@@ -228,8 +228,9 @@ a `running` row with nobody left to push it: no turn runs on the held path, so t
 a silent agent that refuses its next takeover. The write now has three rungs, each the
 previous one's fallback:
 
-1. **Inside the wake** — up to three attempts over a five-second budget
-   (`HANDOFF_SETTLE_RETRY_BUDGET_S`), deliberately synchronous: the wake already holds the
+1. **Inside the wake** — up to three attempts inside one budget
+   (`MEIVA_HOST_HELD_SETTLE_BUDGET_S`, five seconds unless an operator widens or narrows it),
+   deliberately synchronous: the wake already holds the
    incarnation and single-flight, and anything outliving it would race the next dispatch on
    the same row. Lost ownership (`ImpersonationError`) is never retried. Each failed attempt
    stamps `last_turn_fatal_at`, so a hard kill mid-retry still leaves evidence.

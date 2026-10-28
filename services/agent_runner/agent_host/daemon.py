@@ -488,8 +488,9 @@ async def run(
     """Boot the host and serve wakes in the order documented by this module."""
     assert_clock_lattice(
         clock_values(
-            config.view.daemon.wedged_agent_inbound_age_seconds,
-            config.view.sandbox.exec_node_timeout_seconds,
+            wedged_age_sec=config.view.daemon.wedged_agent_inbound_age_seconds,
+            exec_node_timeout_s=config.view.sandbox.exec_node_timeout_seconds,
+            handoff_settle_budget_s=config.view.daemon.held_settle_budget_s,
         )
     )
     instance_lock = take_instance_lock(home)

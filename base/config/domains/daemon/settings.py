@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from base.config.base import EnvSettings
 from base.config.domains.daemon.delivery_watchdog_fields import DeliveryWatchdogFields
@@ -109,6 +109,20 @@ class DaemonSettings(
         default=30.0,
         alias="MEIVA_HOST_TURN_PROGRESS_SCAN_INTERVAL_SECONDS",
         description="Hosted agent-runner: how often the no-progress stall guard polls the per-agent turn clock while a graph.ainvoke is running. Poll cadence only — it changes detection latency, never the abort threshold (MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS).",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    held_settle_budget_s: float = Field(
+        default=5.0,
+        gt=0,
+        alias="MEIVA_HOST_HELD_SETTLE_BUDGET_S",
+        description="Hosted agent-runner: the whole wall-clock budget the wake that ends a takeover may spend settling its one owed checkpoint write before it fails closed (three synchronous attempts inside that wake, geometric backoff). Five seconds — the deploy family's HANDOFF_SETTLE_RETRY_BUDGET_S — because the retry runs inside a wake that already holds the incarnation and single-flight: it must finish while the wake is still the wake. This is the knob that turns 'slow' into an error event, so raise it when a cold pool's first dial or a cross-machine checkpoint read legitimately outlasts five seconds; it costs wall clock on the failing path only. The value must stay below the turn's own no-progress bound (MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS) and below the deploy family's NO_PROGRESS_TIMEOUT_S and CORPSE_REAP_GRACE_S, and above the two backoffs the retry pays before its third attempt: this domain refuses the turn bound, and the host root refuses the rest at boot through the clock lattice's declared orderings.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
@@ -487,3 +501,20 @@ class DaemonSettings(
             "remote_writable": True,
         },
     )
+
+    @model_validator(mode="after")
+    def _the_settle_budget_stays_under_the_turns_stall_bound(self) -> DaemonSettings:
+        # meiva:note
+        # The two deploy-family orderings are the clock lattice's (declared in `base.deploy.timing`
+        # and checked at the host root, which may read that module); this is the bound only the
+        # configuration knows. A settle that outlives the turn's own no-progress bound would spend
+        # a budget the host never gets back.
+        budget = self.held_settle_budget_s
+        turn_bound = self.host_turn_no_progress_timeout_seconds
+        if budget >= turn_bound:
+            raise ValueError(
+                f"MEIVA_HOST_HELD_SETTLE_BUDGET_S={budget:g}s must stay below "
+                f"MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS={turn_bound:g}s: a settle that "
+                "outlives the turn's own no-progress bound spends a budget the host never gets back"
+            )
+        return self

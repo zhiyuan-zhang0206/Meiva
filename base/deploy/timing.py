@@ -239,6 +239,16 @@ CONSTRAINTS: list[Constraint] = [
         "CORPSE_REAP_GRACE_S",
         "the retry finishes long before the reaper's grace, so the two never race for the same row",
     ),
+    # meiva:note
+    # The floor of the same family: the retry's two backoffs (one interval, then 3x) must fit inside
+    # the budget, or the third attempt is cut short before it can run and the budget no longer buys
+    # the three attempts it is declared to pay for.
+    Constraint(
+        "<",
+        "HANDOFF_SETTLE_RETRY_INTERVAL_S + 3 * HANDOFF_SETTLE_RETRY_INTERVAL_S",
+        "HANDOFF_SETTLE_RETRY_BUDGET_S",
+        "the two backoffs before the third attempt fit inside the budget that pays for them",
+    ),
     Constraint(
         "<",
         "GATEWAY_PREFLIGHT_BUDGET_S",
@@ -322,13 +332,20 @@ CONSTRAINTS: list[Constraint] = [
 ]
 
 
+# meiva:note
+# A snapshot of every registered clock for the lattice check. The parameters replace the three
+# clocks a boot configuration moves — the wedged age, the exec node timeout and the held path's
+# settle budget — so the host root checks the values it will live by, not the defaults they were
+# seeded from.
 def clock_values(
     wedged_age_sec: float = WEDGED_AGE_SEC,
     exec_node_timeout_s: float = EXEC_NODE_TIMEOUT_S,
+    handoff_settle_budget_s: float = deploy.HANDOFF_SETTLE_RETRY_BUDGET_S,
 ) -> dict[str, float]:
     values = {name: clock.get() for name, clock in CLOCKS.items()}
     values["WEDGED_AGE_SEC"] = float(wedged_age_sec)
     values["EXEC_NODE_TIMEOUT_S"] = float(exec_node_timeout_s)
+    values["HANDOFF_SETTLE_RETRY_BUDGET_S"] = float(handoff_settle_budget_s)
     return values
 
 

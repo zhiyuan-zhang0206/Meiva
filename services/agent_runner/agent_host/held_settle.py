@@ -36,10 +36,7 @@ from agent.ownership.hosted import settle_hosted_runtime, stamp_turn_fatal
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
-from base.deploy.progress_timeout import (
-    HANDOFF_SETTLE_RETRY_BUDGET_S,
-    HANDOFF_SETTLE_RETRY_INTERVAL_S,
-)
+from base.deploy.progress_timeout import HANDOFF_SETTLE_RETRY_INTERVAL_S
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -69,7 +66,11 @@ class HeldSettle:
     # answer differently in a test of the window that lands after the write — the test supplies
     # the answer the committed thread would have given, and nothing else is replaced.
     receipt_landed: Callable[[AsyncConnectionPool, int], Awaitable[bool]]
-    budget_s: float = HANDOFF_SETTLE_RETRY_BUDGET_S
+    # meiva:note
+    # The budget this wake may spend, handed by the host root from its configured
+    # `MEIVA_HOST_HELD_SETTLE_BUDGET_S`: a default here would be a second owner of the number the
+    # domain already declares and guards.
+    budget_s: float
 
 
 async def settle_owed_handoff(
