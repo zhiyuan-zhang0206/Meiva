@@ -3,19 +3,26 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
-import json
 import os
-from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
-from typing import Any, Protocol
+from collections.abc import Awaitable, Coroutine, Mapping, Sequence
+from typing import Protocol
 
-type JsonValue = (
-    str | int | float | bool | dict[str, Any] | list[JsonValue] | Mapping[str, Any] | None
+from base.lm.harness.codex.frames import (
+    ClosedHandler,
+    JsonObject,
+    JsonRpcError,
+    Notification,
+    NotificationHandler,
+    Reply,
+    RequestHandler,
+    RequestParams,
+    ServerRequest,
+    TransportClosedError,
+    classify,
+    encode,
+    notification_frame,
+    request_frame,
 )
-JsonObject = dict[str, Any]
-RequestParams = Mapping[str, Any]
-RequestHandler = Callable[[str, JsonObject], JsonObject | Awaitable[JsonObject]]
-NotificationHandler = Callable[[str, JsonObject], None]
-ClosedHandler = Callable[[str], None]
 
 # meiva:note
 # One app-server payload can be a full command output or an item list, so the
@@ -23,22 +30,6 @@ ClosedHandler = Callable[[str], None]
 # raise ValueError inside readline() and kill the session stream.
 # meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
 STREAM_LIMIT_BYTES = 8 * 1024 * 1024
-
-
-# meiva:note
-# `TransportClosedError` means the child is gone, so no further request can be
-# answered; `JsonRpcError` carries a server-side refusal the caller may recover
-# from (a rejected `thread/resume`, for example).
-class TransportClosedError(RuntimeError):
-    pass
-
-
-class JsonRpcError(RuntimeError):
-    def __init__(self, code: int, message: str, data: object = None) -> None:
-        super().__init__(f"app-server error {code}: {message}")
-        self.code = code
-        self.message = message
-        self.data = data
 
 
 class AppServerTransport(Protocol):
@@ -69,20 +60,6 @@ class AppServerTransport(Protocol):
     def close(self) -> Awaitable[None]: ...
 
 
-def as_object(value: JsonValue) -> JsonObject:
-    return value if isinstance(value, dict) else {}
-
-
-def as_text(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def as_int(value: object) -> int | None:
-    if isinstance(value, bool):
-        return None
-    return value if isinstance(value, int) else None
-
-
 # meiva:note
 # JSON-RPC over the app-server's stdio transport: one JSON object per line, ids
 # correlate replies, and server-initiated requests (approvals) must be answered on
@@ -109,7 +86,7 @@ class StdioAppServer:
         self._tasks = asyncio.TaskGroup()
         self._children: set[asyncio.Task[None]] = set()
         self._tasks_entered = False
-        self._pending: dict[int, asyncio.Future[JsonObject]] = {}
+        self._pending: dict[int, asyncio.Future[Reply]] = {}
         self._next_id = 0
         self._write_lock = asyncio.Lock()
         self._notification_handler: NotificationHandler | None = None
@@ -166,12 +143,10 @@ class StdioAppServer:
             raise TransportClosedError(f"transport closed before {method}")
         self._next_id += 1
         request_id = self._next_id
-        future: asyncio.Future[JsonObject] = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[Reply] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         try:
-            await self._write(
-                {"jsonrpc": "2.0", "id": request_id, "method": method, "params": dict(params)}
-            )
+            await self._write(request_frame(request_id, method, params))
             reply = await asyncio.wait_for(
                 future, timeout if timeout is not None else self._request_timeout
             )
@@ -179,21 +154,13 @@ class StdioAppServer:
             raise TimeoutError(f"app-server did not answer {method} in time") from None
         finally:
             self._pending.pop(request_id, None)
-        error = reply.get("error")
-        if error is not None:
-            details = as_object(error)
-            raise JsonRpcError(
-                as_int(details.get("code")) or -32000,
-                as_text(details.get("message")) or "unknown",
-                details.get("data"),
-            )
-        return as_object(reply.get("result"))
+        outcome = reply.outcome()
+        if isinstance(outcome, JsonRpcError):
+            raise outcome
+        return outcome
 
     async def notify(self, method: str, params: RequestParams | None = None) -> None:
-        message: JsonObject = {"jsonrpc": "2.0", "method": method}
-        if params is not None:
-            message["params"] = dict(params)
-        await self._write(message)
+        await self._write(notification_frame(method, params))
 
     async def close(self) -> None:
         if self._closing:
@@ -228,7 +195,7 @@ class StdioAppServer:
         process = self._process
         if process is None or process.stdin is None or self._closed:
             raise TransportClosedError("app-server is not running")
-        payload = (json.dumps(message, separators=(",", ":")) + "\n").encode()
+        payload = encode(message)
         async with self._write_lock:
             process.stdin.write(payload)
             await process.stdin.drain()
@@ -242,34 +209,15 @@ class StdioAppServer:
                 line = await stdout.readline()
                 if not line:
                     break
-                message = self._dispatch(line)
-                if message is not None:
-                    request_id = message.get("id")
-                    method = as_text(message.get("method")) or ""
-                    params = as_object(message.get("params"))
-                    handler = self._request_handler
-                    if handler is None:
-                        await self._write(
-                            {
-                                "jsonrpc": "2.0",
-                                "id": request_id,
-                                "error": {"code": -32601, "message": "no handler"},
-                            }
-                        )
-                        continue
-                    try:
-                        reply = handler(method, params)
-                        result = await reply if inspect.isawaitable(reply) else reply
-                    except Exception as exc:
-                        await self._write(
-                            {
-                                "jsonrpc": "2.0",
-                                "id": request_id,
-                                "error": {"code": -32603, "message": str(exc)},
-                            }
-                        )
-                        continue
-                    await self._write({"jsonrpc": "2.0", "id": request_id, "result": result})
+                match classify(line):
+                    case ServerRequest() as request:
+                        await self._serve(request)
+                    case Reply() as reply:
+                        self._settle(reply)
+                    case Notification() as notification:
+                        self._notify(notification)
+                    case None:
+                        pass
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -277,30 +225,28 @@ class StdioAppServer:
             return
         self._shutdown("app-server closed its stdout")
 
-    def _dispatch(self, line: bytes) -> JsonObject | None:
-        try:
-            decoded = json.loads(line)
-        except json.JSONDecodeError:
-            return None
-        message = as_object(decoded)
-        if not message:
-            return None
-        if "id" in message and "method" in message:
-            return message
-        self._dispatch_non_request(message)
-        return None
-
-    def _dispatch_non_request(self, message: dict[str, Any]) -> None:
-        if "id" in message:
-            reply_id = as_int(message.get("id"))
-            future = self._pending.get(reply_id) if reply_id is not None else None
-            if future is not None and not future.done():
-                future.set_result(message)
+    async def _serve(self, request: ServerRequest) -> None:
+        handler = self._request_handler
+        if handler is None:
+            await self._write(request.refused())
             return
-        method = as_text(message.get("method"))
+        try:
+            answer = handler(request.method, request.params)
+            result = await answer if inspect.isawaitable(answer) else answer
+        except Exception as exc:
+            await self._write(request.failed(exc))
+            return
+        await self._write(request.answered(result))
+
+    def _settle(self, reply: Reply) -> None:
+        future = self._pending.get(reply.request_id)
+        if future is not None and not future.done():
+            future.set_result(reply)
+
+    def _notify(self, notification: Notification) -> None:
         handler = self._notification_handler
-        if method is not None and handler is not None:
-            handler(method, as_object(message.get("params")))
+        if handler is not None:
+            handler(notification.method, notification.params)
 
     def _spawn(self, coro: Coroutine[object, object, None]) -> asyncio.Task[None]:
         task = self._tasks.create_task(coro)

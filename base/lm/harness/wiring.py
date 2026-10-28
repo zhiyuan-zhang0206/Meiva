@@ -15,7 +15,8 @@ from base.lm.harness.base_session import SessionBinding, SessionClock
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
 from base.lm.harness.claude import BridgeConfig
 from base.lm.harness.claude.session import ClaudeSession
-from base.lm.harness.codex import CodexConfig, CodexSession
+from base.lm.harness.codex import CodexConfig
+from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
 from base.lm.harness.kimi import KimiConfig, KimiSession

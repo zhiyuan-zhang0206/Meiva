@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from base.lm.harness.codex.frames import JsonRpcError
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
 from base.lm.harness.codex.tests.support import handoff, start
-from base.lm.harness.codex.transport import JsonRpcError
 from base.lm.harness.events import (
     HandoffInjected,
     SessionBound,
