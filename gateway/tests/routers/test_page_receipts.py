@@ -11,6 +11,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db import create_agent
 from base.events.live.bus import EventBus, EventBusConfig
@@ -46,6 +47,7 @@ def _unreachable_bus(client: GatewayTestClient) -> EventBus:
     return EventBus(
         EventBusConfig(redis_url="no-scheme", events_channel=client.app.state.bus.channel),
         rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )
 
 

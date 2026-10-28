@@ -59,7 +59,7 @@ async def test_reconnect_logs_warning_without_a_traceback(
 
     patch_open_async_redis(monkeypatch, _open)
     disp = InboundWakeDispatcher(
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         _IdleScheduler(),
         subscription_read_timeout_s=0.01,
         subscription_read_deadline_grace_s=0.01,

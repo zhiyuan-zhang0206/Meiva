@@ -29,6 +29,7 @@ from fastapi import FastAPI
 # the route annotation is resolved from module globals
 from starlette.requests import Request
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 
 MARKERS_ENV = "GATEWAY_SHUTDOWN_TEST_MARKERS"
@@ -93,6 +94,7 @@ def build_app() -> FastAPI:
         bus = EventBus(
             EventBusConfig(redis_url=os.environ[REDIS_ENV], events_channel="gateway-shutdown-test"),
             rng=seeded_rng(),
+            timers=SYSTEM_TIMERS,
         )
         if mode == "filtered":
             frames = sse.event_stream(bus, 7, request, poll_s=0.5, cadence=SseCadence())

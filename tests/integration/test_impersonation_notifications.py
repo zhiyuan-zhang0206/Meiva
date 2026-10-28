@@ -179,7 +179,7 @@ async def _termination_session(
     assert owner is not None
     session = leases.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         ttl_seconds=300,
@@ -194,7 +194,7 @@ async def _termination_session(
     if status in ("accepted", "active"):
         leases.prepare(
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             session["id"],
             agent_id,
             owner,
@@ -204,7 +204,7 @@ async def _termination_session(
     if status == "active":
         leases.activate(
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             session["id"],
             owner,
         )
@@ -239,7 +239,7 @@ async def _terminate_native(
         else:
             terminate_id, _cutoff = enqueue_termination_inbounds(
                 Database.from_settings(gate=database_gate),
-                EventBus.from_settings(rng=seeded_rng()),
+                EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                 owner.agent_id,
                 ops_pool,
                 source="user",
@@ -292,7 +292,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
                 default_reader=defaults(),
             ),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             identity=AgentIdentity(agent_id=owner.agent_id, owns_loop=True),
             original_incarnation=owner,
             clock_factory=Clock.from_settings,

@@ -15,6 +15,7 @@ import redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import DataError, NoPermissionError, ResponseError
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live.bus import EventBus, event_bus_config_from_settings
@@ -23,7 +24,9 @@ from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 
 _FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
 _bus = EventBus(
-    replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY), rng=seeded_rng()
+    replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
+    rng=seeded_rng(),
+    timers=SYSTEM_TIMERS,
 )
 
 
@@ -38,6 +41,7 @@ def _skip_acl_backoff_waits() -> None:
     _bus = EventBus(
         replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
         rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )
 
 
@@ -197,10 +201,12 @@ async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_b
     first = EventBus(
         replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
         rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )
     second = EventBus(
         replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
         rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )
     channel = "meiva:owner-cadence"
 

@@ -32,7 +32,7 @@ from agent.graph.llm_errors import LlmLedger
 from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_overview
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.config.tests.configuration import defaults
@@ -192,7 +192,7 @@ def make_runtime(
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )

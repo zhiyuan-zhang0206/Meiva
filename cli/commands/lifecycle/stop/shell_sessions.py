@@ -199,7 +199,9 @@ def _write_close_notices(
     )
     if not notices:
         return
-    bus = EventBus(event_bus_config_from_config(command.config), rng=command.rng)
+    bus = EventBus(
+        event_bus_config_from_config(command.config), rng=command.rng, timers=command.timers
+    )
     for unwritten, exc in pty_close_notices.write_notices(
         database_factory(), bus, notices, direct=direct_db
     ):

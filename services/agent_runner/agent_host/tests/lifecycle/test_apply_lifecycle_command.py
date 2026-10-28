@@ -17,6 +17,7 @@ from agent.ownership.tests.ownership_support import (
     agent_row,
     insert_lifecycle_command,
 )
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
@@ -200,6 +201,7 @@ async def hung_redis_publication() -> AsyncGenerator[tuple[EventBus, asyncio.Eve
                 publish_attempt_timeout_s=60.0,
             ),
             rng=seeded_rng(),
+            timers=SYSTEM_TIMERS,
         )
         yield bus, asked
     finally:

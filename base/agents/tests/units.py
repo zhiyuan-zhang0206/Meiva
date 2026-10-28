@@ -1,5 +1,6 @@
 from typing import Any
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -26,7 +27,7 @@ def spawn_agent(
 
     db, bus = (
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
     )
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         db,

@@ -38,7 +38,7 @@ class TestSubscriptionRecovery:
             raise RuntimeError("database unavailable")
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             ScanScheduler(),
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -75,7 +75,7 @@ class TestSubscriptionRecovery:
             raise RuntimeError("database unavailable")
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             scheduler,
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -118,7 +118,7 @@ class TestSubscriptionRecovery:
             return []
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             ScanScheduler(),
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -181,7 +181,7 @@ class TestSubscriptionRecovery:
 
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             ScanScheduler(),
             subscription_read_timeout_s=0.01,
             subscription_read_deadline_grace_s=0.01,
@@ -242,7 +242,7 @@ class TestReconnectExhaustion:
 
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             ScanScheduler(),
             reconnect_delay_s=0.0,
             timers=SYSTEM_TIMERS,
@@ -275,7 +275,7 @@ class TestReconnectExhaustion:
 
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             ScanScheduler(),
             subscription_read_timeout_s=0.005,
             subscription_read_deadline_grace_s=0.05,

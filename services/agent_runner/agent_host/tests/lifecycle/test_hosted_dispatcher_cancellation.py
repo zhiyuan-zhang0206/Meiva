@@ -96,7 +96,7 @@ async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
             return []
 
     dispatcher = InboundWakeDispatcher(
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         _IdleScheduler(),
         pending_scan=pending,
         scan_interval_s=0.05,

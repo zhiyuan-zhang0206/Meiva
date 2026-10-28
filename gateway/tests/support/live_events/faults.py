@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
 
@@ -19,4 +20,5 @@ def unpublishable_bus() -> EventBus:
     return EventBus(
         EventBusConfig(redis_url="redis://[unpublishable", events_channel="unpublished"),
         rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )

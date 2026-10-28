@@ -11,4 +11,4 @@ exports = ["daemon.py", "labeler.py", "tests"]
 "label_rules.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["home", "pid", "random", "settings"], why = "process entry point of the labeler daemon: builds ConfigBoot from the process environment, reads the home it runs under and builds the random generator its event bus draws retry jitter from; it reads its own pid once to claim its pidfile" }
+"daemon.py" = { kinds = ["clock", "home", "pid", "random", "settings"], why = "process entry point of the labeler daemon: builds ConfigBoot from the process environment, reads the home it runs under, builds the random generator its event bus draws retry jitter from and hands the bus the process timers its ACL-transition retry measures its window on; it reads its own pid once to claim its pidfile" }

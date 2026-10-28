@@ -27,6 +27,7 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -246,6 +247,7 @@ async def run(
     home: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
+    timers: Timers,
 ) -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> enter main loop."""
     if _is_running(process_config, runtime=runtime):
@@ -269,7 +271,7 @@ async def run(
     db = database()
     pool = db.pool()
     catalog = build_model_catalog(home=home)
-    bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
+    bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng(), timers=timers)
     try:
         await dispatch_loop(
             pool,
@@ -341,6 +343,7 @@ def main() -> None:
                 home=process_home,
                 database=database,
                 image=image,
+                timers=SYSTEM_TIMERS,
             )
         )
     except KeyboardInterrupt:

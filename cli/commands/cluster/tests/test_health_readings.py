@@ -102,7 +102,13 @@ def test_a_gateway_that_recovers_inside_the_budget_is_alive_after_exactly_the_fa
     answers = (Reply(status=503, body={}), Reply(status=503, body={}), Reply(body={}))
     with serving({_HEALTH: answers}) as gateway:
         options = dataclasses.replace(healthy_options, gateway_url=gateway.url)
-        reading = read_gateway(options, probe_command.config, operator_database, probe_command.rng)
+        reading = read_gateway(
+            options,
+            probe_command.config,
+            operator_database,
+            probe_command.rng,
+            probe_command.timers,
+        )
 
     assert reading == GatewayReading(alive=True, data_plane_abnormal=False)
     assert len(gateway.requests) == 3
@@ -117,7 +123,13 @@ def test_a_gateway_that_stays_dead_spends_the_budget_once_and_no_more(
 ) -> None:
     with serving({_HEALTH: Reply(status=503, body={})}) as gateway:
         options = dataclasses.replace(healthy_options, gateway_url=gateway.url)
-        reading = read_gateway(options, probe_command.config, operator_database, probe_command.rng)
+        reading = read_gateway(
+            options,
+            probe_command.config,
+            operator_database,
+            probe_command.rng,
+            probe_command.timers,
+        )
 
     assert reading == GatewayReading(alive=False, data_plane_abnormal=False)
     assert len(gateway.requests) == 3
@@ -132,7 +144,11 @@ def test_a_live_gateway_is_not_followed_by_a_look_at_the_data_plane(
     # The data plane is read only to classify a dead gateway: with the gateway answering, an
     # unreachable database is the population check's business.
     reading = read_gateway(
-        healthy_options, probe_command.config, unreachable_database, probe_command.rng
+        healthy_options,
+        probe_command.config,
+        unreachable_database,
+        probe_command.rng,
+        probe_command.timers,
     )
 
     assert reading == GatewayReading(alive=True, data_plane_abnormal=False)
@@ -146,7 +162,10 @@ def test_the_data_plane_is_normal_when_postgres_and_redis_answer(
 ) -> None:
     assert (
         data_plane_abnormal(
-            probe_command.config, database_factory=operator_database, rng=probe_command.rng
+            probe_command.config,
+            database_factory=operator_database,
+            rng=probe_command.rng,
+            timers=probe_command.timers,
         )
         is False
     )
@@ -159,7 +178,10 @@ def test_the_data_plane_is_abnormal_when_postgres_does_not_answer(
 ) -> None:
     assert (
         data_plane_abnormal(
-            probe_command.config, database_factory=unreachable_database, rng=probe_command.rng
+            probe_command.config,
+            database_factory=unreachable_database,
+            rng=probe_command.rng,
+            timers=probe_command.timers,
         )
         is True
     )
@@ -175,7 +197,10 @@ def test_the_data_plane_is_abnormal_when_redis_does_not_answer(
 
     assert (
         data_plane_abnormal(
-            probe_command.config, database_factory=operator_database, rng=probe_command.rng
+            probe_command.config,
+            database_factory=operator_database,
+            rng=probe_command.rng,
+            timers=probe_command.timers,
         )
         is True
     )
