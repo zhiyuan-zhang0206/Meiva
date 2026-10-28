@@ -108,6 +108,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
             uid=os.getuid(),
             retained_children=native_cluster.retained_children,
             producer=operator_pipeline,
+            timers=SYSTEM_TIMERS,
         ).stopped == ("postgres",)
         assert not first.live() and ownership.postgres(native_cluster.pg_data) is None
         assert pg.receipt_path(native_cluster.pg_data).read_bytes() == persisted
@@ -120,6 +121,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
         uid=os.getuid(),
         retained_children=native_cluster.retained_children,
         producer=operator_pipeline,
+        timers=SYSTEM_TIMERS,
     )
     assert stopped.stopped == ()
 

@@ -22,6 +22,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Deadline
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.native_process.kernel_identity import pid_starttime_ticks
@@ -354,7 +355,7 @@ def test_a_stop_run_from_inside_a_supervised_session_is_refused_before_it_stops_
 def test_retiring_extras_on_a_host_without_a_helper_retires_nothing(
     stop_runtime: CommandRuntime,
 ) -> None:
-    deadline = time.monotonic() + 30.0
+    deadline = Deadline(at=time.monotonic() + 30.0, timers=SYSTEM_TIMERS)
     stop_extras(stop_runtime, deadline, retained=frozenset())
     with pytest.raises(ValueError, match="retains browser"):
         stop_extras(stop_runtime, deadline, retained=frozenset({"browser"}))
@@ -372,7 +373,9 @@ def test_a_macos_stop_asks_the_helper_owner_about_its_configured_port_and_lets_a
     macos.config.set_field("permissions_helper_port", 0)
 
     with pytest.raises(ValueError, match="canonical home and registered port"):
-        stop_extras(macos, time.monotonic() + 30.0, retained=frozenset())
+        stop_extras(
+            macos, Deadline(at=time.monotonic() + 30.0, timers=SYSTEM_TIMERS), retained=frozenset()
+        )
 
 
 # meiva:note
@@ -405,7 +408,9 @@ def test_a_browser_that_is_not_there_costs_a_stop_nothing(
     capsys: pytest.CaptureFixture[str],
     stop_runtime: CommandRuntime,
 ) -> None:
-    browser.stop_browser(time.monotonic() + 5, home=home)
+    browser.stop_browser(
+        Deadline(at=SYSTEM_TIMERS.monotonic() + 5, timers=SYSTEM_TIMERS), home=home
+    )
     browser.reap_cluster_chrome(home=home)
     assert capsys.readouterr().out == ""
     browser.record_browser_session(stop_runtime, now=datetime(2026, 10, 22, tzinfo=UTC))
@@ -422,7 +427,9 @@ def test_the_stop_signals_the_chrome_on_the_profile_of_the_home_it_stops(tmp_pat
         cluster_chrome(profile_dir(ours), workdir=tmp_path / "ours-chrome") as chrome,
         cluster_chrome(profile_dir(other), workdir=tmp_path / "other-chrome") as decoy,
     ):
-        browser.stop_browser(time.monotonic() + 10, home=ours)
+        browser.stop_browser(
+            Deadline(at=SYSTEM_TIMERS.monotonic() + 10, timers=SYSTEM_TIMERS), home=ours
+        )
 
         assert chrome.wait(timeout=10) == -signal.SIGTERM
         assert decoy.poll() is None

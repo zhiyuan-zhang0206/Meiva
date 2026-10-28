@@ -17,6 +17,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from base.paths import meiva_home
 from cli.commands.data_plane import bringup, cluster_instance, completion
@@ -161,6 +162,7 @@ def test_a_release_readiness_refuses_a_home_without_a_ledger_before_any_dial(
             database_factory=operator_database,
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
+            timers=SYSTEM_TIMERS,
         )
 
 

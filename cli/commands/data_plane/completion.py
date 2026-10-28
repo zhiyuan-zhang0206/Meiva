@@ -29,6 +29,7 @@ import psycopg
 from psycopg.conninfo import make_conninfo
 
 from base import cluster
+from base.clock import Timers
 from base.cluster import authority
 from base.cluster.dataplane import pg_admin, pooler
 from base.cluster.derive import runner_db_url_projection
@@ -98,6 +99,7 @@ def ensure_pooler(
     *,
     machine: MachineIdentityReader,
     macos: bool,
+    timers: Timers,
 ) -> None:
     if not config.pgbouncer_enabled:
         return
@@ -118,7 +120,7 @@ def ensure_pooler(
         macos=macos,
         bind_wait_s=instance.BIND_WAIT_TIMEOUT_S,
     )
-    rc = pgbouncer.ensure_pgbouncer(spec)
+    rc = pgbouncer.ensure_pgbouncer(spec, timers=timers)
     if rc:
         raise RuntimeError("pooler did not become ready")
 
@@ -230,6 +232,10 @@ class _Completion:
     database_factory: OperatorDatabaseFactory
     machine: MachineIdentityReader
     macos: bool
+    # meiva:note
+    # The clock of this completion pass, handed to the steps that wait (the pooler's ready poll
+    # and the stop that precedes its restart).
+    timers: Timers
     local: _LocalPlane | None
 
     def run(self, steps: tuple[CompletionStep, ...], stage: _Stage) -> _Stage:
@@ -337,6 +343,7 @@ class _Completion:
                     self._generation(stage),
                     machine=self.machine,
                     macos=self.macos,
+                    timers=self.timers,
                 )
                 return stage
             case ProveLogins():
@@ -395,6 +402,7 @@ def execute_completion(
     database_factory: OperatorDatabaseFactory,
     machine: MachineIdentityReader,
     macos: bool,
+    timers: Timers,
 ) -> None:
     local = (
         None
@@ -412,6 +420,7 @@ def execute_completion(
         database_factory=database_factory,
         machine=machine,
         macos=macos,
+        timers=timers,
         local=local,
     ).run(steps, _Stage())
 
@@ -437,6 +446,7 @@ def complete_gateway_data_plane(
     database_factory: OperatorDatabaseFactory,
     machine: MachineIdentityReader,
     macos: bool,
+    timers: Timers,
 ) -> None:
     local = not config.is_remote
     facts = CompletionFacts(
@@ -454,4 +464,5 @@ def complete_gateway_data_plane(
         database_factory=database_factory,
         machine=machine,
         macos=macos,
+        timers=timers,
     )

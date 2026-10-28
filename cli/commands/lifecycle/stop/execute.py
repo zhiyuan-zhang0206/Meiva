@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import Deadline
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import phase as journal_phase
 from base.telemetry import EventPipeline
@@ -69,7 +70,7 @@ class StopEnvironment:
 # failed stop reports even though the plan raised before it could return anything.
 @dataclass
 class StopRun:
-    deadline: float
+    deadline: Deadline
     phases: list[tuple[str, float]]
 
 
@@ -177,6 +178,7 @@ def _perform(
                         config,
                         home=command.home,
                         macos=command.host.platform.system == "darwin",
+                        timers=command.timers,
                         retained_children=retained_children,
                         producer=env.producer,
                     )
@@ -191,6 +193,7 @@ def _perform(
                     uid=command.host.uid,
                     retained_children=retained_children,
                     producer=env.producer,
+                    timers=command.timers,
                 )
                 return StopOutcome(stopped.notes, stopped.clients)
         case SkipDataPlane(plane):

@@ -20,7 +20,7 @@ import psutil
 import psycopg
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Deadline
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
@@ -127,6 +127,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
             uid=os.getuid(),
             retained_children=retained,
             producer=emitted_events.producer,
+            timers=SYSTEM_TIMERS,
             legs=StopLegs(cleanup_wait_s=1.0, kill_wait_s=1.0),
         )
         elapsed = time.monotonic() - started
@@ -162,4 +163,4 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
 @pytest.mark.parametrize("offset", [0.0, -1.0])
 def test_an_exhausted_stop_budget_refuses_admission(offset: float) -> None:
     with pytest.raises(TimeoutError, match="stop deadline expired"):
-        remaining(time.monotonic() + offset)
+        remaining(Deadline(at=time.monotonic() + offset, timers=SYSTEM_TIMERS))

@@ -41,7 +41,6 @@ from __future__ import annotations
 import shutil
 import signal
 import sys
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,7 +48,7 @@ from typing import Literal, assert_never
 
 import psutil
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Deadline, Timers
 from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.machine import MachineIdentityReader
@@ -287,6 +286,10 @@ class _Run:
     spec: PoolerSpec
     text: PoolerText
     custodian: OwnedPooler | None
+    # meiva:note
+    # The clock of this convergence pass: its ready wait and the stop that precedes a restart are
+    # bounded on it, never on one the pass reads for itself.
+    timers: Timers
 
     def running(self) -> OwnedPooler:
         if self.custodian is None:
@@ -326,13 +329,13 @@ def _launch(run: _Run) -> int:
     # meiva:note
     # `-d` daemonizes and returns at once; wait for the admin console to authenticate. The
     # caller proves each delivered login's pooled backend.
-    deadline = SYSTEM_TIMERS.monotonic() + spec.ready_wait_s
+    deadline = Deadline.after(run.timers, spec.ready_wait_s)
     while not pooler_files.admin_reachable(spec.shape.listen_port, spec.admin_password):
-        left = deadline - SYSTEM_TIMERS.monotonic()
-        if left <= 0:
+        left = deadline.left()
+        if left is None:
             print(text.not_ready(), file=sys.stderr)
             return 1
-        SYSTEM_TIMERS.sleep(min(_READY_POLL_S, left))
+        run.timers.sleep(min(_READY_POLL_S, left))
     machine = spec.shape.machine
     if not pooler_files.pgbouncer_public_listener_reachable(
         spec.shape.listen_port, POOLER_ADMIN, machine=machine
@@ -369,7 +372,7 @@ def _perform(step: PoolerStep, run: _Run) -> int:
             print(text.degraded_restart(), file=sys.stderr)
         case StopRunning():
             custodian = run.running()
-            if not custodian.stop(deadline=time.monotonic() + spec.stop_wait_s):
+            if not custodian.stop(deadline=Deadline.after(run.timers, spec.stop_wait_s)):
                 print(text.stop_survived(custodian.identity.pid), file=sys.stderr)
                 return 1
         case Launch():
@@ -395,7 +398,7 @@ def _perform(step: PoolerStep, run: _Run) -> int:
 #
 # Only called when MEIVA_PGBOUNCER_ENABLED (gated by the caller in
 # `complete_gateway_data_plane`).
-def ensure_pgbouncer(spec: PoolerSpec) -> int:
+def ensure_pgbouncer(spec: PoolerSpec, *, timers: Timers) -> int:
     shape = spec.shape
     if not binary_installed(spec.binary):
         print(not_installed_error(spec.binary, _install_hint(macos=spec.macos)), file=sys.stderr)
@@ -415,7 +418,7 @@ def ensure_pgbouncer(spec: PoolerSpec) -> int:
         listen_port=shape.listen_port,
         logfile=str(_logfile_path(spec.home)),
     )
-    run = _Run(spec, text, custodian)
+    run = _Run(spec, text, custodian, timers)
     for step in plan_convergence(observation):
         if failure := _perform(step, run):
             return failure
@@ -432,7 +435,7 @@ PoolerStop = Literal["not-running", "stopped", "forced"]
 # only a caller that owns an already-quiescent, already-revoked data plane passes it. Returns
 # how the stop ended: no pooler of this home was running, the safe shutdown completed, or force
 # escalated.
-def stop_pgbouncer(*, home: Path, force: bool = False) -> PoolerStop:
+def stop_pgbouncer(*, home: Path, force: bool = False, timers: Timers) -> PoolerStop:
     pid = running_pid(home=home)
     if pid is None:
         return "not-running"
@@ -440,7 +443,7 @@ def stop_pgbouncer(*, home: Path, force: bool = False) -> PoolerStop:
     if owner is None:
         return "not-running"
     custodian = OwnedPooler.from_config(owner, pooler_files.ini_path(home))
-    deadline = time.monotonic() + RESTART_STOP_WAIT_S
+    deadline = Deadline.after(timers, RESTART_STOP_WAIT_S)
     try:
         if custodian.stop(deadline=deadline):
             return "stopped"

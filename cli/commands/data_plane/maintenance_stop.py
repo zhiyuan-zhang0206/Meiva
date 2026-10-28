@@ -35,7 +35,7 @@ from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Deadline, Timers
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
@@ -185,7 +185,7 @@ def report_pooler_clients(identity: OwnedProcess, *, home: Path) -> str | None:
 # meiva:note
 # One Redis command bound by the stop's deadline. redis-py's command stubs are partially unknown;
 # the pyright directive says only that.
-async def _redis_command(client: Redis, deadline: float, *args: str) -> None:
+async def _redis_command(client: Redis, deadline: Deadline, *args: str) -> None:
     await asyncio.wait_for(client.execute_command(*args), remaining(deadline))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
@@ -219,7 +219,7 @@ class MaintenanceStop:
 # Redis' save. A stop whose remaining time is not larger than the reserve gives the fast
 # shutdown all of it; the escalation legs then overrun the deadline by their own bounded waits,
 # like the shell-session closure's SIGKILL leg.
-def postgres_fast_budget(deadline: float, legs: StopLegs) -> float:
+def postgres_fast_budget(deadline: Deadline, legs: StopLegs) -> float:
     reserve = fast_shutdown_reserve_s(legs.cleanup_wait_s, legs.kill_wait_s)
     return postgres_fast_budget_s(remaining(deadline), reserve)
 
@@ -231,7 +231,7 @@ async def request_stop(
     step: StopStep,
     identity: OwnedProcess,
     client: Redis,
-    deadline: float,
+    deadline: Deadline,
     context: StopContext,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -248,7 +248,7 @@ async def request_stop(
                 immediate_wait=context.legs.cleanup_wait_s,
                 kill_wait=context.legs.kill_wait_s,
                 retained_children=retained_children,
-                timers=SYSTEM_TIMERS,
+                timers=deadline.timers,
             )
             if escalation is not None:
                 return report_postgres_stop_escalation(escalation, producer=context.producer)
@@ -272,7 +272,7 @@ async def request_stop(
 # The dedicated admin connection of the stop. The default user is the native instance's admin
 # identity; the runtime URL can carry a restricted ACL user's different password, which is not
 # admin auth. Every wait of the client is bound by what is left of the stop's deadline.
-def _admin_client(config: DataPlaneConfig, port: int, deadline: float) -> Redis:
+def _admin_client(config: DataPlaneConfig, port: int, deadline: Deadline) -> Redis:
     return Redis(
         host="127.0.0.1",
         port=port,
@@ -288,13 +288,13 @@ def _admin_client(config: DataPlaneConfig, port: int, deadline: float) -> Redis:
 # meiva:note
 # Cleanup must not wait another full socket timeout after the shared deadline. Close this
 # private transport without waiting for peer EOF.
-async def _release(client: Redis, deadline: float) -> None:
+async def _release(client: Redis, deadline: Deadline) -> None:
     if client.connection is not None:
         await client.connection.disconnect(nowait=True)
-    await asyncio.wait_for(client.aclose(), max(0.001, deadline - time.monotonic()))
+    await asyncio.wait_for(client.aclose(), max(0.001, deadline.left() or 0.0))
 
 
-def _require_nothing_left(port: int, deadline: float, home: Path, uid: int) -> None:
+def _require_nothing_left(port: int, deadline: Deadline, home: Path, uid: int) -> None:
     remaining(deadline)
     if (
         ownership.postgres(instance.pg_data_dir(home)) is not None
@@ -315,7 +315,7 @@ async def _end_services(
     captured: Mapping[str, OwnedProcess],
     trees: Mapping[str, set[OwnedProcess]],
     client: Redis,
-    deadline: float,
+    deadline: Deadline,
     context: StopContext,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None,
@@ -345,7 +345,7 @@ async def _end_services(
 
 async def _stop(
     config: DataPlaneConfig,
-    deadline: float,
+    deadline: Deadline,
     context: StopContext,
     *,
     save: bool,
@@ -362,7 +362,10 @@ async def _stop(
     custody = ownership.RedisConnectionCustody()
     try:
         redis_process = await custody.capture(
-            client, port=port, data_dir=instance.redis_data_dir(context.home), deadline=deadline
+            client,
+            port=port,
+            data_dir=instance.redis_data_dir(context.home),
+            deadline=deadline.at,
         )
         captured = {
             name: process
@@ -404,9 +407,10 @@ def stop(
     save: bool = True,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
+    timers: Timers,
     legs: StopLegs = DEFAULT_STOP_LEGS,
 ) -> MaintenanceStop:
-    deadline = deadline_after(timeout)
+    deadline = deadline_after(timers, timeout)
     if config.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
     return asyncio.run(
