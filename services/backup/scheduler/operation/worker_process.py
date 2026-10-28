@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeGuard
 
+from base.clock import Timers
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from services.backup.scheduler.operation.staging import (
     OperationBusyError,
@@ -124,6 +125,7 @@ async def run_operation(
     *,
     kind: OperationKind,
     env: dict[str, str],
+    timers: Timers,
     timeout_s: float = 6 * 3600,
 ) -> CompletedOperation:
     """Run a trusted worker; accept only zero exit and a valid result object.
@@ -150,7 +152,7 @@ async def run_operation(
         future, cancelled = await _to_completion(lambda: _launch(module, work, env))
         process = future.result()
         _raise_stopped(cancelled)
-        await _await_operation(process, asyncio.get_running_loop().time() + timeout_s)
+        await _await_operation(process, deadline=timers.monotonic() + timeout_s, timers=timers)
         result = _finished_result(process, work)
         return CompletedOperation(kind, work, result, held)
     except BaseException as original:
@@ -207,12 +209,13 @@ def _launch(module: str, work: Path, env: dict[str, str]) -> subprocess.Popen[by
         )
 
 
-async def _await_operation(process: subprocess.Popen[bytes], deadline: float) -> None:
-    loop = asyncio.get_running_loop()
+async def _await_operation(
+    process: subprocess.Popen[bytes], *, deadline: float, timers: Timers
+) -> None:
     while process.poll() is None:
-        if loop.time() >= deadline:
+        if timers.monotonic() >= deadline:
             raise TimeoutError("operation exceeded its execution bound")
-        await asyncio.sleep(0.05)
+        await timers.asleep(0.05)
 
 
 def _stop_worker(process: subprocess.Popen[bytes], grace_s: float) -> None:

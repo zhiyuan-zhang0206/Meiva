@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -352,7 +353,9 @@ class TestSchedulerIntegration:
     ) -> None:
         overlay: dict[str, object] = {"llm_model": "claude-haiku-5-5"}
         host, _, _ = wired({1: Row(overlay=overlay)}, {1: [ValueError("turn failed")]})
-        sched = TurnScheduler(host.run_turn, config_fingerprint=host.turn_fingerprints.get)
+        sched = TurnScheduler(
+            host.run_turn, config_fingerprint=host.turn_fingerprints.get, timers=SYSTEM_TIMERS
+        )
 
         sched.wake(1)
         await poll_until_async(lambda: bool(loguru_records.events("host_turn_crashed")))
@@ -378,7 +381,7 @@ class TestSchedulerIntegration:
         """
         host, graph, _ = wired({1: Row()})
         graph.gate(1)
-        sched = TurnScheduler(host.run_turn)
+        sched = TurnScheduler(host.run_turn, timers=SYSTEM_TIMERS)
 
         sched.wake(1)
         await asyncio.wait_for(graph.arrival(1).wait(), TURN_TIMEOUT_S)

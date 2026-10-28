@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
@@ -63,6 +64,7 @@ async def test_reconnect_logs_warning_without_a_traceback(
         subscription_read_timeout_s=0.01,
         subscription_read_deadline_grace_s=0.01,
         reconnect_delay_s=0.0,
+        timers=SYSTEM_TIMERS,
     )
     task = asyncio.create_task(disp.run())
 

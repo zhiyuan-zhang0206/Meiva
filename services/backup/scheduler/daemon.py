@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from base import telemetry
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -143,7 +144,7 @@ async def local_restore_round(
         last = load_local_dump_restore_success(tree.restore_marker)
         if not restore_due(now, settings.timezone, settings.backup_hour, last):
             return
-        await run_job("restore", settings=settings, tree=tree, launch=launch)
+        await run_job("restore", settings=settings, tree=tree, launch=launch, timers=SYSTEM_TIMERS)
         record_local_dump_restore_success(now, tree.restore_marker)
     except OperationBusyError as exc:
         _log.info("[pg-backup] local restore drill deferred: %s", exc)
@@ -170,7 +171,9 @@ async def backup_round(
     state.record_attempt(now)
     state.running = True
     try:
-        await run_job("dump", settings=settings, tree=tree, launch=launch, now=now)
+        await run_job(
+            "dump", settings=settings, tree=tree, launch=launch, timers=SYSTEM_TIMERS, now=now
+        )
         state.record_success(now)
         await local_restore_round(now, settings=settings, tree=tree, launch=launch)
     except Exception as exc:

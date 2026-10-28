@@ -22,6 +22,7 @@ import pytest
 import websockets.asyncio.server
 from websockets.asyncio.server import ServerConnection
 
+from base.clock import SYSTEM_TIMERS
 from services.desktop.browser.tab_groups import grouping
 from services.desktop.browser.tab_groups.grouping import (
     EXTENSION_DIR,
@@ -188,6 +189,7 @@ class FakeChrome:
             listing_timeout_s=listing_timeout_s,
             group_timeout_s=group_timeout_s,
             worker_wait_s=worker_wait_s,
+            timers=SYSTEM_TIMERS,
         )
 
     async def _handle_http(

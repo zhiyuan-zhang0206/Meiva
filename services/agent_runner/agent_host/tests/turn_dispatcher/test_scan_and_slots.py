@@ -7,6 +7,7 @@ import threading
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live.bus import EventBus
@@ -35,7 +36,7 @@ class TestCancelBeforeTheFirstSlice:
 
     async def test_cancel_before_the_first_slice_releases_the_slot(self) -> None:
         rec = Recorder()
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(7)
         assert await asyncio.wait_for(sched.cancel_turn(7), 2) is True
@@ -48,7 +49,7 @@ class TestCancelBeforeTheFirstSlice:
         """Shutdown must stay quiet: the closed flag outranks any pending wake,
         so a pre-start cancel during `aclose` never starts a successor."""
         rec = Recorder()
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(7)
         await sched.aclose()
@@ -65,7 +66,7 @@ async def test_stuck_fixture_releases_after_failed_assertion() -> None:
     try:
         with pytest.raises(AssertionError, match="injected assertion failure"):
             async with releasing_stuck_turn() as turn:
-                sched = TurnScheduler(turn)
+                sched = TurnScheduler(turn, timers=SYSTEM_TIMERS)
                 sched.wake(5)
                 await asyncio.wait_for(turn.entered.wait(), 2)
                 raise AssertionError("injected assertion failure")
@@ -100,7 +101,7 @@ async def test_settlement_precedes_next_turn_after_cancel_timeout() -> None:
             events.append("turn2")
             next_turn.set()
 
-    scheduler = TurnScheduler(run, cancel_unwind_timeout_s=0.01)
+    scheduler = TurnScheduler(run, cancel_unwind_timeout_s=0.01, timers=SYSTEM_TIMERS)
     try:
         scheduler.wake(1)
         await asyncio.wait_for(entered.wait(), 2)
@@ -164,7 +165,16 @@ class TestDispatcherMessageHandling:
             def wake(self, agent_id: int) -> None:
                 woken.append(agent_id)
 
-        return InboundWakeDispatcher(EventBus.from_settings(rng=seeded_rng()), _Sched()), woken  # pyright: ignore[reportArgumentType]
+        # meiva:note
+        # `_Sched` is the one method this test needs from a scheduler.
+        return (
+            InboundWakeDispatcher(
+                EventBus.from_settings(rng=seeded_rng()),
+                _Sched(),  # pyright: ignore[reportArgumentType]
+                timers=SYSTEM_TIMERS,
+            ),
+            woken,
+        )
 
     def test_pmessage_wakes_its_agent(self) -> None:
         disp, woken = self._dispatcher()
@@ -192,7 +202,10 @@ class TestPendingScan:
             return [23]
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()), scheduler, pending_scan=_pending
+            EventBus.from_settings(rng=seeded_rng()),
+            scheduler,
+            pending_scan=_pending,
+            timers=SYSTEM_TIMERS,
         )
 
         await disp.scan_once()
@@ -210,7 +223,7 @@ class TestStallRestartEscalation:
             async def __call__(self, _agent_id: int) -> None:
                 raise dispatcher.HostRestartRequiredError("refused")
 
-        sched = TurnScheduler(_RefusingTurn())
+        sched = TurnScheduler(_RefusingTurn(), timers=SYSTEM_TIMERS)
         sched.wake(23)
         await settle()
         assert sched.restart_required is True
@@ -220,7 +233,7 @@ class TestStallRestartEscalation:
             async def __call__(self, _agent_id: int) -> None:
                 raise dispatcher.TurnStallTimeoutError(23)
 
-        sched = TurnScheduler(_CleanAbort())
+        sched = TurnScheduler(_CleanAbort(), timers=SYSTEM_TIMERS)
         sched.wake(23)
         await settle()
         assert sched.restart_required is False
@@ -242,6 +255,7 @@ class TestStallRestartEscalation:
             scan_interval_s=0.005,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
+            timers=SYSTEM_TIMERS,
         )
         with pytest.raises(dispatcher.HostRestartRequiredError, match="supervisor recovery"):
             await asyncio.wait_for(disp.run(), timeout=2.0)
@@ -268,7 +282,7 @@ class TestScanNeverCancelsATurn:
                     cancelled.append(agent_id)
                     raise
 
-        scheduler = TurnScheduler(run_turn)
+        scheduler = TurnScheduler(run_turn, timers=SYSTEM_TIMERS)
         scheduler.wake(23)
         await asyncio.wait_for(entered.wait(), 2)
         first = scheduler.task_for(23)
@@ -277,7 +291,10 @@ class TestScanNeverCancelsATurn:
             return [23]
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()), scheduler, pending_scan=_pending
+            EventBus.from_settings(rng=seeded_rng()),
+            scheduler,
+            pending_scan=_pending,
+            timers=SYSTEM_TIMERS,
         )
         await disp.scan_once()
 
