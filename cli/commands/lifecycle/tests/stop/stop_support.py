@@ -385,3 +385,30 @@ def refusing_pty_service(home: Path) -> Iterator[RefusingPtyService]:
         yield service
     finally:
         service.close()
+
+
+# meiva:note
+# A real process that reads as a cluster's headed Chrome to the orphan sweep: a name containing
+# "chrom" and `--user-data-dir=<profile>` in its argv. It is a copy of this interpreter under that
+# name (a copy of a system binary is killed by the platform's signature check, and a symlink reports
+# the name of its target), set to sleep; the copy finds its standard library through `PYTHONHOME`
+# and its shared library through the `lib` link beside its `bin`.
+@contextmanager
+def cluster_chrome(profile: Path, *, workdir: Path) -> Generator[subprocess.Popen[bytes]]:
+    base = Path(sys.base_prefix)
+    (workdir / "bin").mkdir(parents=True)
+    (workdir / "lib").symlink_to(base / "lib")
+    executable = workdir / "bin" / "chromium-python"
+    shutil.copyfile(os.path.realpath(sys.executable), executable)
+    executable.chmod(0o755)
+    child = subprocess.Popen(
+        [str(executable), "-c", "import time; time.sleep(60)", f"--user-data-dir={profile}"],
+        env={"PYTHONHOME": str(base)},
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        yield child
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=10)
