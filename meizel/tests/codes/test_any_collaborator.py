@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from meizel.checkout import GitRepo
 from meizel.contracts.analysis import analyze, diagnose, load_policy, scan_all
 from meizel.graph.model import AnyCollaboratorSite, Code, Sources
-from meizel.graph.universe import GitRepo, Universe
+from meizel.graph.universe import Universe
 from meizel.language.scan import FileScan, scan_source
 from meizel.tests.synthetic import (
     RepoFactory,

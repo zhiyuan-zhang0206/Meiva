@@ -41,7 +41,7 @@ from meizel.contracts.policy import POLICY, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import prepare_policy_snapshot, prune
 from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import MANIFEST, EditPlan, GitRepo, Universe
+from meizel.graph.universe import MANIFEST, Checkout, EditPlan, Universe
 from meizel.language.scan import invalidate_policy_caches
 
 __all__ = ["RuleDiff", "declarations_changed", "rule_change", "rule_diff"]
@@ -189,7 +189,7 @@ def _refuse_unreadable(analysis: Analysis, ref: str) -> None:
 # meiva:note
 # The files that differ between `ref` and the working tree under the given git pathspecs; no
 # pathspecs lists every changed file.
-def _changed_under(repo: GitRepo, ref: str, pathspecs: list[str]) -> list[str]:
+def _changed_under(repo: Checkout, ref: str, pathspecs: list[str]) -> list[str]:
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
     listing = repo.run_bytes("diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs)
@@ -231,7 +231,7 @@ def _entries(value: object) -> dict[str, object]:
 # meiva:note
 # One line per declaration added, removed or changed between `ref` and the working tree, written
 # `<manifest> [<table>] <key> <sign>`, so a reviewer reads what the two measures came from.
-def declarations_changed(repo: GitRepo, ref: str) -> list[str]:
+def declarations_changed(repo: Checkout, ref: str) -> list[str]:
     before = manifest_texts_at(repo, ref)
     files = repo.universe().files
     after = {
@@ -258,7 +258,7 @@ def declarations_changed(repo: GitRepo, ref: str) -> list[str]:
 # What a change edits in the measuring device, item by item: every rule file and every pathspec the
 # caller adds, the policy's own diff for its entries, and one line per manifest declaration; a reviewer
 # reads the two measures' inputs instead of taking a total on trust.
-def measurement_lines(repo: GitRepo, ref: str, extra: Collection[str] = ()) -> list[str]:
+def measurement_lines(repo: Checkout, ref: str, extra: Collection[str] = ()) -> list[str]:
     universe = repo.universe()
     entries = [
         f"{POLICY} {line}"
@@ -275,7 +275,7 @@ def measurement_lines(repo: GitRepo, ref: str, extra: Collection[str] = ()) -> l
 
 # meiva:note
 # Whether the interval changes what is measured, not only what the recorded number says.
-def rule_change(repo: GitRepo, ref: str, extra: Collection[str] = ()) -> bool:
+def rule_change(repo: Checkout, ref: str, extra: Collection[str] = ()) -> bool:
     if declarations_changed(repo, ref):
         return True
     if extra and _changed_under(repo, ref, list(extra)):
@@ -286,7 +286,7 @@ def rule_change(repo: GitRepo, ref: str, extra: Collection[str] = ()) -> bool:
 # meiva:note
 # The baseline this checker would write for the checkout `base`: the commands a rule change runs on
 # it, staged after each write because the checker reads tracked files only.
-def regenerated(base: GitRepo, ref: str, jobs: int | None) -> Baselines:
+def regenerated(base: Checkout, ref: str, jobs: int | None) -> Baselines:
     # meiva:note
     # The declarations are written over the base's content, so an entry the change *adds* names a file
     # the base does not have, and the base reads it as a child that is not there (pull request 7625,
@@ -313,7 +313,7 @@ def regenerated(base: GitRepo, ref: str, jobs: int | None) -> Baselines:
 # The device's own code, and only that: the rule code and the policy are the change's, everything else
 # under `meizel/` is content and is measured as the reference left it. A wider copy would hide a
 # violation the change adds there behind the change's own files.
-def _sync_rule_files(repo: GitRepo, ref: str, base: GitRepo) -> None:
+def _sync_rule_files(repo: Checkout, ref: str, base: Checkout) -> None:
     byte_writes: dict[Path, bytes] = {}
     deletes: list[Path] = []
     for rel in _changed_under(repo, ref, list(RULE_PATHS)):
@@ -324,14 +324,14 @@ def _sync_rule_files(repo: GitRepo, ref: str, base: GitRepo) -> None:
             deletes.append(dst)
     if not byte_writes and not deletes:
         return
-    EditPlan(byte_writes=byte_writes, deletes=tuple(deletes)).apply()
+    base.apply_plan(EditPlan(byte_writes=byte_writes, deletes=tuple(deletes)))
 
 
 # meiva:note
 # The reference's content at the paths the change uses: a file git reports as renamed is moved before
 # it is measured, so the device sees the change's paths and a rename is neither a rule change nor
 # repayment. The bytes are the reference's own, never the change's.
-def _apply_renames(base: GitRepo, moved: Mapping[str, str]) -> None:
+def _apply_renames(base: Checkout, moved: Mapping[str, str]) -> None:
     byte_writes: dict[Path, bytes] = {}
     deletes: list[Path] = []
     dirs: list[Path] = []
@@ -344,7 +344,7 @@ def _apply_renames(base: GitRepo, moved: Mapping[str, str]) -> None:
         deletes.append(base.root / old)
     if not byte_writes:
         return
-    EditPlan(byte_writes=byte_writes, deletes=tuple(deletes), dirs=tuple(dirs)).apply()
+    base.apply_plan(EditPlan(byte_writes=byte_writes, deletes=tuple(deletes), dirs=tuple(dirs)))
     base.stage_all()
 
 
@@ -352,7 +352,7 @@ def _apply_renames(base: GitRepo, moved: Mapping[str, str]) -> None:
 # The head's manifests, minus their debt tables, over the base's content: what is measured is the
 # head's device, and what it is measured in is the base's code. A manifest the head dropped is dropped
 # from the base too, so deleting a declaration reads as a rule change as well.
-def _apply_declarations(repo: GitRepo, base: GitRepo) -> None:
+def _apply_declarations(repo: Checkout, base: Checkout) -> None:
     staged = base.universe()
     head_paths = {path for path in repo.universe().files if path.rsplit("/", 1)[-1] == MANIFEST}
     base_paths = {path for path in staged.files if path.rsplit("/", 1)[-1] == MANIFEST}
@@ -365,7 +365,7 @@ def _apply_declarations(repo: GitRepo, base: GitRepo) -> None:
     deletes = tuple(base.root / path for path in sorted(base_paths - head_paths))
     if not writes and not deletes:
         return
-    EditPlan(writes=writes, deletes=deletes, dirs=tuple(p.parent for p in writes)).apply()
+    base.apply_plan(EditPlan(writes=writes, deletes=deletes, dirs=tuple(p.parent for p in writes)))
     base.stage_all()
 
 
@@ -376,7 +376,7 @@ def _apply_declarations(repo: GitRepo, base: GitRepo) -> None:
 # old file no longer defines the name and the new one does, and the diff touches both — and every
 # rewrite is named in the report: a gate that quietly repaired the tree it measures could not be
 # audited, and 2026-10-29's two queue failures were exactly a gate that never said which tree it read.
-def _move_applies(repo: GitRepo, head: Universe, ref: str, move: SymbolMove) -> bool:
+def _move_applies(repo: Checkout, head: Universe, ref: str, move: SymbolMove) -> bool:
     touched = set(_changed_under(repo, ref, [move.old, move.new]))
     if not {move.old, move.new} <= touched:
         return False
@@ -389,7 +389,7 @@ def _move_applies(repo: GitRepo, head: Universe, ref: str, move: SymbolMove) -> 
     )
 
 
-def _retarget_one(base: GitRepo, move: SymbolMove) -> list[str]:
+def _retarget_one(base: Checkout, move: SymbolMove) -> list[str]:
     lines: list[str] = []
     for relative in sorted(base.universe().files):
         if not relative.endswith(".py") or move.name not in base.load_text(relative):
@@ -397,7 +397,7 @@ def _retarget_one(base: GitRepo, move: SymbolMove) -> list[str]:
         updated, rewrites = retarget_imports(relative, base.load_text(relative), move)
         if not rewrites:
             continue
-        EditPlan(writes={base.root / relative: updated}).apply()
+        base.apply_plan(EditPlan(writes={base.root / relative: updated}))
         lines.extend(
             f"base import rewritten: {relative}:{number} {old}.{move.name} -> {new}.{move.name} "
             "(Symbol-Move, declared in the pull request body)"
@@ -407,7 +407,7 @@ def _retarget_one(base: GitRepo, move: SymbolMove) -> list[str]:
 
 
 def _apply_symbol_moves(
-    repo: GitRepo, ref: str, base: GitRepo, moves: Sequence[SymbolMove]
+    repo: Checkout, ref: str, base: Checkout, moves: Sequence[SymbolMove]
 ) -> tuple[list[str], list[str]]:
     if not moves:
         return [], []
@@ -437,7 +437,7 @@ def _apply_symbol_moves(
 # meiva:note
 # Compare the tree `repo` reads with `ref`, given the per-code debt the base records.
 def rule_diff(
-    repo: GitRepo,
+    repo: Checkout,
     ref: str,
     base: Counter[str],
     moved: Mapping[str, str],

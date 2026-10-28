@@ -38,7 +38,7 @@ def load_policy(universe: Universe, text: str | None = None) -> tuple[Policy, li
         return parse_policy(text)
     if POLICY not in universe.files:
         return Policy(), []
-    return parse_policy(universe.load_text(POLICY))
+    return parse_policy(universe.repo.load_text(POLICY))
 
 
 def _site(manifest: Manifest, name: str) -> str:

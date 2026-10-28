@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from meizel.checkout import load_universe
 from meizel.contracts import enumerations as generated
 from meizel.contracts.cli import main
 from meizel.graph.model import Code, Diagnostic, MeizelError
-from meizel.graph.universe import load_universe
 from meizel.roles import roles
 from meizel.tests.synthetic import RepoFactory, run, seat
 
