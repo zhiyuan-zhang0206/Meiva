@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +29,7 @@ def _caller(
         frozenset(),
         local_names=frozenset(),
         birth=birth_facts(),
+        user_home=Path("/home/operator"),
     )
 
 

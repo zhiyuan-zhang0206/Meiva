@@ -66,7 +66,7 @@ def site(inputs: identity.IdentityInput) -> HomeSite:
 @pytest.fixture
 def caller(tmp_path: Path) -> CallerHost:
     """A caller whose PATH is one tool directory and who declares nothing else."""
-    return caller_host(path=str(tmp_path / "tools"))
+    return caller_host(path=str(tmp_path / "tools"), user_home=tmp_path / "caller-home")
 
 
 def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityInput) -> None:
@@ -342,11 +342,40 @@ def test_lossy_tool_path_is_rejected_before_identity_publication(
     "key",
     ["MEIVA_HOME", "MEIVA_GATEWAY_PORT", "MEIVA_DB_URL", "MEIVA_MACHINE_NAME", "UNKNOWN_SETTING"],
 )
-def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key: str) -> None:
+def test_config_file_cannot_choose_identity(
+    inputs: identity.IdentityInput, caller: CallerHost, key: str
+) -> None:
     config = inputs.home.parent / "input.env"
     config.write_text(f"{key}=wrong\n")
     with pytest.raises(ValueError, match="config file"):
-        init_intent.config_values(_args("--config-file", str(config)), inputs.home)
+        init_intent.config_values(
+            _args("--config-file", str(config)), inputs.home, user_home=caller.user_home
+        )
+
+
+# meiva:note
+# A `--config-file` a person types may start with `~`: it names the home the entry read (the
+# caller's), never the process's user database, and a `~account` spelling names a home this
+# invocation cannot read.
+def test_a_tilde_config_file_expands_against_the_callers_home(
+    inputs: identity.IdentityInput, caller: CallerHost, tmp_path: Path
+) -> None:
+    home = tmp_path / "caller-home"
+    (home / "etc").mkdir(parents=True)
+    (home / "etc" / "first-start.env").write_text("MEIVA_LLM_OVERRIDE=fixture:model\n")
+    args = _args("--config-file", "~/etc/first-start.env")
+
+    values, digest = init_intent.config_values(args, inputs.home, user_home=home)
+
+    assert values["MEIVA_LLM_OVERRIDE"] == "fixture:model" and digest is not None
+    # meiva:note
+    # A home that does not hold it expands there and finds nothing: the value follows the home the
+    # caller read, not the one this process would have guessed.
+    with pytest.raises(FileNotFoundError):
+        init_intent.config_values(args, inputs.home, user_home=tmp_path / "elsewhere")
+    someone = _args("--config-file", "~someone/first-start.env")
+    with pytest.raises(ValueError, match="names another user's home"):
+        init_intent.config_values(someone, inputs.home, user_home=home)
 
 
 _RUNNER_ENDPOINT = "postgresql://meiva@remote.invalid/db"
@@ -546,7 +575,7 @@ def test_config_file_is_taken_once_and_a_second_init_is_refused(
     assert (inputs.home / ".env").read_bytes() == first
     # A home that already has an `.env` without an intent takes no config file either.
     with pytest.raises(ValueError, match=r"no `\.env` yet"):
-        init_intent.config_values(args, inputs.home)
+        init_intent.config_values(args, inputs.home, user_home=caller.user_home)
 
 
 # meiva:note

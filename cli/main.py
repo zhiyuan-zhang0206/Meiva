@@ -157,6 +157,7 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
             backup_passphrase=passphrase.mint(random.SystemRandom()),
         ),
         transport_key=args.transport_key,
+        user_home=Path.home(),
     )
     if args.ssl_cert_file is not None:
         os.environ["SSL_CERT_FILE"] = args.ssl_cert_file

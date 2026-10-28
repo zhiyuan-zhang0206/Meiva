@@ -52,12 +52,15 @@ _FLAGS = (
 )
 
 
-def config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str], str | None]:
+def config_values(
+    args: argparse.Namespace, home: Path, *, user_home: Path
+) -> tuple[dict[str, str], str | None]:
     if args.config_file is None:
         return {}, None
     from base.host.env.config_lite_table import FIELD_ALIASES
+    from base.paths.expand import expand_home
 
-    path = Path(args.config_file).expanduser().resolve(strict=True)
+    path = expand_home(args.config_file, user_home=user_home).resolve(strict=True)
     if path.is_relative_to(home):
         raise ValueError("first-start config file must be outside the home")
     content = path.read_bytes()
@@ -157,7 +160,7 @@ def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> Ide
     except ValueError as exc:
         raise ValueError(f"{exc}{_first_time_examples(site.checkout)}") from exc
     values: dict[str, str] = dict(stored)
-    config, digest = config_values(args, home)
+    config, digest = config_values(args, home, user_home=caller.user_home)
     values.update(config)
     values["MEIVA_SERVICE_PATH"] = service_path(values, site, caller)
     _apply_identity_options(args, stored, values, site.checkout)
