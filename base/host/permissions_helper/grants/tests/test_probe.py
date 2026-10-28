@@ -172,6 +172,48 @@ def test_an_old_helper_build_is_a_setup_error_the_caller_must_fix(tmp_path: Path
     assert "rebuild" in str(caught.value)
 
 
+# meiva:note
+# The waits of one preflight, answered from a script: `monotonic` walks the readings and
+# `sleep` records the interval. A poll that slept on the process clock instead leaves `sleeps`
+# empty, and the scripted reading past the deadline still ends the loop, so the test reports
+# instead of hanging.
+class ScriptedWaits:
+    def __init__(self, readings: list[float]) -> None:
+        self._readings = readings
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self._readings.pop(0) if self._readings else 1_000.0
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+
+# meiva:note
+# A preflight that finds no result spends its poll on the timers it was given, and the deadline it
+# compares against is the same value's.
+def test_a_preflight_that_finds_no_result_spends_its_poll_on_the_given_timers(
+    tmp_path: Path,
+) -> None:
+    class Silent(FakeHelper):
+        def spawn_process(self, *args: object, **kwargs: object) -> Any:
+            return {"pid": 1, "reused": False}
+
+    waits = ScriptedWaits([0.0, 0.0, 5.0])
+    with pytest.raises(probe.PermissionsProbeError):
+        probe.run_preflight(
+            Silent(codes=_codes(0)),
+            workdir=tmp_path,
+            run_id="r9",
+            env={},
+            services=("kTCCServiceScreenCapture",),
+            timers=waits,
+            wait_s=1.0,
+        )
+
+    assert waits.sleeps == [probe.POLL_S]
+
+
 def test_a_probe_child_that_never_writes_times_out(tmp_path: Path) -> None:
     class Silent(FakeHelper):
         def spawn_process(self, *args: object, **kwargs: object) -> Any:

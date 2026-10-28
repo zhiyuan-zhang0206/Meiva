@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -114,6 +115,24 @@ def _codes(value: int) -> dict[str, int]:
     return dict.fromkeys(PREFLIGHT_SERVICES, value)
 
 
+# meiva:note
+# The waits a pass spends, recorded instead of slept: every reading of the monotonic deadline is
+# counted, and a poll that gets this far is a failure rather than a silent sleep. A pass that read
+# some other clock -- the process's, the loop's -- leaves `readings` at zero.
+class RecordingWaits:
+    def __init__(self) -> None:
+        self.readings = 0
+
+    def monotonic(self) -> float:
+        self.readings += 1
+        return 0.0
+
+    def sleep(self, seconds: float) -> None:
+        raise AssertionError(
+            f"a probe whose child already wrote its result must not sleep ({seconds})"
+        )
+
+
 def host(tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None) -> onboarding.GateHost:
     for subpath in FOLDER_PATHS.values():
         (tmp_path / subpath).mkdir(parents=True, exist_ok=True)
@@ -148,6 +167,18 @@ def test_a_deferred_host_stays_deferred_across_checks(tmp_path: Path) -> None:
 def test_an_unreachable_helper_is_reported_as_unavailable(tmp_path: Path) -> None:
     report = onboarding.check(host=host(tmp_path, client=DeadHelper()), now=NOW, run_id=RUN)
     assert report.state is gate.GateState.UNAVAILABLE
+
+
+# meiva:note
+# The pass waits on the timers its host carries: with any other timers the deadline of the probe
+# would be read somewhere else and this count would stay at zero.
+def test_a_pass_waits_on_the_timers_of_the_host_it_is_given(tmp_path: Path) -> None:
+    waits = RecordingWaits()
+    seat = replace(host(tmp_path), timers=waits)
+
+    onboarding.check(host=seat, now=NOW, run_id=RUN)
+
+    assert waits.readings > 0
 
 
 def test_a_non_darwin_host_has_nothing_to_check(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@
 
 [roots]
 "helper-signing.py" = { kinds = ["clock", "environ", "home", "platform", "random"], why = "operator signing CLI resolves the home it operates once, timestamps detached logs, and builds the one world its commands share (the account home, the host's platform, process environment and command runner, the clock and the operating system's random generator the signing keychain password is drawn from)" }
-"onboard-helper-grants.py" = { kinds = ["clock", "home", "pid", "platform"], why = "macOS TCC onboarding CLI checks the host platform, resolves guarded folders under $HOME, stamps the run report with PID and nodename, and builds the process timers its wait for each probe child measures with" }
+"onboard-helper-grants.py" = { kinds = ["clock", "home", "pid", "platform"], why = "macOS TCC onboarding CLI checks the host platform, resolves guarded folders under $HOME, stamps the run report with PID and nodename and names its probe children from a `%H%M%S` clock reading plus that pid, and builds the process timers its wait for each probe child measures with" }
 "request_grants_evidence.py" = { kinds = ["clock", "home", "platform"], why = "macOS TCC grant-request evidence CLI checks the host platform, resolves the home that holds its evidence directory once in main() and timestamps the tccd log window" }
 
 [debt.ambient-read]
