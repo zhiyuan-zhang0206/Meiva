@@ -33,8 +33,6 @@ from pathlib import Path
 from typing import Any, assert_never
 
 from base import telemetry
-from base.clock import Clock
-from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import (
     GatewayAccess,
     gateway_api_base,
@@ -44,6 +42,7 @@ from base.cluster.machine.boot import gateway_access_from_boot
 from base.host.net.http_dial import get as dial_get
 from base.paths import repo_root
 from base.telemetry import EventPipeline
+from cli.database.runtime import CommandRuntime
 
 from .child_verdict import child_verdict, spawn_failure_verdict, timeout_verdict
 from .sweep_outcome import (
@@ -240,6 +239,15 @@ def report_verify(outcome: SweepOutcome, *, producer: Callable[[], EventPipeline
     )
 
 
+# meiva:note
+# The instant a report is stamped with: the invocation's own instant, read in the zone its
+# configuration names. The zone is the runtime's answer (`CommandRuntime.zone`), asked here instead
+# of a second clock built in this command: that clock would carry the UTC instant only, and
+# `astimezone(None)` downstream would quietly write the report in the machine's zone.
+def stamped_instant(runtime: CommandRuntime) -> datetime:
+    return runtime.clock.now().astimezone(runtime.zone)
+
+
 def h_schedules_verify(args: argparse.Namespace) -> int:
     source: SweepSource
     if args.check_file is not None:
@@ -253,10 +261,10 @@ def h_schedules_verify(args: argparse.Namespace) -> int:
             source = RowsFromGateway(gateway_access_from_boot(args.runtime.config))
         except Exception as exc:
             source = GatewayUnresolved(type(exc).__name__, str(exc))
-    zone = Clock(clock_config_from_boot(args.runtime.config), timers=args.runtime.timers).zone()
+    stamped = stamped_instant(args.runtime)
     return cmd_schedules_verify(
         source=source,
         notify=not args.no_notify,
-        now=args.runtime.clock.now().astimezone(zone),
+        now=stamped,
         producer=args.producer,
     )
