@@ -122,8 +122,12 @@ def choose_throwaway_base(
     )
 
 
-def verify_foreground_data_dir(reported_dir: str | None, expected_dir: Path) -> None:
-    if reported_dir is None or Path(reported_dir).resolve() != expected_dir.resolve():
+# meiva:note
+# Both paths arrive resolved by the shell: the server answers with the path it was started with,
+# which spells the same directory differently when that path is a symlink or the unreduced macOS
+# `/var` form.
+def verify_foreground_data_dir(reported_dir: Path | None, expected_dir: Path) -> None:
+    if reported_dir is None or reported_dir != expected_dir:
         raise RuntimeError("foreground Postgres port is owned by another data directory")
 
 

@@ -2,8 +2,4 @@ exports = ["apple_event.py", "folder_touch.py", "preflight.py"]
 
 [purity]
 "__init__.py" = "strict"
-"folder_touch.py" = "strict-to-be"
-
-[debt.impure-call]
-"folder_touch.py#Path.iterdir" = 1
-"folder_touch.py#Path.open" = 1
+"folder_touch.py" = { mode = "none", why = "the TCC probe child: launched by path under the permissions helper's own attribution, it lists the target directory and writes the one result word its parent parses; the word is the whole decision and its reading side (the granted/denied/unresolved classification) already lives in grants/triggers.py, so no plan is left behind the io" }

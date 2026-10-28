@@ -1,0 +1,10 @@
+exports = ["__main__.py"]
+
+[uses]
+"__main__.py" = ["plan.py"]
+"tests" = ["plan.py"]
+
+[purity]
+"__init__.py" = "strict"
+"__main__.py" = { mode = "none", why = "the double-fork helper itself: setsid, the fork, the pid handback write, the three dup2 calls and execv — every call an async-signal-safe os.* run after the fork; the command line, the usage verdict and the redirect table are decided in plan.py before it" }
+"plan.py" = "strict"

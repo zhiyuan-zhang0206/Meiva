@@ -126,7 +126,7 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
 ) -> None:
     """A port collision must never authorize creating roles in the other server."""
     with pytest.raises(RuntimeError, match="another data directory"):
-        pg_plan.verify_foreground_data_dir(str(tmp_path / "other-db"), tmp_path / "owned-db")
+        pg_plan.verify_foreground_data_dir(tmp_path / "other-db", tmp_path / "owned-db")
 
     bin_dir = _write_stub_pg_bindir(tmp_path / "bin")
     port = int(str(conninfo_to_dict(db_url)["port"]))
