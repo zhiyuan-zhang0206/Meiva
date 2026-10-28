@@ -24,14 +24,14 @@ INSTANT = dt.datetime(2031, 3, 4, 5, 6, tzinfo=dt.UTC)
 # generator is seeded: a coding tool that read the environment, the real clock or a generator of its
 # own instead would not find what these tests look for.
 @pytest.fixture
-def context_home(tmp_path: Path, unit_home: Path) -> Iterator[Path]:
+def context_home(tmp_path: Path, unit_home: Path, operator_home: Path) -> Iterator[Path]:
     home = tmp_path / "context-home"
     home.mkdir()
     assert home != unit_home
     process_context.bind_context(
         MeivaContext(
             meiva_home=home,
-            user_home=Path.home(),
+            user_home=operator_home,
             clock_factory=lambda: clock_at(INSTANT),
             rng=seeded_rng(11),
         )
@@ -68,6 +68,17 @@ def test_the_cluster_home_is_the_bound_contexts_not_the_environments(
 ) -> None:
     assert _common.cluster_home() == context_home
     assert _common.cluster_home() != unit_home
+
+
+# meiva:note
+# The operator home a `~` expands against is the value the bound context carries, never this
+# process's own home: the two differ here, so a launcher that called `Path.home()` would answer the
+# wrong one and fail the second assertion.
+def test_the_operator_home_is_the_bound_contexts_not_the_processes(
+    operator_home: Path,
+) -> None:
+    assert _common.user_home() == operator_home
+    assert _common.user_home() != Path.home()
 
 
 def test_a_new_generation_draws_from_the_bound_generator_and_stamps_the_bound_instant(
