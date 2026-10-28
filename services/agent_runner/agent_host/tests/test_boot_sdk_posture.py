@@ -47,6 +47,7 @@ def test_host_root_supplies_model_and_config_owners(tmp_path: Path) -> None:
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
             rng=rng,
             home=tmp_path,
+            disabled_entries=(),
         )
         assert installation.sampling.rng is rng
         assert installation.require_catalog().models
@@ -82,6 +83,7 @@ def _assert_profiled_host_defers_complete_model(tmp_path: Path) -> None:
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
             rng=seeded_rng(),
             home=tmp_path,
+            disabled_entries=(),
         )
         assert calls == []
         authority = installation.authority
