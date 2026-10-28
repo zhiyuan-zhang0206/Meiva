@@ -337,8 +337,19 @@ def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
     from base.host.permissions_helper.grants import checklist, gate
     from services.desktop.permissions_helper import onboarding
 
-    first_run = gate.read_record() is None
-    report = onboarding.onboard()
+    host = onboarding.gate_host(
+        home=ctx.meiva_home,
+        user_home=ctx.session.user_home,
+        environ=ctx.read_config().process_environment(),
+        helper=ctx.helper,
+    )
+    first_run = gate.read_record(host.record_path) is None
+    # meiva:note
+    # A converge runs under the home's lifecycle lock, so one pass per home is in flight; its
+    # children are named by the instant the converge asked the clock, a namespace the other roots'
+    # random run ids cannot collide with.
+    run_id = f"converge-{ctx.clock.now():%Y%m%dT%H%M%S%f}"
+    report = onboarding.onboard(host=host, clock=ctx.clock, run_id=run_id)
     if report.state in (gate.GateState.COMPLETE, gate.GateState.NOT_APPLICABLE):
         return
     if first_run:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -14,7 +14,6 @@ from base.host.permissions_helper.grants.catalog import (
     RequestMode,
 )
 from base.host.permissions_helper.grants.probe import ProbeResult
-from base.paths import meiva_home
 
 RECORD_NAME = "permissions_onboarding.json"
 RECORD_VERSION = 1
@@ -109,22 +108,15 @@ def _detail(result: ProbeResult, item: PermissionItem) -> str:
     return ""
 
 
-def _checked_at(now: datetime | None) -> datetime:
-    return datetime.now(UTC) if now is None else now
-
-
 # meiva:note
 # A host state is computed from the probe of the same call. The record under $MEIVA_HOME stores the last observation and the user's deferral flag; it is written from a probe and never read as evidence, so a cached 'granted' can neither hide a revoked grant nor invent one.
 # meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
-def evaluate(
-    result: ProbeResult, *, deferred: bool = False, now: datetime | None = None
-) -> GateReport:
-    checked_at = _checked_at(now)
+def evaluate(result: ProbeResult, *, now: datetime, deferred: bool = False) -> GateReport:
     if not result.helper_reachable:
         items = tuple(ItemStatus(item, Grant.UNKNOWN, "helper unreachable") for item in CATALOG)
         return GateReport(
             state=GateState.UNAVAILABLE,
-            checked_at=checked_at,
+            checked_at=now,
             items=items,
             diagnostic=result.diagnostic,
             helper_reachable=False,
@@ -135,7 +127,7 @@ def evaluate(
     )
     report = GateReport(
         state=GateState.COMPLETE,
-        checked_at=checked_at,
+        checked_at=now,
         items=items,
         diagnostic=result.diagnostic,
         supports_request=result.supports_request,
@@ -143,7 +135,7 @@ def evaluate(
     if report.missing:
         return GateReport(
             state=GateState.DEFERRED if deferred else GateState.ACTION_REQUIRED,
-            checked_at=checked_at,
+            checked_at=now,
             items=items,
             diagnostic=result.diagnostic,
             supports_request=result.supports_request,
@@ -151,10 +143,10 @@ def evaluate(
     return report
 
 
-def not_applicable(now: datetime | None = None) -> GateReport:
+def not_applicable(now: datetime) -> GateReport:
     return GateReport(
         state=GateState.NOT_APPLICABLE,
-        checked_at=_checked_at(now),
+        checked_at=now,
         items=(),
         diagnostic="There are no macOS authorizations to check on this host.",
         supports_request=False,
@@ -202,34 +194,32 @@ class OnboardingRecord:
         )
 
 
-def record_path() -> Path:
-    return meiva_home() / RECORD_NAME
+def record_path(home: Path) -> Path:
+    return home / RECORD_NAME
 
 
-def read_record(path: Path | None = None) -> OnboardingRecord | None:
-    target = path or record_path()
+def read_record(path: Path) -> OnboardingRecord | None:
     try:
-        return OnboardingRecord.from_json(target.read_text())
+        return OnboardingRecord.from_json(path.read_text())
     except FileNotFoundError:
         return None
     except (ValueError, KeyError, TypeError):
         return None
 
 
-def write_record(record: OnboardingRecord, path: Path | None = None) -> None:
-    target = path or record_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(record.to_json())
+def write_record(record: OnboardingRecord, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(record.to_json())
 
 
 # meiva:note
 # Recording 'later' keeps the host in the restricted family: the state becomes deferred, complete stays false, and the next gate run asks again. A complete run clears the flag.
 # meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
-def mark_deferred(*, now: datetime | None = None, path: Path | None = None) -> OnboardingRecord:
+def mark_deferred(*, now: datetime, path: Path) -> OnboardingRecord:
     record = read_record(path)
     if record is None:
         record = OnboardingRecord(
-            checked_at=_checked_at(now),
+            checked_at=now,
             state=GateState.DEFERRED,
             deferred=True,
             grants={},
@@ -245,7 +235,7 @@ def mark_deferred(*, now: datetime | None = None, path: Path | None = None) -> O
     return record
 
 
-def remember(report: GateReport, *, deferred: bool, path: Path | None = None) -> OnboardingRecord:
+def remember(report: GateReport, *, deferred: bool, path: Path) -> OnboardingRecord:
     record = OnboardingRecord.from_report(report, deferred=deferred and not report.complete)
     write_record(record, path)
     return record
