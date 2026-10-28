@@ -36,7 +36,8 @@ _QUOTES = '"' * 3
     ],
 )
 def test_only_test_paths_are_test_files(rel_path: str, is_test: bool) -> None:
-    assert plan.any_test_file([_ROOT / rel_path], _ROOT) is is_test
+    cli = frozenset({"cli"})
+    assert plan.in_default_scope(_ROOT / "cli" / rel_path, _ROOT, test_only_dirs=cli) is is_test
 
 
 def test_the_rule_judges_a_test_file_it_has_not_exempted() -> None:
@@ -53,6 +54,12 @@ def test_a_skipped_directory_is_scanned_only_for_its_test_files() -> None:
     assert plan.in_default_scope(_ROOT / "cli/pkg/test_mod.py", _ROOT, test_only_dirs=dirs) is True
     assert plan.in_default_scope(_ROOT / "cli/pkg/mod.py", _ROOT, test_only_dirs=dirs) is False
     assert plan.in_default_scope(_ROOT / "base/mod.py", _ROOT, test_only_dirs=dirs) is True
+
+
+def test_the_default_scan_reads_tooling_tests_and_the_test_only_directories() -> None:
+    assert plan.scan_targets(
+        ["base", "agent", "cli"], ["scripts", "meizel"], frozenset({"cli", "ops"})
+    ) == ("base", "agent", "scripts", "meizel", "tests", "cli", "ops")
 
 
 def test_a_path_outside_the_repository_is_not_narrowed() -> None:
@@ -141,9 +148,9 @@ def test_a_finding_names_the_variable_and_what_to_do_instead() -> None:
     assert 'monkeypatch.setattr(settings, "<field_name>", value)' in finding
 
 
-def test_the_summary_names_the_count_and_the_note() -> None:
+def test_the_summary_names_the_count_and_where_the_exemptions_live() -> None:
     assert plan.summary(3) == (
         "\n3 violations total. See the note at the top of "
-        "meizel/state/no_os_environ.py for the exemption procedure and the rationale "
-        "for using setattr in tests."
+        "meizel/state/no_os_environ.py for the rationale and meizel.policy.toml's "
+        "[no-os-environ] table for the exemptions."
     )

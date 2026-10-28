@@ -1,8 +1,8 @@
 # meiva:note
-# What the `no_os_environ` rule decides, over the values its shell read: whether a walked path is in
-# the default scan, whether any scanned path is a test file, whether the rule judges one file, which
-# of a file's lines set an environment variable the settings singleton models, and the text of a
-# finding and of the summary. The shell locates the repository, reads the policy, walks the scan
+# What the `no_os_environ` rule decides, over the values its shell read: the directories of its
+# default scan, whether a walked path is in that scan, whether the rule judges one file, which of a
+# file's lines set an environment variable the settings singleton models, and the text of a finding
+# and of the summary. The shell locates the repository, reads the policy, walks the scan
 # directories, reads each judged file and prints.
 # meiva:link meizel/docs/meizel.meiva.okf.md
 
@@ -12,11 +12,13 @@ import re
 from collections.abc import Collection, Iterable
 from pathlib import Path
 
+from meizel.state import lint_paths
+
 __all__ = [
-    "any_test_file",
     "finding",
     "in_default_scope",
     "judges_file",
+    "scan_targets",
     "setenv_violations",
     "summary",
 ]
@@ -47,13 +49,19 @@ def _is_test_file(rel_path: str) -> bool:
 
 
 # meiva:note
-# How a path is labelled in a finding: repository-relative when it is inside the repository, its
-# absolute posix form when it is not.
-def _label(path: Path, root: Path) -> str:
-    try:
-        return path.relative_to(root).as_posix()
-    except ValueError:
-        return path.as_posix()
+# The directories the default scan reads, in order: the application's packages outside the
+# test-only directories, the tooling packages, the top-level tests tree, and the test-only
+# directories themselves, sorted — their production code is skipped while their own test files are
+# read.
+def scan_targets(
+    application: Iterable[str], tooling: Iterable[str], test_only_dirs: Collection[str]
+) -> tuple[str, ...]:
+    return (
+        *(directory for directory in application if directory not in test_only_dirs),
+        *tooling,
+        "tests",
+        *sorted(test_only_dirs),
+    )
 
 
 # meiva:note
@@ -70,17 +78,10 @@ def in_default_scope(path: Path, root: Path, *, test_only_dirs: Collection[str])
 
 
 # meiva:note
-# Whether any scanned path is a test file: the shell only pays for the config registry's import when
-# one is, so a run over production files alone stays fast.
-def any_test_file(paths: Iterable[Path], root: Path) -> bool:
-    return any(_is_test_file(_label(path, root)) for path in paths)
-
-
-# meiva:note
 # Whether the rule judges a file at all: only a test file it has not exempted, because the bug is a
 # test writing to a variable the settings singleton already holds.
 def judges_file(path: Path, root: Path, *, allowed_files: Collection[str]) -> bool:
-    rel = _label(path, root)
+    rel = lint_paths.label(path, root)
     return rel not in allowed_files and _is_test_file(rel)
 
 
@@ -124,17 +125,17 @@ def setenv_violations(
 def finding(path: Path, root: Path, lineno: int, kind: str) -> str:
     env = kind.split(":", 1)[1]
     return (
-        f"{_label(path, root)}:{lineno}: monkeypatch.setenv/delenv on `{env}` — Settings is a "
-        f"singleton built once; env changes do not reach the settings instance field. Use "
+        f"{lint_paths.label(path, root)}:{lineno}: monkeypatch.setenv/delenv on `{env}` — Settings"
+        f" is a singleton built once; env changes do not reach the settings instance field. Use "
         f'`monkeypatch.setattr(settings, "<field_name>", value)` instead.'
     )
 
 
 # meiva:note
-# The closing line of a run that found violations, naming where the exemption procedure is written.
+# The closing line of a run that found violations, naming where the exemption list lives.
 def summary(total: int) -> str:
     return (
         f"\n{total} violations total. See the note at the top of "
-        "meizel/state/no_os_environ.py for the exemption procedure and the rationale "
-        "for using setattr in tests."
+        "meizel/state/no_os_environ.py for the rationale and meizel.policy.toml's "
+        "[no-os-environ] table for the exemptions."
     )

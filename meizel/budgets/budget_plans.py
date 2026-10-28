@@ -1,6 +1,6 @@
 # meiva:note
 # The two structure ceilings and every judgment they make, as functions over values the shells have
-# already read: a file's line count, a directory's entry names and kinds, a Git path listing and the
+# already read: a directory's entry names and kinds, a judged file's text, a Git path listing and the
 # paths a target names. Nothing here opens a file, lists a directory, resolves a link or starts a
 # process; which files and directories the ceilings judge, what they leave out and what the report
 # says are decided here.
@@ -10,24 +10,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Literal
 
 __all__ = [
     "DIRECTORY_CEILING",
     "HARD_CEILING",
-    "Side",
-    "directory_violations",
+    "ceiling_violations",
     "entry_candidate",
-    "file_violations",
-    "judged_side",
-    "selected_directories",
+    "is_python_file",
+    "judged_directories",
+    "judged_path",
     "tracked_children",
 ]
 
 HARD_CEILING = 800
 DIRECTORY_CEILING = 20
-Side = Literal["target", "scope"]
 
+_PYTHON_SUFFIX = ".py"
 _MANIFEST = "meizel.toml"
 # meiva:note
 # The two names the file budget never enters: the interpreter's cache, and the migrations tree,
@@ -69,12 +67,12 @@ def tracked_children(listing: str) -> dict[str, set[str]]:
 
 
 # meiva:note
-# The judged directories for the given targets: each target's tracked descendants and its
-# ancestors, and the whole tree for the repository root itself, which never answers the cap on its
-# own. A target outside the repository is not judged at all.
-def selected_directories(
+# The judged directories for the given targets, each with its direct entry count: a target's tracked
+# descendants and its ancestors, the whole tree for the repository root itself, which never answers
+# the cap on its own, and nothing for a target outside the repository.
+def judged_directories(
     children: Mapping[str, set[str]], targets: Iterable[Path], repo_root: Path
-) -> set[str]:
+) -> dict[str, int]:
     selected: set[str] = set()
     for target in targets:
         try:
@@ -91,7 +89,7 @@ def selected_directories(
         )
         parts = PurePosixPath(relative).parts
         selected.update("/".join(parts[:depth]) for depth in range(1, len(parts)))
-    return selected.intersection(children).difference({""})
+    return {name: len(children[name]) for name in selected.intersection(children).difference({""})}
 
 
 # meiva:note
@@ -106,47 +104,72 @@ def entry_candidate(name: str, *, is_symlink: bool, is_directory: bool) -> bool:
 
 
 # meiva:note
+# What the file budget counts as source: a `.py` suffix, read the way `Path.suffix` reads it, so a
+# directory or a notes file a target names straight is not read.
+def is_python_file(name: str) -> bool:
+    return PurePosixPath(name).suffix == _PYTHON_SUFFIX
+
+
+# meiva:note
 # Which of the two the file budget judges for one target and one structure directory, or None when
 # they are disjoint or the judged path runs through a hidden name, the interpreter's cache or the
-# migrations tree: the file budget only reads what it would walk anyway. The two are the target and
-# the scope, not their union, so a target deep under one scope is judged as itself.
-def judged_side(target: Path, scope: Path, repo_root: Path) -> Side | None:
-    try:
-        relative_target = target.relative_to(repo_root)
-        relative_scope = scope.relative_to(repo_root)
-    except ValueError:
-        return None
-    side: Side
-    if relative_target == relative_scope or relative_scope in relative_target.parents:
-        side, judged = "target", relative_target
-    elif relative_target in relative_scope.parents:
-        side, judged = "scope", relative_scope
+# migrations tree. The two are compared as the paths they are, so a target that holds the repository
+# is judged as the structure directory inside it.
+def judged_path(target: Path, scope: Path, repo_root: Path) -> Path | None:
+    if target == scope or scope in target.parents:
+        selected = target
+    elif target in scope.parents:
+        selected = scope
     else:
         return None
-    if any(part.startswith(".") or part in _IGNORED for part in judged.parts):
+    try:
+        relative = selected.relative_to(repo_root)
+    except ValueError:
         return None
-    return side
+    if any(part.startswith(".") or part in _IGNORED for part in relative.parts):
+        return None
+    return selected
 
 
 # meiva:note
-# A line per file over the hard ceiling, given each judged file's repository-relative path and its
-# line count, in path order.
-def file_violations(lines: Mapping[str, int]) -> list[str]:
+# Both ceilings' report for one run, in the order the ceilings have always been printed in: a line
+# per file over the hard ceiling, ordered by path *parts* (so `app/a/b.py` precedes `app/a.py`, as
+# walking `Path` objects did), then a line per judged directory over the entry cap, by name.
+def ceiling_violations(
+    texts: Mapping[Path, str], repo_root: Path, judged: Mapping[str, int]
+) -> list[str]:
+    files = sorted(
+        ((_label(path, repo_root), _line_count(text)) for path, text in texts.items()),
+        key=lambda named: PurePosixPath(named[0]).parts,
+    )
     return [
-        f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling"
-        f" — {_FILE_CEILING_GUIDANCE}"
-        for name, count in sorted(lines.items())
-        if count > HARD_CEILING
+        *(
+            f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling"
+            f" — {_FILE_CEILING_GUIDANCE}"
+            for name, count in files
+            if count > HARD_CEILING
+        ),
+        *(
+            f"{name}: directory has {count} direct entries, over the {DIRECTORY_CEILING}-entry cap"
+            f" — {_DIRECTORY_CEILING_GUIDANCE}"
+            for name, count in sorted(judged.items())
+            if count > DIRECTORY_CEILING
+        ),
     ]
 
 
 # meiva:note
-# A line per directory over the entry cap, given each judged directory's repository-relative path
-# and its direct entry count, in path order.
-def directory_violations(counts: Mapping[str, int]) -> list[str]:
-    return [
-        f"{name}: directory has {count} direct entries, over the {DIRECTORY_CEILING}-entry cap"
-        f" — {_DIRECTORY_CEILING_GUIDANCE}"
-        for name, count in sorted(counts.items())
-        if count > DIRECTORY_CEILING
-    ]
+# What counts as a line of a judged file: every line `str.splitlines` splits, with no trailing empty
+# line counted for a file that ends at a newline.
+def _line_count(text: str) -> int:
+    return len(text.splitlines())
+
+
+# meiva:note
+# How a judged path is named in the report: repository-relative, or its absolute posix form when it
+# sits outside the repository.
+def _label(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()

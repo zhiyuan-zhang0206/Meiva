@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from meizel import allowances, lint_common
+from meizel.state import lint_paths
 from meizel.state import turn_scoped_config_plan as plan
 
 __all__ = ["main"]
@@ -28,9 +29,12 @@ _ALLOWED_FILES = frozenset(_POLICY.reasons("turn-scoped-config", "files"))
 _PLUGIN_MECHANISM_FILES = frozenset(_POLICY.reasons("turn-scoped-config", "plugin-mechanism-files"))
 
 
+# meiva:note
+# Every file the rule reads: explicit paths as given, otherwise each scan directory walked plus the
+# policy's extra files.
 def _iter_files(resolved: list[str], root: Path = _REPO_ROOT, *, explicit: bool) -> list[Path]:
     if explicit:
-        return [root / p for p in resolved if p.endswith(".py")]
+        return lint_paths.python_paths(root, resolved)
     files: list[Path] = []
     for d in _SCAN_DIRS:
         files.extend((root / d).rglob("*.py"))
@@ -53,7 +57,7 @@ def _report(heading: str, entries: list[str]) -> None:
 # meiva:note
 # Collect one file's bare, layered and process-global plugin config reads. The label is the resolved
 # path, so a link into the scan scope is judged as what it points at, and the skip decisions are
-# asked of the plan with both the resolved label and the name the scan reached.
+# asked of the plan with both that label and the name the scan reached.
 def _scan(
     path: Path,
     per_agent: set[str],
@@ -63,11 +67,7 @@ def _scan(
     *,
     root: Path = _REPO_ROOT,
 ) -> None:
-    resolved = path.resolve()
-    try:
-        rel = resolved.relative_to(root.resolve()).as_posix()
-    except ValueError:
-        rel = resolved.as_posix()
+    rel = lint_paths.label(path.resolve(), root.resolve())
     if plan.skips(rel, path.name, allowed_files=_ALLOWED_FILES):
         return
     text = lint_common.read_utf8_text(path)

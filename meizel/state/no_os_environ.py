@@ -7,8 +7,8 @@
 # the files that may read it are declared under `[roots]`.
 #
 # This module is the effect shell of that rule: it locates the repository, reads the policy, walks
-# the scan directories, reads each judged file and prints. Which files it judges and what it says
-# are decided in `meizel.state.no_os_environ_plan`.
+# the scan directories, reads each judged file and prints. Which directories and files it judges and
+# what it prints are decided in `meizel.state.no_os_environ_plan`.
 # meiva:link meizel/docs/meizel.meiva.okf.md
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from pathlib import Path
 
 from meizel import allowances, lint_common
 from meizel.roles import packages
+from meizel.state import lint_paths
 from meizel.state import no_os_environ_plan as plan
 
 __all__ = ["main"]
@@ -33,10 +34,7 @@ _POLICY = allowances.load(_REPO_ROOT)
 _TEST_ONLY_DIRS = _POLICY.names("no-os-environ", "test-only-dirs")
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
-_SCAN_DIRS = (
-    *(d for d in packages("application") if d not in _TEST_ONLY_DIRS),
-    *packages("tooling"),
-)
+_SCAN_TARGETS = plan.scan_targets(packages("application"), packages("tooling"), _TEST_ONLY_DIRS)
 
 _PROVIDER_KEY_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "provider-key-vars"))
 
@@ -51,19 +49,19 @@ _ALLOWED_FILES = frozenset(_POLICY.reasons("no-os-environ", "files"))
 
 
 # meiva:note
-# Explicit paths as given; otherwise every file the default scan reads, narrowed to the `--only`
-# changed files when `scope` names them.
+# Every file the default scan reads: each scan target walked, a file under a skipped directory's
+# production code dropped, and the `--only` changed files narrowing the result when `scope` names
+# them. Explicit paths are read as given.
 def _files_to_scan(
     resolved: list[str], scope: frozenset[str] | None, root: Path, *, explicit: bool
 ) -> list[Path]:
     if explicit:
-        return [root / entry for entry in resolved if entry.endswith(".py")]
-    targets = [root / d for d in (*_SCAN_DIRS, "tests", *_TEST_ONLY_DIRS)]
+        return lint_paths.python_paths(root, resolved)
     default = [
-        p
-        for target in targets
-        for p in target.rglob("*.py")
-        if plan.in_default_scope(p, root, test_only_dirs=_TEST_ONLY_DIRS)
+        path
+        for name in _SCAN_TARGETS
+        for path in (root / name).rglob("*.py")
+        if plan.in_default_scope(path, root, test_only_dirs=_TEST_ONLY_DIRS)
     ]
     return lint_common.restrict(default, scope, root)
 
@@ -73,9 +71,12 @@ _RULE_INPUTS = _POLICY.names("no-os-environ", "rule-inputs")
 
 
 # meiva:note
-# One file's findings as (line number, stripped line, kind): the judged test files are read, and an
-# unreadable entry (a dangling symlink, binary content) keeps the shared lint contract of skipping.
-def _scan_file(path: Path, root: Path, managed_envs: frozenset[str]) -> list[tuple[int, str, str]]:
+# One file's findings as (line number, stripped line, kind): a judged file is read, and an unreadable
+# entry (a dangling symlink, binary content) keeps the shared lint contract of skipping. The registry
+# is asked through `managed_envs` only here, so a scan that judges nothing never imports it.
+def _scan_file(
+    path: Path, root: Path, managed_envs: Callable[[], frozenset[str]]
+) -> list[tuple[int, str, str]]:
     if not plan.judges_file(path, root, allowed_files=_ALLOWED_FILES):
         return []
     text = lint_common.read_utf8_text(path)
@@ -83,7 +84,7 @@ def _scan_file(path: Path, root: Path, managed_envs: frozenset[str]) -> list[tup
         return []
     return plan.setenv_violations(
         text,
-        managed_envs=managed_envs,
+        managed_envs=managed_envs(),
         provider_keys=_PROVIDER_KEY_ENV_VARS,
         live_reads=_LIVE_READ_ENV_VARS,
     )
@@ -101,8 +102,8 @@ def main(
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     # meiva:note
-    # argv non-empty = explicit paths; empty = the test files of all _SCAN_DIRS + tests/, or
-    # the `--only` changed files (the commit hook) under that same scope.
+    # argv non-empty = explicit paths; empty = the test files of all _SCAN_TARGETS, or the `--only`
+    # changed files (the commit hook) under that same scope.
     resolved: list[str] = []
     if argv:
         resolved, missing = lint_common.resolve_targets(argv, root)
@@ -112,10 +113,14 @@ def main(
     scope = lint_common.changed_scope(only, root, inputs=_RULE_INPUTS)
     py_files = _files_to_scan(resolved, scope, root, explicit=bool(argv))
     # meiva:note
-    # Importing the config registry is the slow part of a run that judges no test file.
-    managed_envs: frozenset[str] = (
-        managed_aliases() if plan.any_test_file(py_files, root) else frozenset[str]()
-    )
+    # Importing the config registry is the slow part, so it is read at the first judged file and
+    # never for a run that judges none.
+    registry_envs: list[frozenset[str]] = []
+
+    def managed_envs() -> frozenset[str]:
+        if not registry_envs:
+            registry_envs.append(managed_aliases())
+        return registry_envs[0]
 
     total_violations = 0
     for path in sorted(py_files):
