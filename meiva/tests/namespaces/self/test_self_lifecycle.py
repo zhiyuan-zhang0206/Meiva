@@ -16,18 +16,21 @@ import pytest
 
 import meiva
 from base.agents.context.identity import ExternalLease
-from base.agents.lifecycle import AgentRestart, AgentTermination
+from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.agents.tests.units import spawn_agent
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
+from base.events.live.projection import CompactRequest
 from base.events.live.redis_client import open_sync_redis
 from base.events.live.tests.rng import seeded_auth_retry
 from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.sdk import pinned_bus as pinned_bus
 from meiva.tests.namespaces.self.redis_view import loose
 
 
@@ -250,3 +253,36 @@ def test_restart_checks_the_overlay_against_the_plugin_configs_of_the_contexts_h
         "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()
     assert stored is not None and stored[0] == {"restart_probe": "x"}
+
+
+# meiva:note
+# The live request a compaction publishes carries the text `compact_notice` decided: the summary's
+# length only, never its text. The wake of the same compaction travels on the agent's inbound
+# channel; this reads the bus channel the frontend listens on.
+def test_compact_publishes_the_notice_text_of_its_summary(
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    pinned_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    _spawned(model_catalog, config_authority, database_gate, machine_identity)
+    listener = open_sync_redis(redis_url, decode_responses=True, auth_retry=seeded_auth_retry())
+    subscription = loose(listener).pubsub()
+    subscription.subscribe(pinned_bus.channel)
+    assert subscription.get_message(timeout=5)["type"] == "subscribe"
+    summary = "Requests: (none)\nProgress: done\n"
+
+    with pytest.raises(SystemHalt):
+        meiva.self.compact(summary)
+
+    message = subscription.get_message(timeout=5)
+    subscription.close()
+    listener.close()
+    assert message is not None
+    request = CompactRequest.model_validate_json(message["data"])
+    assert request.role == "compact_request"
+    assert request.content == f"[compact requested, {len(summary)} chars]"
+    assert "Progress" not in request.content
