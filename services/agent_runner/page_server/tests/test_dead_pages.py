@@ -95,7 +95,7 @@ async def _round(pool: ConnectionPool, *, bus: EventBus | None = None) -> None:
         pool,
         _HOST,
         _progress(),
-        EventBus.from_settings(rng=seeded_rng()) if bus is None else bus,
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS) if bus is None else bus,
     )
 
 
@@ -226,7 +226,7 @@ async def test_the_loop_scans_at_once_then_paces(
             _HOST,
             _progress(),
             page_server_config(),
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         )
     )
     try:

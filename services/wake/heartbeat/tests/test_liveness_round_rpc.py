@@ -12,6 +12,7 @@ import asyncio
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -44,7 +45,7 @@ def test_the_liveness_round_probes_each_machine_through_its_own_cluster_client(
         round_ = AgentLivenessRound(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             rpc,
         )
 

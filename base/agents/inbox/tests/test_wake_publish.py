@@ -26,7 +26,9 @@ async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventB
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         agent_id = create_agent(conn)
         insert_inbound_message(conn, agent_id, "wake", "user", bus=event_bus, database=database)
-    r = EventBus.from_settings(rng=seeded_rng()).sync_redis(decode_responses=True)
+    r = EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS).sync_redis(
+        decode_responses=True
+    )
     try:
         prefix = redis_channel_prefix(settings.data_plane.events_channel)
         leftover = [

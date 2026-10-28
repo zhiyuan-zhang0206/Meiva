@@ -441,7 +441,7 @@ def _request_context(
         meiva_home=home,
         user_home=Path.home(),
         rng=rng,
-        bus_factory=deferred_event_bus(config, rng=rng),
+        bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
     )
 
 

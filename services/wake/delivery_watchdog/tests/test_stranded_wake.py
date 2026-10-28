@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -97,7 +98,7 @@ def _chat(
         agent_id,
         "queued behind the death",
         source=source,
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         database=Database.from_settings(gate=database_gate),
     )
     if age_s:

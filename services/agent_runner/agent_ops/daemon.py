@@ -154,7 +154,9 @@ def _dispatch_in_thread(
         kind,
         payload,
         pool=pool,
-        db=boot.ops_handles(database=database, authority=authority, rng=rng)[0],
+        db=boot.ops_handles(database=database, authority=authority, rng=rng, timers=SYSTEM_TIMERS)[
+            0
+        ],
         authority=authority,
         image=image,
         local_machine=local_machine,
@@ -189,7 +191,9 @@ async def dispatch(
     try:
         match kind:
             case "spawn-launch":
-                db, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
+                db, bus = boot.ops_handles(
+                    database=database, authority=authority, rng=rng, timers=SYSTEM_TIMERS
+                )
                 spawned = await lifecycle.launch_agent_op(
                     db,
                     bus,
@@ -204,7 +208,9 @@ async def dispatch(
             case "launch-reconcile":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
 
-                db, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
+                db, bus = boot.ops_handles(
+                    database=database, authority=authority, rng=rng, timers=SYSTEM_TIMERS
+                )
                 result = await reconcile_launch_op(
                     db,
                     bus,
@@ -215,7 +221,9 @@ async def dispatch(
                 return OpStatus.COMPLETED, result.model_dump(mode="json")
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                db, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
+                db, bus = boot.ops_handles(
+                    database=database, authority=authority, rng=rng, timers=SYSTEM_TIMERS
+                )
                 resp = await lifecycle.lifecycle_op(
                     db,
                     bus,
@@ -599,7 +607,9 @@ async def serve_ops_daemon(
             ops_port=endpoint.health_port,
             home=home,
         )
-        _, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
+        _, bus = boot.ops_handles(
+            database=database, authority=authority, rng=rng, timers=SYSTEM_TIMERS
+        )
         try:
             async with server, asyncio.TaskGroup() as background:
                 watcher = background.create_task(

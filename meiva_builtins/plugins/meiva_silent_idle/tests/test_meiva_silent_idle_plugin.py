@@ -29,7 +29,7 @@ from langgraph.runtime import Runtime
 from agent.messages import NoteTag, read_meiva_kwargs
 from agent.state import build_agent_state
 from base.agents.context import MeivaContext
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -85,7 +85,7 @@ def _runtime(
         ),
         catalog=catalog,
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         clock_factory=_clock,
     )
     return Runtime(context=ctx)
