@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from base.paths.home import resolve_meiva_home
+from base.paths.home import resolve_meiva_home, user_home
 
 # `webchat` lives in the parent skill's scripts/ dir, a sibling tree within
 # this same web-ai skill (not an importable package; PYTHONSAFEPATH=1 keeps a
@@ -403,7 +403,7 @@ def main() -> None:
         case "start":
             result = cmd_start(args)
         case "check":
-            result = cmd_check(args, webchat.system_places(resolve_meiva_home()))
+            result = cmd_check(args, webchat.system_places(resolve_meiva_home(), user_home()))
         case "reply":
             result = cmd_reply(args)
         case _:

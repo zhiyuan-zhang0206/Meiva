@@ -1,5 +1,5 @@
 # meiva:note
-# The effects around where a web-ai child run lands its files: reading the Meiva home and the Downloads folder once (the child's entry script is the composition root that calls `system_places`), creating a capability's landing directory, and reading the clock for the run stamp. The naming itself is `_landing`.
+# The effects around where a web-ai child run lands its files: the places it lands them in, handed in by the child's entry script (the composition root that reads both homes and calls `system_places`), creating a capability's landing directory, and reading the clock for the run stamp. The naming itself is `_landing`.
 from __future__ import annotations
 
 import datetime as _dt
@@ -9,9 +9,9 @@ from _landing import Places, capability_dir, format_stamp
 
 
 # meiva:note
-# The places of this process: the Meiva `home` its entry script resolved (through the one resolver every Meiva process uses, without touching `Settings`, so no database is reached), and `~/Downloads`.
-def system_places(home: Path) -> Places:
-    return Places(home=home, downloads=Path("~/Downloads").expanduser())
+# The places of this process: the Meiva `home` its entry script resolved (through the one resolver every Meiva process uses, without touching `Settings`, so no database is reached), and the account's `user_home`, under whose `Downloads` the run lands what it saves.
+def system_places(home: Path, user_home: Path) -> Places:
+    return Places(home=home, downloads=user_home / "Downloads")
 
 
 # meiva:note
