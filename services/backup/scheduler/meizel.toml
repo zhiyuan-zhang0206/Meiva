@@ -10,8 +10,5 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 "commit_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "home", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources" }
+"daemon.py" = { kinds = ["clock", "environ", "home", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources, and reads its own environment once as the base its operation workers are launched with" }
 "worker.py" = { kinds = ["home", "settings"], why = "Worker process entry boots configuration and reads the home it runs under before composing its resources" }
-
-[debt.ambient-read]
-"daemon.py#environ base.native_process.child_env.inherited_process_env" = 1

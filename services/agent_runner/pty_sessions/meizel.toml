@@ -10,7 +10,4 @@ exports = ["daemon.py", "ledger.py", "shutdown_budget.py"]
 "shutdown_budget.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "home", "pid", "random"], why = "The pty-sessions process entry composes its service with the system clock, process identity, host generation and the home it runs under" }
-
-[debt.ambient-read]
-"service.py#environ base.native_process.child_env.inherited_process_env" = 1
+"daemon.py" = { kinds = ["clock", "environ", "home", "pid", "random"], why = "The pty-sessions process entry composes its service with the system clock, process identity, host generation and the home it runs under, and reads its own environment once as the base every shell it starts is given" }

@@ -9,7 +9,4 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 "shutdown_budget.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "cwd", "home", "pid", "settings"], why = "The exec-host process entry boots configuration and reads the home it runs under before composing its service resources; it builds the process timers every exec run and kill deadline is measured with" }
-
-[debt.ambient-read]
-"daemon.py#environ base.native_process.child_env.inherited_process_env" = 1
+"daemon.py" = { kinds = ["clock", "cwd", "environ", "home", "pid", "settings"], why = "The exec-host process entry boots configuration and reads the home it runs under before composing its service resources; it builds the process timers every exec run and kill deadline is measured with, and reads the parent environment it was started with once, as the base every child it spawns is given" }
