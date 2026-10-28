@@ -71,12 +71,13 @@ def test_downloads_root_creates_the_capability_directory(tmp_path: Path) -> None
     assert M.utils.downloads_root("console", places=places) == root
 
 
-def test_system_places_carry_the_home_they_are_given_and_the_downloads_folder(
-    tmp_path: Path,
-) -> None:
-    places = M.utils.system_places(tmp_path / "given-home")
+# meiva:note
+# Both homes are the caller's: the Meiva home it resolved and the account home whose `Downloads`
+# folder receives what the run saves. The module reads neither.
+def test_system_places_carry_the_homes_they_are_given(tmp_path: Path) -> None:
+    places = M.utils.system_places(tmp_path / "given-home", tmp_path / "given-user-home")
     assert places.home == tmp_path / "given-home"
-    assert places.downloads == Path("~/Downloads").expanduser()
+    assert places.downloads == tmp_path / "given-user-home" / "Downloads"
 
 
 def test_now_stamp_is_a_sortable_local_time_stamp() -> None:

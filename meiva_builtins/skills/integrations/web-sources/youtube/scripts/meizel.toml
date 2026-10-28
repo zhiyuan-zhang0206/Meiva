@@ -6,7 +6,5 @@ exports = ["feed.py"]
 "yt_wire.py" = "strict"
 
 [roots]
+"feed.py" = { kinds = ["home"], why = "the entry an agent imports (`import feed`, then `sync`/`fetch`/`resolve_source`): no in-repo caller hands it a home, and it is the only place that knows where this machine keeps a channel's mirror ($MEIVA_HOME/state/mirrors/youtube), which no caller of an agent's code cell can supply" }
 "yt_run.py" = { kinds = ["clock"], why = "YouTube sync runner stamps fetched items with current UTC time" }
-
-[debt.ambient-read]
-"feed.py#home base.paths.home.resolve_meiva_home" = 1
