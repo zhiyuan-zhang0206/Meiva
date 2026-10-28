@@ -89,7 +89,7 @@ def preflight_start_readiness(
             host=host,
             home=home,
         ),
-        trees=tuple(_tree_facts(home / name) for name in _TREE_ROOTS),
+        trees=tuple(_tree_facts(home / name, euid=host.uid) for name in _TREE_ROOTS),
         not_directories=_not_directories(home),
         marker=str(_marker(home)),
         marker_problem=private_file_problem(_marker(home)),
@@ -178,16 +178,16 @@ def _occupied(
 
 # meiva:note
 # One private tree: whether converge could use its root and what it would skip inside.
-def _tree_facts(root: Path) -> TreeFacts:
+def _tree_facts(root: Path, *, euid: int) -> TreeFacts:
     try:
-        skipped = tuple(str(node) for node in scan_non_regular_nodes(root))
+        skipped = tuple(str(node) for node in scan_non_regular_nodes(root, euid=euid))
         scan_error = None
     except OSError as exc:
         skipped = ()
         scan_error = str(exc)
     return TreeFacts(
         root=str(root),
-        root_problem=private_tree_root_problem(root),
+        root_problem=private_tree_root_problem(root, euid=euid),
         skipped=skipped,
         scan_error=scan_error,
     )

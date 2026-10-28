@@ -55,7 +55,7 @@ def test_converge_skips_foreign_nodes(request: pytest.FixtureRequest, tmp_path: 
     ours_dir.chmod(0o755)
     cap = _Captured(request.addfinalizer)
     skips = private_storage.SkipReport()
-    private_storage.converge_child(ours_dir, skips)
+    private_storage.converge_child(ours_dir, skips, euid=os.geteuid())
 
     foreign_file = ours_dir / "secret"
     foreign_file.write_bytes(b"secret")
@@ -121,7 +121,7 @@ def test_private_tree_recursively_repairs_existing_mode_drift(tmp_path: Path) ->
         directory.chmod(0o755)
     payload.chmod(0o644)
 
-    assert private_storage.converge_private_tree(root) == root
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
 
     assert _mode(root) == 0o700
     assert _mode(root / "agent") == 0o700
@@ -139,7 +139,7 @@ def test_private_tree_skips_nested_symlink(request: pytest.FixtureRequest, tmp_p
     link.symlink_to(target, target_is_directory=True)
     cap = _Captured(request.addfinalizer)
 
-    assert private_storage.converge_private_tree(root) == root
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
 
     assert link.is_symlink()
     assert _mode(target) == 0o755
@@ -226,7 +226,7 @@ def test_private_tree_skips_live_unix_socket(request: pytest.FixtureRequest) -> 
         server.bind(str(socket_path))
         cap = _Captured(request.addfinalizer)
 
-        assert private_storage.converge_private_tree(root) == root
+        assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
 
         assert stat.S_ISSOCK(socket_path.lstat().st_mode)
         assert _mode(root) == 0o700
@@ -264,7 +264,7 @@ def test_private_tree_skips_fifo(request: pytest.FixtureRequest, tmp_path: Path)
     os.mkfifo(fifo)
     cap = _Captured(request.addfinalizer)
 
-    assert private_storage.converge_private_tree(root) == root
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
 
     assert stat.S_ISFIFO(fifo.lstat().st_mode)
     assert _mode(root) == 0o700
@@ -306,14 +306,14 @@ def test_converge_does_not_descend_node_modules(
     top.chmod(0o644)
     cap = _Captured(request.addfinalizer)
 
-    assert private_storage.converge_private_tree(root) == root
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
 
     assert _mode(modules) == 0o700
     assert _mode(payload) == 0o644
     assert _mode(top) == 0o600
     assert cap.debugs == []
     assert cap.warnings == []
-    assert private_storage.scan_non_regular_nodes(root) == []
+    assert private_storage.scan_non_regular_nodes(root, euid=os.geteuid()) == []
 
 
 def test_summary_caps_examples_and_counts_every_skip(
@@ -328,7 +328,7 @@ def test_summary_caps_examples_and_counts_every_skip(
         links.append(link)
     cap = _Captured(request.addfinalizer)
 
-    assert private_storage.converge_private_tree(root) == root
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
 
     assert len(cap.warnings) == 1
     message, kwargs = cap.warnings[0]
@@ -353,10 +353,10 @@ def test_scan_non_regular_nodes_matches_what_converge_skips(
     target.mkdir()
     (root / "link").symlink_to(target, target_is_directory=True)
 
-    assert private_storage.scan_non_regular_nodes(root) == [fifo]
+    assert private_storage.scan_non_regular_nodes(root, euid=os.geteuid()) == [fifo]
 
     cap = _Captured(request.addfinalizer)
-    assert private_storage.converge_private_tree(root) == root
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
     assert (
         f"private storage convergence skipped non-regular file {fifo}",
         {"path": fifo},
@@ -368,7 +368,7 @@ def test_scan_non_regular_nodes_matches_what_converge_skips(
 
 
 def test_scan_non_regular_nodes_missing_root_is_empty(tmp_path: Path) -> None:
-    assert private_storage.scan_non_regular_nodes(tmp_path / "absent") == []
+    assert private_storage.scan_non_regular_nodes(tmp_path / "absent", euid=os.geteuid()) == []
 
 
 def test_scan_non_regular_nodes_does_not_follow_a_symlinked_root(tmp_path: Path) -> None:
@@ -378,21 +378,23 @@ def test_scan_non_regular_nodes_does_not_follow_a_symlinked_root(tmp_path: Path)
     link = tmp_path / "link"
     link.symlink_to(target, target_is_directory=True)
 
-    assert private_storage.scan_non_regular_nodes(link) == []
+    assert private_storage.scan_non_regular_nodes(link, euid=os.geteuid()) == []
 
 
 def test_private_tree_root_problem_matches_converges_refusals(tmp_path: Path) -> None:
     root = tmp_path / "root"
-    assert private_storage.private_tree_root_problem(root) is None
+    assert private_storage.private_tree_root_problem(root, euid=os.geteuid()) is None
 
     root.write_text("file")
-    assert private_storage.private_tree_root_problem(root) == "is not a directory"
+    assert (
+        private_storage.private_tree_root_problem(root, euid=os.geteuid()) == "is not a directory"
+    )
 
     root.unlink()
     target = tmp_path / "target"
     target.mkdir()
     root.symlink_to(target, target_is_directory=True)
-    assert private_storage.private_tree_root_problem(root) == "is a symlink"
+    assert private_storage.private_tree_root_problem(root, euid=os.geteuid()) == "is a symlink"
 
 
 def test_private_file_problem_matches_the_writer_refusal(tmp_path: Path) -> None:

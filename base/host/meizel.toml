@@ -17,5 +17,4 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "exit_codes.py" = "strict"
 
 [debt.ambient-read]
-"private_storage.py#pid base.paths.private_dir.is_foreign_owned" = 5
 "proc.py#clock time.monotonic" = 1

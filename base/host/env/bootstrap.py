@@ -122,9 +122,12 @@ def launch_facts(env: Mapping[str, str], *, env_file: Mapping[str, str]) -> Laun
 # meiva:note
 # Whether `env` carries exactly this runner home's installed unit
 # login (`base.host.db_authority.unit`) with its generation marker.
+#
+# `home` is the resolved home the boot entry read (base/config/_lite.py); this
+# canonicalizes it, never expands a tilde against the process's user database.
 def is_delivered_unit_login(env: Mapping[str, str], *, home: Path) -> bool:
     generation = env.get(_GENERATION_ENV)
-    home = home.expanduser().resolve()
+    home = home.resolve()
     if not generation or not (home / "db-authority" / "unit.json").exists():
         return False
     from base.host.db_authority.unit import is_delivered_login
@@ -141,7 +144,7 @@ def is_delivered_unit_login(env: Mapping[str, str], *, home: Path) -> bool:
 def deliver_unit_authority(env: MutableMapping[str, str], *, home: Path) -> EnvBootResult:
     if is_delivered_unit_login(env, home=home):
         return EnvBootResult()
-    home = home.expanduser().resolve()
+    home = home.resolve()
     context = launcher_context(env)
     if context is not None:
         return EnvBootResult(

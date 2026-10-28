@@ -26,8 +26,6 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "process_profile.py" = "strict"
 
 [debt.ambient-read]
-"bootstrap.py#home pathlib.Path.expanduser" = 2
-"dotenv_boot.py#home pathlib.Path.expanduser" = 1
 "dotenv_file.py#clock datetime.datetime.now" = 1
 "dotenv_file.py#home base.paths.home.resolve_meiva_home" = 1
 "harness_binaries.py#home base.paths.home.user_home" = 1

@@ -88,7 +88,10 @@ def _run(
         disabled_services=(),
         all_services=True,
         machine=command.machine,
-        host=fake_host(),
+        # meiva:note
+        # This process's real effective user: the preflight compares the private tree's
+        # nodes against it, so a canned id would make every test-created node foreign.
+        host=fake_host(uid=os.geteuid()),
         migrations_dir=migrations,
     )
 

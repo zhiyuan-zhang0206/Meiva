@@ -12,7 +12,7 @@ from base.log import logger
 from base.paths.private_dir import (
     dir_refusal,
     ensure_private_dir,
-    is_foreign_owned,
+    foreign_owned,
     private_path_error,
 )
 
@@ -90,7 +90,11 @@ class SkipReport:
         return f"{shown}; …" if len(tagged) > _SUMMARY_EXAMPLE_LIMIT else shown
 
 
-def converge_private_tree(path: Path, *, euid: int | None = None) -> Path:
+# meiva:note
+# `euid` is the owner the walk compares against: the composition root reads its own
+# once (`Host.uid`) and passes it down, so nothing under this module answers
+# "who am I" from the process's own user database.
+def converge_private_tree(path: Path, *, euid: int) -> Path:
     """Recursively converge a private directory tree to owner-only modes.
 
     A unit's logs, workspaces, and memory checkout can predate the private
@@ -130,12 +134,12 @@ def report_skips(path: Path, skips: SkipReport) -> None:
         )
 
 
-def _converge_tree(path: Path, skips: SkipReport, *, euid: int | None = None) -> None:
+def _converge_tree(path: Path, skips: SkipReport, *, euid: int) -> None:
     try:
         current = path.lstat()
     except FileNotFoundError:
         current = None
-    if current is not None and is_foreign_owned(current, euid=euid):
+    if current is not None and foreign_owned(current, euid=euid):
         # A directory owned by another account can never be chmod'd by
         # converge — warn and leave it (and its subtree) alone instead of
         # aborting the whole converge run (2026-09-02 boot loop).
@@ -146,7 +150,7 @@ def _converge_tree(path: Path, skips: SkipReport, *, euid: int | None = None) ->
         converge_child(child, skips, euid=euid)
 
 
-def converge_child(child: Path, skips: SkipReport, *, euid: int | None = None) -> None:
+def converge_child(child: Path, skips: SkipReport, *, euid: int) -> None:
     current = child.lstat()
     if stat.S_ISLNK(current.st_mode):
         # meiva:note
@@ -155,7 +159,7 @@ def converge_child(child: Path, skips: SkipReport, *, euid: int | None = None) -
         logger.debug("private storage convergence skipped symlink {path}", path=child)
         skips.symlinks.append(child)
         return
-    if is_foreign_owned(current, euid=euid):
+    if foreign_owned(current, euid=euid):
         logger.debug("private storage convergence skipped foreign-owned path {path}", path=child)
         skips.foreign_owned.append(child)
         return
@@ -178,7 +182,7 @@ def converge_child(child: Path, skips: SkipReport, *, euid: int | None = None) -
     ensure_private_file(child)
 
 
-def private_tree_root_problem(path: Path) -> str | None:
+def private_tree_root_problem(path: Path, *, euid: int) -> str | None:
     """Read-only: why `converge_private_tree(path)` would ABORT on this root, or None.
 
     The root half of the pre-stop check, without the repair: a missing root is
@@ -191,12 +195,12 @@ def private_tree_root_problem(path: Path) -> str | None:
         current = path.lstat()
     except FileNotFoundError:
         return None
-    if is_foreign_owned(current):
+    if foreign_owned(current, euid=euid):
         return None
-    return dir_refusal(current)
+    return dir_refusal(current, euid=euid)
 
 
-def scan_non_regular_nodes(root: Path) -> list[Path]:
+def scan_non_regular_nodes(root: Path, *, euid: int) -> list[Path]:
     """Read-only: the nodes `converge_private_tree(root)` would skip as non-regular.
 
     Sockets, FIFOs, and device nodes are live-service plumbing, not storage:
@@ -215,16 +219,16 @@ def scan_non_regular_nodes(root: Path) -> list[Path]:
         return out
     if stat.S_ISLNK(current.st_mode) or not stat.S_ISDIR(current.st_mode):
         return out
-    if is_foreign_owned(current):
+    if foreign_owned(current, euid=euid):
         return out
     for child in root.iterdir():
         child_stat = child.lstat()
-        if stat.S_ISLNK(child_stat.st_mode) or is_foreign_owned(child_stat):
+        if stat.S_ISLNK(child_stat.st_mode) or foreign_owned(child_stat, euid=euid):
             continue
         if stat.S_ISDIR(child_stat.st_mode):
             if child.name == _NODE_MODULES_DIRNAME:
                 continue
-            out += scan_non_regular_nodes(child)
+            out += scan_non_regular_nodes(child, euid=euid)
         elif not stat.S_ISREG(child_stat.st_mode):
             out.append(child)
     return out
