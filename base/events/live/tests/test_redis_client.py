@@ -15,6 +15,7 @@ from redis.asyncio.connection import AbstractConnection
 from redis.exceptions import AuthenticationError, NoPermissionError
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live import redis_client as mod
@@ -26,7 +27,7 @@ from base.events.live.tests.rng import seeded_auth_retry
 from base.host.net.predicates import is_ipv4_literal
 
 _FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
-_bus = EventBus.from_settings(rng=seeded_rng())
+_bus = EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
 _PUBLISH_BOUND_S = event_bus_config_from_settings().publish_attempt_timeout_s
 
 
@@ -39,6 +40,7 @@ def _fresh_bus() -> None:
     _bus = EventBus(
         replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
         rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )
 
 
@@ -180,6 +182,7 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     quick = EventBus(
         replace(event_bus_config_from_settings(), publish_attempt_timeout_s=0.01),
         rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )
 
     task = asyncio.create_task(quick.publish_best_effort("payload", channel="meiva:events"))

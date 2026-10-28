@@ -22,6 +22,11 @@ import random
 import socket
 from dataclasses import dataclass
 
+# meiva:note
+# The one import beyond the standard library: `Timers`, whose module reaches `base.config` only
+# inside a function, so this module stays importable from either client without a cycle.
+from base.clock import Timers
+
 SOCKET_CONNECT_TIMEOUT_S = 5.0
 HEALTH_CHECK_INTERVAL_S = 30
 WARN_THROTTLE_S = 60.0
@@ -39,14 +44,23 @@ DEFAULT_AUTH_RETRY_POLICY = AuthRetryPolicy()
 
 
 # meiva:note
-# The ACL-transition retry a client or a publisher runs: the schedule's tuning values and the
-# jitter source that spreads a restarted fleet's retries. The process root builds one random
-# generator and hands it to the bus; scheduling jitter is not a secret, so the generator is a
-# plain `random.Random`.
+# The ACL-transition retry a client or a publisher runs: the schedule's tuning values, the jitter
+# source that spreads a restarted fleet's retries, and the clock its window is measured on. The
+# process root builds one random generator and hands it to the bus (jitter is not a secret, so the
+# generator is a plain `random.Random`), and the bus hands the retry the same `Timers` it measures
+# its own waits with, so a `ManualTimers` moves the retry window in a test.
 class AuthRetry:
-    def __init__(self, policy: AuthRetryPolicy, *, rng: random.Random) -> None:
+    def __init__(self, policy: AuthRetryPolicy, *, rng: random.Random, timers: Timers) -> None:
         self.policy = policy
         self._rng = rng
+        self._timers = timers
+
+    # meiva:note
+    # The clock the elapsed part of the window is read on: a retry loop reads it before its first
+    # attempt and again at each failure, so the schedule never consults the process clock.
+    @property
+    def timers(self) -> Timers:
+        return self._timers
 
     # meiva:note
     # What the next failed attempt waits: one jitter sample in [0, 1) from the generator places the

@@ -86,7 +86,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
             daemon.run_loops(
                 pool,
                 Database.from_settings(gate=database_gate),
-                EventBus.from_settings(rng=seeded_rng()),
+                EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                 liveness,
                 reaper_config(),
                 rpc=rpc,

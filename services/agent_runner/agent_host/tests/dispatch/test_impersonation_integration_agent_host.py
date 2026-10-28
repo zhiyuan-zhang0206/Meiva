@@ -13,6 +13,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -84,7 +85,7 @@ async def test_replacement_host_admission_carries_the_takeover_without_respawnin
         checkpointer=MagicMock(),
         graph=cast(Any, graph),
         machine=configured_machine(name=machine),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         commands=CommandCatalog.system(skills=list, home=meiva_home()),
@@ -179,7 +180,7 @@ async def test_restarted_host_leaves_a_carried_takeover_alone_without_an_externa
         checkpointer=MagicMock(),
         graph=cast(Any, graph),
         machine=configured_machine(name=machine),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         commands=CommandCatalog.system(skills=list, home=meiva_home()),
@@ -259,7 +260,7 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
         checkpointer=MagicMock(),
         graph=cast(Any, graph),
         machine=configured_machine(name=machine),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         commands=CommandCatalog.system(skills=list, home=meiva_home()),
@@ -375,7 +376,7 @@ def _handoff_host(
         checkpointer=MagicMock(),
         graph=cast(Any, graph),
         machine=configured_machine(name=machine),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         commands=CommandCatalog.system(skills=list, home=meiva_home()),

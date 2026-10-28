@@ -7,6 +7,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
@@ -54,6 +55,7 @@ async def test_run_serves_while_it_polls_and_releases_everything_when_stopped(
             database=lambda: database,
             image=LoadedCommit(Path(), None),
             home=meiva_home(),
+            timers=SYSTEM_TIMERS,
         )
     )
     try:
@@ -89,6 +91,7 @@ async def test_run_releases_everything_when_the_poll_fails(
                 database=lambda: database,
                 image=LoadedCommit(Path(), None),
                 home=meiva_home(),
+                timers=SYSTEM_TIMERS,
             ),
             timeout=30.0,
         )

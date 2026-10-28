@@ -48,7 +48,7 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -198,7 +198,7 @@ def _runtime_with_llm(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=build_model_catalog(home=home),
             clock_factory=Clock.from_settings,
         )
@@ -238,7 +238,7 @@ def _make_runtime(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         catalog=build_model_catalog(home=home),
         clock_factory=Clock.from_settings,
     )

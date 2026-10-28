@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.native_process.code_version import CodeVersion
@@ -445,7 +446,7 @@ def redis_url(provisioned_redis: str, _clean_redis: None) -> str:
 def event_bus(redis_url: str):
     from base.events.live.bus import EventBus
 
-    return EventBus.from_settings(rng=seeded_rng())
+    return EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
 
 
 @pytest.fixture

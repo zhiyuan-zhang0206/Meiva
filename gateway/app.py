@@ -240,6 +240,7 @@ async def lifespan(
             app.state.bus = EventBus(
                 event_bus_config_from_config(process.config),
                 rng=app.state.gateway_config.rng,
+                timers=SYSTEM_TIMERS,
             )
             db_pool = app.state.db.pool(max_size=app.state.gateway_config.db_pool_max_size)
             app.state.db_pool = db_pool

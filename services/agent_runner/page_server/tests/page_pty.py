@@ -22,6 +22,7 @@ import psycopg
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from base.host.env import port_lease
@@ -131,7 +132,7 @@ def reconcile(pool: ConnectionPool, managed: dict[PageKey, ServerHandle]) -> Non
         pool,
         managed,
         HOST,
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         _backend(home),
         home,
     )
@@ -148,7 +149,7 @@ def reconcile_snapshot(
         managed,
         rows,
         HOST,
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         _backend(home),
         home,
     )

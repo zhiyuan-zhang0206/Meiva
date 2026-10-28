@@ -7,6 +7,7 @@ import pytest
 
 from base.agents.tasks.priority import Priority
 from base.api_contracts.idempotency import keyed_headers
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
 from gateway.routers import tasks
@@ -63,6 +64,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
         broken_bus = EventBus(
             EventBusConfig(redis_url="no-scheme", events_channel=working_bus.channel),
             rng=seeded_rng(),
+            timers=SYSTEM_TIMERS,
         )
         client.app.state.bus = broken_bus
         assert (

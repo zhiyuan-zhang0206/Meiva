@@ -19,6 +19,7 @@ import pytest
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.model.birth_config import set_cluster_default_model
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -47,7 +48,7 @@ def _spawn_agent(
 
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         spawner=spawner,
         machine=local_machine.name(),
         config=config,

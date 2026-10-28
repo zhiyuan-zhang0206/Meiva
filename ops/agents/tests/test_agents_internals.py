@@ -34,6 +34,7 @@ from psycopg.types.json import Jsonb
 from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.observation.snapshot import select_one
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -79,7 +80,7 @@ def spawn_agent(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentityReader,
 ) -> int:
-    bus = EventBus.from_settings(rng=seeded_rng())
+    bus = EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         bus,
