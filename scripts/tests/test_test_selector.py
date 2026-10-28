@@ -18,6 +18,7 @@ from time import perf_counter
 import pytest
 
 from scripts.ci import test_selector
+from scripts.ci.test_impact import python_files
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ESTIMATE_CHILD = Path(__file__).with_name("child_estimate_seconds.py")
@@ -426,20 +427,30 @@ def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
     assert len(set(outputs)) == 1
 
 
-def test_real_repository_map_is_fast_and_has_broad_static_coverage(tmp_path: Path) -> None:
-    """The production checkout must keep the selector map usable in CI.
-
-    The map is an AST pass over every tracked source file: CPU-bound Python that the
-    coverage tracer slows down (7 s untraced against 16 s traced on a laptop; 47 s in
-    `.test_durations` and 60-63 s in three evicted queue runs on a loaded CI runner), which
-    left the 60 s budget flaking. The budget guards the selector as the classify job runs
-    it, with no tracer, so it is measured in a child interpreter; the repository does not
-    enable coverage's subprocess measurement, so the child runs untraced.
-    """
+# meiva:note
+# The production checkout's selector map is guarded by two counted facts, never by a clock.
+# Coverage: the inputs the map answers with must cover the tree the static pass walks
+# (`map_source_count >= 0.9 * python_files`, 1.013 today), so a map that answers with a
+# handful of files, or that dropped a package inside the walk, is red where it used to be
+# silently blind. Fineness: one leaf source must select a small share of the collectable
+# suite (96 of 2355 today), which is the only fact that catches a map where every source
+# reaches every test — that keeps `map_source_count` large while making every selection
+# suite-sized. A code top removed from the walk itself shrinks both sides of the ratio;
+# the miniature-repo tests and `test_every_tracked_path_has_an_owner` own that boundary.
+#
+# `elapsed` below is a hang backstop, not a performance criterion: the same code measured
+# 42.8 s at load 26.2 and 177.6 s at load 30.9 on one machine, so a 60 s budget measured
+# the runner. 600 s is 10x the 47-63 s a loaded runner took and only catches a wedge.
+def test_real_repository_map_covers_the_tree_and_stays_fine_grained(tmp_path: Path) -> None:
+    # meiva:note
+    # S603 is answered by the fixture: a fixed `sys.executable` runs in-repo code
+    # (`-m scripts.ci.test_selector`), never a shell or a caller-supplied path. The child is
+    # the point — the classify job runs the selector with no tracer, and the repository does
+    # not enable coverage's subprocess measurement, so this measurement matches production.
     changed_files = tmp_path / "changed.txt"
     changed_files.write_text("scripts/ci/test_selector.py\n")
     started = perf_counter()
-    completed = subprocess.run(  # noqa: S603 -- fixed interpreter and in-repo code
+    completed = subprocess.run(  # noqa: S603
         [
             sys.executable,
             "-m",
@@ -456,10 +467,26 @@ def test_real_repository_map_is_fast_and_has_broad_static_coverage(tmp_path: Pat
         text=True,
     )
     elapsed = perf_counter() - started
+    payload = json.loads(completed.stdout)
 
-    map_source_count = int(json.loads(completed.stdout)["map_source_count"])
-    assert map_source_count > 500
-    assert elapsed < 60
+    tracked_sources = sum(1 for _ in python_files(_REPO_ROOT))
+    assert tracked_sources > 0
+    assert payload["map_source_count"] >= 0.9 * tracked_sources, (
+        f"the map covers {payload['map_source_count']} inputs for {tracked_sources} tracked "
+        "Python files: a code top or a package dropped out of the static pass"
+    )
+
+    collectable = len(test_selector.load_checkout(_REPO_ROOT).collectable)
+    selected = payload["tests"]
+    assert payload["decision"] == "SELECTED"
+    assert 0 < len(selected) < 0.2 * collectable, (
+        f"one leaf source selected {len(selected)} of {collectable} tests: the map is not "
+        "fine-grained"
+    )
+    # meiva:note
+    # Hang backstop only, not a criterion. Re-adding a wall-clock budget means deleting this
+    # note and the one above the function first.
+    assert elapsed < 600
 
 
 def test_cli_reports_an_unreadable_changed_file_as_an_invocation_error(
