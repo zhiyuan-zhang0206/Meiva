@@ -71,7 +71,9 @@ async def running(
     adapter: RelayAdapter,
     tuning: RelayTuning = FAST,
 ) -> AsyncGenerator[asyncio.Task[None], None]:
-    listener = RedisInboundListener(redis_url, lease.agent_id)
+    listener = RedisInboundListener(
+        redis_url, lease.agent_id, events_channel=event_bus.channel, timers=SYSTEM_TIMERS
+    )
     task = asyncio.create_task(
         push_inbox(
             lease,

@@ -558,6 +558,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
             stdout=transport,
             bus=event_bus,
             clock=real_clock,
+            timers=SYSTEM_TIMERS,
         ),
         database_factory=lambda: database,
         machine=machine_identity,
@@ -616,7 +617,9 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
             ),
             db=database,
             bus=event_bus,
-            listener=RedisInboundListener(redis_url, owner.agent_id),
+            listener=RedisInboundListener(
+                redis_url, owner.agent_id, events_channel=event_bus.channel, timers=SYSTEM_TIMERS
+            ),
             adapter=ClaudeStdout(transport),
             tuning=RelayTuning(debounce=0.0, max_chars=None, catchup_seconds=0.2),
             clock=Clock(

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import time
 from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, TypeGuard
@@ -33,8 +32,8 @@ from typing import Any, TypeGuard
 import redis.asyncio as aredis
 from redis.asyncio.client import PubSub as _RedisPubSub
 
+from base.clock import Timers
 from base.cluster import inbound_channel
-from base.config import settings
 from base.events.live.redis_client import TransportAwareAsyncConnection
 from base.events.live.redis_resilience import (
     HEALTH_CHECK_INTERVAL_S,
@@ -91,6 +90,10 @@ def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict)
 
 
+# meiva:note
+# The channel prefix and the timers are handed in: the caller that read the configuration and owns
+# the process clock passes both, so no record in this class answers "which channel" or "how much
+# time is left" from the process it runs in, and a test drives a wait budget with `ManualTimers`.
 class RedisInboundListener:
     """Per-agent Redis pub/sub listener for inbound message wake-ups.
 
@@ -113,22 +116,21 @@ class RedisInboundListener:
         redis_url: str,
         agent_id: int,
         *,
-        events_channel: str | None = None,
+        events_channel: str,
+        timers: Timers,
         consume_abandon_grace: float = _CONSUME_ABANDON_GRACE,
         redis_factory: Callable[..., Any] | None = None,
     ) -> None:
         self._redis_url = redis_url
         self._agent_id = agent_id
+        self._timers = timers
         self._consume_abandon_grace = consume_abandon_grace
         # meiva:note
         # `redis_factory` lets unit tests inject an in-memory Redis double without
         # patching `redis.asyncio.Redis.from_url`; `redis-py` types `from_url` as
         # partially unknown under strict pyright.
         self._redis_factory: Callable[..., aredis.Redis] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
-        channel_source = (
-            settings.data_plane.events_channel if events_channel is None else events_channel
-        )
-        self._channel = inbound_channel(agent_id, channel_source)  # ambient: B2
+        self._channel = inbound_channel(agent_id, events_channel)
         self._redis: aredis.Redis | None = None
         self._pubsub: _RedisPubSub | None = None
         self._lock = asyncio.Lock()
@@ -250,7 +252,7 @@ class RedisInboundListener:
         """Seconds elapsed in the current degraded episode, if any."""
         if self._wake_degraded_at is None:
             return None
-        return time.monotonic() - self._wake_degraded_at
+        return self._timers.monotonic() - self._wake_degraded_at
 
     def _mark_wake_degraded(self, reason: WakeFailure) -> None:
         """Start one wake-degradation episode and log its first failure."""
@@ -258,7 +260,7 @@ class RedisInboundListener:
             return
         self._wake_degraded = True
         self._wake_degrade_reason = reason.value
-        self._wake_degraded_at = time.monotonic()
+        self._wake_degraded_at = self._timers.monotonic()
         logger.warning(
             "RedisInboundListener[agent={a}]: wake path degraded ({r}) — instant pub/sub wake off; "
             "wake now rides the SELECT recheck until a clean consume proves the channel readable",
@@ -274,7 +276,7 @@ class RedisInboundListener:
             return
         reason = self._wake_degrade_reason
         degraded_s = (
-            time.monotonic() - self._wake_degraded_at
+            self._timers.monotonic() - self._wake_degraded_at
             if self._wake_degraded_at is not None
             else None
         )
@@ -437,9 +439,9 @@ class RedisInboundListener:
         filters most — a stray reconnect subscribe message could still
         arrive.
         """
-        deadline = asyncio.get_running_loop().time() + timeout
+        deadline = self._timers.monotonic() + timeout
         while True:
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = deadline - self._timers.monotonic()
             if remaining <= 0:
                 return
             raw_pubsub: Any = pubsub
@@ -487,10 +489,10 @@ class RedisInboundListener:
         Cancel pending open/consume children when this caller exits. Completed
         opens transfer their handles to the listener's existing close path.
         """
-        deadline = asyncio.get_running_loop().time() + timeout
+        deadline = self._timers.monotonic() + timeout
         backoff = 0.5
         while True:
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = deadline - self._timers.monotonic()
             if remaining <= 0:
                 return
             pubsub, redis = None, None
@@ -514,7 +516,7 @@ class RedisInboundListener:
                 generation = self._generation
                 if not self._subscription_is_current(pubsub, redis, generation):
                     continue
-                remaining = deadline - asyncio.get_running_loop().time()
+                remaining = deadline - self._timers.monotonic()
                 if remaining <= 0:
                     return
                 # Consume with bounded budget (see `_CONSUME_ABANDON_GRACE`).
@@ -551,9 +553,9 @@ class RedisInboundListener:
                         expected_redis=redis,
                         expected_generation=generation,
                     )
-                remaining = deadline - asyncio.get_running_loop().time()
+                remaining = deadline - self._timers.monotonic()
                 if remaining > 0:
-                    await asyncio.sleep(remaining)
+                    await self._timers.asleep(remaining)
                 return
             except (OSError, aredis.ConnectionError, aredis.TimeoutError, TypeError) as exc:
                 # TypeError: a defensive catch for redis-py's
@@ -577,7 +579,7 @@ class RedisInboundListener:
                     )
                 if remaining <= backoff:
                     return
-                await asyncio.sleep(backoff)
+                await self._timers.asleep(backoff)
                 backoff = min(backoff * 2, max(0.5, remaining / 2))
 
     async def _abandon_consume(
