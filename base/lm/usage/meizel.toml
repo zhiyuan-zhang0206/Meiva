@@ -1,18 +1,17 @@
-purity = "strict-to-be"
-exports = ["__init__.py", "metering.py"]
+exports = ["__init__.py", "metering.py", "reporting.py"]
 
 [uses]
 "__init__.py" = []
-"metering.py" = ["__init__.py"]
+"metering.py" = ["__init__.py", "reporting.py"]
+"reporting.py" = []
+
+[purity]
+"." = "strict-to-be"
+"reporting.py" = "strict"
+"metering.py" = { mode = "none", why = "the LangChain callback adapter: on a chat start it reads the interval clock and keeps the reading per run id, on the end it reads the clock again for latency_ms, and it emits one usage row per generation through the emitter the caller injected, reporting a failed row through the throttled best-effort channel; the row shape and UsageOptions.metered are decided in __init__.py and when a repeated failure is reported in reporting.should_report" }
 
 [debt.ambient-read]
 "__init__.py#clock time.time_ns" = 1
-
-[debt.fake-entropy]
-"metering.py#interval-wrapper _monotonic" = 1
-
-[debt.impure-call]
-"metering.py#time.monotonic" = 1
 
 [debt.impure-edge]
 "__init__.py#base/telemetry/__init__.py" = 1

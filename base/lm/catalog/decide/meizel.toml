@@ -5,10 +5,7 @@ exports = ["http.py", "types.py"]
 "tests" = ["types.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "types.py" = "strict"
-
-[debt.impure-call]
-"http.py#async def post_json" = 1
-"http.py#import httpx" = 1
+"http.py" = { mode = "none", why = "one authenticated JSON POST against the provider: it builds an httpx client around the transport the caller injected, sends the body, and hands the response to the pure rules in types.py; which status is a failure and what its message says, when a body is not JSON, and when a decoded body is not an object are decided in types.require_success, types.require_json_object, types.not_json_failure and types.transport_failure" }

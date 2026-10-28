@@ -76,7 +76,9 @@ def test_probe_reads_the_version_and_the_declared_flags(tmp_path: Path) -> None:
     binary = _binary(tmp_path)
     run, _calls = _runner()
 
-    probe = caps.probe_tool(_spec(binary), run=run, store=tmp_path / "probes.json", now=NOW)
+    probe = caps.probe_tool(
+        _spec(binary), run=run, store=tmp_path / "probes.json", now=NOW, user_home=tmp_path
+    )
 
     assert probe.path == str(binary)
     assert probe.version == (2, 1, 284)
@@ -88,7 +90,9 @@ def test_a_binary_outside_path_is_unknown_not_absent(tmp_path: Path) -> None:
     spec = _spec(tmp_path / "does-not-exist")
     run, calls = _runner()
 
-    probe = caps.probe_tool(spec, run=run, store=tmp_path / "probes.json", now=NOW)
+    probe = caps.probe_tool(
+        spec, run=run, store=tmp_path / "probes.json", now=NOW, user_home=tmp_path
+    )
 
     assert probe.unknown_reason is not None
     assert "not found" in probe.unknown_reason
@@ -101,10 +105,10 @@ def test_a_cached_probe_costs_no_second_run(tmp_path: Path) -> None:
     spec = _spec(binary)
     store = tmp_path / "probes.json"
     run, calls = _runner()
-    caps.probe_tool(spec, run=run, store=store, now=NOW)
+    caps.probe_tool(spec, run=run, store=store, now=NOW, user_home=tmp_path)
     first = len(calls)
 
-    caps.probe_tool(spec, run=run, store=store, now=NOW)
+    caps.probe_tool(spec, run=run, store=store, now=NOW, user_home=tmp_path)
 
     assert len(calls) == first
 
@@ -114,11 +118,11 @@ def test_cache_freshness_is_judged_at_the_supplied_instant(tmp_path: Path) -> No
     spec = _spec(binary)
     store = tmp_path / "probes.json"
     run, calls = _runner()
-    caps.probe_tool(spec, run=run, store=store, now=NOW)
+    caps.probe_tool(spec, run=run, store=store, now=NOW, user_home=tmp_path)
     first = len(calls)
 
     later = NOW + dt.timedelta(seconds=caps.PROBE_TTL_SECONDS + 1)
-    caps.probe_tool(spec, run=run, store=store, now=later)
+    caps.probe_tool(spec, run=run, store=store, now=later, user_home=tmp_path)
 
     assert len(calls) > first
 
@@ -128,11 +132,11 @@ def test_an_upgraded_binary_is_probed_again(tmp_path: Path) -> None:
     spec = _spec(binary)
     store = tmp_path / "probes.json"
     run, calls = _runner()
-    caps.probe_tool(spec, run=run, store=store, now=NOW)
+    caps.probe_tool(spec, run=run, store=store, now=NOW, user_home=tmp_path)
     first = len(calls)
     os.utime(binary, (1, 1))
 
-    caps.probe_tool(spec, run=run, store=store, now=NOW)
+    caps.probe_tool(spec, run=run, store=store, now=NOW, user_home=tmp_path)
 
     assert len(calls) > first
 
@@ -141,7 +145,9 @@ def test_an_unparseable_version_is_unknown_but_flags_survive(tmp_path: Path) -> 
     binary = _binary(tmp_path)
     run, _calls = _runner(version="dev build")
 
-    probe = caps.probe_tool(_spec(binary), run=run, store=tmp_path / "probes.json", now=NOW)
+    probe = caps.probe_tool(
+        _spec(binary), run=run, store=tmp_path / "probes.json", now=NOW, user_home=tmp_path
+    )
 
     assert probe.unknown_reason is not None
     assert probe.flags == {"stream_json_out": True, "resume": True}

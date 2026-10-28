@@ -9,21 +9,10 @@ exports = ["permission.py", "tests", "transport.py"]
 "tests" = ["__init__.py", "errors.py", "frames.py", "inbound.py", "permission.py", "transport.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "errors.py" = "strict"
 "frames.py" = "strict"
 "inbound.py" = "strict"
 "permission.py" = "strict"
-
-[debt.impure-call]
-"transport.py#async def _read_loop" = 1
-"transport.py#async def _read_stderr" = 1
-"transport.py#async def _write" = 1
-"transport.py#async def close" = 1
-"transport.py#async def notifications" = 1
-"transport.py#async def notify" = 1
-"transport.py#async def request" = 1
-"transport.py#async def start" = 1
-"transport.py#import signal" = 1
-"transport.py#os.killpg" = 1
+"transport.py" = { mode = "none", why = "the live ACP connection: it starts the child on its stdio pipes, writes each frame the pure encoders in frames.py produce, reads and classifies every inbound line, settles the pending reply and reaps the process tree on close; which frame shape a line is and what an inbound request is answered with are decided in frames.py and inbound.py, and the answer a permission request gets in permission.py" }

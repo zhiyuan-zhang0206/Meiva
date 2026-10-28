@@ -22,19 +22,14 @@ from loguru import logger
 
 from base.lm.catalog import ModelCatalog
 from base.lm.usage import UsageOptions, log_usage_from_message
+from base.lm.usage.reporting import FAILURE_REPORT_EVERY, should_report
 from base.telemetry.delivery.reporting import report_sink_failure
 
 __all__ = ["DIRECT_USAGE_KIND", "LlmUsageMeter", "install_usage_meter", "unmeter"]
 
 DIRECT_USAGE_KIND = "direct"
 
-_FAILURE_REPORT_EVERY = 50
-
 UsageEmitter = Callable[..., Any]
-
-
-def _monotonic() -> float:
-    return time.monotonic()
 
 
 class LlmUsageMeter(BaseCallbackHandler):
@@ -68,7 +63,7 @@ class LlmUsageMeter(BaseCallbackHandler):
         # provider call that ended.
         # meiva:link base/lm/usage/docs/usage.meiva.okf.md
         with self._lock:
-            self._started[run_id] = _monotonic()
+            self._started[run_id] = time.monotonic()
 
     def on_llm_end(
         self,
@@ -84,7 +79,7 @@ class LlmUsageMeter(BaseCallbackHandler):
         # meiva:link base/lm/usage/docs/usage.meiva.okf.md
         with self._lock:
             started = self._started.pop(run_id, None)
-        latency_ms = None if started is None else (_monotonic() - started) * 1_000.0
+        latency_ms = None if started is None else (time.monotonic() - started) * 1_000.0
         for generations in response.generations:
             for generation in generations:
                 message: AIMessage | None = getattr(generation, "message", None)
@@ -107,7 +102,7 @@ class LlmUsageMeter(BaseCallbackHandler):
     def _report_failure(self, exc: BaseException) -> None:
         self._failures += 1
         report_sink_failure("direct model call accounting (the llm_usage row is dropped)", exc)
-        if self._failures == 1 or self._failures % _FAILURE_REPORT_EVERY == 0:
+        if should_report(self._failures):
             logger.warning(
                 "direct model call accounting failed ({failures} time(s) in this process; "
                 "the first and every {every}th are reported): {err}",
@@ -116,7 +111,7 @@ class LlmUsageMeter(BaseCallbackHandler):
                 error_type=type(exc).__name__,
                 err=f"{type(exc).__name__}: {exc}",
                 failures=self._failures,
-                every=_FAILURE_REPORT_EVERY,
+                every=FAILURE_REPORT_EVERY,
             )
 
 

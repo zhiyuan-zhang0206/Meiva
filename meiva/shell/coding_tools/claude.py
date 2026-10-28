@@ -20,6 +20,7 @@ import uuid
 from pathlib import Path
 
 from base.agents.messages.external_caller import launch_caller_assignment
+from base.paths.expand import expand_home
 from base.sessions import coding_session_owner
 
 from ._claude_checks import send_bootstrap, wait_for_ready
@@ -31,6 +32,7 @@ from ._common import (
     init_file,
     kill_session_after_failed_launch,
     launch_site,
+    user_home,
     write_task_file_header,
 )
 from ._common import cancel as _cancel_generation
@@ -48,7 +50,9 @@ DEFAULT_TTL_SECONDS = 24 * 3600
 def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
     """Print the workspace's recorded generations."""
     return _owner_status(
-        coding_session_owner.canonical_key(workspace, tool="claude", cluster=cluster_home()),
+        coding_session_owner.canonical_key(
+            expand_home(workspace, user_home=user_home()), tool="claude", cluster=cluster_home()
+        ),
         capability=capability_report("claude", mode=mode, force=force),
     )
 
@@ -56,7 +60,9 @@ def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
 def cancel(workspace: Path, generation: str) -> int:
     """Stop and terminalize exactly this generation."""
     return _cancel_generation(
-        coding_session_owner.canonical_key(workspace, tool="claude", cluster=cluster_home()),
+        coding_session_owner.canonical_key(
+            expand_home(workspace, user_home=user_home()), tool="claude", cluster=cluster_home()
+        ),
         generation,
         sessions=cluster_sessions(),
     )
