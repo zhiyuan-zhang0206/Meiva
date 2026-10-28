@@ -637,8 +637,19 @@ def test_a_stalled_canonical_run_wakes_the_owner_at_each_heartbeat(
             sessions=_cluster_sessions(key),
         )
 
+    # meiva:note
+    # End the run once the second heartbeat has actually landed, instead of after a fixed
+    # 0.45 s window: a loaded runner misses that window and under-counts the heartbeats.
+    # The upper bound stays as a cheap guard; heartbeat throttling itself is unit-tested
+    # above, so this test only has to prove that repeated heartbeats reach the owner.
+    def finish_after_two_heartbeats() -> None:
+        deadline = time.monotonic() + 5.0
+        while len(_notes(gateway)) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        finish()
+
     cadence = ww.Cadence(poll_seconds=0.01, stall_seconds=0.05, heartbeat_seconds=0.1)
-    _supervise(key, owner, work, cadence=cadence, after=(0.45, finish))
+    _supervise(key, owner, work, cadence=cadence, after=(0.0, finish_after_two_heartbeats))
 
     notes = _notes(gateway)
     assert 2 <= len(notes) <= 5
