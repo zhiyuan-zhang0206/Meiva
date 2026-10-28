@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Coroutine, Iterable, Mapping
-from dataclasses import dataclass
 from typing import Protocol
 
 import psutil
@@ -17,12 +16,6 @@ class ChildProbe(Protocol):
     def descendants(self, pid: int) -> dict[int, str]: ...
 
     def is_alive(self, pid: int) -> bool: ...
-
-
-@dataclass(frozen=True, slots=True)
-class ProcessObservation:
-    pid: int
-    command: str
 
 
 class PsutilChildProbe:
@@ -149,10 +142,6 @@ async def wait_gone(
         if clock.monotonic() - started >= timeout_seconds:
             return (False, (clock.monotonic() - started) * 1000.0)
         await clock.asleep(poll_seconds)
-
-
-def describe(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[ProcessObservation, ...]:
-    return tuple(ProcessObservation(pid=pid, command=observed.get(pid, "")) for pid in sorted(pids))
 
 
 # meiva:note

@@ -1,13 +1,20 @@
-exports = ["tests", "transport.py"]
+exports = ["permission.py", "tests", "transport.py"]
 
 [uses]
-"__init__.py" = ["transport.py"]
-"transport.py" = []
-"tests" = ["__init__.py"]
+"__init__.py" = ["errors.py", "inbound.py", "permission.py"]
+"frames.py" = []
+"inbound.py" = ["errors.py", "frames.py", "permission.py"]
+"permission.py" = ["frames.py"]
+"transport.py" = ["errors.py", "frames.py", "inbound.py", "permission.py"]
+"tests" = ["__init__.py", "errors.py", "frames.py", "inbound.py", "permission.py", "transport.py"]
 
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"errors.py" = "strict"
+"frames.py" = "strict"
+"inbound.py" = "strict"
+"permission.py" = "strict"
 
 [debt.impure-call]
 "transport.py#async def _read_loop" = 1

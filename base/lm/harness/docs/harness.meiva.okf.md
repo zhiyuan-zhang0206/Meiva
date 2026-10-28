@@ -51,20 +51,21 @@ and open questions are recorded in
 
 | Module | Owns |
 |---|---|
-| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `TurnOutcome`, `SessionTotals`, `SessionBinding`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency deduplication, bounded outbound event queue with delta-dropping backpressure, turn timeout watchdog, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`) |
+| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `SessionBinding`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency dedupe, bounded event queue with delta dropping, turn timeout watchdog, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`) |
+| `cancel.py` | `CancelReport`, `ProcessObservation`, `describe`, `Sweep`, and the pure functions that cut a report from them |
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
+| `turn.py` | `SessionTotals`, `TurnOutcome`, `add_cost` |
 | `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary, plus the `prelude` turns that completed before it) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, and its rendered byte size |
 | `registry.py` | `SessionRecord` and `FileSessionRegistry`: one JSON document per agent id, atomic replace |
 | `registration.py` | `HarnessRegistration` and `RegistrationStore`: the attachment row the bridge writes, always with an expiry, plus the crash sweep |
 | `process.py` | `ChildProbe`, the psutil implementation, tree snapshots and the bounded wait for a pid to disappear |
 
-`process.py` stays provider-neutral on purpose: the question it answers — "is
-anything still running under this pid?" — is the same for every adapter, and only
-the way an adapter learns its root pid differs. `client_pid()` is the one
-best-effort helper: it reads an SDK client's private transport and returns `None`
-rather than guessing when the shape changes. That debt is registered in the
-[tech-debt ledger](../../../../future/tech-debt/ledger.md).
+`process.py` stays provider-neutral on purpose: "is anything still running under
+this pid?" is the same question for every adapter; only how an adapter learns its
+root pid differs. `client_pid()` is the one best-effort helper: it reads an SDK
+client's private transport, returning `None` rather than guessing. That debt is
+registered in the [tech-debt ledger](../../../../future/tech-debt/ledger.md).
 
 ## Where the CLI comes from
 

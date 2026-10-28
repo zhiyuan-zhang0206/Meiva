@@ -8,10 +8,9 @@ from base.lm.harness.base_session import (
     SessionClock,
     SessionClosedError,
     SessionRegistry,
-    SessionTotals,
-    TurnOutcome,
     TurnTicket,
 )
+from base.lm.harness.turn import SessionTotals, TurnOutcome
 
 __all__ = [
     "EVENT_STREAM_END",

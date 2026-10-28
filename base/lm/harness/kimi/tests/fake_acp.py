@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-from base.lm.harness.acp.transport import AcpNotification, AcpRpcError, AcpTimeoutError
+from base.lm.harness.acp import AcpRpcError, AcpTimeoutError
+from base.lm.harness.acp.transport import AcpNotification
 
 
 class FakeConnection:

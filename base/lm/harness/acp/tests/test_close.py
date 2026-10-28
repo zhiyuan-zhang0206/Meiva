@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness.acp import AcpConnection
 from base.lm.harness.acp.tests.eof_process import EofPeer, eof_peer, wait_until
+from base.lm.harness.acp.transport import AcpConnection
 
 
 async def _entered_close(connection: AcpConnection, entered: asyncio.Event) -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 from base.lm.harness.base_session import (
@@ -12,9 +11,14 @@ from base.lm.harness.base_session import (
     SessionBinding,
     SessionClock,
     SessionClosedError,
-    SessionTotals,
-    TurnOutcome,
     TurnTicket,
+)
+from base.lm.harness.cancel import (
+    CancelReport,
+    Sweep,
+    observed_cancel,
+    spawned_since,
+    unobserved_cancel,
 )
 from base.lm.harness.claude.auth import build_env
 from base.lm.harness.claude.config import BridgeConfig
@@ -30,17 +34,16 @@ from base.lm.harness.events import (
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
-    ProcessObservation,
     SdkClient,
     client_pid,
     client_process,
-    describe,
     process_returncode,
     settle_close,
     snapshot,
     wait_gone,
     watch_tree,
 )
+from base.lm.harness.turn import TurnOutcome
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is synchronous and
@@ -120,18 +123,6 @@ def _load_sdk() -> ClaudeSdkProtocol:
 # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 def _claimed_origin(origin_kind: str | None) -> str | None:
     return None if origin_kind is None or origin_kind == HUMAN_ORIGIN else origin_kind
-
-
-@dataclass(frozen=True, slots=True)
-class CancelReport:
-    turn_id: str | None
-    interrupt_ms: float
-    settled: bool | None
-    observed: tuple[ProcessObservation, ...]
-    remaining: tuple[ProcessObservation, ...]
-    waited_ms: float
-    cli_pid: int | None
-    cli_alive: bool | None
 
 
 class ClaudeSession(BaseHarnessSession[BridgeConfig]):
@@ -226,24 +217,14 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if ticket is not None:
             ticket.interrupt_requested = True
         pid = self._cli_pid
+        turn_id = ticket.turn_id if ticket is not None else None
         observed = snapshot(self._probe, pid)
-        spawned = {
-            child: command for child, command in observed.items() if child not in self._baseline
-        }
+        spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
         await client.interrupt()
         interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
-            return CancelReport(
-                turn_id=ticket.turn_id if ticket is not None else None,
-                interrupt_ms=interrupt_ms,
-                settled=None,
-                observed=(),
-                remaining=(),
-                waited_ms=0.0,
-                cli_pid=None,
-                cli_alive=None,
-            )
+            return unobserved_cancel(turn_id=turn_id, interrupt_ms=interrupt_ms)
         gone, waited_ms = await wait_gone(
             self._probe,
             spawned,
@@ -251,20 +232,18 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             poll_seconds=CANCEL_POLL_SECONDS,
             clock=self._clock,
         )
-        remaining = (
-            ()
-            if gone
-            else describe(observed, [pid for pid in spawned if self._probe.is_alive(pid)])
-        )
-        return CancelReport(
-            turn_id=ticket.turn_id if ticket is not None else None,
+        return observed_cancel(
+            turn_id=turn_id,
             interrupt_ms=interrupt_ms,
-            settled=gone,
-            observed=describe(observed, spawned),
-            remaining=remaining,
-            waited_ms=waited_ms,
-            cli_pid=pid,
+            pid=pid,
             cli_alive=self._probe.is_alive(pid),
+            sweep=Sweep(
+                observed=observed,
+                spawned=spawned,
+                gone=gone,
+                waited_ms=waited_ms,
+                alive=() if gone else [child for child in spawned if self._probe.is_alive(child)],
+            ),
         )
 
     def _build_options(self, resume: str | None) -> object:
@@ -465,7 +444,5 @@ __all__ = [
     "InboundQueueFullError",
     "MissingClaudeSdkError",
     "SessionClosedError",
-    "SessionTotals",
-    "TurnOutcome",
     "TurnTicket",
 ]
