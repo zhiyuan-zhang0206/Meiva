@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from meiva.shell.coding_tools import codex
 from meiva.shell.coding_tools.plans.codex_screen import (
     dead_session_warning,
@@ -73,7 +74,9 @@ def test_the_app_server_wait_accepts_a_bound_socket(short_dir: Path) -> None:
     thread = threading.Thread(target=accept_once, daemon=True)
     thread.start()
     try:
-        codex.wait_for_app_server(f"unix://{path}", Pacing(timeout=5.0, poll=0.05, settle=0.0))
+        codex.wait_for_app_server(
+            f"unix://{path}", Pacing(timeout=5.0, poll=0.05, settle=0.0), SYSTEM_TIMERS
+        )
     finally:
         thread.join(timeout=5)
         listener.close()
@@ -86,6 +89,7 @@ def test_the_app_server_wait_fails_loudly_when_absent(tmp_path: Path) -> None:
         codex.wait_for_app_server(
             f"unix://{tmp_path}/missing.sock",
             Pacing(timeout=0.4, poll=0.05, settle=0.0),
+            SYSTEM_TIMERS,
             log_path=log_path,
         )
     assert str(log_path) in str(excinfo.value)
@@ -106,7 +110,7 @@ def test_the_ready_wait_passes_mcp_startup(
     line = f"echo 'Starting MCP servers (0/2)'; sleep 0.5; clear; echo '{'x' * 60}'"
     session_id = _running(live_shell, live_host, unit_home, line)
 
-    codex.wait_for_ready(live_shell, session_id, _PATIENT)
+    codex.wait_for_ready(live_shell, session_id, _PATIENT, SYSTEM_TIMERS)
 
     assert "-> ready (MCP startup finished)" in capsys.readouterr().out
 
@@ -123,14 +127,14 @@ def test_the_ready_wait_says_so_and_goes_on_when_the_screen_never_renders(
         assert time.monotonic() < deadline, "the screen never cleared"
         time.sleep(0.05)
 
-    codex.wait_for_ready(live_shell, session_id, _QUICK)
+    codex.wait_for_ready(live_shell, session_id, _QUICK, SYSTEM_TIMERS)
 
     assert "timeout after" in capsys.readouterr().out
 
 
 def test_the_ready_wait_fails_when_the_session_has_ended(live_shell: ShellSessions) -> None:
     with pytest.raises(RuntimeError, match="ended before it was ready"):
-        codex.wait_for_ready(live_shell, 999, _QUICK)
+        codex.wait_for_ready(live_shell, 999, _QUICK, SYSTEM_TIMERS)
 
 
 def test_the_session_id_is_read_after_asking_for_status(
@@ -139,7 +143,7 @@ def test_the_session_id_is_read_after_asking_for_status(
     line = f"while read l; do [ \"$l\" = /status ] && echo 'Session:   {_SESSION}'; done"
     session_id = _running(live_shell, live_host, unit_home, line)
 
-    assert codex.read_session_id(live_shell, session_id, _PATIENT) == _SESSION
+    assert codex.read_session_id(live_shell, session_id, _PATIENT, SYSTEM_TIMERS) == _SESSION
 
 
 def test_a_status_that_parked_gets_one_enter(
@@ -150,7 +154,10 @@ def test_a_status_that_parked_gets_one_enter(
     line = f"read a; read b; echo 'Session:   {_SESSION}'"
     session_id = _running(live_shell, live_host, unit_home, line)
 
-    assert codex.read_session_id(live_shell, session_id, Pacing(5.0, 0.05, 0.0)) == _SESSION
+    assert (
+        codex.read_session_id(live_shell, session_id, Pacing(5.0, 0.05, 0.0), SYSTEM_TIMERS)
+        == _SESSION
+    )
 
 
 def test_no_session_id_fails_the_launch(
@@ -159,7 +166,7 @@ def test_no_session_id_fails_the_launch(
     session_id = _running(live_shell, live_host, unit_home, "echo '› /status'")
 
     with pytest.raises(RuntimeError, match="could not read the Codex session id"):
-        codex.read_session_id(live_shell, session_id, Pacing(0.4, 0.05, 0.0))
+        codex.read_session_id(live_shell, session_id, Pacing(0.4, 0.05, 0.0), SYSTEM_TIMERS)
 
 
 def test_submission_is_confirmed_when_working_shows(
@@ -170,7 +177,7 @@ def test_submission_is_confirmed_when_working_shows(
 ) -> None:
     session_id = _running(live_shell, live_host, unit_home, 'sleep 0.3; echo Wor"king"; sleep 30')
 
-    codex.verify_submitted(live_shell, session_id, _PATIENT)
+    codex.verify_submitted(live_shell, session_id, _PATIENT, SYSTEM_TIMERS)
 
     assert "-> submitted (Working visible)" in capsys.readouterr().out
 
@@ -183,7 +190,7 @@ def test_a_parked_message_gets_one_enter_and_then_works(
 ) -> None:
     session_id = _running(live_shell, live_host, unit_home, 'read a; echo Wor"king"; sleep 30')
 
-    codex.verify_submitted(live_shell, session_id, _QUICK)
+    codex.verify_submitted(live_shell, session_id, _QUICK, SYSTEM_TIMERS)
 
     out = capsys.readouterr().out
     assert "not submitted within window; sending Enter once" in out
@@ -198,7 +205,7 @@ def test_a_message_that_stays_parked_is_reported_not_raised(
 ) -> None:
     session_id = _running(live_shell, live_host, unit_home, "cat")
 
-    codex.verify_submitted(live_shell, session_id, _QUICK)
+    codex.verify_submitted(live_shell, session_id, _QUICK, SYSTEM_TIMERS)
 
     assert "still no Working signal" in capsys.readouterr().out
 
@@ -206,7 +213,7 @@ def test_a_message_that_stays_parked_is_reported_not_raised(
 def test_submission_check_survives_a_dead_session_at_capture(
     live_shell: ShellSessions, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    codex.verify_submitted(live_shell, 999, _PATIENT)
+    codex.verify_submitted(live_shell, 999, _PATIENT, SYSTEM_TIMERS)
 
     out = capsys.readouterr().out
     assert "WARNING" in out
@@ -218,7 +225,9 @@ def test_submission_check_survives_a_dead_session_at_enter(
 ) -> None:
     # meiva:note
     # A window of zero seconds goes straight to the Enter retry, which finds the session gone.
-    codex.verify_submitted(live_shell, 999, Pacing(timeout=0.0, poll=0.05, settle=0.05))
+    codex.verify_submitted(
+        live_shell, 999, Pacing(timeout=0.0, poll=0.05, settle=0.05), SYSTEM_TIMERS
+    )
 
     out = capsys.readouterr().out
     assert "WARNING" in out
@@ -235,6 +244,8 @@ def test_submission_check_survives_a_dead_session_after_the_enter_retry(
     # The session ends the moment it reads the Enter the check sends, so the capture that follows finds it gone.
     session_id = _running(live_shell, live_host, unit_home, "read a; exit 0")
 
-    codex.verify_submitted(live_shell, session_id, Pacing(timeout=0.3, poll=0.05, settle=0.5))
+    codex.verify_submitted(
+        live_shell, session_id, Pacing(timeout=0.3, poll=0.05, settle=0.5), SYSTEM_TIMERS
+    )
 
     assert "capture failed" in capsys.readouterr().out

@@ -11,10 +11,5 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 "tests" = ["__init__.py", "_claude_checks.py", "_common.py", "_first_run.py", "antigravity.py", "claude.py", "codex.py", "plans"]
 
 [roots]
-"_common.py" = { kinds = ["home"], why = "launch_site() resolves the operator's Path.home() for Claude and Codex user-level config files" }
+"_common.py" = { kinds = ["home", "clock"], why = "launch_site() resolves the operator's Path.home() for Claude and Codex user-level config files, and reads the process clock once for the site: the timers every launch wait spends (`LaunchSite.timers`) and the instant a first-run preset is stamped with (`LaunchSite.now`)" }
 "claude.py" = { kinds = ["random"], why = "launch() mints a fresh UUID for a new Claude Code session when --resume is not given" }
-
-[debt.ambient-read]
-"_claude_checks.py#clock base.clock.SYSTEM_TIMERS" = 4
-"claude.py#clock time.strftime()" = 1
-"codex.py#clock base.clock.SYSTEM_TIMERS" = 14

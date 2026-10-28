@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from meiva.shell.coding_tools import _claude_checks, _first_run, claude
 from meiva.shell.coding_tools.plans.claude_launch import (
     ClaudeLaunchFacts,
@@ -260,7 +261,9 @@ def _session_running(site_shell: ShellSessions, host: SessionHost, home: Path, l
 def _wait(
     shell: ShellSessions, session_id: int, marker: Path | None, pacing: Pacing = _FAST
 ) -> None:
-    _claude_checks.wait_for_ready(shell, session_id, pacing, failure_marker=marker, resumed=False)
+    _claude_checks.wait_for_ready(
+        shell, session_id, pacing, SYSTEM_TIMERS, failure_marker=marker, resumed=False
+    )
 
 
 def test_the_wait_returns_once_the_panel_is_up_and_stays_up(

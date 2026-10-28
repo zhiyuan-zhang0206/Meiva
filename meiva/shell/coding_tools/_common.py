@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
+from base.clock import SYSTEM_TIMERS, Timers
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
 from base.paths import meiva_home
@@ -49,7 +51,9 @@ def capture_screen(shell: ShellSessions, session_id: int) -> str | SessionGone:
 
 
 # meiva:note
-# What a launch reads from the process, once: the calling agent's shell sessions, the home whose Claude and Codex files it touches, the cluster home its owner records live under, the directory a new session starts in (the agent's workspace), and the machine facts a new session starts from.
+# What a launch reads from the process, once: the calling agent's shell sessions, the home whose Claude and Codex files it touches, the cluster home its owner records live under, the directory a new session starts in (the agent's workspace), the machine facts a new session starts from, and the clocks one launch measures against — the timers its readiness polls spend and the instant it stamps a first run with.
+#
+# `timers` and `now` are here because a launch is the thing that owns a wait: every poll a launch runs (MCP startup, `/status`, the submission check, the shared app server) is timed by `timers`, and a first-run preset is stamped from `now`. Handing them out with the rest of the site keeps one reading of the process clock in this module, which is already where a launch reads its process facts; nothing the launcher calls reads a clock for itself.
 @dataclass(frozen=True)
 class LaunchSite:
     shell: ShellSessions
@@ -57,6 +61,8 @@ class LaunchSite:
     cluster: Path
     session_cwd: Path
     host: SessionHost
+    timers: Timers
+    now: datetime
 
     def open_session(self, name: str, ttl: float) -> int:
         session_id, _full = self.shell.create(name, cwd=self.session_cwd, ttl=ttl, host=self.host)
@@ -73,6 +79,8 @@ def launch_site() -> LaunchSite:
         cluster=meiva_home(),
         session_cwd=agent_workspace(shell.agent_id),
         host=sessions.session_host(),
+        timers=SYSTEM_TIMERS,
+        now=datetime.now(UTC),
     )
 
 

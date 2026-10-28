@@ -59,7 +59,8 @@ skill directory, whose `references/` holds the collaboration contract and whose
   never overwritten.
 - `_common` — shared by the launchers: workspace path resolution; `LaunchSite`, the facts a
   launch reads from the process once (the agent's shell sessions, the home, the cluster
-  home, the directory a new session starts in, the machine facts); a new owner generation
+  home, the directory a new session starts in, the machine facts, and the clock: the timers
+  every wait spends and the instant a first-run preset is stamped with); a new owner generation
   for each launch, after the workspace's dead ones are reclaimed; owner-record status
   (every generation of the workspace) and cancel; and the lineage facts read from the
   cluster.
@@ -73,8 +74,13 @@ skill directory, whose `references/` holds the collaboration contract and whose
 ## Shells and tests
 
 The launchers are shells over a `LaunchSite`: they type the plan's lines into real
-sessions, wait with the pacing a caller gives (short ones in tests, the launch's own
-constants otherwise) and reclaim every session they opened when a step fails. Tests run
+sessions, wait with the site's timers and the pacing a caller gives (short windows in tests,
+the launch's own constants otherwise) and reclaim every session they opened when a step
+fails. A wait never reads a clock for itself: a new wait in either launcher takes
+`LaunchSite.timers` as a parameter, and a `SYSTEM_TIMERS` read in `claude.py`, `codex.py` or
+`_claude_checks.py` puts a second owner of the process clock back and is charged as an
+`ambient-read`. A test drives a wait with `ManualTimers` and spends no wall time
+(`tests/test_waits_spend_their_timers.py`). Tests run
 them against a real pty-sessions service and stand-in `claude` and `codex` programs
 installed through the test home's `.bash_profile` (`tests/fake_tools.py`), so the
 developer's own programs never run; the pure plans are tested by value.

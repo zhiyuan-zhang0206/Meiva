@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Generator, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,7 @@ import pytest
 
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
+from base.clock import SYSTEM_TIMERS, Timers
 from base.paths import workspace_dir
 from meiva.shell.coding_tools._common import LaunchSite
 from meiva.shell.session_env import SessionHost
@@ -31,14 +33,23 @@ CODEX_SESSION = "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5"
 
 
 # meiva:note
-# The launch site a test runs a launcher with: the agent's real shell sessions, `home` as the home whose Claude and Codex files a launch touches, the agent's workspace as the directory a new session starts in, and `host` (`live_host`) so the session finds the programs installed under `home`.
-def site_for(shell: ShellSessions, home: Path, host: SessionHost) -> LaunchSite:
+# The launch site a test runs a launcher with: the agent's real shell sessions, `home` as the home whose Claude and Codex files a launch touches, the agent's workspace as the directory a new session starts in, `host` (`live_host`) so the session finds the programs installed under `home`, and the clock the launch waits against. These launchers run real child processes, so the site defaults to the process's own timers and the instant the site is built; a test that drives a wait passes its own.
+def site_for(
+    shell: ShellSessions,
+    home: Path,
+    host: SessionHost,
+    *,
+    timers: Timers = SYSTEM_TIMERS,
+    now: datetime | None = None,
+) -> LaunchSite:
     return LaunchSite(
         shell=shell,
         home=home,
         cluster=home / "cluster",
         session_cwd=workspace_dir(shell.agent_id, home=home),
         host=host,
+        timers=timers,
+        now=datetime.now(UTC) if now is None else now,
     )
 
 

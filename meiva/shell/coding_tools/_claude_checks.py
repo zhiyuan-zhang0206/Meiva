@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Deadline, Timers
 from meiva.shell.coding_tools._common import SessionGone, capture_screen
 from meiva.shell.coding_tools.plans.claude_screen import (
     CLAUDE_NOT_FOUND,
@@ -51,23 +51,24 @@ def wait_for_ready(
     shell: ShellSessions,
     sid: int,
     pacing: Pacing,
+    timers: Timers,
     *,
     failure_marker: Path | None,
     resumed: bool,
 ) -> None:
     print(f"waiting for session {sid} to be ready (polling capture)...")
-    deadline = SYSTEM_TIMERS.monotonic() + pacing.timeout
-    while SYSTEM_TIMERS.monotonic() < deadline:
+    deadline = Deadline.after(timers, pacing.timeout)
+    while deadline.left() is not None:
         verdict = _look(shell, sid, failure_marker, resumed=resumed)
         _raise_if_failed(verdict, sid, settled=False)
         if verdict == "ready":
-            SYSTEM_TIMERS.sleep(pacing.settle)
+            timers.sleep(pacing.settle)
             verdict = _look(shell, sid, failure_marker, resumed=resumed)
             _raise_if_failed(verdict, sid, settled=True)
             if verdict == "ready":
                 print("  -> ready (Claude Code UI)")
                 return
-        SYSTEM_TIMERS.sleep(pacing.poll)
+        timers.sleep(pacing.poll)
     raise RuntimeError(
         f"Claude Code UI did not appear in session {sid} within {pacing.timeout:.0f} s; "
         "no text was delivered"

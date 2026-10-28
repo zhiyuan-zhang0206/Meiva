@@ -15,7 +15,6 @@ collaboration contract.
 from __future__ import annotations
 
 import tempfile
-import time
 import uuid
 from pathlib import Path
 
@@ -87,6 +86,7 @@ def run_supervised_launch(site: LaunchSite, plan: ClaudePlan) -> int:
             shell,
             sid,
             plan.ready,
+            site.timers,
             failure_marker=plan.failure_marker,
             resumed=plan.resumed,
         )
@@ -144,7 +144,7 @@ def launch(
     )
     caller_assignment = launch_caller_assignment("claude_code", caller_instance)
     site = launch_site()
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = site.now.strftime("%Y%m%d-%H%M%S")
     if preset_first_run:
         preset_claude_first_run(site.home, stamp)
     with tempfile.TemporaryDirectory(prefix="meiva-claude-launch-") as marker_dir:
