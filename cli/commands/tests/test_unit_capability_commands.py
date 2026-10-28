@@ -7,6 +7,7 @@ import psycopg
 import pytest
 
 from base import config
+from base.clock import SYSTEM_TIMERS
 from base.cluster.authority.tests.unit_capability_support import MACHINE, issue, open_issued
 from base.config.service_read import ConfigAuthority, served_db_endpoint
 from base.host.db_authority import delivery, unit
@@ -67,7 +68,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     bundle = issue(born.home, runner, endpoint=endpoint)
-    pooler.stop_pgbouncer(force=True, home=meiva_home())
+    pooler.stop_pgbouncer(force=True, home=meiva_home(), timers=SYSTEM_TIMERS)
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
         unit.install_bundle(
             runner,
@@ -85,6 +86,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         delivery.active_generation(born.home),
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=SYSTEM_TIMERS,
     )
     installed = unit.install_bundle(
         runner,

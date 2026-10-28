@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Deadline, Timers
 from base.clock.tests.manual_timers import ManualTimers
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
@@ -145,7 +145,23 @@ def test_a_manual_wall_clock_must_be_timezone_aware() -> None:
 
 def test_a_test_drives_a_deadline_by_advancing_the_virtual_clock() -> None:
     timers = ManualTimers()
-    deadline = timers.monotonic() + 30.0
-    assert timers.monotonic() < deadline
+    deadline = Deadline.after(timers, 30.0)
+    assert deadline.left() == 30.0
     timers.advance(30.0)
-    assert timers.monotonic() >= deadline
+    assert deadline.left() is None
+
+
+def test_a_deadline_carries_the_clock_that_measures_it() -> None:
+    manual = ManualTimers(start=1000.0)
+    deadline = Deadline.after(manual, 5.0)
+    assert (deadline.at, deadline.timers) == (1005.0, manual)
+    manual.advance(2.0)
+    assert deadline.left() == 3.0
+
+
+def test_a_spent_deadline_reports_no_time_left_rather_than_a_negative_span() -> None:
+    manual = ManualTimers()
+    deadline = Deadline(at=10.0, timers=manual)
+    assert deadline.left() == 10.0
+    manual.advance(11.0)
+    assert deadline.left() is None

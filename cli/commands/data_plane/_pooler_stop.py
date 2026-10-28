@@ -8,11 +8,10 @@
 from __future__ import annotations
 
 import signal
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Deadline
 from base.cluster import port_preflight
 from base.host.private_storage import write_private_bytes
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -24,7 +23,7 @@ from cli.commands.data_plane.pooler.stop_intent import (
     native_birth,
     render_intent,
 )
-from cli.commands.data_plane.stop_budget import poll_delay, time_left
+from cli.commands.data_plane.stop_budget import poll_delay
 
 # meiva:note
 # How often a wait for the pooler to exit observes it again.
@@ -86,8 +85,8 @@ class OwnedPooler:
     # A stranger on the recycled pid is never signalled, and a pid that changes birth between the
     # check and the delivery raises inside `send_signal`. The "native birth changed before signal"
     # error this stop used to raise covered the gone case too, which is now a finished stop.
-    def _request_stop(self, deadline: float) -> None:
-        budget = time_left(deadline, time.monotonic())
+    def _request_stop(self, deadline: Deadline) -> None:
+        budget = deadline.left()
         if budget is None:
             raise TimeoutError("PgBouncer stop deadline expired; custody retained")
         with file_lock(self.config.with_name("stop-intent.lock"), timeout_s=budget):
@@ -106,23 +105,23 @@ class OwnedPooler:
                     render_intent(_birth(self.identity)).encode(),
                 )
             if listeners and not requested:
-                if time_left(deadline, time.monotonic()) is None:
+                if deadline.left() is None:
                     raise TimeoutError("PgBouncer stop deadline expired; custody retained")
                 self.identity.send_signal(signal.SIGINT)
 
-    def _wait(self, deadline: float) -> bool:
+    def _wait(self, deadline: Deadline) -> bool:
         while self.identity.live():
-            delay = poll_delay(time_left(deadline, SYSTEM_TIMERS.monotonic()), _POLL_INTERVAL_S)
+            delay = poll_delay(deadline.left(), _POLL_INTERVAL_S)
             if delay is None:
                 return False
-            SYSTEM_TIMERS.sleep(delay)
+            deadline.timers.sleep(delay)
         return True
 
     # meiva:note
     # Request safe shutdown once; explicit force has a separate settle bound. The forced SIGKILL
     # follows the same rule as the first signal: a birth that is already gone is not signalled and
     # the settle wait ends at once.
-    def stop(self, *, deadline: float, force: bool = False) -> bool:
+    def stop(self, *, deadline: Deadline, force: bool = False) -> bool:
         if not self.identity.live():
             return True
         try:
@@ -138,4 +137,4 @@ class OwnedPooler:
         if not self.identity.live() or self._listeners() is None:
             return True
         self.identity.send_signal(signal.SIGKILL)
-        return self._wait(time.monotonic() + _KILL_SETTLE_S)
+        return self._wait(Deadline.after(deadline.timers, _KILL_SETTLE_S))

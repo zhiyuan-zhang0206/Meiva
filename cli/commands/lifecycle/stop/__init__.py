@@ -149,7 +149,7 @@ def _run_force(
     env: StopEnvironment,
     retained_children: list[subprocess.Popen[bytes]] | None,
 ) -> int:
-    run = StopRun(deadline_after(request.timeout), [])
+    run = StopRun(deadline_after(env.command.timers, request.timeout), [])
     try:
         execute_plan(plan, env, run, retained_children, timed=False)
     except DataPlaneStopError as exc:
@@ -164,9 +164,9 @@ def _run_normal(
     env: StopEnvironment,
     retained_children: list[subprocess.Popen[bytes]] | None,
 ) -> int:
-    deadline = deadline_after(request.timeout)
+    deadline = deadline_after(env.command.timers, request.timeout)
     home = env.command.home
-    owns_journal = begin(home, "stop", pid=env.command.pid, deadline=deadline)
+    owns_journal = begin(home, "stop", pid=env.command.pid, deadline=deadline.at)
     # meiva:note
     # Per-phase accounting: a failed stop names each phase and how much of the shared budget it
     # consumed, so the operator sees WHERE the budget went, never a bare timeout (#2045).

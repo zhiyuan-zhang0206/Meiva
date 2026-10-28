@@ -8,17 +8,16 @@
 from __future__ import annotations
 
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from base import telemetry
-from base.clock import SYSTEM_TIMERS
+from base.clock import Deadline, Timers
 from base.cluster import postgres as owned_postgres
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.maintenance.report_lines import escalation_note
-from cli.commands.data_plane.stop_budget import poll_delay, require_valid_timeout, time_left
+from cli.commands.data_plane.stop_budget import poll_delay, require_valid_timeout
 
 # meiva:note
 # How long a normal stop's shell-session closure waits between its HUP/TERM and the
@@ -56,12 +55,15 @@ class StopLegs:
 DEFAULT_STOP_LEGS = StopLegs()
 
 
-def deadline_after(timeout: float) -> float:
-    return time.monotonic() + require_valid_timeout(timeout)
+# meiva:note
+# The deadline `timeout` seconds from now on the stop's `timers`: the caller's clock, never one
+# read here.
+def deadline_after(timers: Timers, timeout: float) -> Deadline:
+    return Deadline.after(timers, require_valid_timeout(timeout))
 
 
-def remaining(deadline: float) -> float:
-    left = time_left(deadline, time.monotonic())
+def remaining(deadline: Deadline) -> float:
+    left = deadline.left()
     if left is None:
         raise TimeoutError("maintenance kept its hold; stop deadline expired")
     return left
@@ -73,20 +75,20 @@ def remaining(deadline: float) -> float:
 # Never escalates a signal and never certifies success while anything is alive. A
 # descendant of a living identity joins `tracked`, so a leader that exits without closing
 # its children does not let the wait finish early.
-def wait_for_exit(tracked: set[OwnedProcess], deadline: float) -> None:
+def wait_for_exit(tracked: set[OwnedProcess], deadline: Deadline) -> None:
     while True:
         living = {identity for identity in tracked if identity.live()}
         if not living:
             return
         for identity in living:
             retain_processes(tracked, capture_tree(identity))
-        delay = poll_delay(time_left(deadline, SYSTEM_TIMERS.monotonic()), _POLL_INTERVAL_S)
+        delay = poll_delay(deadline.left(), _POLL_INTERVAL_S)
         if delay is None:
             raise TimeoutError(
                 "maintenance kept its hold; processes did not exit: "
                 f"{sorted(identity.pid for identity in living)}"
             )
-        SYSTEM_TIMERS.sleep(delay)
+        deadline.timers.sleep(delay)
 
 
 # meiva:note

@@ -170,7 +170,12 @@ def test_a_redis_that_never_answers_cannot_hold_the_stop_past_its_deadline(
 
         with pytest.raises((TimeoutError, RuntimeError)):
             maintenance_stop.stop(
-                plane, 0.3, home=unit_home, uid=os.getuid(), producer=operator_pipeline
+                plane,
+                0.3,
+                home=unit_home,
+                uid=os.getuid(),
+                producer=operator_pipeline,
+                timers=SYSTEM_TIMERS,
             )
 
         assert time.monotonic() - started < 1.5
@@ -194,7 +199,7 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
             # meiva:note
             # redis-py's async command stubs are partially unknown; the pyright directives
             # below say only that.
-            deadline = deadline_after(10)
+            deadline = deadline_after(SYSTEM_TIMERS, 10)
             dedicated = AsyncRedis(
                 host="127.0.0.1",
                 port=server.port,
@@ -206,7 +211,7 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
                 dedicated,
                 port=server.port,
                 data_dir=instance.redis_data_dir(unit_home),
-                deadline=deadline,
+                deadline=deadline.at,
             )
             assert identity is not None
             connection_id = await dedicated.client_id()  # pyright: ignore[reportUnknownMemberType]
@@ -270,7 +275,11 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
         with pytest.raises(RuntimeError, match="replacement"):
             asyncio.run(
                 maintenance_stop.request_stop(
-                    StopPostgres(), replaced, unused_client, deadline_after(10), context
+                    StopPostgres(),
+                    replaced,
+                    unused_client,
+                    deadline_after(SYSTEM_TIMERS, 10),
+                    context,
                 )
             )
 
@@ -323,6 +332,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                 uid=os.getuid(),
                 retained_children=retained,
                 producer=operator_pipeline,
+                timers=SYSTEM_TIMERS,
             )
 
             assert stopped.stopped == ("pgbouncer", "postgres", "redis")

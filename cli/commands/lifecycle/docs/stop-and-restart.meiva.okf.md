@@ -59,7 +59,7 @@ resource exits (`data_plane/maintenance_stop_report` names survivors). What the 
 closure's outcome means (owner notices first, then the leftover jobs, then a failing shell or the
 wait for an empty service table) is `closure_plan`'s; a survivor role other than the closure's two
 (`closure_plan.SurvivorRole`) is a `ValueError`, never a job; the deadline arithmetic is
-`data_plane/stop_budget`'s. The shell reads the clock and sleeps.
+`data_plane/stop_budget`'s. Each wait spends the `base.clock.Deadline` it was handed.
 `data_plane/_pooler_stop.OwnedPooler` owns ordinary pooler stop
 admission for maintenance and startup recovery: exact native birth and listener
 proof precede a durable stop intent and the first SIGINT (`WAIT_FOR_SERVERS`).

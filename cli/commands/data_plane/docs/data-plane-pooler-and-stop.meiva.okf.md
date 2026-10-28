@@ -29,9 +29,10 @@ bind that failed at startup); and one that is not running is started after the s
 `pooler/stop_intent.py` the durable stop intent and `pooler/identity.py` attributes a running
 pgbouncer to a home from its command line. The composition root (`completion.ensure_pooler`)
 hands the shell one `PoolerSpec`: the home it lives under, the ini's shape, the userlist and
-admin credential, the resolved binary, the daemon environment (`daemon_process_env`) and the waits, so a test starts
-a real pooler under its own home with small waits instead of replacing the code that looks
-for it.
+admin credential, the resolved binary, the daemon environment (`daemon_process_env`) and the waits, and
+`ensure_pgbouncer` takes the completion pass's `Timers` from that same root, so a test starts a
+real pooler under its own home with small waits and a manual clock instead of replacing the code
+that looks for it.
 
 Where the pooler's files live follows the `home` argument everywhere: `ini_path(home)`,
 `pidfile_path(home)` and `pooler_dir(home)` in `base/cluster/dataplane/pooler.py` derive from the home

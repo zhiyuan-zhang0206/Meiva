@@ -12,6 +12,7 @@ from typing import Any, Literal
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Deadline
 from base.deploy.lifecycle import status_journal
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
@@ -47,7 +48,7 @@ def settle(
     shells.settle_closure(
         outcome,
         pty_close_notices.STOP_REASON,
-        deadline=time.monotonic() + window_s,
+        deadline=Deadline(at=time.monotonic() + window_s, timers=SYSTEM_TIMERS),
         direct_db=False,
         database_factory=database_factory,
         command=runtime,

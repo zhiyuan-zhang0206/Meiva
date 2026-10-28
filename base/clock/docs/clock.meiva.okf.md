@@ -84,6 +84,20 @@ blocking operations into virtual-time operations.
   source. `asleep` yields to the event loop once, as `asyncio.sleep` does, and a
   negative `sleep` raises like `time.sleep`.
 
+### Deadlines
+
+`Deadline` pairs an instant on a `Timers` clock with the timers that measure it.
+`Deadline.after(timers, seconds)` builds one and `left()` returns the seconds still
+available (`None` once the deadline is spent). A bounded wait takes one `Deadline`
+instead of a bare float deadline plus a separate `Timers`, so the wait cannot read a
+clock its caller did not choose: the shell that owns the budget builds the value once
+from `CommandRuntime.timers` and hands it down. Crossing to an interface that takes a bare
+float has two forms. One that measures the instant against its own `time.monotonic()` — the
+ownership capture, the stop journal's record — takes `.at`, which is the same instant only
+while the deadline's timers are the process clock. One that takes a span — `asyncio.wait_for`,
+a socket timeout — takes `left()`, or a caller's `remaining()` where a spent budget must
+raise.
+
 The single Clock implementation is retained: injection does not create a second
 timezone policy or require parallel wall-clock and timer arguments. Replacing
 `now` changes wall time only; native monotonic time remains owned by the supplied
