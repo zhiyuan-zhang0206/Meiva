@@ -56,10 +56,6 @@ async def adopt_for_successor(
     if row is None:
         return None
     lease_id, session_id, status, from_generation, from_owner, provider = row
-    await conn.execute(
-        "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s WHERE id=%s",
-        (incarnation.generation, incarnation.owner, lease_id),
-    )
     await _record_adoption(
         conn,
         str(lease_id),
@@ -86,25 +82,24 @@ async def _record_adoption(
     provider: str | None,
 ) -> None:
     # meiva:note
-    # Append the move to the lease's own log, under the row lock the caller holds.
-    # `history.append` is the sync twin of these two statements; the admission holds an
-    # async connection. The entry carries no event identity: a repeated admission finds the
-    # recorded pair already equal and returns before reaching this point.
-    row = await (
-        await conn.execute(
-            "UPDATE agent_impersonations SET next_entry=next_entry+1 WHERE id=%s "
-            "RETURNING next_entry-1",
-            (lease_id,),
-        )
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("Adopted lease disappeared")
+    # Move the accepting pair and append the move to the lease's own log in one statement.
+    #
+    # The update and the entry are one statement because a lease that recorded no move must not
+    # look moved: two statements could land the pair and lose the entry, and the only reader of
+    # the accepting incarnation is that entry. One statement cannot leave that state, so no
+    # savepoint guards it and a database failure simply fails the admission. The entry carries
+    # no event identity; a repeated admission finds the pair already equal and returns earlier.
     await conn.execute(
-        "INSERT INTO agent_impersonation_entries(lease_id,seq,kind,payload) "
-        "VALUES(%s,%s,'lifecycle',%s)",
+        "WITH moved AS ("
+        "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s,"
+        "next_entry=next_entry+1 WHERE id=%s RETURNING next_entry-1 AS seq"
+        ") INSERT INTO agent_impersonation_entries(lease_id,seq,kind,payload) "
+        "SELECT %s,seq,'lifecycle',%s FROM moved",
         (
+            accepted_by[0],
+            accepted_by[1],
             lease_id,
-            row[0],
+            lease_id,
             Jsonb(
                 {
                     "event": "lease_adopted",
@@ -123,9 +118,9 @@ async def end_for_replacement(
     # meiva:note
     # Close the agent's accepted or active lease if the admitted incarnation cannot carry it.
     #
-    # This is the fallback that keeps an admission from ever refusing or stalling: the
-    # caller runs it when adoption raises, and it also runs for a lease adoption refuses
-    # to move. The accepting binding is first moved to the admitted incarnation: closing a
+    # This is the fallback for a lease adoption refuses to move: a takeover the successor
+    # cannot carry is closed exactly as it was before carry existed. An unexpected database
+    # failure is not caught here — it fails the admission, which the next wake retries. The accepting binding is first moved to the admitted incarnation: closing a
     # lease restores the recorded accepting incarnation into the agent row
     # (`restore_native_impersonation_owner`), and restoring the dead predecessor would
     # break every native ownership check of the live process. Returns the closed lease id,
