@@ -252,12 +252,16 @@ def _ast_rule_files(argv: list[str], repo_root: Path) -> set[Path]:
 
 
 def _collect_locality(
-    tree: ast.Module, rel: str, sites: dict[str, locality.Sites], scanned: set[str]
+    tree: ast.Module,
+    rel: str,
+    sites: dict[str, locality.Sites],
+    scanned: set[str],
+    scopes: path_imports.Scopes,
 ) -> None:
     scanned.add(rel)
     for kind, found in locality.measure(tree, rel, _SCAN_DIRS).items():
         sites[kind].update(found)
-    sites[path_imports.SECTION].update(path_imports.measure(tree, rel))
+    sites[path_imports.SECTION].update(path_imports.measure(tree, rel, scopes))
 
 
 @dataclass(frozen=True)
@@ -267,6 +271,7 @@ class _TypeContext:
     allowed: frozenset[str]
     packages: tuple[str, ...]
     files: set[Path]
+    scopes: path_imports.Scopes
 
     def in_scope(self, path: Path, rel: str) -> bool:
         return path in self.files and type_checking_in_scope(rel, self.packages)
@@ -306,6 +311,7 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
             frozenset(policy.reasons("type-checking", "files")),
             type_packages,
             set(_iter_py_files(roots)),
+            path_imports.Scopes.of(policy),
         ),
         [],
     )
@@ -323,6 +329,17 @@ def _governed(
     )
 
 
+# meiva:note
+# What one run admits: the tracked snapshot plus every file it reads off the working tree. A file
+# written but not yet committed is present here, as it was for the disk probe this replaced.
+def _admitted_files(universe: Universe, repo_root: Path, paths: set[Path]) -> set[str]:
+    admitted = set(universe.files)
+    for path in paths:
+        if path.is_relative_to(repo_root):
+            admitted.add(path.relative_to(repo_root).as_posix())
+    return admitted
+
+
 def _check_ast_and_quality(
     argv: list[str],
     targets: list[Path],
@@ -338,6 +355,11 @@ def _check_ast_and_quality(
         return type_problems
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
+    ambient_tree = ambient_state.Tree(
+        _admitted_files(type_ctx.universe, repo_root, files | ast_files | type_ctx.files),
+        type_ctx.universe.load_text,
+        type_ctx.universe.dirs,
+    )
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
     scanned: set[str] = set()
@@ -359,9 +381,9 @@ def _check_ast_and_quality(
             errors.extend(type_ctx.errors(rel, tree))
         if ast_rules:
             errors.extend(f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel))
-            _collect_locality(tree, rel, sites, scanned)
+            _collect_locality(tree, rel, sites, scanned, type_ctx.scopes)
         if ambient:
-            errors.extend(ambient_state.collect(tree, rel, repo_root, sites, scanned))
+            errors.extend(ambient_state.collect(tree, rel, ambient_tree, sites, scanned))
         if path in files:
             for kind, values in measure_quality(tree, rel).items():
                 measurements[kind].update(values)
@@ -370,7 +392,7 @@ def _check_ast_and_quality(
         locality.site_errors(sites, baseline, scanned=scanned, repo_root=repo_root, renames=renames)
     )
     errors.extend(decisions.missing_allowlist_errors(repo_root))
-    errors.extend(ambient_state.missing_allowlist_errors(repo_root))
+    errors.extend(ambient_state.missing_allowlist_errors(ambient_tree))
     return errors
 
 

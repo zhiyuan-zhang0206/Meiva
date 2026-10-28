@@ -194,17 +194,21 @@ def test_the_same_source_outside_tests_is_governed(
 
 def test_path_import_rule_skips_test_files_at_any_depth() -> None:
     tree = ast.parse('import sys\nsys.path.insert(0, "/somewhere")\n')
+    scopes = path_imports.Scopes(scope=("meiva_builtins/",), skills=("meiva_builtins/skills/",))
     assert (
         path_imports.measure(
-            tree, "meiva_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py"
+            tree, "meiva_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py", scopes
         )
         == {}
     )
     assert (
-        path_imports.measure(tree, "meiva_builtins/tests/schedules/test_goal_watch_filter.py") == {}
+        path_imports.measure(
+            tree, "meiva_builtins/tests/schedules/test_goal_watch_filter.py", scopes
+        )
+        == {}
     )
     assert path_imports.measure(
-        tree, "meiva_builtins/skills/integrations/gmail/scripts/run.py"
+        tree, "meiva_builtins/skills/integrations/gmail/scripts/run.py", scopes
     ) == {"meiva_builtins/skills/integrations/gmail/scripts/run.py::sys.path": [2]}
 
 

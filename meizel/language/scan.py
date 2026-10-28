@@ -686,4 +686,3 @@ def scan_typescript_files(
 # original snapshot validation to avoid them.
 def invalidate_policy_caches() -> None:
     allowances.invalidate_cache()
-    purity.invalidate_policy_cache()

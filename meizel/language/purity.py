@@ -4,10 +4,10 @@ import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import cache
-from pathlib import Path
 
 from meizel import allowances
 from meizel.graph.model import Code, EnumSubsetUse, PurityItem
+from meizel.graph.universe import Universe
 from meizel.language.purity_structure import (
     record_attr_write,
     record_enum_subsets,
@@ -21,7 +21,6 @@ __all__ = [
     "DEFAULT_IMPURE_CALLS",
     "DEFAULT_IMPURE_IMPORTS",
     "PurityState",
-    "invalidate_policy_cache",
     "make_state",
     "record_assign",
     "record_attr_write",
@@ -330,12 +329,15 @@ def _policy_int(policy: allowances.Policy, section: str, default: int) -> int:
     return int(vals[0]) if vals and vals[0].isdigit() else default
 
 
+# meiva:note
+# The purity settings a policy text states, keyed by that text: a comparison that installs the
+# other snapshot's policy asks a different question and gets its own answer, so no cache of the
+# old rules survives a swap.
 @cache
-def _rules_for_root(root: Path) -> tuple[frozenset[str], frozenset[str], int, int, int]:
-    path = root / allowances.POLICY
-    if not path.is_file():
+def _rules_for(text: str) -> tuple[frozenset[str], frozenset[str], int, int, int]:
+    if not text:
         return DEFAULT_IMPURE_IMPORTS, DEFAULT_IMPURE_CALLS, 6, 6, 3
-    policy, _ = allowances.parse(path.read_text(encoding="utf-8"))
+    policy, _ = allowances.parse(text)
     imports = DEFAULT_IMPURE_IMPORTS | frozenset(policy.names("purity", "impure-imports"))
     calls = DEFAULT_IMPURE_CALLS | frozenset(policy.names("purity", "impure-calls"))
     return (
@@ -348,14 +350,11 @@ def _rules_for_root(root: Path) -> tuple[frozenset[str], frozenset[str], int, in
 
 
 # meiva:note
-# A comparison validates the old snapshot before installing the current rule policy. Discard
-# root-keyed settings after that mutation so the second scan sees the replacement policy.
-def invalidate_policy_cache() -> None:
-    _rules_for_root.cache_clear()
-
-
-def make_state(root: Path) -> PurityState:
-    imports, calls, max_pub, max_params, max_hops = _rules_for_root(root)
+# The policy the run admitted: read through the universe that holds the tree, never from a path
+# this module computes itself.
+def make_state(universe: Universe) -> PurityState:
+    text = universe.load_text(allowances.POLICY) if allowances.POLICY in universe.files else ""
+    imports, calls, max_pub, max_params, max_hops = _rules_for(text)
     return PurityState(imports, calls, max_pub, max_params, max_hops)
 
 
