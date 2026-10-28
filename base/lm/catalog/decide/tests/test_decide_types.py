@@ -6,10 +6,16 @@ from base.lm.catalog.decide.types import (
     Choice,
     Decision,
     DecisionModelSpec,
+    DecisionRequestError,
+    DecisionResponseError,
     Score,
     YesNo,
     estimate_tokens,
+    not_json_failure,
     question_text,
+    require_json_object,
+    require_success,
+    transport_failure,
 )
 
 
@@ -68,3 +74,27 @@ def test_question_text_carries_every_string() -> None:
     text = question_text(Choice("Which one?", {"alpha": "first thing"}.copy() | {"beta": "second"}))
     for fragment in ("Which one?", "alpha", "first thing", "beta", "second"):
         assert fragment in text
+
+
+def test_a_non_success_status_is_the_request_failure_with_the_body_head() -> None:
+    require_success("m", "https://x", status_code=200, is_success=True, text="ok")
+    with pytest.raises(DecisionRequestError, match=r"HTTP 500 from https://x: bolted") as raised:
+        require_success("m", "https://x", status_code=500, is_success=False, text="bolted")
+    with pytest.raises(DecisionRequestError) as long_body:
+        require_success("m", "https://x", status_code=502, is_success=False, text="z" * 400)
+    assert len(str(long_body.value)) == len("m: HTTP 502 from https://x: ") + 300
+    assert "500" in str(raised.value)
+
+
+def test_a_transport_error_keeps_its_type_name_and_message() -> None:
+    failure = transport_failure("m", "https://x", ValueError("boom"))
+    assert isinstance(failure, DecisionRequestError)
+    assert str(failure) == "m: request to https://x failed: ValueError: boom"
+
+
+def test_a_body_that_is_not_json_and_one_that_is_not_an_object() -> None:
+    assert isinstance(not_json_failure("m", "https://x"), DecisionResponseError)
+    assert str(not_json_failure("m", "https://x")) == "m: response from https://x is not JSON"
+    assert require_json_object("m", "https://x", {"a": 1}) == {"a": 1}
+    with pytest.raises(DecisionResponseError, match="is not a JSON object"):
+        require_json_object("m", "https://x", [1, 2])

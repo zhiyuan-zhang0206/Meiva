@@ -27,5 +27,5 @@ exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "code
 "handoff.py" = "strict"
 "turn.py" = "strict"
 
-[debt.ambient-read]
-"wiring.py#environ base.host.env.registry.process_environment" = 1
+[roots]
+"wiring.py" = { kinds = ["environ"], why = "builds one harness session (a bridge, a handoff, a session object) from the values the caller hands down; a Claude session's child environment is every key of the live environment blanked and then the explicit slice on top, which needs the live key list the way base/host/git/gitenv.py does for a git child" }
