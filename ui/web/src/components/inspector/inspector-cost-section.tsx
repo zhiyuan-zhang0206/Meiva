@@ -138,13 +138,19 @@ export function CostActivitySection({
   const idleSeconds = activity
     ? Math.max(0, activity.alive_seconds - activity.active_seconds)
     : 0;
-  const billingSub =
-    harness != null ? (isExternalHarness ? t("billingSubscription") : t("billingApi")) : undefined;
+  // meiva:note
+  // The cost cell names a billing mode only when the number needs qualifying: a
+  // metered (API) agent prices every call, so the amount is the whole story and
+  // the cell stays silent; a subscription pays nothing per token, so its label
+  // rides the amount in parentheses instead of taking a line of its own. An
+  // unresolved harness gets the amount alone — the panel never guesses a mode
+  // (user ruling 2026-10-28).
+  // meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
+  const billingLabel = isExternalHarness ? t("billingSubscription") : undefined;
   const unpricedSub =
     cost && cost.unpriced_calls > 0
       ? t("unpriced", { count: String(cost.unpriced_calls) })
       : undefined;
-  const costSub = [billingSub, unpricedSub].filter(Boolean).join(" · ") || undefined;
   return (
     <Section
       icon={<Activity className="size-3" />}
@@ -189,8 +195,9 @@ export function CostActivitySection({
             <div className="grid grid-cols-2 gap-1">
               <Metric
                 label={t("metricCost")}
-                value={`$${cost.cost_usd.toFixed(4)}`}
-                sub={costSub}
+                value={costAmount(cost.cost_usd, billingLabel)}
+                sub={unpricedSub}
+                valueTestId="inspector-cost-amount"
               />
               <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
               <Metric
@@ -242,6 +249,15 @@ export function CostActivitySection({
       )}
     </Section>
   );
+}
+
+// meiva:note
+// One text run: the amount and, for a subscription, its qualifier in
+// parentheses — the cell must not split them across two rows.
+// meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
+function costAmount(usd: number, billing: string | undefined): string {
+  const amount = `$${usd.toFixed(4)}`;
+  return billing === undefined ? amount : `${amount} (${billing})`;
 }
 
 function formatTps(n: number): string {
