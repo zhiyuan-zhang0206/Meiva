@@ -487,9 +487,16 @@ async def aops_pool(db_url: str):
 
 @pytest_asyncio.fixture
 async def aredis_inbound_listener(redis_url: str):
+    from base.clock import SYSTEM_TIMERS
+    from base.config import settings
     from base.events.live.redis_listener import RedisInboundListener
 
-    listener = RedisInboundListener(redis_url, agent_id=0)
+    listener = RedisInboundListener(
+        redis_url,
+        agent_id=0,
+        events_channel=settings.data_plane.events_channel,
+        timers=SYSTEM_TIMERS,
+    )
     try:
         yield listener
     finally:

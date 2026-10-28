@@ -27,6 +27,7 @@ from base.agents.impersonation.host_transport import (
     AntigravityServer,
     antigravity_server_from_environment,
 )
+from base.clock import Timers
 from base.db import Database
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.events.live.redis_listener import RedisInboundListener
@@ -135,6 +136,8 @@ async def _wait_inbox(
     *,
     local_machine: str,
     redis_url: str,
+    events_channel: str,
+    timers: Timers,
 ) -> list[dict[str, Any]]:
     from base.agents import impersonation as control
 
@@ -143,18 +146,19 @@ async def _wait_inbox(
     lease = await asyncio.to_thread(
         control.require_active, db, lease_id, local_machine=local_machine
     )
-    listener = RedisInboundListener(redis_url, lease["agent_id"])
-    loop = asyncio.get_running_loop()
+    listener = RedisInboundListener(
+        redis_url, lease["agent_id"], events_channel=events_channel, timers=timers
+    )
 
     async def read_until_a_message_or_the_deadline() -> list[dict[str, Any]]:
         if wait:
             await listener.ensure_listening()
-        deadline = loop.time() + wait
+        deadline = timers.monotonic() + wait
         while True:
             messages = await asyncio.to_thread(
                 control.inbox, db, lease_id, limit=limit, local_machine=local_machine
             )
-            remaining = deadline - loop.time()
+            remaining = deadline - timers.monotonic()
             if messages or remaining <= 0:
                 return messages
             await listener.wait_one(min(remaining, 30.0))
@@ -368,6 +372,8 @@ def _dispatch(
                     args.wait,
                     local_machine=args.runtime.machine.name(),
                     redis_url=args.runtime.config.view.data_plane.redis_url,
+                    events_channel=bus.channel,
+                    timers=args.runtime.timers,
                 )
             )
         )

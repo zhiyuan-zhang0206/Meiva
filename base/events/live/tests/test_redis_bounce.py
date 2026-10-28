@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 import redis
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import inbound_channel
 from base.config import settings
 from base.events.live.redis_listener import RedisInboundListener
@@ -106,7 +107,9 @@ async def test_parked_listener_wakes_after_redis_bounce(
     """kill redis → parked listener → restart → publish → wake."""
     url, datadir, port = bounceable_redis
     agent_id = 6001
-    listener = RedisInboundListener(url, agent_id)
+    listener = RedisInboundListener(
+        url, agent_id, events_channel=settings.data_plane.events_channel, timers=SYSTEM_TIMERS
+    )
     server = _start_redis  # bind for readability
 
     # 1. Park the listener on a long wait; let it subscribe.

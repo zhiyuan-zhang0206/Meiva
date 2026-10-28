@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.events.live import redis_listener
 
 
@@ -59,6 +60,8 @@ async def test_cancelling_open_wait_cancels_child_without_waiting_for_rollback(
         "redis://unused",
         7001,
         redis_factory=_factory,
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     parent = asyncio.create_task(listener.ensure_listening() if eager else listener.wait_one(30))
     try:
@@ -94,6 +97,8 @@ async def test_cancelling_parent_after_open_completes_preserves_listener_handles
         "redis://unused",
         7002,
         redis_factory=_factory,
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     parent = asyncio.create_task(listener.wait_one(30))
     pubsub.parent = parent

@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.events.live import redis_listener
 
 
@@ -109,7 +110,11 @@ async def test_open_deadline_and_stop_do_not_wait_for_rollback() -> None:
     redis = Redis(pubsub)
     redis.close_release.clear()
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7003, redis_factory=client_factory(redis)
+        "redis://unused",
+        7003,
+        redis_factory=client_factory(redis),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     waiter = asyncio.create_task(listener.wait_one(0.02))
     try:
@@ -140,7 +145,11 @@ async def test_late_consume_bug_is_visible_after_stop_and_raised_on_next_join(
     pubsub.error = None
     redis = Redis(pubsub)
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7004, redis_factory=client_factory(redis)
+        "redis://unused",
+        7004,
+        redis_factory=client_factory(redis),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     waiter = asyncio.create_task(listener.wait_one(30))
     try:
@@ -176,7 +185,11 @@ async def test_same_tick_unknown_result_and_caller_cancel_is_not_lost(
     pubsub.error = error
     redis = Redis(pubsub)
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7005, redis_factory=client_factory(redis)
+        "redis://unused",
+        7005,
+        redis_factory=client_factory(redis),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     waiter = asyncio.create_task(listener.wait_one(30))
     pubsub.parent = waiter
@@ -203,7 +216,11 @@ async def test_active_unknown_error_reaches_caller_once(
     error = LateError("active subscribe")
     pubsub.error = error
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7006, redis_factory=client_factory(Redis(pubsub))
+        "redis://unused",
+        7006,
+        redis_factory=client_factory(Redis(pubsub)),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     with pytest.raises(LateError) as captured:
         await listener.wait_one(1)
@@ -218,7 +235,11 @@ async def test_abandoned_open_cannot_attach_to_replacement_generation() -> None:
     new = PubSub()
     first, second = Redis(old), Redis(new)
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7007, redis_factory=client_factory(first, second)
+        "redis://unused",
+        7007,
+        redis_factory=client_factory(first, second),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     waiter = asyncio.create_task(listener.wait_one(0.02))
     try:
@@ -248,6 +269,8 @@ async def test_consume_grace_returns_while_handle_close_is_unfinished() -> None:
         7008,
         consume_abandon_grace=0.02,
         redis_factory=client_factory(redis),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     waiter = asyncio.create_task(listener.wait_one(0.02))
     try:
@@ -275,7 +298,11 @@ async def test_expected_late_network_error_does_not_fail_stop(
     pubsub = PubSub()
     redis = Redis(pubsub)
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7009, redis_factory=client_factory(redis)
+        "redis://unused",
+        7009,
+        redis_factory=client_factory(redis),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     waiter = asyncio.create_task(listener.wait_one(30))
     try:
@@ -315,7 +342,11 @@ async def test_completed_active_open_stays_owned_until_caller_claims_error(
     pubsub = ReceiptPubSub()
     pubsub.error = error
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7013, redis_factory=client_factory(Redis(pubsub))
+        "redis://unused",
+        7013,
+        redis_factory=client_factory(Redis(pubsub)),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     with pytest.raises(LateError) as captured:
         await listener.wait_one(1)
@@ -338,7 +369,11 @@ async def test_unknown_cleanup_typeerror_is_not_the_redis_transport_quirk(
     pubsub = FailingClosePubSub()
     redis = Redis(pubsub)
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7014, redis_factory=client_factory(redis)
+        "redis://unused",
+        7014,
+        redis_factory=client_factory(redis),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     await listener.ensure_listening()
     with pytest.raises(TypeError) as captured:
@@ -363,7 +398,11 @@ async def test_unknown_probe_error_reaches_active_caller(
     pubsub.release.set()
     redis = Redis(pubsub)
     listener = redis_listener.RedisInboundListener(
-        "redis://unused", 7015, redis_factory=client_factory(redis)
+        "redis://unused",
+        7015,
+        redis_factory=client_factory(redis),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     try:
         await listener.ensure_listening()
@@ -387,6 +426,8 @@ async def test_old_phase_cleanup_preserves_replacement_subscription(
         7016,
         consume_abandon_grace=0.02,
         redis_factory=client_factory(first, second),
+        events_channel="meiva:test:events",
+        timers=SYSTEM_TIMERS,
     )
     waiter = asyncio.create_task(listener.wait_one(0.3))
     try:
