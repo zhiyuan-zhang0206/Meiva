@@ -29,7 +29,7 @@ from base.cluster.machine import (
     GatewayApiTokenMissing,
     MachineIdentityReader,
     MachineRole,
-    daemon_acceptance,
+    accepted_digests,
     gateway_auth_headers,
 )
 from base.cluster.machine.ambient import gateway_access_from_settings
@@ -450,19 +450,29 @@ def test_ops_bind_follows_the_declared_reachable_address(
 def test_ops_without_a_secret_or_capability_refuses_to_serve(gateway: Path) -> None:
     _ = gateway
     with pytest.raises(ClusterSecretMissingError):
-        daemon_acceptance(_access(secret="", token=None), home=meiva_home())
+        accepted_digests(
+            _access(secret="", token=None), home=meiva_home(), unit=None, generation=frozenset()
+        )
     # A remote-managed plane keeps no generations: its gateway presents the human secret.
-    assert daemon_acceptance(
-        replace(_access(secret=_HUMAN, token=None), remote_plane=True), home=meiva_home()
+    assert accepted_digests(
+        replace(_access(secret=_HUMAN, token=None), remote_plane=True),
+        home=meiva_home(),
+        unit=None,
+        generation=frozenset(),
     ) == frozenset({api.token_digest(_HUMAN)})
 
 
 # meiva:note
 # The acceptance is read from the home it is handed, and a relative one would name whatever
 # directory the daemon happens to run in, so it is refused before anything is read.
-def test_daemon_acceptance_refuses_a_relative_home() -> None:
+def test_accepted_digests_refuses_a_relative_home() -> None:
     with pytest.raises(ValueError, match="absolute home"):
-        daemon_acceptance(_access(secret=_HUMAN, token=None), home=Path("unit/home"))
+        accepted_digests(
+            _access(secret=_HUMAN, token=None),
+            home=Path("unit/home"),
+            unit=None,
+            generation=frozenset(),
+        )
 
 
 @pytest.fixture
