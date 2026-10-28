@@ -11,11 +11,25 @@ import os
 import stat
 from pathlib import Path
 
-__all__ = ["dir_refusal", "ensure_private_dir", "is_foreign_owned", "private_path_error"]
+__all__ = [
+    "dir_refusal",
+    "ensure_private_dir",
+    "foreign_owned",
+    "is_foreign_owned",
+    "private_path_error",
+]
 
 
 def private_path_error(path: Path, reason: str) -> RuntimeError:
     return RuntimeError(f"private storage path {path} {reason}")
+
+
+# meiva:note
+# Whether `current` belongs to someone other than `euid`. The one spelling of the
+# ownership rule; a caller that holds the id passes it (`foreign_owned`), and the
+# ambient form below is for a composition root that reads its own.
+def foreign_owned(current: os.stat_result, *, euid: int) -> bool:
+    return current.st_uid != euid
 
 
 def is_foreign_owned(current: os.stat_result, *, euid: int | None = None) -> bool:
@@ -25,7 +39,7 @@ def is_foreign_owned(current: os.stat_result, *, euid: int | None = None) -> boo
     with a foreign gid (chgrp'd leftover) is still repairable, and skipping
     it would strand a 0o644 file as group-readable.
     """
-    return current.st_uid != (os.geteuid() if euid is None else euid)
+    return foreign_owned(current, euid=os.geteuid() if euid is None else euid)
 
 
 def dir_refusal(current: os.stat_result, *, euid: int | None = None) -> str | None:

@@ -34,7 +34,10 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
     """Own function-local config overlays and identity caches for this invocation.
 
     The host is inert: it finds no program and runs no command, so a test that reaches for the
-    host must say what the host answers (`fake_host(...)`). The user's session is a zsh login
+    host must say what the host answers (`fake_host(...)`). Its `uid` is this process's real
+    effective user, because a step that converges a private tree compares the files it just
+    created against it — a canned id makes every test-created node look foreign-owned.
+    The user's session is a zsh login
     with no terminal whose home is `tmp_path / "user"`, so a step that wires the user's account
     writes under the test's own directory. The terminal is three empty streams that are not
     ttys, so a command that asks a person a question finds nobody to answer.
@@ -47,7 +50,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
         home=meiva_home(),
         machine=ConfiguredMachineIdentity(config),
         helper=refuse_helper,
-        host=fake_host(),
+        host=fake_host(uid=os.geteuid()),
         session=UserSession(user_home=tmp_path / "user", login_shell="/bin/zsh", interactive=False),
         timers=timers,
         rng=seeded_rng(),
