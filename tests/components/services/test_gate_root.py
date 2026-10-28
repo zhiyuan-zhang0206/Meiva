@@ -74,6 +74,7 @@ async def test_gate_native_child_readiness_restart_and_stop(short_tmp: Path) -> 
     )
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=3),
         clock=Clock(

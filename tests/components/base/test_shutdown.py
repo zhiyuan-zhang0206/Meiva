@@ -117,6 +117,7 @@ async def test_root_graceful_stop_runs_the_product_handlers_cleanup(unit_home: P
     unit = UnitManifest("svc", command, RestartPolicy.NEVER, "root", env)
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=unit_home / "root",
         config=SupervisorConfig(stop_timeout_s=10),
         clock=Clock(

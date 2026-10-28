@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,6 @@ import psutil
 from base.clock import Clock
 from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
-from base.native_process.child_env import inherited_process_env
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.root_control.ipc import (
@@ -82,6 +81,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         run_dir: Path,
         clock: Clock,
         root_pid: int,
+        environ: Mapping[str, str],
         config: SupervisorConfig | None = None,
         spawn: ChildSpawn | None = None,
         process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
@@ -90,13 +90,16 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._clock = clock
         self._root_pid = root_pid
         # meiva:note
-        # The child-process launcher. None means `asyncio.create_subprocess_exec`;
-        # a deployment assembly (`--wiring`) may install its own before start.
+        # The child-process launcher. None means `asyncio.create_subprocess_exec`; a deployment
+        # assembly (`--wiring`) may install its own before start. `environ` is what every child
+        # starts from, read once by the entry (a `--wiring` loaded after construction cannot change
+        # it); each manifest overlays its own names.
         self.spawn: ChildSpawn | None = spawn
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
         self._process_control = process_control
+        self._environ = environ
         # meiva:note
         # Opaque launch rewriting from the assembly; None launches the manifest as written.
         self._argv_transform: ArgvTransform | None = None
@@ -642,7 +645,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         )
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
-            env = inherited_process_env() | dict(manifest.env)
+            env = dict(self._environ) | dict(manifest.env)
             launcher = self.spawn or asyncio.create_subprocess_exec
             plain = list(manifest.exec)
             argv = (

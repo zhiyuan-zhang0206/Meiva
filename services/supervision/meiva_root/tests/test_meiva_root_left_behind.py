@@ -40,6 +40,7 @@ def _root(run_dir: Path, *scenario: str, stop_timeout_s: float = 0.2) -> Supervi
     )
     return Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=stop_timeout_s),
         clock=system_clock(),

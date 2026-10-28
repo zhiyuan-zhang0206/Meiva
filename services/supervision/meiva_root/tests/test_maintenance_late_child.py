@@ -21,6 +21,7 @@ def _supervisor(run_dir: Path, *scenario: str) -> Supervisor:
     )
     return Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=1.0),
         clock=system_clock(),
