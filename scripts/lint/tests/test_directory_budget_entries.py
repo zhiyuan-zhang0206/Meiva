@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from base.host.proc import run_bounded
-from meizel.budgets import directory_budget
+from meizel.budgets import budget_plans
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
@@ -47,7 +47,7 @@ def _module(path: pathlib.Path) -> None:
 
 def test_a_meizel_manifest_is_not_a_directory_entry() -> None:
     listing = "".join(f"pkg/m{i}.py\0" for i in range(3)) + "pkg/meizel.toml\0meizel.toml\0"
-    children = directory_budget.tracked_children(listing)
+    children = budget_plans.tracked_children(listing)
     assert children["pkg"] == {"m0.py", "m1.py", "m2.py"}
     assert children[""] == {"pkg"}
 
