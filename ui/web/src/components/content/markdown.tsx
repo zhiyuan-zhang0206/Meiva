@@ -1,41 +1,41 @@
 // meiva:note
-// ChatMarkdown is a lazy boundary: the renderer (the react-markdown chain) is a deferred chunk, so route bundles carry only the boundary and a cold first paint shows the same content as plain text inside the shared chat-md wrapper. A resolved renderer renders Markdown on the first paint; a pending one upgrades the mounted tree when it arrives, and a superseded or unmounted attempt never writes back. Prefetch starts when the boundary module evaluates and is shared and deduplicated by one module-level promise; a rejected load clears the cache, keeps the fallback, and the next attempt retries.
+// ChatMarkdown is a lazy boundary: the renderer (the react-markdown chain) is a deferred chunk, so route bundles carry only the boundary and a cold first paint shows the same content as plain text inside the shared chat-md wrapper. A resolved renderer renders Markdown on the first paint; a pending one upgrades the mounted tree when it arrives, and a superseded or unmounted attempt never writes back. Prefetch starts when the boundary module evaluates; one chunk deduplicates that import for every surface, a rejected load drops the attempt so the next one retries, and the fallback stays in place until it succeeds.
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { createLazyChunk, type LazyChunk } from "@/components/content/lazy-chunk";
 import type { ChatMarkdownProps, ChatMarkdownRenderer } from "@/components/content/markdown-renderer";
 import { cn } from "@/lib/format/utils";
 import { MIN_W_0 } from "@/lib/layout/layout";
 
 type Renderer = typeof ChatMarkdownRenderer;
 
-let importRenderer: () => Promise<Renderer> = () =>
-  import("@/components/content/markdown-renderer").then((module) => module.ChatMarkdownRenderer);
-let rendererPromise: Promise<Renderer> | null = null;
-let resolvedRenderer: Renderer | null = null;
+const defaultRendererChunk: LazyChunk<Renderer> = createLazyChunk({
+  name: "chat-markdown",
+  importModule: () =>
+    import("@/components/content/markdown-renderer").then((module) => module.ChatMarkdownRenderer),
+});
 
-function loadChatMarkdownRenderer(): Promise<Renderer> {
-  if (rendererPromise !== null) return rendererPromise;
-  const promise = importRenderer()
-    .then((Renderer) => {
-      if (rendererPromise === promise) resolvedRenderer = Renderer;
-      return Renderer;
-    })
-    .catch((error: unknown) => {
-      if (rendererPromise === promise) rendererPromise = null;
-      throw error;
-    });
-  rendererPromise = promise;
-  return promise;
+const RendererChunkContext = createContext<LazyChunk<Renderer>>(defaultRendererChunk);
+
+export function ChatMarkdownRendererProvider({
+  value,
+  children,
+}: {
+  value: LazyChunk<Renderer>;
+  children: ReactNode;
+}) {
+  return <RendererChunkContext.Provider value={value}>{children}</RendererChunkContext.Provider>;
+}
+
+export function useChatMarkdownRenderer(): LazyChunk<Renderer> {
+  return useContext(RendererChunkContext);
 }
 
 export function preloadChatMarkdown(): Promise<void> {
-  return loadChatMarkdownRenderer().then(
-    () => undefined,
-    () => undefined,
-  );
+  return defaultRendererChunk.preload();
 }
 
 if (typeof window !== "undefined") {
@@ -43,21 +43,22 @@ if (typeof window !== "undefined") {
 }
 
 export const ChatMarkdown = memo(function ChatMarkdown(props: ChatMarkdownProps) {
-  const [Renderer, setRenderer] = useState<Renderer | null>(() => resolvedRenderer);
+  const rendererChunk = useChatMarkdownRenderer();
+  const [Renderer, setRenderer] = useState<Renderer | null>(() => rendererChunk.peek());
 
   useEffect(() => {
     if (Renderer !== null) return;
     let active = true;
-    void loadChatMarkdownRenderer().then(
-      (Renderer) => {
-        if (active) setRenderer(() => Renderer);
+    void rendererChunk.load().then(
+      (loaded) => {
+        if (active) setRenderer(() => loaded);
       },
       () => undefined,
     );
     return () => {
       active = false;
     };
-  }, [Renderer]);
+  }, [Renderer, rendererChunk]);
 
   if (Renderer === null) return <PlainChatMarkdown content={props.content} inline={props.inline} />;
   return <Renderer {...props} />;
@@ -72,14 +73,4 @@ function PlainChatMarkdown({ content, inline }: { content: string; inline?: bool
       <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{content}</p>
     </div>
   );
-}
-
-export function __resetMarkdownCacheForTests(): void {
-  rendererPromise = null;
-  resolvedRenderer = null;
-}
-
-export function __setMarkdownImportForTests(loader: (() => Promise<Renderer>) | null): void {
-  importRenderer =
-    loader ?? (() => import("@/components/content/markdown-renderer").then((module) => module.ChatMarkdownRenderer));
 }

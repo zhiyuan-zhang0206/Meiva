@@ -1,56 +1,64 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { memo, type ReactElement } from "react";
 
-import {
-  ChatMarkdown,
-  __resetMarkdownCacheForTests,
-  __setMarkdownImportForTests,
-  preloadChatMarkdown,
-} from "./markdown";
-import { ChatMarkdownRenderer } from "./markdown-renderer";
+import { createLazyChunk, type LazyChunk } from "./lazy-chunk";
+import { ChatMarkdown, ChatMarkdownRendererProvider } from "./markdown";
+import type { ChatMarkdownProps, ChatMarkdownRenderer } from "./markdown-renderer";
 
 type Renderer = typeof ChatMarkdownRenderer;
 
-beforeEach(() => {
-  __resetMarkdownCacheForTests();
-});
+const FakeRenderer = memo(({ content }: ChatMarkdownProps) => (
+  <strong data-testid="fake-renderer">{content}</strong>
+));
+
+function chunkOf(
+  importModule: () => Promise<Renderer>,
+  report: (message: string) => void = vi.fn(),
+): LazyChunk<Renderer> {
+  return createLazyChunk({ name: "test-markdown", importModule, report });
+}
+
+function renderWith(chunk: LazyChunk<Renderer>, ui: ReactElement) {
+  return render(<ChatMarkdownRendererProvider value={chunk}>{ui}</ChatMarkdownRendererProvider>);
+}
 
 afterEach(() => {
   cleanup();
-  __setMarkdownImportForTests(null);
 });
 
 describe("ChatMarkdown lazy boundary", () => {
-  it.each([false, true])("upgrades the lazy fallback to markdown with inline=%s", async (inline) => {
+  it.each([false, true])("upgrades the lazy fallback to the renderer with inline=%s", async (inline) => {
     let resolveImport: (renderer: Renderer) => void = () => undefined;
     const pending = new Promise<Renderer>((resolve) => {
       resolveImport = resolve;
     });
-    __setMarkdownImportForTests(() => pending);
+    const chunk = chunkOf(() => pending);
 
-    const { container } = render(<ChatMarkdown content="**bold** text" inline={inline} />);
+    const { container } = renderWith(chunk, <ChatMarkdown content="**bold** text" inline={inline} />);
 
     const fallback = screen.getByTestId("chat-markdown-plain");
     expect(fallback.textContent).toBe("**bold** text");
     expect(fallback.classList.contains("chat-md")).toBe(true);
     expect(fallback.tagName).toBe(inline ? "SPAN" : "DIV");
-    expect(container.querySelector("strong")).toBeNull();
+    expect(screen.queryByTestId("fake-renderer")).toBeNull();
 
-    resolveImport(ChatMarkdownRenderer);
+    resolveImport(FakeRenderer);
 
     await waitFor(() => {
-      expect(container.querySelector("strong")?.textContent).toBe("bold");
+      expect(screen.getByTestId("fake-renderer").textContent).toBe("**bold** text");
     });
     expect(screen.queryByTestId("chat-markdown-plain")).toBeNull();
     if (inline) expect(container.querySelector("div, p, pre")).toBeNull();
   });
 
-  it("renders markdown on the first paint when the renderer was already prefetched", async () => {
-    await preloadChatMarkdown();
+  it("renders through the resolved renderer on the first paint when the chunk was already prefetched", async () => {
+    const chunk = chunkOf(() => Promise.resolve(FakeRenderer));
+    await chunk.preload();
 
-    const { container } = render(<ChatMarkdown content="**bold** text" />);
+    renderWith(chunk, <ChatMarkdown content="**bold** text" />);
 
-    expect(container.querySelector("strong")?.textContent).toBe("bold");
+    expect(screen.getByTestId("fake-renderer").textContent).toBe("**bold** text");
     expect(screen.queryByTestId("chat-markdown-plain")).toBeNull();
   });
 
@@ -62,22 +70,28 @@ describe("ChatMarkdown lazy boundary", () => {
     process.on("unhandledRejection", onUnhandledRejection);
 
     try {
-      __setMarkdownImportForTests(() => Promise.reject(new Error("chunk load failed")));
+      let attempts = 0;
+      const chunk = chunkOf(() => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject(new Error("chunk load failed"))
+          : Promise.resolve(FakeRenderer);
+      });
 
-      const first = render(<ChatMarkdown content="**bold** text" />);
+      const first = renderWith(chunk, <ChatMarkdown content="**bold** text" />);
       expect(screen.getByTestId("chat-markdown-plain")).toBeDefined();
 
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(first.container.querySelector("strong")).toBeNull();
+      expect(screen.queryByTestId("fake-renderer")).toBeNull();
       expect(screen.getByTestId("chat-markdown-plain")).toBeDefined();
       first.unmount();
 
-      __setMarkdownImportForTests(null);
-      await preloadChatMarkdown();
+      await chunk.preload();
+      expect(attempts).toBe(2);
 
-      const retry = render(<ChatMarkdown content="**bold** text" />);
-      expect(retry.container.querySelector("strong")?.textContent).toBe("bold");
+      renderWith(chunk, <ChatMarkdown content="**bold** text" />);
+      expect(screen.getByTestId("fake-renderer").textContent).toBe("**bold** text");
     } finally {
       process.off("unhandledRejection", onUnhandledRejection);
     }
