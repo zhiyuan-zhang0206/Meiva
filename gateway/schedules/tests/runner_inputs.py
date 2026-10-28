@@ -1,3 +1,4 @@
+import threading
 from contextlib import closing
 from functools import partial
 
@@ -65,5 +66,6 @@ def run_schedule(
                 ),
                 policy=policy,
                 home=meiva_home(),
+                main_thread_id=threading.get_ident(),
             ),
         )

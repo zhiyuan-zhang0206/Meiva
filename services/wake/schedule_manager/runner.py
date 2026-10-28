@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import random
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -107,6 +108,10 @@ def run(schedule_id: int, revision: int | None = None) -> int:
                 policy=StallPolicy(timeout_s=config.view.gateway.schedule_stall_timeout_seconds),
                 home=home,
                 pid=os.getpid(),
+                # meiva:note
+                # This process entry records the thread the guard must watch once, before it
+                # hands the runner to the engine.
+                main_thread_id=threading.get_ident(),
             ),
         )
     except BaseException as exc:

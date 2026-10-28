@@ -14,6 +14,7 @@
 # module loads.
 
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -112,6 +113,7 @@ def completion_during_stall(schedule_id: int) -> None:
         plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
         policy=StallPolicy(timeout_s=_BUDGET_S, record_deadline_s=_RECORD_DEADLINE_S),
         home=meiva_home(),
+        main_thread_id=threading.get_ident(),
     )
     raise SystemExit(engine.run(schedule_id, None, root))
 

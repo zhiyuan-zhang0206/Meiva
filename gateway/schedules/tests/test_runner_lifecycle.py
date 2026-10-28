@@ -23,7 +23,11 @@ from services.wake.schedule_manager.stall_policy import StallPolicy
 
 def test_closing_a_guard_that_never_stalled_ends_its_thread(database_gate: ProcessDbGate) -> None:
     guard = engine.StallGuard(
-        Database.from_settings(gate=database_gate), 1, None, policy=StallPolicy(timeout_s=3600.0)
+        Database.from_settings(gate=database_gate),
+        1,
+        None,
+        policy=StallPolicy(timeout_s=3600.0),
+        main_thread_id=threading.get_ident(),
     )
 
     guard.close()
