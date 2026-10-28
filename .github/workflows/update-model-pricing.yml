@@ -99,7 +99,7 @@ jobs:
         run: |
           if git -C "$CANDIDATE" diff --quiet -- \
             base/lm/pricing/pricing_catalog_archive.json \
-            ':(glob)meiva_builtins/plugins/lm_*/provider.py'; then
+            ':(glob)meiva_builtins/plugins/lm_*/*.py'; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -115,7 +115,7 @@ jobs:
           git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C "$CANDIDATE" add \
             base/lm/pricing/pricing_catalog_archive.json \
-            ':(glob)meiva_builtins/plugins/lm_*/provider.py'
+            ':(glob)meiva_builtins/plugins/lm_*/*.py'
           git -C "$CANDIDATE" commit -m 'fix: update model pricing'
           git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
 
@@ -141,7 +141,7 @@ jobs:
 
           ```text
           base/lm/pricing/pricing_catalog_archive.json      (M when changed) ★ effective-dated rates and provenance
-          meiva_builtins/plugins/lm_*/provider.py       (M when changed) ★ synchronized runtime PriceRates
+          meiva_builtins/plugins/lm_*/*.py              (M when changed) ★ synchronized runtime PriceRates
           ```
 
           ## Data flow

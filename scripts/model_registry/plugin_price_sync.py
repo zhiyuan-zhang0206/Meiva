@@ -1,8 +1,10 @@
 # meiva:note
 # Archive-to-provider source synchronization. The archive is the reviewed ledger; a built-in
 # provider's ``PriceRates`` must carry the period, tier and window lattice the archive states
-# for its model. ``plugin_price_source`` owns what a ``provider.py`` declares; this module
-# owns how the archive reconciles it and how a rewrite lands back in the source.
+# for its model. ``plugin_price_source`` owns what a provider package declares; this module
+# owns how the archive reconciles it and how a rewrite lands back in the source. A provider is
+# one declaration unit — its ``provider.py`` face plus any sibling module the face names — so a
+# rewrite lands in the file that holds each price, not always in ``provider.py``.
 # Synchronization preserves the complete lattice: effective periods, input-token tiers and
 # recurring UTC windows. The flat ``PriceRates`` fields remain the base tier covering the
 # synchronization instant.
@@ -31,7 +33,7 @@ from scripts.model_registry.plugin_price_source import (
     WindowDeclaration,
     collapse_flat_periods,
     imported_names,
-    provider_manifest,
+    unit_manifest,
     validated_provenance,
 )
 
@@ -45,9 +47,13 @@ class PluginSyncResult(NamedTuple):
 
 
 # meiva:note
-# What one read-only comparison covered, and which declarations disagree with the archive.
+# What one read-only comparison covered, and which declarations disagree with the archive. A face
+# is one provider package; the sources are the files behind those faces, because one face may
+# spread its declarations over several. Both are reported: a count that cannot move on its own
+# would hide a sibling module the reader stopped reaching.
 class LatticeDrift(NamedTuple):
-    provider_files: int
+    provider_faces: int
+    scanned_sources: int
     priced_models: int
     drifted: tuple[str, ...]
 
@@ -365,6 +371,12 @@ def rewrite_provider(
     drifted: list[str] = []
     drifted_periods: list[str] = []
     for model, declared in manifest.prices.items():
+        node = manifest.price_nodes[model]
+        if node.path != path:
+            # meiva:note
+            # This file declares the model but not its price: a sibling module of the same
+            # provider holds that row, and its own rewrite handles it.
+            continue
         target = targets[model]
         if (declared.source_url, declared.vendor) != (target.source_url, target.vendor):
             raise RuntimeError(f"{path}: {model!r} source_url/vendor drift requires human review")
@@ -373,9 +385,8 @@ def rewrite_provider(
             continue
         drifted.append(model)
         drifted_periods.extend(labels)
-        node = manifest.price_nodes[model]
-        start, end = _call_offsets(source, node, path=path)
-        replacements.append((start, end, _render_price(target, _entry_indent(source, node))))
+        start, end = _call_offsets(source, node.node, path=path)
+        replacements.append((start, end, _render_price(target, _entry_indent(source, node.node))))
     if replacements:
         imported = imported_names(source, path)
         rendered: set[str] = set()
@@ -391,14 +402,34 @@ def rewrite_provider(
     rewritten = source
     for start, end, replacement in sorted(replacements, reverse=True):
         rewritten = rewritten[:start] + replacement + rewritten[end:]
-    round_trip = provider_manifest(rewritten, path)
+    round_trip = unit_manifest({**manifest.sources, path: rewritten})
     if round_trip.models != manifest.models or round_trip.prices.keys() != manifest.prices.keys():
         raise RuntimeError(f"{path}: rewrite changed the registered model or pricing set")
-    for model, target in targets.items():
-        if round_trip.prices[model] != target:
+    for model in drifted:
+        if round_trip.prices[model] != targets[model]:
             raise RuntimeError(f"{path}: {model!r} did not round-trip to the archive price")
     ast.parse(rewritten, filename=str(path))
     return rewritten, tuple(drifted), tuple(drifted_periods)
+
+
+def _provider_units(root: Path) -> list[Path]:
+    return [
+        package
+        for package in sorted((root / "meiva_builtins/plugins").glob("lm_*"))
+        if (package / "provider.py").is_file()
+    ]
+
+
+# meiva:note
+# One provider package's sources, its ``provider.py`` face first then its siblings: the face
+# orders the declarations every report lists, and each sibling is read by the same gate.
+def _unit_sources(package: Path, root: Path) -> dict[Path, str]:
+    ordered = sorted(package.glob("*.py"), key=lambda path: (path.stem != "provider", path.name))
+    sources: dict[Path, str] = {}
+    for candidate in ordered:
+        path = _regular_file(candidate, root, label="provider source")
+        sources[path] = path.read_text(encoding="utf-8")
+    return sources
 
 
 def _regular_file(path: Path, root: Path, *, label: str) -> Path:
@@ -469,8 +500,8 @@ def sync_plugin_rates(
     root = repo_root.resolve(strict=True)
     archive = _regular_file(archive_path, root, label="pricing archive")
     archive_models = _load_archive_models(archive)
-    provider_paths = sorted((root / "meiva_builtins/plugins").glob("lm_*/provider.py"))
-    if not provider_paths:
+    units = _provider_units(root)
+    if not units:
         raise RuntimeError(f"no built-in provider.py files found under {root}")
 
     plans: list[tuple[Path, str]] = []
@@ -479,16 +510,23 @@ def sync_plugin_rates(
     future_notes: list[tuple[str, str, FlatRates]] = []
     seen_models: set[str] = set()
     failures: list[str] = []
-    for candidate in provider_paths:
-        path = _regular_file(candidate, root, label="provider source")
-        source = path.read_text(encoding="utf-8")
+    for package in units:
+        sources = _unit_sources(package, root)
+        label = next(iter(sources))
+        drifted: list[str] = []
         try:
-            manifest = provider_manifest(source, path)
-            _reject_duplicate_prices(seen_models, manifest, path=path)
-            targets, notes = _plugin_targets(manifest, archive_models, path=path, now=now)
-            rewritten, drifted, differing_periods = rewrite_provider(
-                source, path, manifest, targets
-            )
+            manifest = unit_manifest(sources)
+            _reject_duplicate_prices(seen_models, manifest, path=label)
+            targets, notes = _plugin_targets(manifest, archive_models, path=label, now=now)
+            differing_periods: list[str] = []
+            for path, source in sources.items():
+                rewritten, file_drifted, file_periods = rewrite_provider(
+                    source, path, manifest, targets
+                )
+                drifted.extend(file_drifted)
+                differing_periods.extend(file_periods)
+                if file_drifted:
+                    plans.append((path, rewritten))
         except (RuntimeError, TypeError) as exc:
             failures.append(str(exc))
             print(f"- NOT synchronized: {exc}", file=sys.stderr)
@@ -497,17 +535,15 @@ def sync_plugin_rates(
         future_notes.extend(notes)
         drifted_models.extend(drifted)
         drifted_periods.extend(differing_periods)
-        if drifted:
-            plans.append((path, rewritten))
         print(
-            f"- {path.relative_to(root)}: {', '.join(manifest.declarations)} — "
+            f"- {label.relative_to(root)}: {', '.join(manifest.declarations)} — "
             f"{len(manifest.prices)} priced model(s), "
             + (f"{len(drifted)} drifted" if drifted else "matches the archive")
         )
 
     if failures:
         raise RuntimeError(
-            f"{len(failures)} of {len(provider_paths)} provider file(s) could not be "
+            f"{len(failures)} of {len(units)} provider face(s) could not be "
             "synchronized, so no plugin rate was written:\n"
             + "\n".join(f"- {failure}" for failure in failures)
         )
@@ -537,22 +573,26 @@ def sync_plugin_rates(
 # and provenance must be what the archive states. The flat trio is the base tier at the last
 # synchronization instant, so comparing it would answer differently on different days while nothing
 # in the tree changed; it is compared only where it is the whole declaration, on a provider that
-# carries no periods. Zero provider files or zero priced models is an error, never a green run.
+# carries no periods. Zero provider faces, zero scanned sources or zero priced models is an
+# error, never a green run.
 # meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
 def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
     root = repo_root.resolve(strict=True)
     archive = _regular_file(archive_path, root, label="pricing archive")
     archive_models = _load_archive_models(archive)
-    provider_paths = sorted((root / "meiva_builtins/plugins").glob("lm_*/provider.py"))
-    if not provider_paths:
+    units = _provider_units(root)
+    if not units:
         raise RuntimeError(f"no built-in provider.py files found under {root}")
 
     drifted: list[str] = []
+    scanned_sources = 0
     priced_models = 0
     seen_models: set[str] = set()
-    for candidate in provider_paths:
-        path = _regular_file(candidate, root, label="provider source")
-        manifest = provider_manifest(path.read_text(encoding="utf-8"), path)
+    for package in units:
+        sources = _unit_sources(package, root)
+        scanned_sources += len(sources)
+        path = next(iter(sources))
+        manifest = unit_manifest(sources)
         _reject_duplicate_prices(seen_models, manifest, path=path)
         seen_models.update(manifest.prices)
         priced_models += len(manifest.prices)
@@ -579,4 +619,4 @@ def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
             drifted.extend(_period_labels(model, declared, target))
             if not declared.periods and not target.periods and declared.rates != base:
                 drifted.append(f"{model}: flat rate")
-    return LatticeDrift(len(provider_paths), priced_models, tuple(sorted(drifted)))
+    return LatticeDrift(len(units), scanned_sources, priced_models, tuple(sorted(drifted)))
