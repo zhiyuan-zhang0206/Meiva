@@ -4,35 +4,17 @@
 "use client";
 
 import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
-import type * as PrismReactRenderer from "prism-react-renderer";
 import type { Highlight as HighlightComponentType, PrismTheme } from "prism-react-renderer";
 
 import { CopyButton } from "@/components/content/copy-button";
 import { createLazyChunk, type LazyChunk } from "@/components/content/lazy-chunk";
 
-const REAL_IMPORT = () => import("prism-react-renderer");
+const defaultChunk: LazyChunk<typeof HighlightComponentType> = createLazyChunk({
+  name: "python-code",
+  importModule: () => import("prism-react-renderer").then((module) => module.Highlight),
+});
 
-// meiva:note
-// TEMPORARY (task #5732, blocked on #7548 merging): the import is a `let`, and the chunk behind the default provider is swappable, only so the two __…ForTests delegates at the bottom of this file keep serving the three test files whose rewrite waits on that PR. Production never swaps it; once that lands this collapses into one `const defaultChunk = createLazyChunk({ name, importModule: REAL_IMPORT })`.
-// meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
-let importHighlighterModule: () => Promise<typeof PrismReactRenderer> = REAL_IMPORT;
-
-function createHighlighterChunk(): LazyChunk<typeof HighlightComponentType> {
-  return createLazyChunk({
-    name: "python-code",
-    importModule: () => importHighlighterModule().then((module) => module.Highlight),
-  });
-}
-
-let defaultChunk = createHighlighterChunk();
-
-const activeChunk: LazyChunk<typeof HighlightComponentType> = {
-  peek: () => defaultChunk.peek(),
-  load: () => defaultChunk.load(),
-  preload: () => defaultChunk.preload(),
-};
-
-const HighlighterChunkContext = createContext<LazyChunk<typeof HighlightComponentType>>(activeChunk);
+const HighlighterChunkContext = createContext<LazyChunk<typeof HighlightComponentType>>(defaultChunk);
 
 export function PythonCodeHighlighterProvider({
   value,
@@ -159,17 +141,4 @@ function BlinkCursor() {
   return (
     <span className="inline-block w-1.5 h-3 ml-0.5 bg-foreground/70 animate-pulse align-middle" />
   );
-}
-
-// meiva:note
-// TEMPORARY (task #5732, blocked on #7548 merging): the pre-injection test seams as thin delegates onto the chunk above. Exactly three test files still call them (timeline/pinned-titles-autofollow.test.tsx, timeline/view/timeline-test-mock.tsx, app/control/schedules/page.test.tsx); #5732 deletes both, with the `let` and `activeChunk` indirection, once that PR has landed.
-// meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
-export function __resetHighlighterCacheForTests(): void {
-  defaultChunk = createHighlighterChunk();
-}
-
-export function __setHighlighterImportForTests(
-  fn: (() => Promise<typeof PrismReactRenderer>) | null,
-): void {
-  importHighlighterModule = fn ?? REAL_IMPORT;
 }
