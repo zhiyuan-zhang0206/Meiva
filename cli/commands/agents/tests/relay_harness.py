@@ -13,13 +13,19 @@ from typing import Any
 from uuid import UUID
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from cli.commands.agents.impersonation_adapters import RelayAdapter
 from cli.commands.agents.impersonation_relay import RelayLease, push_inbox
-from cli.commands.agents.relay.steps import RelayTuning
+from cli.commands.agents.relay.steps import ConnectionRetry, RelayTuning
+
+# meiva:note
+# A relay harness never waits: these tests drive the loop's decisions, and a retry budget would
+# only make a broken read slower. `ManualTimers` keeps the elapsed it reports off the wall clock.
+NO_RETRY = ConnectionRetry((), ManualTimers())
 
 __all__ = [
     "CSRF",
@@ -70,6 +76,7 @@ async def running(
     redis_url: str,
     adapter: RelayAdapter,
     tuning: RelayTuning = FAST,
+    retry: ConnectionRetry = NO_RETRY,
 ) -> AsyncGenerator[asyncio.Task[None], None]:
     listener = RedisInboundListener(
         redis_url, lease.agent_id, events_channel=event_bus.channel, timers=SYSTEM_TIMERS
@@ -83,6 +90,7 @@ async def running(
             adapter=adapter,
             tuning=tuning,
             clock=REAL_CLOCK,
+            retry=retry,
         )
     )
     try:
