@@ -32,7 +32,7 @@ from meizel.contracts.debt_symbol import (
 from meizel.contracts.manifest import load_manifests
 from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
-from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
+from meizel.graph.universe import MANIFEST, Checkout, Universe, parent_of
 
 __all__ = ["carry", "renames_since", "run_debt"]
 
@@ -52,12 +52,12 @@ def _join(owner: str, path: str) -> str:
     return f"{owner}/{path}" if owner else path
 
 
-def default_base(repo: GitRepo) -> str:
+def default_base(repo: Checkout) -> str:
     """The branch point with origin/main, or HEAD when there is no origin/main."""
     return repo.default_base()
 
 
-def renames_since(repo: GitRepo, base: str) -> dict[str, str]:
+def renames_since(repo: Checkout, base: str) -> dict[str, str]:
     """`old -> new` for the files git detects as renamed between `base` and the working tree."""
     if base.startswith("-"):
         raise MeizelError(f"{base}: not a git ref")
@@ -158,14 +158,14 @@ def _plan(
 
 
 def _check_move(
-    repo: GitRepo, base: str, universe: Universe, move: SymbolMove
+    repo: Checkout, base: str, universe: Universe, move: SymbolMove
 ) -> tuple[bytes, bytes]:
     """The old file at the base and the new file now, after checking that this is a move."""
     if move.new not in universe.files:
         raise MeizelError(
             f"{move.new} is not a file of the repository (missing, or ignored by git)"
         )
-    before, after = repo.show_bytes(base, move.old), universe.load_bytes(move.new)
+    before, after = repo.show_bytes(base, move.old), universe.repo.load_bytes(move.new)
     if repo.has_file(move.old) and defines(
         universe, move.old, repo.load_bytes(move.old), move.name
     ):
@@ -211,7 +211,7 @@ def _swap(
 
 
 def _move_symbols(
-    repo: GitRepo,
+    repo: Checkout,
     base: str,
     universe: Universe,
     tables: dict[str, DebtTable],
@@ -229,7 +229,7 @@ def _move_symbols(
 
 
 def carry(
-    repo: GitRepo,
+    repo: Checkout,
     base: str | None = None,
     rename_targets: list[str] | None = None,
     move_symbols: list[str] | None = None,
@@ -259,7 +259,7 @@ def carry(
     return lines
 
 
-def _run_diff(repo: GitRepo, ref: str, on_growth: str, args: argparse.Namespace) -> int:
+def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     rules_changed = (
         bool(args.waive_if_changed) and bool(changed_under(repo, ref, args.waive_if_changed))
     ) or purity_changed(repo, ref)
@@ -284,7 +284,7 @@ def _run_diff(repo: GitRepo, ref: str, on_growth: str, args: argparse.Namespace)
     return 1 if on_growth == "fail" else 0
 
 
-def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
+def _run_record(repo: Checkout, targets: list[str], jobs: int | None) -> int:
     written, created, unrecordable = record(repo, targets, jobs)
     for path in written:
         print(f"meizel: wrote {path}")
@@ -304,7 +304,7 @@ def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
     return 0
 
 
-def run_debt(repo: GitRepo, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
+def run_debt(repo: Checkout, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
     mode = args.debt_mode
     if mode is None:
         print(summarize(repo, as_json=args.json))

@@ -1,227 +1,42 @@
-"""The node universe: tracked files and their directories, from `git ls-files`."""
+# meiva:note
+# The node universe: tracked files, their directories, and module resolution.
+#
+# Data only. `meizel.checkout` builds one from a checkout, runs git for it, and reads the files the
+# universe names; nothing here touches the filesystem.
+# meiva:link meizel/docs/checker/purity.meiva.okf.md
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-from collections.abc import Collection, Generator
-from contextlib import contextmanager, suppress
+from collections.abc import Collection
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from meizel.graph.model import MeizelError
+from typing import Protocol
 
 __all__ = [
     "MANIFEST",
     "SOURCE_EXTENSIONS",
+    "Checkout",
     "EditPlan",
-    "GitRepo",
     "Module",
     "Universe",
     "is_private_module",
-    "load_universe",
     "parent_of",
-    "toplevel",
-    "tracked_files",
 ]
 
 MANIFEST = "meizel.toml"
 SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".mts", ".cts")
 
 
-def _read_text(path: Path) -> str:
-    return path.read_bytes().decode("utf-8")
-
-
-def _write_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-
-
-def _write_text(path: Path, text: str) -> None:
-    _write_bytes(path, text.encode("utf-8"))
-
-
-def _mkdtemp(root: Path, prefix: str) -> Path:
-    base = root.resolve().parent
-    for idx in range(100_000):
-        candidate = base / f".{prefix}{idx}"
-        try:
-            candidate.mkdir(mode=0o700)
-            return candidate
-        except FileExistsError:
-            continue
-    raise MeizelError("unable to allocate temporary directory")
-
-
-def _rmtree(root: Path) -> None:
-    for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-        base = Path(dirpath)
-        for name in filenames:
-            with suppress(OSError):
-                (base / name).unlink()
-        for name in dirnames:
-            sub = base / name
-            with suppress(OSError):
-                if sub.is_symlink():
-                    sub.unlink()
-                else:
-                    sub.rmdir()
-    with suppress(OSError):
-        root.rmdir()
-
-
+# meiva:note
+# What a command decided to write, delete or create; `meizel.checkout.apply_plan` does it.
 @dataclass(frozen=True, slots=True)
 class EditPlan:
     writes: dict[Path, str] = field(default_factory=dict[Path, str])
     byte_writes: dict[Path, bytes] = field(default_factory=dict[Path, bytes])
     deletes: tuple[Path, ...] = ()
     dirs: tuple[Path, ...] = ()
-
-    def apply(self) -> None:
-        for directory in self.dirs:
-            directory.mkdir(parents=True, exist_ok=True)
-        for path, text in self.writes.items():
-            _write_text(path, text)
-        for path, data in self.byte_writes.items():
-            _write_bytes(path, data)
-        for path in self.deletes:
-            path.unlink()
-
-
-@dataclass(frozen=True, slots=True)
-class GitRepo:
-    root: Path
-
-    def has_file(self, rel: str) -> bool:
-        return (self.root / rel).is_file()
-
-    def load_text(self, rel: str, *, default: str | None = None) -> str:
-        full = self.root / rel
-        if default is not None and not full.is_file():
-            return default
-        return _read_text(full)
-
-    def load_bytes(self, rel: str) -> bytes:
-        return (self.root / rel).read_bytes()
-
-    def run_text(self, *args: str) -> str:
-        # meiva:note
-        # Fixed git argv against the checkout root without invoking a shell.
-        result = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.root), *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise MeizelError(f"git {args[0]} failed: {result.stderr.strip()}")
-        return result.stdout
-
-    def run_bytes(self, *args: str, stdin: bytes | None = None) -> bytes:
-        # meiva:note
-        # Fixed git argv for binary streams against the checkout root without invoking a shell.
-        result = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.root), *args],
-            input=stdin,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise MeizelError(
-                f"git {args[0]} failed: {result.stderr.decode(errors='replace').strip()}"
-            )
-        return result.stdout
-
-    def default_base(self) -> str:
-        # meiva:note
-        # Resolves the branch point with origin/main using a fixed git merge-base argv.
-        result = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.root), "merge-base", "HEAD", "origin/main"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return result.stdout.strip() if result.returncode == 0 else "HEAD"
-
-    def show_optional_text(self, ref: str, path: str) -> str | None:
-        # meiva:note
-        # Reads a tracked blob from a git ref using a fixed git show argv after rejecting flag refs.
-        if ref.startswith("-"):
-            raise MeizelError(f"{ref}: not a git ref")
-        result = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.root), "show", f"{ref}:{path}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return result.stdout if result.returncode == 0 else None
-
-    def show_bytes(self, ref: str, path: str) -> bytes:
-        return self.run_text("show", f"{ref}:{path}").encode()
-
-    def stage_all(self) -> None:
-        self.run_bytes("add", "-A")
-
-    def grep_files(self, marker: str, suffixes: tuple[str, ...]) -> list[str]:
-        # meiva:note
-        # Lists tracked files containing a fixed marker via git grep without invoking a shell.
-        done = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.root), "grep", "-l", "-F", marker, "--", "."],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if done.returncode not in (0, 1):
-            raise MeizelError(f"git grep failed: {done.stderr.strip()}")
-        return sorted(
-            p
-            for p in done.stdout.splitlines()
-            if p.endswith(suffixes) and not p.startswith("meizel/")
-        )
-
-    def grep_words(self, words: Collection[str], suffix: str) -> list[str]:
-        # meiva:note
-        # Lists tracked files with the given suffix that contain any of the words as a whole word,
-        # via git grep with a fixed argv and without invoking a shell.
-        if not words:
-            return []
-        patterns = [arg for word in sorted(words) for arg in ("-e", word)]
-        done = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.root), "grep", "-l", "-w", "-F", *patterns, "--", f"*{suffix}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if done.returncode not in (0, 1):
-            raise MeizelError(f"git grep failed: {done.stderr.strip()}")
-        return sorted(done.stdout.splitlines())
-
-    # meiva:note
-    # The file index of this checkout: the tracked regular files and the directories above them.
-    # Built here, where the repository is read, so a caller holds the value instead of a path it
-    # would rebuild the index from.
-    def universe(self) -> Universe:
-        return load_universe(self.root)
-
-    @contextmanager
-    def checkout(self, ref: str) -> Generator[GitRepo]:
-        # meiva:note
-        # The same seat over a detached checkout of `ref`, removed on exit: a caller compares two
-        # trees by holding two seats, never by rebuilding one from a path it made.
-        if ref.startswith("-"):
-            raise MeizelError(f"{ref}: not a git ref")
-        parent = _mkdtemp(self.root, "meizel-base-")
-        target = parent / "base"
-        try:
-            self.run_bytes("worktree", "add", "--detach", str(target), ref)
-            try:
-                yield GitRepo(target)
-            finally:
-                self.run_bytes("worktree", "remove", "--force", str(target))
-        finally:
-            _rmtree(parent)
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,16 +62,42 @@ def parent_of(path: str) -> str:
     return path.rpartition("/")[0]
 
 
-def toplevel(cwd: Path) -> Path:
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise MeizelError(f"not inside a git checkout: {result.stderr.strip()}")
-    return Path(result.stdout.strip())
+# meiva:note
+# The checkout a decision layer works on: the root it reads and the files under it. The decision
+# modules of `meizel/contracts` take this handle and never build one, so what they decide stays
+# separable from the git and file reads that answer it; `meizel.checkout.GitRepo` is the one
+# implementation, and it is the shell that runs git for the universe.
+class Checkout(Protocol):
+    @property
+    def root(self) -> Path: ...
+
+    def has_file(self, rel: str) -> bool: ...
+
+    def load_text(self, rel: str, *, default: str | None = None) -> str: ...
+
+    def load_bytes(self, rel: str) -> bytes: ...
+
+    def run_text(self, *args: str) -> str: ...
+
+    def run_bytes(self, *args: str, stdin: bytes | None = None) -> bytes: ...
+
+    def default_base(self) -> str: ...
+
+    def show_optional_text(self, ref: str, path: str) -> str | None: ...
+
+    def show_bytes(self, ref: str, path: str) -> bytes: ...
+
+    def stage_all(self) -> None: ...
+
+    def apply_plan(self, plan: EditPlan) -> None: ...
+
+    def grep_files(self, marker: str, suffixes: tuple[str, ...]) -> list[str]: ...
+
+    def grep_words(self, words: Collection[str], suffix: str) -> list[str]: ...
+
+    def universe(self) -> Universe: ...
+
+    def checkout(self, ref: str) -> AbstractContextManager[Checkout]: ...
 
 
 class Universe:
@@ -266,7 +107,7 @@ class Universe:
         {"__init__.py", "index.ts", "index.tsx", "index.mts", "index.cts"}
     )
 
-    def __init__(self, repo: GitRepo, tracked: list[str]) -> None:
+    def __init__(self, repo: Checkout, tracked: list[str]) -> None:
         self.repo = repo
         self.root = repo.root
         self.files: frozenset[str] = frozenset(tracked)
@@ -336,38 +177,3 @@ class Universe:
             if p.endswith(ts_extensions) and any(p == s or p.startswith(f"{s}/") for s in ts_scopes)
         )
         return (*self.python_files, *ts)
-
-    def has_file(self, rel: str) -> bool:
-        return (self.root / rel).is_file()
-
-    def load_text(self, rel: str) -> str:
-        return _read_text(self.root / rel)
-
-    def load_bytes(self, rel: str) -> bytes:
-        return (self.root / rel).read_bytes()
-
-
-def _is_regular(root: Path, rel: str) -> bool:
-    full = root / rel
-    return full.is_file() and not full.is_symlink()
-
-
-# meiva:note
-# Fixed Git argv and NUL framing preserve tracked names containing whitespace or newlines.
-def tracked_files(repo_root: Path, *, include_untracked: bool = False) -> list[str]:
-    extra = ("--cached", "--others", "--exclude-standard") if include_untracked else ()
-    result = subprocess.run(  # noqa: S603
-        ["git", "-C", str(repo_root), "ls-files", "-z", *extra],
-        capture_output=True,
-        check=False,
-        timeout=30,
-    )
-    if result.returncode != 0:
-        raise MeizelError(f"git ls-files failed: {result.stderr.decode(errors='replace').strip()}")
-    return [path.decode() for path in result.stdout.split(b"\0") if path]
-
-
-def load_universe(root: Path) -> Universe:
-    return Universe(
-        GitRepo(root), sorted({path for path in tracked_files(root) if _is_regular(root, path)})
-    )
