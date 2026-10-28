@@ -55,17 +55,7 @@ vi.mock("@/lib/agents/sidebar", async () => {
     }),
   };
 });
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    patchAgentLabel: vi.fn().mockResolvedValue(undefined),
-    listAgents: vi.fn(() =>
-      Promise.resolve({
-        agents: state.agents.filter((a) => a.status === "terminated"),
-        next_cursor: null,
-      }),
-    ),
-  },
-}));
+
 vi.mock("@/lib/plugins/plugin-stats", async () => {
   const actual = await vi.importActual<typeof PluginStatsModule>("@/lib/plugins/plugin-stats");
   return {

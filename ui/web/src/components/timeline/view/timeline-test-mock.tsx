@@ -10,8 +10,8 @@ import {
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
 import { useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
-import { api } from "@/lib/transport/api";
-import { WallClockProvider } from "@/lib/transport/transport-context";
+import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
+import { transport } from "@/test-support/fake-api";
 
 notifyManager.setScheduler((cb) => {
   cb();
@@ -37,7 +37,9 @@ function realWallNow(): number {
 function TimelineQueryWrapper({ children }: { children: ReactNode }) {
   return (
     <WallClockProvider wallNow={realWallNow}>
-      <QueryClientProvider client={timelineQueryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={timelineQueryClient}>
+        <ApiProvider api={transport}>{children}</ApiProvider>
+      </QueryClientProvider>
     </WallClockProvider>
   );
 }
@@ -140,8 +142,11 @@ function buildSettingsSnapshot(): Record<string, unknown> {
 }
 
 function syncSettingsCache() {
-  vi.spyOn(api, "getSettings").mockImplementation(() => new Promise(() => undefined));
-  vi.spyOn(api, "getConfig").mockImplementation(() => new Promise(() => undefined));
+  // meiva:note
+  // The timeline reads settings through the transport; the cache below answers instead, and
+  // an unanswered read must not reach the network.
+  transport.getSettings.mockImplementation(() => new Promise(() => undefined));
+  transport.getConfig.mockImplementation(() => new Promise(() => undefined));
   act(() => {
     if (toggleState.isLoading) {
       timelineQueryClient.removeQueries({ queryKey: SETTINGS_QUERY_KEY });

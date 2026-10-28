@@ -10,22 +10,29 @@
 // lifecycle).
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import type { InventoryAggregate, InventoryWriteResult } from "@/lib/contracts/types";
 
 import InventoryPage from "./page";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
+
 
 const pushSpy = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
 
 afterEach(cleanup);
-// Each test spies on the shared `api` object — restore between tests so spy
-// call history (and stubbed impls) don't leak across cases.
+// meiva:note
+// Each test answers the fake's endpoints; reset between tests so one case's calls and
+// answers do not leak into the next.
 beforeEach(() => {
   vi.restoreAllMocks();
+  resetTransport();
   pushSpy.mockReset();
 });
 
@@ -95,7 +102,7 @@ const OK_RESULT: InventoryWriteResult = {
 
 describe("InventoryPage tri-state", () => {
   it("loading shows a spinner placeholder", () => {
-    vi.spyOn(api, "getInventory").mockReturnValue(
+    transport.getInventory.mockReturnValue(
       new Promise(() => undefined /* never resolves */),
     );
     wrap(<InventoryPage />);
@@ -104,7 +111,7 @@ describe("InventoryPage tri-state", () => {
   });
 
   it("error shows a quiet line, not the raw error", async () => {
-    vi.spyOn(api, "getInventory").mockRejectedValue(new Error("network down"));
+    transport.getInventory.mockRejectedValue(new Error("network down"));
     wrap(<InventoryPage />);
     // Both the Plugins and MCP matrices surface the same quiet line (one query,
     // two sections), so assert presence via getAllByText.
@@ -115,7 +122,7 @@ describe("InventoryPage tri-state", () => {
 
 describe("InventoryPage render", () => {
   it("renders both section headers + every item row", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
     await waitFor(() => screen.getByText("meiva_code"));
     expect(screen.getByText("Plugins")).toBeTruthy();
@@ -125,7 +132,7 @@ describe("InventoryPage render", () => {
   });
 
   it("machine columns appear as headers", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
     await waitFor(() => screen.getByText("meiva_code"));
     // Each machine appears as a header cell.
@@ -134,7 +141,7 @@ describe("InventoryPage render", () => {
   });
 
   it("N/M enabled chip reflects present+enabled over present", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
     await waitFor(() => screen.getByTestId("summary-meiva_code"));
     // meiva_code: enabled on h1, disabled on h2, present on both -> 1/2.
@@ -144,7 +151,7 @@ describe("InventoryPage render", () => {
   });
 
   it("not-installed cell shows — for a host lacking the item", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
     await waitFor(() => screen.getByText("only_h1"));
     // only_h1 has no h1/h2 toggle for the h2 column (not installed there).
@@ -154,7 +161,7 @@ describe("InventoryPage render", () => {
   });
 
   it("can't-enable cell is disabled and shows its reason as title", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
     const cell = await waitFor(() =>
       screen.getByTestId<HTMLButtonElement>(`cell-needs_display-${H1}`),
@@ -166,8 +173,8 @@ describe("InventoryPage render", () => {
 
 describe("InventoryPage toggle (putInventory)", () => {
   it("clicking an enabled cell calls putInventory with {plugins:{name:false}} + machine", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
-    const putSpy = vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
+    const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
     // meiva_code is enabled on h1 -> clicking turns it OFF.
     const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H1}`));
@@ -177,8 +184,8 @@ describe("InventoryPage toggle (putInventory)", () => {
   });
 
   it("clicking a disabled cell calls putInventory to enable it on that host", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
-    const putSpy = vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
+    const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
     // meiva_code is disabled on h2 -> clicking turns it ON.
     const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H2}`));
@@ -205,8 +212,8 @@ describe("InventoryPage toggle (putInventory)", () => {
         },
       ],
     };
-    vi.spyOn(api, "getInventory").mockResolvedValue(agg);
-    const putSpy = vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
+    transport.getInventory.mockResolvedValue(agg);
+    const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
     const cell = await waitFor(() =>
       screen.getByTestId<HTMLButtonElement>(`cell-needs_display-${H1}`),
@@ -220,8 +227,8 @@ describe("InventoryPage toggle (putInventory)", () => {
   });
 
   it("a settled write invalidates the inventory query", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
-    vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
+    transport.putInventory.mockResolvedValue(OK_RESULT);
     const qc = makeQc();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     wrap(<InventoryPage />, qc);
@@ -235,8 +242,8 @@ describe("InventoryPage toggle (putInventory)", () => {
   });
 
   it("enable-all fans out one putInventory per installed+enableable host", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
-    const putSpy = vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
+    transport.getInventory.mockResolvedValue(AGGREGATE);
+    const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
     // meiva_code: enabled on h1 (skipped — already target), disabled on h2 ->
     // exactly one PUT for h2.
@@ -251,8 +258,8 @@ describe("InventoryPage toggle (putInventory)", () => {
 // its OWN kind — the bug a shared component invites.
 describe("InventoryPage install entries", () => {
   it("the plugins entry posts kind=plugin and opens the installer's conversation", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
-    const draft = vi.spyOn(api, "draftPackage").mockResolvedValue({ agent_id: 61 });
+    transport.getInventory.mockResolvedValue(AGGREGATE);
+    const draft = transport.draftPackage.mockResolvedValue({ agent_id: 61 });
     wrap(<InventoryPage />);
 
     fireEvent.change(await screen.findByPlaceholderText(/Describe a plugin you want/), {
@@ -265,8 +272,8 @@ describe("InventoryPage install entries", () => {
   });
 
   it("the MCP entry posts kind=mcp", async () => {
-    vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
-    const draft = vi.spyOn(api, "draftPackage").mockResolvedValue({ agent_id: 62 });
+    transport.getInventory.mockResolvedValue(AGGREGATE);
+    const draft = transport.draftPackage.mockResolvedValue({ agent_id: 62 });
     wrap(<InventoryPage />);
 
     fireEvent.change(await screen.findByPlaceholderText(/Describe a tool you want to reach/), {
@@ -278,7 +285,7 @@ describe("InventoryPage install entries", () => {
   });
 
   it("both entries survive a failed inventory read", async () => {
-    vi.spyOn(api, "getInventory").mockRejectedValue(new Error("network down"));
+    transport.getInventory.mockRejectedValue(new Error("network down"));
     wrap(<InventoryPage />);
     await waitFor(() =>
       expect(screen.getAllByText(/Couldn't load inventory/).length).toBeGreaterThan(0),

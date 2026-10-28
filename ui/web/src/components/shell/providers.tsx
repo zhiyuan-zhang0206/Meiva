@@ -12,6 +12,7 @@ import { ToastHost } from "@/components/notifications/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
 import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
 import { API_BASE, ApiError, api } from "@/lib/transport/api";
+import type { Api } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
 import { systemStreamTransport } from "@/lib/transport/system-transport";
@@ -95,18 +96,20 @@ export function createQueryClient(): QueryClient {
   });
 }
 
-function RootContexts({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
-  const [transport] = useState(() => systemStreamTransport());
-  const wallNow = useCallback(() => transport.wallNow(), [transport]);
-  const [hub] = useState(
-    () => new StreamHub(
-      transport,
-      { checkAuth: () => api.checkAuth(), sessionInvalid: notifySessionInvalid },
-      API_BASE,
-    ),
-  );
+function RootContexts({
+  children,
+  nonce,
+  client,
+  hub,
+}: {
+  children: React.ReactNode;
+  nonce?: string;
+  client: Api;
+  hub: StreamHub;
+}) {
+  const wallNow = useCallback(() => hub.transport.wallNow(), [hub]);
   return (
-    <ApiProvider api={api}>
+    <ApiProvider api={client}>
       <StreamHubProvider hub={hub}>
         <WallClockProvider wallNow={wallNow}>
           <NonceProvider value={nonce}>{children}</NonceProvider>
@@ -116,10 +119,33 @@ function RootContexts({ children, nonce }: { children: React.ReactNode; nonce?: 
   );
 }
 
-export function Providers({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
+// meiva:note
+// The composition root: it builds the app's one gateway client and hands it to every reader
+// through <ApiProvider>. `client` names that input, so a test can compose the same tree with
+// its own fake instead of replacing the transport module.
+export function Providers({
+  children,
+  nonce,
+  client = api,
+  hub,
+}: {
+  children: React.ReactNode;
+  nonce?: string;
+  client?: Api;
+  hub?: StreamHub;
+}) {
   const [queryClient] = useState(() => createQueryClient());
+  const [streamHub] = useState(
+    () =>
+      hub ??
+      new StreamHub(
+        systemStreamTransport(),
+        { checkAuth: () => client.checkAuth(), sessionInvalid: notifySessionInvalid },
+        API_BASE,
+      ),
+  );
   return (
-    <RootContexts nonce={nonce}>
+    <RootContexts nonce={nonce} client={client} hub={streamHub}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <EventStreamProvider>

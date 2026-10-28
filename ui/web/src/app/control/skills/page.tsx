@@ -27,7 +27,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type { SkillLayer, SkillsView } from "@/lib/contracts/types";
@@ -35,6 +34,7 @@ import type { SkillLayer, SkillsView } from "@/lib/contracts/types";
 import { useSectionVisible } from "../visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
 
@@ -54,19 +54,20 @@ function layerLabel(layer: SkillLayer, t: ReturnType<typeof useTranslations<"ski
 }
 
 export default function SkillsPage() {
+  const client = useApi();
   const t = useTranslations("skills");
   const showToast = useStore((s) => s.showToast);
   const visible = useSectionVisible();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: SKILLS_QUERY_KEY,
-    queryFn: api.getSkills,
+    queryFn: client.getSkills,
     enabled: visible,
   });
 
   const toggleMutation = useMutation({
     mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
-      api.putSkillEnabled(name, enabled),
+      client.putSkillEnabled(name, enabled),
     // Without an onError the switch silently snapped back (invalidate pulled
     // the server truth) and the user never knew the toggle failed.
     onError: (err: unknown) => showToast(`Failed to toggle skill: ${errMsg(err)}`),

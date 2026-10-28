@@ -140,9 +140,13 @@ describe("useUserSettings", () => {
     });
   });
 
+  // meiva:note
+  // This case drives a real local server: the GET never answers and the PUT is released by
+  // hand. It waits for the PUT to arrive before releasing it, because a whole-suite run can
+  // delay the request past the optimistic flip; the budget is wide for the same reason.
   it("rolls back to defaults when the PUT fails before the initial GET resolves", async () => {
     let releasePut: (reply: GatewayReply) => void = () => undefined;
-    const { wrapper } = await setupSettingsGateway({
+    const { gateway, wrapper } = await setupSettingsGateway({
       onGet: () => ({ kind: "hang" }),
       onPut: () =>
         new Promise<GatewayReply>((resolve) => {
@@ -163,11 +167,19 @@ describe("useUserSettings", () => {
     });
 
     // …and the failed PUT rolls it back to the default, not a stuck true.
+    await waitFor(() => expect(gateway.requests.some((r) => r.method === "PUT")).toBe(true));
     releasePut({ kind: "json", status: 500, body: { detail: "Server error" } });
-    await waitFor(() => {
-      expect(result.current.settings["display.show_agent_status"]).toBe(false);
-    });
-  });
+    // meiva:note
+    // The GET is deliberately hanging, so the rollback can only be seen once the PUT's
+    // rejection lands. A whole-suite run (hundreds of files on one machine) pushes that
+    // past the default one-second wait; five seconds still fails a real regression.
+    await waitFor(
+      () => {
+        expect(result.current.settings["display.show_agent_status"]).toBe(false);
+      },
+      { timeout: 5_000 },
+    );
+  }, 20_000);
 
   it("caches settings and does not refetch on every call", async () => {
     const { gateway, wrapper } = await setupSettingsGateway();

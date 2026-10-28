@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import type {
   AgentMachineRow,
   ConfigView,
@@ -15,6 +14,8 @@ import type {
 } from "@/lib/contracts/types";
 
 import ConfigPage from "./page";
+import { resetTransport, transport } from "@/test-support/fake-api";
+import { ApiProvider } from "@/lib/transport/transport-context";
 
 const localStorageMock = (() => {
   const store = new Map<string, string>();
@@ -37,9 +38,16 @@ export function makeQc() {
   });
 }
 
+// meiva:note
+// The page reads its transport from <ApiProvider>, so the harness hands it the fake
+// the tests answer. Same provider the app mounts -- nothing replaces the module.
 export function wrap(ui: React.ReactElement, qc?: QueryClient) {
   const client = qc ?? makeQc();
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>
+      <ApiProvider api={transport}>{ui}</ApiProvider>
+    </QueryClientProvider>,
+  );
 }
 
 export async function renderSettled() {
@@ -324,19 +332,22 @@ export const RESOLVED: ResolvedConfigView = {
 
 
 export function setupConfigTest() {
+  // meiva:note
+  // restoreAllMocks + resetTransport: every test starts from unanswered endpoints, then
+  // this harness answers the reads a config page always makes.
   vi.restoreAllMocks();
+  resetTransport();
   localStorage.clear();
   vi.stubGlobal("requestIdleCallback", (cb: IdleRequestCallback) => {
     cb({ didTimeout: true, timeRemaining: () => 0 });
     return 0;
   });
   vi.stubGlobal("cancelIdleCallback", () => undefined);
-  vi.spyOn(api, "getMachines").mockResolvedValue(MACHINES);
-  vi.spyOn(api, "getSystemStatus").mockResolvedValue(STATUS);
-  vi.spyOn(api, "getModels").mockResolvedValue(MODELS);
-  vi.spyOn(api, "getResolvedConfig").mockResolvedValue(RESOLVED);
-
-  vi.spyOn(api, "getDefaultModel").mockResolvedValue({
+  transport.getMachines.mockResolvedValue(MACHINES);
+  transport.getSystemStatus.mockResolvedValue(STATUS);
+  transport.getModels.mockResolvedValue(MODELS);
+  transport.getResolvedConfig.mockResolvedValue(RESOLVED);
+  transport.getDefaultModel.mockResolvedValue({
     model: "deepseek-v4-pro",
     source: "cluster",
   });

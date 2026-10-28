@@ -1,20 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
+import { MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
 import { Composer } from "./composer";
-let commandList: { name: string; description: string; instruction_hint: string }[] = [];
-vi.mock("@/lib/transport/api", () => ({
-  MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
-    constructor(readonly clientMessageId: string) {
-      super("delivery unconfirmed");
-    }
-  },
-  api: {
-    getCommands: vi.fn((_agentId?: number | null) => Promise.resolve(commandList)),
-    getContextBreakdown: () =>
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getCommands.mockImplementation((_agentId?: number | null) => Promise.resolve(commandList));
+  transport.getContextBreakdown.mockImplementation(() =>
       Promise.resolve({
         total_input_tokens: 1000,
         estimated: false,
@@ -24,10 +20,12 @@ vi.mock("@/lib/transport/api", () => ({
         hard_compact_tokens: 800_000,
         sections: [],
         categories: [{ kind: "system_prompt", tokens: 1000, estimated: false, exact_fraction: 1 }],
-      }),
-  },
-}));
-const getCommandsMock = vi.mocked(api.getCommands);
+      }));
+});
+
+let commandList: { name: string; description: string; instruction_hint: string }[] = [];
+
+const getCommandsMock = transport.getCommands;
 beforeEach(() => {
   interactionTimingResetForTest();
   telemetryTestControl.reset();

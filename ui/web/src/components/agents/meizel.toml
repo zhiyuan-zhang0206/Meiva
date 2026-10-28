@@ -14,13 +14,6 @@ exports = ["agent-row.tsx", "spawn-form.tsx", "window-select.tsx"]
 [debt.ambient-read]
 "agent-row.tsx#clock Date" = 1
 
-[debt.first-party-patch]
-"agent-row-menu.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"agent-row.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"harness-picker.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"spawn-form-layouts.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"spawn-form.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-
 [debt.stdlib-patch]
 "agent-row-menu.test.tsx#vi.stubGlobal confirm" = 4
 

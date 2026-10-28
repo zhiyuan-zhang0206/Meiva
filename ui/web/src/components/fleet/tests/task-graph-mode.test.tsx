@@ -1,6 +1,6 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,13 @@ import { STATUS_TO_LANE } from "../task-kanban";
 import { STATUS_FILL, TASK_LEGEND_ENTRIES } from "../presentation/task-palette";
 import { TASK_FORCE_KEY } from "../task-graph-chrome";
 import { TaskGraph } from "../task-graph";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getTask.mockImplementation((id: number) => getTask(id));
+});
+
 
 // meiva:note
 // The hover card reads its one row through TanStack Query, so the hover tests
@@ -34,10 +41,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
-vi.mock("@/lib/transport/api", async (importOriginal) => {
-  const original = await importOriginal<{ api: Record<string, unknown> }>();
-  return { ...original, api: { ...original.api, getTask: (id: number) => getTask(id) } };
-});
 
 const useTasks = vi.fn<(...args: string[]) => TasksResult>();
 vi.mock("@/lib/notifications/use-tasks", () => ({
@@ -89,7 +92,6 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
-
 
 it("maps each task status into its Kanban lane", () => {
   expect(STATUS_TO_LANE.in_progress).toBe(0);

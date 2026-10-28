@@ -5,7 +5,6 @@ import { ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { api } from "@/lib/transport/api";
 import { categoryColor } from "@/lib/context-colors";
 import { errMsg } from "@/lib/contracts/errors";
 import { useTimeFormat } from "@/lib/format/use-time-format";
@@ -15,6 +14,7 @@ import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL } from "@/lib/layout/layout";
 
 import { SectionRows } from "./context-sections";
+import { useApi } from "@/lib/transport/transport-context";
 
 const CATEGORY_MESSAGE_KEY: Record<string, string> = {
   system_prompt: "categories.system_prompt",
@@ -57,12 +57,13 @@ export function ContextBreakdownCard({
   snapshot?: string;
   categoryHighlight?: CategoryHighlight;
 }) {
+  const client = useApi();
   const t = useTranslations("contextBreakdown");
   const { formatShort } = useTimeFormat();
   const pointed = at !== undefined;
   const point = useQuery({
     queryKey: ["run-timeline-context", agentId, at, snapshot] as const,
-    queryFn: () => snapshot === undefined ? api.getRunTimelineContext(agentId, at ?? 0) : api.getRunTimelineContext(agentId, at ?? 0, snapshot),
+    queryFn: () => snapshot === undefined ? client.getRunTimelineContext(agentId, at ?? 0) : client.getRunTimelineContext(agentId, at ?? 0, snapshot),
     enabled: pointed && at !== null,
     staleTime: 10_000,
 
@@ -110,9 +111,10 @@ export function ContextBreakdownBody({
   agentId: number;
   categoryHighlight?: CategoryHighlight;
 }) {
+  const client = useApi();
   const query = useQuery({
     queryKey: ["context-breakdown", agentId] as const,
-    queryFn: () => api.getContextBreakdown(agentId),
+    queryFn: () => client.getContextBreakdown(agentId),
     staleTime: 10_000,
 
     refetchOnMount: "always",

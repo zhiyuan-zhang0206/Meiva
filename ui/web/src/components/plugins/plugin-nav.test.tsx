@@ -5,16 +5,16 @@
 // the declared page path, and an entry must say which plugin put it there.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PluginNavIcons, PluginNavList } from "@/components/plugins/plugin-nav";
-import { api } from "@/lib/transport/api";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: { getUiContributions: vi.fn() },
-  API_BASE: "http://gateway.test:8000",
-}));
 
 const BOARD = {
   plugin: "board",
@@ -45,7 +45,7 @@ function renderNav(ui: React.ReactElement) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.getUiContributions).mockResolvedValue({
+  transport.getUiContributions.mockResolvedValue({
     themes: [],
     stats: [],
     nav: [BOARD, LEDGER, FLEET],
@@ -91,11 +91,11 @@ describe("plugin nav", () => {
   });
 
   it("renders nothing when no plugin declares an entry for the location", async () => {
-    vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [], stats: [] });
+    transport.getUiContributions.mockResolvedValue({ themes: [], nav: [], stats: [] });
 
     const { container } = renderNav(<PluginNavIcons location="fleet-toolbar" />);
 
-    await waitFor(() => expect(api.getUiContributions).toHaveBeenCalled());
+    await waitFor(() => expect(transport.getUiContributions).toHaveBeenCalled());
     expect(container.innerHTML).toBe("");
   });
 });

@@ -1,19 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import DisplaySettingsPage from "./page";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getSettings: vi.fn(),
-    putSetting: vi.fn(),
-    getModels: vi.fn(),
-    getUiContributions: vi.fn(),
-    getNotificationCategories: vi.fn(),
-  },
-}));
 
 function renderPage() {
   const qc = new QueryClient({
@@ -31,15 +26,15 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
-  vi.mocked(api.getModels).mockResolvedValue({ providers: {}, models: {}, default: "" });
-  vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [], stats: [] });
-  vi.mocked(api.getNotificationCategories).mockResolvedValue({ categories: [] });
+  transport.getSettings.mockResolvedValue({ settings: [] });
+  transport.getModels.mockResolvedValue({ providers: {}, models: {}, default: "" });
+  transport.getUiContributions.mockResolvedValue({ themes: [], nav: [], stats: [] });
+  transport.getNotificationCategories.mockResolvedValue({ categories: [] });
 });
 
 describe("DisplaySettingsPage models, themes, language, and colors", () => {
   it("groups the model picker toggles by provider with a header per group", async () => {
-    vi.mocked(api.getModels).mockResolvedValue({
+    transport.getModels.mockResolvedValue({
       providers: {
         deepseek: ["deepseek-v4-pro"],
         claude: ["claude-sonnet-5", "claude-haiku-4-5-20251001"],
@@ -59,7 +54,7 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
   });
 
   it("writes the provider switch to models.hidden_providers and the model switch to models.hidden", async () => {
-    vi.mocked(api.getModels).mockResolvedValue({
+    transport.getModels.mockResolvedValue({
       providers: { claude: ["claude-opus-5-5", "claude-sonnet-5-5"] },
       models: {},
       default: "claude-opus-5-5",
@@ -68,17 +63,17 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
 
     fireEvent.click(await screen.findByRole("switch", { name: "Claude" }));
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("models.hidden_providers", ["claude"]);
+      expect(transport.putSetting).toHaveBeenCalledWith("models.hidden_providers", ["claude"]);
     });
 
     fireEvent.click(screen.getByRole("switch", { name: "claude-opus-5-5" }));
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("models.hidden", ["claude-opus-5-5"]);
+      expect(transport.putSetting).toHaveBeenCalledWith("models.hidden", ["claude-opus-5-5"]);
     });
   });
 
   it("drops a superseded model instead of showing a switch that changes nothing", async () => {
-    vi.mocked(api.getModels).mockResolvedValue({
+    transport.getModels.mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro", "deepseek-flash"] },
       models: {
         "deepseek-v4-pro": {
@@ -114,7 +109,7 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
   });
 
   it("lists contributed skins and persists the chosen pack", async () => {
-    vi.mocked(api.getUiContributions).mockResolvedValue({
+    transport.getUiContributions.mockResolvedValue({
       nav: [],
       stats: [],
       themes: [
@@ -135,12 +130,12 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
 
     fireEvent.click(mine);
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.theme_pack", "skins/solarized");
+      expect(transport.putSetting).toHaveBeenCalledWith("display.theme_pack", "skins/solarized");
     });
   });
 
   it("marks only the packs that pin both light and dark", async () => {
-    vi.mocked(api.getUiContributions).mockResolvedValue({
+    transport.getUiContributions.mockResolvedValue({
       nav: [],
       stats: [],
       themes: [
@@ -163,12 +158,12 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
   });
 
   it("clears the pack back to null when Default is chosen", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({
+    transport.getSettings.mockResolvedValue({
       settings: [
         { key: "display.theme_pack", value: "skins/solarized", updated_at: "2026-01-01T00:00:00Z" },
       ],
     });
-    vi.mocked(api.getUiContributions).mockResolvedValue({
+    transport.getUiContributions.mockResolvedValue({
       nav: [],
       stats: [],
       themes: [{ plugin: "skins", name: "solarized", tokens: { "--background": "#fdf6e3" } }],
@@ -184,7 +179,7 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
 
     fireEvent.click(screen.getByLabelText("Default (Meiva)"));
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.theme_pack", null);
+      expect(transport.putSetting).toHaveBeenCalledWith("display.theme_pack", null);
     });
   });
 
@@ -201,7 +196,7 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
 
     fireEvent.click(chinese);
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.language", "zh");
+      expect(transport.putSetting).toHaveBeenCalledWith("display.language", "zh");
     });
   });
 
@@ -243,12 +238,12 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
       target: { value: "fuchsia" },
     });
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.color.note", "fuchsia");
+      expect(transport.putSetting).toHaveBeenCalledWith("display.color.note", "fuchsia");
     });
   });
 
   it("reflects a stored family and falls back to the default for garbage", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({
+    transport.getSettings.mockResolvedValue({
       settings: [
         { key: "display.color.note", value: "fuchsia", updated_at: "2026-09-14T00:00:00Z" },
         { key: "display.color.memory", value: "chartreuse", updated_at: "2026-09-14T00:00:00Z" },

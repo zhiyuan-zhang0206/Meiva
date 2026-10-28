@@ -11,9 +11,9 @@ import { Bell } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 
-import { api } from "@/lib/transport/api";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { ToggleRow } from "./_rows";
+import { useApi } from "@/lib/transport/transport-context";
 
 const SWITCHES_KEY = "notifications.categories";
 
@@ -25,11 +25,12 @@ const KNOWN_LABELS = {
 } as const;
 
 export function NotificationCategoryRows() {
+  const client = useApi();
   const t = useTranslations("displaySettings.categories");
   const { settings, setSetting } = useUserSettings();
   const { data } = useQuery({
     queryKey: ["notification-categories"],
-    queryFn: () => api.getNotificationCategories(),
+    queryFn: () => client.getNotificationCategories(),
     staleTime: 60_000,
   });
 

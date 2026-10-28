@@ -24,9 +24,9 @@ import { formatRelative } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 import { useStore } from "@/lib/state/store";
-import { api } from "@/lib/transport/api";
 
 import { useSectionVisible } from "../visibility";
+import { useApi } from "@/lib/transport/transport-context";
 
 const STATUS_DOT: Record<string, string> = {
   running: "bg-green-500",
@@ -149,32 +149,33 @@ function ScheduleDetail({
   editing: boolean;
   onDoneEditing: () => void;
 }) {
+  const client = useApi();
   const t = useTranslations("schedules");
   const showToast = useStore((s) => s.showToast);
   const visible = useSectionVisible();
   const full = useQuery({
     queryKey: ["schedule", id],
-    queryFn: () => api.getSchedule(id),
+    queryFn: () => client.getSchedule(id),
     enabled: visible,
     staleTime: 0,
   });
   const logs = useQuery({
     queryKey: ["schedule-logs", id],
-    queryFn: () => api.scheduleLogs(id),
+    queryFn: () => client.scheduleLogs(id),
     refetchInterval: 15_000,
     enabled: visible,
     staleTime: 0,
   });
   const runs = useQuery({
     queryKey: ["schedule-runs", id],
-    queryFn: () => api.scheduleRuns(id),
+    queryFn: () => client.scheduleRuns(id),
     enabled: visible,
     staleTime: 0,
   });
 
   const [edit, setEdit] = useState<ScheduleUpdate | null>(null);
   const updateMutation = useMutation({
-    mutationFn: (body: ScheduleUpdate) => api.updateSchedule(id, body),
+    mutationFn: (body: ScheduleUpdate) => client.updateSchedule(id, body),
     onSuccess: () => {
       showToast("Schedule updated");
       onDoneEditing();
