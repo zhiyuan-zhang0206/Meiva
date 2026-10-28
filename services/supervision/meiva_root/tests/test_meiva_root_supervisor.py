@@ -553,3 +553,21 @@ async def test_uptime_is_measured_on_the_injected_clock(tmp_path: Path) -> None:
         assert root["uptime_s"] == 5.0
     finally:
         await owner.shutdown()
+
+
+# meiva:note
+# The identity the supervisor reports for its root is the process it was constructed with, not the
+# process the test runs in: the sleeper's pid is never this test's.
+def test_root_identity_is_the_native_birth_of_the_process_the_supervisor_serves(
+    tmp_path: Path,
+) -> None:
+    sleeper = subprocess.Popen(["/bin/sleep", "60"])
+    try:
+        owner = Supervisor(
+            UnitRegistry([]), run_dir=tmp_path, clock=system_clock(), root_pid=sleeper.pid
+        )
+        assert owner.root_identity() == OwnedProcess.capture(psutil.Process(sleeper.pid))
+        assert owner.root_identity().pid != os.getpid()
+    finally:
+        sleeper.kill()
+        sleeper.wait()

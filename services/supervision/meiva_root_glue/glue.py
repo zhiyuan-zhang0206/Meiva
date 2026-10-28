@@ -164,10 +164,12 @@ def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
 # meiva:note
 # The settings the host diagnostics decide on, read once here, where the root assembles them.
 def probe_config_from_settings(*, home: Path) -> ProbeConfig:
+    from base.sessions.helperproc import helper_client
     from services.desktop.browser.profile import profile_dir
 
     return ProbeConfig(
         home=home,
+        helper_socket=helper_client(home=home).sock_path,
         redis_url=str(get_field("redis_url")),
         db_url=str(get_field("db_url")),
         pgbouncer_enabled=bool(get_field("pgbouncer_enabled")),
@@ -269,6 +271,7 @@ def build_wiring(
             macos=Platform.current().system == "darwin",
             launchd=LaunchdFacts.of(host, user_home=Path.home()),
             run=host.run,
+            root=context.supervisor.root_identity(),
         )
         if diagnostics is None
         else diagnostics
