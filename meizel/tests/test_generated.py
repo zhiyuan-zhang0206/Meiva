@@ -4,9 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from meizel.checkout import load_universe
 from meizel.contracts import enumerations as generated
-from meizel.contracts.cli import main
+from meizel.contracts.cli import GitRepo, main
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.roles import roles
 from meizel.tests.synthetic import RepoFactory, run, seat
@@ -23,7 +22,7 @@ BASE = {
 
 
 def findings(root: Path) -> list[Diagnostic]:
-    return generated.check(load_universe(root), roles(root))
+    return generated.check(GitRepo(root).universe(), roles(root))
 
 
 def repo(make_repo: RepoFactory, extra: dict[str, str]) -> Path:

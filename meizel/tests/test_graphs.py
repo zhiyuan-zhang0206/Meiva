@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from meizel.checkout import GitRepo, apply_plan, load_universe, toplevel, tracked_files
 from meizel.graph import universe as model
 from meizel.graph.graphs import feedback_edges, strongly_connected, unneeded_back_edges
 
@@ -63,6 +62,7 @@ def test_two_edges_that_each_break_the_cycle_alone_are_not_both_dropped() -> Non
 # here as well as in `meizel check`.
 # meiva:link meizel/docs/checker/purity.meiva.okf.md
 _MODEL = Path(model.__file__).resolve()
+_SHELL = _MODEL.parent.parent / "checkout.py"
 _EFFECT_MODULES = {"os", "shutil", "subprocess", "tempfile"}
 _FILESYSTEM_CALLS = {
     "exists",
@@ -87,6 +87,10 @@ _SHELL_NAMES = {"GitRepo", "apply_plan", "load_universe", "toplevel", "tracked_f
 
 def _tree() -> ast.Module:
     return ast.parse(_MODEL.read_text())
+
+
+def _shell_tree() -> ast.Module:
+    return ast.parse(_SHELL.read_text())
 
 
 def test_the_model_imports_no_effect_module() -> None:
@@ -125,9 +129,23 @@ def test_the_shell_implements_every_method_the_model_declares() -> None:
         if not name.startswith("_") and callable(getattr(model.Checkout, name, None))
     }
     assert declared != set()
-    assert {name for name in declared if not hasattr(GitRepo, name)} == set()
+    shell = next(
+        node
+        for node in _shell_tree().body
+        if isinstance(node, ast.ClassDef) and node.name == "GitRepo"
+    )
+    implemented = {
+        node.name
+        for node in shell.body
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+    }
+    assert declared - implemented == set()
 
 
 def test_the_shell_owns_the_reader() -> None:
-    for entry in (GitRepo, apply_plan, load_universe, toplevel, tracked_files):
-        assert entry.__module__ == "meizel.checkout"
+    defined = {
+        node.name
+        for node in _shell_tree().body
+        if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef))
+    }
+    assert defined >= _SHELL_NAMES
