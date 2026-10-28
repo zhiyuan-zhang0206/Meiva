@@ -5,6 +5,3 @@ exports = ["grouping.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"grouping.py#clock asyncio.loop.time" = 4

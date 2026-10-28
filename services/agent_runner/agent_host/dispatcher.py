@@ -54,7 +54,7 @@ from typing import Protocol
 
 from redis.asyncio.client import PubSub
 
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.cluster import redis_channel_prefix
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
@@ -157,10 +157,12 @@ class TurnScheduler:
         activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
         config_fingerprint: Callable[[int], str | None] | None = None,
         clock: Clock | None = None,
+        timers: Timers,
         cancel_unwind_timeout_s: float = CANCEL_UNWIND_TIMEOUT_S,
         clock_read_timeout_s: float = CLOCK_READ_TIMEOUT_S,
     ) -> None:
         self._run_turn = run_turn
+        self._timers = timers
         self._activity_clock = activity_clock
         self._config_fingerprint = config_fingerprint
         self._clock = clock
@@ -353,8 +355,7 @@ class TurnScheduler:
         refuses to unwind is data here instead of an exception — which is what
         lets the host report it and keep shutting down.
         """
-        loop = asyncio.get_running_loop()
-        started = loop.time()
+        started = self._timers.monotonic()
         _, pending = await asyncio.wait(tasks.values(), timeout=self._cancel_unwind_timeout_s)
         # Retrieving the outcome of the tasks that DID finish keeps asyncio from
         # logging "exception was never retrieved" for a turn that raised on its
@@ -364,7 +365,7 @@ class TurnScheduler:
                 task.exception()
         if not pending:
             return
-        waited = loop.time() - started
+        waited = self._timers.monotonic() - started
         stuck = [agent_id for agent_id, task in tasks.items() if task in pending]
         clocks = await self._activity_clocks(stuck)
         for agent_id in stuck:
@@ -504,6 +505,7 @@ class InboundWakeDispatcher:
         scheduler: _WakeScheduler,
         *,
         pending_scan: Callable[[], Awaitable[list[int]]] | None = None,
+        timers: Timers,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         max_scan_backoff_s: float = _DEFAULT_MAX_SCAN_BACKOFF_S,
         subscription_read_timeout_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
@@ -512,6 +514,7 @@ class InboundWakeDispatcher:
     ) -> None:
         self._bus = bus
         self._scheduler = scheduler
+        self._timers = timers
         self._pending_scan = pending_scan
         self._scan_interval_s = scan_interval_s
         self._max_scan_backoff_s = max_scan_backoff_s
@@ -546,7 +549,6 @@ class InboundWakeDispatcher:
         prefix = redis_channel_prefix(self._bus.channel)
         pattern = f"{prefix}{INBOUND_PATTERN_SUFFIX}"
         consecutive_failures = 0
-        loop = asyncio.get_running_loop()
         while True:
             redis = self._bus.open_async_redis()
             pubsub = None
@@ -567,12 +569,12 @@ class InboundWakeDispatcher:
                 while True:
                     raise_if_cancellation_pending()
                     self._raise_if_restart_required()
-                    now = loop.time()
+                    now = self._timers.monotonic()
                     if now >= next_scan_at:
                         scan_schedule = await self._next_scan_schedule(scan_backoff_s)
                         next_scan_at = scan_schedule.next_scan_at
                         scan_backoff_s = scan_schedule.scan_backoff_s
-                    until_scan_s = max(0.001, next_scan_at - loop.time())
+                    until_scan_s = max(0.001, next_scan_at - self._timers.monotonic())
                     read_timeout_s = min(self._subscription_read_timeout_s, until_scan_s)
                     message = await asyncio.wait_for(
                         _next_pubsub_message(pubsub, timeout=read_timeout_s),
@@ -627,7 +629,6 @@ class InboundWakeDispatcher:
 
     async def _next_scan_schedule(self, scan_backoff_s: float) -> _ScanSchedule:
         """Run the durable backstop without treating its DB failure as Redis failure."""
-        loop = asyncio.get_running_loop()
         try:
             await self.scan_once()
         except asyncio.CancelledError:
@@ -641,11 +642,11 @@ class InboundWakeDispatcher:
                 backoff_s=backoff_s,
             )
             return _ScanSchedule(
-                next_scan_at=loop.time() + backoff_s,
+                next_scan_at=self._timers.monotonic() + backoff_s,
                 scan_backoff_s=min(backoff_s * 2, self._max_scan_backoff_s),
             )
         return _ScanSchedule(
-            next_scan_at=loop.time() + self._scan_interval_s,
+            next_scan_at=self._timers.monotonic() + self._scan_interval_s,
             scan_backoff_s=self._scan_interval_s,
         )
 

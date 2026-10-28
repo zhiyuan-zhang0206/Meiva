@@ -25,6 +25,7 @@ from agent.graph.exec.tests.process_inputs import live_parent_facts
 from base.agents.context.clients import ClientSet
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -193,7 +194,7 @@ class Cluster:
                 database=lambda: self.database, gateway_url="http://gateway.invalid:8000"
             ),
         )
-        scheduler = TurnScheduler(host.run_turn)
+        scheduler = TurnScheduler(host.run_turn, timers=SYSTEM_TIMERS)
         if wakes:
             host.bind_wake(scheduler.wake)
         graceful = GracefulExit(

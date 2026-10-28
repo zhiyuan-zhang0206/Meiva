@@ -32,6 +32,8 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 
+from base.clock import Timers
+
 # Waiter poll interval: short enough that a released screen is re-taken
 # promptly, long enough that idle waiters cost nothing.
 _POLL_S = 0.05
@@ -44,12 +46,18 @@ class ScreenSession:
     """One holder + a FIFO of waiters, protected by a single state lock."""
 
     def __init__(
-        self, lease_s: float = DEFAULT_LEASE_S, queue_timeout_s: float = DEFAULT_QUEUE_TIMEOUT_S
+        self,
+        timers: Timers,
+        lease_s: float = DEFAULT_LEASE_S,
+        queue_timeout_s: float = DEFAULT_QUEUE_TIMEOUT_S,
     ) -> None:
+        self._timers = timers
         self._lease_s = lease_s
         self._queue_timeout_s = queue_timeout_s
         self._holder: int | None = None
-        self._lease_until: float = 0.0  # loop.time() (monotonic)
+        # meiva:note
+        # The holder's lease deadline, on the timers this session was built with.
+        self._lease_until: float = 0.0
         self._waiters: deque[tuple[asyncio.Future[bool], str]] = deque()
         self._state_lock = asyncio.Lock()
 
@@ -110,16 +118,16 @@ class ScreenSession:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[bool] = loop.create_future()
         queued = False
-        deadline = loop.time() + self._queue_timeout_s
+        deadline = self._timers.monotonic() + self._queue_timeout_s
         try:
             while True:
                 async with self._state_lock:
                     verdict, queued = self._step(
-                        agent_id, fut, priority, loop.time(), deadline, queued=queued
+                        agent_id, fut, priority, self._timers.monotonic(), deadline, queued=queued
                     )
                 if verdict is not None:
                     return verdict
-                await asyncio.sleep(_POLL_S)
+                await self._timers.asleep(_POLL_S)
         except asyncio.CancelledError:
             # A cancelled waiter must not keep occupying its queue slot.
             if queued:
@@ -151,7 +159,7 @@ class ScreenSession:
         """Renew the holder's lease (a no-op for non-holders)."""
         async with self._state_lock:
             if self._holder == agent_id:
-                self._lease_until = asyncio.get_running_loop().time() + self._lease_s
+                self._lease_until = self._timers.monotonic() + self._lease_s
 
     async def release(self, agent_id: int | None = None) -> int | None:
         """Release the screen. agent_id None = operator kick (any holder).

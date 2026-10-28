@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import cast
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -223,7 +224,7 @@ class TestSchedulerIntegration:
                 served.append(key)
                 await releases[key].wait()
 
-        scheduler = TurnScheduler(run_turn)
+        scheduler = TurnScheduler(run_turn, timers=SYSTEM_TIMERS)
         try:
             scheduler.wake(1)
             await _until(lambda: served == [(1, 1)])
@@ -254,7 +255,7 @@ class TestSchedulerIntegration:
                 if agent_id == 1:
                     await hold_first.wait()
 
-        scheduler = TurnScheduler(run_turn)
+        scheduler = TurnScheduler(run_turn, timers=SYSTEM_TIMERS)
         scheduler.wake(1)
         await _until(lambda: served == [1])
         scheduler.wake(2)
@@ -265,13 +266,16 @@ class TestSchedulerIntegration:
         assert gate.waiting == 0, "the dropped queue leaves no waiter state"
         assert gate.waits_total == 0, "an unserved wait is not counted as served"
 
-        fresh = TurnScheduler(run_turn)
+        fresh = TurnScheduler(run_turn, timers=SYSTEM_TIMERS)
 
         async def _pending() -> list[int]:
             return [2, 3]
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()), fresh, pending_scan=_pending
+            EventBus.from_settings(rng=seeded_rng()),
+            fresh,
+            pending_scan=_pending,
+            timers=SYSTEM_TIMERS,
         )
         try:
             await disp.scan_once()

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from services.backup.layout import BackupTree
 from services.backup.scheduler.settings import SchedulerSettings
 from services.backup.scheduler.worker import WorkerLaunch, run_job
@@ -135,7 +136,7 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
     )
     tree = BackupTree(tmp_path)
 
-    await run_job("restore", settings=settings, tree=tree, launch=launch)
+    await run_job("restore", settings=settings, tree=tree, launch=launch, timers=SYSTEM_TIMERS)
 
     assert not _alive(int((tmp_path / "postgres").read_text()))
     controls = tree.controls("restore-drill")

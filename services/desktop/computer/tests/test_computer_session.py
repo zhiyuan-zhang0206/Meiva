@@ -4,24 +4,25 @@ import asyncio
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from services.desktop.computer.session import ScreenSession
 
 
 async def test_idle_screen_implicitly_acquired() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     assert await s.acquire(7) is True
     assert s.holder == 7
 
 
 async def test_holder_pass_through() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
     assert await s.acquire(7) is True
     assert s.holder == 7
 
 
 async def test_waiter_takes_over_after_release() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
 
     async def waiter() -> bool:
@@ -36,14 +37,14 @@ async def test_waiter_takes_over_after_release() -> None:
 
 
 async def test_queue_timeout_fails_with_busy() -> None:
-    s = ScreenSession(queue_timeout_s=0.05)
+    s = ScreenSession(queue_timeout_s=0.05, timers=SYSTEM_TIMERS)
     await s.acquire(7)
     assert await s.acquire(8) is False
     assert s.holder == 7
 
 
 async def test_fifo_order() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
     order: list[int] = []
 
@@ -61,7 +62,7 @@ async def test_fifo_order() -> None:
 
 
 async def test_lease_expiry_frees_the_screen() -> None:
-    s = ScreenSession(lease_s=0.05)
+    s = ScreenSession(lease_s=0.05, timers=SYSTEM_TIMERS)
     await s.acquire(7)
     assert s.holder == 7
     await asyncio.sleep(0.1)
@@ -70,7 +71,7 @@ async def test_lease_expiry_frees_the_screen() -> None:
 
 
 async def test_touch_renews_lease() -> None:
-    s = ScreenSession(lease_s=0.2, queue_timeout_s=0.05)
+    s = ScreenSession(lease_s=0.2, queue_timeout_s=0.05, timers=SYSTEM_TIMERS)
     await s.acquire(7)
     await asyncio.sleep(0.06)
     await s.touch(7)
@@ -80,14 +81,14 @@ async def test_touch_renews_lease() -> None:
 
 
 async def test_release_by_non_holder_is_noop() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
     assert await s.release(8) is None
     assert s.holder == 7
 
 
 async def test_operator_kick_releases_any_holder() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
     assert await s.release(None) == 7
     assert s.holder is None
@@ -95,7 +96,7 @@ async def test_operator_kick_releases_any_holder() -> None:
 
 
 async def test_expired_holder_is_replaced_by_first_waiter() -> None:
-    s = ScreenSession(lease_s=0.05)
+    s = ScreenSession(lease_s=0.05, timers=SYSTEM_TIMERS)
     await s.acquire(7)
     t8 = asyncio.create_task(s.acquire(8))
     await asyncio.sleep(0.1)
@@ -104,7 +105,7 @@ async def test_expired_holder_is_replaced_by_first_waiter() -> None:
 
 
 async def test_cancelled_waiter_cleans_its_queue_slot() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
     t8 = asyncio.create_task(s.acquire(8))
     await asyncio.sleep(0.05)
@@ -119,7 +120,7 @@ async def test_cancelled_waiter_cleans_its_queue_slot() -> None:
 
 
 async def test_high_priority_jumps_normal_waiters() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
     order: list[int] = []
 
@@ -137,7 +138,7 @@ async def test_high_priority_jumps_normal_waiters() -> None:
 
 
 async def test_high_priority_fifo_among_highs() -> None:
-    s = ScreenSession()
+    s = ScreenSession(timers=SYSTEM_TIMERS)
     await s.acquire(7)
     order: list[int] = []
 
@@ -155,7 +156,7 @@ async def test_high_priority_fifo_among_highs() -> None:
 
 
 async def test_high_waiter_timeout_still_fails() -> None:
-    s = ScreenSession(queue_timeout_s=0.05)
+    s = ScreenSession(queue_timeout_s=0.05, timers=SYSTEM_TIMERS)
     await s.acquire(7)
     assert await s.acquire(8, priority="high") is False
     assert s.holder == 7
