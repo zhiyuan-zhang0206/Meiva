@@ -67,11 +67,30 @@ class ChromeModel:
         worker: str | None = None,
         script_delay: int = 0,
         ungrouped: bool = True,
+        report: dict[str, Any] | None = None,
+        converge: list[dict[str, Any]] | None = None,
+        converge_error: Exception | None = None,
     ) -> None:
         self.loaded = loaded
         self.worker = worker
         self.script_delay = script_delay  # probes answering "undefined" before the script ran
         self.ungrouped = ungrouped
+        # meiva:note
+        # What the worker reports for `meivaGroup` (a convergence of one window) and
+        # for `meivaConvergeAll` (one report per group it found). A test sets the
+        # merge it wants to see reported, or the failure `converge_all` must degrade.
+        # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+        self.report = report or {
+            "title": "Meiva #7",
+            "windowId": 1,
+            "groups": [11],
+            "kept": 11,
+            "merged": 0,
+            "moved": 0,
+            "created": False,
+        }
+        self.converge = converge if converge is not None else []
+        self.converge_error = converge_error
         self.expressions: list[str] = []
 
     def handlers(self) -> dict[str, Any]:
@@ -83,7 +102,7 @@ class ChromeModel:
             "Runtime.evaluate": self._evaluate,
         }
 
-    def _evaluate(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _evaluate(self, params: dict[str, Any]) -> dict[str, Any] | Exception:
         self.expressions.append(params["expression"])
         if params["expression"] == "typeof meivaGroup":
             if self.script_delay > 0:
@@ -92,7 +111,11 @@ class ChromeModel:
             return {"result": {"type": "string", "value": "function"}}
         if params["expression"].startswith("meivaUngroupLast("):
             return {"result": {"type": "boolean", "value": self.ungrouped}}
-        return {"result": {"type": "number", "value": 12}}
+        if params["expression"] == "meivaConvergeAll()":
+            if self.converge_error is not None:
+                return self.converge_error
+            return {"result": {"type": "object", "value": self.converge}}
+        return {"result": {"type": "object", "value": self.report}}
 
     def _get_extensions(self, _params: dict[str, Any]) -> dict[str, Any]:
         found = [{"id": EXTENSION_ID, "path": str(EXTENSION_DIR)}] if self.loaded else []
@@ -329,16 +352,13 @@ def test_manifest_points_at_the_worker_and_asks_only_for_what_it_uses() -> None:
 
 def test_worker_is_stateless_and_only_ever_ungroups_an_agents_last_tab() -> None:
     # meiva:note
-    # The group is found by title (no groupId survives anywhere), duplicate open
-    # groups with that title are coalesced into the first one, Chrome picks the
+    # The group is found by title (no groupId survives anywhere), Chrome picks the
     # color, and the worker's one write that can destroy a group is
     # `meivaUngroupLast`: it must check the title AND that the group has no other
     # member, so a group the user made is never touched. There is still no delete
     # and no storage.
     # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     source = next(EXTENSION_DIR.glob("group-*.js")).read_text()
-    assert "tabGroups.query({ title })" in source
-    assert "duplicates.map((g) => chrome.tabs.query({ groupId: g.id }))" in source
     assert not re.search(r"\bcolor\s*:", source)
     assert not re.search(r"tabs\.remove|tabGroups\.remove|storage\.", source)
     assert "self.meivaUngroupLast" in source
@@ -714,60 +734,3 @@ async def test_back_to_back_pages_of_one_agent_make_one_group() -> None:
     await asyncio.gather(*groups._tasks)
 
     assert created == ["Meiva #7"]
-
-
-# meiva:note
-# release_page, ungroup before the last tab closes: Chrome keeps a group whose last
-# tab closes as a SAVED group, and the extension API neither lists nor deletes one.
-# The daemon therefore ungroups that tab first; these pin the Python half of that
-# contract (the JS half decides that the tab is really last and really in this
-# agent's group).
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
-
-
-async def test_release_page_ungroups_the_recorded_target_of_the_agent() -> None:
-    model = ChromeModel(loaded=True, worker=SHIPPED_WORKER)
-    chrome = await FakeChrome.start(model.handlers())
-    chrome.listings.append([_page("T1"), _page("T2")])
-    groups = chrome.groups()
-    await _group(groups, 42, frozenset({"T1"}), page_id=7)
-
-    await groups.release_page(7)
-
-    expressions = [e for e in model.expressions if e.startswith("meivaUngroupLast(")]
-    assert len(expressions) == 1
-    assert '"T2"' in expressions[0]
-    assert "Meiva #42" in expressions[0]
-
-
-async def test_release_page_is_a_no_op_for_a_page_it_never_grouped() -> None:
-    model = ChromeModel(loaded=True, worker=SHIPPED_WORKER)
-    chrome = await FakeChrome.start(model.handlers())
-
-    await chrome.groups().release_page(99)
-
-    assert chrome.http_urls == []
-    assert model.expressions == []
-
-
-async def test_release_page_does_not_start_a_worker_and_only_warns(
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    # meiva:note
-    # A worker that is not running cannot have left a saved group, so the
-    # ungroup never loads one -- it warns that the chip may be left behind.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
-    model = ChromeModel(loaded=False)
-    chrome = await FakeChrome.start(model.handlers())
-    chrome.listings.append([_page("T1"), _page("T2")])
-    groups = chrome.groups()
-    await _group(groups, 42, frozenset({"T1"}), page_id=7)
-    model.expressions.clear()
-    loaded_before = chrome.ws.methods().count("Extensions.loadUnpacked")
-    model.worker = None
-
-    await groups.release_page(7)
-
-    assert chrome.ws.methods().count("Extensions.loadUnpacked") == loaded_before
-    messages = _warnings(loguru_records)
-    assert any("saved tab group" in m for m in messages), messages

@@ -678,6 +678,13 @@ async def _serve_generation(
             contained(expired_page_reaper(daemon, stop), "expired-page reaper")
         )
         # meiva:note
+        # Repair the one-group-per-agent-per-window invariant from Chrome's own
+        # state on every connection: a duplicate that outlived a Chrome restart, an
+        # extension update or a race is merged here, with a WARNING, before any page
+        # is created. Idempotent, so a healthy browser costs two queries.
+        # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+        helpers.create_task(contained(daemon.tab_groups.converge_all(), "tab group convergence"))
+        # meiva:note
         # Chrome is confirmed up here — inject the gateway session cookie
         # right away (the periodic loop covers expiry; this covers the
         # fresh-profile cold start and the post-restart gap without

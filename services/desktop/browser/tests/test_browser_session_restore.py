@@ -469,7 +469,11 @@ def test_the_shipped_worker_reports_and_re_applies_the_layout_without_destroying
     assert "self.meivaApplyLayout" in worker
     assert "chrome.tabs.update(tab.id, { pinned: true })" in worker
     assert "chrome.tabs.group" in worker
-    assert "tabGroups.query({ title: group.title })" in worker
+    # meiva:note
+    # The recorded groups are re-made one per window through the same convergence
+    # the page path uses, so a restore cannot produce a second group with a title
+    # that already exists in that window.
+    assert "meivaConvergeWindow(group.title, windowId)" in worker
     for forbidden in ("tabs.remove", "tabGroups.remove", "pinned: false", "tabs.move"):
         assert forbidden not in worker, forbidden
 
