@@ -23,6 +23,7 @@ Reads use the process's constructed Settings domains. An unavailable domain
 fails explicitly; a read never constructs a second Settings image.
 """
 
+from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
 from base.packages.plugins.plugin_errors import (
     FlagDomainUnavailable as FlagDomainUnavailable,
 )
@@ -35,9 +36,8 @@ from base.packages.plugins.plugin_errors import (
 from base.packages.plugins.plugin_errors import (
     UnknownFlag as UnknownFlag,
 )
-from base.packages.plugins.plugin_errors import (
-    validate_flag_key as validate_flag_key,
-)
+
+_DOMAIN_ATTRS: frozenset[str] = frozenset(FIELD_DOMAINS.values())
 
 
 def read_declared_flag(key: str, flags: tuple[str, ...]) -> object:
@@ -56,3 +56,24 @@ def read_declared_flag(key: str, flags: tuple[str, ...]) -> object:
     if not settings.has_domain(domain):
         raise FlagDomainUnavailable(f"declared core flag {key!r} is unavailable in this profile")
     return getattr(getattr(settings, domain), field)
+
+
+# meiva:note
+# Validate one fully qualified, non-sensitive Settings key and return it. The key names a live
+# Settings domain and field, so the namespace check reads the generated lite index here (a
+# non-strict module) rather than from the strict error module that only raises.
+def validate_flag_key(key: str) -> str:
+    if not isinstance(key, str) or key.count(".") != 1:
+        raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")
+    domain, field = key.split(".")
+    if not domain or not field:
+        raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")
+    if domain not in _DOMAIN_ATTRS:
+        raise UnknownFlag(f"unknown plugin flag {key!r}: {domain!r} is not a Settings domain.")
+    if FIELD_DOMAINS.get(field) != domain:
+        raise UnknownFlag(
+            f"unknown plugin flag {key!r}: {field!r} is not a field in the {domain!r} domain."
+        )
+    if field in SENSITIVE_FIELDS:
+        raise UnknownFlag(f"unknown plugin flag {key!r}: secrets are not flags.")
+    return key
