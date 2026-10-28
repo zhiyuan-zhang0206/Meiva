@@ -6,7 +6,6 @@
 # pyright: reportUnknownVariableType = warning
 # meiva:note
 # Upper-level grouping run by the consumer: due checks, sealing, the durable cursor, failures.
-
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +27,7 @@ from base.agents.history.hierarchy.group_store import (
     load_open_nodes,
     write_groups,
 )
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
@@ -51,10 +51,14 @@ def test_generation_reads_late_policy_after_model_construction(
     config: ConfigBoot, model_catalog: ModelCatalog
 ) -> None:
     # meiva:note
-    # The real SDK is built before corrections, rendering and the close brake are captured.
+    # The real SDK is built before corrections and the close brake are captured; the rendering
+    # clock is not read here at all -- it is the one the caller built, so a post-boot settings
+    # change cannot move a stamped node.
     import json
     from dataclasses import replace
 
+    from base.clock import Clock, ClockConfig
+    from base.clock.tests.manual_timers import ManualTimers
     from base.lm.provider_api import BuildContext, ProviderBinding
     from base.packages.tests.model_catalog import inert_keys
     from services.agent_runner.understanding.chunk_consumer import ModelCache
@@ -67,6 +71,9 @@ def test_generation_reads_late_policy_after_model_construction(
     config.set_field("understanding_group_corrections", 2)
     config.set_field("understanding_group_check_open", 60)
     config.set_field("timezone", "UTC")
+    # meiva:note
+    # The caller's clock names the zone nodes are stamped in; `config` no longer chooses it.
+    clock = Clock(ClockConfig("Europe/London", "Europe/London", False), timers=ManualTimers())
     at = datetime(2026, 10, 5, tzinfo=UTC)
     nodes = [
         OpenNode(i, i * 10, i * 10 + 9, at, at + timedelta(minutes=30), "leaf") for i in range(18)
@@ -80,7 +87,7 @@ def test_generation_reads_late_policy_after_model_construction(
             # This explicit test-owner update is not production hot reload.
             config.set_field("understanding_group_reasoning", "off")
             config.set_field("understanding_group_corrections", 0)
-            config.set_field("timezone", "Europe/London")
+            config.set_field("timezone", "Not/A_Zone")
             config.set_field("understanding_group_check_open", 6)
             config.set_field("understanding_group_check_decay", 1)
             return model
@@ -105,6 +112,7 @@ def test_generation_reads_late_policy_after_model_construction(
                 calls,
                 7,
                 config=config,
+                clock=clock,
             )
         [request] = [json.loads(body) for body in wire.requests]
         assert wire.build_efforts == ["high"]
@@ -213,12 +221,24 @@ async def test_the_cadence_setting_decides_when_a_level_is_due(
     config.set_field("understanding_group_check_open", 8)
     await _fill(aops_pool, 7)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert _seams["asked"] == []
     await _add_leaf(aops_pool, 7)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert len(_seams["asked"]) == 1
 
@@ -228,7 +248,13 @@ async def test_nothing_is_asked_below_five_open_nodes(
 ) -> None:
     await _fill(aops_pool, 4)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert _seams["asked"] == []
 
@@ -239,7 +265,13 @@ async def test_a_check_closes_groups_links_children_and_resets_the_baseline(
     ids = await _fill(aops_pool, 6)
     _seams["reply"] = lambda nodes: [Group(nodes[0][0], nodes[2][0], "first three")]
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert _seams["asked"] == [ids]
     assert await _parents(aops_pool) == [(2, 0, 29, 3, "first three")]
@@ -259,24 +291,48 @@ async def test_a_declined_check_is_not_repeated_at_the_same_count(
 ) -> None:
     await _fill(aops_pool, 5)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert len(_seams["asked"]) == 1 and await load_last_checked(aops_pool, AGENT, 1) == 5
     # meiva:note
     # 9 open: still short of 10
     await _fill(aops_pool, 4, start=5)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert len(_seams["asked"]) == 1
     # meiva:note
     # 10 open
     await _fill(aops_pool, 1, start=9)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert len(_seams["asked"]) == 2
 
@@ -293,7 +349,13 @@ async def test_closing_a_level_can_make_the_next_level_due(
         [Group(nodes[0][0], nodes[2][0], "g")] if nodes[0][1].startswith("leaf") else []
     )
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     # meiva:note
     # level 1 closed one group; level 2 (now 6 open) was asked next
@@ -310,7 +372,13 @@ async def test_a_failed_check_emits_an_event_records_calls_and_waits_for_five_mo
     await _fill(aops_pool, 5)
     _seams["reply_text"] = lambda _nodes: '<group first="1">unclosed'
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert emitted_events.names() == ["understanding_group_failed"]
     assert await load_last_checked(aops_pool, AGENT, 1) == 5
@@ -321,7 +389,13 @@ async def test_a_failed_check_emits_an_event_records_calls_and_waits_for_five_mo
         # the calls are recorded though the check failed
         assert _first(await cur.fetchone()) == 1
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     # meiva:note
     # same count, not asked again
@@ -334,7 +408,13 @@ async def test_a_live_lease_blocks_a_second_checker(
     await _fill(aops_pool, 5)
     assert await claim_check(aops_pool, AGENT, 1)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert _seams["asked"] == []
     async with aops_pool.connection() as conn, conn.cursor() as cur:
@@ -342,7 +422,13 @@ async def test_a_live_lease_blocks_a_second_checker(
             "UPDATE understanding_group_state SET claimed_at = now() - interval '1 hour'"
         )
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert len(_seams["asked"]) == 1
 
@@ -355,7 +441,13 @@ async def test_a_crash_inside_a_check_frees_the_lease(
     # meiva:note
     # never raises
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _seams["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     # meiva:note
     # the lease was released
@@ -391,7 +483,9 @@ def test_standalone_groupings_hand_the_reasoning_setting_to_the_model(
     none = ModelOverrides.from_pins(None)
     for value in ("", "off", "high"):
         config.set_field("understanding_group_reasoning", value)
-        gc.generate(models, "deepseek-flash", none, 1, [], [], 7, config=config)
+        gc.generate(
+            models, "deepseek-flash", none, 1, [], [], 7, config=config, clock=system_clock()
+        )
         assert models.gets[-1] == ("deepseek-flash", none, value)
 
 
@@ -409,7 +503,13 @@ async def test_two_checkers_of_one_level_make_one_call(
     await asyncio.gather(
         *(
             gc.run_group_checks(
-                aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+                aops_pool,
+                MagicMock(),
+                _seams["models"],
+                AGENT,
+                clock=system_clock(),
+                config=config,
+                min_check_open=1,
             )
             for _ in range(3)
         )
@@ -436,7 +536,13 @@ async def test_different_agents_are_checked_at_the_same_time(
     await asyncio.gather(
         *(
             gc.run_group_checks(
-                aops_pool, MagicMock(), _seams["models"], a, config=config, min_check_open=1
+                aops_pool,
+                MagicMock(),
+                _seams["models"],
+                a,
+                clock=system_clock(),
+                config=config,
+                min_check_open=1,
             )
             for a in (7, 8)
         )
@@ -485,20 +591,56 @@ def test_an_open_set_past_three_checks_must_close_a_group(
     ]
     config.set_field("understanding_group_check_open", 5)
     gc.generate(
-        models, "deepseek-flash", none, 1, nodes[:14], [], 7, config=config, min_check_open=1
+        models,
+        "deepseek-flash",
+        none,
+        1,
+        nodes[:14],
+        [],
+        7,
+        config=config,
+        clock=system_clock(),
+        min_check_open=1,
     )
     gc.generate(
-        models, "deepseek-flash", none, 1, nodes[:15], [], 7, config=config, min_check_open=1
+        models,
+        "deepseek-flash",
+        none,
+        1,
+        nodes[:15],
+        [],
+        7,
+        config=config,
+        clock=system_clock(),
+        min_check_open=1,
     )
     config.set_field("understanding_group_check_open", 60)
     config.set_field("understanding_group_check_decay", 3)
     # meiva:note
     # level 2: 3 x 20 = 60
     gc.generate(
-        models, "deepseek-flash", none, 2, nodes[:59], [], 7, config=config, min_check_open=6
+        models,
+        "deepseek-flash",
+        none,
+        2,
+        nodes[:59],
+        [],
+        7,
+        config=config,
+        clock=system_clock(),
+        min_check_open=6,
     )
     gc.generate(
-        models, "deepseek-flash", none, 2, nodes[:60], [], 7, config=config, min_check_open=6
+        models,
+        "deepseek-flash",
+        none,
+        2,
+        nodes[:60],
+        [],
+        7,
+        config=config,
+        clock=system_clock(),
+        min_check_open=6,
     )
     # meiva:note
     # 14 < 3 x 5, 15 = 3 x 5; per level: 59 < 60 = 3 x 20
@@ -547,7 +689,13 @@ async def test_single_groups_in_the_middle_close_and_no_level_ever_overlaps(
     for i in range(60):
         await _add_leaf(aops_pool, i)
         await gc.run_group_checks(
-            aops_pool, MagicMock(), _seams["models"], AGENT, config=config, min_check_open=1
+            aops_pool,
+            MagicMock(),
+            _seams["models"],
+            AGENT,
+            clock=system_clock(),
+            config=config,
+            min_check_open=1,
         )
     rows, parents = await _tree(aops_pool)
     assert parents, "the plans must have closed some groups"

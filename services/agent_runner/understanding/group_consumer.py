@@ -47,8 +47,7 @@ from base.agents.history.hierarchy.group_store import (
     write_groups,
 )
 from base.agents.observation.snapshot import agent_model_target
-from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import clock_config_from_boot
+from base.clock import Clock
 from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
@@ -134,6 +133,7 @@ def generate(
     agent_id: int,
     *,
     config: ConfigBoot,
+    clock: Clock,
     min_check_open: int = MIN_CHECK_OPEN,
 ) -> list[Group]:
     # meiva:note
@@ -145,7 +145,7 @@ def generate(
         catalog=models.catalog,
         agent_id=agent_id,
         corrections=config.view.agent.understanding_group_corrections,
-        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        clock=clock,
         # meiva:note
         # The brake on an open set that keeps growing: past three checks' worth of this level, close one.
         must_close=len(nodes)
@@ -164,6 +164,7 @@ async def _check_level(
     upto: int | None = None,
     *,
     config: ConfigBoot,
+    clock: Clock,
     min_check_open: int = MIN_CHECK_OPEN,
 ) -> bool:
     # meiva:note
@@ -201,6 +202,7 @@ async def _check_level(
                 calls,
                 agent_id,
                 config=config,
+                clock=clock,
                 min_check_open=min_check_open,
             )
         except GenerateError as exc:
@@ -238,6 +240,7 @@ async def run_group_checks(
     agent_id: int,
     *,
     config: ConfigBoot,
+    clock: Clock,
     executor: Executor | None = None,
     upto: int | None = None,
     min_check_open: int = MIN_CHECK_OPEN,
@@ -260,6 +263,7 @@ async def run_group_checks(
             executor,
             upto,
             config=config,
+            clock=clock,
             min_check_open=min_check_open,
         ):
             level += 1

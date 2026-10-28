@@ -388,6 +388,11 @@ async def run(
     # meiva:note
     # The telemetry mirror lives in the home's logs directory, beside the runtime directory.
     config = events_maintenance_config(process_config, mirror_dir=runtime.parent / "logs")
+    # meiva:note
+    # The health component times and the alert reconciler's snapshot stamps share this one instance,
+    # so a single clock decides both and a test that steers it steers them together. The dispatch and
+    # resolution loops still build their own from the same configuration.
+    clock = _clock(config)
     # Only a unit holding the Grafana credential reconciles alerts; one without it
     # carries no such loop (and no tracker to read as idle).
     loops = loop_roster.roster(
@@ -403,9 +408,7 @@ async def run(
         "events_maintenance",
         endpoint.health_port,
         liveness=liveness,
-        components=lambda: loop_components(
-            liveness, timeouts, now=_clock(config).now().timestamp()
-        ),
+        components=lambda: loop_components(liveness, timeouts, now=clock.now().timestamp()),
         image=image,
     )
     events_maintenance_log.info(
@@ -427,7 +430,7 @@ async def run(
                 bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
                 group.create_task(
                     alert_reconciler.reconciliation_loop(
-                        pool, bus, progress["alert_reconciliation"], config
+                        pool, bus, progress["alert_reconciliation"], config, clock=clock
                     )
                 )
     finally:

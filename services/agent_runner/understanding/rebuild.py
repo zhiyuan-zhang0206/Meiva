@@ -7,6 +7,7 @@ from concurrent.futures import Executor
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy.rebuild import IDLE_WAIT_SECONDS, checks_idle, lift_upper
+from base.clock import Clock
 from base.config import ConfigBoot
 from base.db import Database
 from services.agent_runner.understanding.group_consumer import (
@@ -25,6 +26,7 @@ async def run_rebuild(
     agent_id: int,
     *,
     config: ConfigBoot,
+    clock: Clock,
     executor: Executor | None = None,
     min_check_open: int = MIN_CHECK_OPEN,
 ) -> int:
@@ -47,6 +49,7 @@ async def run_rebuild(
             models,
             agent_id,
             config=config,
+            clock=clock,
             executor=executor,
             upto=end,
             min_check_open=min_check_open,

@@ -16,6 +16,7 @@ from base.agents.history.hierarchy.units import divide_units
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.db import Database
 from base.lm.catalog import ModelCatalog
@@ -113,5 +114,10 @@ async def run_rounds(
     for _ in range(count):
         async with asyncio.TaskGroup() as tg:
             await loop.Consumer(
-                pool, MagicMock(), [], **lm_wiring(model_catalog), config=config
+                pool,
+                MagicMock(),
+                [],
+                clock=system_clock(),
+                **lm_wiring(model_catalog),
+                config=config,
             ).claim(tg)
