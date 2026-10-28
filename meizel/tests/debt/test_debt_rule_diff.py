@@ -64,6 +64,7 @@ def test_a_pure_rule_change_may_record_what_the_new_rules_find(
     out = capsys.readouterr().out
     assert "private-module" in out
     assert "+1" in out
+    assert "  rules/engine.py" in out
     assert "no content growth" in out
 
 
@@ -109,6 +110,121 @@ def test_a_rule_change_cannot_increase_an_existing_debt_count(
     assert "app/x.py" in out.out
     assert "2 recorded, 1 found" in out.out
     assert "warning" in out.err
+
+
+# meiva:note
+# `debt diff` without the extra rule pathspecs: it has to detect the rule change by itself.
+def plain_diff(root: Path, on_growth: str = "fail") -> int:
+    return run(root, "debt", "diff", "--against", "HEAD", "--on-growth", on_growth)
+
+
+def test_editing_only_the_debt_tables_keeps_the_single_column(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(DECLARED_BASE)
+    commit(root)
+    write(
+        root,
+        {
+            "app/meizel.toml": "# what the device measures here\n\n[debt.ambient-read]\n"
+            '"daemon.py#environ os.environ" = 1\n'
+        },
+    )
+    capsys.readouterr()
+    assert plain_diff(root) == 0
+    out = capsys.readouterr().out
+    assert "rules " not in out
+    assert "no growth" in out
+
+
+# meiva:note
+# A policy the change edits without touching an entry (a comment) is still part of the device: the
+# report names the file, so the two measures are never printed without an input that explains them.
+def test_a_policy_edit_with_no_entry_change_still_names_the_policy(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(DECLARED_BASE)
+    commit(root)
+    policy = (root / "meizel.policy.toml").read_text(encoding="utf-8")
+    write(root, {"meizel.policy.toml": policy + "# a note the entries do not see\n"})
+    capsys.readouterr()
+    assert plain_diff(root) == 0
+    out = capsys.readouterr().out
+    assert "meizel: rules +0 / content +0" in out
+    assert "  meizel.policy.toml" in out
+
+
+# meiva:note
+# The tests under `meizel/` are not the device either: the checker records nothing there, and editing
+# one keeps the totals-only report instead of spending a second column on it.
+def test_editing_only_a_test_file_under_meizel_keeps_the_single_column(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            **DECLARED_BASE,
+            "meizel.toml": '[roles]\napplication = ["app"]\ntooling = ["meizel", "rules"]\n',
+            "meizel/rule.py": "RULE = 1\n",
+            "meizel/tests/debt/probe.py": "VALUE = 1\n",
+        }
+    )
+    commit(root)
+    write(root, {"meizel/tests/debt/probe.py": "VALUE = 2\n"})
+    capsys.readouterr()
+    assert plain_diff(root) == 0
+    out = capsys.readouterr().out
+    assert "rules " not in out
+    assert "no growth" in out
+
+
+def test_a_rule_code_change_under_meizel_is_detected_without_a_flag(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            **DECLARED_BASE,
+            "meizel.toml": '[roles]\napplication = ["app"]\ntooling = ["meizel", "rules"]\n',
+            "meizel/rule.py": "RULE = 1\n",
+        }
+    )
+    commit(root)
+    write(root, {"meizel/rule.py": "RULE = 2\n"})
+    capsys.readouterr()
+    assert plain_diff(root) == 0
+    out = capsys.readouterr().out
+    assert "meizel: rules +0 / content +0" in out
+    assert "what this change edits in the measurement" in out
+    assert "  meizel/rule.py" in out
+
+
+# meiva:note
+# Only the rule code is the device: everything else under `meizel/` is measured as it was, including
+# the three allowances readers the rule-code pathspecs exclude by name.
+@pytest.mark.parametrize("probe", ["meizel/state/probe.py", "meizel/allowances.py"])
+def test_a_violation_the_change_adds_under_meizel_is_content_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], probe: str
+) -> None:
+    root = make_repo(
+        {
+            **DECLARED_BASE,
+            "meizel.toml": '[roles]\napplication = ["app"]\ntooling = ["meizel", "rules"]\n',
+            "meizel/rule.py": "RULE = 1\n",
+            probe: "VALUE = 1\n",
+        }
+    )
+    commit(root)
+    write(
+        root,
+        {
+            "meizel/rule.py": "RULE = 2\n",
+            probe: "import os\n\nVALUE = os.environ['A']\n",
+        },
+    )
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert plain_diff(root) == 1
+    assert f"{probe.rsplit('/', 1)[-1]}#environ os.environ" in capsys.readouterr().out
 
 
 def test_a_content_change_that_moves_a_file_is_not_growth(make_repo: RepoFactory) -> None:
@@ -218,7 +334,6 @@ def ambient_base(make_repo: RepoFactory, policy: str = LEGACY_POLICY) -> Path:
             "app/x.py": "from base.db import connect\nx = connect()\n",
             "app/bootstrap.py": "from base.db import connect\nx = connect()\n",
             "app/env.py": "import os\nfrom base.config import settings\nx = os.environ['X']\n",
-            "app/ambient_roots.toml": 'db = ["bootstrap.py"]\nsettings = ["env.py"]\n',
         },
     )
 
@@ -255,28 +370,64 @@ def test_retired_schema_comparison_counts_old_reads_but_rejects_new_reads(
         assert "2 recorded, 1 found" in out
 
 
-def test_new_root_permission_is_not_copied_into_the_historical_baseline(
+DECLARED_BASE = {
+    "meizel.toml": '[roles]\napplication = ["app"]\ntooling = ["rules"]\n',
+    "app/__init__.py": "",
+    "app/daemon.py": "import os\n\nvalue = os.environ['A']\n",
+    "app/meizel.toml": '[debt.ambient-read]\n"daemon.py#environ os.environ" = 1\n',
+    "rules/engine.py": "RULE = 1\n",
+}
+
+
+# meiva:note
+# No line of code changes: the read leaves the record because the device stopped measuring it.
+def test_a_root_declaration_is_a_rule_change_and_not_repayment(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = ambient_base(make_repo)
-    ambient_rule_change(root)
-    path = root / "app/meizel.toml"
+    root = make_repo(DECLARED_BASE)
+    commit(root)
+    rule_change(root)
     write(
         root,
         {
-            "app/meizel.toml": path.read_text()
-            + '"x.py" = { kinds = ["db"], why = "opens the database" }\n'
+            "app/meizel.toml": '[roots]\n"daemon.py" = { kinds = ["environ"], why = "the process entry" }\n'
         },
     )
-    record(root)
+    assert run(root, "debt", "prune") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert plain_diff(root) == 0
+    out = capsys.readouterr().out
+    row = next(line.split() for line in out.splitlines() if line.startswith("ambient-read"))
+    assert row[1:] == ["1", "0", "0", "-1", "+0"]
+    assert "meizel: rules -1 / content +0" in out
+    assert "what this change edits in the measurement" in out
+    assert "app/meizel.toml [roots] daemon.py +" in out
+
+
+# meiva:note
+# The other direction: the device starts measuring the read again, and the code did not move.
+def test_taking_a_root_away_is_a_rule_change_and_not_new_debt(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            **DECLARED_BASE,
+            "app/meizel.toml": '[roots]\n"daemon.py" = { kinds = ["environ"], why = "the process entry" }\n',
+        }
+    )
+    commit(root)
+    rule_change(root)
+    write(root, {"app/meizel.toml": ""})
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
     capsys.readouterr()
     assert diff(root) == 0
-    row = next(
-        line.split()
-        for line in capsys.readouterr().out.splitlines()
-        if line.startswith("ambient-read")
-    )
-    assert row[1:] == ["0", "1", "0", "+1", "-1"]
+    out = capsys.readouterr().out
+    row = next(line.split() for line in out.splitlines() if line.startswith("ambient-read"))
+    assert row[1:] == ["0", "1", "1", "+1", "+0"]
+    assert "meizel: rules +1 / content +0" in out
+    assert "app/meizel.toml [roots] daemon.py -" in out
 
 
 @pytest.mark.parametrize(
@@ -293,19 +444,6 @@ def test_retired_schema_never_bypasses_the_unreadable_policy_gate(
     ambient_rule_change(root)
     assert diff(root) == 2
     assert "cannot read the manifests" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("registry", ["unknown = []\n", "db = [3]\n", "settings = []\n"])
-def test_malformed_legacy_root_registry_still_stops_comparison(
-    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], registry: str
-) -> None:
-    root = ambient_base(make_repo)
-    write(root, {"app/ambient_roots.toml": registry})
-    commit(root)
-    ambient_rule_change(root)
-    assert diff(root) == 2
-    error = capsys.readouterr().err
-    assert "historical root" in error or "list of modules" in error
 
 
 @pytest.mark.parametrize(
@@ -548,9 +686,9 @@ def patch_repo(make_repo: RepoFactory, policy: str) -> Path:
 
 
 # meiva:note
-# The base's table of approvals is kept while the base is regenerated, so approving a file is a drop
-# of the record (the content column), not a change of the rules.
-def test_approving_a_file_whose_patches_are_recorded_lowers_the_record_and_passes(
+# An approval is part of the device: approving a file stops the measurement, and no line of its code
+# changed, so the drop is the rules column.
+def test_approving_a_file_is_a_rule_change_and_not_repayment(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = patch_repo(make_repo, "")
@@ -562,7 +700,8 @@ def test_approving_a_file_whose_patches_are_recorded_lowers_the_record_and_passe
     assert diff(root) == 0
     out = capsys.readouterr().out
     [row] = [line.split() for line in out.splitlines() if line.startswith("first-party-patch")]
-    assert row[1:] == ["1", "1", "0", "+0", "-1"]
+    assert row[1:] == ["1", "0", "0", "-1", "+0"]
+    assert "+ [approved-patches.files] app/tests/guards.py" in out
     assert "no content growth" in out
 
 
@@ -591,10 +730,12 @@ def test_taking_an_approval_away_does_not_excuse_a_patch_added_elsewhere(
     assert diff(root) == 1
     out = capsys.readouterr().out
     assert "other.py#monkeypatch.setattr lib.helper" in out
-    assert "guards.py" not in out
+    assert "guards.py#" not in out
 
 
-def test_the_file_whose_approval_is_taken_away_is_let_through_for_patches_only(
+# meiva:note
+# The old patch is the rules' business; the one this change adds is the content's.
+def test_a_patch_added_where_an_approval_was_taken_away_is_content_growth(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = patch_repo(make_repo, APPROVAL)
@@ -607,4 +748,4 @@ def test_the_file_whose_approval_is_taken_away_is_let_through_for_patches_only(
     assert diff(root) == 1
     out = capsys.readouterr().out
     assert "guards.py#exec" in out
-    assert "monkeypatch.setattr" not in out
+    assert "guards.py#monkeypatch.setattr lib.helper (first-party-patch) 2 recorded, 1 found" in out

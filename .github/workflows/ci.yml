@@ -815,10 +815,11 @@ jobs:
       - name: Recorded locality debt against the base (fails on growth)
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
         # Strict-to-be debt may only shrink. The one exception is a rule change (it edits meizel's
-        # rule code or its policy, whose reader tables decide what is an acquisition): the tool runs the new rules on the base's checkout and reports the growth they
-        # cause there, which widening a rule makes unavoidable, and fails the growth the content
-        # causes. The base may be main or a merge-queue parent; the comparison does not depend on
-        # which, so a queued PR is not blamed for the one ahead of it. Nobody judges it by eye.
+        # rule code, its policy, or a manifest's declarations, which decide what is an acquisition):
+        # the tool runs the new device on the base's content and reports the change it causes there,
+        # which widening a rule makes unavoidable, and fails the growth the content causes. The base
+        # may be main or a merge-queue parent; the comparison does not depend on which, so a queued
+        # PR is not blamed for the one ahead of it. Nobody judges it by eye.
         run: |
           env -u VIRTUAL_ENV uv run python -m meizel debt diff \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \

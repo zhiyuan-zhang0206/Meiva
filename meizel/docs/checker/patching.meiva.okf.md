@@ -122,7 +122,7 @@ keyed by form and target without a line number:
 New patches fail in a strict-to-be directory like any other violation; repaid ones
 make the entry `debt-paid`. A new `unresolved-patch` is no way around the rule:
 only what is already in the baseline passes, and CI fails when the recorded total
-grows. See [[meizel/docs/checker/debt.meiva.okf.md|recorded debt]]. When a symbol is
-renamed, `debt carry --rename-target OLD=NEW` moves the entries to the new name.
+grows. See [[meizel/docs/checker/debt/debt.meiva.okf.md|recorded debt]]. A renamed
+symbol moves its entries with `debt carry --rename-target OLD=NEW`.
 
 Parent: [[meizel/docs/checker/checker.meiva.okf.md|the checker]].

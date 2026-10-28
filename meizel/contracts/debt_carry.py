@@ -9,19 +9,19 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Collection
 
-from meizel.contracts.debt import PATCH_CODES, DebtTable, file_key, total
+from meizel.contracts.debt import EDGE_CODES, PATCH_CODES, DebtTable, file_key, total
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record, resolve, write_baseline
 from meizel.contracts.debt_report import (
     by_target,
-    changed_under,
     diff,
     read_baselines,
     summarize,
     totals_at,
 )
-from meizel.contracts.debt_rules import purity_changed, rule_diff
+from meizel.contracts.debt_rules import measurement_lines, rule_change, rule_diff
 from meizel.contracts.debt_sites import approved, format_approved, format_sites, sites
 from meizel.contracts.debt_symbol import (
     SymbolMove,
@@ -34,18 +34,9 @@ from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
 from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
 
-__all__ = ["carry", "renames_since", "run_debt"]
+__all__ = ["carry", "run_debt"]
 
 _SEPARATOR = " -> "
-_EDGE_CODES = frozenset(
-    {
-        Code.UNDECLARED_EDGE,
-        Code.NOT_EXPORTED,
-        Code.PRIVATE_MODULE,
-        Code.PRIVATE_NAME,
-        Code.CYCLE_EDGE,
-    }
-)
 
 
 def _join(owner: str, path: str) -> str:
@@ -76,7 +67,9 @@ def renames_since(repo: GitRepo, base: str) -> dict[str, str]:
     return found
 
 
-def _owner_of_edge(src: str, dst: str) -> str:
+# meiva:note
+# The directory that owns an edge's debt: the lowest common directory of its two files.
+def edge_owner(src: str, dst: str) -> str:
     projection = project(Fact(src, dst, 0, FactKind.IMPORT))
     return projection.lca if projection is not None else parent_of(src)
 
@@ -85,14 +78,14 @@ def _relocated(
     owner: str, code: Code, key: str, moved: dict[str, str], gone: set[str]
 ) -> tuple[str, str] | None:
     """The `(owner, key)` an entry has after the renames, or None when it is not affected."""
-    if code in _EDGE_CODES:
+    if code in EDGE_CODES:
         head, _, name = key.partition("#")
         src, _, dst = head.partition(_SEPARATOR)
         old_src, old_dst = _join(owner, src), _join(owner, dst)
         if old_src not in gone and old_dst not in gone:
             return None
         new_src, new_dst = moved.get(old_src, old_src), moved.get(old_dst, old_dst)
-        new_owner = _owner_of_edge(new_src, new_dst)
+        new_owner = edge_owner(new_src, new_dst)
         within = len(new_owner) + 1 if new_owner else 0
         edge = f"{new_src[within:]}{_SEPARATOR}{new_dst[within:]}"
         return new_owner, f"{edge}#{name}" if name else edge
@@ -259,13 +252,21 @@ def carry(
     return lines
 
 
+# meiva:note
+# The two measures' inputs, named: each rule file, manifest declaration and policy entry it edits.
+def _measured(repo: GitRepo, ref: str, extra: Collection[str]) -> list[str]:
+    return [
+        "meizel: what this change edits in the measurement:",
+        *(f"  {line}" for line in measurement_lines(repo, ref, extra)),
+    ]
+
+
 def _run_diff(repo: GitRepo, ref: str, on_growth: str, args: argparse.Namespace) -> int:
-    rules_changed = (
-        bool(args.waive_if_changed) and bool(changed_under(repo, ref, args.waive_if_changed))
-    ) or purity_changed(repo, ref)
+    rules_changed = rule_change(repo, ref, args.waive_if_changed)
     if rules_changed:
-        result = rule_diff(repo, ref, totals_at(repo, ref), args.jobs)
+        result = rule_diff(repo, ref, totals_at(repo, ref), renames_since(repo, ref), args.jobs)
         print("\n".join(result.lines()))
+        print("\n".join(_measured(repo, ref, args.waive_if_changed)))
         print("\n".join(result.explanation()))
         grew = result.content_grew
     else:

@@ -19,7 +19,7 @@ decision and its rationale live in
 
 The checker never executes inspected source. Tracked files come from `git ls-files -z`.
 Python uses stdlib AST; TypeScript uses the locked Node compiler. See TypeScript
-scanning below for setup, selection and coverage.
+scanning below for setup and coverage.
 
 ```
 python -m meizel check [paths... | --changed files...] [--limit N]
@@ -38,7 +38,7 @@ python -m meizel roles list <role>... | check | write
   Each diagnostic gives `file:line`, the fact edge, the judging directory `L`,
   and the manifest line to add or public door to use. `check --changed files...` judges only those files.
 - `debt` manages recorded violations, a per-directory baseline that may only
-  shrink: [[meizel/docs/checker/debt.meiva.okf.md|recorded debt]].
+  shrink: [[meizel/docs/checker/debt/debt.meiva.okf.md|recorded debt]].
 - `explain` shows graph edges and bounded [[meizel/docs/checker/explain.meiva.okf.md|Python source evidence]].
 - `sync --prune` drops stale declarations; `sync --declare` writes the legal new
   dependencies of the changed files: [[meizel/docs/checker/sync.meiva.okf.md|keeping manifests current]].

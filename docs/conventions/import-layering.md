@@ -39,7 +39,7 @@ Legacy locality violations (such as test-only patches or remaining cross-package
 exemptions: each fact is a recorded debt in the manifest of the directory that owns it, counted per
 source and target, so a new violation fails `meizel check` and the recorded ones can only shrink. All
 `cycle-edge` debts across the repository have been eliminated (`0` remaining). `python -m meizel debt`
-shows what is left. See [recorded debt](../../meizel/docs/checker/debt.meiva.okf.md).
+shows what is left. See [recorded debt](../../meizel/docs/checker/debt/debt.meiva.okf.md).
 
 ## Packages outside the stack
 
