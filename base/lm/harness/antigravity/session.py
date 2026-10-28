@@ -99,10 +99,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             return
         self._closed = True
         self._sent_turn = None
-        self._fail_pending(SessionClosedError("session closed"))
-        await self._close_tasks()
         transport, self._transport = self._transport, None
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
+        self._fail_pending(SessionClosedError("session closed"))
+        await self._close_tasks()
         if transport is not None:
             await transport.close()
         await settle_close(
