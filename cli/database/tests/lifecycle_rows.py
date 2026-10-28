@@ -44,6 +44,12 @@ def caller_block(operation: str, *, agent_id: str | None = "1818") -> CallerPayl
 
 
 # meiva:note
+# What launched the command under test; a fixture-supplied block keeps the row shaped like
+# production without reading this test process's parent.
+_SPAWN: dict[str, object] = {"parent_argv": ["pytest"], "ssh_connection": None}
+
+
+# meiva:note
 # The lifecycle requests one operation wrote, oldest first.
 @dataclass(frozen=True)
 class LifecycleRows:
@@ -81,7 +87,9 @@ def lifecycle_rows(
     operation = f"test@{uuid.uuid4().hex}"
     caller = caller_block(operation)
     with lifecycle_audit(
-        operator_request_recorder(database_factory=operator_database, caller=caller, head_sha=None),
+        operator_request_recorder(
+            database_factory=operator_database, caller=caller, head_sha=None, spawn=_SPAWN
+        ),
         operator_result_recorder(database_factory=operator_database, caller=caller, head_sha=None),
     ):
         yield LifecycleRows(db_conn, operation)

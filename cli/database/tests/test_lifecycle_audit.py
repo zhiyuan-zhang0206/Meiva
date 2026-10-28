@@ -49,11 +49,22 @@ def refuse_database() -> Any:
     raise AssertionError("this command must not reach the database")
 
 
+# meiva:note
+# What launched the command under test, as the scope reads it in production: the parent
+# process's command line and the ssh connection it arrived on (None for a local shell).
+_SPAWN: dict[str, object] = {
+    "parent_argv": ["-zsh", "-c", "/Users/zyonzhang/.meiva/source/.venv/bin/meiva stop"],
+    "ssh_connection": "10.1.2.3 51000 10.1.2.4 22",
+}
+
+
 def recorders(
     database: DatabaseFactory, caller: CallerPayload, head_sha: str | None
 ) -> tuple[Callable[[str, Sequence[str]], None], Any]:
     return (
-        operator_request_recorder(database_factory=database, caller=caller, head_sha=head_sha),
+        operator_request_recorder(
+            database_factory=database, caller=caller, head_sha=head_sha, spawn=_SPAWN
+        ),
         operator_result_recorder(database_factory=database, caller=caller, head_sha=head_sha),
     )
 
@@ -101,6 +112,18 @@ def test_the_record_carries_the_wire_caller_block(
     assert attributes["head_sha"] is None
     assert attributes["caller"]["machine"] == "macmini"
     assert attributes["caller"]["argv"][-1] == "<redacted>"
+
+
+def test_the_record_names_what_launched_the_command(
+    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+) -> None:
+    operation = f"stop@{uuid.uuid4().hex}"
+    request, _ = recorders(operator_database, caller_block(operation), None)
+
+    request("down", ["gateway"])
+
+    attributes = audit_rows(db_conn, operation)["lifecycle_request"]["attributes"]
+    assert attributes["spawn"] == _SPAWN
 
 
 def test_a_human_operator_is_recorded_without_an_agent_id(
