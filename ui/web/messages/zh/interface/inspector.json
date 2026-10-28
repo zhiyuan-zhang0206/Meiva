@@ -47,6 +47,8 @@
   "neverPaused": "从未暂停",
   "pending": "待定",
   "due": "到期",
+  "pausedUntil": "暂停至 {time}",
+  "pausedRemaining": "剩余 {remaining}",
   "windowedUnavailable": "窗口化检查器数据不可用",
   "retryWindowed": "重试窗口化数据",
   "openRunTimeline": "打开运行时间线",

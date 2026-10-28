@@ -18,6 +18,7 @@ def select_idle_agents_needing_heartbeat(
     *,
     now: float,
     heartbeat_interval_s: float | None = None,
+    backoff_max_interval_s: float,
     jitter_span_s: float = 0.0,
     limit: int | None = None,
     backoff_until: dict[int, float] | None = None,
@@ -45,7 +46,10 @@ def select_idle_agents_needing_heartbeat(
     #     Native agents must be idling; active impersonators are eligible while either
     #     idling or running. During impersonation the clock runs from lease activation,
     #     independent of native turns. The next check-in respects the pause window,
-    #     threshold plus jitter, and the durable last-heartbeat interval. Native no-op
+    #     threshold plus jitter, and the durable last-heartbeat interval.
+    #     `backoff_max_interval_s` is the configured ceiling the stretched interval is clamped
+    #     to (`MEIVA_HEARTBEAT_BACKOFF_MAX_INTERVAL_SECONDS`); it arrives as a value like the
+    #     cadence, so this predicate reads no configuration itself. Native no-op
     #     backoff does not apply to an external executor whose progress is not observed
     #     through native LLM turns. Preparation and unapplied terminal handoffs stay
     #     excluded until a consumer can receive the heartbeat.
@@ -131,7 +135,7 @@ def select_idle_agents_needing_heartbeat(
         "   + make_interval(secs => %s + COALESCE(mod(agents_meta.id, NULLIF(%s, 0)::int), 0)), "
         "   last_heartbeat_at "
         "   + make_interval(secs => LEAST(%s * power(2.0, "
-        " CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level END), 86400))"
+        " CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level END), %s))"
         " ) "
         " AND NOT EXISTS ("
         "   SELECT 1 FROM inbound_messages im "
@@ -147,6 +151,7 @@ def select_idle_agents_needing_heartbeat(
         idle_threshold_s,
         jitter_span_s,
         reminder_interval_s,
+        backoff_max_interval_s,
         STALE_PENDING_S,
     ]
     with pool.connection() as conn, conn.cursor() as cur:
