@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.machine import MachineIdentityReader
@@ -68,6 +69,7 @@ def _stop(cluster: NativeCluster, producer: Callable[[], EventPipeline]) -> int:
         retained_children=cluster.retained_children,
         producer=producer,
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
     )
 
 
@@ -138,6 +140,7 @@ def test_a_redis_that_the_admin_cannot_shut_down_is_a_failed_stop(
         retained_children=native_cluster.retained_children,
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
     )
 
     assert rc == 1
@@ -209,6 +212,7 @@ def test_a_remote_plane_stops_nothing_and_says_so(
         home=unit_home,
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
     )
 
     assert rc == 0
@@ -243,6 +247,7 @@ def test_a_local_instance_left_behind_by_a_switch_to_remote_is_named_and_not_tou
         home=native_cluster.home,
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
     )
 
     assert rc == 0

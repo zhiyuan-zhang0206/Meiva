@@ -13,7 +13,6 @@ from cli.commands.data_plane.stop_budget import (
     postgres_fast_budget_s,
     require_valid_timeout,
     settle_until,
-    time_left,
 )
 
 
@@ -25,16 +24,6 @@ def test_a_deadline_needs_a_finite_positive_span(timeout: float) -> None:
 
 def test_a_finite_positive_span_is_its_own_deadline_budget() -> None:
     assert require_valid_timeout(0.001) == 0.001
-
-
-@pytest.mark.parametrize(
-    ("deadline", "now", "left"),
-    [(10.0, 4.0, 6.0), (10.0, 9.999, pytest.approx(0.001)), (10.0, 10.0, None), (10.0, 11.0, None)],
-)
-def test_the_time_left_is_none_once_the_deadline_is_reached(
-    deadline: float, now: float, left: float | None
-) -> None:
-    assert time_left(deadline, now) == left
 
 
 @pytest.mark.parametrize(

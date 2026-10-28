@@ -23,6 +23,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Deadline
 from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess
@@ -90,7 +91,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
             failure: RuntimeError | TimeoutError | None = None
             try:
                 if _attempt and compensation_retry:
-                    pooler.stop_pgbouncer(home=meiva_home())
+                    pooler.stop_pgbouncer(home=meiva_home(), timers=SYSTEM_TIMERS)
                 else:
                     maintenance_stop.stop(
                         pooler_plane(data_plane_config),
@@ -98,6 +99,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
                         home=unit_home,
                         uid=os.getuid(),
                         producer=operator_pipeline,
+                        timers=SYSTEM_TIMERS,
                     )
             except (RuntimeError, TimeoutError) as exc:
                 failure = exc
@@ -105,7 +107,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
             assert client.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (42,)
             assert failure is not None and "custody retained" in str(failure)
         client.commit()
-    assert custodian.stop(deadline=time.monotonic() + 5)
+    assert custodian.stop(deadline=Deadline(at=time.monotonic() + 5, timers=SYSTEM_TIMERS))
     with psycopg.connect(direct) as conn:
         assert conn.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (42,)
     assert not custodian.identity.live()
@@ -124,7 +126,7 @@ def test_a_drain_that_finishes_during_the_listener_scan_is_stopped(
     custodian, pooled, direct = native_pooler
     with contextlib.closing(psycopg.connect(pooled)) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (7)")
-        assert not custodian.stop(deadline=time.monotonic() + 2)
+        assert not custodian.stop(deadline=Deadline(at=time.monotonic() + 2, timers=SYSTEM_TIMERS))
         assert custodian._listeners() == frozenset()
         client.commit()
         deadline = time.monotonic() + 5
@@ -132,7 +134,9 @@ def test_a_drain_that_finishes_during_the_listener_scan_is_stopped(
             assert time.monotonic() < deadline, "private pooler did not finish its drain"
             time.sleep(0.01)
         assert custodian._listeners() is None
-        assert custodian.stop(deadline=time.monotonic() + budget, force=force)
+        assert custodian.stop(
+            deadline=Deadline(at=time.monotonic() + budget, timers=SYSTEM_TIMERS), force=force
+        )
     with psycopg.connect(direct) as conn:
         assert conn.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (7,)
     assert not custodian.identity.live()
@@ -145,9 +149,11 @@ def test_explicit_force_can_finish_a_retained_drain(
     custodian, pooled, direct = native_pooler
     with contextlib.closing(psycopg.connect(pooled)) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (99)")
-        assert not custodian.stop(deadline=time.monotonic() + 2)
+        assert not custodian.stop(deadline=Deadline(at=time.monotonic() + 2, timers=SYSTEM_TIMERS))
         assert custodian.identity.live()
-        assert custodian.stop(deadline=time.monotonic() + force_budget, force=True)
+        assert custodian.stop(
+            deadline=Deadline(at=time.monotonic() + force_budget, timers=SYSTEM_TIMERS), force=True
+        )
         with pytest.raises(psycopg.OperationalError):
             client.execute("SELECT 1")
     with psycopg.connect(direct) as conn:
@@ -177,13 +183,13 @@ def test_a_restart_cannot_replace_a_pooler_holding_a_transaction(
             stop_wait_s=0.5,
         )
 
-        assert pooler.ensure_pgbouncer(spec) == 1
+        assert pooler.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 1
 
         assert "could not stop the running pooler" in capsys.readouterr().err
         assert custodian.identity.live()
         assert client.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (5,)
         client.commit()
-    assert custodian.stop(deadline=time.monotonic() + 5)
+    assert custodian.stop(deadline=Deadline(at=time.monotonic() + 5, timers=SYSTEM_TIMERS))
     with psycopg.connect(direct) as conn:
         assert conn.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (5,)
 
@@ -201,7 +207,9 @@ def test_a_recorded_intent_never_authorizes_another_signal(unit_home: Path) -> N
 
         with pytest.raises(RuntimeError, match="stop was already requested"):
             custodian.require_accepting()
-        assert not custodian.stop(deadline=time.monotonic() + 0.3)
+        assert not custodian.stop(
+            deadline=Deadline(at=time.monotonic() + 0.3, timers=SYSTEM_TIMERS)
+        )
 
         assert running.identity.live(), "the pooler was never signalled"
         assert port_preflight.require_listener(running.identity, running.port)
@@ -227,7 +235,7 @@ def test_an_intent_for_an_earlier_birth_does_not_stop_this_one_from_being_stoppe
         )
         intent.write_text(render_intent(earlier))
 
-        assert custodian.stop(deadline=time.monotonic() + 5)
+        assert custodian.stop(deadline=Deadline(at=time.monotonic() + 5, timers=SYSTEM_TIMERS))
 
         assert not running.identity.live()
         assert json.loads(intent.read_text()) == json.loads(
@@ -243,7 +251,7 @@ def test_an_expired_stop_budget_never_admits_a_signal(unit_home: Path) -> None:
         custodian = OwnedPooler.from_config(running.identity, running.directory / "pgbouncer.ini")
 
         with pytest.raises(TimeoutError, match="stop deadline expired; custody retained"):
-            custodian.stop(deadline=time.monotonic() - 1)
+            custodian.stop(deadline=Deadline(at=time.monotonic() - 1, timers=SYSTEM_TIMERS))
 
         assert running.identity.live()
         assert not (running.directory / "stop-intent.json").exists()
@@ -264,7 +272,7 @@ def test_a_replaced_pid_is_reported_gone_and_not_signalled(tmp_path: Path) -> No
         )
         custodian = OwnedPooler(replaced, 16433, tmp_path / "pgbouncer.ini")
 
-        assert custodian.stop(deadline=time.monotonic() + 1)
+        assert custodian.stop(deadline=Deadline(at=time.monotonic() + 1, timers=SYSTEM_TIMERS))
 
         assert real.live(), "the process behind the replaced pid was not signalled"
         assert not (tmp_path / "stop-intent.json").exists()
@@ -283,7 +291,7 @@ def test_a_foreign_listener_refuses_before_intent_or_signal(tmp_path: Path) -> N
             custodian = OwnedPooler(recorded, foreign.getsockname()[1], tmp_path / "pgbouncer.ini")
 
             with pytest.raises(RuntimeError, match="does not belong"):
-                custodian.stop(deadline=time.monotonic() + 1)
+                custodian.stop(deadline=Deadline(at=time.monotonic() + 1, timers=SYSTEM_TIMERS))
 
         assert child.poll() is None, "the recorded process was not signalled"
         assert not (tmp_path / "stop-intent.json").exists()
@@ -295,6 +303,6 @@ def test_a_corrupt_stop_intent_cannot_authorize_another_signal(unit_home: Path) 
         (running.directory / "stop-intent.json").write_text(json.dumps({"pid": running.pid}))
 
         with pytest.raises(RuntimeError, match="invalid PgBouncer stop intent"):
-            custodian.stop(deadline=time.monotonic() + 1)
+            custodian.stop(deadline=Deadline(at=time.monotonic() + 1, timers=SYSTEM_TIMERS))
 
         assert running.identity.live(), "the pooler was never signalled"

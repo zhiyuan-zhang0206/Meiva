@@ -49,6 +49,34 @@ class _SystemTimers:
 SYSTEM_TIMERS: Timers = _SystemTimers()
 
 
+# meiva:note
+# An instant on a `Timers` clock, carried with the timers that measure it.
+#
+# A bounded wait needs two facts: the moment it ends, and the clock that says how much time is
+# left. Pairing them keeps one value in the signature instead of a bare float whose readings come
+# from somewhere the callee cannot see, so the caller that owns the clock hands it down once and a
+# test drives the wait with `ManualTimers`.
+@dataclass(frozen=True)
+class Deadline:
+    # meiva:note
+    # The instant the wait ends, on the same `timers` (`timers.monotonic()` scale, never a wall
+    # clock: only differences between monotonic readings carry meaning).
+    at: float
+    timers: Timers
+
+    # meiva:note
+    # The deadline `seconds` from now on `timers`.
+    @classmethod
+    def after(cls, timers: Timers, seconds: float) -> Deadline:
+        return cls(at=timers.monotonic() + seconds, timers=timers)
+
+    # meiva:note
+    # Seconds left, or None once the deadline is reached or passed.
+    def left(self) -> float | None:
+        left = self.at - self.timers.monotonic()
+        return left if left > 0 else None
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 

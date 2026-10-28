@@ -10,6 +10,7 @@ from pathlib import Path
 
 import psutil
 
+from base.clock import Deadline
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from cli.commands.data_plane.stop_waits import wait_for_exit
 from cli.database.runtime import CommandRuntime
@@ -34,7 +35,7 @@ def record_browser_session(command: CommandRuntime, *, now: datetime) -> None:
         print(f"  {line}")
 
 
-def stop_browser(deadline: float, *, home: Path) -> None:
+def stop_browser(deadline: Deadline, *, home: Path) -> None:
     from services.desktop.browser.orphan import find_cluster_chrome
     from services.desktop.browser.profile import profile_dir
 

@@ -20,14 +20,13 @@ import json
 import signal
 import subprocess
 import sys
-import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import NamedTuple, TypeGuard, assert_never
 
 import psutil
 
-from base.clock import Timers
+from base.clock import Deadline, Timers
 from base.cluster import session_name
 from base.cluster.machine import MachineRoles
 from base.deploy import start_trace
@@ -730,10 +729,10 @@ def stop_dormant_helper_root(
 # TERM window), so nothing else is stopped while the agent-host drains. Each call dials a
 # client bounded by the time left of the shared deadline.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-def down_units(unit_ids: Iterable[str], *, deadline: float, force: bool, home: Path) -> None:
+def down_units(unit_ids: Iterable[str], *, deadline: Deadline, force: bool, home: Path) -> None:
     for unit_id in unit_ids:
-        remaining_s = deadline - time.monotonic()
-        if remaining_s <= 0:
+        remaining_s = deadline.left()
+        if remaining_s is None:
             raise RootDriverError("service stop deadline expired; custody retained")
         client = root_client(home, timeout=remaining_s)
         response = client.force_down(unit_id) if force else client.down(unit_id)
@@ -759,13 +758,13 @@ def stop_root_service_tree(
     leaves the root running to host it. Raises `RootDriverError` when the
     tree cannot be brought down; the caller's phase accounting reports it.
     """
-    deadline = time.monotonic() + timeout_s
+    deadline = Deadline.after(timers, timeout_s)
     client = root_client(home, timeout=timeout_s)
     snapshot = root_status(client)
     if snapshot is None:
         require_root_absent(home)
         stop_dormant_helper_root(
-            deadline, helper=helper, home=home, facts=facts, run=run, timers=timers
+            deadline.at, helper=helper, home=home, facts=facts, run=run, timers=timers
         )
         print("  meiva-root: no live owner or retained service custody")
         return
@@ -784,7 +783,7 @@ def stop_root_service_tree(
                 stop_root_process(
                     client,
                     snapshot,
-                    timeout_s=max(0.0, deadline - time.monotonic()),
+                    timeout_s=max(0.0, deadline.at - timers.monotonic()),
                     helper=helper,
                     home=home,
                     timers=timers,

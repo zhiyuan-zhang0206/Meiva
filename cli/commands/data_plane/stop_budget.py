@@ -1,10 +1,11 @@
 # meiva:note
 # The arithmetic of a stop's shared deadline, as functions of values.
 #
-# A stop spends one monotonic deadline across its phases. The shell that reads the clock
-# (`stop_waits`, the unit stop's shell-session closure) asks these functions what the reading
-# means: how much is left, how long to sleep before observing again, how long a closure grace
-# may be. Nothing here reads the clock or sleeps, so a test passes the numbers it wants.
+# A stop spends one monotonic deadline across its phases (`base.clock.Deadline` carries it and
+# what is left of it). The shell that reads the clock (`stop_waits`, the unit stop's
+# shell-session closure) asks these functions what the reading means: how long to sleep before
+# observing again, how long a closure grace may be. Nothing here reads the clock or sleeps, so a
+# test passes the numbers it wants.
 
 from __future__ import annotations
 
@@ -16,7 +17,6 @@ __all__ = [
     "postgres_fast_budget_s",
     "require_valid_timeout",
     "settle_until",
-    "time_left",
 ]
 
 
@@ -26,13 +26,6 @@ def require_valid_timeout(timeout: float) -> float:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("maintenance stop timeout must be finite and positive")
     return timeout
-
-
-# meiva:note
-# Seconds until `deadline`, or None once it is reached or passed.
-def time_left(deadline: float, now: float) -> float | None:
-    left = deadline - now
-    return left if left > 0 else None
 
 
 # meiva:note

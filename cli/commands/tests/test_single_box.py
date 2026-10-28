@@ -28,6 +28,7 @@ import pytest
 from redis.exceptions import RedisError
 
 from base import cluster
+from base.clock import SYSTEM_TIMERS
 from base.cluster import authority, ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -132,7 +133,7 @@ def _intent(home: Path, record: cluster.ClusterRecord, values: dict[str, str]) -
 
 def _teardown(born: Born) -> None:
     try:
-        pooler.stop_pgbouncer(force=True, home=meiva_home())
+        pooler.stop_pgbouncer(force=True, home=meiva_home(), timers=SYSTEM_TIMERS)
     finally:
         subprocess.run(
             [
@@ -260,10 +261,12 @@ def _prepare_schema(
     )
 
 
-def _birth(
+# meiva:note
+# Complete a born data plane the way the entry does: the runtime's host facts, its clock, and the
+# platform the runtime host reports.
+def _complete(
     born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> None:
-    _prepare_schema(born, operator_database=operator_database, command_runtime=command_runtime)
     completion.complete_gateway_data_plane(
         born.plane,
         home=born.home,
@@ -271,7 +274,15 @@ def _birth(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=SYSTEM_TIMERS,
     )
+
+
+def _birth(
+    born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
+) -> None:
+    _prepare_schema(born, operator_database=operator_database, command_runtime=command_runtime)
+    _complete(born, operator_database=operator_database, command_runtime=command_runtime)
 
 
 @pytest.fixture
@@ -445,7 +456,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         bind_wait_s=ci.BIND_WAIT_TIMEOUT_S,
         home=meiva_home(),
     )
-    rc = pooler.ensure_pgbouncer(spec)
+    rc = pooler.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS)
     assert rc == 0
     owner_after = ownership.pooler(
         base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
@@ -465,14 +476,7 @@ def test_unchanged_userlist_reloads_without_restart(
     before = ownership.pooler(
         base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
     )
-    completion.complete_gateway_data_plane(
-        born.plane,
-        home=born.home,
-        environment=born.process_env,
-        database_factory=operator_database,
-        machine=command_runtime.machine,
-        macos=command_runtime.host.platform.system == "darwin",
-    )
+    _complete(born, operator_database=operator_database, command_runtime=command_runtime)
     after = ownership.pooler(
         base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
     )
@@ -490,14 +494,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
             "CREATE ROLE meiva_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE meiva_runner"
         )
     with pytest.raises(model.CatalogRefusedError, match="meiva_g7_runner"):
-        completion.complete_gateway_data_plane(
-            born.plane,
-            home=born.home,
-            environment=born.process_env,
-            database_factory=operator_database,
-            machine=command_runtime.machine,
-            macos=command_runtime.host.platform.system == "darwin",
-        )
+        _complete(born, operator_database=operator_database, command_runtime=command_runtime)
     with born.admin() as conn:
         assert conn.execute(
             "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'meiva_g7_runner'"
@@ -515,14 +512,7 @@ def test_ordinary_start_holds_on_an_invariant_violation(
         conn.execute("CREATE ROLE foreign_writer LOGIN PASSWORD 'foreign-password'")
         conn.execute("GRANT INSERT ON agents TO foreign_writer")
     with pytest.raises(model.CatalogRefusedError, match="foreign_writer"):
-        completion.complete_gateway_data_plane(
-            born.plane,
-            home=born.home,
-            environment=born.process_env,
-            database_factory=operator_database,
-            machine=command_runtime.machine,
-            macos=command_runtime.host.platform.system == "darwin",
-        )
+        _complete(born, operator_database=operator_database, command_runtime=command_runtime)
 
 
 def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
@@ -549,14 +539,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     assert "no conversion exists" in capsys.readouterr().err
     assert not (configured.home / "pg").exists()
     with pytest.raises(RuntimeError, match="no database authority ledger"):
-        completion.complete_gateway_data_plane(
-            configured.plane,
-            home=configured.home,
-            environment=configured.process_env,
-            database_factory=operator_database,
-            machine=command_runtime.machine,
-            macos=command_runtime.host.platform.system == "darwin",
-        )
+        _complete(configured, operator_database=operator_database, command_runtime=command_runtime)
 
 
 # meiva:note
@@ -582,6 +565,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=macos,
+        timers=SYSTEM_TIMERS,
     )
 
     interrupted = ledger.require_ledger(configured.home)
@@ -594,6 +578,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=macos,
+        timers=SYSTEM_TIMERS,
     )
     settled = ledger.require_ledger(configured.home)
     assert settled.active is not None and settled.active.number == 0

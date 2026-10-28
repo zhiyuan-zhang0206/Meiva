@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from base.clock import Deadline
 from cli.commands.data_plane.stop_waits import remaining
 from cli.commands.lifecycle.stop.extras_plan import retained_refusal, retires_helper
 from cli.database.runtime import CommandRuntime
@@ -36,7 +37,7 @@ def stop_permissions_helper(command: CommandRuntime, *, timeout_s: float) -> Non
 # Retire the extras within what is left of the stop's `deadline`.
 #
 # Refuses while any unit is retained: the helper cannot be retired under a live root.
-def stop_extras(command: CommandRuntime, deadline: float, *, retained: frozenset[str]) -> None:
+def stop_extras(command: CommandRuntime, deadline: Deadline, *, retained: frozenset[str]) -> None:
     if (refusal := retained_refusal(retained)) is not None:
         raise ValueError(refusal)
     stop_permissions_helper(command, timeout_s=remaining(deadline))
