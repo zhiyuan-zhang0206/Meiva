@@ -13,13 +13,8 @@ from typing import Any
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff, UnsolicitedOutput
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.claude import (
-    BridgeConfig,
-    ClaudeSession,
-    SessionTotals,
-    TurnOutcome,
-    TurnTicket,
-)
+from base.lm.harness.claude import BridgeConfig, SessionTotals, TurnOutcome
+from base.lm.harness.claude.session import ClaudeSession, TurnTicket
 from base.lm.harness.process import PsutilChildProbe
 
 # meiva:note

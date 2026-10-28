@@ -8,9 +8,8 @@ import pytest
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.claude import (
-    DEFAULT_MODEL,
-    BridgeConfig,
+from base.lm.harness.claude import DEFAULT_MODEL, BridgeConfig
+from base.lm.harness.claude.session import (
     ClaudeSession,
     MissingClaudeSdkError,
     SessionClosedError,

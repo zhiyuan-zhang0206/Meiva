@@ -38,10 +38,16 @@ package through the dependency group, so pyright still resolves the import.
 
 | Module | Owns |
 |---|---|
-| `session.py` | `ClaudeSession`: start / resume / close, ordered inbound queue, one event stream, interrupt, totals |
+| `session.py` | the effect shell of `ClaudeSession`: start / resume / close, ordered inbound queue, one event stream, interrupt, totals — it awaits the SDK and holds the state, and every decision it makes comes from the modules below |
+| `inbound.py` | what one inbound message is (dispatch by class name), which result may claim the running turn, what a step and a turn's text are, the background-task set, and whether a task report goes to the sink or the stream |
+| `options.py` | the keyword values handed to the SDK's option class, including the two that ride only when resolved or supported |
+| `settle.py` | how one result settles a turn: the outcome, the stream event, the new session id and the running totals |
 | `mapping.py` | pure SDK-message → `BridgeEvent` translation, dispatched by class name |
 | `auth.py` | the credential boundary: OAuth by default, API key only on request, secrets never returned |
 | `config.py` | `BridgeConfig` |
+
+The package door (`__init__.py`) re-exports the pure half; `ClaudeSession` and the errors it
+exports come from `base.lm.harness.claude.session`, so the door itself stays `strict`.
 
 ## Three responsibilities
 
