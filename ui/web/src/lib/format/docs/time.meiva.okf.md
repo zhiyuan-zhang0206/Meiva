@@ -79,4 +79,4 @@ Consumers: timeline card stamps (`formatItemTime`), the Inspector's birth cell,
 notice details, run-timeline detail panes and axis labels, sidebar absolute
 times, the permissions "checked …" line, and alert hover titles. The Inspector's
 Liveness cells are the first `formatUpcoming` consumer; see
-[[ui/web/src/docs/frontend-components/inspector/section-details.meiva.okf.md|Inspector section details]].
+[[ui/web/src/docs/frontend-components/inspector/section-details/section-details.meiva.okf.md|Inspector section details]].

@@ -131,7 +131,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     ).toBe("Tomorrow 15:21");
   });
 
-  it("shows the active pause window when paused", async () => {
+  it("labels the active pause window and its remaining span when paused", async () => {
     useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -139,8 +139,57 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("16:38")).toBeTruthy());
-    expect(screen.queryByText("every 15m")).toBeNull();
+    await waitFor(() => expect(screen.getByText("paused until 16:38")).toBeTruthy());
+    expect(screen.getByText("in 12m")).toBeTruthy();
+  });
+
+  it("keeps the pause as the answer for a running agent (user report 2026-10-28)", async () => {
+    useFrozenClock("2026-10-17T16:26:00Z");
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        status: "running",
+        heartbeat: { interval_s: 900, next_at: null, paused_until: "2026-10-18T15:21:00Z", heartbeat_pending: false, last_pause: null },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
+    expect(within(nextCell!).getByText("paused until Tomorrow 15:21")).toBeTruthy();
+    expect(within(nextCell!).getByText("in 22h 55m")).toBeTruthy();
+  });
+
+  it("counts the remaining pause span down as the panel clock ticks", async () => {
+    useFrozenClock("2026-10-17T16:26:00Z");
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        heartbeat: { interval_s: 900, next_at: null, paused_until: "2026-10-17T16:38:00Z", heartbeat_pending: false, last_pause: null },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("in 12m")).toBeTruthy());
+
+    // meiva:note
+    // The sub line is computed from the panel's one-second clock, not once at open: a live query
+    // that has not refreshed yet must still show a shorter span after the clock moves on, or the
+    // panel would print "in 6h" for the rest of the pause.
+    // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md
+    vi.setSystemTime(new Date("2026-10-17T16:32:00Z"));
+    await waitFor(() => expect(screen.getByText("in 6m")).toBeTruthy(), { timeout: 3000 });
+  });
+
+  it("reads 'due' when a pause ran out between the last read and this tick", async () => {
+    useFrozenClock("2026-10-17T16:26:00Z");
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        heartbeat: { interval_s: 900, next_at: null, paused_until: "2026-10-17T16:20:00Z", heartbeat_pending: false, last_pause: null },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
+    expect(within(nextCell!).getByText("due")).toBeTruthy();
   });
 
   it("shows 'pending' when a check-in is already queued but unprocessed", async () => {
@@ -167,7 +216,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     expect(screen.getByText("due")).toBeTruthy();
   });
 
-  it("shows an em dash for a running agent plus the last pause from history", async () => {
+  it("shows an em dash for a running agent with no active pause, plus the last pause from history", async () => {
     const at = new Date(Date.now() - 330_000).toISOString();
     getAgentInspectLive.mockResolvedValue(
       liveFixture({

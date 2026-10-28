@@ -133,21 +133,27 @@ _MAX_CHECKINS_PER_STEP = 25
 # streak=1 -> next check-in after 2 idle windows; the cap bounds the longest
 # silence (~5.3h at a 5min idle threshold).
 BACKOFF_MAX_WINDOWS = 64
-# Platform-side nudge backoff (B7): a no-op nudge — no real inbound arrived and
-# the agent did not pause — raises the agent's persisted backoff level, which
-# stretches the reminder floor to heartbeat_interval * 2^level, capped at 24h.
-# The level lives in agents_meta.heartbeat_backoff_level (survives daemon
-# restarts); the consecutive-no-op counter is in-process only, so a restart
-# recounts from zero. Real inbound or a pause resets the level to 0.
-_BACKOFF_MAX_INTERVAL_S = 86400
+# meiva:note
+# Platform-side nudge backoff (B7): a no-op nudge — no real inbound arrived and the agent did
+# not pause — raises the agent's persisted backoff level, which stretches the reminder floor to
+# heartbeat_interval * 2^level, capped at MEIVA_HEARTBEAT_BACKOFF_MAX_INTERVAL_SECONDS (a day by
+# default; the inspector projection mirrors the same ceiling as its cadence value). The level
+# lives in agents_meta.heartbeat_backoff_level (survives daemon restarts); the consecutive-no-op
+# counter is in-process only, so a restart recounts from zero. Real inbound or a pause resets
+# the level to 0.
+# meiva:link services/docs/gateway_side/heartbeat.meiva.okf.md
 _BACKOFF_MAX_LEVEL = 16  # schema CHECK bound; the raise-time cap is tighter
 
 
+# meiva:note
+# The highest backoff level whose stretched interval still stays under the configured ceiling;
+# past it the selection SQL's LEAST clamp is what holds the floor.
+# meiva:link services/docs/gateway_side/heartbeat.meiva.okf.md
 def backoff_max_level(interval_s: float) -> int:
-    """Highest backoff level whose stretched interval stays under the 24h cap."""
     if interval_s <= 0:
         return 0
-    return max(0, math.floor(math.log2(_BACKOFF_MAX_INTERVAL_S / interval_s)))
+    ceiling_s = settings.daemon.heartbeat_backoff_max_interval_seconds
+    return max(0, math.floor(math.log2(ceiling_s / interval_s)))
 
 
 # An idle_minutes reading this much below the value recorded at check-in time
@@ -357,7 +363,12 @@ def _raise_backoff_level(
     pool: ConnectionPool, agent_id: int, new_level: int, interval_s: float
 ) -> None:
     """Persist a raised B7 backoff level and emit its event."""
-    stretched_s = int(min(interval_s * (2**new_level), _BACKOFF_MAX_INTERVAL_S))
+    stretched_s = int(
+        min(
+            interval_s * (2**new_level),
+            settings.daemon.heartbeat_backoff_max_interval_seconds,
+        )
+    )
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET heartbeat_backoff_level = %s WHERE id = %s",
@@ -463,6 +474,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
 class DispatchConfig:
     idle_threshold_s: float
     heartbeat_interval_s: float
+    backoff_max_interval_s: float
 
 
 # meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
@@ -520,6 +532,7 @@ class HeartbeatDispatch:
             self._config.idle_threshold_s,
             now=now,
             heartbeat_interval_s=self._config.heartbeat_interval_s,
+            backoff_max_interval_s=self._config.backoff_max_interval_s,
             jitter_span_s=JITTER_SPAN_S,
             limit=_MAX_CHECKINS_PER_STEP,
             backoff_until=backoff_deadlines(
@@ -623,6 +636,7 @@ async def run(
             config=DispatchConfig(
                 settings.daemon.heartbeat_idle_threshold_seconds,
                 settings.daemon.heartbeat_interval_seconds,
+                settings.daemon.heartbeat_backoff_max_interval_seconds,
             ),
             clock=clock,
         )

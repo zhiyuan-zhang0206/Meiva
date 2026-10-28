@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -345,6 +346,71 @@ def test_inspect_heartbeat_paused_shows_window(db_conn: psycopg.Connection) -> N
     assert hb["next_at"] is None
     assert hb["paused_until"] is not None
     assert _seconds_from_now(hb["paused_until"]) == pytest.approx(1800, abs=5)
+
+
+# meiva:note
+# A pause is the daemon's floor on any agent, so a busy one reports it too. The 2026-10-28
+# report: a day-long pause rendered as "—" for as long as the agent kept working, because the
+# projection only read the pause from the idling branch.
+def test_inspect_heartbeat_running_agent_shows_its_active_pause(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = _insert_agent(db_conn, status="running", paused_until_s_ahead=3600)
+    db_conn.commit()
+    with gateway_test_client() as client:
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
+    assert hb["next_at"] is None
+    assert hb["paused_until"] is not None
+    assert _seconds_from_now(hb["paused_until"]) == pytest.approx(3600, abs=5)
+
+
+def _insert_active_lease(db_conn: psycopg.Connection, agent_id: int) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_impersonations "
+            "(id, agent_id, source, machine, status, ttl_seconds, expires_at, activated_at) "
+            "VALUES (%s, %s, 'external_agent:codex', 'test-machine', 'active', 3600, "
+            "clock_timestamp() + interval '1 hour', clock_timestamp())",
+            (str(uuid4()), agent_id),
+        )
+    db_conn.commit()
+
+
+def _set_reminder_floor(db_conn: psycopg.Connection, agent_id: int, *, backoff_level: int) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET last_heartbeat_at = now() - interval '120 seconds', "
+            "       heartbeat_backoff_level = %s WHERE id = %s",
+            (backoff_level, agent_id),
+        )
+    db_conn.commit()
+
+
+def test_inspect_heartbeat_backoff_stretches_the_reminder_floor(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=600)
+    _set_reminder_floor(db_conn, aid, backoff_level=2)
+    with gateway_test_client() as client:
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
+    assert hb["paused_until"] is None
+    expected = settings.daemon.heartbeat_interval_seconds * 4 - 120
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
+
+
+# meiva:note
+# The daemon never stretches the reminder floor of an externally driven agent, so the panel
+# must not either.
+def test_inspect_heartbeat_active_lease_holds_the_backoff_at_level_zero(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=600)
+    _insert_active_lease(db_conn, aid)
+    _set_reminder_floor(db_conn, aid, backoff_level=2)
+    with gateway_test_client() as client:
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
+    expected = settings.daemon.heartbeat_interval_seconds - 120
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
 
 
 def test_inspect_heartbeat_expired_pause_is_not_paused(db_conn: psycopg.Connection) -> None:

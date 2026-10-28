@@ -126,37 +126,11 @@ class HeartbeatLastPause(BaseModel):
     duration_s: float = Field(ge=0)
 
 
+# meiva:note
+# One of four mutually-exclusive heartbeat display states — a pause, a queued wake, a projected
+# check-in, or nothing — each with the rule and the daemon predicate behind it.
+# meiva:link gateway/inspect/docs/heartbeat.meiva.okf.md
 class HeartbeatInfo(BaseModel):
-    """Idle check-in heartbeat state for one agent — mutually-exclusive display
-    states the panel renders:
-
-    - idling (the status the fleet view projects to "Idle") & not paused & no
-      fresh wake queued: `next_at` is set — the daemon's projected check-in due
-      time: the later of
-      `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)` and
-      `last_heartbeat_at + interval_s` when a prior check-in exists. The daemon
-      dispatches the actual check-in at its first poll tick at/after that (at
-      most one 15s dispatch step later), so `next_at` is the earliest possible
-      check-in, and never later than what the daemon does. An overdue
-      projection renders as "due" in the frontend, never as a past time;
-      everything else off.
-    - idling & not paused & a *fresh* wake already queued (created within
-      the daemon's 900s `STALE_PENDING_S` freshness window): `heartbeat_pending`
-      is True — the daemon suppresses check-ins while a fresh inbound is pending
-      (its `NOT EXISTS` guard, windowed by `STALE_PENDING_S`), so no future
-      check-in is projected. This is the state a stuck agent sits in (a
-      heartbeat check-in it never woke to process); rendering it honestly is
-      what stops the panel from projecting a nonsensical past `next_at`. A
-      pending inbound older than the window is stale — the daemon checks in on
-      the agent anyway, so the panel projects `next_at` instead.
-    - paused: `paused_until` is set (the active suppression end); `next_at` None.
-    - running or terminated: all off — an active agent never gets a check-in,
-      and a dead one never will.
-
-    `interval_s` is the cluster heartbeat interval in seconds (context for the
-    `next_at` projection). `last_pause` is the most recent pause from history,
-    independent of the current state."""
-
     model_config = ConfigDict(frozen=True)
 
     interval_s: int

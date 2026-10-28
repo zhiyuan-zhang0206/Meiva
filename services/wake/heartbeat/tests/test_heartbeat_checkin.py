@@ -29,7 +29,11 @@ from services.wake.heartbeat.daemon import (
     send_heartbeat_checkin,
 )
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
-from services.wake.heartbeat.tests.heartbeat_support import THRESHOLD_S, make_idle
+from services.wake.heartbeat.tests.heartbeat_support import (
+    BACKOFF_MAX_INTERVAL_S,
+    THRESHOLD_S,
+    make_idle,
+)
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 
 
@@ -55,7 +59,7 @@ def _selected(pool: ConnectionPool) -> dict[int, float]:
     return {
         agent_id: idle
         for agent_id, idle, _reason in select_idle_agents_needing_heartbeat(
-            pool, THRESHOLD_S, now=time.time()
+            pool, THRESHOLD_S, backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S, now=time.time()
         )
     }
 
@@ -211,12 +215,20 @@ class TestSendHeartbeatCheckin:
 
         assert aid not in _selected_ids(
             select_idle_agents_needing_heartbeat(
-                pool, THRESHOLD_S, heartbeat_interval_s=300.0, now=time.time()
+                pool,
+                THRESHOLD_S,
+                heartbeat_interval_s=300.0,
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
             )
         )
         assert aid in _selected_ids(
             select_idle_agents_needing_heartbeat(
-                pool, THRESHOLD_S, heartbeat_interval_s=15.0, now=time.time()
+                pool,
+                THRESHOLD_S,
+                heartbeat_interval_s=15.0,
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
             )
         )
 
@@ -290,12 +302,17 @@ class TestConsecutiveFailureBackoff:
                 pool,
                 THRESHOLD_S,
                 backoff_until={aid: time.time() + 1000},
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
                 now=time.time(),
             )
         )
         assert aid in _selected_ids(
             select_idle_agents_needing_heartbeat(
-                pool, THRESHOLD_S, backoff_until={aid: time.time() - 1}, now=time.time()
+                pool,
+                THRESHOLD_S,
+                backoff_until={aid: time.time() - 1},
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
             )
         )
 
@@ -334,6 +351,7 @@ class TestConsecutiveFailureBackoff:
             THRESHOLD_S,
             limit=1,
             backoff_until={wedged: time.time() + 10_000},
+            backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
             now=time.time(),
         )
         assert [r[0] for r in selected] == [healthy]
