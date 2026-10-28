@@ -4,11 +4,13 @@ import asyncio
 import json
 import socket
 import time
+from pathlib import Path
 from typing import Any
 
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from services.desktop.browser import page_lifecycle
-from services.desktop.browser.mcp_daemon import ChromeMcpDaemon
+from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, serve_with_upstream
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
@@ -38,6 +40,9 @@ class RecordingGroups:
         if self._order is not None:
             self._order.append(f"release:{page_id}")
         self.events.append(("release", page_id))
+
+    async def converge_all(self) -> None:
+        self.events.append(("converge", len(self.events)))
 
     def grouped(self) -> list[int]:
         return [payload[0] for kind, payload in self.events if kind == "group"]
@@ -251,7 +256,13 @@ async def test_the_public_surface_is_the_grouping_contract_and_one_ungroup() -> 
     # path to reconcile.
     # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     public = {n for n in dir(AgentTabGroups) if not n.startswith("_")}
-    assert public == {"snapshot", "group_new_page", "release_page", "cancel_pending"}
+    assert public == {
+        "snapshot",
+        "group_new_page",
+        "release_page",
+        "converge_all",
+        "cancel_pending",
+    }
 
 
 async def test_close_page_ungroups_the_last_tab_before_the_upstream_closes_it() -> None:
@@ -297,3 +308,45 @@ async def test_release_of_an_agents_pages_also_ungroups_each_before_closing() ->
     await page_lifecycle.release_agent_page(d, 7)
 
     assert order == ["release:1", "close_page", "release:2", "close_page"], order
+
+
+# meiva:note
+# The daemon's half of the invariant: serving an upstream connection converges the
+# agents' groups once, before any page is created -- daemon start and every
+# reconnect. Chrome is unreachable here on purpose: the attempt itself is the
+# contract, and a failed convergence must degrade to one warning, never to a
+# failed start.
+# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+class _StubUpstream:
+    async def send_ping(self) -> None:
+        return None
+
+
+async def test_a_served_connection_converges_the_agents_groups_first(
+    tmp_path: Path, loguru_records: list[dict[str, Any]]
+) -> None:
+    stop = asyncio.Event()
+    # meiva:note
+    # A duck-typed session: this test drives the daemon's own serve loop, and the one
+    # method it uses upstream (`send_ping`) is all the loop needs.
+    upstream: Any = _StubUpstream()
+    async with asyncio.TaskGroup() as tasks:
+        tasks.create_task(
+            serve_with_upstream(
+                home=tmp_path,
+                browser_cdp_port=_closed_local_port(),
+                stop=stop,
+                upstream=upstream,
+                current_stack=None,
+                clock=system_clock(),
+            )
+        )
+        for _ in range(200):
+            if any("tab groups" in r["message"] for r in loguru_records):
+                break
+            await asyncio.sleep(0.01)
+        stop.set()
+
+    messages = [r["message"] for r in loguru_records if r["level"].name == "WARNING"]
+    converged = [m for m in messages if "converge the agents' tab groups" in m]
+    assert converged, messages

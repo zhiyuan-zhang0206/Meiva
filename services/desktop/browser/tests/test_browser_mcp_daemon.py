@@ -106,6 +106,9 @@ class NoTabGroups:
     async def release_page(self, page_id: int) -> None:
         return None
 
+    async def converge_all(self) -> None:
+        return None
+
 
 def new_daemon(
     upstream: Any,

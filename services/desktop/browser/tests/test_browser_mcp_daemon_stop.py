@@ -220,6 +220,20 @@ def _upstream_child_pid(daemon: subprocess.Popen[bytes]) -> int:
     return children[0].pid if children else 0
 
 
+# meiva:note
+# The start-time work reaches Chrome (grouping, convergence); a STOP must add no
+# connection of its own, which is what this samples before the signal.
+def _settled_accepts(chrome: _ChromeFake, timeout: float = 10.0) -> int:
+    deadline = time.monotonic() + timeout
+    seen = chrome.accepted
+    while time.monotonic() < deadline:
+        time.sleep(0.3)
+        if chrome.accepted == seen:
+            return seen
+        seen = chrome.accepted
+    return seen
+
+
 def _term_and_wait(daemon: subprocess.Popen[bytes], log_path: Path, timeout: float = 25.0) -> int:
     with suppress(ProcessLookupError):
         os.kill(daemon.pid, signal.SIGTERM)
@@ -251,11 +265,16 @@ def test_sigterm_normal_connection_closes_everything_except_chrome(
         child_pid = _upstream_child_pid(daemon)
         assert child_pid, "no upstream child — the fake npx did not spawn"
 
+        # meiva:note
+        # The daemon does reach Chrome while it serves (the tab-group convergence at
+        # start), so the claim is not "no connection ever": it is that the STOP adds
+        # none. Sample the count once the start-time work settled.
+        settled = _settled_accepts(chrome)
         rc = _term_and_wait(daemon, daemon_log)
         assert rc == 0
         assert not sock_path.exists(), "daemon socket must be unlinked on stop"
         assert not psutil.pid_exists(child_pid), "upstream child must exit with the daemon"
-        assert chrome.accepted == 0, "stop must never touch the retained Chrome"
+        assert chrome.accepted == settled, "stop must never touch the retained Chrome"
     finally:
         if daemon.poll() is None:
             daemon.kill()

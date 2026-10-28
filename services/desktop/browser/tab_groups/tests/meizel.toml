@@ -1,0 +1,2 @@
+[uses]
+"test_grouping_invariants.py" = ["test_grouping.py"]

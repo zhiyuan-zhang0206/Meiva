@@ -8,7 +8,17 @@
 # ``--remote-debugging-port`` connection, no launch flag -- and calls the
 # ``meivaGroup(targetId, title)`` function its service worker exposes.
 #
-# Three facts shape the design:
+# The invariant is stated once, here: an agent's pages sit in exactly one tab
+# group per window (Chrome groups cannot span windows, so "one group per agent" is
+# only ever true per window; no tab is ever moved to another window to satisfy a
+# title). Every entry point CONVERGES rather than assumes: it re-reads Chrome's
+# open groups by title, keeps one deterministic group per (title, window), and
+# moves the other groups' tabs into it. Convergence is a function of Chrome's state
+# alone -- nothing is remembered -- so a daemon restart, a Chrome restart, an
+# extension update and a repeated run all land in the same place, and the second
+# run of any of them changes nothing.
+#
+# The facts that shape the design:
 #
 # - **Loading is per Chrome session and the worker idles out.** An unpacked
 #   extension loaded over CDP is gone after a Chrome restart, and its service
@@ -37,6 +47,12 @@
 #   the daemon's): two grouping tasks of one agent both search the group by title
 #   and would otherwise each create it. ``cancel_pending()`` drops in-flight
 #   tasks when the daemon stops (an upstream death ends the process).
+# - **A duplicate is repaired and reported, never repaired silently.** The worker
+#   returns what it found -- the group ids it saw, which one it kept, how many it
+#   merged -- and the daemon logs a WARNING naming the agent, the window and the
+#   group ids. Repairing quietly would hide what produced the duplicate (two
+#   groupings racing, a restored layout, a copy of the group made by hand), and the
+#   defect would come back unnoticed.
 # - **A closed group is saved, not deleted, and saving is what makes residue.**
 #   Chrome keeps a group whose last tab closes as a SAVED group on the bookmarks
 #   bar (measured on Chrome 155: the chip reads "Meiva #<id> group - Closed").
@@ -67,6 +83,7 @@ import asyncio
 import itertools
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +136,75 @@ def group_title(agent_id: int) -> str:
     no color; Chrome picks the color.
     """
     return f"Meiva #{agent_id}"
+
+
+# meiva:note
+# What one convergence found and did, as the worker reports it: the title, the
+# window it looked at, the group ids it saw there (before the merge), the group it
+# kept, how many groups it merged away and how many tabs it moved. The daemon logs
+# a merge as a WARNING, so the numbers have to survive the trip.
+# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+@dataclass(frozen=True)
+class Convergence:
+    title: str
+    window_id: int
+    groups: tuple[int, ...]
+    kept: int
+    merged: int
+    moved: int
+
+
+# meiva:note
+# Read one report the worker returned, defensively: the worker is code this module
+# does not share a type with, and a malformed report must degrade to a WARNING like
+# every other grouping failure rather than escape as a crash.
+def _integer(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"convergence report field {field!r} must be an integer")
+    return value
+
+
+def _convergence(raw: object) -> Convergence:
+    payload: Any = raw
+    checked: object = payload
+    if not isinstance(checked, dict):
+        raise TypeError("convergence report must be an object")
+    report: dict[str, Any] = payload
+    group_ids_value: Any = report.get("groups")
+    ids_check: object = group_ids_value
+    if not isinstance(ids_check, list):
+        raise TypeError("convergence report must carry the group ids it saw")
+    group_ids: list[Any] = group_ids_value
+    kept: Any = report.get("kept")
+    if kept is None:
+        raise TypeError("convergence report must name the group it kept")
+    return Convergence(
+        title=str(report.get("title", "")),
+        window_id=_integer(report.get("windowId"), "windowId"),
+        groups=tuple(_integer(i, "groups") for i in group_ids),
+        kept=_integer(kept, "kept"),
+        merged=_integer(report.get("merged", 0), "merged"),
+        moved=_integer(report.get("moved", 0), "moved"),
+    )
+
+
+# meiva:note
+# A merged duplicate is a defect that got repaired, not a normal path: name the
+# agent, the window and every group id, so the log says what has to stop happening.
+# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+def _warn_merged(report: Convergence, *, who: str) -> None:
+    if report.merged <= 0:
+        return
+    logger.warning(
+        "[browser-mcp] {} had {} duplicate tab group(s) titled {!r} in window {} "
+        "(groups {}); merged them into group {} so the agent holds one group per window",
+        who,
+        report.merged,
+        report.title,
+        report.window_id,
+        list(report.groups),
+        report.kept,
+    )
 
 
 class _NoUniqueNewPageError(RuntimeError):
@@ -234,17 +320,22 @@ async def _await_worker_script(
         await timers.asleep(_WORKER_POLL_S)
 
 
+# meiva:note
+# The grouping facade the daemon holds: pages in, converged groups out.
+#
+# Built once by the daemon's composition root (with its root ``TaskGroup``, which
+# owns the background tasks) and shared by every ``ChromeMcpDaemon`` it creates.
+# Callers hold the daemon's serial lock around ``snapshot`` -> ``new_page`` ->
+# ``group_new_page``; ``group_new_page`` returns after one short target listing and
+# finishes the grouping in a background task. No method raises, and every failure is
+# a WARNING.
+#
+# Every write here converges: the extension re-reads Chrome's open groups by title
+# and merges the duplicates of a window instead of trusting a group id it
+# remembered, so ``converge_all`` at start and one grouping on each new page repair
+# the same defects and are no-ops when there is nothing to repair.
+# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
 class AgentTabGroups:
-    """Files agent-created pages into per-agent tab groups. Stateless and create-only.
-
-    Built once by the daemon's composition root (with its root ``TaskGroup``, which
-    owns the background tasks) and shared by every ``ChromeMcpDaemon`` it
-    creates. Callers hold the daemon's serial lock
-    around ``snapshot`` -> ``new_page`` -> ``group_new_page``; ``group_new_page``
-    returns after one short target listing and finishes the grouping in a
-    background task. Neither method raises, and every failure is a WARNING.
-    """
-
     def __init__(
         self,
         cdp_port: int,
@@ -381,6 +472,31 @@ class AgentTabGroups:
         if "exceptionDetails" in outcome:
             raise RuntimeError(outcome["exceptionDetails"]["exception"]["description"])
 
+    # meiva:note
+    # Converge every agent's groups in every window: the keeper of each (title,
+    # window) absorbs its duplicates, and a duplicate it had to merge is a WARNING
+    # naming the agent, the window and the group ids.
+    #
+    # Runs once per served upstream connection (daemon start and every reconnect) and
+    # again from the extension itself on Chrome start and extension update, so no
+    # restart path has to remember anything. Chrome state is the input, so a run with
+    # nothing to repair does nothing and logs nothing.
+    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    async def converge_all(self) -> None:
+        try:
+            async with self._lock:
+                reports = await asyncio.wait_for(self._converge_all_call(), self._group_timeout_s)
+        except Exception as e:
+            logger.opt(exception=not isinstance(e, TimeoutError)).warning(
+                "[browser-mcp] could not converge the agents' tab groups ({}: {}); "
+                "every page keeps the group it has",
+                type(e).__name__,
+                e,
+            )
+            return
+        for report in reports:
+            _warn_merged(report, who=f"tab group {report.title!r}")
+
     def cancel_pending(self) -> None:
         """Drop every in-flight grouping (daemon stop, which an upstream death also causes).
 
@@ -399,9 +515,13 @@ class AgentTabGroups:
         title = group_title(agent_id)
         try:
             async with self._lock:
-                await asyncio.wait_for(self._apply(title, target_id), self._group_timeout_s)
+                report = await asyncio.wait_for(
+                    self._apply(title, target_id), self._group_timeout_s
+                )
         except Exception as e:
             self._warn(agent_id, e)
+            return
+        _warn_merged(report, who=f"agent {agent_id}")
 
     @staticmethod
     def _warn(agent_id: int, error: Exception) -> None:
@@ -414,7 +534,7 @@ class AgentTabGroups:
             error,
         )
 
-    async def _apply(self, title: str, target_id: str) -> None:
+    async def _apply(self, title: str, target_id: str) -> Convergence:
         raw_version: Any = await http_json(f"http://127.0.0.1:{self._cdp_port}/json/version")
         version: dict[str, Any] = raw_version if raw_version is not None else {}
         ids = itertools.count(1)
@@ -437,3 +557,31 @@ class AgentTabGroups:
             )
         if "exceptionDetails" in outcome:
             raise RuntimeError(outcome["exceptionDetails"]["exception"]["description"])
+        return _convergence(outcome["result"].get("value"))
+
+    async def _converge_all_call(self) -> list[Convergence]:
+        raw_version: Any = await http_json(f"http://127.0.0.1:{self._cdp_port}/json/version")
+        version: dict[str, Any] = raw_version if raw_version is not None else {}
+        ids = itertools.count(1)
+        async with websockets.connect(str(version["webSocketDebuggerUrl"])) as ws:
+            session_id = await _worker_session(
+                ws, ids, timers=self._timers, worker_wait_s=self._worker_wait_s
+            )
+            outcome = await cdp_call(
+                ws,
+                ids,
+                "Runtime.evaluate",
+                {
+                    "expression": "meivaConvergeAll()",
+                    "awaitPromise": True,
+                    "returnByValue": True,
+                },
+                session_id=session_id,
+            )
+        if "exceptionDetails" in outcome:
+            raise RuntimeError(outcome["exceptionDetails"]["exception"]["description"])
+        raw: Any = outcome["result"].get("value")
+        listed: object = raw
+        if not isinstance(listed, list):
+            raise TypeError("meivaConvergeAll did not return a list of reports")
+        return [_convergence(item) for item in raw]
