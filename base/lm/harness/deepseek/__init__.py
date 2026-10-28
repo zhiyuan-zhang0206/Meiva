@@ -3,19 +3,17 @@ from __future__ import annotations
 from base.lm.harness.cancel import CancelReport
 from base.lm.harness.deepseek.config import DEFAULT_MODEL, REASONING_EFFORTS, BridgeConfig
 from base.lm.harness.deepseek.mapping import PromptFields, map_update, parse_prompt_result
-from base.lm.harness.deepseek.session import (
-    DeepSeekSession,
+from base.lm.harness.deepseek.types import (
     InboundQueueFullError,
     SessionClosedError,
-    dsh_home_for,
+    SessionTotals,
+    TurnOutcome,
+    TurnTicket,
 )
-from base.lm.harness.deepseek.types import SessionTotals, TurnOutcome, TurnTicket
 from base.lm.harness.deepseek.usage import (
     StepUsage,
     UsageSnapshot,
     UsageUnavailableError,
-    read_usage,
-    session_log_path,
 )
 
 __all__ = [
@@ -23,7 +21,6 @@ __all__ = [
     "REASONING_EFFORTS",
     "BridgeConfig",
     "CancelReport",
-    "DeepSeekSession",
     "InboundQueueFullError",
     "PromptFields",
     "SessionClosedError",
@@ -33,9 +30,6 @@ __all__ = [
     "TurnTicket",
     "UsageSnapshot",
     "UsageUnavailableError",
-    "dsh_home_for",
     "map_update",
     "parse_prompt_result",
-    "read_usage",
-    "session_log_path",
 ]

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,100 +76,38 @@ class UsageSnapshot:
         )
 
 
-Decoder = Callable[[Path], bytes]
-
-
 def session_log_dir(dsh_home: Path, cwd: Path) -> Path:
     escaped = f"-{Path(cwd).as_posix().replace('/', '-')}-"
     return Path(dsh_home) / "sessions" / escaped
 
 
-def _session_log_candidates(dsh_home: Path, cwd: Path, session_id: str) -> Iterable[Path]:
+# meiva:note
+# The two places a session's log is expected, the compressed one first: the documented layout under
+# the escaped working directory. The shell looks further (`sessions/*/<session>/`) when neither exists.
+def expected_log_paths(dsh_home: Path, cwd: Path, session_id: str) -> tuple[Path, ...]:
     directory = session_log_dir(dsh_home, cwd) / session_id
-    for suffix in (COMPRESSED_SUFFIX, JSONL_SUFFIX):
-        yield directory / f"session.v4{suffix}"
-    yield from sorted(Path(dsh_home).glob(f"sessions/*/{session_id}/session.v4.*"))
+    return tuple(directory / f"session.v4{suffix}" for suffix in (COMPRESSED_SUFFIX, JSONL_SUFFIX))
 
 
-def session_log_path(dsh_home: Path, cwd: Path, session_id: str) -> Path | None:
-    return next(
-        (
-            candidate
-            for candidate in _session_log_candidates(dsh_home, cwd, session_id)
-            if candidate.is_file()
-        ),
-        None,
-    )
+def unavailable(session_id: str, reason: str) -> UsageSnapshot:
+    return UsageSnapshot(per_turn_usage=False, session_id=session_id, reason=reason)
 
 
-def read_usage(
-    dsh_home: Path,
-    cwd: Path,
-    session_id: str,
-    *,
-    decoder: Decoder | None = None,
-) -> UsageSnapshot:
-    path = session_log_path(dsh_home, cwd, session_id)
-    if path is None:
-        return UsageSnapshot(
-            per_turn_usage=False,
-            session_id=session_id,
-            reason=f"no session log under {dsh_home}/sessions for {session_id}",
-        )
-    try:
-        payload = (decoder or decompress)(path)
-    except UsageUnavailableError as exc:
-        return UsageSnapshot(per_turn_usage=False, session_id=session_id, reason=str(exc))
-    try:
-        steps = _parse(payload)
-    except ValueError as exc:
-        return UsageSnapshot(per_turn_usage=False, session_id=session_id, reason=str(exc))
-    if not steps:
-        return UsageSnapshot(
-            per_turn_usage=False,
-            session_id=session_id,
-            reason=f"session log {path} carries no assistant usage yet",
-        )
-    return UsageSnapshot(per_turn_usage=True, session_id=session_id, steps=steps)
-
-
-def decompress(path: Path) -> bytes:
-    if path.suffix == JSONL_SUFFIX:
-        return path.read_bytes()
-    try:
-        import zstandard
-    except ImportError:
-        return _decompress_with_cli(path)
-    try:
-        with path.open("rb") as stream:
-            return zstandard.ZstdDecompressor().stream_reader(stream).read()
-    except zstandard.ZstdError as exc:
-        raise UsageUnavailableError(f"{path} is not a readable zstd frame: {exc}") from exc
+def missing_log(dsh_home: Path, session_id: str) -> UsageSnapshot:
+    return unavailable(session_id, f"no session log under {dsh_home}/sessions for {session_id}")
 
 
 # meiva:note
-# The zstd CLI is the fallback for a machine without the `zstandard` wheel: a
-# missing decoder must surface as an unavailable snapshot with a reason, not as a
-# silent zero. The argv is fixed here — no caller string reaches it.
-# meiva:link base/lm/harness/deepseek/docs/deepseek.meiva.okf.md
-def _decompress_with_cli(path: Path) -> bytes:
+# Read the usage out of a session log's decoded payload: a malformed line or a log with no
+# assistant usage yet is an unavailable snapshot with its reason, never zeros.
+def parse_usage(payload: bytes, *, session_id: str, path: Path) -> UsageSnapshot:
     try:
-        completed = subprocess.run(  # noqa: S603
-            ["zstd", "-dc", str(path)],
-            check=False,
-            capture_output=True,
-            timeout=30,
-        )
-    except FileNotFoundError as exc:
-        raise UsageUnavailableError(
-            "no zstd decoder: install the zstandard package or the zstd binary"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise UsageUnavailableError(f"zstd timed out reading {path}") from exc
-    if completed.returncode != 0:
-        detail = completed.stderr.decode("utf-8", "replace").strip()[:200]
-        raise UsageUnavailableError(f"zstd failed on {path} (rc={completed.returncode}): {detail}")
-    return completed.stdout
+        steps = _parse(payload)
+    except ValueError as exc:
+        return unavailable(session_id, str(exc))
+    if not steps:
+        return unavailable(session_id, f"session log {path} carries no assistant usage yet")
+    return UsageSnapshot(per_turn_usage=True, session_id=session_id, steps=steps)
 
 
 def _parse(payload: bytes) -> tuple[StepUsage, ...]:

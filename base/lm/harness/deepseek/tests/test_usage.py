@@ -8,13 +8,10 @@ import pytest
 from base.lm.harness.deepseek.usage import (
     StepUsage,
     UsageSnapshot,
-    UsageUnavailableError,
-    decompress,
     merge_snapshots,
-    read_usage,
     session_log_dir,
-    session_log_path,
 )
+from base.lm.harness.deepseek.usage_files import decompress, read_usage, session_log_path
 
 SESSION = "session-1"
 
@@ -126,15 +123,15 @@ def test_a_broken_line_says_so_instead_of_reading_as_zero(tmp_path: Path) -> Non
     assert snapshot.reason is not None and "line 2 is not JSON" in snapshot.reason
 
 
-def test_a_decoder_failure_travels_with_the_snapshot(tmp_path: Path) -> None:
-    write_log(tmp_path, [assistant_message(1, 1)])
+# meiva:note
+# Plain text where a zstd frame belongs: the decoder (or, without it, the CLI) refuses.
+def test_an_unreadable_compressed_log_travels_with_the_snapshot(tmp_path: Path) -> None:
+    write_log(tmp_path, [assistant_message(1, 1)], name="session.v4.jsonl.zstd")
 
-    def refuse(path: Path) -> bytes:
-        raise UsageUnavailableError(f"{path} is not a readable zstd frame")
+    snapshot = read_usage(tmp_path, tmp_path, SESSION)
 
-    snapshot = read_usage(tmp_path, tmp_path, SESSION, decoder=refuse)
     assert snapshot.per_turn_usage is False
-    assert snapshot.reason is not None and "not a readable zstd frame" in snapshot.reason
+    assert snapshot.reason is not None and "zstd" in snapshot.reason
 
 
 def test_a_boolean_or_missing_counter_reads_as_zero(tmp_path: Path) -> None:
