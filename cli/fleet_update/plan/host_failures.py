@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import TypeGuard
 
 # meiva:note
@@ -31,16 +32,51 @@ class HostFailure:
 
 
 # meiva:note
-# The step and reason a host's converge recorded when it aborted, else the start's own exit. A
-# host whose converge aborted leaves the rest of the cluster running: the report names its step.
-def start_failure(alias: str, incomplete: str | None, exit_reason: str) -> HostFailure:
+# How far two machines' clocks may disagree before a marker's own stamp stops being evidence
+# about *this* attempt: the marker is stamped on the host, the window is measured here. Two
+# minutes covers an NTP-synced fleet, and a host drifting further loses its attribution rather
+# than lending it to the wrong step.
+_CLOCK_SKEW = timedelta(seconds=120)
+
+
+# meiva:note
+# The step and reason a host's converge recorded when it aborted, else the start's own exit.
+#
+# The marker outlives the wave that wrote it — only a fully successful converge on that home
+# clears it — so `window` is what makes it evidence: the record counts only when its own `at`
+# falls inside the window this attempt occupied, widened by `_CLOCK_SKEW`. A marker from an
+# earlier wave is dropped and the failure is reported at the start with the start's own words,
+# never with an older step's: a wrong attribution sends the reader to the wrong machine.
+def start_failure(
+    alias: str,
+    incomplete: str | None,
+    exit_reason: str,
+    *,
+    window: tuple[datetime, datetime],
+) -> HostFailure:
     try:
         recorded: object = json.loads(incomplete or "")
         if not _is_object_dict(recorded):
             raise TypeError("incomplete converge record must be a mapping")
-        return HostFailure(alias, str(recorded["step"]), str(recorded["error"]))
+        step = str(recorded["step"])
+        error = str(recorded["error"])
+        at = datetime.fromisoformat(str(recorded["at"]))
     except (KeyError, TypeError, ValueError):
         return HostFailure(alias, "start", exit_reason)
+    if not _within(at, window):
+        return HostFailure(alias, "start", exit_reason)
+    return HostFailure(alias, step, error)
+
+
+# meiva:note
+# Whether a marker's moment sits inside the attempt's window, clocks allowed to disagree. A
+# marker or window without a zone cannot be placed on that line at all, so it is not evidence.
+def _within(at: datetime, window: tuple[datetime, datetime]) -> bool:
+    started, finished = window
+    try:
+        return started - _CLOCK_SKEW <= at <= finished + _CLOCK_SKEW
+    except TypeError:
+        return False
 
 
 # meiva:note

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta
 
 from .choices import start_flags
 from .fleet_verify import verify
@@ -20,12 +21,20 @@ from .programs import VERIFY_SCRIPTS, program_text, run_silence
 from .session import FailedError, Session
 
 
-def _host_failure(s: Session, alias: str, exc: FailedError) -> HostFailure:
+# meiva:note
+# What a failed start is attributed to. The converge marker counts only as evidence about *this*
+# run: `window` opens when the window started and closes after the longest attempt its own
+# `--start-timeout` allows, so a marker from an earlier wave falls outside it and the failure is
+# reported at the start instead. The clock is the value the entry point read, never one this
+# module takes itself.
+def _host_failure(
+    s: Session, alias: str, exc: FailedError, window: tuple[datetime, datetime]
+) -> HostFailure:
     try:
         recorded: str | None = s.run(alias, INCOMPLETE, effect=False)
     except FailedError:
         recorded = None
-    return start_failure(alias, recorded, str(exc))
+    return start_failure(alias, recorded, str(exc), window=window)
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
@@ -34,6 +43,7 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
     # Start every host, then verify every host: one failure never erases what the window learned
     # about the others, and each listed host ends with its own line.
     failures: list[HostFailure] = []
+    window = (s.now, s.now + timedelta(seconds=args.start_timeout))
     hosts = start_order(args.gateway, tuple(args.runner))
     started: set[str] = set()
     for alias in hosts:
@@ -47,7 +57,7 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
         try:
             s.run(alias, script)
         except FailedError as exc:
-            failure = _host_failure(s, alias, exc)
+            failure = _host_failure(s, alias, exc, window)
             failures.append(failure)
             s.say(f"PARTIAL: {failure.line()}")
         else:
