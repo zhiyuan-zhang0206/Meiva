@@ -8,6 +8,3 @@ exports = ["adopt.py", "install_registry.py", "materialize.py", "registry.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"install_registry.py#home pathlib.Path.expanduser" = 1

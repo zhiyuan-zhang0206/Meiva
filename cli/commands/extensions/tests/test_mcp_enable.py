@@ -38,7 +38,7 @@ def test_list_marks_disabled_server(unit_home: Path, capsys: pytest.CaptureFixtu
     cmd_mcp_disable("foo", home=unit_home)
     capsys.readouterr()
 
-    assert cmd_mcp_list(home=unit_home) == 0
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
     out = capsys.readouterr().out
     assert "foo" in out
     assert "[disabled]" in out
@@ -98,7 +98,7 @@ def test_enable_and_list_accept_valid_declarations(unit_home: Path, requires: ob
     assert cmd_mcp_add("foo", spec, None, [], [], home=unit_home) == 0
     assert cmd_mcp_enable("foo", home=unit_home) == 0
     assert read_enabled(home=unit_home) == {"foo": True}
-    assert cmd_mcp_list(home=unit_home) == 0
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
 
 
 @pytest.mark.parametrize("requires", [[], {"gpu": False}, {"display": "false"}])
@@ -110,7 +110,7 @@ def test_list_rejects_invalid_requirements_before_printing_inventory(
     assert cmd_mcp_disable("foo", home=unit_home) == 0
     capsys.readouterr()
 
-    assert cmd_mcp_list(home=unit_home) == 1
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 1
     output = capsys.readouterr()
     assert "requires" in output.err
     assert output.out == ""

@@ -67,6 +67,7 @@ def _refresh(
         only=only,
         from_job=from_job,
         home=_home(),
+        user_home=_home(),
     )
 
 
@@ -381,6 +382,7 @@ def test_git_channel_copy_edit_converges_to_incoming(
             now=datetime.now(UTC),
             repo=core_repo,
             home=_home(),
+            user_home=_home(),
         )
         result, new_hash = gate._apply_staged(pkg, staged, "0" * 40)
     finally:
@@ -614,23 +616,31 @@ def test_rollback_without_a_previous_tree_refuses(core_repo: Path) -> None:
 def test_policy_verb_writes_explicit_values(refresh_config: ConfigBoot, core_repo: Path) -> None:
     from cli.commands.extensions.packages import cmd_packages_policy
 
+    h = _home()
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
     assert (
         cmd_packages_policy(
-            "foo", config=refresh_config, update_mode="notify", check_every="2h", home=meiva_home()
+            "foo",
+            config=refresh_config,
+            update_mode="notify",
+            check_every="2h",
+            home=h,
+            user_home=h,
         )
         == 0
     )
     row = _row("foo")
     assert row.update.mode == "notify" and row.update.interval_seconds == 7200
     assert (
-        cmd_packages_policy("foo", config=refresh_config, check_every="soon", home=meiva_home())
+        cmd_packages_policy("foo", config=refresh_config, check_every="soon", home=h, user_home=h)
         == 1
     )
-    assert cmd_packages_policy("foo", config=refresh_config, home=meiva_home()) == 1
+    assert cmd_packages_policy("foo", config=refresh_config, home=h, user_home=h) == 1
     assert (
-        cmd_packages_policy("missing", config=refresh_config, update_mode="auto", home=meiva_home())
+        cmd_packages_policy(
+            "missing", config=refresh_config, update_mode="auto", home=h, user_home=h
+        )
         == 1
     )
 
@@ -653,6 +663,7 @@ def test_refresh_cmd_json_shape(
             now=datetime.now(UTC),
             json_output=True,
             home=_home(),
+            user_home=_home(),
         )
         == 0
     )

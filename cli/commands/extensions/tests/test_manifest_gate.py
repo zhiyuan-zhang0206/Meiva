@@ -170,7 +170,10 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
     _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"meiva": ">=2099"}))
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "break engines")
-    assert cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
+        == 1
+    )
     assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     # the landed copy still carries the previous manifest — nothing was re-landed
     landed = unit_home / "mcps" / "acme" / "meiva-plugin.json"

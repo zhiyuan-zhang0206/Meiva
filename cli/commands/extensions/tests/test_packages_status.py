@@ -32,6 +32,7 @@ def test_empty_registry_prints_host_and_no_packages(
             config=process_config,
             now=datetime.now(UTC),
             home=unit_home,
+            user_home=unit_home,
         )
         == 0
     )
@@ -53,6 +54,7 @@ def test_text_table_shows_resolved_policy_per_source_class(
             config=process_config,
             now=datetime.now(UTC),
             home=unit_home,
+            user_home=unit_home,
         )
         == 0
     )
@@ -74,7 +76,11 @@ def test_json_output_carries_host_channels_and_packages(
 
     assert (
         cmd_packages_status(
-            config=process_config, json_output=True, now=datetime.now(UTC), home=unit_home
+            config=process_config,
+            json_output=True,
+            now=datetime.now(UTC),
+            home=unit_home,
+            user_home=unit_home,
         )
         == 0
     )
@@ -101,7 +107,11 @@ def test_invalid_manifest_reported_not_crashed(
 
     assert (
         cmd_packages_status(
-            config=process_config, json_output=True, now=datetime.now(UTC), home=unit_home
+            config=process_config,
+            json_output=True,
+            now=datetime.now(UTC),
+            home=unit_home,
+            user_home=unit_home,
         )
         == 0
     )
@@ -133,6 +143,7 @@ def test_declared_range_displayed(
             config=process_config,
             now=datetime.now(UTC),
             home=unit_home,
+            user_home=unit_home,
         )
         == 0
     )
@@ -162,7 +173,11 @@ def test_host_blocked_package_surfaces_the_reason(
 
     assert (
         cmd_packages_status(
-            config=process_config, json_output=True, now=datetime.now(UTC), home=unit_home
+            config=process_config,
+            json_output=True,
+            now=datetime.now(UTC),
+            home=unit_home,
+            user_home=unit_home,
         )
         == 0
     )
@@ -175,8 +190,66 @@ def test_host_blocked_package_surfaces_the_reason(
             config=process_config,
             now=datetime.now(UTC),
             home=unit_home,
+            user_home=unit_home,
         )
         == 0
     )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "not loadable on this host" in out
+
+
+# meiva:note
+# A row recorded as `~/src/tilde-skill` (written before sources were recorded absolute) resolves
+# like the absolute path it names: a local directory has no remote channel. The verdict follows the
+# caller's home, not the process's.
+def test_status_places_a_recorded_tilde_source_before_resolving_its_channel(
+    process_config: ConfigBoot,
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "src" / "tilde-skill").mkdir(parents=True)
+    _register("tilde-skill", origin="user", source="~/src/tilde-skill")
+
+    def channel_here(user_home: Path) -> object:
+        assert (
+            cmd_packages_status(
+                config=process_config,
+                json_output=True,
+                now=datetime.now(UTC),
+                home=unit_home,
+                user_home=user_home,
+            )
+            == 0
+        )
+        payload = json.loads(capsys.readouterr().out)
+        (row,) = payload["packages"]
+        return row["channel"]
+
+    assert channel_here(tmp_path / "elsewhere") == "git"
+    assert channel_here(tmp_path) is None
+
+
+# meiva:note
+# `packages policy` reports the channel of the row it just wrote. A row recorded as
+# `~/src/local-pkg` names a local directory, so it has none — the same verdict `packages status`
+# gives for it.
+def test_policy_reports_the_channel_a_placed_row_has(
+    process_config: ConfigBoot, unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands.extensions.packages import cmd_packages_policy
+
+    (tmp_path / "src" / "local-pkg").mkdir(parents=True)
+    _register("local-pkg", origin="user", source="~/src/local-pkg")
+
+    assert (
+        cmd_packages_policy(
+            "local-pkg",
+            config=process_config,
+            update_mode="auto",
+            home=unit_home,
+            user_home=tmp_path,
+        )
+        == 0
+    )
+    assert "channel=-" in capsys.readouterr().out

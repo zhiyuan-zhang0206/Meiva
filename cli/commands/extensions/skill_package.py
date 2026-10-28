@@ -241,7 +241,7 @@ def register_in_cluster(
     gateway: ExtensionGateway,
     machine: MachineIdentityReader,
 ) -> None:
-    from ._pkg_source import looks_like_local_path
+    from base.packages.extensions.install_registry import looks_like_local_path
 
     origin = (
         f"local:{machine.name()}" if source is None or looks_like_local_path(source) else source

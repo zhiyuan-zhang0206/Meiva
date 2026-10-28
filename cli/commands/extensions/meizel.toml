@@ -8,7 +8,6 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 "parsers" = ["mcp.py", "memory.py", "packages", "plugins.py", "plugins_inspect.py", "skill.py", "skills_sync.py"]
 "plugins.py" = ["_claude_code_plugin.py", "_manifest_gate.py", "_pkg_source.py", "plans", "skill_package.py", "skills_sync.py"]
 "skill.py" = ["_manifest_gate.py", "_pkg_source.py", "plans", "skill_package.py", "skills_sync.py"]
-"skill_package.py" = ["_pkg_source.py"]
 "skills_sync.py" = ["plans", "skill_package.py"]
 "tests" = ["_pkg_source.py", "external_skill_host", "external_skills.py", "materialize.py", "mcp.py", "packages", "plans", "plugins.py", "plugins_inspect.py", "skill.py", "skill_package.py", "skills_sync.py"]
 
@@ -20,8 +19,3 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 
 [roots]
 "external_skills.py" = { kinds = ["random"], why = "Mints fresh skill installation and staging generation UUIDs" }
-
-[debt.ambient-read]
-"_pkg_source.py#home pathlib.Path.expanduser" = 1
-"mcp.py#home pathlib.Path.expanduser" = 1
-"skill.py#home pathlib.Path.expanduser" = 1

@@ -113,6 +113,7 @@ class Pass:
         now: datetime,
         repo: Path,
         home: Path,
+        user_home: Path,
     ) -> None:
         self.config = config
         self.check_only = check_only
@@ -121,6 +122,7 @@ class Pass:
         self.now = now
         self.repo = repo
         self.home = home
+        self.user_home = user_home
         self.skills_dir = paths.skills_dir(home)
         self.registry: install_registry.Registry | None = None
         self.deltas: dict[str, _Delta] = {}
@@ -239,7 +241,9 @@ class Pass:
 
     def run(self) -> RefreshReport:
         try:
-            registry = install_registry.load(home=self.home)
+            registry = install_registry.place_sources(
+                install_registry.load(home=self.home), user_home=self.user_home
+            )
         except (install_registry.InstallRegistryError, OSError) as exc:
             return RefreshReport(
                 ran=False,
@@ -615,7 +619,7 @@ class Pass:
 
     def _git_candidate(self, pkg: install_registry.InstalledPackage) -> str | None:
         """The remote sha worth acquiring, or None after recording why this package stops here."""
-        from cli.commands.extensions._pkg_source import looks_like_local_path
+        from base.packages.extensions.install_registry import looks_like_local_path
 
         policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
         source = pkg.source
@@ -726,6 +730,7 @@ def run_refresh(
     config: ConfigBoot,
     repo: Path,
     home: Path,
+    user_home: Path,
     now: datetime,
     check_only: bool = False,
     only: str | None = None,
@@ -757,6 +762,7 @@ def run_refresh(
                 now=now,
                 repo=repo,
                 home=home,
+                user_home=user_home,
             )
             return pass_.run()
     except LockTimeoutError:

@@ -125,7 +125,7 @@ def cmd_mcp_add(
     return 0
 
 
-def cmd_mcp_list(*, home: Path) -> int:
+def cmd_mcp_list(*, home: Path, user_home: Path) -> int:
     """`meiva mcp list` — print the merged server set, flagging each server's
     origin (machine / installed / plugin-built-in) and which are disabled."""
     from base.packages.extensions.install_registry import installed_mcp_names
@@ -162,7 +162,7 @@ def cmd_mcp_list(*, home: Path) -> int:
         disabled = " [disabled]" if not enabled.get(name, True) else ""
         print(f"  {name}  [{origin}]{disabled}")
         print(f"      {server_summary(merged[name])}")
-        if name in installed and _source_is_dead_local_path(name, home=home):
+        if name in installed and _source_is_dead_local_path(name, home=home, user_home=user_home):
             print(
                 f"      ! recorded source path no longer exists — `meiva mcp upgrade {name}` "
                 f"will fail (reinstall from a live git URL to restore upgradeability)",
@@ -171,19 +171,23 @@ def cmd_mcp_list(*, home: Path) -> int:
     return 0
 
 
-def _source_is_dead_local_path(name: str, *, home: Path) -> bool:
+# meiva:note
+# `user_home` places a `~` in a row recorded before sources were recorded absolute; a source that
+# names no local directory in that home is dead, and a `~account` spelling always is.
+def _source_is_dead_local_path(name: str, *, home: Path, user_home: Path) -> bool:
     """True when the installed package's recorded source is a local path that
     no longer exists on disk (an MCP installed from a git worktree that has
     since been removed — audit round 2, skills-plugins #4). Such a source
     cannot be re-fetched: `meiva mcp upgrade` would fail."""
-    from pathlib import Path
-
     from base.packages.extensions import install_registry
 
     pkg = install_registry.get(name, home=home)
-    if pkg is None or pkg.source is None or "://" in pkg.source or pkg.source.startswith("git@"):
+    if pkg is None or pkg.source is None:
         return False
-    return not Path(pkg.source).expanduser().exists()
+    recorded = install_registry.placed(pkg, user_home=user_home).source
+    if recorded is None or install_registry.source_is_git_url(recorded):
+        return False
+    return not install_registry.looks_like_local_path(recorded)
 
 
 def cmd_mcp_enable(name: str, *, home: Path) -> int:
@@ -695,7 +699,7 @@ def cmd_mcp_uninstall(name: str, *, home: Path) -> int:
     return 0
 
 
-def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime) -> int:
+def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime, user_home: Path) -> int:
     """`meiva mcp upgrade <name>` — re-fetch an installed MCP package
     from its source.
 
@@ -711,7 +715,8 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime) -> int
     if pkg is None or pkg.type != "mcp":
         print(f"[meiva mcp upgrade] '{name}' is not an installed MCP package.", file=sys.stderr)
         return 1
-    if pkg.source is None:
+    recorded = pkg.source
+    if recorded is None:
         print(f"[meiva mcp upgrade] '{name}' has no recorded source.", file=sys.stderr)
         return 1
 
@@ -722,7 +727,12 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime) -> int
             "replacing it with the fetched source."
         )
 
-    acq = _acquire_or_report(pkg.source, pkg.ref, "upgrade")
+    # meiva:note
+    # `acquire_source` takes a value already placed; `pkg` keeps the recorded text, so the
+    # re-registration below does not migrate a legacy `~/...` row to an absolute path.
+    acq = _acquire_or_report(
+        install_registry.placed_source(recorded, user_home=user_home), pkg.ref, "upgrade"
+    )
     if acq is None:
         return 1
 
