@@ -260,6 +260,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `reply_suggestion_gate_failed` | reply suggestion gate call failed | anomaly | — | — | events | — |
 | `reply_suggestion_draft_failed` | reply suggestion draft call failed | anomaly | — | — | events | — |
 | `reply_suggestion_draft_rejected` | reply suggestion draft empty or too long | noise | — | — | events | — |
+| `agent_watch_round` | one agent-watch round — duties judged, silent, woken, and unreadable | observation | watched, silent, sent, blind | — | events | — |
 | `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events | — |
 | `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events | — |
 | `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles and flake discoveries (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds, flake_new_quarantines | — | events | — |
