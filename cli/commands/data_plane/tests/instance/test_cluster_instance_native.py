@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import getpass
+import os
 import subprocess
 import tempfile
 import time
@@ -25,6 +26,7 @@ from redis.backoff import NoBackoff
 from redis.retry import Retry
 
 from base import cluster
+from base.clock import SYSTEM_TIMERS
 from base.cluster import provision_database
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import pg_admin_url
@@ -67,6 +69,8 @@ def _storage(cluster_: NativeCluster, machine: MachineIdentityReader) -> int:
         retained_children=cluster_.retained_children,
         machine=machine,
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
 
@@ -176,6 +180,8 @@ def test_the_entry_brings_up_the_instance_on_the_recorded_ports_with_the_url_ide
             database_factory=operator_database,
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
+            timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
 
     assert start() == 0
@@ -218,6 +224,8 @@ def test_a_fresh_single_box_redis_refuses_unauthenticated_connections(
             database_factory=operator_database,
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
+            timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
         == 0
     )
@@ -250,6 +258,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             home=native_cluster.home,
             retained_children=native_cluster.retained_children,
             machine=command_machine,
+            timers=SYSTEM_TIMERS,
         )
         == 0
     )
@@ -414,13 +423,15 @@ def test_the_hba_proof_refuses_a_postmaster_still_serving_trust(
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
     socket_dir = instance.pg_socket_dir(native_cluster.home)
-    instance.require_authenticated_hba(native_cluster.pg_port, "127.0.0.1", socket_dir=socket_dir)
+    instance.require_authenticated_hba(
+        native_cluster.pg_port, "127.0.0.1", socket_dir=socket_dir, timers=SYSTEM_TIMERS
+    )
 
     _legacy_trust_loaded(native_cluster)
 
     with pytest.raises(RuntimeError, match="does not enforce password authentication"):
         instance.require_authenticated_hba(
-            native_cluster.pg_port, "127.0.0.1", socket_dir=socket_dir
+            native_cluster.pg_port, "127.0.0.1", socket_dir=socket_dir, timers=SYSTEM_TIMERS
         )
 
 

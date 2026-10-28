@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import getpass
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -39,6 +40,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> int:
         retained_children=cluster.retained_children,
         machine=machine,
         tuning=StartTuning(bind_wait_s=0.0),
+        timers=SYSTEM_TIMERS,
     )
 
 
