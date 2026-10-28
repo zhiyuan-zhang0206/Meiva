@@ -12,7 +12,3 @@ exports = ["agent_runtime.py", "plugin.py"]
 
 [roots]
 "_state.py" = { kinds = ["home"], why = "Plugin state factory resolves current agent workspace or user home as default logical cwd" }
-
-[debt.ambient-read]
-"_code_namespace.py#home pathlib.Path.expanduser" = 1
-"plugin.py#home pathlib.Path.expanduser" = 3
