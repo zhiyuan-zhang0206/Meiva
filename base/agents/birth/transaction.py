@@ -17,7 +17,11 @@ from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
 from base.agents.labels import spawn_prompt_with_label
-from base.agents.model.birth_config import resolve_birth_config
+from base.agents.model.birth_config import (
+    HARNESS_MODEL_SELECTION_KEY,
+    HARNESS_MODEL_SELECTION_VERSION,
+    resolve_birth_config,
+)
 from base.config.service_read import ConfigAuthority
 from base.db import fetch_one
 from base.lm.catalog import ModelCatalog
@@ -139,6 +143,7 @@ def _resolve_birth_overlay(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    harness: str,
 ) -> tuple[dict[str, object] | None, dict[str, object]]:
     # THE spawn boundary is this INSERT — every spawn in the system funnels
     # through it (SDK / frontend / scripts all POST /api/keyed/v1/agents, which
@@ -169,17 +174,17 @@ def _resolve_birth_overlay(
     birth_config = resolve_birth_config(
         cur, config, inherited=inherited, catalog=catalog, authority=authority
     )
-    from base.api_contracts.agent_contract import InvalidModelConfig
+    from base.api_contracts.agent_contract import Harness, InvalidModelConfig
     from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import validate_model_config
 
     try:
-        validate_model_config(
-            catalog=catalog,
-            config=resolve_agent_config_pins(config, birth_config),
-        )
+        pins = resolve_agent_config_pins(config, birth_config)
+        validate_model_config(catalog=catalog, config=pins, harness=Harness(harness))
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
+    if Harness(harness) is not Harness.MEIVA:
+        birth_config[HARNESS_MODEL_SELECTION_KEY] = HARNESS_MODEL_SELECTION_VERSION
     return config, birth_config
 
 
@@ -263,7 +268,7 @@ def insert_agent_birth(
     born_harness = resolve_birth_harness(cur, harness, fork_from)
     new_id = _insert_agent_identity(cur, label)
     config, birth_config = _resolve_birth_overlay(
-        cur, config, fork_from, catalog=catalog, authority=authority
+        cur, config, fork_from, catalog=catalog, authority=authority, harness=born_harness
     )
     # For a fork, spawner records the fork SOURCE — the lineage parent
     # (user ruling 2026-08-28, task #1879). The executor who triggered the

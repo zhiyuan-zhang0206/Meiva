@@ -141,6 +141,7 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
     "gpt-5.6": {
       provider: "gpt",
       harnesses: ["meiva", "codex"],
+      harness_settings: { codex: { reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" } },
       context_window: 400_000,
       reasoning_effort_options: ["minimal", "low", "medium", "high"],
       reasoning_effort_default: "medium",
@@ -169,8 +170,7 @@ async function table(): Promise<HTMLElement> {
 
 function column(element: HTMLElement, name: string): HTMLElement {
   return within(element).getByRole("list", {
-    name: name === MODEL_COLUMN ? /^(Model|Meiva history model)$/
-      : name === EFFORT_COLUMN ? /^(Effort|Summary effort)$/ : name,
+    name,
   });
 }
 
@@ -345,25 +345,45 @@ describe("stacked picker", () => {
   it.each([
     { harness: "claude_code", label: "Claude Code", model: "claude-opus-4-8", effort: "—", catalog: modelsWithEffort },
     { harness: "codex", label: "Codex", model: "gpt-5.6", effort: "medium", catalog: modelsWithTwoLadders },
-  ] as const)("names $harness model choices as Meiva history settings in stacked sections", async ({ harness, label, model, effort, catalog }) => {
+  ] as const)("names $harness execution choices in stacked sections", async ({ harness, label, model, effort, catalog }) => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(catalog());
     setMockSetting("behavior.spawn_harness", harness);
     wrap("stack");
     const form = await stack();
-    expect(section(form, `Meiva history model ${model}`)).toBeTruthy();
-    expect(section(form, `Summary effort ${effort}`)).toBeTruthy();
+    expect(section(form, `Model ${model}`)).toBeTruthy();
+    expect(section(form, `Effort ${effort}`)).toBeTruthy();
 
-    fireEvent.click(section(form, `Meiva history model ${model}`));
-    expect(within(form).getByRole("list", { name: "Meiva history model" })).toBeTruthy();
+    fireEvent.click(section(form, `Model ${model}`));
+    expect(within(form).getByRole("list", { name: "Model" })).toBeTruthy();
     expect(selected(form, MODEL_COLUMN, model)).toBe(true);
-    fireEvent.click(section(form, `Summary effort ${effort}`));
-    expect(within(form).getByRole("list", { name: "Summary effort" })).toBeTruthy();
+    fireEvent.click(section(form, `Effort ${effort}`));
+    expect(within(form).getByRole("list", { name: "Effort" })).toBeTruthy();
 
     fireEvent.click(section(form, `Harness ${label}`));
     pick(form, HARNESS_COLUMN, "Meiva");
     expect(section(form, "Model deepseek-v4-pro")).toBeTruthy();
     expect(section(form, "Effort max")).toBeTruthy();
+  });
+
+  it("sends the model and effort selected for an external harness on mobile", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    const catalog = modelsWithTwoLadders();
+    catalog.models["gpt-5.6"].harness_settings = {
+      codex: { reasoning_effort_options: ["low", "medium", "ultra"], reasoning_effort_default: "medium" },
+    };
+    vi.mocked(api.getModels).mockResolvedValue(catalog);
+    setMockSetting("behavior.spawn_harness", "codex");
+    const { onSpawn } = wrap("stack");
+    const form = await stack();
+    expect(section(form, "Model gpt-5.6")).toBeTruthy();
+    fireEvent.click(section(form, "Effort medium"));
+    pick(form, EFFORT_COLUMN, "ultra");
+    expect(section(form, "Effort ultra")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith({
+      machine: "test-host", harness: "codex", model: "gpt-5.6", reasoning_effort: "ultra",
+    });
   });
 
   it("one pick closes its section and reaches the spawn", async () => {

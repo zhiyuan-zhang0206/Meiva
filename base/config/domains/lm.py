@@ -437,10 +437,10 @@ class LmSettings(EnvSettings):
         alias="MEIVA_REASONING_EFFORT",
         description=(
             "Cross-provider reasoning effort (`` / `none` / `minimal` / `low` / "
-            "`medium` / `high` / `xhigh` / `max`). Unset resolves the per-model "
-            "default (base/lm/registry.py); an explicitly empty value pins each "
-            "provider's own default. Mapped and clamped per provider at model "
-            "build; unknown values fail fast. Per-agent overridable."
+            "`medium` / `high` / `xhigh` / `max` / `ultra`, which is Codex-only). "
+            "Unset resolves the native model or external harness binding's default. "
+            "An empty value selects that runtime's default. Unsupported values fail "
+            "before execution. Per-agent overridable."
         ),
         json_schema_extra={
             "restart_required": "agent",

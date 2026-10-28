@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
@@ -63,37 +63,51 @@ def open_session(
     registry: SessionRegistry,
     environ: Mapping[str, str],
     clock: SessionClock,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
     skip_permissions: bool = True,
     unsolicited: UnsolicitedSink | None = None,
 ) -> HarnessSession:
     if harness is Harness.CLAUDE_CODE:
         claude_env = session_environ(environ)
+        claude_config = BridgeConfig(
+            cwd=cwd,
+            reasoning_effort=reasoning_effort,
+            cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
+        )
+        if model is not None:
+            claude_config = replace(claude_config, model=model)
         return ClaudeSession(
-            BridgeConfig(
-                cwd=cwd,
-                cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
-            ),
+            claude_config,
             environ={**dict.fromkeys(process_environment(), ""), **claude_env},
             binding=SessionBinding(agent_id, registry, unsolicited),
             clock=clock,
         )
     if harness is Harness.CODEX:
         return CodexSession(
-            CodexConfig(cwd=cwd),
+            CodexConfig(cwd=cwd, model=model, reasoning_effort=reasoning_effort),
             environ=environ,
             binding=SessionBinding(agent_id, registry),
             clock=clock,
         )
     if harness is Harness.ANTIGRAVITY:
+        antigravity_config = AntigravityConfig(cwd=cwd, skip_permissions=skip_permissions)
+        if model is not None:
+            antigravity_config = replace(antigravity_config, model=model)
         return AgySession(
-            AntigravityConfig(cwd=cwd, skip_permissions=skip_permissions),
+            antigravity_config,
             environ=environ,
             binding=SessionBinding(agent_id, registry),
             clock=clock,
         )
     if harness is Harness.KIMI_CODE:
         return KimiSession(
-            KimiConfig(cwd=cwd, skip_permissions=skip_permissions),
+            KimiConfig(
+                cwd=cwd,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                skip_permissions=skip_permissions,
+            ),
             environ=environ,
             binding=SessionBinding(agent_id, registry),
             clock=clock,
@@ -170,6 +184,8 @@ def bridge_for(
     registration_ttl_seconds: float,
     environ: Mapping[str, str],
     root: BridgeRootValues,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
     unsolicited: UnsolicitedSink | None = None,
@@ -193,6 +209,8 @@ def bridge_for(
             registry=scoped,
             environ={**session_environ(environ), HANDLE_ENV: handle},
             clock=root.clock,
+            model=model,
+            reasoning_effort=reasoning_effort,
             skip_permissions=skip_permissions,
             unsolicited=unsolicited,
         )

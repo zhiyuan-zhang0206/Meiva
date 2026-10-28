@@ -59,7 +59,7 @@ def get_models(request: Request) -> ModelsResponse:
     from base.agents.model.birth_config import resolve_default_model
     from base.lm.pricing import rates_at
     from base.lm.registry import explain_setting, harnesses_for
-    from gateway.schemas.models import ModelInfo, ModelPricing
+    from gateway.schemas.models import HarnessModelInfo, ModelInfo, ModelPricing
 
     catalog = require_model_catalog(request)
 
@@ -93,6 +93,13 @@ def get_models(request: Request) -> ModelsResponse:
                 reasoning_effort_default=resolved_effort or None,
                 superseded_by=spec.superseded_by,
                 harnesses=list(harnesses_for(spec)),
+                harness_settings={
+                    harness: HarnessModelInfo(
+                        reasoning_effort_options=list(binding.effort_levels),
+                        reasoning_effort_default=binding.default_effort,
+                    )
+                    for harness, binding in spec.external_harnesses.items()
+                },
             )
 
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:

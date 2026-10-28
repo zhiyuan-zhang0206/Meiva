@@ -18,10 +18,11 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 class BridgeConfig:
     cwd: Path
     model: str = DEFAULT_MODEL
+    reasoning_effort: str | None = None
     cli_path: str | None = None
     tools: tuple[str, ...] | None = None
     permission_mode: str = "bypassPermissions"
-    max_turns: int | None = 24
+    max_turns: int | None = None
     auth: AuthConfig = field(default_factory=AuthConfig)
     turn_timeout_seconds: float = 900.0
     cancel_settle_seconds: float = 5.0

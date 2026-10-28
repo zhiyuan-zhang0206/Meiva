@@ -29,14 +29,16 @@ def option_values(
         values["cli_path"] = cli_path
     if "thinking" in option_fields:
         values["thinking"] = {"type": "adaptive", "display": "summarized"}
+    if config.reasoning_effort is not None:
+        if "effort" not in option_fields:
+            raise ValueError("the installed Claude SDK does not support the selected effort")
+        values["effort"] = config.reasoning_effort
     values.update(
         model=config.model,
         cwd=str(config.cwd),
         tools=None if config.tools is None else list(config.tools),
         permission_mode=config.permission_mode,
         max_turns=config.max_turns,
-        setting_sources=[],
-        strict_mcp_config=True,
         include_partial_messages=True,
         env=build_env(environ, config.auth, host=environ),
         resume=resume,
