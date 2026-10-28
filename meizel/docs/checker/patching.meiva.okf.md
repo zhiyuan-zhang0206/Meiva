@@ -42,7 +42,8 @@ classified through the file's imports; a string target names a dotted path. A
 first-party string target stays `restricted-python`, since it hides the dependency
 from the checker, and is not counted twice; an unreadable string target is
 `restricted-python` too. `setitem` and `delitem` on other dicts are not patches
-here. It applies to fixtures and production code that patch, not only to tests.
+here. It applies to fixtures and production code that patch, not only to tests. See
+[[meizel/docs/checker/test-code.meiva.okf.md]].
 
 ## A name the module does not bind
 

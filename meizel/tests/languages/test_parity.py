@@ -289,3 +289,37 @@ def test_the_patch_sites_of_the_approved_files_are_pinned(
     assert run(ROOT, "debt", "approved", "--json") == 0
     found = {item["path"]: item["sites"] for item in json.loads(capsys.readouterr().out)}
     assert found == APPROVED_PATCH_SITES
+
+
+SHARED_MOCK = {
+    "ui/state-test-mock.tsx": "export const state = {count: 0};\n",
+    "meizel.toml": '[roles]\nfrontend = ["ui"]\n',
+}
+MOCK_WRITE = 'import {state} from "./state-test-mock";\nstate.count = 1;\n'
+MOCK_PRODUCTION = (
+    'import {state} from "./state-test-mock";\nexport const count = (): number => state.count;\n'
+)
+
+
+def test_a_typescript_patch_of_a_shared_mock_is_not_a_patch_of_the_code_under_test(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo({**SHARED_MOCK, "ui/view.test.tsx": MOCK_WRITE})
+    assert diagnostics(root, "first-party-patch") == []
+
+
+def test_a_typescript_mock_of_a_shared_mock_is_not_recorded(make_repo: RepoFactory) -> None:
+    mock = 'import {vi} from "vitest";\nvi.mock("./state-test-mock");\n'
+    root = make_repo({**SHARED_MOCK, "ui/view.test.tsx": mock})
+    assert diagnostics(root, "first-party-patch") == []
+
+
+def test_a_production_import_of_the_shared_mock_brings_every_patch_back(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {**SHARED_MOCK, "ui/view.test.tsx": MOCK_WRITE, "ui/view.tsx": MOCK_PRODUCTION}
+    )
+    [found] = diagnostics(root, "first-party-patch")
+    assert found.path == "ui/view.test.tsx"
+    assert "state-test-mock.tsx.count" in found.message

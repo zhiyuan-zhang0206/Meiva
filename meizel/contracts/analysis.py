@@ -17,7 +17,7 @@ from meizel.contracts.ambient_read import (
     stale_readers,
     stale_roots,
 )
-from meizel.contracts.debt import file_key, set_debt
+from meizel.contracts.debt import PATCH_HINT, PATCH_REASONING, PATCH_WHAT, file_key, set_debt
 from meizel.contracts.enumerations import check as check_roles
 from meizel.contracts.ledger import debts_in, reconcile
 from meizel.contracts.manifest import Manifest, effective_purity, load_manifests, manifest_path
@@ -33,7 +33,7 @@ from meizel.contracts.rule import (
 )
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch, Sources
 from meizel.graph.universe import Universe
-from meizel.language.fixtures import FixtureIndex, fixture_facts
+from meizel.language.fixtures import FixtureIndex, fixture_facts, is_test_file
 from meizel.language.scan import (
     EXTERNAL_FORMS,
     FileScan,
@@ -240,70 +240,6 @@ def _source_diagnostics(
     return found
 
 
-_PATCH_WHAT = {
-    Code.FIRST_PARTY_PATCH: "first-party",
-    Code.STDLIB_PATCH: "standard-library",
-    Code.THIRD_PARTY_PATCH: "third-party",
-    Code.ENV_PATCH: "the environment",
-    Code.UNRESOLVED_PATCH: "an unresolved target",
-}
-_PATCH_HINT = {
-    Code.FIRST_PARTY_PATCH: (
-        "do not patch first-party code: split the code under test into a public facade and an "
-        "implementation whose dependencies are explicit parameters, and let the test pass the "
-        "fake in directly"
-    ),
-    Code.STDLIB_PATCH: (
-        "do not patch the standard library: the code under test takes the dependency (a clock, a "
-        "sleeper, a file opener) as an explicit parameter, and the test passes the fake in directly"
-    ),
-    Code.THIRD_PARTY_PATCH: (
-        "do not patch a third-party package: wrap it behind a first-party seam whose dependency is "
-        "an explicit parameter, and let the test pass the fake in directly"
-    ),
-    Code.ENV_PATCH: (
-        "do not patch the environment: read the setting once at the boundary and pass the value "
-        "in as an explicit parameter"
-    ),
-    Code.UNRESOLVED_PATCH: (
-        "the target of this patch is not an imported module or object, so what it replaces is "
-        "invisible to the checker: inject the dependency as an explicit parameter instead of "
-        "patching it"
-    ),
-}
-# meiva:note
-# The two codes below carry their principle, recipe and rule as three lines; the target is zero,
-# not a long-term debt.
-_PATCH_REASONING = {
-    Code.PATCH_RAISING_FALSE: (
-        "why: `raising=False` turns a patch of a name that no longer exists into a silent no-op, so "
-        "the test keeps passing while it stops testing what it claims",
-        "instead: inject the dependency as a parameter; a name that is optional by design is "
-        "asserted to exist before it is patched, or the test builds the object that lacks it. "
-        "`missing-patch-target` is the same defect on a first-party module and cannot be recorded",
-        "see: docs/conventions/python-conventions.md#test-seams-in-another-shape",
-    ),
-    Code.TEST_SUBCLASS_OVERRIDE: (
-        "why: a test class that overrides one method of production code replaces behavior by "
-        "name, a patch in another spelling; later changes of the base silently stop being tested",
-        "instead: give the production class the value it reads as a constructor field and build "
-        "the real class with it; lift the overridden decision into a pure function; make the "
-        "fault with a real resource; only a fault no real resource can make takes a narrow "
-        "Protocol in base/ with its fake in base's tests/",
-        "see: docs/conventions/python-conventions.md#test-seams-in-another-shape",
-    ),
-}
-
-
-def _patch_message(patch: Patch) -> str:
-    if patch.code is Code.PATCH_RAISING_FALSE:
-        return f"{patch.form}(..., raising=False) on {patch.target}"
-    if patch.code is Code.TEST_SUBCLASS_OVERRIDE:
-        return f"a test subclass overrides {patch.target}"
-    suffix = " (imported binding)" if patch.imported else ""
-    return f"{patch.form} on {_PATCH_WHAT[patch.code]} {patch.target}{suffix}"
-
-
 _TEST_MODULE = re.compile(r"^test_|_test\.py$|\.(?:test|spec)\.")
 
 
@@ -371,27 +307,87 @@ def _stale_approvals(
 
 
 # meiva:note
-# Patching: the dependency was not injected. A file the policy approves is not judged.
-def _patch_diagnostics(scans: Iterable[FileScan], approved: Collection[str]) -> list[Diagnostic]:
+# The modules the run's facts show as test code that nothing outside the tests imports, each named
+# the way a patch target names it: a TypeScript file by its path, a Python module by its dotted name
+# (`meizel/tests/codes/test_x.py` is `meizel.tests.codes.test_x`). An importer the run did not scan cannot
+# clear the exemption: the answer is as complete as the run's fact graph.
+def _test_code_modules(facts: Iterable[Fact]) -> frozenset[str]:
+    reached = [fact for fact in facts if fact.kind in (FactKind.IMPORT, FactKind.PATCH)]
+    shipped = {fact.dst for fact in reached if not is_test_file(fact.src)}
+    return frozenset(
+        _target_name(fact.dst)
+        for fact in reached
+        if is_test_file(fact.dst) and fact.dst not in shipped
+    )
+
+
+# meiva:note
+# Whether a target names one of these modules or a name bound inside one: a target adds the patched
+# name to the module it reaches (`page-test-mock.tsx.activeId`, `lib.mod.helper`).
+def _names_test_code(target: str, modules: Collection[str]) -> bool:
+    candidate = target
+    while candidate:
+        if candidate in modules:
+            return True
+        candidate, separator, _ = candidate.rpartition(".")
+        if not separator:
+            return False
+    return False
+
+
+# meiva:note
+# The module part of a patch target that names `path`: a TypeScript file keeps its path, a Python module
+# is written dotted (`meizel/tests/codes/test_x.py` is `meizel.tests.codes.test_x`).
+def _target_name(path: str) -> str:
+    if not path.endswith(".py"):
+        return path
+    return path.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
+
+
+# meiva:note
+# How a patch reads: its form and the code's own word for what it targets.
+def _patch_message(patch: Patch) -> str:
+    if patch.code is Code.PATCH_RAISING_FALSE:
+        return f"{patch.form}(..., raising=False) on {patch.target}"
+    if patch.code is Code.TEST_SUBCLASS_OVERRIDE:
+        return f"a test subclass overrides {patch.target}"
+    suffix = " (imported binding)" if patch.imported else ""
+    return f"{patch.form} on {PATCH_WHAT[patch.code]} {patch.target}{suffix}"
+
+
+def _patch_hints(patch: Patch) -> tuple[str, ...]:
+    hints = list(PATCH_REASONING.get(patch.code) or (PATCH_HINT[patch.code],))
+    if patch.imported:
+        hints.append(
+            "target is an imported binding on this module rather than defined here; "
+            "patch the defining module or inject the dependency"
+        )
+    return tuple(hints)
+
+
+# meiva:note
+# Patching: the dependency was not injected. A file the policy approves is not judged, and neither is
+# a patch of test code: a test that drives its own mock reaches no collaborator of the code under
+# test.
+def _patch_diagnostics(
+    scans: Iterable[FileScan], approved: Collection[str], facts: Iterable[Fact]
+) -> list[Diagnostic]:
     found: list[Diagnostic] = []
+    test_code = _test_code_modules(facts)
     for scan in scans:
         if scan.path in approved:
             continue
         owner = scan.path.rpartition("/")[0]
         for patch in scan.patches:
-            hints = list(_PATCH_REASONING.get(patch.code) or (_PATCH_HINT[patch.code],))
-            if patch.imported:
-                hints.append(
-                    "target is an imported binding on this module rather than defined here; "
-                    "patch the defining module or inject the dependency"
-                )
+            if patch.code is Code.FIRST_PARTY_PATCH and _names_test_code(patch.target, test_code):
+                continue
             found.append(
                 Diagnostic(
                     scan.path,
                     patch.line,
                     patch.code,
                     _patch_message(patch),
-                    tuple(hints),
+                    _patch_hints(patch),
                     DebtKey(owner, file_key(owner, scan.path, f"{patch.form} {patch.target}")),
                 )
             )
@@ -659,7 +655,7 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) 
     _, found, _ = _judge_facts(scan.facts, manifests)
     loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     found.extend(_source_diagnostics([scan], loaders, externals))
-    found.extend(_patch_diagnostics([scan], _approved(policy)))
+    found.extend(_patch_diagnostics([scan], _approved(policy), scan.facts))
     found.extend(ambient_diagnostics([scan], manifests))
     found.extend(_entropy_diagnostics([scan], manifests))
     found.extend(_type_cast_diagnostics([scan]))
@@ -745,7 +741,7 @@ def analyze(
     projections, found, needed = _judge_facts(facts, manifests)
     diagnostics.extend(found)
     diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals))
-    diagnostics.extend(_patch_diagnostics(judged_scans, _approved(policy)))
+    diagnostics.extend(_patch_diagnostics(judged_scans, _approved(policy), facts))
     diagnostics.extend(ambient_diagnostics(judged_scans, manifests))
     diagnostics.extend(_entropy_diagnostics(judged_scans, manifests))
     diagnostics.extend(_type_cast_diagnostics(judged_scans))
