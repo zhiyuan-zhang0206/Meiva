@@ -28,6 +28,11 @@ __all__ = [
 ]
 
 
+# meiva:note
+# `SSH_CONNECTION` is four short tokens (client ip/port, server ip/port); the bound is
+# the wire's own argv bound, applied so a corrupt environment cannot write a huge row.
+_CONNECTION_CHARS = 200
+
 RequestRecorder = Callable[[str, Sequence[str]], None]
 Outcome = Literal["ok", "failed"]
 ResultRecorder = Callable[[str, Sequence[str], Outcome, float], None]
@@ -131,6 +136,7 @@ def operator_lifecycle_audit(
         return
     try:
         caller = _caller_identity(environ)
+        spawn = _spawn_evidence(environ, caller["ppid"])
         head_sha = _head_sha(home, environ)
     except Exception as exc:
         print(
@@ -143,7 +149,7 @@ def operator_lifecycle_audit(
         return
     with lifecycle_audit(
         operator_request_recorder(
-            database_factory=database_factory, caller=caller, head_sha=head_sha
+            database_factory=database_factory, caller=caller, head_sha=head_sha, spawn=spawn
         ),
         operator_result_recorder(
             database_factory=database_factory, caller=caller, head_sha=head_sha
@@ -162,6 +168,27 @@ def _caller_identity(environ: Mapping[str, str]) -> CallerPayload:
     return caller_identity(environ)
 
 
+# meiva:note
+# What launched this command, recorded beside the caller block: the parent process's
+# command line, and the connection the shell arrived on when it came over ssh.
+# `pid`/`ppid` name the local chain but die with it, so the two fleet-wide stops on
+# 2026-10-28 could not be traced past a number; `SSH_CONNECTION` answers "from which
+# machine" and the parent's argv answers "started by what". The pid is the one the caller
+# block already carries, so this reads no process fact of its own. Arguments pass through
+# the wire's own redaction, because a parent's command line can carry a credential; a
+# parent that is gone or opaque answers None, never an empty command line.
+def _spawn_evidence(environ: Mapping[str, str], parent_pid: int) -> dict[str, object]:
+    from base.host.proc import process_cmdline
+    from base.native_process.root_control.client import redacted_argv
+
+    parent = process_cmdline(parent_pid)
+    connection = (environ.get("SSH_CONNECTION") or "").strip()
+    return {
+        "parent_argv": redacted_argv(parent) if parent else None,
+        "ssh_connection": connection[:_CONNECTION_CHARS] or None,
+    }
+
+
 def _head_sha(home: Path, environ: Mapping[str, str]) -> str | None:
     from base.deploy.git.cluster_drift import prod_source_head_sha
 
@@ -175,12 +202,13 @@ def operator_request_recorder(
     database_factory: DatabaseFactory,
     caller: CallerPayload,
     head_sha: str | None,
+    spawn: Mapping[str, object],
 ) -> RequestRecorder:
     def recorder(verb: str, units: Sequence[str]) -> None:
         try:
             _record(
                 "lifecycle_request",
-                {"verb": verb, "units": list(units), "caller": dict(caller)},
+                {"verb": verb, "units": list(units), "caller": dict(caller), "spawn": dict(spawn)},
                 database_factory=database_factory,
                 caller=caller,
                 head_sha=head_sha,
