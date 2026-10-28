@@ -6,8 +6,8 @@
 # prints, and executes what those plans return. Callers hand it the home as a value, and a
 # launch the values it reads from settings (`RootLaunchInputs`); nothing here reads settings.
 #
-# It reads no process environment: the caller block's mapping is handed in, and every path the
-# module touches is derived from the `home` the caller passes. Nothing below it resolves either
+# It reads no process environment: the caller block's mapping is handed in, and every home path
+# the module touches is derived from the `home` the caller passes. Nothing below it resolves either
 # for itself.
 
 from __future__ import annotations
