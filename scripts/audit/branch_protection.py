@@ -13,185 +13,33 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
-from typing import TypeGuard
 
 import yaml
 
 from meizel import lint_common
+from scripts.audit.analysis import (
+    audit_target,
+    drift_report,
+    encode_branch,
+    error_detail,
+    expected_checks,
+    mapping,
+    outcome,
+    report_text,
+    trunk_gate_findings,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
+
+
 # meiva:note
-# P2 ruling (2026-09-02): the branch-protection admission gate is the three
-# suite aggregators. Amended 2026-09-13 (task #3207): the docs-only gate
-# "doc lints (pre-commit family)" joined the admission set once the docs-only
-# classify gap was closed by #2302 and the check was promoted to a required
-# context. The queue TESTING gate lives in trunk.yaml and is
-# audited separately by trunk_gate_findings().
-_ADMISSION_CHECKS = frozenset(
-    {
-        "backend (pytest + pyright)",
-        "frontend (eslint + tsc + vitest)",
-        "e2e (Playwright happy path)",
-        "doc lints (pre-commit family)",
-    }
-)
-_MATRIX_TEMPLATE = re.compile(r"\$\{\{ matrix")
-_GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-_REMOTE_REPO = re.compile(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$")
-_REQUIRED_WORKFLOWS = (
-    ".github/workflows/ci.yml",
-    ".github/workflows/ci-rerun.yml",
-)
-_SAFE_URL_BYTES = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~")
-
-
-def _encode_branch(branch: str) -> str:
-    return "".join(
-        chr(byte) if byte in _SAFE_URL_BYTES else f"%{byte:02X}" for byte in branch.encode("utf-8")
-    )
-
-
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_str_list(value: object) -> TypeGuard[list[str]]:
-    return _is_object_list(value) and all(isinstance(item, str) for item in value)
-
-
-def _mapping(value: object, location: str) -> dict[str, object]:
-    if not _is_raw_dict(value):
-        raise TypeError(f"{location} must be a mapping")
-    if not _is_str_dict(value):
-        raise TypeError(f"{location} keys must be strings")
-    return value
-
-
-def _list(value: object, location: str) -> list[object]:
-    if not _is_object_list(value):
-        raise TypeError(f"{location} must be a list")
-    return value
-
-
-def expected_checks() -> frozenset[str]:
-    """Return the branch-protection admission gate (P2 ruling)."""
-    return _ADMISSION_CHECKS
-
-
-def trunk_gate_findings(text: str) -> list[str]:
-    """Audit the queue TESTING gate declared in .trunk/trunk.yaml.
-
-    Invariants: required_statuses must be present and non-empty, carry the
-    the three suite aggregators, and must not contain raw
-    matrix template names (a fully-skipped matrix reports only the template
-    name, so such an entry could stall the queue forever on docs-only PRs).
-    """
-    document: object = yaml.safe_load(text)
-    root = _mapping(document, ".trunk/trunk.yaml")
-    if "merge" not in root:
-        return ["trunk.yaml is missing merge.required_statuses"]
-    merge = _mapping(root["merge"], "merge")
-    if "required_statuses" not in merge:
-        return ["trunk.yaml is missing merge.required_statuses"]
-    statuses = _string_set(merge["required_statuses"], "merge.required_statuses")
-    if not statuses:
-        return ["trunk.yaml merge.required_statuses must not be empty"]
-
-    findings: list[str] = []
-    for aggregator in (
-        "backend (pytest + pyright)",
-        "frontend (eslint + tsc + vitest)",
-        "e2e (Playwright happy path)",
-    ):
-        if aggregator not in statuses:
-            findings.append(f"trunk.yaml required_statuses missing {aggregator}")
-    for name in sorted(statuses):
-        if _MATRIX_TEMPLATE.search(name):
-            findings.append(f"trunk.yaml required_statuses contains a matrix template name: {name}")
-    return findings
-
-
-def _string_set(value: object, location: str) -> frozenset[str]:
-    items = _list(value, location)
-    if not _is_str_list(items):
-        raise TypeError(f"{location} entries must be strings")
-    return frozenset(items)
-
-
-def _boolean(value: object, location: str) -> bool:
-    if not isinstance(value, bool):
-        raise TypeError(f"{location} must be a boolean")
-    return value
-
-
-def drift_report(
-    protection_payload: Mapping[str, object],
-    expected: frozenset[str],
-    workflows_payload: Mapping[str, object],
-) -> list[str]:
-    """Return human-readable differences from the branch-protection contract."""
-    findings: list[str] = []
-
-    if (
-        "required_status_checks" not in protection_payload
-        or protection_payload["required_status_checks"] is None
-    ):
-        findings.append("branch protection has no required_status_checks")
-    else:
-        status_checks = _mapping(
-            protection_payload["required_status_checks"], "required_status_checks"
-        )
-        contexts = _string_set(status_checks["contexts"], "required_status_checks.contexts")
-        missing = expected - contexts
-        extra = contexts - expected
-        if missing:
-            findings.append("missing required status checks: " + ", ".join(sorted(missing)))
-        if extra:
-            findings.append("extra required status checks: " + ", ".join(sorted(extra)))
-        if _boolean(status_checks["strict"], "required_status_checks.strict"):
-            findings.append("required status checks must have strict=false")
-
-    enforce_admins = _mapping(protection_payload["enforce_admins"], "enforce_admins")
-    if not _boolean(enforce_admins["enabled"], "enforce_admins.enabled"):
-        findings.append("branch protection must enforce rules for administrators")
-
-    workflow_entries = _list(workflows_payload["workflows"], "workflows")
-    live_workflows: dict[str, str] = {}
-    for index, value in enumerate(workflow_entries):
-        workflow = _mapping(value, f"workflows[{index}]")
-        path = workflow["path"]
-        state = workflow["state"]
-        if not isinstance(path, str) or not isinstance(state, str):
-            raise TypeError(f"workflows[{index}].path and state must be strings")
-        if path in live_workflows:
-            raise ValueError(f"duplicate workflow path in GitHub response: {path}")
-        live_workflows[path] = state
-
-    for path in _REQUIRED_WORKFLOWS:
-        name = Path(path).name
-        if path not in live_workflows:
-            findings.append(f"workflow {name} is missing on GitHub")
-        elif live_workflows[path] != "active":
-            findings.append(f"workflow {name} is not active (state={live_workflows[path]})")
-
-    return findings
-
-
-def derive_repo() -> str:
-    """Derive ``owner/repo`` from this checkout's origin remote."""
+# The origin remote of this checkout, as git prints it; naming the repository is the pure
+# `analysis/protection.audit_target`.
+def _origin_url() -> str:
     completed = subprocess.run(
         ["git", "remote", "get-url", "origin"],
         cwd=_REPO_ROOT,
@@ -199,10 +47,7 @@ def derive_repo() -> str:
         text=True,
         check=True,
     )
-    match = _REMOTE_REPO.search(completed.stdout.strip())
-    if match is None:
-        raise ValueError("origin is not a GitHub repository URL")
-    return f"{match.group(1)}/{match.group(2)}"
+    return completed.stdout
 
 
 def run_gh(args: list[str]) -> str:
@@ -219,7 +64,7 @@ def run_gh(args: list[str]) -> str:
 
 def _json_mapping(text: str, location: str) -> dict[str, object]:
     payload: object = json.loads(text)
-    return _mapping(payload, location)
+    return mapping(payload, location)
 
 
 def _audit(
@@ -229,11 +74,6 @@ def _audit(
     trunk_file: Path = TRUNK_FILE,
     run_gh_fn: Callable[[list[str]], str] = run_gh,
 ) -> list[str]:
-    if _GITHUB_REPO.fullmatch(repo) is None:
-        raise ValueError("--repo must have the form owner/repo")
-    if not branch:
-        raise ValueError("--branch must not be empty")
-
     trunk_text = lint_common.read_utf8_text(trunk_file)
     if trunk_text is None:
         raise FileNotFoundError(trunk_file)
@@ -247,7 +87,7 @@ def _audit(
                 "api",
                 "--method",
                 "GET",
-                f"repos/{repo}/branches/{_encode_branch(branch)}/protection",
+                f"repos/{repo}/branches/{encode_branch(branch)}/protection",
             ]
         ),
         "branch protection response",
@@ -266,25 +106,6 @@ def _audit(
     return drift_report(protection, expected, workflows)
 
 
-def _print_report(result: str, findings: list[str], *, as_json: bool) -> None:
-    if as_json:
-        print(json.dumps({"result": result, "findings": findings}, sort_keys=True))
-    elif result == "ok":
-        print("Branch protection audit: no drift detected.")
-    else:
-        print(f"Branch protection audit: {result}.")
-        for finding in findings:
-            print(f"- {finding}")
-    print(f"AUDIT_RESULT={result}")
-
-
-def _error_detail(error: BaseException) -> str:
-    if isinstance(error, subprocess.CalledProcessError):
-        stderr = error.stderr.strip() if isinstance(error.stderr, str) else ""
-        return stderr or str(error)
-    return str(error)
-
-
 def main(
     argv: list[str] | None = None,
     *,
@@ -298,7 +119,8 @@ def main(
     args = parser.parse_args(argv)
 
     try:
-        repo = args.repo if args.repo is not None else derive_repo()
+        remote_url = _origin_url() if args.repo is None else None
+        repo = audit_target(args.repo, args.branch, remote_url)
         findings = _audit(repo, args.branch, trunk_file=trunk_file, run_gh_fn=run_gh_fn)
     except (
         FileNotFoundError,
@@ -310,14 +132,18 @@ def main(
         yaml.YAMLError,
         subprocess.CalledProcessError,
     ) as error:
-        _print_report("error", [_error_detail(error)], as_json=args.as_json)
+        print(
+            report_text(
+                "error",
+                [error_detail(getattr(error, "stderr", None), str(error))],
+                as_json=args.as_json,
+            )
+        )
         return 2
 
-    if findings:
-        _print_report("drift", findings, as_json=args.as_json)
-        return 1
-    _print_report("ok", [], as_json=args.as_json)
-    return 0
+    result, code = outcome(findings)
+    print(report_text(result, findings, as_json=args.as_json))
+    return code
 
 
 if __name__ == "__main__":

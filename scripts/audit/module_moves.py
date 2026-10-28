@@ -33,27 +33,23 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import re
 import sys
 from pathlib import Path
 
 from meizel import lint_common
+from scripts.audit.analysis import (
+    is_text,
+    module_pair,
+    old_references,
+    pair_result,
+    referenced_names,
+    verdict_line,
+)
+from scripts.audit.analysis.frozen import is_frozen
 
-__all__ = ["is_frozen", "main"]
+__all__ = ["main"]
 
 _REPO = Path(__file__).resolve().parent.parent.parent
-_FROZEN = ("docs/decisions/", "docs/postmortems/")
-_HISTORY_READ_RE = re.compile(r"""git\s+show\s+(?:"[^"]*"|'[^']*'|\S+)""")
-
-
-def _mask_history_reads(text: str) -> str:
-    """Blank `git show <rev>:<path>` operands — object reads, never live references."""
-    return _HISTORY_READ_RE.sub(lambda match: " " * len(match.group(0)), text)
-
-
-def is_frozen(name: str) -> bool:
-    """Whether a tracked path is in a frozen history axis: never rewritten."""
-    return name.startswith(_FROZEN)
 
 
 def _is_excluded(name: str) -> bool:
@@ -72,51 +68,10 @@ def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
             continue
         # Git tracks a symlink's target path, not the target file's content.
         text = path.readlink().as_posix() if path.is_symlink() else lint_common.read_utf8_text(path)
-        if text is None or "\0" in text:
+        if not is_text(text):
             continue
         texts.append((name, text))
     return texts
-
-
-def _from_imports(module: str, text: str) -> list[tuple[int, set[str]]]:
-    """Import names and offsets, including multiline imports in prose snippets."""
-    if module not in text or "from" not in text:
-        return []
-    pattern = re.compile(
-        rf"(?<![\w.])from\s+{re.escape(module)}\s+import\s+"
-        r"(\((?:#[^\n]*|[^)#])*\)|(?:\\\n|[^\n;])+)"
-    )
-    imports: list[tuple[int, set[str]]] = []
-    for match in pattern.finditer(text):
-        body = re.sub(r"#[^\n]*", "", match.group(1)).strip("()")
-        body = body.replace("\\\n", "")
-        names = set(re.findall(r"(?:^|,)\s*([A-Za-z_]\w*|\*)", body))
-        imports.append((match.start(), names))
-    return imports
-
-
-def _old_references(module: str, text: str) -> list[int]:
-    text = _mask_history_reads(text)
-    pattern = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
-    offsets = [match.start() for match in pattern.finditer(text)] if module in text else []
-    parent, _, leaf = module.rpartition(".")
-    if parent:
-        offsets.extend(offset for offset, names in _from_imports(parent, text) if leaf in names)
-    slash = module.replace(".", "/")
-    if slash in text:
-        slash_pattern = re.compile(rf"(?<![\w.]){re.escape(slash)}\.py(?!\w)")
-        offsets.extend(match.start() for match in slash_pattern.finditer(text))
-    return sorted(text.count("\n", 0, offset) + 1 for offset in offsets)
-
-
-def _referenced_names(module: str, text: str) -> set[str]:
-    text = _mask_history_reads(text)
-    if module not in text:
-        return set()
-    refs = set(re.findall(rf"(?<![\w.]){re.escape(module)}\.([A-Za-z_]\w*)", text))
-    for _, names in _from_imports(module, text):
-        refs.update(names)
-    return refs
 
 
 def _missing(module: str, refs: set[str]) -> list[str]:
@@ -140,12 +95,14 @@ def _missing(module: str, refs: set[str]) -> list[str]:
 
 
 def _module_pair(value: str) -> tuple[str, str]:
-    parts = value.split("=")
-    if len(parts) != 2 or any(
-        not all(part.isidentifier() for part in module.split(".")) for module in parts
-    ):
-        raise argparse.ArgumentTypeError("expected OLD=NEW with dotted Python module names")
-    return parts[0], parts[1]
+    # meiva:note
+    # Adapt the pure pair decision to argparse's error protocol: argparse renders a ValueError
+    # raised by a `type=` callable as its generic "invalid <callable> value", so translate it to
+    # the exception type that carries the decision's own message to the CLI.
+    try:
+        return module_pair(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
@@ -163,11 +120,11 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
         old_count = 0
         refs: set[str] = set()
         for path, text in texts:
-            lines = _old_references(old, text)
+            lines = old_references(old, text)
             old_count += len(lines)
             for line in lines:
                 print(f"{path}:{line}: old reference to {old}")
-            refs.update(_referenced_names(new, text))
+            refs.update(referenced_names(new, text))
         import_error = ""
         missing: list[str] = []
         try:
@@ -175,12 +132,17 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
         except Exception as exc:
             # An import failure is an audit failure; still report the remaining pairs.
             import_error = f"; import failed: {type(exc).__name__}: {exc}"
-        print(
-            f"{old} -> {new}: {old_count} old references; "
-            f"{len(refs)} referenced names, missing={missing}{import_error}"
+        line, pair_failed = pair_result(
+            old,
+            new,
+            old_count=old_count,
+            names=len(refs),
+            missing=missing,
+            import_error=import_error,
         )
-        failed = failed or bool(old_count or missing or import_error)
-    print("AUDIT:", "FAIL" if failed else "PASS")
+        print(line)
+        failed = failed or pair_failed
+    print(verdict_line(failed=failed))
     return 1 if failed else 0
 
 

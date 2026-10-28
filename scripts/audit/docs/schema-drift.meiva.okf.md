@@ -54,7 +54,7 @@ The audit reports extra and missing tables and columns in both directions, write
 
 The baseline is the squashed schema plus later `ALTER TABLE ... ADD COLUMN`
 deltas, and it carries line and block comments and table-level constraints. The
-parser strips comments outside string literals, reads each `CREATE TABLE` body
+parser (`scripts/audit/analysis/ddl.py`) strips comments outside string literals, reads each `CREATE TABLE` body
 to its matching closing parenthesis, and skips a part whose first token is a
 constraint keyword (`UNIQUE (...)`, `CONSTRAINT ... PRIMARY KEY (...)`,
 `CHECK (...)`, `LIKE ...`). A part whose first token is an identifier is a
@@ -83,9 +83,9 @@ from residue:
   as `agents_meta.watchers`: residue worth a decision, not an immediate outage.
 
 A runtime-owned table is invisible to this classification until its prefix joins
-the registered prefixes in `schema_drift.py`; that constant is the explicit
-registration, and an unregistered table reports as `historical`, which is the
-truthful answer — drift nobody has explained yet.
+the registered prefixes in `scripts/audit/analysis/schema.py` (`_RUNTIME_DDL`);
+that constant is the explicit registration, and an unregistered table reports as
+`historical`, which is the truthful answer — drift nobody has explained yet.
 
 An extra table is design/runtime-partition only when its parent is a declared table and its suffix is six digits or default, design/runtime-ddl only for a registered runtime DDL prefix, and historical otherwise; an extra column is dangerous only when it is NOT NULL without a default.
 

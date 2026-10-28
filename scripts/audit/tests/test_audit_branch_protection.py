@@ -7,6 +7,17 @@ from typing import NoReturn
 import pytest
 
 from scripts.audit import branch_protection as audit
+from scripts.audit.analysis import (
+    audit_target,
+    drift_report,
+    encode_branch,
+    error_detail,
+    expected_checks,
+    mapping,
+    outcome,
+    report_text,
+    trunk_gate_findings,
+)
 
 _ADMISSION_CHECKS = frozenset(
     {
@@ -82,12 +93,12 @@ def _fake_gh(protection: dict[str, object], workflows: dict[str, object]):
 
 
 def test_expected_checks_is_the_trunk_admission_gate() -> None:
-    assert audit.expected_checks() == _ADMISSION_CHECKS
+    assert expected_checks() == _ADMISSION_CHECKS
     assert "doc lints (pre-commit family)" in _ADMISSION_CHECKS
 
 
 def test_trunk_gate_findings_reject_matrix_template_names() -> None:
-    findings = audit.trunk_gate_findings(_TRUNK_BAD_FIXTURE)
+    findings = trunk_gate_findings(_TRUNK_BAD_FIXTURE)
     assert (
         "trunk.yaml required_statuses contains a matrix template name: "
         "backend shard (${{ matrix.group }}/16)"
@@ -95,51 +106,51 @@ def test_trunk_gate_findings_reject_matrix_template_names() -> None:
 
 
 def test_drift_report_accepts_the_exact_live_contract() -> None:
-    assert audit.drift_report(_protection(), _EXPECTED_CHECKS, _workflows()) == []
+    assert drift_report(_protection(), _EXPECTED_CHECKS, _workflows()) == []
 
 
 def test_drift_report_names_missing_contexts() -> None:
     contexts = sorted(_EXPECTED_CHECKS - {"backend (pytest + pyright)"})
-    assert audit.drift_report(_protection(contexts), _EXPECTED_CHECKS, _workflows()) == [
+    assert drift_report(_protection(contexts), _EXPECTED_CHECKS, _workflows()) == [
         "missing required status checks: backend (pytest + pyright)"
     ]
 
 
 def test_drift_report_names_extra_contexts() -> None:
     contexts = [*_EXPECTED_CHECKS, "legacy"]
-    assert audit.drift_report(_protection(contexts), _EXPECTED_CHECKS, _workflows()) == [
+    assert drift_report(_protection(contexts), _EXPECTED_CHECKS, _workflows()) == [
         "extra required status checks: legacy"
     ]
 
 
 def test_drift_report_rejects_strict_status_checks() -> None:
-    assert audit.drift_report(_protection(strict=True), _EXPECTED_CHECKS, _workflows()) == [
+    assert drift_report(_protection(strict=True), _EXPECTED_CHECKS, _workflows()) == [
         "required status checks must have strict=false"
     ]
 
 
 def test_drift_report_requires_admin_enforcement() -> None:
-    assert audit.drift_report(
-        _protection(enforce_admins=False), _EXPECTED_CHECKS, _workflows()
-    ) == ["branch protection must enforce rules for administrators"]
+    assert drift_report(_protection(enforce_admins=False), _EXPECTED_CHECKS, _workflows()) == [
+        "branch protection must enforce rules for administrators"
+    ]
 
 
 def test_drift_report_detects_missing_required_status_checks() -> None:
     protection = {"enforce_admins": {"enabled": True}}
-    assert audit.drift_report(protection, _EXPECTED_CHECKS, _workflows()) == [
+    assert drift_report(protection, _EXPECTED_CHECKS, _workflows()) == [
         "branch protection has no required_status_checks"
     ]
 
 
 def test_drift_report_detects_a_missing_workflow() -> None:
     workflows = {"workflows": [{"path": ".github/workflows/ci.yml", "state": "active"}]}
-    assert audit.drift_report(_protection(), _EXPECTED_CHECKS, workflows) == [
+    assert drift_report(_protection(), _EXPECTED_CHECKS, workflows) == [
         "workflow ci-rerun.yml is missing on GitHub"
     ]
 
 
 def test_drift_report_detects_an_inactive_workflow() -> None:
-    assert audit.drift_report(
+    assert drift_report(
         _protection(), _EXPECTED_CHECKS, _workflows(ci_state="disabled_manually")
     ) == ["workflow ci.yml is not active (state=disabled_manually)"]
 
@@ -198,3 +209,48 @@ def test_cli_reports_verification_errors_and_exits_two(
 
     assert audit.main(["--repo", "owner/repo", "--json"], run_gh_fn=missing_gh) == 2
     assert capsys.readouterr().out.rstrip().endswith("AUDIT_RESULT=error")
+
+
+def test_encode_branch_percent_encodes_everything_outside_the_safe_set() -> None:
+    assert encode_branch("feature/x y") == "feature%2Fx%20y"
+    assert encode_branch("main") == "main"
+
+
+def test_mapping_refuses_a_payload_that_is_not_an_object() -> None:
+    with pytest.raises(TypeError, match="branch protection response must be a mapping"):
+        mapping([], "branch protection response")
+
+
+def test_audit_target_names_the_repository_and_checks_both_inputs() -> None:
+    assert audit_target("owner/repo", "main", None) == "owner/repo"
+    assert audit_target(None, "main", "git@github.com:owner/repo.git") == "owner/repo"
+    assert audit_target(None, "release/1.0", "https://github.com/owner/repo") == "owner/repo"
+    with pytest.raises(ValueError, match="--repo must have the form owner/repo"):
+        audit_target("not-a-repository", "main", None)
+    with pytest.raises(ValueError, match="--branch must not be empty"):
+        audit_target("owner/repo", "", None)
+    with pytest.raises(ValueError, match="origin is not a GitHub repository URL"):
+        audit_target(None, "main", "https://example.com/owner/repo")
+
+
+def test_report_text_says_the_same_thing_as_json_text_and_findings() -> None:
+    assert report_text("ok", [], as_json=False) == (
+        "Branch protection audit: no drift detected.\nAUDIT_RESULT=ok"
+    )
+    assert report_text("drift", ["one", "two"], as_json=False) == (
+        "Branch protection audit: drift.\n- one\n- two\nAUDIT_RESULT=drift"
+    )
+    assert report_text("drift", ["one"], as_json=True) == (
+        '{"findings": ["one"], "result": "drift"}\nAUDIT_RESULT=drift'
+    )
+
+
+def test_outcome_turns_findings_into_the_reported_verdict_and_exit_status() -> None:
+    assert outcome([]) == ("ok", 0)
+    assert outcome(["drift"]) == ("drift", 1)
+
+
+def test_error_detail_prefers_a_child_stderr_over_its_message() -> None:
+    assert error_detail("boom\n", "CalledProcessError: gh") == "boom"
+    assert error_detail(None, "FileNotFoundError: gh") == "FileNotFoundError: gh"
+    assert error_detail("  ", "timed out") == "timed out"
