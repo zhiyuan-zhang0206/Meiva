@@ -15,11 +15,7 @@ from base.lm.harness.antigravity.mapping import (
     parse_result,
     parse_usage,
 )
-from base.lm.harness.antigravity.transport import (
-    AgyTransport,
-    InterruptReport,
-    TransportClosedError,
-)
+from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
 from base.lm.harness.base_session import (
     EVENT_STREAM_END,
     BaseHarnessSession,
@@ -27,11 +23,9 @@ from base.lm.harness.base_session import (
     SessionBinding,
     SessionClock,
     SessionClosedError,
-    SessionTotals,
-    TurnOutcome,
     TurnTicket,
-    add_cost,
 )
+from base.lm.harness.cancel import CancelReport, unobserved_cancel
 from base.lm.harness.events import (
     SessionFailed,
     TurnCompleted,
@@ -45,20 +39,16 @@ from base.lm.harness.process import (
     snapshot,
     watch_tree,
 )
+from base.lm.harness.turn import SessionTotals, TurnOutcome
+
 
 # meiva:note
-# Same three boundaries as the Claude bridge — ordered inbound, one outbound
-# stream, an assertable cancel — with one harness difference that shapes the
-# whole file: an interrupt kills the `agy` process. `interrupt()` therefore
-# retires the transport, and the next turn respawns it with `--conversation`, so
-# the transcript survives even though the process does not.
+# One `agy` conversation as a turn engine. Same three boundaries as the Claude bridge — ordered
+# inbound, one outbound stream, an assertable cancel — with one harness difference that shapes the
+# whole file: an interrupt kills the `agy` process. `interrupt()` therefore retires the transport,
+# and the next turn respawns it with `--conversation`, so the transcript survives even though the
+# process does not.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
-CancelReport = InterruptReport
-_add_cost = add_cost
-
-
-# meiva:note
-# One `agy` conversation as a turn engine.
 class AgySession(BaseHarnessSession[AntigravityConfig]):
     def __init__(
         self,
@@ -139,30 +129,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if ticket is not None:
             ticket.interrupt_requested = True
         if transport is None:
-            return CancelReport(
-                turn_id=ticket.turn_id if ticket is not None else None,
-                interrupt_ms=0.0,
-                settled=None,
-                observed=(),
-                remaining=(),
-                waited_ms=0.0,
-                cli_pid=None,
-                cli_alive=None,
-            )
+            return unobserved_cancel(turn_id=ticket.turn_id if ticket is not None else None)
         if ticket is None:
             # meiva:note
             # Nothing is running: keep the healthy process instead of killing
             # it.
-            return CancelReport(
-                turn_id=None,
-                interrupt_ms=0.0,
-                settled=None,
-                observed=(),
-                remaining=(),
-                waited_ms=0.0,
-                cli_pid=transport.pid,
-                cli_alive=transport.alive,
-            )
+            return unobserved_cancel(turn_id=None, cli_pid=transport.pid, cli_alive=transport.alive)
         # meiva:note
         # Retire before signalling: the reader may see EOF while the report is
         # still being assembled, and an expected exit must not look like a
@@ -392,8 +364,5 @@ __all__ = [
     "CancelReport",
     "InboundQueueFullError",
     "SessionClosedError",
-    "SessionTotals",
-    "TurnOutcome",
     "TurnTicket",
-    "_add_cost",
 ]

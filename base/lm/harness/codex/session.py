@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 
+from base.lm.harness.cancel import (
+    CancelReport,
+    Sweep,
+    observed_cancel,
+    spawned_since,
+    unobserved_cancel,
+)
 from base.lm.harness.codex.auth import build_env
 from base.lm.harness.codex.config import CodexConfig
 from base.lm.harness.codex.mapping import (
@@ -47,8 +53,6 @@ from base.lm.harness.events import (
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
-    ProcessObservation,
-    describe,
     settle_close,
     snapshot,
     wait_gone,
@@ -75,18 +79,6 @@ _INTERRUPT_METHODS = frozenset(
         "applyPatchApproval",
     }
 )
-
-
-@dataclass(frozen=True, slots=True)
-class CancelReport:
-    turn_id: str | None
-    interrupt_ms: float
-    settled: bool | None
-    observed: tuple[ProcessObservation, ...]
-    remaining: tuple[ProcessObservation, ...]
-    waited_ms: float
-    cli_pid: int | None
-    cli_alive: bool | None
 
 
 # meiva:note
@@ -190,10 +182,9 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         if ticket is not None:
             ticket.interrupt_requested = True
         pid = self._transport.pid
+        turn_id = ticket.turn_id if ticket is not None else None
         observed = snapshot(self._probe, pid)
-        spawned = {
-            child: command for child, command in observed.items() if child not in self._baseline
-        }
+        spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
         if ticket is not None and self._session_id:
             codex_turn_id = ticket.provider_turn_id or ""
@@ -209,16 +200,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 )
         interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
-            return CancelReport(
-                turn_id=ticket.turn_id if ticket is not None else None,
-                interrupt_ms=interrupt_ms,
-                settled=None,
-                observed=(),
-                remaining=(),
-                waited_ms=0.0,
-                cli_pid=None,
-                cli_alive=None,
-            )
+            return unobserved_cancel(turn_id=turn_id, interrupt_ms=interrupt_ms)
         gone, waited_ms = await wait_gone(
             self._probe,
             spawned,
@@ -226,18 +208,18 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             poll_seconds=CANCEL_POLL_SECONDS,
             clock=self._clock,
         )
-        remaining = (
-            () if gone else describe(observed, [c for c in spawned if self._probe.is_alive(c)])
-        )
-        return CancelReport(
-            turn_id=ticket.turn_id if ticket is not None else None,
+        return observed_cancel(
+            turn_id=turn_id,
             interrupt_ms=interrupt_ms,
-            settled=gone,
-            observed=describe(observed, spawned),
-            remaining=remaining,
-            waited_ms=waited_ms,
-            cli_pid=pid,
+            pid=pid,
             cli_alive=self._probe.is_alive(pid),
+            sweep=Sweep(
+                observed=observed,
+                spawned=spawned,
+                gone=gone,
+                waited_ms=waited_ms,
+                alive=() if gone else [child for child in spawned if self._probe.is_alive(child)],
+            ),
         )
 
     # meiva:note
