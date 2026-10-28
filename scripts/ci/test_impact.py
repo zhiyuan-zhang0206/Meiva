@@ -18,6 +18,7 @@ from typing import Protocol, cast
 
 from meizel.allowances import POLICY, Policy, parse
 from meizel.contracts.sync import prepare_policy_snapshot
+from meizel.graph.universe import GitRepo
 from scripts.structure.imports.facts import UNANCHORED_READ, Fact, FactKind, Unknown, collect
 from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
@@ -318,7 +319,7 @@ def base_checkout(root: Path, ref: str) -> Generator[Path, None, None]:
         omitted = [path for path in tracked if path and not os.path.lexists(base / path)]
         if omitted:
             raise RuntimeError(f"Base archive omitted tracked inputs: {omitted}")
-        prepare_policy_snapshot(base)
+        prepare_policy_snapshot(GitRepo(base))
         yield base
 
 

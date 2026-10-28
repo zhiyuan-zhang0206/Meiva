@@ -9,13 +9,12 @@ reported by `policy diff` so a reviewer sees every widening at once.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TypeGuard
 
 from meizel.allowances import POLICY, Policy, parse, parse_snapshot
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic, MeizelError
-from meizel.graph.universe import GitRepo, Universe
+from meizel.graph.universe import Universe
 
 __all__ = [
     "POLICY",
@@ -94,9 +93,9 @@ def render_policy(external: dict[str, str], loads: dict[str, tuple[str, ...]]) -
     return "\n".join(blocks)
 
 
-def policy_at(root: Path, ref: str) -> Policy:
+def policy_at(universe: Universe, ref: str) -> Policy:
     """The policy at a git ref; empty when the ref has none."""
-    raw = GitRepo(root).show_optional_text(ref, POLICY)
+    raw = universe.repo.show_optional_text(ref, POLICY)
     if raw is None:
         return Policy()
     policy, problems = parse_snapshot(raw)

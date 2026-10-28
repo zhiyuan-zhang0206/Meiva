@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from meizel.graph.universe import Universe
+from meizel.graph.universe import GitRepo, Universe
 from meizel.language.typescript import scan_typescript
 
 BUNDLED = "ui/web/src/lib/x.ts"
 
 
 def acquired(source: str, path: str = BUNDLED) -> list[tuple[str, str]]:
-    scan = scan_typescript(path, source, Universe(Path("/repo"), [path]))
+    scan = scan_typescript(path, source, Universe(GitRepo(Path("/repo")), [path]))
     return [(item.kind.value, item.target) for item in scan.ambient]
 
 

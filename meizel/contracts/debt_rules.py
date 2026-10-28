@@ -35,7 +35,7 @@ from meizel.contracts.manifest import Manifest, Root, load_manifests, manifest_p
 from meizel.contracts.manifest_text import set_scope
 from meizel.contracts.sync import prepare_policy_snapshot, prune, with_table
 from meizel.graph.model import AmbientKind, Code, MeizelError
-from meizel.graph.universe import EditPlan, GitRepo, Universe, load_universe, parent_of
+from meizel.graph.universe import EditPlan, GitRepo, Universe, parent_of
 from meizel.language.scan import invalidate_policy_caches
 
 __all__ = ["RuleDiff", "purity_changed", "rule_diff"]
@@ -175,20 +175,23 @@ def _refuse_unreadable(analysis: Analysis, ref: str) -> None:
         )
 
 
-def regenerated(base_root: Path, ref: str, jobs: int | None) -> Baselines:
-    """The baseline this checker would write for the checkout at `base_root`."""
-    _refuse_unreadable(analyze(base_root, jobs=jobs), ref)
-    repo = GitRepo(base_root)
-    prune(base_root, jobs)
-    prune_debt(base_root, jobs)
-    declare(base_root, [""], jobs)
-    repo.stage_all()  # the checker reads tracked files only, and these commands create manifests
-    record(base_root, [""], jobs)
-    repo.stage_all()
-    record(base_root, [""], jobs)
-    repo.stage_all()
-    prune_debt(base_root, jobs)
-    return read_baselines(load_universe(base_root))
+# meiva:note
+# The baseline this checker would write for the checkout `base`: the commands a rule change runs on
+# it, staged after each write because the checker reads tracked files only.
+def regenerated(base: GitRepo, ref: str, jobs: int | None) -> Baselines:
+    _refuse_unreadable(analyze(base.universe(), jobs=jobs), ref)
+    prune(base, jobs)
+    prune_debt(base, jobs)
+    declare(base, [""], jobs)
+    base.stage_all()  # the checker reads tracked files only, and these commands create manifests
+    record(base, [""], jobs)
+    base.stage_all()
+    record(base, [""], jobs)
+    base.stage_all()
+    prune_debt(base, jobs)
+    # meiva:note
+    # The commands above wrote manifests and staged them: the index is rebuilt from the new tree.
+    return read_baselines(base.universe())
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -222,15 +225,15 @@ def _strict_to_be_targets(text: str) -> set[str]:
 
 # meiva:note
 # Reads a tracked manifest blob from a git ref using a fixed git show argv without invoking a shell.
-def _base_text(root: Path, ref: str, path: str) -> str:
-    return GitRepo(root).show_optional_text(ref, path) or ""
+def _base_text(repo: GitRepo, ref: str, path: str) -> str:
+    return repo.show_optional_text(ref, path) or ""
 
 
-def purity_changed(root: Path, ref: str) -> bool:
-    changed = set(changed_under(root, ref, [":(glob)**/meizel.toml", "meizel.toml"]))
+def purity_changed(repo: GitRepo, ref: str) -> bool:
+    changed = set(changed_under(repo, ref, [":(glob)**/meizel.toml", "meizel.toml"]))
     if not changed:
         return False
-    manifests, _ = load_manifests(load_universe(root))
+    manifests, _ = load_manifests(repo.universe())
     for d, m in manifests.items():
         rel = manifest_path(d)
         if rel not in changed:
@@ -238,7 +241,7 @@ def purity_changed(root: Path, ref: str) -> bool:
         now = {k for k, v in m.purity.items() if v == "strict-to-be"}
         if m.purity_default == "strict-to-be":
             now.add(".")
-        if now - _strict_to_be_targets(_base_text(root, ref, rel)):
+        if now - _strict_to_be_targets(_base_text(repo, ref, rel)):
             return True
     return False
 
@@ -349,19 +352,17 @@ def _ambient_snapshot(
     return prepared
 
 
-def _sync_rule_files(root: Path, ref: str, base_root: Path) -> set[str]:
-    src_repo = GitRepo(root)
-    dst_repo = GitRepo(base_root)
+def _sync_rule_files(repo: GitRepo, ref: str, base: GitRepo) -> set[str]:
     byte_writes: dict[Path, bytes] = {}
     deletes: list[Path] = []
     copied: set[str] = set()
-    for rel in changed_under(root, ref, [":(glob)meizel/**", "meizel.policy.toml"]):
-        dst = base_root / rel
-        if src_repo.has_file(rel):
-            byte_writes[dst] = src_repo.load_bytes(rel)
+    for rel in changed_under(repo, ref, [":(glob)meizel/**", "meizel.policy.toml"]):
+        dst = base.root / rel
+        if repo.has_file(rel):
+            byte_writes[dst] = repo.load_bytes(rel)
             if Path(rel).name == "meizel.toml":
                 copied.add(rel)
-        elif dst_repo.has_file(rel):
+        elif base.has_file(rel):
             deletes.append(dst)
     EditPlan(byte_writes=byte_writes, deletes=tuple(deletes)).apply()
     return copied
@@ -405,20 +406,21 @@ def _scope_text(
 # facts, including when a checker manifest is copied with the rule code. All scope edits use
 # this existing manifest effect loop rather than a second migration writer.
 def _sync_purity_scope(
-    root: Path,
+    repo: GitRepo,
     ref: str,
-    base_root: Path,
+    base: GitRepo,
     original: dict[str, Manifest],
     approved: Mapping[str, str],
 ) -> None:
-    tree_manifests, _ = load_manifests(load_universe(root))
-    copied = _sync_rule_files(root, ref, base_root)
-    base_repo = GitRepo(base_root)
-    _keep_approvals(base_repo, approved)
+    tree_manifests, _ = load_manifests(repo.universe())
+    copied = _sync_rule_files(repo, ref, base)
+    _keep_approvals(base, approved)
     invalidate_policy_caches()
-    base_repo.stage_all()
-    base_universe = load_universe(base_root)
-    known = base_universe.files | base_universe.dirs
+    base.stage_all()
+    # meiva:note
+    # The rule files copied above are new to the checkout: read the index it has now.
+    staged = base.universe()
+    known = staged.files | staged.dirs
     writes: dict[Path, str] = {}
     for directory in sorted(tree_manifests.keys() | original.keys()):
         manifest = tree_manifests.get(directory)
@@ -427,35 +429,39 @@ def _sync_purity_scope(
         ambient = bool(baseline.state or baseline.roots or manifest_path(directory) in copied)
         if not purity and not ambient:
             continue
-        if directory and directory not in base_universe.dirs:
+        if directory and directory not in staged.dirs:
             continue
         rel = manifest_path(directory)
-        old_text = base_repo.load_text(rel, default="")
+        old_text = base.load_text(rel, default="")
         new_text = _scope_text(old_text, manifest, baseline, known)
         if new_text != old_text:
-            writes[base_root / rel] = new_text
+            writes[base.root / rel] = new_text
     EditPlan(writes=writes).apply()
-    base_repo.stage_all()
+    base.stage_all()
 
 
-def rule_diff(root: Path, ref: str, base: Counter[str], jobs: int | None = None) -> RuleDiff:
-    """Compare the tree at `root` with `ref`, given the per-code debt the base records (`base`)."""
-    with GitRepo(root).checkout(ref) as checkout:
+# meiva:note
+# Compare the tree `repo` reads with `ref`, given the per-code debt the base records.
+def rule_diff(repo: GitRepo, ref: str, base: Counter[str], jobs: int | None = None) -> RuleDiff:
+    with repo.checkout(ref) as checkout:
         historical = prepare_policy_snapshot(checkout)
-        _refuse_unreadable(analyze(checkout, jobs=jobs), ref)
-        universe = load_universe(checkout)
-        manifests, _ = load_manifests(universe)
+        # meiva:note
+        # Normalizing the snapshot rewrites its policy, so the index is read after it: a universe
+        # is a snapshot of the tree that was there when it was built.
+        checkout_universe = checkout.universe()
+        _refuse_unreadable(analyze(checkout_universe, jobs=jobs), ref)
+        manifests, _ = load_manifests(checkout_universe)
         registries = {
             path: _base_text(checkout, "HEAD", path)
-            for path in universe.files
+            for path in checkout_universe.files
             if Path(path).name == "ambient_roots.toml"
         }
-        baseline = _ambient_snapshot(universe, historical, manifests, registries)
+        baseline = _ambient_snapshot(checkout_universe, historical, manifests, registries)
         approved = historical.reasons("approved-patches", "files")
-        _sync_purity_scope(root, ref, checkout, baseline, approved)
+        _sync_purity_scope(repo, ref, checkout, baseline, approved)
         found = regenerated(checkout, ref, jobs)
-    tree_universe = load_universe(root)
-    kept, _ = load_policy(tree_universe)
+    tree = repo.universe()
+    kept, _ = load_policy(tree)
     lifted = approved.keys() - kept.reasons("approved-patches", "files").keys()
-    freed = unmasked_reads(baseline, load_manifests(tree_universe)[0], lifted)
-    return RuleDiff(base, found, read_baselines(tree_universe), ref, freed)
+    freed = unmasked_reads(baseline, load_manifests(tree)[0], lifted)
+    return RuleDiff(base, found, read_baselines(tree), ref, freed)
