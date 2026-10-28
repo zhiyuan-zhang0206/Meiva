@@ -7,10 +7,14 @@ import pytest
 from meizel.language import path_imports
 
 _SKILL = "meiva_builtins/skills/demo/reference/run.py"
+# meiva:note
+# The two lists `meizel.policy.toml` states for this rule, so the test proves the rule rather
+# than the policy file it happens to sit next to.
+_SCOPES = path_imports.Scopes(scope=("meiva_builtins/",), skills=("meiva_builtins/skills/",))
 
 
 def _sites(source: str, rel_path: str = _SKILL) -> dict[str, list[int]]:
-    return path_imports.measure(ast.parse(source), rel_path)
+    return path_imports.measure(ast.parse(source), rel_path, _SCOPES)
 
 
 @pytest.mark.parametrize(

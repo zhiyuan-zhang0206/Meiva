@@ -252,12 +252,16 @@ def _ast_rule_files(argv: list[str], repo_root: Path) -> set[Path]:
 
 
 def _collect_locality(
-    tree: ast.Module, rel: str, sites: dict[str, locality.Sites], scanned: set[str]
+    tree: ast.Module,
+    rel: str,
+    sites: dict[str, locality.Sites],
+    scanned: set[str],
+    scopes: path_imports.Scopes,
 ) -> None:
     scanned.add(rel)
     for kind, found in locality.measure(tree, rel, _SCAN_DIRS).items():
         sites[kind].update(found)
-    sites[path_imports.SECTION].update(path_imports.measure(tree, rel))
+    sites[path_imports.SECTION].update(path_imports.measure(tree, rel, scopes))
 
 
 @dataclass(frozen=True)
@@ -267,6 +271,7 @@ class _TypeContext:
     allowed: frozenset[str]
     packages: tuple[str, ...]
     files: set[Path]
+    scopes: path_imports.Scopes
 
     def in_scope(self, path: Path, rel: str) -> bool:
         return path in self.files and type_checking_in_scope(rel, self.packages)
@@ -306,6 +311,7 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
             frozenset(policy.reasons("type-checking", "files")),
             type_packages,
             set(_iter_py_files(roots)),
+            path_imports.Scopes.of(policy),
         ),
         [],
     )
@@ -359,7 +365,7 @@ def _check_ast_and_quality(
             errors.extend(type_ctx.errors(rel, tree))
         if ast_rules:
             errors.extend(f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel))
-            _collect_locality(tree, rel, sites, scanned)
+            _collect_locality(tree, rel, sites, scanned, type_ctx.scopes)
         if ambient:
             errors.extend(ambient_state.collect(tree, rel, repo_root, sites, scanned))
         if path in files:
