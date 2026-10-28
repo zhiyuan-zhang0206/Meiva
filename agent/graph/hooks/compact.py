@@ -18,6 +18,7 @@ from agent.graph.interrupt import (
     subscribe_interrupt,
 )
 from agent.graph.prompt.compaction import compact_contract
+from agent.graph.prompt.live import read_compact_doc
 from agent.hooks import Hook
 from agent.hooks.compact_anchor import SummaryText, closing_of, closing_request_of
 from agent.hooks.compact_anchor import compose_summary_message as compose_summary_message
@@ -168,7 +169,8 @@ async def generate_summary(
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
     instruction = HumanMessage(
         content=wrap_system_note(
-            f"{COMPACTION_INSTRUCTION}\nmeiva.self.compact contract:\n{compact_contract()}"
+            f"{COMPACTION_INSTRUCTION}\nmeiva.self.compact contract:\n"
+            f"{compact_contract(read_compact_doc())}"
         )
     )
     compaction_input = [*system_head, *content_msgs, instruction]

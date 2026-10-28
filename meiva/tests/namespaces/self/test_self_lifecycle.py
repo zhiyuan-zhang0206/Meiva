@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
 import meiva
+from base.agents.context.identity import ExternalLease
 from base.agents.lifecycle import AgentRestart, AgentTermination
 from base.agents.tests.units import spawn_agent
 from base.cluster import inbound_channel
@@ -23,6 +26,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.redis_client import open_sync_redis
 from base.events.live.tests.rng import seeded_auth_retry
 from base.lm.catalog import ModelCatalog
+from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva.tests.namespaces.self.redis_view import loose
 
@@ -40,12 +44,15 @@ def _spawned(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
+    *,
+    harness: str | None = None,
 ) -> int:
     agent_id = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
         machine=machine_identity,
+        harness=harness,
     )
     pin_agent(agent_id)
     return agent_id
@@ -138,3 +145,108 @@ def test_pause_heartbeat_above_the_agents_limit_writes_nothing(
         "SELECT count(*) FROM heartbeat_pause_log WHERE agent_id = %s", (agent_id,)
     ).fetchone()
     assert count == (0,)
+
+
+# meiva:note
+# A stored harness other than the native one refuses the lifecycle entries that belong to the
+# native loop: the row the database holds for the agent is the third place `_assert_native_self_action`
+# reads, and this pins that the shell's in-transaction query is what refuses.
+def test_restart_is_refused_for_the_harness_stored_for_the_agent(
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent_id = _spawned(
+        model_catalog, config_authority, database_gate, machine_identity, harness="codex"
+    )
+
+    with pytest.raises(RuntimeError, match="codex"):
+        meiva.self.restart()
+
+    assert _inbound(db_conn, agent_id, "restart") == []
+
+
+# meiva:note
+# A controller attached through an external lease that owns the loop ends its own process instead
+# of raising the agent's termination; the decision is `lifecycle_plans.is_attached_controller`, and
+# this pins that the shell acts on it (and skips the self-action check only then).
+def test_terminate_of_an_attached_controller_exits_without_borrowing_the_agents_identity(
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
+    pin_agent(
+        agent_id,
+        owns_loop=True,
+        lease=ExternalLease(agent_id=agent_id, validate=lambda: agent_id, config=lambda: None),
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        meiva.self.terminate()
+
+    assert exit_info.value.code == 0
+    assert _inbound(db_conn, agent_id, "terminate") == [("self", "", None)]
+
+
+# meiva:note
+# Install a plugin whose config declares `field` as a per-agent setting under `home`: the home a
+# test hands in is the only one that knows the field.
+def _write_probe_plugin(home: Path, field: str) -> None:
+    plugin_dir = home / "plugins" / "restart_probe"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.py").write_text('__description__ = "restart probe"\n', encoding="utf-8")
+    (plugin_dir / "default_config.py").write_text(
+        f"""from pydantic import BaseModel, ConfigDict, Field
+
+from base.packages.plugins.extensions import PluginContributions
+
+
+class ProbeConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    {field}: str = Field(default="unset", json_schema_extra={{"per_agent": True}})
+
+
+def contribute() -> PluginContributions:
+    return PluginContributions(config=ProbeConfig)
+""",
+        encoding="utf-8",
+    )
+
+
+# meiva:note
+# The overlay a restart validates is checked against the plugin configs installed in the Meiva home
+# the bound context carries, not the process's own: the probe plugin exists only under the context's
+# home, so a home read from the environment would refuse the overlay as an unknown key.
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_restart_checks_the_overlay_against_the_plugin_configs_of_the_contexts_home(
+    tmp_path: Path,
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
+    overlay_home = tmp_path / "overlay-home"
+    _write_probe_plugin(overlay_home, "restart_probe")
+    bound = process_context.current_context()
+    process_context.unbind_context()
+    process_context.bind_context(replace(bound, meiva_home=overlay_home))
+    assert overlay_home != Path.home()
+
+    with pytest.raises(AgentRestart):
+        meiva.self.restart({"restart_probe": "x"})
+
+    stored = db_conn.execute(
+        "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert stored is not None and stored[0] == {"restart_probe": "x"}

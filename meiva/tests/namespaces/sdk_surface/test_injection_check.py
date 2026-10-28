@@ -37,8 +37,12 @@ from meiva.sdk_surface.injection_check import (
     begin_check,
     page_probability,
 )
-from meiva.sdk_surface.pure.media.injection_pieces import split_for_model
-from meiva.sdk_surface.pure.media.injection_plan import CheckStep, finding_source, plan_check
+from meiva.sdk_surface.pure.media.injection.injection_pieces import split_for_model
+from meiva.sdk_surface.pure.media.injection.injection_plan import (
+    CheckStep,
+    finding_source,
+    plan_check,
+)
 
 _MODEL = "jev-1.13.0"
 _URL = "https://example.com/post"
