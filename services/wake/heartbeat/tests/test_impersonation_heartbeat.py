@@ -24,8 +24,8 @@ from services.wake.heartbeat.daemon import (
     send_heartbeat_checkin,
 )
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
+from services.wake.heartbeat.tests.heartbeat_support import BACKOFF_MAX_INTERVAL_S, make_idle
 from services.wake.heartbeat.tests.heartbeat_support import lease as lease_row
-from services.wake.heartbeat.tests.heartbeat_support import make_idle
 
 
 @pytest.fixture
@@ -77,7 +77,11 @@ def selected(pool: ConnectionPool) -> dict[int, float]:
     return {
         agent_id: idle_minutes
         for agent_id, idle_minutes, _reason in select_idle_agents_needing_heartbeat(
-            pool, 300, heartbeat_interval_s=300, now=time.time()
+            pool,
+            300,
+            heartbeat_interval_s=300,
+            backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+            now=time.time(),
         )
     }
 
@@ -90,7 +94,12 @@ def selected_with_reason(
     return {
         agent_id: reason
         for agent_id, _idle_minutes, reason in select_idle_agents_needing_heartbeat(
-            pool, 300, heartbeat_interval_s=300, now=time.time(), corpse_grace_s=corpse_grace_s
+            pool,
+            300,
+            heartbeat_interval_s=300,
+            backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+            now=time.time(),
+            corpse_grace_s=corpse_grace_s,
         )
     }
 

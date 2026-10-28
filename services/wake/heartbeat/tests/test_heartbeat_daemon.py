@@ -13,6 +13,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 from services.wake.heartbeat.tests.heartbeat_support import (
+    BACKOFF_MAX_INTERVAL_S,
     THRESHOLD_S,
     lease,
     make_idle,
@@ -27,7 +28,11 @@ def _by_agent(rows: list[tuple[int, float, str | None]]) -> dict[int, float]:
 
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
-    return _by_agent(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, now=time.time()))
+    return _by_agent(
+        select_idle_agents_needing_heartbeat(
+            pool, THRESHOLD_S, backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S, now=time.time()
+        )
+    )
 
 
 class TestSelectIdleAgents:
@@ -481,7 +486,11 @@ class TestWakeupStormFlattening:
         self._backdate(db_conn, aid, threshold + offset - 5)
         got = _by_agent(
             select_idle_agents_needing_heartbeat(
-                pool, threshold, jitter_span_s=span, now=time.time()
+                pool,
+                threshold,
+                jitter_span_s=span,
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
             )
         )
         assert aid not in got, "idle just short of the jittered due-time must be excluded"
@@ -489,7 +498,11 @@ class TestWakeupStormFlattening:
         self._backdate(db_conn, aid, threshold + offset + 5)
         got = _by_agent(
             select_idle_agents_needing_heartbeat(
-                pool, threshold, jitter_span_s=span, now=time.time()
+                pool,
+                threshold,
+                jitter_span_s=span,
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
             )
         )
         assert aid in got, "idle just past the jittered due-time must be selected"
@@ -514,7 +527,13 @@ class TestWakeupStormFlattening:
             local_machine=machine_identity,
         )
         got = _by_agent(
-            select_idle_agents_needing_heartbeat(pool, 300.0, jitter_span_s=0.0, now=time.time())
+            select_idle_agents_needing_heartbeat(
+                pool,
+                300.0,
+                jitter_span_s=0.0,
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
+            )
         )
         assert aid in got
 
@@ -555,10 +574,19 @@ class TestWakeupStormFlattening:
         )
 
         order = [
-            r[0] for r in select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, now=time.time())
+            r[0]
+            for r in select_idle_agents_needing_heartbeat(
+                pool, THRESHOLD_S, backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S, now=time.time()
+            )
         ]
         assert order.index(a_old) < order.index(a_mid) < order.index(a_new)
 
-        capped = select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, limit=2, now=time.time())
+        capped = select_idle_agents_needing_heartbeat(
+            pool,
+            THRESHOLD_S,
+            limit=2,
+            backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+            now=time.time(),
+        )
         assert len(capped) == 2
         assert a_new not in [r[0] for r in capped]

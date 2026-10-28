@@ -14,7 +14,9 @@ from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_he
 from gateway.inspect._live import project_heartbeat
 
 LAST_ACTIVE = datetime(2026, 1, 1, tzinfo=UTC)
-CADENCE = HeartbeatCadence(idle_threshold_s=600, interval_s=3600, jitter_span_s=300)
+CADENCE = HeartbeatCadence(
+    idle_threshold_s=600, interval_s=3600, jitter_span_s=300, backoff_max_interval_s=86400
+)
 IDLE = HeartbeatState(
     agent_id=17,
     status=AgentStatus.IDLING,
@@ -22,6 +24,8 @@ IDLE = HeartbeatState(
     last_heartbeat_at=None,
     paused_until=None,
     pending_inbound=False,
+    backoff_level=0,
+    impersonation_active=False,
 )
 
 
@@ -53,6 +57,36 @@ def test_a_pause_hides_the_projection() -> None:
     assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, until, False)
 
 
+# meiva:note
+# A pause is the daemon's floor on its due predicate, not an idle-only state: an agent that
+# paused for a day and then kept working still has a definite next look. The 2026-10-28
+# report read "—" for the whole day.
+def test_a_running_agent_reports_its_active_pause() -> None:
+    until = LAST_ACTIVE + timedelta(hours=6)
+    plan = plan_heartbeat(replace(IDLE, status=AgentStatus.RUNNING, paused_until=until), CADENCE)
+    assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, until, False)
+
+
+def test_a_pause_outranks_a_queued_wake_for_a_running_agent() -> None:
+    until = LAST_ACTIVE + timedelta(hours=6)
+    plan = plan_heartbeat(
+        replace(IDLE, status=AgentStatus.RUNNING, paused_until=until, pending_inbound=True),
+        CADENCE,
+    )
+    assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, until, False)
+
+
+def test_a_running_agent_without_a_pause_has_nothing_scheduled() -> None:
+    plan = plan_heartbeat(replace(IDLE, status=AgentStatus.RUNNING), CADENCE)
+    assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, None, False)
+
+
+def test_a_terminated_agent_shows_no_pause_left_on_its_row() -> None:
+    until = LAST_ACTIVE + timedelta(hours=2)
+    plan = plan_heartbeat(replace(IDLE, status=AgentStatus.TERMINATED, paused_until=until), CADENCE)
+    assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, None, False)
+
+
 def test_a_queued_wake_shows_pending_instead_of_a_time() -> None:
     plan = plan_heartbeat(replace(IDLE, pending_inbound=True), CADENCE)
     assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, None, True)
@@ -64,10 +98,36 @@ def test_a_pause_outranks_a_queued_wake() -> None:
     assert (plan.paused_until, plan.heartbeat_pending) == (until, False)
 
 
-def test_a_running_or_terminated_agent_is_never_checked_in_on() -> None:
-    for status in (AgentStatus.RUNNING, AgentStatus.TERMINATED):
-        plan = plan_heartbeat(replace(IDLE, status=status, pending_inbound=True), CADENCE)
-        assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, None, False)
+def test_a_backoff_level_stretches_the_reminder_floor() -> None:
+    reminded = LAST_ACTIVE + timedelta(minutes=1)
+    plan = plan_heartbeat(replace(IDLE, last_heartbeat_at=reminded, backoff_level=2), CADENCE)
+    assert plan.next_at == reminded + timedelta(seconds=4 * 3600)
+
+
+def test_the_backoff_floor_stops_at_the_daemons_ceiling() -> None:
+    reminded = LAST_ACTIVE + timedelta(minutes=1)
+    plan = plan_heartbeat(replace(IDLE, last_heartbeat_at=reminded, backoff_level=9), CADENCE)
+    assert plan.next_at == reminded + timedelta(hours=24)
+
+
+def test_a_backoff_never_pulls_a_check_in_before_the_idle_clock() -> None:
+    plan = plan_heartbeat(
+        replace(IDLE, last_heartbeat_at=LAST_ACTIVE - timedelta(days=2), backoff_level=4), CADENCE
+    )
+    assert plan.next_at == LAST_ACTIVE + timedelta(seconds=600 + 17)
+
+
+# meiva:note
+# The selection SQL reads `CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level
+# END`: an externally driven agent's reminder floor is never stretched, so the projection must
+# not stretch it either.
+def test_an_active_impersonation_lease_holds_the_backoff_at_level_zero() -> None:
+    reminded = LAST_ACTIVE + timedelta(minutes=1)
+    plan = plan_heartbeat(
+        replace(IDLE, last_heartbeat_at=reminded, backoff_level=2, impersonation_active=True),
+        CADENCE,
+    )
+    assert plan.next_at == reminded + timedelta(seconds=3600)
 
 
 def test_a_status_outside_the_lifecycle_is_not_read_as_not_idling() -> None:

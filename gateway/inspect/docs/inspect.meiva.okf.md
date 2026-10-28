@@ -12,14 +12,9 @@ tags:
 `/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics`
 + `/inspect/widgets` — per-agent LLM cost/token/TPS + neighbor graph.
 
-The live inspector reports an active pause, recent pending inbound, or the
-native idle estimate from activity/idle threshold/jitter and last-heartbeat
-cadence. This projection does not reproduce every scheduler backoff or
-impersonation gate; see [[services/docs/gateway_side/heartbeat.meiva.okf.md]].
-The projection itself is the strict `gateway/inspect/_heartbeat.py` (`plan_heartbeat`): the daemon's cadence
-(`HeartbeatCadence`, read from `daemon.heartbeat_*` by the route) and the agent's rows come in as values.
-Its idle fixtures backdate both `status_changed_at` and `last_active_at`:
-updating a timestamp alone does not invoke the status-change trigger.
+The live inspector's heartbeat block — the four display states (a pause, a queued wake,
+a projected check-in, nothing) and the daemon predicate each one mirrors — has its own
+node: [[gateway/inspect/docs/heartbeat.meiva.okf.md|Inspector heartbeat projection]].
 
 Statistics read persisted compact metric observations and day summaries from
 Postgres. Cache-hit rates divide reported cache reads by `tokens_cache_input`,
