@@ -23,6 +23,7 @@ import {
   QueryClientProvider,
   render,
   resolveNotice,
+  rosterFixture,
   setupInspectorTest,
   streamHandlers,
 } from "./inspector-test-mock";
@@ -136,6 +137,85 @@ describe("InspectorPanel metrics and durations", () => {
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getAllByText("—")).toHaveLength(3);
     expect(within(activitySection!).getByText("42.5")).toBeTruthy();
+  });
+});
+
+describe("Cost cell billing presentation (user ruling 2026-10-28)", () => {
+  // meiva:note
+  // A subscription's label rides the amount in parentheses on one text run; a
+  // metered (API) agent says nothing beyond the amount; an unresolved harness
+  // keeps the amount alone. The assertions read the metric cell's structure, not
+  // "the string appears somewhere": the cell is the label's parent (label span,
+  // amount span, and only when the number needs a note a sub-line span), so the
+  // old presentation's third row and a parenthetical split into its own element
+  // both fail here.
+  // meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
+  const costCell = (): HTMLElement => {
+    const cell = screen.getByText("Cost").parentElement;
+    if (cell === null) throw new Error("the Cost metric rendered no cell");
+    return cell;
+  };
+
+  const costRows = (): (string | null)[] =>
+    [...costCell().children].map((child) => child.textContent);
+
+  const activitySection = (): HTMLElement => {
+    const section = screen.getByText("Activity").closest("section");
+    if (section === null) throw new Error("the Activity section did not render");
+    return section;
+  };
+
+  const costWith = (unpricedCalls: number) =>
+    fixture({ cost: { ...fixture().cost!, unpriced_calls: unpricedCalls } });
+
+  const awaitRosterHarness = (label: string) => screen.findByText(label);
+
+  it("shows only the amount for a metered agent, never the billing mode", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
+    getAgentInspectStatistics.mockResolvedValue(costWith(0));
+    render(<InspectorPanel agentId={1} />);
+    await awaitRosterHarness("Meiva");
+
+    expect(costRows()).toEqual(["Cost", "$0.4213"]);
+    expect(activitySection().textContent).not.toMatch(/api/i);
+  });
+
+  it("keeps a subscription's label in the amount's text run, not on its own row", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "claude_code" }));
+    getAgentInspectStatistics.mockResolvedValue(costWith(0));
+    render(<InspectorPanel agentId={1} />);
+
+    const amount = await screen.findByText("$0.4213 (Subscription)");
+    expect(costRows()).toEqual(["Cost", "$0.4213 (Subscription)"]);
+    expect(amount.childNodes).toHaveLength(1);
+    expect(amount.childNodes[0].nodeType).toBe(Node.TEXT_NODE);
+  });
+
+  it("leaves the amount alone when the harness is unresolved", async () => {
+    getAgentInspectStatistics.mockResolvedValue(costWith(0));
+    render(<InspectorPanel agentId={1} />);
+    await screen.findByText("$0.4213");
+
+    expect(costRows()).toEqual(["Cost", "$0.4213"]);
+  });
+
+  it("keeps unpriced calls on their own sub-line, beside the subscription amount", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "claude_code" }));
+    getAgentInspectStatistics.mockResolvedValue(costWith(3));
+    render(<InspectorPanel agentId={1} />);
+    await screen.findByText("$0.4213 (Subscription)");
+
+    expect(costRows()).toEqual(["Cost", "$0.4213 (Subscription)", "3 unpriced"]);
+  });
+
+  it("keeps unpriced calls on their own sub-line for a metered agent too", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
+    getAgentInspectStatistics.mockResolvedValue(costWith(3));
+    render(<InspectorPanel agentId={1} />);
+    await awaitRosterHarness("Meiva");
+
+    expect(costRows()).toEqual(["Cost", "$0.4213", "3 unpriced"]);
+    expect(costCell().textContent).not.toMatch(/api/i);
   });
 });
 

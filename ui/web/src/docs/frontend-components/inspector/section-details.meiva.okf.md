@@ -23,19 +23,7 @@ instead, so the dot never replaces content. The sibling links (`fleetTaskHref`,
 `fleetNoticeHref`) are typed literal routes so `next/link` infers them without a
 cast.
 
-**Activity** (the panel's last section) is one section with two grids. Cost: total `$` (four
-decimals) with an `N unpriced` sub-line when calls without a stored usage-time
-price snapshot exist — those contribute 0 and are surfaced rather than hidden,
-never silently partial; LLM calls; tokens in / out combined; cache-hit percent
-(`N/A` when unmetered). Activity: TPS (the LLM stage's), then the absolute
-durations the header window covers — LLM output, code execution, and idle
-(`alive − active`). For external harnesses (`harness !== "meiva"`), TPS, LLM
-output, and code execution are omitted because those belong to the native
-`execute_code` loop. Without life (`alive_seconds = 0`) the duration cells
-show em dashes while TPS stays visible. Durations use the shared tiering —
-`45s` / `15m` / `1h` / `1h 30m` / `24d 3h` (day tier past 24h) — and TPS renders
-one decimal, `0` → em dash. Token counts roll `≥1000M` to `B` and past `1000B` to
-`T`. The section header carries the window picker and the ⟳ ([[ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md|reads and refresh]]).
+**Activity** carries the cost, TPS and duration cells in its own node: [[ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md|Activity section]].
 
 **Context** is the selected agent's context-window occupancy: a wide gauge (the
 same `ContextMeter` the composer used to carry, ticks at the soft and hard
