@@ -53,6 +53,7 @@ deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
 import asyncio
+import os
 import random
 import signal
 import socket
@@ -235,7 +236,9 @@ def _run_resolution(
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
-        _pidfile(config, runtime=runtime), "services.upkeep.events_maintenance.daemon"
+        _pidfile(config, runtime=runtime),
+        "services.upkeep.events_maintenance.daemon",
+        pid=os.getpid(),
     ):
         events_maintenance_log.info(
             "[events_maintenance] daemon already running (pidfile=%s), exiting",

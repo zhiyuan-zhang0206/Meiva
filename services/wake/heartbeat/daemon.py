@@ -21,6 +21,7 @@ supervisor through the roster's `/healthz` probe; repeated failed rounds end the
 import asyncio
 import logging
 import math
+import os
 import random
 import signal
 import sys
@@ -436,7 +437,9 @@ def backoff_deadlines(
 
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
-    if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.wake.heartbeat.daemon"):
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.wake.heartbeat.daemon", pid=os.getpid()
+    ):
         _log.info(
             "[heartbeat] daemon already running (pidfile=%s), exiting",
             _pidfile(config, runtime=runtime),

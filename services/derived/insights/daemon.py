@@ -89,7 +89,9 @@ async def run(
     rng: random.Random,
 ) -> None:
     pidfile = insights_pidfile(home)
-    if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
+    if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(
+        pidfile, _MODULE, pid=os.getpid()
+    ):
         _log.info("[insights] daemon already running (pidfile=%s), exiting", pidfile)
         sys.exit(1)
     path = insights_socket(home)

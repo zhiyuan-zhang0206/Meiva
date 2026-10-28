@@ -146,7 +146,7 @@ async def test_window_expiry_kills_once_and_reports_it(tmp_path: Path, recorder:
 def test_identity_change_never_signals_and_reports_the_abort() -> None:
     stale = OwnedProcess(pid=2**22 + 7, birth=0.0, starttime=None)
     assert stale.live() is False
-    assert signal_owned(stale, force=True) is False
+    assert signal_owned(stale, force=True, own_group=os.getpgrp()) is False
 
 
 async def test_an_uncaptured_leader_identity_reports_its_own_reason(

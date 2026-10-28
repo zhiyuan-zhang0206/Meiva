@@ -22,9 +22,9 @@ def pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return endpoint(config, runtime=runtime).pidfile
 
 
-def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path, pid: int) -> None:
     if not pidfiles.acquire_pidfile(
-        pidfile(config, runtime=runtime), "services.agent_runner.page_server.daemon"
+        pidfile(config, runtime=runtime), "services.agent_runner.page_server.daemon", pid=pid
     ):
         _log.info(
             "[page-server] daemon already running (pidfile=%s), exiting",

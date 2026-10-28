@@ -17,4 +17,4 @@ exports = ["daemon.py", "shells.py"]
 "stale_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS" }
+"daemon.py" = { kinds = ["clock", "home", "pid", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS; it reads its own pid once to claim its pidfile" }

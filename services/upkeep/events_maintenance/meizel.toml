@@ -16,5 +16,5 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 "pass_policy.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "home", "platform", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and the host name and builds the random generator its event bus draws retry jitter from before composing its resources; builds the process clock from SYSTEM_TIMERS" }
+"daemon.py" = { kinds = ["clock", "home", "pid", "platform", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and the host name and builds the random generator its event bus draws retry jitter from before composing its resources; builds the process clock from SYSTEM_TIMERS; it reads its own pid once to claim its pidfile" }
 "rollup.py" = { kinds = ["clock", "home", "settings"], why = "Operator process entry boots configuration and resolves the Meiva home it recomputes for before composing its resources; builds the process clock from SYSTEM_TIMERS" }

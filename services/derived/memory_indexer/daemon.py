@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 import time
@@ -101,7 +102,7 @@ def dirty_paths(
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
-        _pidfile(config, runtime=runtime), "services.derived.memory_indexer.daemon"
+        _pidfile(config, runtime=runtime), "services.derived.memory_indexer.daemon", pid=os.getpid()
     ):
         _log.info(
             "[memory_indexer] daemon already running (pidfile=%s), exiting",

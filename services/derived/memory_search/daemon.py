@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 
@@ -91,7 +92,9 @@ def main() -> None:
     config = memory_search_config(config=boot)
     if _is_running(config):
         sys.exit(1)
-    if not acquire_pidfile(config.memory_search_pidfile, "services.derived.memory_search.daemon"):
+    if not acquire_pidfile(
+        config.memory_search_pidfile, "services.derived.memory_search.daemon", pid=os.getpid()
+    ):
         sys.exit(1)
     image = LoadedCommit.capture()
     version = CodeVersion(image)

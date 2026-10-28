@@ -10,5 +10,5 @@ exports = ["daemon.py", "selection.py", "station_probe.py"]
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["bus", "home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from the settings" }
+"daemon.py" = { kinds = ["bus", "home", "pid", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from the settings; it reads its own pid once to claim its pidfile" }
 "station_probe.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration and reads the home it runs under before composing its resources" }

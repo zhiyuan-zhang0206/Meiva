@@ -10,5 +10,5 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 "commit_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "environ", "home", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources, and reads its own environment once as the base its operation workers are launched with" }
+"daemon.py" = { kinds = ["clock", "environ", "home", "pid", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources, and reads its own environment once as the base its operation workers are launched with; it reads its own pid once to claim its pidfile" }
 "worker.py" = { kinds = ["environ", "home", "settings"], why = "Worker process entry boots configuration and reads the home it runs under before composing its resources, and reads its own environment once as the base the encryption, decryption and restore children it spawns are given (the dump child keeps its own PGPASSWORD-only environment)" }
