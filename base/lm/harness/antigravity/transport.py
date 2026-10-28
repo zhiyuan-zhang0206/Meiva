@@ -90,6 +90,7 @@ class AgyTransport:
         self._environ = dict(environ) if environ else None
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._process: asyncio.subprocess.Process | None = None
+        self._returncode: int | None = None
         self._queue: asyncio.Queue[Any] = asyncio.Queue()
         self._tasks = asyncio.TaskGroup()
         self._tasks_entered = False
@@ -111,7 +112,7 @@ class AgyTransport:
     # The session records it on close, after this process has been reaped.
     @property
     def returncode(self) -> int | None:
-        return None if self._process is None else self._process.returncode
+        return self._returncode if self._process is None else self._process.returncode
 
     @property
     def conversation_id(self) -> str | None:
@@ -212,12 +213,7 @@ class AgyTransport:
     async def close(self) -> None:
         process = self._process
         if process is not None and process.returncode is None:
-            process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
-            except TimeoutError:
-                process.kill()
-                await process.wait()
+            await self.interrupt()
         for pump in self._pumps:
             pump.cancel()
         self._pumps = []
@@ -225,6 +221,8 @@ class AgyTransport:
             self._tasks_entered = False
             with contextlib.suppress(ExceptionGroup):
                 await self._tasks.__aexit__(None, None, None)
+        if process is not None:
+            self._returncode = process.returncode
         self._process = None
         await self._queue.put(STREAM_END)
 
