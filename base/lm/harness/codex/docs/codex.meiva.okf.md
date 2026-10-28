@@ -41,8 +41,11 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
 
 | Module | Owns |
 |---|---|
-| `session.py` | `CodexSession`: start / resume / close, ordered inbound queue, one event stream, approvals, interrupt, totals |
-| `transport.py` | `StdioAppServer`: JSON-RPC framing over the child's stdin/stdout, id correlation, server→client requests |
+| `session.py` | `CodexSession`, the shell: start / resume / close, ordered inbound queue, one event stream, approvals, interrupt, totals |
+| `transport.py` | `StdioAppServer`, the shell of the child's pipes: spawn, write a line, read a line, correlate a reply |
+| `frames.py` | the JSON-RPC wire: frames, the compact one-line encoding, what an inbound line is (`classify`), the reply-to-result rule, the two errors |
+| `requests.py` | what the session sends (`initialize`, `thread/*`, `turn/start`, `turn/interrupt`) and the frame it answers a server request with |
+| `turns.py` | what a message means and what a settled turn is: `inbound`, `item`, `binding`, `error_report`, `unclaimed_text`, `TurnRecord`, `settle` |
 | `mapping.py` | pure `ThreadItem` → event translation and usage extraction |
 | `config.py` | `CodexConfig` and the command line |
 | `auth.py` | the credential environment the child receives: which variables are removed, and the explicit opt-in that keeps them |
@@ -52,22 +55,10 @@ modules; this package does not restate them.
 
 ## Notification mapping
 
-| app-server method | Bridge event |
-|---|---|
-| `item/agentMessage/delta` | `TextDelta` |
-| `item/completed` (`agentMessage`) | `AssistantText`; the `final_answer` phase also becomes the turn's reply text |
-| `item/started` / `item/completed` (`commandExecution`) | `ToolUse` / `ToolResult` (`is_error` when the status is failed/declined or the exit code is non-zero) |
-| `item/started` / `item/completed` (`fileChange`) | `ToolUse` / `ToolResult` named `patch` |
-| `item/*` (`mcpToolCall`, `dynamicToolCall`, `webSearch`) | `ToolUse` / `ToolResult` |
-| `thread/tokenUsage/updated` | per-turn `Usage`, accumulated into `SessionTotals` |
-| `turn/started` | binds the provider's name for the turn this session is starting (`TurnTicket.provider_turn_id`); any other moment, nothing |
-| `turn/completed` naming our turn | `TurnCompleted` (`status` → `subtype`, `interrupted` from the interrupt flag or status) |
-| `turn/completed` naming any other turn | `UnsolicitedOutput(source="turn/completed")` carrying that turn's reply |
-| `error` with `willRetry=false`, naming our turn | `TurnFaulted` |
-| `error` with `willRetry=false`, naming any other turn | `UnsolicitedOutput(source="error")` |
-
-Everything else (reasoning, plan, image, sub-agent, queue and rate-limit
-events) maps to nothing: the runtime does not model it.
+[[base/lm/harness/codex/docs/notification-mapping.meiva.okf.md|The notification
+mapping]] lists every app-server method the bridge reads and what each one
+becomes; `turns.inbound` decides which of them is which, and a method the bridge
+does not model maps to nothing because the runtime does not model it.
 
 ## Who a notification belongs to
 

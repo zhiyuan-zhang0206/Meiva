@@ -7,9 +7,10 @@ from typing import Any
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.codex import CodexConfig, CodexSession
+from base.lm.harness.codex import CodexConfig
+from base.lm.harness.codex.frames import JsonValue, as_object, as_text
+from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID, FakeAppServer
-from base.lm.harness.codex.transport import JsonValue, as_object, as_text
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.registry import FileSessionRegistry

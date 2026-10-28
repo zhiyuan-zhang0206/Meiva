@@ -5,7 +5,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from base.lm.harness.codex.transport import (
+from base.lm.harness.codex.frames import (
     ClosedHandler,
     JsonObject,
     JsonRpcError,

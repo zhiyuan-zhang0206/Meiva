@@ -23,9 +23,10 @@ from base.lm.harness.claude.tests.fake_sdk import (
     Say,
     ScriptedProbe,
 )
-from base.lm.harness.codex import CodexConfig, CodexSession
+from base.lm.harness.codex import CodexConfig
+from base.lm.harness.codex.frames import JsonObject, RequestParams
+from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
-from base.lm.harness.codex.transport import JsonObject, RequestParams
 from base.lm.harness.registration import SecureRandom
 from base.lm.harness.registry import FileSessionRegistry
 
