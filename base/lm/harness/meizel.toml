@@ -2,26 +2,30 @@ exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "code
 
 [uses]
 "__init__.py" = ["bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
-"antigravity" = ["base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
-"base_session.py" = ["events.py", "handoff.py", "process.py", "registry.py"]
+"antigravity" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
+"base_session.py" = ["events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
 "bridge.py" = ["base_session.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
-"claude" = ["__init__.py", "base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
-"codex" = ["base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
-"deepseek" = ["__init__.py", "acp", "base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
+"claude" = ["__init__.py", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
+"codex" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
+"deepseek" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
+"cancel.py" = []
 "engine.py" = ["events.py", "handoff.py"]
 "events.py" = []
 "handoff.py" = []
-"kimi" = ["__init__.py", "acp", "base_session.py", "events.py", "handoff.py", "process.py"]
+"kimi" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "turn.py"]
 "process.py" = []
 "registration.py" = []
 "registry.py" = []
+"turn.py" = ["events.py"]
 "wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "events.py", "handoff.py", "kimi", "registration.py", "registry.py"]
-"tests" = ["__init__.py", "antigravity", "base_session.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py", "wiring.py"]
+"tests" = ["__init__.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py", "wiring.py"]
 
 [purity]
+"cancel.py" = "strict"
 "engine.py" = "strict"
 "events.py" = "strict"
 "handoff.py" = "strict"
+"turn.py" = "strict"
 
 [debt.ambient-read]
 "wiring.py#environ base.host.env.registry.process_environment" = 1

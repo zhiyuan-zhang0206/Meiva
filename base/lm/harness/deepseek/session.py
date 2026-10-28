@@ -3,18 +3,26 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from base.lm.harness.acp.transport import (
+from base.lm.harness.acp import (
     AcpClosedError,
-    AcpConnection,
     AcpError,
     AcpNotification,
     AcpRpcError,
     AcpTimeoutError,
-    PermissionRequest,
+)
+from base.lm.harness.acp.permission import PermissionRequest
+from base.lm.harness.acp.transport import AcpConnection
+from base.lm.harness.cancel import (
+    CancelReport,
+    ProcessObservation,
+    Sweep,
+    describe,
+    observed_cancel,
+    spawned_since,
+    unobserved_cancel,
 )
 from base.lm.harness.deepseek.config import BridgeConfig
 from base.lm.harness.deepseek.mapping import assistant_text, map_update, parse_prompt_result
@@ -42,9 +50,7 @@ from base.lm.harness.process import (
     SIGKILL,
     SIGTERM,
     ChildProbe,
-    ProcessObservation,
     PsutilChildProbe,
-    describe,
     snapshot,
     wait_gone,
 )
@@ -71,23 +77,6 @@ from base.lm.pricing import PriceBook, quote
 # meiva:link base/lm/harness/deepseek/docs/deepseek.meiva.okf.md
 CANCEL_POLL_SECONDS = 0.05
 _EVENT_STREAM_END = EVENT_STREAM_END
-
-
-# meiva:note
-# `CancelReport.settled` is None when the runtime pid is unobservable — an
-# unobservable tree is reported as unknown, never as clean — and `remaining` names
-# every process that outlived the sweep so the caller decides instead of assuming.
-# meiva:link base/lm/harness/deepseek/docs/deepseek.meiva.okf.md
-@dataclass(frozen=True, slots=True)
-class CancelReport:
-    turn_id: str | None
-    cancel_ms: float
-    settled: bool | None
-    observed: tuple[ProcessObservation, ...]
-    remaining: tuple[ProcessObservation, ...]
-    waited_ms: float
-    agent_pid: int | None
-    agent_alive: bool | None
 
 
 # meiva:note
@@ -261,27 +250,16 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             turn_id = ticket.turn_id
         pid = self._agent_pid
         if pid is None:
-            return CancelReport(
-                turn_id=turn_id,
-                cancel_ms=0.0,
-                settled=None,
-                observed=(),
-                remaining=(),
-                waited_ms=0.0,
-                agent_pid=None,
-                agent_alive=None,
-            )
+            return unobserved_cancel(turn_id=turn_id)
         observed = snapshot(self._probe, pid)
-        spawned = {
-            child: command for child, command in observed.items() if child not in self._baseline
-        }
+        spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
         if self._session_id is not None:
             await connection.notify("session/cancel", {"sessionId": self._session_id})
         settle_deadline = self._monotonic() + self.config.cancel_settle_seconds
         while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
             await self._clock.asleep(CANCEL_POLL_SECONDS)
-        cancel_ms = (self._monotonic() - started) * 1000.0
+        interrupt_ms = (self._monotonic() - started) * 1000.0
         reaped = self._term_spawned(spawned)
         if reaped:
             await self._clock.asleep(CANCEL_POLL_SECONDS)
@@ -293,16 +271,18 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             poll_seconds=CANCEL_POLL_SECONDS,
             clock=self._clock,
         )
-        remaining = describe(observed, [child for child in reaped if self._probe.is_alive(child)])
-        return CancelReport(
+        return observed_cancel(
             turn_id=turn_id,
-            cancel_ms=cancel_ms,
-            settled=not reaped or gone,
-            observed=describe(observed, spawned),
-            remaining=remaining,
-            waited_ms=waited_ms,
-            agent_pid=pid,
-            agent_alive=self._probe.is_alive(pid),
+            interrupt_ms=interrupt_ms,
+            pid=pid,
+            cli_alive=self._probe.is_alive(pid),
+            sweep=Sweep(
+                observed=observed,
+                spawned=spawned,
+                gone=gone,
+                waited_ms=waited_ms,
+                alive=[child for child in reaped if self._probe.is_alive(child)],
+            ),
         )
 
     def _term_spawned(self, spawned: Mapping[int, str]) -> tuple[int, ...]:
@@ -325,10 +305,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
     # Snapshot the runtime process tree and select descendants spawned since turn start.
     def _spawned_descendants(self) -> tuple[dict[int, str], dict[int, str]]:
         observed = snapshot(self._probe, self._agent_pid)
-        survivors = {
-            child: command for child, command in observed.items() if child not in self._baseline
-        }
-        return (observed, survivors)
+        return (observed, spawned_since(observed, self._baseline))
 
     # meiva:note
     # Describe any descendants still alive after `_reap` and emit `SessionFaulted`.

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff, SessionRecord
-from base.lm.harness.acp.transport import PermissionOption, PermissionRequest
+from base.lm.harness.acp.permission import PermissionOption, PermissionRequest
 from base.lm.harness.deepseek import (
     DEFAULT_MODEL,
     InboundQueueFullError,
@@ -285,7 +285,7 @@ async def test_interrupt_without_children_reports_a_clean_settle(tmp_path: Path)
         report = await harness.session.interrupt()
         assert report.settled is True
         assert report.observed == ()
-        assert report.agent_alive is False
+        assert report.cli_alive is False
     finally:
         await harness.stop()
 

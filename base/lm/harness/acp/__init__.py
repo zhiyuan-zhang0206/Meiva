@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-from base.lm.harness.acp.transport import (
-    AcpClosedError,
-    AcpConnection,
-    AcpError,
-    AcpNotification,
-    AcpRpcError,
-    AcpTimeoutError,
-    PermissionOption,
-    PermissionRequest,
-)
+from base.lm.harness.acp.errors import AcpClosedError, AcpError, AcpRpcError, AcpTimeoutError
+from base.lm.harness.acp.inbound import AcpNotification
+from base.lm.harness.acp.permission import PermissionOption, PermissionRequest
 
 __all__ = [
     "AcpClosedError",
-    "AcpConnection",
     "AcpError",
     "AcpNotification",
     "AcpRpcError",

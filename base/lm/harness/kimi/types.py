@@ -1,29 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from base.lm.harness.base_session import SessionTotals, TurnOutcome, TurnTicket
-from base.lm.harness.process import ProcessObservation
+from base.lm.harness.base_session import TurnTicket
+from base.lm.harness.cancel import CancelReport
+from base.lm.harness.turn import SessionTotals, TurnOutcome
 
 # meiva:note
 # `SessionTotals.per_turn_usage` turns False as soon as one turn's numbers were
 # unavailable, so a caller can never read a silently-zeroed total as a measured
-# one. `CancelReport.settled` is None when the runtime pid is unobservable — an
-# unobservable tree is reported as unknown, never as clean — and `remaining` names
-# every process that outlived the sweep so the caller decides instead of assuming.
+# one. `CancelReport` (owned by `base.lm.harness.cancel`) says `settled=None` when the
+# runtime pid is unobservable and names every process that outlived the sweep in `remaining`.
 # meiva:link base/lm/harness/kimi/docs/kimi.meiva.okf.md
-
-
-@dataclass(frozen=True, slots=True)
-class CancelReport:
-    turn_id: str | None
-    cancel_ms: float
-    settled: bool | None
-    observed: tuple[ProcessObservation, ...]
-    remaining: tuple[ProcessObservation, ...]
-    waited_ms: float
-    agent_pid: int | None
-    agent_alive: bool | None
-
-
 __all__ = ["CancelReport", "SessionTotals", "TurnOutcome", "TurnTicket"]

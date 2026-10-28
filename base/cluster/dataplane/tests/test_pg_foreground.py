@@ -126,7 +126,7 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
 ) -> None:
     """A port collision must never authorize creating roles in the other server."""
     with pytest.raises(RuntimeError, match="another data directory"):
-        pg_plan.verify_foreground_data_dir(str(tmp_path / "other-db"), tmp_path / "owned-db")
+        pg_plan.verify_foreground_data_dir(tmp_path / "other-db", tmp_path / "owned-db")
 
     bin_dir = _write_stub_pg_bindir(tmp_path / "bin")
     port = int(str(conninfo_to_dict(db_url)["port"]))
@@ -141,6 +141,30 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
             pg_foreground.wait_foreground_postgres(
                 process, data=tmp_path / "owned-db", log=log, port=port
             )
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+
+# meiva:note
+# The readiness check resolves both paths before comparing them, so a symlinked spelling of the
+# server's own data directory still authorizes the answer. Removing either `resolve` makes this
+# fail: the server reports the path it was started with, and the test hands in the link.
+def test_a_symlinked_spelling_of_the_reported_data_directory_is_answered(
+    tmp_path: Path, db_url: str
+) -> None:
+    port = int(str(conninfo_to_dict(db_url)["port"]))
+    with psycopg.connect(db_url, connect_timeout=2) as connection:
+        row = connection.execute("SHOW data_directory").fetchone()
+    assert row is not None and row[0] is not None
+    link = tmp_path / "data-link"
+    link.symlink_to(str(row[0]))
+    log = tmp_path / "pg.log"
+    process = pg_foreground.start_foreground_postgres(
+        ["/bin/sleep", "30"], log=log, env=pg_tools.pg_start_env()
+    )
+    try:
+        pg_foreground.wait_foreground_postgres(process, data=link, log=log, port=port)
     finally:
         process.terminate()
         process.wait(timeout=5)

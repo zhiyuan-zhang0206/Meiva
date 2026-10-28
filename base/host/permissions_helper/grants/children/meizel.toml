@@ -2,8 +2,4 @@ exports = ["apple_event.py", "folder_touch.py", "preflight.py"]
 
 [purity]
 "__init__.py" = "strict"
-"folder_touch.py" = "strict-to-be"
-
-[debt.impure-call]
-"folder_touch.py#Path.iterdir" = 1
-"folder_touch.py#Path.open" = 1
+"folder_touch.py" = { mode = "none", why = "the TCC probe child: launched by path under the permissions helper's own attribution, it lists the target directory and writes the one result word its parent parses, and reading that word (granted/denied/unresolved) is grants/triggers.py:classify_touch; the only plan left would be the three-line result-word choice, and lifting it to a sibling module would make this stdlib-only child depend on sys.path[0] (the way it is started today), so any launch that used -m, -I or -P would turn it into an ImportError whose symptom is a ten-second probe timeout instead of the missing word" }

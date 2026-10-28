@@ -4,7 +4,8 @@ import asyncio
 import sys
 from pathlib import Path
 
-from base.lm.harness.acp import AcpConnection, PermissionRequest
+from base.lm.harness.acp import PermissionRequest
+from base.lm.harness.acp.transport import AcpConnection
 
 FAKE_AGENT = Path(__file__).with_name("fake_agent.py")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base.lm.harness.cancel import CancelReport
 from base.lm.harness.claude.auth import (
     AuthConfig,
     AuthMode,
@@ -9,15 +10,13 @@ from base.lm.harness.claude.auth import (
 )
 from base.lm.harness.claude.config import DEFAULT_MODEL, BridgeConfig
 from base.lm.harness.claude.session import (
-    CancelReport,
     ClaudeSession,
     InboundQueueFullError,
     MissingClaudeSdkError,
     SessionClosedError,
-    SessionTotals,
-    TurnOutcome,
     TurnTicket,
 )
+from base.lm.harness.turn import SessionTotals, TurnOutcome
 
 __all__ = [
     "DEFAULT_MODEL",
