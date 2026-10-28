@@ -32,13 +32,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import assert_never
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.config import get_field
-from base.host.env.registry import process_environment
 from base.host.net.url_secret import names_foreign_host
 from base.host.system.hostport import Host
 from base.host.system.probes import (
@@ -46,7 +46,6 @@ from base.host.system.probes import (
     permissions_helper_incapability,
 )
 from base.log import logger
-from base.paths import meiva_home
 from base.telemetry.observability import (
     collector_allowed_for_home,
     endpoint_override_is_explicit,
@@ -80,6 +79,7 @@ def _gate_fact(
     *,
     machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> GateFact | None:
     match kind:
         case "flag":
@@ -105,11 +105,13 @@ def _gate_fact(
         case "station":
             from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_roles
 
-            return StationFact(is_station=is_lgtm_host(meiva_home(), roles=lgtm_roles(machine)))
+            return StationFact(is_station=is_lgtm_host(home, roles=lgtm_roles(machine)))
         case "collector":
-            return CollectorFact(allowed=_collector_allowed(machine))
+            return CollectorFact(
+                allowed=_collector_allowed(machine, home=home, environ=host.environ)
+            )
         case "bridge":
-            return _bridge_fact(machine)
+            return _bridge_fact(machine, home=home)
         case "none":
             return None
         case _:
@@ -138,25 +140,24 @@ def _flag_enabled(session: str) -> bool:
 # `MEIVA_TELEMETRY_OTLP_ENDPOINT` override) so the roster, `meiva start`, `meiva status`, the
 # root, rollout readiness and the cluster health probe agree about which gateway owns the
 # collector. Pure agent-runners retain their relay collector.
-def _collector_allowed(machine: MachineIdentityReader) -> bool:
-    home = meiva_home()
+def _collector_allowed(
+    machine: MachineIdentityReader, *, home: Path, environ: Mapping[str, str]
+) -> bool:
     return collector_allowed_for_home(
         gateway_observability_home(machine, home=home),
         machine=machine,
         unit_home=home,
-        endpoint_explicit=endpoint_override_is_explicit(
-            "MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment()
-        ),
+        endpoint_explicit=endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT", environ),
     )
 
 
 # meiva:note
 # The relay exists only on a macOS gateway with a local data plane and a declared non-loopback
 # address; the same answer drives `meiva status` and the cluster health probe.
-def _bridge_fact(machine: MachineIdentityReader) -> BridgeFact:
+def _bridge_fact(machine: MachineIdentityReader, *, home: Path) -> BridgeFact:
     try:
         endpoint = redis_bridge_endpoint(
-            meiva_home(),
+            home,
             machine_host=machine.host,
             remote_data_plane=lambda: names_foreign_host(
                 str(get_field("db_url")), str(get_field("redis_url"))
@@ -182,6 +183,7 @@ def gate_reason(
     *,
     machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
@@ -203,10 +205,23 @@ def gate_reason(
     kind = gate_kind(spec.session)
     return gate_reason_of(
         spec.session,
-        _gate_fact(kind, spec.session, machine=machine, host=host),
+        _gate_fact(kind, spec.session, machine=machine, host=host, home=home),
     )
 
 
+# meiva:note
+# The union of services this host's capability set runs, each paired with its gate reason (None =
+# will start, a string = gated out + why).
+#
+# A service is included iff its `capabilities` intersect `roles`: a gateway host gets the
+# gateway-group services, an agent-runner host the agent-runner-group, and a single box the union.
+# `services` is the roster to judge (the roster of `home`, from `build_services`, when omitted), in
+# authored order, so each single-capability view keeps its load-bearing order.
+#
+# Config/capability-gated services (browser, disabled heartbeat; and plugin services with their
+# own gate, e.g. disabled task-maintenance) are kept in this list WITH their reason rather than
+# dropped, so `meiva start` / `meiva status` can show WHY a service is absent instead of silently
+# shrinking the roster. `services_for_capabilities` is the start-roster view that drops them.
 def services_for_capabilities_annotated(
     roles: MachineRoles,
     *,
@@ -215,27 +230,18 @@ def services_for_capabilities_annotated(
     services: tuple[ServiceSpec, ...] | None = None,
     home: Path,
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
-    """The union of services this host's capability set runs, each paired with its
-    gate reason (None = will start, a string = gated out + why).
-
-    A service is included iff its ``capabilities`` intersect ``roles`` — so a
-    gateway host gets the gateway-group services, an agent-runner host the
-    agent-runner-group, and a single box the union. Iterates ``build_services()``
-    in authored order, so each single-capability view keeps its load-bearing order.
-
-    Config/capability-gated services (browser, disabled heartbeat; and
-    plugin services with their own gate, e.g. disabled task-maintenance) are kept
-    in this list WITH their reason rather than dropped, so ``meiva start`` /
-    ``meiva status`` can show WHY a service is absent instead of silently shrinking
-    the roster. ``services_for_capabilities`` is the start-roster view that drops
-    them.
-    """
     roster = build_services(home=home) if services is None else services
     return tuple(
-        (s, gate_reason(s, machine=machine, host=host)) for s in roster if s.capabilities & roles
+        (s, gate_reason(s, machine=machine, host=host, home=home))
+        for s in roster
+        if s.capabilities & roles
     )
 
 
+# meiva:note
+# The start roster: the capability-union services that will actually launch (config/capability-gated
+# ones dropped). `services_for_capabilities_annotated` is the diagnostic view that keeps the
+# gated-out services + their reason.
 def services_for_capabilities(
     roles: MachineRoles,
     *,
@@ -244,9 +250,6 @@ def services_for_capabilities(
     services: tuple[ServiceSpec, ...] | None = None,
     home: Path,
 ) -> tuple[ServiceSpec, ...]:
-    """The start roster: the capability-union services that will actually launch
-    (config/capability-gated ones dropped). ``services_for_capabilities_annotated``
-    is the diagnostic view that keeps the gated-out services + their reason."""
     return tuple(
         s
         for s, reason in services_for_capabilities_annotated(

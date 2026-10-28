@@ -10,7 +10,6 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.paths import meiva_home
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe
 from services.backup.walg import state as walg_state
@@ -52,7 +51,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
 
 
 def _healthy_state(sandbox: Sandbox) -> probe.ArchiverState:
-    expected = expected_archive(path=sandbox.path, home=meiva_home())
+    expected = expected_archive(path=sandbox.path, home=sandbox.home)
     assert expected is not None
     return probe.ArchiverState(
         archive_mode=expected.mode,
@@ -71,7 +70,7 @@ def test_failure_texts_carry_no_number_that_could_change_between_runs() -> None:
 
 
 def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
-    expected = expected_archive(path=sandbox.path, home=meiva_home())
+    expected = expected_archive(path=sandbox.path, home=sandbox.home)
     assert expected is not None
 
     assert probe.judge(_healthy_state(sandbox), expected) is None
@@ -88,14 +87,14 @@ def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
 def test_postgres_running_other_archive_settings_is_reported(
     sandbox: Sandbox, drift: dict[str, Any]
 ) -> None:
-    expected = expected_archive(path=sandbox.path, home=meiva_home())
+    expected = expected_archive(path=sandbox.path, home=sandbox.home)
     assert expected is not None
 
     assert probe.judge(replace(_healthy_state(sandbox), **drift), expected) == probe.SETTINGS_DIFFER
 
 
 def test_a_failing_archiver_is_reported(sandbox: Sandbox) -> None:
-    expected = expected_archive(path=sandbox.path, home=meiva_home())
+    expected = expected_archive(path=sandbox.path, home=sandbox.home)
     assert expected is not None
 
     state = replace(_healthy_state(sandbox), failing_now=True)
@@ -104,7 +103,7 @@ def test_a_failing_archiver_is_reported(sandbox: Sandbox) -> None:
 
 
 def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> None:
-    expected = expected_archive(path=sandbox.path, home=meiva_home())
+    expected = expected_archive(path=sandbox.path, home=sandbox.home)
     assert expected is not None
     healthy = _healthy_state(sandbox)
 
@@ -117,7 +116,7 @@ def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> 
 
 
 def test_settings_drift_outranks_the_archiver_conditions(sandbox: Sandbox) -> None:
-    expected = expected_archive(path=sandbox.path, home=meiva_home())
+    expected = expected_archive(path=sandbox.path, home=sandbox.home)
     assert expected is not None
     state = replace(
         _healthy_state(sandbox), archive_mode="off", failing_now=True, oldest_pending_age_s=10_000.0
@@ -131,7 +130,7 @@ def test_off_is_silent_and_never_dials_postgres(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW, home=meiva_home()) is None
+    assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW, home=sandbox.home) is None
     assert probe.configuration_failure(sandbox.path, home=sandbox.home) is None
 
 
@@ -158,13 +157,25 @@ def test_a_swapped_key_is_reported_once_a_key_is_pinned(sandbox: Sandbox) -> Non
     assert probe.configuration_failure(sandbox.path, home=sandbox.home) == probe.KEY_CHANGED
 
 
+def test_the_whole_probe_judges_the_key_against_the_pin_of_the_handed_home(
+    sandbox: Sandbox, postgres_access: None
+) -> None:
+    walg_config.load_walg_config(path=sandbox.path, home=sandbox.home)
+    sandbox.key_file.write_text("ef" * 32 + "\n")
+    unreachable = probe.admin_connection_to(refused_target())
+
+    assert (
+        probe.failure_on(sandbox.path, unreachable, now=NOW, home=sandbox.home) == probe.KEY_CHANGED
+    )
+
+
 def test_the_probe_never_raises_when_postgres_cannot_be_read(
     sandbox: Sandbox, postgres_access: None
 ) -> None:
     unreachable = probe.admin_connection_to(refused_target())
 
     assert (
-        probe.failure_on(sandbox.path, unreachable, now=NOW, home=meiva_home()) == probe.UNREADABLE
+        probe.failure_on(sandbox.path, unreachable, now=NOW, home=sandbox.home) == probe.UNREADABLE
     )
 
 
@@ -182,7 +193,7 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
         time.sleep(2.5)
 
         state = probe.read_archiver_state(conn)
-        expected = expected_archive(path=sandbox.path, home=meiva_home())
+        expected = expected_archive(path=sandbox.path, home=sandbox.home)
         assert expected is not None
         assert (state.archive_mode, state.archive_command) == ("on", expected.command)
         assert (state.archive_timeout_s, state.failing_now, state.failed_count) == (
@@ -275,7 +286,7 @@ def _failure(
         probe.admin_connection_to(pg.target),
         now=datetime.now(UTC),
         rpo_objective_s=rpo_objective_s,
-        home=meiva_home(),
+        home=sandbox.home,
     )
 
 
@@ -522,4 +533,4 @@ def test_off_does_not_read_the_tick_state(tmp_path: Path, monkeypatch: pytest.Mo
     walg_state.walg_dir(sandbox.home).mkdir(parents=True, exist_ok=True)
     walg_state.state_path(sandbox.home).write_text("{broken")
 
-    assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW, home=meiva_home()) is None
+    assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW, home=sandbox.home) is None
