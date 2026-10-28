@@ -61,6 +61,7 @@ def host_policy(
         default_reader=lambda domain, field: getattr(getattr(config.view, domain), field),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
+        held_settle_budget_s=daemon.held_settle_budget_s,
         stall=StallTiming(
             scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
             no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,

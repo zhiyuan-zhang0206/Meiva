@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from random import SystemRandom
 from typing import Any, cast
 from uuid import uuid4
 
@@ -27,16 +28,21 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.harness.registration import SecureRandom
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 from services.agent_runner.agent_host.held_settle import settle_owed_handoff
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.lifecycle.configuration import host_policy
+from services.agent_runner.agent_host.runtime import HostPolicy
 from services.agent_runner.agent_host.tests.host_policy import (
     configured_machine,
     configured_policy,
@@ -147,6 +153,7 @@ def _host(
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    policy: HostPolicy | None = None,
 ) -> AgentHost:
     return AgentHost(
         runtime_owner=uuid4(),
@@ -155,7 +162,7 @@ def _host(
             timestamps_enabled=False,
         ),
         home=meiva_home(),
-        policy=configured_policy(),
+        policy=configured_policy() if policy is None else policy,
         pool=pool,
         checkpointer=saver,
         graph=graph,
@@ -396,3 +403,47 @@ async def test_a_marker_from_an_earlier_wake_is_cleared_by_the_wake_that_settles
     assert [corpse.agent_id for corpse in await reap_crash_corpses(aops_pool, _MACHINE)] == [
         agent_id
     ]
+
+
+# meiva:note
+# The budget is the configuration's, not the deploy family's constant: a host whose policy carries
+# another budget settles on that one, and `HeldSettle` has no default to fall back to.
+@pytest.mark.usefixtures("event_pipeline")
+async def test_the_host_takes_its_settle_budget_from_the_policy(
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+) -> None:
+    graph, saver = await _graph(aops_pool, 0)
+    host = _host(
+        pool=aops_pool,
+        saver=saver,
+        graph=graph,
+        database=database,
+        event_bus=event_bus,
+        model_catalog=model_catalog,
+        policy=configured_policy(held_settle_budget_s=7.5),
+    )
+    try:
+        assert host._held_settle.budget_s == 7.5
+    finally:
+        await host.aclose()
+
+
+# meiva:note
+# The other half of the budget's journey: the policy the root builds carries the configuration's
+# value, so the number `AgentHost` hands the settle is the one an operator set.
+def test_the_host_policy_takes_the_settle_budget_from_the_configuration(tmp_path: Path) -> None:
+    boot = ConfigBoot()
+    boot.set_field("held_settle_budget_s", 7.5)
+
+    policy = host_policy(
+        boot,
+        keys=ProviderKeys({}),
+        rng=SecureRandom(SystemRandom()),
+        pid=1,
+        user_home=tmp_path,
+    )
+
+    assert policy.held_settle_budget_s == 7.5

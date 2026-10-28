@@ -59,6 +59,12 @@ STOP_KILL_REAP_S = 2.0
 # budget stays under both bounds: NO_PROGRESS_TIMEOUT_S (360 s) never sees a stalled
 # wake, and CORPSE_REAP_GRACE_S (900 s) leaves the heartbeat its grace window before the
 # reaper takes the row.
+#
+# The budget is the *default*: the running value is `MEIVA_HOST_HELD_SETTLE_BUDGET_S`
+# (`settings.daemon.held_settle_budget_s`), which this constant seeds and which the daemon
+# domain refuses to load unless it also stays below the turn's own no-progress bound. The
+# interval and the attempt count are not configurable: they shape the same wake, and a
+# knob that lets a caller outlast the wake is the one that matters.
 HANDOFF_SETTLE_RETRY_INTERVAL_S = 0.5
 HANDOFF_SETTLE_RETRY_BUDGET_S = 5.0
 

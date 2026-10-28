@@ -208,6 +208,7 @@ class AgentHost:
             stats=self.stats,
             rng=policy.rng,
             receipt_landed=handoff_landed,
+            budget_s=policy.held_settle_budget_s,
         )
         self._resource_service = HostedServiceResources()
 

@@ -4,6 +4,7 @@ import pytest
 
 import base.deploy.progress_timeout as deploy
 import base.native_process.stop_timing as stop
+from base.config.domains.daemon.settings import DaemonSettings
 from base.deploy.timing import (
     CLOCKS,
     CONSTRAINTS,
@@ -131,3 +132,59 @@ def test_the_handoff_settle_budget_is_bounded_by_the_stall_and_reap_clocks() -> 
         deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S + 3 * deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S
         < deploy.HANDOFF_SETTLE_RETRY_BUDGET_S
     )
+
+
+# meiva:note
+# The host root judges the values it will live by: an operator's settle budget reaches the lattice
+# through the parameter, so an override that inverts one of the held path's orderings is refused at
+# boot rather than at the failing wake.
+def test_an_operator_settle_budget_is_what_the_lattice_checks() -> None:
+    values = clock_values(handoff_settle_budget_s=deploy.NO_PROGRESS_TIMEOUT_S)
+    assert values["HANDOFF_SETTLE_RETRY_BUDGET_S"] == deploy.NO_PROGRESS_TIMEOUT_S
+    assert any(
+        "HANDOFF_SETTLE_RETRY_BUDGET_S < NO_PROGRESS_TIMEOUT_S" in f
+        for f in validate_clock_lattice(values)
+    )
+
+
+# meiva:note
+# The configuration owns the running value and this family owns its two bounds; only this module may
+# read both, so the agreement is proved here. The default is seeded from the one definition above,
+# and a configured value at either bound is what the host root refuses at boot.
+def test_the_configuration_seeds_the_budget_from_the_deploy_family() -> None:
+    assert DaemonSettings().held_settle_budget_s == deploy.HANDOFF_SETTLE_RETRY_BUDGET_S
+
+
+@pytest.mark.parametrize(
+    ("bound", "name"),
+    [
+        (deploy.NO_PROGRESS_TIMEOUT_S, "NO_PROGRESS_TIMEOUT_S"),
+        (deploy.CORPSE_REAP_GRACE_S, "CORPSE_REAP_GRACE_S"),
+    ],
+)
+def test_a_configured_settle_budget_at_a_deploy_bound_fails_the_lattice(
+    bound: float, name: str
+) -> None:
+    loaded = DaemonSettings(MEIVA_HOST_HELD_SETTLE_BUDGET_S=bound).held_settle_budget_s
+    failures = validate_clock_lattice(clock_values(handoff_settle_budget_s=loaded))
+    assert [f for f in failures if f"HANDOFF_SETTLE_RETRY_BUDGET_S < {name}" in f]
+
+
+# meiva:note
+# The same family's floor: the retry pays one interval and then three times it before the third
+# attempt, so a budget below that sum cannot buy the three attempts the budget is declared to pay
+# for. Declared here and refused at boot, like the two ceilings.
+def test_the_settle_budget_declares_the_floor_its_attempts_need() -> None:
+    [floor] = [c for c in CONSTRAINTS if c.rhs == "HANDOFF_SETTLE_RETRY_BUDGET_S"]
+    assert floor.kind == "<"
+    assert floor.lhs == "HANDOFF_SETTLE_RETRY_INTERVAL_S + 3 * HANDOFF_SETTLE_RETRY_INTERVAL_S"
+    assert (
+        deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S + 3 * deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S
+        < deploy.HANDOFF_SETTLE_RETRY_BUDGET_S
+    )
+
+
+@pytest.mark.parametrize("budget", [1.0, 1.9])
+def test_a_budget_too_small_for_three_attempts_fails_the_lattice(budget: float) -> None:
+    failures = validate_clock_lattice(clock_values(handoff_settle_budget_s=budget))
+    assert [f for f in failures if "< HANDOFF_SETTLE_RETRY_BUDGET_S:" in f]

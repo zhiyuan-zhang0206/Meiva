@@ -23,4 +23,8 @@ Its component nodes describe the current contracts and implementation.
 `timing.clock_values()` captures the canonical registered clock sources once at
 agent-host startup. The startup root supplies that complete snapshot to
 `assert_clock_lattice`; validation rejects missing or unknown names and checks
-the same declared ordering and derivations without reading settings again.
+the same declared ordering and derivations without reading settings again. Three
+of those clocks — the wedged age, the exec node timeout and the held path's
+settle budget — are operator settings, so the root passes them in and the lattice
+judges the values the host will live by rather than the defaults they were seeded
+from.
