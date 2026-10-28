@@ -21,6 +21,7 @@ import psycopg
 import redis.exceptions
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import Timers
 from base.cluster.machine import gateway_api_base
 from base.config import ConfigBoot
 from base.deploy.git import source_tree_guard
@@ -114,7 +115,11 @@ def gateway_alive(gateway_url: str) -> bool:
 # True when either dependency behind the gateway is currently unreachable. (redis-py types the
 # optional argument of `ping` as Unknown, hence the pyright directive on that call.)
 def data_plane_abnormal(
-    config: ConfigBoot, *, database_factory: DatabaseFactory, rng: random.Random
+    config: ConfigBoot,
+    *,
+    database_factory: DatabaseFactory,
+    rng: random.Random,
+    timers: Timers,
 ) -> bool:
     try:
         with database_factory().connect(autocommit=True):
@@ -122,7 +127,7 @@ def data_plane_abnormal(
     except (psycopg.Error, OSError):
         return True
     try:
-        client = EventBus(event_bus_config_from_config(config), rng=rng).sync_redis()
+        client = EventBus(event_bus_config_from_config(config), rng=rng, timers=timers).sync_redis()
         try:
             client.ping()  # pyright: ignore[reportUnknownMemberType]
         finally:
@@ -141,6 +146,7 @@ def read_gateway(
     config: ConfigBoot,
     database_factory: DatabaseFactory,
     rng: random.Random,
+    timers: Timers,
 ) -> GatewayReading:
     waits = liveness_waits(options.liveness_attempts, options.liveness_retry_interval_s)
     if gateway_alive(options.gateway_url):
@@ -151,7 +157,9 @@ def read_gateway(
             return GatewayReading(alive=True, data_plane_abnormal=False)
     return GatewayReading(
         alive=False,
-        data_plane_abnormal=data_plane_abnormal(config, database_factory=database_factory, rng=rng),
+        data_plane_abnormal=data_plane_abnormal(
+            config, database_factory=database_factory, rng=rng, timers=timers
+        ),
     )
 
 
@@ -303,7 +311,9 @@ def read_health(
     walg_failure, walg_on = read_walg(options.data_plane.walg_config_file, home=command.home)
     return HealthReadings(
         disk_fraction=disk_usage_fraction(options.data_volume),
-        gateway=read_gateway(options, command.config, database_factory, command.rng),
+        gateway=read_gateway(
+            options, command.config, database_factory, command.rng, command.timers
+        ),
         population=read_population(database_factory, launched),
         schema_skew=options.rules.check_schema and read_schema_skew(database_factory),
         service_failures=read_service_failures(command, launched),

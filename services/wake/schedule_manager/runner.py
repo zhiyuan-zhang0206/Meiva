@@ -52,7 +52,7 @@ def _bind_schedule_actor(
             clients=clients,
             machine=machine,
             clock_factory=clock_factory,
-            bus_factory=deferred_event_bus(config, rng=rng),
+            bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
             meiva_home=home,
             user_home=user_home,
             rng=rng,

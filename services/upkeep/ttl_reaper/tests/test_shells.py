@@ -71,7 +71,7 @@ async def _reap(
     return await reap_expired_shells(
         pool,
         Database.from_settings(gate=database_gate),
-        bus or EventBus.from_settings(rng=seeded_rng()),
+        bus or EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         _progress(),
         config or reaper_config(),
         rpc or rpc_client()[0],

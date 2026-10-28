@@ -6,6 +6,8 @@ from collections.abc import Callable
 import pytest
 from redis.exceptions import AuthenticationError
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.live.redis_client import retry_auth_failures_async, retry_auth_failures_sync
 from base.events.live.redis_resilience import (
@@ -80,20 +82,20 @@ def test_the_retry_places_each_delay_by_a_sample_from_the_generator_it_was_given
         )
         for count in range(1, 5)
     ]
-    assert _delays(AuthRetry(_POLICY, rng=_rng(5)), 4) == expected
+    assert _delays(AuthRetry(_POLICY, rng=_rng(5), timers=SYSTEM_TIMERS), 4) == expected
 
 
 def test_generators_with_different_seeds_give_different_delays() -> None:
-    first = _delays(AuthRetry(_POLICY, rng=_rng(1)), 6)
-    second = _delays(AuthRetry(_POLICY, rng=_rng(2)), 6)
+    first = _delays(AuthRetry(_POLICY, rng=_rng(1), timers=SYSTEM_TIMERS), 6)
+    second = _delays(AuthRetry(_POLICY, rng=_rng(2), timers=SYSTEM_TIMERS), 6)
     assert first != second
     assert len(set(first)) == len(first)
 
 
 def test_the_bus_owns_one_retry_over_its_generator() -> None:
-    bus = EventBus(event_bus_config_from_settings(), rng=_rng(7))
+    bus = EventBus(event_bus_config_from_settings(), rng=_rng(7), timers=SYSTEM_TIMERS)
     policy = bus.auth_retry.policy
-    reference = AuthRetry(policy, rng=_rng(7))
+    reference = AuthRetry(policy, rng=_rng(7), timers=SYSTEM_TIMERS)
     assert _delays(bus.auth_retry, 3) == _delays(reference, 3)
 
 
@@ -117,7 +119,9 @@ def test_the_sync_loop_draws_one_jitter_sample_per_retry() -> None:
     rng = _rng(11)
     operation = _failing(3)
 
-    result = retry_auth_failures_sync(operation, auth_retry=AuthRetry(_POLICY, rng=rng))
+    result = retry_auth_failures_sync(
+        operation, auth_retry=AuthRetry(_POLICY, rng=rng, timers=SYSTEM_TIMERS)
+    )
 
     assert result == "done"
     reference = _rng(11)
@@ -136,7 +140,9 @@ async def test_the_async_loop_draws_one_jitter_sample_per_retry() -> None:
             raise AuthenticationError("ACL is being re-affirmed")
         return "done"
 
-    result = await retry_auth_failures_async(operation, auth_retry=AuthRetry(_POLICY, rng=rng))
+    result = await retry_auth_failures_async(
+        operation, auth_retry=AuthRetry(_POLICY, rng=rng, timers=SYSTEM_TIMERS)
+    )
 
     assert result == "done"
     reference = _rng(13)
@@ -154,6 +160,32 @@ def test_the_loop_gives_up_when_the_attempts_are_spent() -> None:
         raise AuthenticationError("still not affirmed")
 
     with pytest.raises(AuthenticationError):
-        retry_auth_failures_sync(operation, auth_retry=AuthRetry(policy, rng=_rng(1)))
+        retry_auth_failures_sync(
+            operation, auth_retry=AuthRetry(policy, rng=_rng(1), timers=SYSTEM_TIMERS)
+        )
 
     assert attempts["n"] == 3
+
+
+# meiva:note
+# The retry window is measured on the timers the retry carries, and its waits are spent on them: an
+# attempt that moves that clock forward is what makes the window run out, so the loop stops at the
+# second attempt — while a loop reading the process clock would see no elapsed time at all and run on
+# to `max_attempts`.
+def test_the_window_and_its_waits_run_on_the_timers_the_retry_carries() -> None:
+    timers = ManualTimers()
+    policy = AuthRetryPolicy(initial_delay_s=1.0, delay_cap_s=1.0, window_s=10.0, max_attempts=5)
+    retry = AuthRetry(policy, rng=_rng(5), timers=timers)
+    attempts: list[int] = []
+
+    def slow_failure() -> str:
+        attempts.append(1)
+        timers.advance(9.0)
+        raise AuthenticationError("ACL is being re-affirmed")
+
+    with pytest.raises(AuthenticationError):
+        retry_auth_failures_sync(slow_failure, auth_retry=retry)
+
+    assert len(attempts) == 2
+    assert timers.sleeps, "the wait between attempts was spent on the retry's own timers"
+    assert sum(timers.sleeps) <= policy.window_s

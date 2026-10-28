@@ -3,8 +3,8 @@
 #
 # Components take an `EventBus` (or a client it opened), never the Redis URL or the channel name:
 # the URL carries the login. A composition root builds the handle once
-# (`EventBus.from_settings(rng=...)`, with the process's random generator for the retry jitter)
-# and passes it down. The module-level `get_async_redis()` / `sync_redis()` /
+# (`EventBus.from_settings(rng=..., timers=...)`, with the process's random generator for the retry
+# jitter and the process timers the ACL-transition retry measures its window on) and passes it down. The module-level `get_async_redis()` / `sync_redis()` /
 # `publish_best_effort*` in `base.events.live.redis_client` remain as the process default that
 # reads the live settings at each call, a shim that the `ambient-bus` rule
 # (meizel/state/ambient_state) bans package by package.
@@ -18,6 +18,7 @@ import asyncio
 import random
 from dataclasses import dataclass, field
 
+from base.clock import Timers
 from base.config import ConfigBoot, settings
 from base.events.live.redis_client import (
     AuthRetryAsyncRedis,
@@ -72,18 +73,20 @@ def event_bus_config_from_config(boot: ConfigBoot) -> EventBusConfig:
 class EventBus:
     """One cluster Redis and its events channel, dialed with one `EventBusConfig`."""
 
-    def __init__(self, config: EventBusConfig, *, rng: random.Random) -> None:
+    def __init__(self, config: EventBusConfig, *, rng: random.Random, timers: Timers) -> None:
         self._config = config
-        self._auth_retry = AuthRetry(config.auth_retry_policy, rng=rng)
+        self._timers = timers
+        self._auth_retry = AuthRetry(config.auth_retry_policy, rng=rng, timers=timers)
         self._warn_last: dict[tuple[str, str], float] = {}
         self._clients: dict[asyncio.AbstractEventLoop, AuthRetryAsyncRedis] = {}
 
     # meiva:note
     # The composition-root constructor: the config as the live settings hold it now. `rng` is the
-    # process root's one random generator; the bus draws its auth-retry jitter from it.
+    # process root's one random generator; the bus draws its auth-retry jitter from it, and `timers`
+    # is the process clock the retry window is measured on.
     @classmethod
-    def from_settings(cls, *, rng: random.Random) -> EventBus:
-        return cls(event_bus_config_from_settings(), rng=rng)
+    def from_settings(cls, *, rng: random.Random, timers: Timers) -> EventBus:
+        return cls(event_bus_config_from_settings(), rng=rng, timers=timers)
 
     # meiva:note
     # The ACL-transition retry every client and publish of this bus runs.

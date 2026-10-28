@@ -158,7 +158,9 @@ async def run(
 
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
-    bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
+    bus = EventBus(
+        event_bus_config_from_config(process_config), rng=_new_rng(), timers=SYSTEM_TIMERS
+    )
     try:
         rpc = RpcClient.from_boot(process_config, timers=SYSTEM_TIMERS, rng=_new_rng())
         await run_loops(pool, db, bus, liveness, ttl_reaper_config(process_config, rpc=rpc), rpc)

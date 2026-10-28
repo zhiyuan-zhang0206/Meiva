@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.messages.inbound import InboundKind
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -59,7 +60,7 @@ def _park(
 ) -> int:
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         spawner="user",
         machine=machine_identity.name(),
         authority=config_authority,
@@ -303,7 +304,7 @@ def _reaped_crash_park(
         aid,
         "leftover work",
         "user",
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         database=Database.from_settings(gate=database_gate),
     )
     with db.cursor() as cur:
@@ -322,7 +323,7 @@ def _guarded_resurrect(
 ) -> None:
     wake.resurrect_agent(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         aid,
         resurrected_by="system",
         trigger_inbound_id=trigger,

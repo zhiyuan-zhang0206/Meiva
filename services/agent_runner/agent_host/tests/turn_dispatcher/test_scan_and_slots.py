@@ -169,7 +169,7 @@ class TestDispatcherMessageHandling:
         # `_Sched` is the one method this test needs from a scheduler.
         return (
             InboundWakeDispatcher(
-                EventBus.from_settings(rng=seeded_rng()),
+                EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                 _Sched(),  # pyright: ignore[reportArgumentType]
                 timers=SYSTEM_TIMERS,
             ),
@@ -202,7 +202,7 @@ class TestPendingScan:
             return [23]
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             scheduler,
             pending_scan=_pending,
             timers=SYSTEM_TIMERS,
@@ -249,7 +249,7 @@ class TestStallRestartEscalation:
             return []
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             scheduler,
             pending_scan=_pending,
             scan_interval_s=0.005,
@@ -291,7 +291,7 @@ class TestScanNeverCancelsATurn:
             return [23]
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             scheduler,
             pending_scan=_pending,
             timers=SYSTEM_TIMERS,

@@ -209,7 +209,7 @@ async def prepare_graph(
     assert owner is not None
     requested = leases.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
@@ -254,7 +254,7 @@ async def prepare_graph(
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         clients=clients,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         original_incarnation=owner,

@@ -9,7 +9,7 @@ from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
@@ -49,7 +49,7 @@ def start(
 ) -> dict[str, Any]:
     result = sessions.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         owner.agent_id,
         name="Fix login",
         executor_name="Codex: thoughtful squirrel",
@@ -68,7 +68,7 @@ def start(
     if active:
         leases.prepare(
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             str(lease["id"]),
             owner.agent_id,
             owner,
@@ -77,7 +77,7 @@ def start(
         )
         leases.activate(
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             str(lease["id"]),
             owner,
         )

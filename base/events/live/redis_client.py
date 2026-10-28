@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import socket
-import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, TypeGuard
 
@@ -139,11 +138,6 @@ class TransportAwareAsyncConnection(aredis.Connection):
 # same exponential schedule.
 _AUTH_RETRY_ERRORS = (AuthenticationError, NoPermissionError)
 
-# The two indirections make the retry contract deterministic in unit tests
-# without making real callers choose a scheduler or clock implementation.
-sleep_sync = time.sleep
-sleep_async = asyncio.sleep
-
 
 async def retry_auth_failures_async[T](
     operation: Callable[[], Awaitable[T]],
@@ -162,7 +156,7 @@ async def retry_auth_failures_async[T](
     """
     failure_count = 0
     waited_s = 0.0
-    started_at = time.monotonic()
+    started_at = auth_retry.timers.monotonic()
     while True:
         try:
             if attempt_timeout_s is None:
@@ -175,11 +169,11 @@ async def retry_auth_failures_async[T](
             delay_s = auth_retry.next_delay(
                 failure_count=failure_count,
                 waited_s=waited_s,
-                elapsed_s=time.monotonic() - started_at,
+                elapsed_s=auth_retry.timers.monotonic() - started_at,
             )
             if delay_s <= 0:
                 raise
-            await sleep_async(delay_s)
+            await auth_retry.timers.asleep(delay_s)
             waited_s += delay_s
 
 
@@ -187,7 +181,7 @@ def retry_auth_failures_sync[T](operation: Callable[[], T], *, auth_retry: AuthR
     """Synchronous counterpart of retry_auth_failures_async."""
     failure_count = 0
     waited_s = 0.0
-    started_at = time.monotonic()
+    started_at = auth_retry.timers.monotonic()
     while True:
         try:
             return operation()
@@ -198,11 +192,11 @@ def retry_auth_failures_sync[T](operation: Callable[[], T], *, auth_retry: AuthR
             delay_s = auth_retry.next_delay(
                 failure_count=failure_count,
                 waited_s=waited_s,
-                elapsed_s=time.monotonic() - started_at,
+                elapsed_s=auth_retry.timers.monotonic() - started_at,
             )
             if delay_s <= 0:
                 raise
-            sleep_sync(delay_s)
+            auth_retry.timers.sleep(delay_s)
             waited_s += delay_s
 
 
@@ -274,7 +268,12 @@ _WARN_THROTTLE_S = WARN_THROTTLE_S
 
 
 def _log_publish_failure(
-    exc: BaseException, *, channel: str, context: str, warn_last: dict[tuple[str, str], float]
+    exc: BaseException,
+    *,
+    channel: str,
+    context: str,
+    warn_last: dict[tuple[str, str], float],
+    now: float,
 ) -> None:
     """Log a known Redis/network publish failure after bounded recovery.
 
@@ -287,7 +286,7 @@ def _log_publish_failure(
             warn_last,
             channel=channel,
             error_type=type(exc).__name__,
-            now=time.monotonic(),
+            now=now,
             throttle_s=_WARN_THROTTLE_S,
         ):
             logger.warning(
@@ -351,7 +350,13 @@ async def publish_via(
             auth_retry=auth_retry,
         )
     except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
-        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
+        _log_publish_failure(
+            exc,
+            channel=channel,
+            context=context,
+            warn_last=warn_last,
+            now=auth_retry.timers.monotonic(),
+        )
         return None
 
 
@@ -378,7 +383,13 @@ def publish_sync_via(
         finally:
             client.close()
     except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
-        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
+        _log_publish_failure(
+            exc,
+            channel=channel,
+            context=context,
+            warn_last=warn_last,
+            now=auth_retry.timers.monotonic(),
+        )
         return None
 
 

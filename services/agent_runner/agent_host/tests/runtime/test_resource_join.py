@@ -18,6 +18,7 @@ import pytest
 
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import gateway_sampling_owner
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
@@ -125,7 +126,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
         graph=cast(Any, object()),
         machine=configured_machine(name="test-box"),
         catalog=model_catalog,
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         clients=clients,
         commands=CommandCatalog.system(skills=list, home=meiva_home()),
@@ -174,7 +175,7 @@ def exercise_unfinished_main() -> None:
             graph=cast(Any, object()),
             machine=configured_machine(name="resource-join-test"),
             catalog=cast(ModelCatalog, MagicMock()),
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             db=database(),
             clients=clients,
             commands=CommandCatalog.system(skills=list, home=home),

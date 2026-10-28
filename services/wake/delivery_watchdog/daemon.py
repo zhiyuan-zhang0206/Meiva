@@ -360,7 +360,7 @@ async def run(
 
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
-    bus = EventBus.from_settings(rng=_new_rng())
+    bus = EventBus.from_settings(rng=_new_rng(), timers=SYSTEM_TIMERS)
     rpc = RpcClient.from_boot(process_config, timers=SYSTEM_TIMERS, rng=_new_rng())
     try:
         # meiva:note

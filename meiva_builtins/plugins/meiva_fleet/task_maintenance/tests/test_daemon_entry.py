@@ -22,6 +22,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.daemon.endpoints import ServiceEndpoint
 from base.db import Database
@@ -194,7 +195,7 @@ def test_run_refuses_to_start_while_a_daemon_holds_the_pidfile(
             daemon.run(
                 FleetConfig(),
                 database=database,
-                bus=EventBus.from_settings(rng=seeded_rng()),
+                bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                 image=LoadedCommit.capture(),
                 endpoint=endpoint,
             )

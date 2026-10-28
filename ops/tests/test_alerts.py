@@ -12,6 +12,7 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.net.tests.local_http import closed_port_url
@@ -41,7 +42,11 @@ def _row(alert_id: int = 1) -> dict[str, object]:
 
 def _unreachable_bus() -> EventBus:
     url = closed_port_url().replace("http://", "redis://") + "/0"
-    return EventBus(EventBusConfig(redis_url=url, events_channel="meiva:events"), rng=seeded_rng())
+    return EventBus(
+        EventBusConfig(redis_url=url, events_channel="meiva:events"),
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
+    )
 
 
 # meiva:note

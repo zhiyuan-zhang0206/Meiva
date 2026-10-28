@@ -23,6 +23,7 @@ from agent.turn.runloop import PendingTurnFailure, publish_turn_failure
 from base.agents.context import MeivaContext
 from base.agents.recovery.breaker import admit_pending_wake
 from base.agents.tests.units import spawn_agent
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -321,6 +322,7 @@ async def test_publication_failure_is_observable_and_never_repeated(
         EventBus(
             EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"),
             rng=seeded_rng(),
+            timers=SYSTEM_TIMERS,
         )
         if fault == "unavailable"
         else PublicationDefectBus(original)

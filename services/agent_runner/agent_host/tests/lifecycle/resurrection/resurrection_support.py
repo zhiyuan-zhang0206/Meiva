@@ -2,6 +2,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
@@ -23,7 +24,7 @@ def terminated(
 ) -> int:
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         spawner="user",
         machine=machine_identity.name(),
         authority=config_authority,

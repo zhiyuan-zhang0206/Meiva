@@ -12,6 +12,7 @@ from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import ResurrectError
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import redis_channel_prefix
 from base.cluster.machine import MachineIdentityReader
@@ -303,7 +304,7 @@ async def _spawned(
 ) -> int:
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         spawner="user",
         machine=machine_identity.name(),
         authority=config_authority,
@@ -339,7 +340,7 @@ async def _resurrected(
     db.commit()
     wake.resurrect_agent(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         aid,
         resurrected_by="user",
     )
@@ -372,7 +373,7 @@ async def restarted(
         "",
         "user",
         kind="restart",
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         database=Database.from_settings(gate=database_gate),
     )
     db.commit()

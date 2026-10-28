@@ -24,6 +24,7 @@ from redis.asyncio.client import PubSub
 
 from agent.db import claim_inbound_batch
 from base.agents.context import MeivaContext
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -57,7 +58,8 @@ def build_agent_host(
         home=meiva_home(),
         policy=kwargs.pop("policy", configured_policy()),
         machine=machine,
-        bus=kwargs.pop("bus", None) or EventBus.from_settings(rng=seeded_rng()),
+        bus=kwargs.pop("bus", None)
+        or EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=catalog,
         **kwargs,
