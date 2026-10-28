@@ -11,11 +11,4 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "hardened_runtime.py" = "strict"
 
 [roots]
-"onboarding.py" = { kinds = ["home", "platform"], why = "describes the local host from Path.home() and sys.platform for the permission onboarding" }
 "signing_identity.py" = { kinds = ["random"], why = "names the operating system's generator as the type of the keychain password's source (SigningRandom); the entry that provisions the identity builds the generator and hands it down" }
-
-[debt.ambient-read]
-"onboarding.py#environ base.host.env.registry.process_environment" = 1
-
-[debt.fake-entropy]
-"onboarding.py#time.monotonic_ns in an f-string" = 2

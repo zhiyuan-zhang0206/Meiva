@@ -7,12 +7,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from base.clock.tests.fakes import clock_at
 from base.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
@@ -25,7 +29,10 @@ from base.host.converge.screen_capture import (
     read_status,
     write_status,
 )
-from base.host.permissions_helper.client import HelperFactory
+from base.host.permissions_helper.client import HelperFactory, PermissionsHelperClient
+from base.host.permissions_helper.grants import gate
+from base.host.permissions_helper.grants.catalog import PING_KEYS
+from base.host.permissions_helper.grants.triggers import FOLDER_PATHS
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
@@ -39,6 +46,7 @@ from cli.commands.converge.plans.helper_plan import (
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.lifecycle import converge_host
 from cli.commands.lifecycle.tests.converge_host.context_inputs import capable_mac
+from services.desktop.permissions_helper import onboarding
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 
 _BRING_UP = "permissions helper build + sign + load"
@@ -286,3 +294,101 @@ def test_accessibility_step_follows_the_screen_capture_step() -> None:
     assert accessibility_step.apply is converge_host.ensure_accessibility
     assert accessibility_step.roles == screen_step.roles
     assert accessibility_step.requires_unit_config == screen_step.requires_unit_config
+
+
+# meiva:note
+# A helper that answers every probe with a grant and records where its children were asked to run.
+class _PreflightHelper:
+    def __init__(self) -> None:
+        self.cwds: list[str] = []
+        self.envs: list[dict[str, str]] = []
+        self.folders: list[str] = []
+
+    def ping(self) -> Mapping[str, object]:
+        return {"pong": True, "request_grants_v1": True, **dict.fromkeys(PING_KEYS, True)}
+
+    def spawn_process(
+        self,
+        name: str,
+        argv: list[str],
+        env: dict[str, str],
+        cwd: str,
+        stdout: str,
+        stderr: str,
+    ) -> Mapping[str, object]:
+        del name, stdout, stderr
+        self.cwds.append(cwd)
+        self.envs.append(env)
+        if Path(argv[1]).name == "folder_touch.py":
+            self.folders.append(argv[2])
+            Path(argv[3]).write_text("granted")
+            return {"pid": 1, "reused": False}
+        undetermined = set(gate.item_for("desktop-folder").services)
+        Path(argv[3]).write_text(
+            json.dumps(
+                {
+                    service: {"code": 2 if service in undetermined else 0}
+                    for service in json.loads(argv[2])
+                }
+            )
+        )
+        return {"pid": 1, "reused": False}
+
+
+# meiva:note
+# The onboarding step probes in the home the context names, stamps the record with the context's
+# clock and names the probe's children by the instant it asked that clock: all three differ from what
+# this test process would read for itself.
+def test_the_onboarding_step_acts_on_the_context_home_and_clock(
+    ctx: ConvergeCtx, unit_home: Path
+) -> None:
+    helper = _PreflightHelper()
+    instant = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
+    mac = replace(
+        _mac(ctx, unit_home, serve(cast("PermissionsHelperClient", helper))),
+        clock=clock_at(instant),
+    )
+
+    converge_host.ensure_permissions_onboarding(mac)
+
+    record = gate.read_record(gate.record_path(unit_home))
+    assert record is not None
+    assert record.checked_at == instant
+    workdir = unit_home / "permissions-onboarding"
+    assert set(helper.cwds) == {str(workdir)}
+    assert (workdir / "preflight-converge-20261017T080000000000-probe.results.json").exists()
+    assert helper.folders == [str(mac.session.user_home / FOLDER_PATHS["desktop-folder"])]
+    forwarded = onboarding.gate_host(
+        home=unit_home,
+        user_home=mac.session.user_home,
+        environ=mac.read_config().process_environment(),
+        helper=None,
+    ).env
+    from_the_hosts_launch = onboarding.gate_host(
+        home=unit_home, user_home=mac.session.user_home, environ=mac.host.environ, helper=None
+    ).env
+    assert helper.envs[0] == forwarded
+    assert forwarded != from_the_hosts_launch
+
+
+# meiva:note
+# The first pass over a home prints the whole checklist; a later one, over the record the first
+# wrote, prints the one-line state and where to ask. The step finds the record under the home the
+# context names.
+def test_the_onboarding_step_reports_in_full_only_on_the_first_pass(
+    ctx: ConvergeCtx, unit_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    helper = _PreflightHelper()
+    mac = replace(
+        _mac(ctx, unit_home, serve(cast("PermissionsHelperClient", helper))),
+        clock=clock_at(datetime(2026, 10, 17, 8, 0, tzinfo=UTC)),
+    )
+
+    converge_host.ensure_permissions_onboarding(mac)
+    first = capsys.readouterr().err
+    converge_host.ensure_permissions_onboarding(mac)
+    second = capsys.readouterr().err
+
+    later = "with someone at the machine to request what is still askable"
+    assert later not in first
+    assert later in second

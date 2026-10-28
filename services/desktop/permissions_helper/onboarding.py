@@ -1,81 +1,70 @@
 from __future__ import annotations
 
-import sys
-import time
+import random
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
+from base.clock import Clock
+from base.clock.ids import new_uuid
+from base.host.permissions_helper.client import HelperFactory
 from base.host.permissions_helper.grants import gate, probe, triggers
 from base.host.permissions_helper.grants.catalog import PermissionItem
 from base.host.permissions_helper.grants.gate import GateReport, GateState
 from base.host.permissions_helper.grants.probe import HelperChannel, PermissionsProbeError
-from base.paths import meiva_home
 
 REQUEST_TIMEOUT_S = 90.0
 
 
+# meiva:note
+# The host the gate runs on, as the process root that runs it describes it. `client` is the helper's
+# channel, None on a platform that has no helper (the gate has nothing to check there); `env` is the
+# environment the probe children are launched with, `workdir` where they write, `home` the account
+# home whose folders the folder rows ask, and `record_path` the file that remembers the last pass.
 @dataclass(frozen=True)
 class GateHost:
-    client: HelperChannel
+    client: HelperChannel | None
     env: dict[str, str]
     workdir: Path
     home: Path
     record_path: Path
-    platform: str
 
 
-def scratch_dir() -> Path:
-    return meiva_home() / "permissions-onboarding"
-
-
-def child_env() -> dict[str, str]:
-    from base.host.env.registry import process_environment
+# meiva:note
+# Describe a host from the facts a root already holds: the Meiva `home` (the scratch directory and
+# the record live under it), the account's `user_home`, the launch `environ`, and the helper factory
+# the platform decided (None where it has no helper).
+def gate_host(
+    *,
+    home: Path,
+    user_home: Path,
+    environ: Mapping[str, str],
+    helper: HelperFactory | None,
+) -> GateHost:
     from base.sessions import env_forwarding
 
-    return env_forwarding.forward_env_dict(process_environment(), activate_venv=False)
-
-
-def helper_client() -> HelperChannel:
-    from base.sessions.helperproc import helper_client as sessions_helper_client
-
-    return sessions_helper_client(home=meiva_home())
-
-
-def local_host() -> GateHost:
     return GateHost(
-        client=helper_client(),
-        env=child_env(),
-        workdir=scratch_dir(),
-        home=Path.home(),
-        record_path=gate.record_path(),
-        platform=sys.platform,
+        client=None if helper is None else helper(),
+        env=env_forwarding.forward_env_dict(environ, activate_venv=False),
+        workdir=home / "permissions-onboarding",
+        home=user_home,
+        record_path=gate.record_path(home),
     )
 
 
 # meiva:note
 # After requesting, the gate re-probes and reports what the system says. A child that reports 'granted' while the system still denies leaves the item denied, and a request that raised no dialog (macOS answers a denied or already-asked grant silently) leaves the grant exactly as it was.
 # meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
-def check(
-    *,
-    host: GateHost | None = None,
-    now: datetime | None = None,
-    run_id: str | None = None,
-) -> GateReport:
-    seat = host or local_host()
-    if seat.platform != "darwin":
+def check(*, host: GateHost, now: datetime, run_id: str) -> GateReport:
+    if host.client is None:
         return gate.not_applicable(now)
-    record = gate.read_record(seat.record_path)
+    record = gate.read_record(host.record_path)
     deferred = bool(record.deferred) if record is not None else False
-    result = probe.probe(
-        seat.client,
-        workdir=seat.workdir,
-        run_id=run_id or f"{time.monotonic_ns():x}",
-        env=seat.env,
-    )
+    result = probe.probe(host.client, workdir=host.workdir, run_id=run_id, env=host.env)
     report = gate.evaluate(result, deferred=deferred, now=now)
-    gate.remember(report, deferred=deferred, path=seat.record_path)
+    gate.remember(report, deferred=deferred, path=host.record_path)
     return report
 
 
@@ -89,7 +78,7 @@ def _say(progress: TextIO | None, line: str) -> None:
 
 def _ask_process_grants(
     report: GateReport,
-    seat: GateHost,
+    client: HelperChannel,
     pending: tuple[PermissionItem, ...],
     progress: TextIO | None,
 ) -> str:
@@ -103,7 +92,7 @@ def _ask_process_grants(
         )
     _say(progress, "Asking the system for: " + ", ".join(item.id for item in items))
     try:
-        probe.request_process_grants(seat.client)
+        probe.request_process_grants(client)
     except PermissionsProbeError as exc:
         return f"Asking the system for a grant failed: {exc}"
     return ""
@@ -111,18 +100,19 @@ def _ask_process_grants(
 
 def _ask_items(
     seat: GateHost,
+    client: HelperChannel,
     pending: tuple[PermissionItem, ...],
     *,
+    run_id: str,
     timeout_s: float,
     progress: TextIO | None,
 ) -> None:
-    run_id = f"{time.monotonic_ns():x}"
     for item in pending:
         if item.group == "desktop":
             continue
         _say(progress, f"Asking for: {item.title}")
         verdict = triggers.request_item(
-            seat.client,
+            client,
             item,
             workdir=seat.workdir,
             run_id=run_id,
@@ -138,22 +128,25 @@ def _ask_items(
 # meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
 def onboard(
     *,
-    host: GateHost | None = None,
-    now: datetime | None = None,
+    host: GateHost,
+    clock: Clock,
+    run_id: str,
     automatic: bool = True,
     timeout_s: float = REQUEST_TIMEOUT_S,
     progress: TextIO | None = None,
 ) -> GateReport:
-    seat = host or local_host()
-    report = check(host=seat, now=now)
-    if report.state in (GateState.COMPLETE, GateState.NOT_APPLICABLE):
+    report = check(host=host, now=clock.now(), run_id=f"{run_id}-probe")
+    client = host.client
+    if client is None or report.state in (GateState.COMPLETE, GateState.NOT_APPLICABLE):
         return report
     pending = report.prompt_now() if automatic else report.requestable()
     if not pending:
         return report
-    unsupported = _ask_process_grants(report, seat, pending, progress)
-    _ask_items(seat, pending, timeout_s=timeout_s, progress=progress)
-    report = check(host=seat, now=now)
+    unsupported = _ask_process_grants(report, client, pending, progress)
+    _ask_items(
+        host, client, pending, run_id=f"{run_id}-ask", timeout_s=timeout_s, progress=progress
+    )
+    report = check(host=host, now=clock.now(), run_id=f"{run_id}-verify")
     if unsupported and not report.complete:
         report = replace(
             report, diagnostic=" ".join(part for part in (report.diagnostic, unsupported) if part)
@@ -165,9 +158,8 @@ def observations(report: GateReport) -> dict[str, str]:
     return {status.item.id: status.grant.value for status in report.items}
 
 
-def defer(*, now: datetime | None = None, host: GateHost | None = None) -> None:
-    seat = host or local_host()
-    gate.mark_deferred(now=now, path=seat.record_path)
+def defer(*, host: GateHost, now: datetime) -> None:
+    gate.mark_deferred(now=now, path=host.record_path)
 
 
 # meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
@@ -189,9 +181,17 @@ def missing_summary(report: GateReport) -> str:
     return f"{len(report.missing)} permission(s) still missing: {names}"
 
 
+# meiva:note
+# The gate as the gateway serves it: the host it was built for, the clock every pass is stamped
+# with, and the generator its run ids are drawn from. Each call is one pass.
 class GateService:
+    def __init__(self, *, host: GateHost, clock: Clock, rng: random.Random) -> None:
+        self.host = host
+        self.clock = clock
+        self.rng = rng
+
     def check(self) -> GateReport:
-        return check()
+        return check(host=self.host, now=self.clock.now(), run_id=self._run_id())
 
     def onboard(
         self,
@@ -200,10 +200,20 @@ class GateService:
         timeout_s: float = REQUEST_TIMEOUT_S,
         progress: TextIO | None = None,
     ) -> GateReport:
-        return onboard(automatic=automatic, timeout_s=timeout_s, progress=progress)
+        return onboard(
+            host=self.host,
+            clock=self.clock,
+            run_id=self._run_id(),
+            automatic=automatic,
+            timeout_s=timeout_s,
+            progress=progress,
+        )
 
     def defer(self) -> None:
-        defer()
+        defer(host=self.host, now=self.clock.now())
 
     def restart_helper(self) -> str:
         return restart_helper()
+
+    def _run_id(self) -> str:
+        return new_uuid(self.rng).hex

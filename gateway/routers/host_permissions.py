@@ -2,18 +2,34 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from base.host.permissions_helper.grants import checklist
 from base.host.permissions_helper.grants.gate import GateReport
+from base.sessions.helperproc import helper_for
 from gateway.schemas import HostPermissionsPayload, PermissionItemRow
-from services.desktop.permissions_helper.onboarding import GateService
+from services.desktop.permissions_helper.onboarding import GateService, gate_host
 
 router = APIRouter()
 
 
-def gate_service() -> GateService:
-    return GateService()
+# meiva:note
+# The gate for this gateway process: the host it describes is the process's own home, launch
+# environment and platform's helper, with the account home the app's configuration holds (the one
+# uploads live under); its passes are stamped by the app's clock and named from the app's generator.
+def gate_service(request: Request) -> GateService:
+    process = request.app.state.gateway_process
+    config = request.app.state.gateway_config
+    return GateService(
+        host=gate_host(
+            home=process.home,
+            user_home=config.upload_home,
+            environ=process.host.environ,
+            helper=helper_for(process.host.platform, home=process.home),
+        ),
+        clock=request.app.state.clock,
+        rng=config.rng,
+    )
 
 
 def _payload(report: GateReport) -> HostPermissionsPayload:

@@ -210,16 +210,17 @@ def main(argv: list[str] | None = None) -> int:
         print("this evidence run needs macOS", file=sys.stderr)
         return 2
     from base.paths import meiva_home
-    from services.desktop.permissions_helper.onboarding import helper_client
+    from base.sessions.helperproc import helper_client
 
+    home = meiva_home()
     started = datetime.now(UTC)
-    outcome = _request_helper_grants(helper_client(), platform=sys.platform)
+    outcome = _request_helper_grants(helper_client(home=home), platform=sys.platform)
     if isinstance(outcome, int):
         return outcome
     before, requested, after = outcome
     return _write_evidence(
         args,
-        home=meiva_home(),
+        home=home,
         started=started,
         before=before,
         requested=requested,
