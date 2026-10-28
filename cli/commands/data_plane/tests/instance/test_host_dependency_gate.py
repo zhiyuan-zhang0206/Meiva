@@ -304,6 +304,7 @@ def _context(
         timers=command_runtime.timers,
         clock=command_runtime.clock,
         services=services,
+        terminal=command_runtime.terminal,
     )
 
 

@@ -26,6 +26,7 @@ from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_config_machine as command_config_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import inert_terminal
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 SKILL_NAME = "operating-meiva-cluster"
@@ -84,6 +85,7 @@ def _ctx(
         clock=Clock(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
         ),
+        terminal=inert_terminal(),
     )
 
 

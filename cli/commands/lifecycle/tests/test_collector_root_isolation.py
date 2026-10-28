@@ -60,6 +60,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         timers=command_runtime.timers,
         clock=command_runtime.clock,
         services=frozenset(),
+        terminal=command_runtime.terminal,
     )
 
     with scripted_root(home, [UnitRow("gateway")]) as root:

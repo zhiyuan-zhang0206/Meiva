@@ -349,6 +349,7 @@ def _cold_report(
         clock=Clock(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers()
         ),
+        terminal=args.runtime.terminal,
     )
     lgtm_native.ensure_lgtm_native_step(context)
     return 0

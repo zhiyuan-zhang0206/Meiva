@@ -63,6 +63,7 @@ def context(
         timers=runtime.timers,
         clock=runtime.clock,
         services=frozenset(BACKENDS),
+        terminal=runtime.terminal,
     )
 
 

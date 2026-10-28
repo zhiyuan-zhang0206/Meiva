@@ -107,6 +107,7 @@ def _context(
         services=frozenset(),
         timers=command_runtime.timers,
         clock=command_runtime.clock,
+        terminal=command_runtime.terminal,
     )
 
 

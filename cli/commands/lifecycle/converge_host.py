@@ -172,7 +172,7 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
                     system=ctx.host.platform.system, user_home=ctx.session.user_home
                 ),
                 profile=profile_dir(ctx.meiva_home),
-                console=Console.of_process(),
+                console=Console(stdin=ctx.terminal.stdin, stdout=ctx.terminal.stdout),
             )
         case _:
             assert_never(plan)
@@ -613,6 +613,7 @@ def converge_host(
         clock=command.clock,
         host=command.host,
         session=command.session,
+        terminal=command.terminal,
     )
     # meiva:note
     # Host-global steps belong to the host's prod install (the default home

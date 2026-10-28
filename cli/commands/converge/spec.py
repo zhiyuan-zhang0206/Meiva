@@ -19,7 +19,7 @@ from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.telemetry import EventPipeline
-from cli.database.runtime import OsRandom, UserSession
+from cli.database.runtime import OsRandom, Terminal, UserSession
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
@@ -53,6 +53,11 @@ class ConvergeCtx:
     # meiva:note
     # The wall clock of the invocation that runs this converge; a step stamps with `clock.now()`.
     clock: Clock
+    # meiva:note
+    # The three streams of the invocation that runs this converge. A step that asks a person
+    # something prompts over them (`ensure_browser` offers to seed the browser profile); the
+    # process's own streams are read once by the command entry, never here.
+    terminal: Terminal
     services: frozenset[str]
 
     # meiva:note
