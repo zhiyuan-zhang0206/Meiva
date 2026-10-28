@@ -20,7 +20,7 @@ from meizel.contracts.manifest_text import add_exports, add_uses
 from meizel.contracts.rule import Projection, is_private
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Fact, MeizelError
-from meizel.graph.universe import EditPlan, GitRepo, Universe, is_private_module
+from meizel.graph.universe import Checkout, EditPlan, Universe, is_private_module
 
 __all__ = ["changed_files", "declare", "plan_declare_writes"]
 
@@ -33,7 +33,7 @@ class Plan:
     left: list[str] = field(default_factory=list[str])
 
 
-def changed_files(repo: GitRepo) -> list[str]:
+def changed_files(repo: Checkout) -> list[str]:
     """Files that differ from the branch point with origin/main (HEAD when there is none)."""
     base = repo.default_base()
     changed = repo.run_text("diff", "--name-only", "--no-renames", "-z", base).split("\0")
@@ -197,7 +197,7 @@ def plan_declare_writes(root: Path, texts: Mapping[str, str], plan: Plan) -> Edi
 
 
 def declare(
-    repo: GitRepo, targets: list[str] | None, jobs: int | None = None
+    repo: Checkout, targets: list[str] | None, jobs: int | None = None
 ) -> tuple[list[str], list[str]]:
     """Declare the legal new dependencies under `targets` (default: the changed files).
 
@@ -207,5 +207,5 @@ def declare(
     plan = _plan(analyze(repo.universe(), jobs=jobs), scope)
     directories = sorted(set(plan.uses) | set(plan.exports))
     texts = {d: repo.load_text(manifest_path(d), default="") for d in directories}
-    plan_declare_writes(repo.root, texts, plan).apply()
+    repo.apply_plan(plan_declare_writes(repo.root, texts, plan))
     return plan.lines, plan.left

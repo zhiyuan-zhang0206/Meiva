@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import Collection
 from pathlib import Path
 
+from meizel.checkout import GitRepo, toplevel
 from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
@@ -15,7 +16,6 @@ from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.policy import load_policy, policy_at
 from meizel.contracts.sync import sync_manifests
 from meizel.graph.model import Diagnostic, MeizelError
-from meizel.graph.universe import GitRepo, toplevel
 from meizel.source_evidence import load_report
 
 __all__ = ["main"]
