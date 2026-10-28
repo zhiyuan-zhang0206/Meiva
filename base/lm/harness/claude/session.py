@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from typing import Any, Protocol
+from typing import Any, Protocol, assert_never
 
 from base.lm.harness.base_session import (
     EVENT_STREAM_END,
@@ -20,17 +20,21 @@ from base.lm.harness.cancel import (
     spawned_since,
     unobserved_cancel,
 )
-from base.lm.harness.claude.auth import build_env
 from base.lm.harness.claude.config import BridgeConfig
-from base.lm.harness.claude.mapping import map_message, parse_result, task_update_status
-from base.lm.harness.events import (
-    AssistantText,
-    SessionFailed,
-    SessionStarted,
-    ToolUse,
-    TurnCompleted,
-    UnsolicitedOutput,
+from base.lm.harness.claude.inbound import (
+    BackgroundTasks,
+    MessageKind,
+    assistant_texts,
+    claimed_origin,
+    counts_as_step,
+    message_kind,
+    notification_plan,
+    started_identity,
 )
+from base.lm.harness.claude.mapping import map_message, parse_result, task_update_status
+from base.lm.harness.claude.options import option_values
+from base.lm.harness.claude.settle import RunningTurn, result_output, settle_result
+from base.lm.harness.events import SessionFailed, SessionStarted
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
@@ -43,7 +47,6 @@ from base.lm.harness.process import (
     wait_gone,
     watch_tree,
 )
-from base.lm.harness.turn import TurnOutcome
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is synchronous and
@@ -57,16 +60,6 @@ from base.lm.harness.turn import TurnOutcome
 # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 CANCEL_POLL_SECONDS = 0.02
 _EVENT_STREAM_END = EVENT_STREAM_END
-
-# meiva:note
-# Two vocabularies the CLI speaks that the shared session must not learn. `human`
-# is the origin of a turn this session started by submitting a prompt; every other
-# origin is a turn the CLI began on its own, which is why only `human` can claim
-# the running turn. Terminal task statuses come from the SDK's
-# `TERMINAL_TASK_STATUSES`, spelled out here so the adapter's own fake carries the
-# same rule the real CLI follows.
-HUMAN_ORIGIN = "human"
-TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "stopped", "killed"})
 
 
 class MissingClaudeSdkError(RuntimeError):
@@ -114,15 +107,8 @@ def _load_sdk() -> ClaudeSdkProtocol:
     return claude_agent_sdk
 
 
-# meiva:note
-# The turn name a result claims, in the session's own claim language. `human` is
-# the answer to a prompt this session submitted, so it claims whatever turn is
-# running — exactly what a CLI that names no origin at all means. Every other origin
-# names a turn the CLI began itself, which this session never started, so it comes
-# back as no claim at all and the result is recorded as unsolicited output (#5663).
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
-def _claimed_origin(origin_kind: str | None) -> str | None:
-    return None if origin_kind is None or origin_kind == HUMAN_ORIGIN else origin_kind
+def _task_id(message: object) -> str:
+    return str(getattr(message, "task_id", ""))
 
 
 class ClaudeSession(BaseHarnessSession[BridgeConfig]):
@@ -152,7 +138,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # meiva:note
         # The tasks the CLI says are running: started and not yet reported terminal.
         # `close()` is their one stop caller, and the note there says why.
-        self._background_tasks: set[str] = set()
+        self._background = BackgroundTasks()
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._client is not None:
@@ -183,8 +169,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # stop that fails is not the close's failure: the residue check that follows is
         # what reports whatever kept running.
         # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
-        client, live = self._client, sorted(self._background_tasks)
-        self._background_tasks.clear()
+        client, live = self._client, list(self._background.open_task_ids)
+        self._background = BackgroundTasks()
         if client is not None and live:
             await asyncio.gather(
                 *(client.stop_task(task_id) for task_id in live), return_exceptions=True
@@ -247,27 +233,15 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         )
 
     def _build_options(self, resume: str | None) -> object:
-        # meiva:note
-        # `cli_path` and `thinking` ride only when resolved/supported: Python's own
-        # Claude Code SDK takes them, while a test double that models the older
-        # option set would reject them.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-        resolved: dict[str, Any] = {} if self._cli_path is None else {"cli_path": self._cli_path}
-        opt_fields = getattr(self._sdk.ClaudeAgentOptions, "__dataclass_fields__", {})
-        if "thinking" in opt_fields:
-            resolved["thinking"] = {"type": "adaptive", "display": "summarized"}
-        return self._sdk.ClaudeAgentOptions(
-            **resolved,
-            model=self.config.model,
-            cwd=str(self.config.cwd),
-            tools=None if self.config.tools is None else list(self.config.tools),
-            permission_mode=self.config.permission_mode,
-            max_turns=self.config.max_turns,
-            setting_sources=[],
-            strict_mcp_config=True,
-            include_partial_messages=True,
-            env=build_env(self._environ, self.config.auth, host=self._environ),
-            resume=resume,
+        options = self._sdk.ClaudeAgentOptions
+        return options(
+            **option_values(
+                self.config,
+                environ=self._environ,
+                cli_path=self._cli_path,
+                option_fields=getattr(options, "__dataclass_fields__", {}),
+                resume=resume,
+            )
         )
 
     async def _begin(self, ticket: TurnTicket) -> None:
@@ -298,25 +272,29 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # messages are about the session, and everything else is inside the running turn.
     # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
     def _handle(self, message: object) -> None:
-        name = type(message).__name__
-        if name == "ResultMessage":
-            self._handle_result(message)
-        elif name == "TaskNotificationMessage":
-            self._handle_task_notification(message)
-        elif name == "TaskStartedMessage":
-            self._track_task_started(message)
-        elif name == "TaskUpdatedMessage":
-            self._track_task_update(message)
-        elif name in {"RateLimitEvent", "SystemMessage"}:
-            self._handle_session_message(message)
-        else:
-            self._handle_turn_message(message)
+        kind = message_kind(type(message).__name__)
+        match kind:
+            case MessageKind.RESULT:
+                self._handle_result(message)
+            case MessageKind.TASK_NOTIFICATION:
+                self._handle_task_notification(message)
+            case MessageKind.TASK_STARTED:
+                self._track_task_started(message)
+            case MessageKind.TASK_UPDATED:
+                self._track_task_update(message)
+            case MessageKind.SESSION:
+                self._handle_session_message(message)
+            case MessageKind.TURN:
+                self._handle_turn_message(message)
+            case _:
+                assert_never(kind)
 
     def _handle_session_message(self, message: object) -> None:
         for event in map_message(message, turn_id=None):
             if isinstance(event, SessionStarted):
-                self._session_id = event.session_id or self._session_id
-                self._model = event.model or self._model
+                identity = started_identity(event, session_id=self._session_id, model=self._model)
+                self._session_id = identity.session_id
+                self._model = identity.model
                 self._emit(event)
                 self._bind()
                 continue
@@ -327,108 +305,51 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if ticket is None:
             return
         mapped = map_message(message, turn_id=ticket.turn_id)
-        if type(message).__name__ == "AssistantMessage" and any(
-            isinstance(event, (AssistantText, ToolUse)) for event in mapped
-        ):
+        if counts_as_step(type(message).__name__, mapped):
             self._turn_steps_count += 1
+        ticket.parts.extend(assistant_texts(mapped))
         for event in mapped:
-            if isinstance(event, AssistantText):
-                ticket.parts.append(event.text)
             self._emit(event)
 
-    # meiva:note
-    # A background task the CLI finished. Two different things arrive under one
-    # message: the report the model should read, and — whenever the CLI answered it
-    # itself — a turn of the CLI's own that streams right behind it. The report goes
-    # to `_unsolicited` when no turn of ours is running (nobody has read it yet), and,
-    # while one is, only into the stream: a running turn received the notification in
-    # its own context, so a second delivery would be a duplicate turn. The CLI's turn
-    # is held off dispatch until its own result arrives, so its text cannot be
-    # collected into ours (#5663).
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
     def _handle_task_notification(self, message: object) -> None:
-        self._background_tasks.discard(str(getattr(message, "task_id", "")))
-        for event in map_message(message, turn_id=None):
-            if not isinstance(event, UnsolicitedOutput):
-                self._emit(event)
-                continue
-            if self._claim() is not None:
-                self._emit(event)
-                continue
+        self._background = self._background.reported(_task_id(message))
+        plan = notification_plan(
+            map_message(message, turn_id=None), claimed=self._claim() is not None
+        )
+        for event in plan.stream:
+            self._emit(event)
+        if plan.report is not None:
             self._hold_dispatch(self.config.injected_turn_timeout_seconds)
-            self._unsolicited(event)
+            self._unsolicited(plan.report)
 
     def _track_task_started(self, message: object) -> None:
-        task_id = str(getattr(message, "task_id", ""))
-        if task_id:
-            self._background_tasks.add(task_id)
+        self._background = self._background.started(_task_id(message))
 
-    # meiva:note
-    # A task's terminal state can arrive only as an update, with no notification: a
-    # task stopped through the control request reports `killed` here and the
-    # notification that would have followed is sometimes suppressed. Clearing it
-    # keeps `close()` from asking the CLI to stop work that already ended; the
-    # report the agent would have read is the notification's, so a task that ends
-    # this way is not delivered as unsolicited output.
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
     def _track_task_update(self, message: object) -> None:
-        if task_update_status(message) in TERMINAL_TASK_STATUSES:
-            self._background_tasks.discard(str(getattr(message, "task_id", "")))
+        self._background = self._background.updated(_task_id(message), task_update_status(message))
 
     def _handle_result(self, message: object) -> None:
         fields = parse_result(message)
-        ticket = self._claim(_claimed_origin(fields.origin_kind))
+        ticket = self._claim(claimed_origin(fields.origin_kind))
         if ticket is None:
-            # meiva:note
-            # A terminal message for a turn this session did not run: the CLI's own
-            # answer to a notification, or a result from a turn it began for some
-            # other reason. It is neither this session's boundary nor a failure; it
-            # is recorded so the stream keeps one entry per turn the provider ran, and
-            # its arrival ends any hold. The agent already read the reply in the
-            # provider's transcript, so it is not delivered as new inbound content —
-            # unlike the report that asked for it.
-            # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
-            self._emit(
-                UnsolicitedOutput(
-                    source=fields.origin_kind or "result", text=fields.result_text or ""
-                )
-            )
+            self._emit(result_output(fields))
             self._release_dispatch()
             return
-        text = "\n".join(ticket.parts).strip() or (fields.result_text or "")
-        outcome = TurnOutcome(
-            turn_id=ticket.turn_id,
-            text=text,
-            subtype=fields.subtype,
-            is_error=fields.is_error,
-            interrupted=ticket.interrupt_requested,
-            stop_reason=fields.stop_reason,
-            usage=fields.usage,
-            cost_usd=fields.cost_usd,
-            permission_denials=fields.permission_denials,
-        )
-        self._totals = self._totals.with_turn(fields.usage, fields.cost_usd)
-        if fields.session_id:
-            self._session_id = fields.session_id
-        num_turns = max(fields.num_turns, self._turn_steps_count, 1)
-        self._emit(
-            TurnCompleted(
+        settlement = settle_result(
+            fields,
+            turn=RunningTurn(
                 turn_id=ticket.turn_id,
-                session_id=fields.session_id or self._session_id,
-                text=text,
-                subtype=fields.subtype,
-                is_error=fields.is_error,
-                interrupted=ticket.interrupt_requested,
-                stop_reason=fields.stop_reason,
-                num_turns=num_turns,
-                duration_ms=fields.duration_ms,
-                usage=fields.usage,
-                cost_usd=fields.cost_usd,
-                cumulative_cost_usd=self._totals.cost_usd,
-                permission_denials=fields.permission_denials,
-            )
+                parts=tuple(ticket.parts),
+                interrupt_requested=ticket.interrupt_requested,
+                steps=self._turn_steps_count,
+            ),
+            session_id=self._session_id,
+            totals=self._totals,
         )
-        self._complete(ticket, outcome)
+        self._totals = settlement.totals
+        self._session_id = settlement.session_id
+        self._emit(settlement.completed)
+        self._complete(ticket, settlement.outcome)
 
     def _require_client(self) -> ClaudeClientProtocol:
         if self._client is None:
