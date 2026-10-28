@@ -16,6 +16,11 @@ from gateway.http.middleware.loop_lag import LagPolicy
 
 _POLICY = LagPolicy(tick_interval_s=0.01, emit_interval_s=0.03, slow_tick_threshold_ms=10_000.0)
 
+# meiva:note
+# An idle `sleep` holds a couple of mebibytes; this interpreter holds hundreds. 64 MiB
+# separates them with two orders of margin, so a sample of the wrong process fails.
+MAX_IDLE_CHILD_RSS = 64 * 1024 * 1024
+
 
 async def _run_monitor_for(process: psutil.Process, seconds: float) -> None:
     monitor = runtime_metrics.GatewayRuntimeMonitor(
@@ -70,6 +75,33 @@ async def test_runtime_monitor_keeps_ticking_after_a_sampling_failure(
     names = [event.event_name for event in emitted_events]
     assert names.count("gateway_event_loop") >= 2
     assert "gateway_process" not in names
+
+
+# meiva:note
+# The entry hands the monitor the process it samples; a pid read inside the module would report this
+# test process instead of the child it was given. An idle `sleep` is orders of magnitude smaller than
+# this interpreter, so its rss is the proof.
+async def test_start_runtime_monitor_samples_the_process_the_entry_hands_it(
+    emitted_events: EmittedEvents,
+) -> None:
+    child = subprocess.Popen(["sleep", "60"])
+    child_process = psutil.Process(child.pid)
+    try:
+        before = child_process.memory_info().rss
+        monitor = runtime_metrics.start_runtime_monitor(process=child_process, policy=_POLICY)
+        try:
+            await asyncio.sleep(0.3)
+            after = child_process.memory_info().rss
+        finally:
+            monitor.stop()
+    finally:
+        child.kill()
+        child.wait(timeout=10)
+
+    process_event = next(e for e in emitted_events if e.event_name == "gateway_process")
+    rss = process_event.attributes["rss_bytes"]
+    assert min(before, after) <= rss <= max(before, after)
+    assert rss < MAX_IDLE_CHILD_RSS
 
 
 def test_sse_metrics_initialize_idle_modes_at_zero(

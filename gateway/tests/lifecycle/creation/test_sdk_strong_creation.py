@@ -6,6 +6,7 @@ from functools import partial
 from typing import Any
 
 import httpx
+import psutil
 import psycopg
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -53,6 +54,7 @@ def _older(current: FastAPI) -> FastAPI:
             lifespan,
             process=current.state.gateway_process,
             process_ownership="borrowed",
+            runtime_process=psutil.Process(),
         ),
         middleware=current.user_middleware,
     )

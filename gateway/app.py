@@ -7,6 +7,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
+import psutil
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -202,6 +203,7 @@ async def lifespan(
     *,
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
+    runtime_process: psutil.Process,
 ) -> AsyncGenerator[None]:
 
     if process_ownership not in {"borrowed", "owned"}:
@@ -276,7 +278,9 @@ async def lifespan(
             except Exception:
                 _log.warning("OS health-probe cron registration failed", exc_info=True)
 
-            monitor = runtime_metrics.start_runtime_monitor()
+            monitor = runtime_metrics.start_runtime_monitor(
+                process=runtime_process, policy=runtime_metrics.DEFAULT_LAG_POLICY
+            )
             app.state.runtime_metrics = monitor
             releases.callback(monitor.stop)
 
@@ -502,7 +506,15 @@ def create_app(
         raise ValueError("gateway process ownership must be borrowed or owned")
     app = FastAPI(
         title="Meiva",
-        lifespan=partial(lifespan, process=process, process_ownership=process_ownership),
+        lifespan=partial(
+            lifespan,
+            process=process,
+            process_ownership=process_ownership,
+            # meiva:note
+            # The process the runtime monitor samples is this gateway's own; the root builds it here
+            # so no async body reaches for psutil.
+            runtime_process=psutil.Process(),
+        ),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

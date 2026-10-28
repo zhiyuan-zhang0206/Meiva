@@ -146,9 +146,12 @@ class GatewayRuntimeMonitor:
         )
 
 
-def start_runtime_monitor() -> GatewayRuntimeMonitor:
+# meiva:note
+# The entry hands in the process this monitor samples and the cadence it reports on: the gateway's
+# root builds the process object (`psutil.Process()`), so this module reads no pid of its own.
+def start_runtime_monitor(*, process: psutil.Process, policy: LagPolicy) -> GatewayRuntimeMonitor:
     """Start one monitor bound to the running uvicorn event loop."""
     initialize_sse_metrics()
-    monitor = GatewayRuntimeMonitor(loop=asyncio.get_running_loop(), process=psutil.Process())
+    monitor = GatewayRuntimeMonitor(loop=asyncio.get_running_loop(), process=process, policy=policy)
     monitor.start()
     return monitor
