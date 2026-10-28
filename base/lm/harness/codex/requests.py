@@ -39,8 +39,8 @@ def initialize_request() -> tuple[str, JsonObject]:
 
 
 # meiva:note
-# The method and payload that open the thread: a recorded thread is resumed by id; a fresh one
-# starts with the sandbox, the approval policy and the model the caller chose, and inherits the
+# The method and payload that open the thread: a recorded thread resumes by id with the selected
+# model override; a fresh one starts with the sandbox, approval policy and model, and inherits the
 # whole shell environment so a command the turn runs sees what the bridge sees. `model` is omitted
 # rather than sent empty: an unset model means the account's default, not a request for no model.
 def open_thread_request(
@@ -52,7 +52,10 @@ def open_thread_request(
     sandbox: str,
 ) -> tuple[str, JsonObject]:
     if resume:
-        return ("thread/resume", {"threadId": resume})
+        resume_params: JsonObject = {"threadId": resume}
+        if model is not None:
+            resume_params["model"] = model
+        return "thread/resume", resume_params
     params: JsonObject = {
         "cwd": cwd,
         "approvalPolicy": approval_policy,
@@ -64,8 +67,19 @@ def open_thread_request(
     return ("thread/start", params)
 
 
-def turn_start_request(thread_id: str | None, text: str) -> tuple[str, JsonObject]:
-    return ("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": text}]})
+def turn_start_request(
+    thread_id: str | None,
+    text: str,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> tuple[str, JsonObject]:
+    params: JsonObject = {"threadId": thread_id, "input": [{"type": "text", "text": text}]}
+    if model is not None:
+        params["model"] = model
+    if reasoning_effort is not None:
+        params["effort"] = reasoning_effort
+    return "turn/start", params
 
 
 def interrupt_request(thread_id: str, turn_id: str) -> tuple[str, JsonObject]:

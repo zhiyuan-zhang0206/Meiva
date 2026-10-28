@@ -10,7 +10,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES, resolve_birth_harness
 from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.api_contracts.agent_contract import ForkSourceEmpty
+from base.api_contracts.agent_contract import ForkSourceEmpty, Harness
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -38,6 +38,9 @@ async def launch_agent_op(
     authority: ConfigAuthority,
     local_machine: str,
 ) -> SpawnedAgent:
+    harness = await asyncio.to_thread(
+        validate_launch_row, db_pool, body, local_machine=local_machine
+    )
     keys = await asyncio.to_thread(process_provider_keys, catalog)
     validate_model_launch(
         catalog=catalog,
@@ -45,8 +48,8 @@ async def launch_agent_op(
         llm_override=authority.service_field_value("llm_override"),
         model=authority.service_field_value("llm_model"),
         config=resolve_agent_config_pins(body.config, body.birth_config),
+        harness=harness,
     )
-    await asyncio.to_thread(validate_launch_row, db_pool, body, local_machine=local_machine)
     publish_inbound_wake(db, bus, body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 
@@ -55,14 +58,14 @@ async def launch_agent_op(
 # Read the agent's row and refuse a stale, misplaced or unlaunchable attempt.
 def validate_launch_row(
     db_pool: ConnectionPool, body: LaunchAgentRequest, *, local_machine: str
-) -> None:
+) -> Harness:
     with db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT machine, last_launch_attempt_id, status, harness FROM agents_meta WHERE id=%s",
             (body.agent_id,),
         )
         row = cur.fetchone()
-    require_current_launch_row(
+    return require_current_launch_row(
         None if row is None else StoredLaunch(*row),
         agent_id=body.agent_id,
         launch_attempt_id=body.launch_attempt_id,
@@ -85,6 +88,7 @@ def spawn_prechecks_blocking(
     from base.agents.model.model_config import validate_spawn_model_config
 
     with db_pool.connection() as conn, conn.cursor() as cur:
+        resolve_birth_harness(cur, body.harness, body.fork_from)
         validate_spawn_model_config(
             cur,
             body.config,
@@ -93,11 +97,11 @@ def spawn_prechecks_blocking(
             keys=keys,
             authority=authority,
             llm_override=authority.service_field_value("llm_override"),
+            harness=body.harness or Harness.MEIVA,
         )
     fork_checkpoint: str | None = None
     if body.fork_from is not None:
         with db_pool.connection() as conn, conn.cursor() as cur:
-            resolve_birth_harness(cur, body.harness, body.fork_from)
             fork_checkpoint = latest_checkpoint_id(cur, body.fork_from)
         if fork_checkpoint is None:
             raise ForkSourceEmpty(

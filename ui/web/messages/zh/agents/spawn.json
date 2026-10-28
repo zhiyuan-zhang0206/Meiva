@@ -23,7 +23,5 @@
   "harnessStatus": {
     "unavailable": "不可用"
   },
-  "newAgent": "新建 agent",
-  "historyModel": "Meiva 历史模型",
-  "historyEffort": "摘要强度"
+  "newAgent": "新建 agent"
 }

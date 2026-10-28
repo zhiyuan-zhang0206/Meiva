@@ -27,13 +27,12 @@ the built-in `meiva` runtime runs every spawnable model and is always listed
 first), grouped under a vendor heading, with hidden and superseded catalog
 entries excluded and a provider switched off in Control contributing nothing.
 Which harness runs which model is the registry's declaration, not a frontend
-table. The effort column shows
-the selected model's `reasoning_effort_options` ladder; a model that publishes
-none leaves the column empty rather than offering a synthetic default, and the
-model's concrete `reasoning_effort_default` is the row marked when nothing is
-stored. External harnesses use "Meiva history model" and "Summary effort" in
-both layouts, including closed sections and expanded lists. Help text explains
-their history budget and compaction purpose; CLI model settings are independent.
+table. Model and Effort select actual execution settings in both layouts.
+Native uses the model's `reasoning_effort_options` and
+`reasoning_effort_default`; external harnesses use that harness's entry in
+`harness_settings`. An unsupported stored effort falls back to the selected
+harness binding's concrete default, never the native model default. External harnesses expose no history-model or summary-effort settings: their
+CLI owns context and compaction, and Meiva retains a basic timeline projection.
 The footer states the action only — one `Spawn` button, disabled with
 the first refusal that applies (a down host, then a harness the machine cannot
 start).
