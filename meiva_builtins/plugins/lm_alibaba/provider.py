@@ -15,9 +15,7 @@ from base.config import settings
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
-    PricePeriod,
     PriceRates,
-    PriceTier,
     ProviderBinding,
     ProviderContribution,
 )
@@ -203,21 +201,6 @@ PROVIDER = ProviderContribution(
             source_url="https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max",
             source_checked_at="2026-08-20",
             vendor="alibaba",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="1.65",
-                            cache_hit="0.206",
-                            output="4.951",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "qwen3.8-27b": PriceRates(
             cache_miss=0.424,
@@ -226,21 +209,6 @@ PROVIDER = ProviderContribution(
             source_url="https://www.alibabacloud.com/help/en/model-studio/qwen3-8-27b",
             source_checked_at="2026-08-20",
             vendor="alibaba",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.424",
-                            cache_hit="0.085",
-                            output="1.696",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "qwen3.8-flash": PriceRates(
             cache_miss=0.113,
@@ -249,21 +217,6 @@ PROVIDER = ProviderContribution(
             source_url="https://www.alibabacloud.com/help/en/model-studio/qwen3-8-flash",
             source_checked_at="2026-09-02",
             vendor="alibaba",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.113",
-                            cache_hit="0.014",
-                            output="0.382",
-                        ),
-                    ),
-                ),
-            ),
         ),
     },
 )

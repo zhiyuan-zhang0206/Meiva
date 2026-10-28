@@ -24,9 +24,7 @@ from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
     InferenceSpeed,
-    PricePeriod,
     PriceRates,
-    PriceTier,
     ProviderBinding,
     ProviderContribution,
     with_fast_variants,
@@ -242,23 +240,6 @@ def contribute() -> PluginContributions:
                         source_url="https://platform.claude.com/docs/en/about-claude/pricing",
                         source_checked_at="2026-10-08",
                         vendor="anthropic",
-                        periods=(
-                            PricePeriod(
-                                effective_from=None,
-                                effective_until=None,
-                                tiers=(
-                                    PriceTier(
-                                        input_tokens_min=0,
-                                        input_tokens_max=None,
-                                        cache_miss="10",
-                                        cache_hit="1",
-                                        output="50",
-                                        cache_write_5m="12.50",
-                                        cache_write_1h="20",
-                                    ),
-                                ),
-                            ),
-                        ),
                     ),
                     "claude-opus-5-5": PriceRates(
                         cache_miss=8,
@@ -269,23 +250,6 @@ def contribute() -> PluginContributions:
                         source_url="https://platform.claude.com/docs/en/about-claude/pricing",
                         source_checked_at="2026-10-08",
                         vendor="anthropic",
-                        periods=(
-                            PricePeriod(
-                                effective_from=None,
-                                effective_until=None,
-                                tiers=(
-                                    PriceTier(
-                                        input_tokens_min=0,
-                                        input_tokens_max=None,
-                                        cache_miss="8",
-                                        cache_hit="0.4",
-                                        output="40",
-                                        cache_write_5m="10.00",
-                                        cache_write_1h="16",
-                                    ),
-                                ),
-                            ),
-                        ),
                     ),
                 },
             ),

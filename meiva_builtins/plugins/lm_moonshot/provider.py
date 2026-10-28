@@ -21,9 +21,7 @@ from base.lm.compat.stop import StopSpec
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
-    PricePeriod,
     PriceRates,
-    PriceTier,
     ProviderBinding,
     ProviderContribution,
 )
@@ -175,23 +173,6 @@ PROVIDER = ProviderContribution(
             source_url="https://platform.moonshot.ai/docs/pricing",
             source_checked_at="2026-10-24",
             vendor="moonshot",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="3.0",
-                            cache_hit="0.30",
-                            output="15.0",
-                            cache_write_5m="3.0",
-                            cache_write_1h="6.0",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "kimi-k3.1-pro": PriceRates(
             cache_miss=2.0,
@@ -202,23 +183,6 @@ PROVIDER = ProviderContribution(
             source_url="https://platform.moonshot.ai/docs/pricing",
             source_checked_at="2026-10-24",
             vendor="moonshot",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="2.0",
-                            cache_hit="0.20",
-                            output="10.0",
-                            cache_write_5m="2.0",
-                            cache_write_1h="4.0",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "kimi-k3.1-pro-highspeed": PriceRates(
             cache_miss=4.0,
@@ -229,23 +193,6 @@ PROVIDER = ProviderContribution(
             source_url="https://platform.moonshot.ai/docs/pricing",
             source_checked_at="2026-10-24",
             vendor="moonshot",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="4.0",
-                            cache_hit="0.20",
-                            output="20.0",
-                            cache_write_5m="4.0",
-                            cache_write_1h="8.0",
-                        ),
-                    ),
-                ),
-            ),
         ),
     },
 )
