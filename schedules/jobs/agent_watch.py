@@ -2,7 +2,8 @@
 # The effects of the agent watch: read each watched duty's signals from the database, ask the rule
 # in `schedules/plans/agent_watch_rule.py`, carry the states in one JSON file under the running
 # host's MEIVA_HOME, send the messages the rule asks for, and record the round as one telemetry
-# event.
+# event. Every message is written to the host's alarm record before it is sent, and the round
+# begins by reporting the alarms an earlier send could not deliver.
 #
 # A signal this host cannot read is not a healthy signal: `observe` reports it in `blind`, and the
 # round's line and messages carry it. The watch itself is one round per fire and holds no loop --
@@ -12,14 +13,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-import meiva
 from psycopg import Connection
 
+from base.events.alarms import mark_delivered, mark_notified, open_alarms, record
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.native_process.root_control.client import RootClientError, root_process
 from base.sessions.backend import get_shell_backend
@@ -42,13 +43,16 @@ from schedules.plans.agent_watch_rule import (
 __all__ = [
     "EVENT_NAME",
     "EmitTally",
+    "Notice",
     "observe",
     "read_seat_registries",
     "read_seat_state",
     "read_state",
+    "report_pending_alarms",
     "round_line",
     "run_round",
     "seat_round",
+    "send_notice",
     "write_seat_state",
     "write_state",
 ]
@@ -83,6 +87,97 @@ _FIRES = (
     "SELECT slot_fire_at FROM schedule_fire_log WHERE schedule_id = %s "
     "ORDER BY slot_fire_at DESC LIMIT %s"
 )
+
+# meiva:note
+# The record of every message this job sends names this file as its source, and an alarm waits
+# this long before a round reports it: the sender is still inside its request before that, and a
+# ten-minute round that reported its own fresh alarm would tell the lead twice.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+_SOURCE = "schedules/jobs/agent_watch.py"
+_ALARM_NOT_BEFORE = timedelta(minutes=15)
+
+
+# meiva:note
+# The message call this job performs, passed in by the composition root: a test hands in the
+# refusal it needs to see recorded, and nothing here resolves the SDK's sender by name.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+SendMessage = Callable[[int, str], None]
+
+
+# meiva:note
+# One message a round will send, with the record of why: `kind` is the rung (`wake`, `report`,
+# `escalate`, `seats`), `subject` the duty or owner it is about, `judgement` the reading that made
+# it fire, and `reading` the numbers behind that judgement.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+@dataclass(frozen=True)
+class Notice:
+    kind: str
+    subject: str
+    judgement: str
+    reading: str
+    target: int
+    text: str
+
+
+# meiva:note
+# The one place this watch sends: the alarm is on the disk before the transport is opened, and the
+# transport's answer is appended to the same record. A refusal comes back as its reason -- a line
+# in the round, never the end of it -- and a send that raised still leaves a record the next round
+# can read, which is what one refused send on 2026-10-28 did not.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+def send_notice(home: Path, notice: Notice, *, now: datetime, send: SendMessage) -> str | None:
+    alarm = record(
+        home,
+        kind=notice.kind,
+        subject=notice.subject,
+        judgement=notice.judgement,
+        reading=notice.reading,
+        owner=f"#{notice.target}",
+        source=_SOURCE,
+        now=now,
+    )
+    try:
+        send(notice.target, notice.text)
+    except Exception as exc:
+        refusal = f"{type(exc).__name__}: {exc}"
+        mark_delivered(home, alarm.id, error=refusal, now=now)
+        return refusal
+    mark_delivered(home, alarm.id, error=None, now=now)
+    return None
+
+
+# meiva:note
+# The reader every guard on this host shares: the alarms no transport took, told to the lead once,
+# then closed against the next round. A report that fails leaves them open and is named on the
+# line; the report itself is not recorded, because a report about alarms must not become one.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+def report_pending_alarms(
+    home: Path, *, now: datetime, report_agent: int, send: SendMessage
+) -> tuple[str, ...]:
+    due = open_alarms(home, older_than=_ALARM_NOT_BEFORE, now=now)
+    if not due:
+        return ()
+    text = "Alarms no transport took:\n" + "\n".join(alarm.line() for alarm in due)
+    try:
+        send(report_agent, text)
+    except Exception as exc:
+        return (f"alarms-unreported={len(due)} {type(exc).__name__}",)
+    mark_notified(home, [alarm.id for alarm in due], now=now)
+    return (f"alarms-reported={len(due)}",)
+
+
+# meiva:note
+# What the alarm's record keeps of the observation behind it: the numbers a reader can weigh
+# without asking the round what it meant.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+def _reading(observation: Observation) -> str:
+    parts = [f"sessions={observation.sessions}"]
+    if observation.active_minutes is not None:
+        parts.append(f"active={observation.active_minutes:.0f}m")
+    if observation.paused_minutes is not None:
+        parts.append(f"paused={observation.paused_minutes:.0f}m")
+    parts.extend(observation.late_schedules)
+    return " ".join(parts)
 
 
 # meiva:note
@@ -188,6 +283,7 @@ def seat_round(
     now: datetime,
     process: str,
     inputs: ScheduleInputs,
+    send: SendMessage,
     dry_run: bool = False,
 ) -> tuple[str, tuple[str, ...]]:
     registry_dir = home / _SEAT_DIR
@@ -235,10 +331,21 @@ def seat_round(
         if dry_run:
             notes.append(f"{wake.agent_id}: seats dry-run {','.join(wake.absent)}")
             continue
-        try:
-            meiva.agents.send_message(wake.agent_id, wake.text)
-        except Exception as exc:
-            notes.append(f"{wake.agent_id}: seats wake failed {type(exc).__name__}")
+        refusal = send_notice(
+            home,
+            Notice(
+                kind="seats",
+                subject=f"{wake.agent_id} seats",
+                judgement="absent=" + ",".join(wake.absent),
+                reading=f"live={len(names)}",
+                target=wake.agent_id,
+                text=wake.text,
+            ),
+            now=now,
+            send=send,
+        )
+        if refusal is not None:
+            notes.append(f"{wake.agent_id}: seats wake failed {refusal}")
             continue
         sent += 1
         notes.append(f"{wake.agent_id}: seats woke for {','.join(wake.absent)}")
@@ -368,13 +475,16 @@ def run_round(
     now: datetime,
     process: str,
     tally: EmitTally,
+    send: SendMessage,
 ) -> str:
     entries = watched_agents()
     states = read_state(state_path)
     stamp = now.isoformat(timespec="seconds")
     with inputs.database().connect(autocommit=True) as conn:
         observations = {entry.agent_id: observe(conn, entry, now=now) for entry in entries}
-    notes: list[str] = []
+    notes: list[str] = list(
+        report_pending_alarms(home, now=now, report_agent=report_agent, send=send)
+    )
     plans: list[tuple[WatchedAgent, RoundPlan]] = []
     for entry in entries:
         plan = plan_round(
@@ -389,11 +499,23 @@ def run_round(
         plans.append((entry, plan))
         notes.extend(plan.log)
         for action in plan.actions:
-            try:
-                meiva.agents.send_message(action.target, action.text)
+            refusal = send_notice(
+                home,
+                Notice(
+                    kind=action.kind,
+                    subject=f"{entry.agent_id} {entry.duty}",
+                    judgement="; ".join(plan.reasons) or action.kind,
+                    reading=_reading(observations[entry.agent_id]),
+                    target=action.target,
+                    text=action.text,
+                ),
+                now=now,
+                send=send,
+            )
+            if refusal is None:
                 notes.append(f"{entry.agent_id}: {action.kind} -> {action.target}")
-            except Exception as exc:
-                notes.append(f"{entry.agent_id}: {action.kind} failed: {type(exc).__name__}: {exc}")
+            else:
+                notes.append(f"{entry.agent_id}: {action.kind} failed: {refusal}")
     write_state(state_path, states)
     seat_line, seat_notes = seat_round(
         home=home,
@@ -401,6 +523,7 @@ def run_round(
         now=now,
         process=process,
         inputs=inputs,
+        send=send,
     )
     notes.extend(seat_notes)
     try:
