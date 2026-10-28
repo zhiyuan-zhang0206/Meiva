@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { pressEnter } from "@/test-support/enter-key";
 import { PromptDialog } from "./agent-prompt-dialog";
 
 afterEach(cleanup);
@@ -64,13 +65,43 @@ describe("PromptDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("Cmd/Ctrl+Enter in the textarea submits", () => {
+  it("Enter in the textarea submits — a prompt is a message", () => {
     const onSubmit = vi.fn();
     render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
     const textarea = screen.getByPlaceholderText("Initial prompt…");
     fireEvent.change(textarea, { target: { value: "go" } });
-    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSubmit).toHaveBeenCalledWith("go");
+  });
+
+  it("Shift+Enter breaks the line instead of forking", () => {
+    const onSubmit = vi.fn();
+    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>("Initial prompt…");
+    fireEvent.change(textarea, { target: { value: "firstsecond" } });
+    textarea.setSelectionRange(5, 5);
+    pressEnter(textarea, { shiftKey: true });
+    expect(textarea.value).toBe("first\nsecond");
+    expect(textarea.selectionStart).toBe(6);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("Enter during IME composition neither submits nor loses the key", () => {
+    const onSubmit = vi.fn();
+    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    const textarea = screen.getByPlaceholderText("Initial prompt…");
+    fireEvent.change(textarea, { target: { value: "\u4f60\u597d" } });
+    expect(fireEvent.keyDown(textarea, { key: "Enter", isComposing: true })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("a whitespace-only prompt never submits on Enter", () => {
+    const onSubmit = vi.fn();
+    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    const textarea = screen.getByPlaceholderText("Initial prompt…");
+    fireEvent.change(textarea, { target: { value: "   " } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("Cancel closes without submitting", () => {

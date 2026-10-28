@@ -65,8 +65,11 @@ Questions have three types: text, single select and multi select. Ordered choice
 use native radio/checkbox rows, numbered by their immutable array position.
 Single and multi select both show an optional comment textarea at all times.
 Selection and comment are independent; a comment never replaces a required choice.
-There is no Other choice or Add note toggle. Text questions use a growing textarea;
-Enter adds a newline. Every structured answer requires an explicit Submit.
+There is no Other choice or Add note toggle. Text questions use a growing textarea
+and the comment box follows it; in both, Enter sends the answer and Shift+Enter
+adds a newline — the shared rule in
+[[ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md|Enter sends]].
+The Submit button stays for a pointer and for touch, where Enter breaks the line.
 Failed submissions retain input and reuse the existing operation key; a 409
 disables the stale question. Resolved history preserves original choices and
 answers, including legacy Other text. Queue titles wrap above agent/time/blocking context.

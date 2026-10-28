@@ -82,9 +82,17 @@ export function OpenNoticeDetail({
     }
   };
 
+  // meiva:note
+  // One answer path for a question, reached from the Submit button and from Enter
+  // in either of the form's fields. NoticeQuestionForm builds the answer from its
+  // own draft, so Enter does not wait for the round trip through structuredAnswer.
+  // meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+  const submitAnswer = (answer: NoticeAnswer) =>
+    void run({ action: "answer", answer }, t("noLongerAvailable"), t("submitAnswer"));
+
   const answer = () => {
     if (notice.question) {
-      if (structuredAnswer) void run({ action: "answer", answer: structuredAnswer }, t("noLongerAvailable"), t("submitAnswer"));
+      if (structuredAnswer) submitAnswer(structuredAnswer);
       return;
     }
     const text = reply.trim();
@@ -154,6 +162,7 @@ export function OpenNoticeDetail({
           pending={pending || unavailable}
           focusAnswer={autoFocus}
           onAnswerChange={setStructuredAnswer}
+          onSubmit={submitAnswer}
           submitAction={
             <SendButton
               state={pending ? "sending" : "send"}

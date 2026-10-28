@@ -12,7 +12,7 @@
   "singleSelect": "请选择一项",
   "multiSelect": "请选择一项或多项",
   "openQuestion": "你的回答",
-  "openPlaceholder": "写下你的回答…",
+  "openPlaceholder": "写下你的回答…（回车发送）",
   "other": "其他",
   "closeQuestion": "关闭此问题，不作回答",
   "submitAnswer": "提交回答",

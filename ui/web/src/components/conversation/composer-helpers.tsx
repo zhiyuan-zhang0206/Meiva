@@ -6,6 +6,7 @@ import { type SlashAutocompleteHandle } from "@/components/conversation/slash-au
 import { ContextButton } from "@/components/inspector/context-breakdown";
 import { ContextMeterGhost } from "@/components/inspector/context-meter";
 import { cn } from "@/lib/format/utils";
+import { isImeComposition, isSendEnter, type KeyStroke } from "@/lib/input/enter-to-send";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 export interface PendingImage {
@@ -119,8 +120,19 @@ export function ComposerAttachmentStrip({
   );
 }
 
+// meiva:note
+// The composer reads only these keydown fields, so the handler takes a plain
+// value: a React keydown satisfies it, and a test supplies one without a cast.
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+export interface ComposerKeyDown extends KeyStroke {
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+  preventDefault: () => void;
+}
+
 export function handleComposerKeyDown(
-  e: React.KeyboardEvent<HTMLTextAreaElement>,
+  e: ComposerKeyDown,
   opts: {
     ac: SlashAutocompleteHandle | null;
     offeredSuggestion: string | null;
@@ -129,12 +141,14 @@ export function handleComposerKeyDown(
     replyIndex: number;
     agentId: number | null;
     mode: "disabled" | "idle" | "busy";
+    coarsePointer: boolean;
     acceptSuggestion: (text: string) => void;
     onCycleSuggestion: (nextIndex: number) => void;
     submit: () => void;
   },
 ): void {
-  const composing = e.nativeEvent.isComposing || e.key === "Process";
+  const composing = isImeComposition(e);
+  const sendEnter = isSendEnter(e, opts.coarsePointer);
   const { ac } = opts;
   if (ac?.isOpen() && !composing) {
     if (e.key === "ArrowDown") {
@@ -157,7 +171,7 @@ export function handleComposerKeyDown(
       ac.selectActive();
       return;
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (sendEnter) {
       e.preventDefault();
       if (ac.selectActive()) return;
     }
@@ -190,7 +204,7 @@ export function handleComposerKeyDown(
       return;
     }
   }
-  if (e.key === "Enter" && !e.shiftKey && !composing) {
+  if (sendEnter) {
     e.preventDefault();
     if (opts.mode === "disabled") return;
     opts.submit();

@@ -2,43 +2,49 @@
 
 import React, { useCallback } from "react";
 import { Textarea } from "@/components/ui/textarea";
+import { isSendEnter } from "@/lib/input/enter-to-send";
+import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { cn } from "@/lib/format/utils";
 
 interface AutoExpandTextareaProps
   extends Omit<React.ComponentProps<"textarea">, "onKeyDown"> {
-  /** Called when Enter is pressed (without Shift) and IME is not composing. */
+  focusVisible?: boolean;
+  coarsePointer?: boolean;
   onSend: () => void;
-  /** Additional keydown handler — runs for keys not consumed by Enter-to-send. */
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
-/**
- * A textarea that auto-grows via CSS field-sizing-content and sends on Enter.
- *
- * Shift+Enter inserts a newline; Enter fires `onSend`. IME composition is
- * detected via nativeEvent.isComposing + the "Process" key fallback (older
- * Safari), so committing a CJK candidate does not trigger a send.
- */
+// meiva:note
+// A textarea that auto-grows via CSS field-sizing-content and sends on Enter; the
+// rule itself lives in lib/input/enter-to-send.ts. `focusVisible` reaches Textarea.
+// `coarsePointer` is whether the primary pointer is a finger: omitted, this field
+// reads it, and a caller that already knows it passes it in.
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
 export const AutoExpandTextarea = React.forwardRef<
   HTMLTextAreaElement,
   AutoExpandTextareaProps
->(function AutoExpandTextarea({ onSend, onKeyDown, className, ...props }, ref) {
+>(function AutoExpandTextarea(
+  { focusVisible, coarsePointer, onSend, onKeyDown, className, ...props },
+  ref,
+) {
+  const primaryPointerIsCoarse = useCoarsePointer();
+  const touchKeyboard = coarsePointer ?? primaryPointerIsCoarse;
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      const composing = e.nativeEvent.isComposing || e.key === "Process";
-      if (e.key === "Enter" && !e.shiftKey && !composing) {
+      if (isSendEnter(e, touchKeyboard)) {
         e.preventDefault();
         onSend();
         return;
       }
       onKeyDown?.(e);
     },
-    [onSend, onKeyDown],
+    [onSend, onKeyDown, touchKeyboard],
   );
 
   return (
     <Textarea
       ref={ref}
+      focusVisible={focusVisible}
       onKeyDown={handleKeyDown}
       className={cn("resize-none", className)}
       {...props}

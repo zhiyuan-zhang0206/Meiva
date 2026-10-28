@@ -1,0 +1,4 @@
+exports = ["enter-to-send.ts", "use-coarse-pointer.ts"]
+
+[uses]
+"enter-to-send.test.ts" = ["enter-to-send.ts"]

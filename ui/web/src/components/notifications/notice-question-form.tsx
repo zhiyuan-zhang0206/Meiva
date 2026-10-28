@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
-import { Textarea } from "@/components/ui/textarea";
+import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import type { NoticeAnswer, NoticeQuestion } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
@@ -34,12 +34,18 @@ function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer |
   };
 }
 
-/** Numbered choices share their frozen order with server replies and history. */
+// meiva:note
+// Numbered choices share their frozen order with server replies and history.
+// onAnswerChange reports the answer the current draft would submit (null while
+// incomplete), which is what enables Submit; onSubmit sends an answer, and Enter
+// in either field calls it with the answer built from that draft.
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
 export function NoticeQuestionForm({
   question,
   pending,
   focusAnswer,
   onAnswerChange,
+  onSubmit,
   submitAction,
 }: {
   submitAction: ReactNode;
@@ -47,6 +53,7 @@ export function NoticeQuestionForm({
   pending: boolean;
   focusAnswer: boolean;
   onAnswerChange: (answer: NoticeAnswer | null) => void;
+  onSubmit: (answer: NoticeAnswer) => void;
 }) {
   const t = useTranslations("noticeDetail");
   const fieldId = useId();
@@ -59,6 +66,16 @@ export function NoticeQuestionForm({
     onAnswerChange(answerFromDraft(question, draft));
   }, [question, draft, onAnswerChange]);
 
+  // meiva:note
+  // Enter sends whatever the draft already answers; an incomplete draft sends
+  // nothing, exactly like the disabled Submit button.
+  // meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+  const draftAnswer = answerFromDraft(question, draft);
+  const send = () => {
+    if (pending || !draftAnswer) return;
+    onSubmit(draftAnswer);
+  };
+
   useEffect(() => {
     if (focusAnswer) textRef.current?.focus();
   }, [focusAnswer]);
@@ -67,7 +84,7 @@ export function NoticeQuestionForm({
   if (question.type === "text") {
     return (
       <div className={cn("items-end gap-2", FLEX)}>
-        <Textarea
+        <AutoExpandTextarea
           id={fieldId}
           aria-label={t("openQuestion")}
           ref={textRef}
@@ -75,6 +92,7 @@ export function NoticeQuestionForm({
           focusVisible={false}
           value={draft.text}
           onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+          onSend={send}
           placeholder={t("openPlaceholder")}
           disabled={pending}
           className={inputClass}
@@ -127,13 +145,14 @@ export function NoticeQuestionForm({
 
       </fieldset>
       <div className={cn("items-end gap-2", FLEX)}>
-        <Textarea
+        <AutoExpandTextarea
           id={`${fieldId}-comment`}
           aria-label={t("comment")}
           rows={1}
           focusVisible={false}
           value={draft.comment}
           onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
+          onSend={send}
           disabled={pending}
           placeholder={t("comment")}
           className={inputClass}

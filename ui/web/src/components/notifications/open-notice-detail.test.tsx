@@ -7,6 +7,7 @@ import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OpenNoticeDetail } from "./open-notice-detail";
+import { pressEnter } from "@/test-support/enter-key";
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import { USER_SETTING_DEFAULTS, type OpenNotice } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
@@ -41,7 +42,16 @@ function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
 afterEach(() => {
   cleanup();
   resolveNotice.mockReset();
+  vi.restoreAllMocks();
 });
+
+// meiva:note
+// The one text field the current notice renders — the answer box of a question,
+// or the reply box of a notice without one.
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+function field(): HTMLTextAreaElement {
+  return screen.getByRole<HTMLTextAreaElement>("textbox");
+}
 
 describe("OpenNoticeDetail — timestamp", () => {
   const createdAt = "2026-06-14T12:00:00Z";
@@ -272,13 +282,12 @@ describe("OpenNoticeDetail — numbered questions", () => {
     expect(comment.disabled).toBe(true);
   });
 
-  it("open questions preserve multiline text; Enter alone does not submit", async () => {
+  it("open questions keep their multiline text when Enter sends them", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
-    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "Use 2.\nThen 1." } });
-    fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
-    expect(resolveNotice).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(box, { target: { value: "Use 2.\nThen 1." } });
+    pressEnter(box);
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { text: "Use 2.\nThen 1." } }, expect.any(String)));
   });
 
@@ -301,5 +310,84 @@ describe("OpenNoticeDetail — numbered questions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("no longer available"));
     expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
+  });
+});
+
+// meiva:note
+// The reported bug (user, 2026-10-28): replying to a notification typed a newline
+// instead of sending. Every reply field now shares one rule: Enter sends,
+// Shift+Enter breaks the line at the caret, an input method keeps its keys, and an
+// incomplete answer sends nothing.
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+describe("OpenNoticeDetail — Enter sends", () => {
+  it("Enter in a question's answer box sends the answer", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    fireEvent.change(field(), { target: { value: "Use 2." } });
+
+    pressEnter(field());
+
+    await waitFor(() =>
+      expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { text: "Use 2." } }, expect.any(String)),
+    );
+  });
+
+  it("Enter in the free-text reply box sends the reply", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    fireEvent.change(field(), { target: { value: "ship it" } });
+
+    pressEnter(field());
+
+    await waitFor(() =>
+      expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", reply: "ship it" }, expect.any(String)),
+    );
+  });
+
+  it("Enter in the optional comment of a question sends the answer with it", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options: [{ id: "a", label: "A", description: null }], allow_other: false } })} />);
+    fireEvent.change(field(), { target: { value: "second choice is fine too" } });
+
+    pressEnter(field());
+
+    await waitFor(() =>
+      expect(resolveNotice).toHaveBeenCalledWith(7, 11, {
+        action: "answer",
+        answer: { option_ids: [], comment: "second choice is fine too" },
+      }, expect.any(String)),
+    );
+  });
+
+  it("Shift+Enter breaks the line at the caret and sends nothing", () => {
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    fireEvent.change(field(), { target: { value: "firstsecond" } });
+    field().setSelectionRange(5, 5);
+
+    pressEnter(field(), { shiftKey: true });
+
+    expect(field().value).toBe("first\nsecond");
+    expect(field().selectionStart).toBe(6);
+    expect(resolveNotice).not.toHaveBeenCalled();
+  });
+
+  it("Enter that commits an IME candidate neither sends nor loses the key", () => {
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    fireEvent.change(field(), { target: { value: "\u4f60\u597d" } });
+
+    expect(fireEvent.keyDown(field(), { key: "Enter", isComposing: true })).toBe(true);
+
+    expect(resolveNotice).not.toHaveBeenCalled();
+    expect(field().value).toBe("\u4f60\u597d");
+  });
+
+
+  it("Enter in a blank or whitespace-only answer sends nothing", () => {
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    fireEvent.change(field(), { target: { value: "   " } });
+
+    pressEnter(field());
+
+    expect(resolveNotice).not.toHaveBeenCalled();
   });
 });

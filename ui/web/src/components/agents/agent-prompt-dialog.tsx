@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 
 export interface PromptDialogProps {
   open: boolean;
@@ -30,6 +30,11 @@ export interface PromptDialogProps {
   onSubmit: (prompt: string) => void;
 }
 
+// meiva:note
+// A prompt is a message: the field sends the way every other send-type field does
+// (Enter sends, Shift+Enter breaks the line). Closing the dialog resets the text,
+// so the next open starts blank.
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
 export function PromptDialog({
   open,
   onOpenChange,
@@ -53,7 +58,7 @@ export function PromptDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setText(""); // reset so the next open starts blank
+        if (!next) setText("");
         onOpenChange(next);
       }}
     >
@@ -64,18 +69,12 @@ export function PromptDialog({
             <DialogDescription>{description}</DialogDescription>
           ) : null}
         </DialogHeader>
-        <Textarea
+        <AutoExpandTextarea
           autoFocus
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={placeholder}
-          // Cmd/Ctrl+Enter submits (matches the chat composer convention).
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              submit();
-            }
-          }}
+          onSend={submit}
           className="min-h-28 font-mono text-xs"
         />
         <DialogFooter>
