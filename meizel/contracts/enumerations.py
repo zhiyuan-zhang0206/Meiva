@@ -35,7 +35,7 @@ from typing import TypeGuard
 
 from meizel import roles as role_api
 from meizel.graph.model import Code, Diagnostic, MeizelError
-from meizel.graph.universe import EditPlan, GitRepo, Universe
+from meizel.graph.universe import Checkout, EditPlan, Universe
 
 __all__ = ["check", "parse_regions", "plan_writes", "regions", "run_roles", "write"]
 
@@ -165,7 +165,7 @@ def plan_writes(
 
 # meiva:note
 # Regenerate every region; returns one line per file rewritten.
-def write(repo: GitRepo) -> list[str]:
+def write(repo: Checkout) -> list[str]:
     declared = role_api.roles(repo.root)
     universe = repo.universe()
     texts = _candidate_texts(universe)
@@ -173,7 +173,7 @@ def write(repo: GitRepo) -> list[str]:
     for region in parse_regions(texts):
         by_path.setdefault(region.path, []).append(region)
     plan, changed = plan_writes(repo.root, texts, by_path, declared)
-    plan.apply()
+    repo.apply_plan(plan)
     return changed
 
 
@@ -309,7 +309,7 @@ def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[D
         if _outside_rule(path) or path == "meizel.toml":
             continue
         try:
-            text = universe.load_text(path)
+            text = universe.repo.load_text(path)
         except (OSError, UnicodeDecodeError):
             continue
         scan = _python if path.endswith(".py") else _toml
@@ -317,7 +317,7 @@ def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[D
     return sorted(found, key=lambda d: (d.path, d.line, d.message))
 
 
-def run_roles(repo: GitRepo, mode: str, role_names: tuple[str, ...] = ()) -> int:
+def run_roles(repo: Checkout, mode: str, role_names: tuple[str, ...] = ()) -> int:
     if mode == "list":
         for name in role_api.packages(*role_names, root=repo.root):
             print(name)

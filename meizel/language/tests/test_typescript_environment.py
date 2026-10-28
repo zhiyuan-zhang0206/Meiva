@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from meizel.graph.universe import GitRepo, Universe
+from meizel.checkout import GitRepo
+from meizel.graph.universe import Universe
 from meizel.language.typescript import scan_typescript
 
 BUNDLED = "ui/web/src/lib/x.ts"

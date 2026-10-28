@@ -37,8 +37,8 @@ from meizel.allowances import (  # noqa: E402
     parse_snapshot,
     removal_report,
 )
+from meizel.checkout import GitRepo, toplevel  # noqa: E402
 from meizel.graph.model import MeizelError  # noqa: E402
-from meizel.graph.universe import GitRepo, toplevel  # noqa: E402
 
 _SEPARATOR = " \u2014 "
 

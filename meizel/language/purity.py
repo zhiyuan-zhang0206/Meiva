@@ -353,7 +353,7 @@ def _rules_for(text: str) -> tuple[frozenset[str], frozenset[str], int, int, int
 # The policy the run admitted: read through the universe that holds the tree, never from a path
 # this module computes itself.
 def make_state(universe: Universe) -> PurityState:
-    text = universe.load_text(allowances.POLICY) if allowances.POLICY in universe.files else ""
+    text = universe.repo.load_text(allowances.POLICY) if allowances.POLICY in universe.files else ""
     imports, calls, max_pub, max_params, max_hops = _rules_for(text)
     return PurityState(imports, calls, max_pub, max_params, max_hops)
 
