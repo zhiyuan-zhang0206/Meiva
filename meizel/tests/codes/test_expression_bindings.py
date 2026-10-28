@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from meizel.graph.model import Code, FactKind, Sources
-from meizel.graph.universe import Universe
+from meizel.graph.universe import GitRepo, Universe
 from meizel.language.scan import FileScan, scan_source
 
 
@@ -14,7 +14,7 @@ def scan(tmp_path: Path, source: str) -> FileScan:
     library = tmp_path / "lib" / "api.py"
     library.parent.mkdir(exist_ok=True)
     library.write_text("VALUE = 1\n", encoding="utf-8")
-    universe = Universe(tmp_path, [path, "lib/__init__.py", "lib/api.py"])
+    universe = Universe(GitRepo(tmp_path), [path, "lib/__init__.py", "lib/api.py"])
     return scan_source(universe, path, source.encode(), Sources())
 
 

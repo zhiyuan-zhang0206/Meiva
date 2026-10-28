@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from meizel.contracts.debt import PATCH_CODES, DebtTable, file_key, total
 from meizel.contracts.debt_edit import prune as prune_debt
@@ -33,7 +32,7 @@ from meizel.contracts.debt_symbol import (
 from meizel.contracts.manifest import load_manifests
 from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
-from meizel.graph.universe import MANIFEST, GitRepo, Universe, load_universe, parent_of
+from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
 
 __all__ = ["carry", "renames_since", "run_debt"]
 
@@ -53,16 +52,16 @@ def _join(owner: str, path: str) -> str:
     return f"{owner}/{path}" if owner else path
 
 
-def default_base(root: Path) -> str:
+def default_base(repo: GitRepo) -> str:
     """The branch point with origin/main, or HEAD when there is no origin/main."""
-    return GitRepo(root).default_base()
+    return repo.default_base()
 
 
-def renames_since(root: Path, base: str) -> dict[str, str]:
+def renames_since(repo: GitRepo, base: str) -> dict[str, str]:
     """`old -> new` for the files git detects as renamed between `base` and the working tree."""
     if base.startswith("-"):
         raise MeizelError(f"{base}: not a git ref")
-    listing = GitRepo(root).run_text("diff", "-M", "--name-status", "-z", base).split("\0")
+    listing = repo.run_text("diff", "-M", "--name-status", "-z", base).split("\0")
     found: dict[str, str] = {}
     index = 0
     while index < len(listing) and listing[index]:
@@ -158,13 +157,14 @@ def _plan(
     return tables, lines
 
 
-def _check_move(root: Path, base: str, universe: Universe, move: SymbolMove) -> tuple[bytes, bytes]:
+def _check_move(
+    repo: GitRepo, base: str, universe: Universe, move: SymbolMove
+) -> tuple[bytes, bytes]:
     """The old file at the base and the new file now, after checking that this is a move."""
     if move.new not in universe.files:
         raise MeizelError(
             f"{move.new} is not a file of the repository (missing, or ignored by git)"
         )
-    repo = GitRepo(root)
     before, after = repo.show_bytes(base, move.old), universe.load_bytes(move.new)
     if repo.has_file(move.old) and defines(
         universe, move.old, repo.load_bytes(move.old), move.name
@@ -211,7 +211,7 @@ def _swap(
 
 
 def _move_symbols(
-    root: Path,
+    repo: GitRepo,
     base: str,
     universe: Universe,
     tables: dict[str, DebtTable],
@@ -221,7 +221,7 @@ def _move_symbols(
     manifests, _ = load_manifests(universe)
     lines: list[str] = []
     for move in moves:
-        old_source, new_source = _check_move(root, base, universe, move)
+        old_source, new_source = _check_move(repo, base, universe, move)
         before = symbol_debt(universe, manifests, move.old, old_source, move.name)
         after = symbol_debt(universe, manifests, move.new, new_source, move.name)
         lines.extend(_swap(tables, move, before, after, renames))
@@ -229,7 +229,7 @@ def _move_symbols(
 
 
 def carry(
-    root: Path,
+    repo: GitRepo,
     base: str | None = None,
     rename_targets: list[str] | None = None,
     move_symbols: list[str] | None = None,
@@ -241,39 +241,39 @@ def carry(
     `move_symbols` (`OLD_FILE::NAME=NEW_FILE`) rekeys the entries of a function or class that
     moved from one file to another, which git cannot see as a rename.
     """
-    base = base or default_base(root)
-    moved = renames_since(root, base)
-    universe = load_universe(root)
+    base = base or default_base(repo)
+    moved = renames_since(repo, base)
+    universe = repo.universe()
     baselines = read_baselines(universe)
     renames = parse_renames(rename_targets or [])
     symbols = parse_symbol_moves(move_symbols or [])
     tables, lines = _plan(baselines, moved, universe, renames)
-    lines.extend(_move_symbols(root, base, universe, tables, symbols, renames))
+    lines.extend(_move_symbols(repo, base, universe, tables, symbols, renames))
     before = sum(total(t) for t in baselines.values())
     after = sum(total(t) for t in tables.values())
     if after != before:
         raise MeizelError(f"carrying would change the recorded total ({before} -> {after})")
     for owner in sorted(tables):
         if tables[owner] != baselines.get(owner, {}):
-            write_baseline(root, owner, {c: r for c, r in tables[owner].items() if r})
+            write_baseline(repo, owner, {c: r for c, r in tables[owner].items() if r})
     return lines
 
 
-def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
+def _run_diff(repo: GitRepo, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     rules_changed = (
-        bool(args.waive_if_changed) and bool(changed_under(root, ref, args.waive_if_changed))
-    ) or purity_changed(root, ref)
+        bool(args.waive_if_changed) and bool(changed_under(repo, ref, args.waive_if_changed))
+    ) or purity_changed(repo, ref)
     if rules_changed:
-        result = rule_diff(root, ref, totals_at(root, ref), args.jobs)
+        result = rule_diff(repo, ref, totals_at(repo, ref), args.jobs)
         print("\n".join(result.lines()))
         print("\n".join(result.explanation()))
         grew = result.content_grew
     else:
-        lines, grew = diff(root, ref)
+        lines, grew = diff(repo, ref)
         print("\n".join(lines))
     if args.by_target:
         print()
-        print("\n".join(by_target(root, ref, args.target_prefix, args.depth)))
+        print("\n".join(by_target(repo, ref, args.target_prefix, args.depth)))
         print()
     if not grew:
         if not rules_changed:
@@ -284,8 +284,8 @@ def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) ->
     return 1 if on_growth == "fail" else 0
 
 
-def _run_record(root: Path, targets: list[str], jobs: int | None) -> int:
-    written, created, unrecordable = record(root, targets, jobs)
+def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
+    written, created, unrecordable = record(repo, targets, jobs)
     for path in written:
         print(f"meizel: wrote {path}")
     if created:
@@ -304,19 +304,19 @@ def _run_record(root: Path, targets: list[str], jobs: int | None) -> int:
     return 0
 
 
-def run_debt(root: Path, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
+def run_debt(repo: GitRepo, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
     mode = args.debt_mode
     if mode is None:
-        print(summarize(root, as_json=args.json))
+        print(summarize(repo, as_json=args.json))
         return 0
     if args.json:
         raise MeizelError("--json belongs to the summary: `meizel debt --json`")
     if mode == "prune":
-        for line in prune_debt(root, jobs):
+        for line in prune_debt(repo, jobs):
             print(line)
         return 0
     if mode in ("sites", "approved"):
-        universe = load_universe(root)
+        universe = repo.universe()
         if mode == "sites":
             found = sites(universe, args.code, args.target_prefix, targets, jobs)
             print(format_sites(found, as_json=args.as_json))
@@ -324,13 +324,13 @@ def run_debt(root: Path, targets: list[str], args: argparse.Namespace, jobs: int
             print(format_approved(approved(universe, jobs), as_json=args.as_json))
         return 0
     if mode == "resolve":
-        for line in resolve(root, targets, jobs):
+        for line in resolve(repo, targets, jobs):
             print(line)
         return 0
     if mode == "diff":
-        return _run_diff(root, args.against, args.on_growth, args)
+        return _run_diff(repo, args.against, args.on_growth, args)
     if mode == "carry":
-        lines = carry(root, args.base, args.rename_target, args.move_symbol)
+        lines = carry(repo, args.base, args.rename_target, args.move_symbol)
         for line in lines:
             print(f"meizel: carried {line}")
         if not lines:
@@ -338,4 +338,4 @@ def run_debt(root: Path, targets: list[str], args: argparse.Namespace, jobs: int
                 "meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt"
             )
         return 0
-    return _run_record(root, targets, jobs)
+    return _run_record(repo, targets, jobs)

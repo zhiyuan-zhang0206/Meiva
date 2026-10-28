@@ -10,7 +10,6 @@ import json
 import tomllib
 from collections import Counter
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any, TypeGuard
 
 from meizel.contracts.debt import (
@@ -23,7 +22,7 @@ from meizel.contracts.debt import (
 from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import MANIFEST, GitRepo, Universe, load_universe, parent_of
+from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
 
 __all__ = [
     "Baselines",
@@ -135,8 +134,8 @@ def _text(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def summarize(root: Path, *, as_json: bool) -> str:
-    data = _report(load_universe(root))
+def summarize(repo: GitRepo, *, as_json: bool) -> str:
+    data = _report(repo.universe())
     return json.dumps(data, indent=2, sort_keys=True) if as_json else _text(data)
 
 
@@ -167,11 +166,10 @@ def _totals_in(text: str) -> Counter[str]:
     return counts
 
 
-def _manifest_texts_at(root: Path, ref: str) -> list[str]:
+def _manifest_texts_at(repo: GitRepo, ref: str) -> list[str]:
     """The text of every `meizel.toml` at a git ref."""
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
-    repo = GitRepo(root)
     listing = repo.run_bytes("ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0")
     paths = [p for p in listing if p.rsplit("/", 1)[-1] == MANIFEST]
     texts: list[str] = []
@@ -191,35 +189,33 @@ def _manifest_texts_at(root: Path, ref: str) -> list[str]:
     return texts
 
 
-def totals_at(root: Path, ref: str) -> Counter[str]:
+def totals_at(repo: GitRepo, ref: str) -> Counter[str]:
     totals: Counter[str] = Counter()
-    for text in _manifest_texts_at(root, ref):
+    for text in _manifest_texts_at(repo, ref):
         totals.update(_totals_in(text))
     return totals
 
 
-def changed_under(root: Path, ref: str, pathspecs: list[str]) -> list[str]:
+def changed_under(repo: GitRepo, ref: str, pathspecs: list[str]) -> list[str]:
     """The files that differ between `ref` and the working tree under the given git pathspecs.
 
     No pathspecs lists every changed file.
     """
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
-    listing = GitRepo(root).run_bytes(
-        "diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs
-    )
+    listing = repo.run_bytes("diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs)
     return [p for p in listing.decode().split("\0") if p]
 
 
-def diff(root: Path, ref: str) -> tuple[list[str], bool]:
+def diff(repo: GitRepo, ref: str) -> tuple[list[str], bool]:
     """Per-code totals against `ref`, and whether any code grew.
 
     Totals, not directories, are compared: debt that moves with a file between directories
     leaves them unchanged.
     """
-    before = totals_at(root, ref)
+    before = totals_at(repo, ref)
     after = Counter(
-        {code.value: n for code, n in _by_code(read_baselines(load_universe(root))).items()}
+        {code.value: n for code, n in _by_code(read_baselines(repo.universe())).items()}
     )
     codes = sorted(set(before) | set(after))
     lines = [f"{'code':<20}{ref[:12]:>14}{'tree':>8}{'change':>8}"]
@@ -290,7 +286,7 @@ def _grouped(
     return groups
 
 
-def by_target(root: Path, ref: str, prefixes: list[str], depth: int) -> list[str]:
+def by_target(repo: GitRepo, ref: str, prefixes: list[str], depth: int) -> list[str]:
     """Recorded patch debt per target group against `ref`: what a change paid down or added.
 
     Counts come from the baselines, keyed by the target of each entry, so debt that moves with
@@ -298,8 +294,8 @@ def by_target(root: Path, ref: str, prefixes: list[str], depth: int) -> list[str
     of a target; with them, a target counts under its longest prefix and the rest under `(other)`.
     Unchanged groups are left out, except the listed prefixes, which always show.
     """
-    before = _targets([t for text in _manifest_texts_at(root, ref) for t in _tables_in(text)])
-    tree = read_baselines(load_universe(root))
+    before = _targets([t for text in _manifest_texts_at(repo, ref) for t in _tables_in(text)])
+    tree = read_baselines(repo.universe())
     after = _targets(
         [{c.value: dict(rows) for c, rows in table.items()} for table in tree.values()]
     )

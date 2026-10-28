@@ -35,10 +35,10 @@ def _copy(table: DebtTable) -> DebtTable:
 
 
 def plan_baseline_write(
-    root: Path, owner: str, before: str, table: DebtTable
+    repo: GitRepo, owner: str, before: str, table: DebtTable
 ) -> tuple[EditPlan, str | None]:
     rel = manifest_path(owner)
-    path = root / rel
+    path = repo.root / rel
     after = set_debt(before, table)
     if after == before:
         return EditPlan(), None
@@ -49,14 +49,14 @@ def plan_baseline_write(
     return EditPlan(deletes=(path,)), rel
 
 
-def _manifest_text(root: Path, owner: str) -> str:
-    return GitRepo(root).load_text(manifest_path(owner), default="")
+def _manifest_text(repo: GitRepo, owner: str) -> str:
+    return repo.load_text(manifest_path(owner), default="")
 
 
-def write_baseline(root: Path, owner: str, table: DebtTable) -> str | None:
+def write_baseline(repo: GitRepo, owner: str, table: DebtTable) -> str | None:
     """Rewrite the `[debt]` tables of `owner`'s manifest; the path written, or None if unchanged."""
-    before = _manifest_text(root, owner)
-    plan, changed = plan_baseline_write(root, owner, before, table)
+    before = _manifest_text(repo, owner)
+    plan, changed = plan_baseline_write(repo, owner, before, table)
     plan.apply()
     return changed
 
@@ -93,7 +93,7 @@ def _recordable(analysis: Analysis, targets: list[str]) -> list[Diagnostic]:
 
 
 def record(
-    root: Path, targets: list[str], jobs: int | None = None
+    repo: GitRepo, targets: list[str], jobs: int | None = None
 ) -> tuple[list[str], list[str], list[Diagnostic]]:
     """Record the violations under `targets`.
 
@@ -103,7 +103,7 @@ def record(
     A count never goes down here (that is `prune`), and a violation outside `targets` is not
     recorded. The second result is every violation under `targets` that no baseline can hold.
     """
-    analysis = analyze(root, jobs=jobs)
+    analysis = analyze(repo.universe(), jobs=jobs)
     _refuse_malformed(analysis, "record")
     tables = {owner: _copy(m.debt) for owner, m in analysis.manifests.items()}
     for (owner, code, key), found in tally(_recordable(analysis, targets)).items():
@@ -117,7 +117,7 @@ def record(
     written: list[str] = []
     created: list[str] = []
     for owner, table in sorted(tables.items()):
-        if path := write_baseline(root, owner, table):
+        if path := write_baseline(repo, owner, table):
             written.append(path)
             if owner not in analysis.manifests:
                 created.append(path)
@@ -131,9 +131,9 @@ def record(
     return written, created, unrecordable
 
 
-def prune(root: Path, jobs: int | None = None) -> list[str]:
+def prune(repo: GitRepo, jobs: int | None = None) -> list[str]:
     """Lower every baseline to what still occurs; returns a line per manifest rewritten."""
-    analysis = analyze(root, jobs=jobs)
+    analysis = analyze(repo.universe(), jobs=jobs)
     _refuse_malformed(analysis, "prune")
     found = tally(analysis.diagnostics)
     lines: list[str] = []
@@ -149,7 +149,7 @@ def prune(root: Path, jobs: int | None = None) -> list[str]:
                 if not (code is CYCLE_EDGE and local_edge(key) in unneeded)
             }
             table[code] = {key: n for key, n in kept.items() if n > 0}
-        if write_baseline(root, owner, table):
+        if write_baseline(repo, owner, table):
             lines.append(
                 f"{manifest_path(owner)}: {total(manifest.debt)} recorded debts lowered to {total(table)}"
             )
@@ -163,23 +163,23 @@ def prune(root: Path, jobs: int | None = None) -> list[str]:
 # between two authors: both sides are kept, the lower count wins where both changed, and `prune`
 # settles the rest. A conflict outside the debt tables, or a file that has none, refuses the whole
 # command and writes nothing.
-def resolve(root: Path, paths: list[str], jobs: int | None = None) -> list[str]:
+def resolve(repo: GitRepo, paths: list[str], jobs: int | None = None) -> list[str]:
     plans: dict[Path, str] = {}
     problems: list[str] = []
     for rel in paths:
         if rel.rpartition("/")[2] != "meizel.toml":
             problems.append(f"{rel}: not a meizel.toml")
             continue
-        text = _manifest_text(root, rel.removesuffix("meizel.toml").rstrip("/"))
+        text = _manifest_text(repo, rel.removesuffix("meizel.toml").rstrip("/"))
         resolved, found = resolve_debt_conflicts(text, rel)
         problems.extend(found)
         if resolved != text:
-            plans[root / rel] = resolved
+            plans[repo.root / rel] = resolved
     if problems:
         raise MeizelError("\n".join(problems))
     EditPlan(writes=plans).apply()
     lines = [
         f"meizel: resolved {rel}"
-        for rel in sorted(path.relative_to(root).as_posix() for path in plans)
+        for rel in sorted(path.relative_to(repo.root).as_posix() for path in plans)
     ]
-    return [*lines, *prune(root, jobs)]
+    return [*lines, *prune(repo, jobs)]

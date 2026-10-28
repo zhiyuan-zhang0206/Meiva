@@ -7,7 +7,16 @@ import pytest
 
 from meizel.allowances import parse
 from meizel.contracts.sync import with_table
-from meizel.tests.synthetic import RepoFactory, analysis_of, commit, diagnostics, git, run, write
+from meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    commit,
+    diagnostics,
+    git,
+    run,
+    seat,
+    write,
+)
 
 LOADER = {
     "lib/__init__.py": "",
@@ -183,7 +192,7 @@ def test_historical_policy_diff_keeps_retired_entries_and_surviving_reasons(
     )
     root = make_repo({"meizel.policy.toml": old})
     commit(root)
-    metadata = prepare_policy_snapshot(root)
+    metadata = prepare_policy_snapshot(seat(root).repo)
     assert metadata.named[("ambient-state", "db-handles")] == ("base:Database",)
     normalized = (root / "meizel.policy.toml").read_text()
     assert '"a.py::cache" = "keep # and this reason"' in normalized

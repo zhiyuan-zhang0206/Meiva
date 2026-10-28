@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from meizel.contracts.analysis import analyze
-from meizel.tests.synthetic import RepoFactory, run, write
+from meizel.tests.synthetic import RepoFactory, run, seat, write
 
 TWO_BAD = {
     "pkg/__init__.py": "",
@@ -173,7 +173,7 @@ def test_global_role_copies_are_judged_whatever_changed(make_repo: RepoFactory, 
             path: "VALUE = 1\n" if path.endswith(".py") else "",
         }
     )
-    result = analyze(root, jobs=1, changed={path})
+    result = analyze(seat(root), jobs=1, changed={path})
     assert [(d.path, d.code.value) for d in result.verdict] == [("copy.toml", "manifest-roles")]
     assert set(result.scans) == ({path} if path.endswith(".py") else set())
     assert "a/unchanged.py" not in result.scans
@@ -195,7 +195,7 @@ def test_role_checks_use_current_validated_declarations(make_repo: RepoFactory) 
     assert run(root, "roles", "check") == 0
     assert run(root, "check", "--changed", "scan.sh") == 0
     write(root, {"meizel.toml": '[roles]\napplication = ["a", "b", "c", "d"]\n'})
-    result = analyze(root, jobs=1, changed={"meizel.toml"})
+    result = analyze(seat(root), jobs=1, changed={"meizel.toml"})
     assert any(d.path == "scan.sh" and "stale" in d.message for d in result.verdict)
     assert result.scans == {}
 
@@ -220,7 +220,7 @@ def test_generated_regions_cannot_escape_by_removing_or_emptying_roles(
     )
     assert run(root, "check", "--changed", "scan.sh") == 0
     write(root, {"meizel.toml": replacement})
-    result = analyze(root, jobs=1, changed={"scan.sh"})
+    result = analyze(seat(root), jobs=1, changed={"scan.sh"})
     assert any(
         "generated role regions require" in d.message
         or (d.path == "scan.sh" and "stale" in d.message)
