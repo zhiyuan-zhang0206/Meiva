@@ -244,7 +244,9 @@ def test_a_dump_pg_restore_cannot_read_fails_with_the_base_and_the_capacity_knob
     garbage.write_bytes(b"this is not a custom-format archive")
 
     with pytest.raises(RuntimeError) as failure:
-        restore_drill.restore_dump(garbage, db_url, base=tmp_path, home=meiva_home())
+        restore_drill.restore_dump(
+            garbage, db_url, base=tmp_path, home=meiva_home(), env=dict(os.environ)
+        )
 
     message = str(failure.value)
     assert "pg_restore exited" in message

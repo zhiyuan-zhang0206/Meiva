@@ -94,7 +94,9 @@ def _ensure_restore_roles(db_url: str) -> None:
 
 # meiva:note
 # Load the custom dump into the disposable target database.
-def restore_dump(raw_dump: Path, db_url: str, *, base: Path, home: Path) -> None:
+def restore_dump(
+    raw_dump: Path, db_url: str, *, base: Path, home: Path, env: Mapping[str, str]
+) -> None:
     proc = subprocess.run(  # noqa: S603
         [
             str(pg_tool("pg_restore", home=home)),
@@ -107,6 +109,7 @@ def restore_dump(raw_dump: Path, db_url: str, *, base: Path, home: Path) -> None
         capture_output=True,
         check=False,
         timeout=backup.DUMP_TIMEOUT_S,
+        env=env,
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -218,7 +221,7 @@ def run_drill(
             config=throwaway, base=base, foreground=foreground
         ) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
-            restore_dump(raw_dump, scratch_db_url, base=base, home=tree.home)
+            restore_dump(raw_dump, scratch_db_url, base=base, home=tree.home, env=env)
             report = verify_restored_database(scratch_db_url, database_for_url=database_for_url)
     return report, time.monotonic() - started
 
