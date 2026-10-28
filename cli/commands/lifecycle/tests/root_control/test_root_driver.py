@@ -566,7 +566,7 @@ def test_mac_helper_protocol_refuses_fallback(short_tmp: Path) -> None:
     with pytest.raises(RuntimeError, match="root_stop_intent_v1"):
         driver.bring_up_root(
             launch,
-            driver.root_client(short_tmp),
+            driver.root_client(short_tmp, environ=os.environ),
             {},
             retained_children=[],
             helper=serve(silent),
@@ -650,7 +650,7 @@ def test_await_root_status_returns_the_snapshot_of_the_serving_root(short_tmp: P
 
     with scripted_root(short_tmp, [UnitRow("gateway")]):
         snapshot = driver.await_root_status(
-            driver.root_client(short_tmp), launch, timers=SYSTEM_TIMERS
+            driver.root_client(short_tmp, environ=os.environ), launch, timers=SYSTEM_TIMERS
         )
 
     assert list(root_units(snapshot)) == ["gateway"]
@@ -663,7 +663,7 @@ def test_a_root_that_never_serves_fails_with_the_tail_of_its_log(short_tmp: Path
 
     with pytest.raises(driver.RootDriverError, match="did not become ready within 0s") as failure:
         driver.await_root_status(
-            driver.root_client(short_tmp),
+            driver.root_client(short_tmp, environ=os.environ),
             launch,
             timeout_s=0.0,
             interval_s=0.01,
@@ -681,7 +681,7 @@ def test_a_root_that_exits_before_serving_fails_with_its_code_and_log(short_tmp:
     with pytest.raises(driver.RootDriverError, match=r"exited before serving \(rc=3\)") as failure:
         driver.bring_up_root(
             launch,
-            driver.root_client(short_tmp),
+            driver.root_client(short_tmp, environ=os.environ),
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
@@ -704,7 +704,7 @@ def test_a_direct_launch_retains_its_child_and_cannot_have_it_reaped_by_an_unrel
     with scripted_root(short_tmp):
         snapshot = driver.bring_up_root(
             launch,
-            driver.root_client(short_tmp),
+            driver.root_client(short_tmp, environ=os.environ),
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
@@ -737,7 +737,7 @@ def reconcile(
 ) -> dict[str, str]:
     roster = tuple(service(session) for session in requested)
     with scripted_root(home, rows):
-        client = driver.root_client(home)
+        client = driver.root_client(home, environ=os.environ)
         snapshot = driver.root_status(client)
         assert snapshot is not None
         refreshed = driver.reconcile_units(
