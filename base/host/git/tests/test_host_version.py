@@ -94,8 +94,21 @@ def test_fallback_to_pyproject_without_git(tmp_path: Path) -> None:
 def test_neither_source_raises(tmp_path: Path) -> None:
     d = tmp_path / "bare"
     d.mkdir()
-    with pytest.raises(hv.HostVersionError, match=r"no pyproject\.toml in "):
+    with pytest.raises(hv.HostVersionError) as caught:
         hv.host_version(d)
+
+    assert str(caught.value) == f"cannot determine host version: no pyproject.toml in {d}"
+    assert isinstance(caught.value.__cause__, FileNotFoundError)
+
+
+def test_a_pyproject_that_is_a_directory_is_refused_like_a_missing_one(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").mkdir()
+
+    with pytest.raises(hv.HostVersionError) as caught:
+        hv.host_version_from_repo(tmp_path)
+
+    assert str(caught.value) == (f"cannot determine host version: no pyproject.toml in {tmp_path}")
+    assert isinstance(caught.value.__cause__, IsADirectoryError)
 
 
 def test_host_version_from_repo(tmp_path: Path) -> None:
@@ -104,8 +117,11 @@ def test_host_version_from_repo(tmp_path: Path) -> None:
     )
     assert hv.host_version_from_repo(tmp_path) == "0.1.5"
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "meiva"\n', encoding="utf-8")
-    with pytest.raises(hv.HostVersionError, match=r"\[project\]\.version invalid"):
+    with pytest.raises(hv.HostVersionError) as invalid:
         hv.host_version_from_repo(tmp_path)
+    assert str(invalid.value) == (
+        f"cannot determine host version: {tmp_path / 'pyproject.toml'} [project].version invalid"
+    )
     (tmp_path / "pyproject.toml").write_text("[project\n", encoding="utf-8")
     with pytest.raises(hv.HostVersionError, match="cannot determine host version") as caught:
         hv.host_version_from_repo(tmp_path)

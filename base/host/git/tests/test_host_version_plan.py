@@ -69,6 +69,7 @@ def test_a_pyproject_that_is_not_toml_raises_the_parse_error() -> None:
         version_from_pyproject("[project\nversion = ", "/r/pyproject.toml")
 
     assert isinstance(caught.value.__cause__, tomllib.TOMLDecodeError)
+    assert str(caught.value) == f"cannot determine host version: {caught.value.__cause__}"
 
 
 @pytest.mark.parametrize(
