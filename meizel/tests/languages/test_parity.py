@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tomllib
@@ -265,3 +266,26 @@ def test_a_typescript_test_module_cannot_be_approved(make_repo: RepoFactory, nam
     root = make_repo({**VITEST_REPO, path: VITEST_SETUP, "meizel.policy.toml": approving(path)})
     [refused] = [d for d in analysis_of(root).diagnostics if d.code.value == "policy-syntax"]
     assert "a test module" in refused.message
+
+
+ROOT = Path(__file__).resolve().parents[3]
+# meiva:note
+# An approved file keeps its patches out of every baseline, so nothing else stops one more from being
+# added: the number of patch sites each holds is pinned here, and a change to it (or to the list) is a
+# deliberate edit that a reviewer reads. `python -m meizel debt approved` prints these numbers. The
+# TypeScript file needs the compiler, which is why this test is in a file of the native lane.
+APPROVED_PATCH_SITES = {
+    "cli/tests/bootstrap/child_main_dispatch.py": 2,
+    "tests/e2e/fakes/child_budget_writer.py": 2,
+    "tests/fixtures/guards.py": 7,
+    "tests/integration/child_schedule_runner.py": 2,
+    "ui/web/tests/vitest.setup.ts": 1,
+}
+
+
+def test_the_patch_sites_of_the_approved_files_are_pinned(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert run(ROOT, "debt", "approved", "--json") == 0
+    found = {item["path"]: item["sites"] for item in json.loads(capsys.readouterr().out)}
+    assert found == APPROVED_PATCH_SITES
