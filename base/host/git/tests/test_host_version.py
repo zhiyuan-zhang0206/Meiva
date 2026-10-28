@@ -94,7 +94,7 @@ def test_fallback_to_pyproject_without_git(tmp_path: Path) -> None:
 def test_neither_source_raises(tmp_path: Path) -> None:
     d = tmp_path / "bare"
     d.mkdir()
-    with pytest.raises(hv.HostVersionError):
+    with pytest.raises(hv.HostVersionError, match=r"no pyproject\.toml in "):
         hv.host_version(d)
 
 
@@ -104,5 +104,9 @@ def test_host_version_from_repo(tmp_path: Path) -> None:
     )
     assert hv.host_version_from_repo(tmp_path) == "0.1.5"
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "meiva"\n', encoding="utf-8")
-    with pytest.raises(hv.HostVersionError):
+    with pytest.raises(hv.HostVersionError, match=r"\[project\]\.version invalid"):
         hv.host_version_from_repo(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[project\n", encoding="utf-8")
+    with pytest.raises(hv.HostVersionError, match="cannot determine host version") as caught:
+        hv.host_version_from_repo(tmp_path)
+    assert caught.value.__cause__ is not None

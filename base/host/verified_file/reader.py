@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from base.host.verified_file.plan import (
+    read_limit,
     refusal_after_read,
     refusal_before_open,
     refusal_on_open,
@@ -32,7 +33,7 @@ def regular_bytes(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
         refusal = refusal_on_open(path, info, opened)
         if refusal is not None:
             raise RegularFileReadError(refusal)
-        body = stream.read(max_bytes + 1)
+        body = stream.read(read_limit(max_bytes))
         after = os.fstat(stream.fileno())
     refusal = refusal_after_read(
         path,

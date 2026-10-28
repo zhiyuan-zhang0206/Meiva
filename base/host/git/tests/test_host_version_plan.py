@@ -5,14 +5,17 @@
 
 from __future__ import annotations
 
+import tomllib
+
 import pytest
 
 from base.host.git.host_version_plan import (
-    PyprojectVersion,
+    PyprojectVersionError,
     Version,
     derived_from_log,
     display_form,
     parse_version,
+    unreadable_pyproject_message,
     version_from_pyproject,
 )
 
@@ -58,15 +61,14 @@ def test_versions_order_by_segments_and_a_prerelease_sorts_below_its_release() -
 def test_a_pyproject_with_a_version_yields_it() -> None:
     raw = '[project]\nname = "meiva"\nversion = "0.1.5"\n'
 
-    assert version_from_pyproject(raw, "/r/pyproject.toml") == PyprojectVersion("0.1.5", None)
+    assert version_from_pyproject(raw, "/r/pyproject.toml") == "0.1.5"
 
 
-def test_a_pyproject_that_is_not_toml_yields_the_parse_error() -> None:
-    parsed = version_from_pyproject("[project\nversion = ", "/r/pyproject.toml")
+def test_a_pyproject_that_is_not_toml_raises_the_parse_error() -> None:
+    with pytest.raises(PyprojectVersionError, match=r"^cannot determine host version: ") as caught:
+        version_from_pyproject("[project\nversion = ", "/r/pyproject.toml")
 
-    assert parsed.version is None
-    assert parsed.error is not None
-    assert parsed.error.startswith("cannot determine host version: ")
+    assert isinstance(caught.value.__cause__, tomllib.TOMLDecodeError)
 
 
 @pytest.mark.parametrize(
@@ -80,8 +82,17 @@ def test_a_pyproject_that_is_not_toml_yields_the_parse_error() -> None:
     ],
 )
 def test_a_pyproject_without_a_usable_version_names_the_file(raw: str) -> None:
-    assert version_from_pyproject(raw, "/r/pyproject.toml") == PyprojectVersion(
-        None, "cannot determine host version: /r/pyproject.toml [project].version invalid"
+    with pytest.raises(PyprojectVersionError) as caught:
+        version_from_pyproject(raw, "/r/pyproject.toml")
+
+    assert str(caught.value) == (
+        "cannot determine host version: /r/pyproject.toml [project].version invalid"
+    )
+
+
+def test_a_checkout_without_a_readable_pyproject_is_refused_naming_it() -> None:
+    assert unreadable_pyproject_message("/r") == (
+        "cannot determine host version: no pyproject.toml in /r"
     )
 
 
@@ -107,3 +118,39 @@ def test_git_log_output_becomes_the_derived_version_or_nothing(
 
 def test_a_derived_version_is_shown_with_its_sha() -> None:
     assert display_form(("2026.3.5", "abc1234")) == "2026.3.5+gabc1234"
+
+
+@pytest.mark.parametrize(
+    ("raw", "prerelease"),
+    [
+        ("1.2.3-RC1", "rc.1"),
+        ("1.2.3-preview4", "rc.4"),
+        ("1.2.3-pre", "rc.0"),
+        ("1.2.3-c5", "rc.5"),
+        ("1.2.3-rc-1", "rc.1"),
+        ("1.2.3-rc.1", "rc.1"),
+        ("1.2.3-dev", "dev.0"),
+        ("1.2.3-a-b", "a-b"),
+    ],
+)
+def test_prerelease_normal_forms(raw: str, prerelease: str) -> None:
+    version = parse_version(raw)
+
+    assert version is not None and version.prerelease == prerelease
+
+
+def test_an_unknown_prerelease_sorts_after_rc_and_before_the_release() -> None:
+    rc = parse_version("1.2.3-rc1")
+    custom = parse_version("1.2.3-custom")
+    same_custom = parse_version("1.2.3-custom")
+    release = parse_version("1.2.3")
+
+    assert rc is not None and custom is not None and same_custom is not None
+    assert release is not None
+    assert rc < custom < release
+    assert not custom < same_custom
+    assert Version(1, 2, 3) == Version(1, 2, 3, None)
+    assert Version(1, 2, 4) > Version(1, 2, 3)
+    assert Version(1, 3, 0) > Version(1, 2, 9)
+    assert Version(2, 0, 0) > Version(1, 9, 9)
+    assert not Version(1, 2, 3) < Version(1, 2, 3)

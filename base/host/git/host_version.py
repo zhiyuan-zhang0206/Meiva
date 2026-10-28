@@ -22,7 +22,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.host.git.gitenv import git_env
-from base.host.git.host_version_plan import derived_from_log, display_form, version_from_pyproject
+from base.host.git.host_version_plan import (
+    PyprojectVersionError,
+    derived_from_log,
+    display_form,
+    unreadable_pyproject_message,
+    version_from_pyproject,
+)
 from base.host.proc import SubprocessError, run_bounded
 
 _GIT_TIMEOUT_S = 10.0
@@ -46,11 +52,11 @@ def host_version_from_repo(repo: Path) -> str:
     try:
         raw = pyproject.read_text(encoding="utf-8")
     except OSError as e:
-        raise HostVersionError(f"cannot determine host version: no pyproject.toml in {repo}") from e
-    parsed = version_from_pyproject(raw, str(pyproject))
-    if parsed.version is None:
-        raise HostVersionError(parsed.error)
-    return parsed.version
+        raise HostVersionError(unreadable_pyproject_message(str(repo))) from e
+    try:
+        return version_from_pyproject(raw, str(pyproject))
+    except PyprojectVersionError as e:
+        raise HostVersionError(str(e)) from e
 
 
 def _derived(repo: Path) -> tuple[str, str] | None:

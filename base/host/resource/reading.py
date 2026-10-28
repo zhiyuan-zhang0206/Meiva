@@ -76,12 +76,6 @@ class ResourceSample(BaseModel):
 
 
 # meiva:note
-# Whether a host of this platform name has a battery reading to take: only macOS does.
-def battery_applies(platform: str) -> bool:
-    return platform == "darwin"
-
-
-# meiva:note
 # Parse `pmset -g batt` text into the battery fields; {} when no battery.
 #
 # Sample input (a battery-powered macOS host on AC):

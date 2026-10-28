@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from base.host.verified_file.plan import (
+    read_limit,
     refusal_after_read,
     refusal_before_open,
     refusal_on_open,
@@ -113,3 +114,14 @@ def test_a_read_that_saw_nothing_move_is_trusted() -> None:
 )
 def test_a_read_over_the_budget_or_of_a_file_that_moved_is_refused(refusal: str | None) -> None:
     assert refusal == f"{_PATH} changed while reading"
+
+
+def test_one_read_asks_for_one_byte_more_than_the_budget() -> None:
+    assert read_limit(1024) == 1025
+    assert read_limit(1) == 2
+
+
+def test_a_directory_over_the_budget_is_still_not_a_regular_file() -> None:
+    assert refusal_before_open(_PATH, _stat(stat.S_IFDIR | 0o755, size=4096), 1024) == (
+        f"{_PATH} is not a regular file"
+    )

@@ -68,28 +68,34 @@ def parse_version(raw: str) -> Version | None:
 
 
 # meiva:note
-# The `[project].version` of a pyproject text: the version, or why there is none.
-@dataclass(frozen=True)
-class PyprojectVersion:
-    version: str | None
-    error: str | None
+# No host version could be read from a pyproject: its text says why.
+class PyprojectVersionError(ValueError):
+    pass
+
+
+_NO_VERSION = "cannot determine host version: "
+
+
+# meiva:note
+# The refusal for a checkout whose pyproject.toml cannot be read.
+def unreadable_pyproject_message(repo: str) -> str:
+    return f"{_NO_VERSION}no pyproject.toml in {repo}"
 
 
 # meiva:note
 # Read `[project].version` from the text of the pyproject at `pyproject_path`. Text that is not TOML
-# or a version that is not a three-segment version is an error naming what is wrong.
-def version_from_pyproject(raw: str, pyproject_path: str) -> PyprojectVersion:
+# or a version that is not a three-segment version raises `PyprojectVersionError` naming what is
+# wrong.
+def version_from_pyproject(raw: str, pyproject_path: str) -> str:
     try:
         data: dict[str, Any] = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as e:
-        return PyprojectVersion(None, f"cannot determine host version: {e}")
+        raise PyprojectVersionError(f"{_NO_VERSION}{e}") from e
     project: dict[str, Any] | None = data.get("project")
     version = project.get("version") if project is not None else None
     if not isinstance(version, str) or parse_version(version) is None:
-        return PyprojectVersion(
-            None, f"cannot determine host version: {pyproject_path} [project].version invalid"
-        )
-    return PyprojectVersion(version, None)
+        raise PyprojectVersionError(f"{_NO_VERSION}{pyproject_path} [project].version invalid")
+    return version
 
 
 # meiva:note

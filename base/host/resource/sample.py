@@ -18,7 +18,6 @@ from base.host.resource.reading import (
     MemoryFigures,
     ResourceSample,
     assemble_sample,
-    battery_applies,
     parse_battery,
 )
 from base.native_process.os_platform import is_macos, primary_disk_path
@@ -34,7 +33,7 @@ def battery_sample(
     platform: str | None = None,
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> BatteryFields:
-    on_macos = is_macos() if platform is None else battery_applies(platform)
+    on_macos = is_macos() if platform is None else platform == "darwin"
     if not on_macos:
         return {}
     try:

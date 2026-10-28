@@ -13,7 +13,7 @@ from base.host.resource.reading import (
     MemoryFigures,
     ResourceSample,
     assemble_sample,
-    battery_applies,
+    parse_battery,
 )
 
 _GIB = 1024**3
@@ -89,8 +89,48 @@ def test_battery_fields_are_merged_into_the_sample() -> None:
     ) == (80, "ac", True, 63)
 
 
+def test_every_displayed_figure_is_rounded_to_two_places() -> None:
+    third = _GIB // 3
+    sample = assemble_sample(
+        ts=0.0,
+        cpu_pct=0.0,
+        memory=MemoryFigures(6 * _GIB, third, 10.0),
+        disk=DiskFigures(7 * _GIB + third, third, 10.0),
+        battery={},
+    )
+
+    assert sample.mem_used_gb == 5.67
+    assert sample.mem_total_gb == 6.0
+    assert sample.disk_used_gb == 7.33
+    assert sample.disk_total_gb == 7.67
+
+
 @pytest.mark.parametrize(
-    ("platform", "expected"), [("darwin", True), ("linux", False), ("", False), ("Darwin", False)]
+    ("state", "charging"),
+    [
+        ("charging", True),
+        ("finishing charge", True),
+        ("discharging", False),
+        ("charged", False),
+        ("AC attached", False),
+        ("not charging", False),
+        ("Charging", True),
+    ],
 )
-def test_only_a_macos_host_has_a_battery_to_read(platform: str, expected: bool) -> None:
-    assert battery_applies(platform) is expected
+def test_battery_states(state: str, charging: bool) -> None:
+    out = f"Now drawing from 'AC Power'\n -InternalBattery-0\t50%; {state}; 1:00 remaining"
+
+    assert parse_battery(out).get("battery_charging") is charging
+
+
+def test_an_unknown_state_and_an_unknown_source_are_omitted_not_guessed() -> None:
+    out = parse_battery(
+        "Now drawing from 'UPS Power'\n -InternalBattery-0\t50%; weird; (no estimate)"
+    )
+
+    assert out == {"battery_percent": 50}
+
+
+def test_two_digit_hours_and_minutes_are_read() -> None:
+    assert parse_battery("x 5%; charging; 10:07 remaining").get("battery_remaining_min") == 607
+    assert "battery_remaining_min" not in parse_battery("x 5%; charging; 1:7 remaining")

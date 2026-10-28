@@ -19,6 +19,13 @@ def require_budget(max_bytes: int) -> None:
 
 
 # meiva:note
+# How many bytes one read asks for: one past the budget, so a file that grew past it after it was
+# checked comes back longer than the budget and `refusal_after_read` refuses it.
+def read_limit(max_bytes: int) -> int:
+    return max_bytes + 1
+
+
+# meiva:note
 # Why an entry is not read before it is opened: it is not a regular file, or it is over the budget.
 def refusal_before_open(path: Path, info: os.stat_result, max_bytes: int) -> str | None:
     if not stat.S_ISREG(info.st_mode):
