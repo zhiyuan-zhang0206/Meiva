@@ -4,6 +4,7 @@ import nextPlugin from "@next/eslint-plugin-next";
 import reactHooks from "eslint-plugin-react-hooks";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 
+import noTestOnlyImport from "./eslint-rules/no-test-only-import.mjs";
 import sentenceCase from "./eslint-rules/sentence-case.mjs";
 import layoutPrimitive from "./eslint-rules/layout-primitive.mjs";
 import noUntranslatedUiCopy from "./eslint-rules/no-untranslated-ui-copy.mjs";
@@ -369,12 +370,24 @@ export default tseslint.config(
           "sentence-case": sentenceCase,
           "layout-primitive": layoutPrimitive,
           "no-untranslated-ui-copy": noUntranslatedUiCopy,
+          "no-test-only-import": noTestOnlyImport,
         },
       },
     },
     rules: {
       "local/sentence-case": ["error", { allow: SENTENCE_CASE_ALLOW }],
       "local/layout-primitive": "error",
+    },
+  },
+
+  // meiva:note
+  // Test-only modules stay test-only: a shipped module must not import a *-test-mock, test-support/ or *.test module. Test files and the doubles themselves are exempt, because they are the intended importers.
+  // meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.{ts,tsx}", "**/*-test-mock.{ts,tsx}", "**/test-support/**"],
+    rules: {
+      "local/no-test-only-import": "error",
     },
   },
 

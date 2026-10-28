@@ -1,28 +1,28 @@
 import { render } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
-import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
-} from "@/components/content/python-code";
+import { createLazyChunk } from "@/components/content/lazy-chunk";
+import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { CodeHighlighterPreloader } from "./code-highlighter-preloader";
 
-const preload = vi.fn(() => new Promise<never>(() => undefined));
-
-beforeEach(() => {
-  preload.mockClear();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(preload);
-});
+function pendingChunk() {
+  const importModule = vi.fn(() => new Promise<never>(() => undefined));
+  return {
+    importModule,
+    chunk: createLazyChunk({
+      name: "test-highlighter",
+      importModule,
+    }),
+  };
+}
 
 afterEach(() => {
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 it("prefetches the highlighter once requestIdleCallback fires, and cancels it on unmount", () => {
+  const { importModule, chunk } = pendingChunk();
   let idleCallback: (() => void) | undefined;
   const requestIdleCallback = vi.fn((cb: () => void) => {
     idleCallback = cb;
@@ -32,14 +32,18 @@ it("prefetches the highlighter once requestIdleCallback fires, and cancels it on
   vi.stubGlobal("requestIdleCallback", requestIdleCallback);
   vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
 
-  const { unmount } = render(<CodeHighlighterPreloader />);
+  const { unmount } = render(
+    <PythonCodeHighlighterProvider value={chunk}>
+      <CodeHighlighterPreloader />
+    </PythonCodeHighlighterProvider>,
+  );
   expect(requestIdleCallback).toHaveBeenCalledTimes(1);
-  expect(preload).not.toHaveBeenCalled();
+  expect(importModule).not.toHaveBeenCalled();
 
   // Idle callback fires only once the browser actually goes idle — not at
   // mount time.
   idleCallback?.();
-  expect(preload).toHaveBeenCalledTimes(1);
+  expect(importModule).toHaveBeenCalledTimes(1);
 
   unmount();
   expect(cancelIdleCallback).toHaveBeenCalledWith(7);
@@ -48,10 +52,15 @@ it("prefetches the highlighter once requestIdleCallback fires, and cancels it on
 it("falls back to a setTimeout delay when requestIdleCallback doesn't exist", () => {
   vi.useFakeTimers();
   vi.stubGlobal("requestIdleCallback", undefined);
+  const { importModule, chunk } = pendingChunk();
 
-  render(<CodeHighlighterPreloader />);
-  expect(preload).not.toHaveBeenCalled();
+  render(
+    <PythonCodeHighlighterProvider value={chunk}>
+      <CodeHighlighterPreloader />
+    </PythonCodeHighlighterProvider>,
+  );
+  expect(importModule).not.toHaveBeenCalled();
 
   vi.advanceTimersByTime(2000);
-  expect(preload).toHaveBeenCalledTimes(1);
+  expect(importModule).toHaveBeenCalledTimes(1);
 });

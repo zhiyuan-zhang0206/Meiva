@@ -17,23 +17,24 @@
 // requestIdleCallback at all, hence the setTimeout fallback.
 import { useEffect } from "react";
 
-import { preloadPythonCodeHighlighter } from "@/components/content/python-code";
+import { usePythonCodeHighlighter } from "@/components/content/python-code";
 
 const IDLE_TIMEOUT_MS = 4000;
 const FALLBACK_DELAY_MS = 2000;
 
 export function CodeHighlighterPreloader() {
+  const highlighter = usePythonCodeHighlighter();
   useEffect(() => {
     if (typeof window.requestIdleCallback === "function") {
-      const handle = window.requestIdleCallback(() => void preloadPythonCodeHighlighter(), {
+      const handle = window.requestIdleCallback(() => void highlighter.preload(), {
         timeout: IDLE_TIMEOUT_MS,
       });
       return () => window.cancelIdleCallback(handle);
     }
 
-    const timer = window.setTimeout(() => void preloadPythonCodeHighlighter(), FALLBACK_DELAY_MS);
+    const timer = window.setTimeout(() => void highlighter.preload(), FALLBACK_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [highlighter]);
 
   return null;
 }
