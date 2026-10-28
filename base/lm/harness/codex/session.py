@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
+from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
@@ -83,6 +84,17 @@ from base.lm.harness.process import (
 CANCEL_POLL_SECONDS = 0.02
 
 
+# meiva:note
+# The CLI this session spawns, resolved through the directories a harness installs into as well as
+# PATH: the session environment it is handed need not carry a PATH at all, and a bare name would
+# then resolve against the OS default (#5491).
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def resolved_binary(
+    config: CodexConfig, environ: Mapping[str, str], *, bin_dirs: Sequence[str] | None = None
+) -> str:
+    return resolve_harness_binary(config.binary, path_env=environ.get("PATH"), bin_dirs=bin_dirs)
+
+
 class CodexSession(BaseHarnessSession[CodexConfig]):
     def __init__(
         self,
@@ -102,7 +114,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             clock=clock,
         )
         self._transport: AppServerTransport = transport or StdioAppServer(
-            config.command(config.resolved_binary(environ)),
+            config.command(resolved_binary(config, environ)),
             cwd=config.cwd,
             environ=build_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
