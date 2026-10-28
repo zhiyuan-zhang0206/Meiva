@@ -35,6 +35,8 @@ def _scoped_repo(make_repo: RepoFactory, *, scopes: str, declare: bool) -> Path:
             f"{SCOPED}/reading.ts": READS_THE_CLOCK_TS,
             f"{SCOPED}/meizel.toml": 'exports = ["reading.ts"]\n',
             f"{OUT_OF_SCOPE}/reading.ts": READS_THE_CLOCK_TS,
+            f"{OUT_OF_SCOPE}/deep/reading.ts": READS_THE_CLOCK_TS,
+            f"{OUT_OF_SCOPE}/deep/meizel.toml": 'exports = ["reading.ts"]\n',
             f"{OUT_OF_SCOPE}/meizel.toml": manifest,
             "meizel.policy.toml": scopes,
         }
@@ -92,3 +94,59 @@ def test_a_python_directory_is_judged_without_any_scope_declaration(
     )
     assert run(root, "check") == 0
     assert "warning" not in capsys.readouterr().err
+
+
+def test_a_file_target_in_the_warned_directory_reports_it(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _scoped_repo(make_repo, scopes=POLICY_JUDGING_LIB, declare=True)
+    assert run(root, "check", f"{OUT_OF_SCOPE}/reading.ts") == 0
+    assert "exempt nothing" in capsys.readouterr().err
+    assert run(root, "check", f"{SCOPED}/reading.ts") == 0
+    assert "exempt nothing" not in capsys.readouterr().err
+
+
+# meiva:note
+# Only a *file* target stands in for the manifest that judges it. A directory target already says
+# which directories were asked about, so a parent's inert table stays out of a run about a
+# subdirectory -- the table names files directly in its own directory, not in that one.
+def test_a_subdirectory_target_does_not_report_its_parents_table(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _scoped_repo(make_repo, scopes=POLICY_JUDGING_LIB, declare=True)
+    assert run(root, "check", f"{OUT_OF_SCOPE}/deep") == 0
+    assert "exempt nothing" not in capsys.readouterr().err
+    assert run(root, "check", f"{OUT_OF_SCOPE}/deep/reading.ts") == 0
+    assert "exempt nothing" not in capsys.readouterr().err
+    assert run(root, "check", OUT_OF_SCOPE) == 0
+    assert "exempt nothing" in capsys.readouterr().err
+
+
+# meiva:note
+# The remedy must not send an author down a route that cannot work. A `[roots]` key has to name a
+# Python or TypeScript file, so the reachable hole with no way out is a directory whose only such
+# file is a `.d.ts` declaration: the checker reads source, never a declaration, so a scope entry
+# cannot help and deleting the entries is the only repair.
+DECLARES_A_CONSTANT = "export declare const PORT: number;\n"
+DECLARATION_ROOT_TABLE = (
+    '[roots]\n"types.d.ts" = { kinds = ["clock"], why = "stamps a page event" }\n'
+)
+
+
+def test_a_declaration_only_directory_is_told_to_delete_the_entries(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            f"{SCOPED}/reading.ts": READS_THE_CLOCK_TS,
+            f"{SCOPED}/meizel.toml": 'exports = ["reading.ts"]\n',
+            f"{OUT_OF_SCOPE}/types.d.ts": DECLARES_A_CONSTANT,
+            f"{OUT_OF_SCOPE}/meizel.toml": DECLARATION_ROOT_TABLE,
+            "meizel.policy.toml": POLICY_JUDGING_LIB,
+        }
+    )
+    assert run(root, "check") == 0
+    err = capsys.readouterr().err
+    assert f"meizel: warning: {OUT_OF_SCOPE}/meizel.toml:2:" in err
+    assert err.index("delete the entries") < err.index("to the scopes")
+    assert "unless a `.d.ts` declaration is all it names" in err

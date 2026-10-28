@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter
+from collections.abc import Collection
 from pathlib import Path
 
 from meizel.contracts import enumerations
@@ -38,6 +39,17 @@ def _relative_target(root: Path, base: Path, raw: str) -> str:
 
 def _within(path: str, targets: list[str]) -> bool:
     return any(not t or path == t or path.startswith(f"{t}/") for t in targets)
+
+
+# meiva:note
+# Whether a warning about `manifest` belongs to the run the caller asked for: the manifest sits at
+# or under a target, or a target names a file in the manifest's own directory -- that file's
+# manifest is the one being judged, so the table's warning is about the run that was asked for.
+def _reports(manifest: str, targets: list[str], directories: Collection[str]) -> bool:
+    if not targets or _within(manifest, targets):
+        return True
+    held = manifest.rpartition("/")[0]
+    return any(t and t not in directories and t.rpartition("/")[0] == held for t in targets)
 
 
 def _select(analysis: Analysis, targets: list[str]) -> list[Diagnostic]:
@@ -80,9 +92,10 @@ def _run_check(
     print(analysis.coverage_line())
     # meiva:note
     # Warnings report a declaration the run cannot honour; they never change the verdict, because
-    # no rule is violated by writing a table the policy does not reach.
+    # no rule is violated by writing a table the policy does not reach. A file target names a file
+    # whose directory the table claims to govern, so it reports that directory's warning too.
     for manifest, warning in analysis.inert:
-        if not targets or _within(manifest, targets):
+        if _reports(manifest, targets, known.dirs):
             print(warning, file=sys.stderr)
     if diagnostics:
         _print_verdict(diagnostics, limit)

@@ -28,7 +28,9 @@ repository can narrow selection in its tracked `meizel.policy.toml`:
   A `[roots]` table written in a directory outside the scopes exempts nothing —
   the exemption is read when that file's own reads are judged, and no file there
   is — so `check` reports each such table as a warning naming the scopes that
-  were selected instead of passing over it in silence.
+  were selected instead of passing over it in silence. Its remedy deletes the
+  entries first: a `.d.ts` declaration it names is a dependency target, never a
+  rule subject, so no scope entry can make it readable.
 - `extensions` can narrow the supported extensions.
 
 The nearest `tsconfig.json`, its `extends`, `paths`, module-resolution mode and

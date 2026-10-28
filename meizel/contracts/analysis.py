@@ -693,7 +693,7 @@ def _inert_roots(
     source_dirs = {
         path.rpartition("/")[0] for path in tracked if path.rsplit("/", 1)[-1] != "meizel.toml"
     }
-    covered = ", ".join(scopes) if scopes else "no directory"
+    covered = ", ".join(scopes) if scopes else "none declared"
     found: list[tuple[str, str]] = []
     for directory, manifest in sorted(manifests.items()):
         if not manifest.roots or directory in judged or directory not in source_dirs:
@@ -705,8 +705,10 @@ def _inert_roots(
             (
                 manifest_path(directory),
                 f"meizel: warning: {manifest_path(directory)}:{line}: [roots] {names} exempt "
-                f"nothing: this run analyses no file in {where}, because [typescript].scopes "
-                f"covers {covered} -- add the directory to [typescript].scopes, or delete the entries",
+                f"nothing: this run reads Python and the files inside [typescript].scopes "
+                f"({covered}); no file directly in {where} is judged -- delete the entries, or "
+                f"add {where} to the scopes so the TypeScript it names is read, unless a "
+                f"`.d.ts` declaration is all it names, which no scope can make readable",
             )
         )
     return found
