@@ -33,6 +33,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -184,7 +185,7 @@ async def _serve(
 # the deployed daemon would cancel and report; it fails the test that left it.
 async def _drain(daemon: _Daemon) -> None:
     daemon.server.close()
-    await in_flight.drain(requests=daemon.requests, workers=daemon.workers)
+    await in_flight.drain(requests=daemon.requests, workers=daemon.workers, timers=SYSTEM_TIMERS)
     await stop_health_server(daemon.server)
     if daemon.requests or daemon.workers:
         raise RuntimeError(
