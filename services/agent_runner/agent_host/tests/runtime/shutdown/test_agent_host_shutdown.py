@@ -11,6 +11,7 @@ with a default-executor job mid-flight.
 
 import asyncio
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -226,7 +227,9 @@ def _run_shutdown(failure: str, *, home: Path) -> None:
         )
 
     pidfile = daemon.pidfile_path()
-    assert daemon.acquire_pidfile(pidfile, "services.agent_runner.agent_host.daemon")
+    assert daemon.acquire_pidfile(
+        pidfile, "services.agent_runner.agent_host.daemon", pid=os.getpid()
+    )
     workload = _PoolRecorder(events, pidfile=pidfile, record_close=True)
     control = _PoolRecorder(events, pidfile=pidfile, record_close=False)
     installation = _InstallationHandle(events)

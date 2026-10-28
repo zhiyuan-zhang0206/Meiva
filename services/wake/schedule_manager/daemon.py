@@ -27,6 +27,7 @@ Usage:
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 import time
@@ -169,7 +170,9 @@ async def run(
     if refusal is not None:
         raise RuntimeError(f"schedule supervision refused: {refusal}")
     if _is_running(process_config, runtime=runtime) or not acquire_pidfile(
-        _pidfile(process_config, runtime=runtime), "services.wake.schedule_manager.daemon"
+        _pidfile(process_config, runtime=runtime),
+        "services.wake.schedule_manager.daemon",
+        pid=os.getpid(),
     ):
         _log.info(
             "[schedule-manager] daemon already running (pidfile=%s), exiting",

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import os
 import signal
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,10 +75,15 @@ class SupervisorConfig:
 
 # meiva:note
 # Attempt the captured leader's group only while that leader still lives.
+#
+# The group signal is the right one only for a leader that leads a group of its own: a leader
+# inside *our* group would take this process (and every sibling) down with it, so its pid is
+# signalled alone. `own_group` is that fact, handed in by whoever runs in this process.
 def signal_owned(
     identity: OwnedProcess,
     *,
     force: bool,
+    own_group: int,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
 ) -> bool:
     if not identity.live():
@@ -89,7 +93,7 @@ def signal_owned(
         group = process_control.getpgid(identity.pid)
         if not identity.live():
             return False
-        if group == identity.pid and group != os.getpgrp():
+        if group == identity.pid and group != own_group:
             process_control.killpg(group, signum)
         else:
             process_control.kill(identity.pid, signum)
@@ -104,6 +108,7 @@ class StoppingMixin:
     _clock: Clock
     _config: SupervisorConfig
     _process_control: ProcessControl
+    _root_pid: int
 
     async def _stop_unit(
         self, runtime: UnitRuntime, *, force: bool = False, escalate: bool = True
@@ -229,6 +234,13 @@ class StoppingMixin:
         declared = runtime.manifest.stop_timeout_s
         return self._config.stop_timeout_s if declared is None else declared
 
+    # meiva:note
+    # The group this process runs in, asked of the same port that signals its children: a leader
+    # leading a group of its own may be stopped as a group, a leader inside ours only as a single
+    # pid, because a group signal there would take this process down with it.
+    def _own_group(self) -> int:
+        return self._process_control.getpgid(self._root_pid)
+
     def _signal_owned(
         self,
         identity: OwnedProcess,
@@ -238,6 +250,7 @@ class StoppingMixin:
         return signal_owned(
             identity,
             force=force,
+            own_group=self._own_group(),
             process_control=self._process_control,
         )
 

@@ -192,9 +192,12 @@ def pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return endpoint(config, runtime=runtime).pidfile
 
 
-def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+# meiva:note
+# Claim the daemon's pidfile for the process that runs the daemon: the entry reads its own pid
+# and hands it here, because a pidfile records *that* process, not this module.
+def write_pidfile(config: ConfigBoot, *, runtime: Path, pid: int) -> None:
     if not pidfile_operations.acquire_pidfile(
-        pidfile(config, runtime=runtime), "services.agent_runner.agent_ops.daemon"
+        pidfile(config, runtime=runtime), "services.agent_runner.agent_ops.daemon", pid=pid
     ):
         _log.info(
             "[agent_ops] daemon already running (pidfile=%s), exiting",

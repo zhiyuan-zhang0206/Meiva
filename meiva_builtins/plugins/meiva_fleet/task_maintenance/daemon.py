@@ -549,7 +549,7 @@ async def run(
         sys.exit(1)
 
     # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
-    if not acquire_pidfile(endpoint.pidfile, _DAEMON_MODULE):
+    if not acquire_pidfile(endpoint.pidfile, _DAEMON_MODULE, pid=os.getpid()):
         _log.info(
             "[task_maintenance] daemon already running (pidfile=%s), exiting", endpoint.pidfile
         )

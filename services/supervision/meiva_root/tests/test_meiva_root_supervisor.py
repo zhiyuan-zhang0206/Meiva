@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import signal
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -254,8 +255,8 @@ def test_changed_birth_never_signals_a_numeric_group() -> None:
         )
         pc = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
 
-        signal_owned(stale, force=False, process_control=pc)
-        signal_owned(stale, force=True, process_control=pc)
+        signal_owned(stale, force=False, own_group=os.getpgrp(), process_control=pc)
+        signal_owned(stale, force=True, own_group=os.getpgrp(), process_control=pc)
         assert pc.signals == []
         assert stranger.poll() is None
     finally:
@@ -276,6 +277,45 @@ async def test_obsolete_custody_records_do_not_gate_ordinary_start(tmp_path: Pat
         await owner.shutdown()
 
 
+# meiva:note
+# A leader that leads *our* group must be signalled alone: killing its group would take this
+# process and every sibling unit down with it. The fake answers the same pid for the leader's
+# group and is handed that pid as this process's group, so the two readings agree — which is the
+# one state where a group signal is wrong.
+# meiva:note
+# The stop path asks the port that signals the children for this process's own group, rather
+# than reading it from the runtime: the fake answers a group this process is not in, and that
+# number is what the guard must see.
+def test_the_stop_path_takes_our_group_from_the_port(tmp_path: Path) -> None:
+    from base.native_process.tests.fake_process_control import FakeProcessControl
+
+    owner = Supervisor(
+        UnitRegistry([]),
+        run_dir=tmp_path,
+        clock=system_clock(),
+        root_pid=4242,
+        process_control=FakeProcessControl(groups={4242: 7}),
+    )
+    assert owner._own_group() == 7
+
+
+def test_a_leader_inside_our_own_group_is_signalled_alone() -> None:
+    from base.native_process.tests.fake_process_control import FakeProcessControl, Signalled
+    from services.supervision.meiva_root.stopping import signal_owned
+
+    # meiva:note
+    # A fixed sleeper spawned into *this* process group, like a unit that did not get its own.
+    leader = subprocess.Popen([sys.executable, str(_CHILD), "sleep"])  # noqa: S603
+    try:
+        identity = OwnedProcess.capture(psutil.Process(leader.pid))
+        pc = FakeProcessControl(groups={leader.pid: leader.pid})
+        assert signal_owned(identity, force=False, own_group=leader.pid, process_control=pc) is True
+        assert pc.signals == [Signalled("kill", leader.pid, signal.SIGTERM)]
+    finally:
+        leader.kill()
+        leader.wait(timeout=5)
+
+
 def test_concrete_group_signal_error_is_not_hidden() -> None:
     from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
     from base.native_process.tests.fake_process_control import FakeProcessControl
@@ -292,7 +332,7 @@ def test_concrete_group_signal_error_is_not_hidden() -> None:
         pc.refuse(child.pid, PermissionError("known group signal denied"))
 
         with pytest.raises(PermissionError, match="known group signal denied"):
-            signal_owned(identity, force=False, process_control=pc)
+            signal_owned(identity, force=False, own_group=os.getpgrp(), process_control=pc)
         assert child.poll() is None
     finally:
         child.kill()

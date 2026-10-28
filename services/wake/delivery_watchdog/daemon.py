@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import random
 import signal
 import sys
@@ -196,7 +197,7 @@ def _alert_stalled(
 
 def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
-        _pidfile(config, runtime=runtime), "services.wake.delivery_watchdog.daemon"
+        _pidfile(config, runtime=runtime), "services.wake.delivery_watchdog.daemon", pid=os.getpid()
     ):
         _log.info(
             "[delivery_watchdog] daemon already running (pidfile=%s), exiting",

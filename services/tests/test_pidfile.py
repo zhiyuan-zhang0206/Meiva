@@ -86,10 +86,13 @@ def test_daemon_guard_checks_only_current_pidfile(
         holder.wait(timeout=5)
 
 
-def test_acquire_writes_own_pid(tmp_path: Path) -> None:
+# meiva:note
+# The pidfile records the pid the claiming entry hands in, not one this module reads: the
+# number below belongs to no live process, so nothing but the written contents can match it.
+def test_acquire_writes_the_pid_it_is_given(tmp_path: Path) -> None:
     pidfile = tmp_path / "svc.pid"
-    assert acquire_pidfile(pidfile, "svc.daemon") is True
-    assert pidfile.read_text().strip() == str(os.getpid())
+    assert acquire_pidfile(pidfile, "svc.daemon", pid=4242) is True
+    assert pidfile.read_text().strip() == "4242"
 
 
 def test_acquire_refuses_live_instance(tmp_path: Path) -> None:
@@ -97,8 +100,8 @@ def test_acquire_refuses_live_instance(tmp_path: Path) -> None:
     cmdline = process_cmdline(os.getpid())
     assert cmdline
     identity = " ".join(cmdline)
-    assert acquire_pidfile(pidfile, identity) is True
-    assert acquire_pidfile(pidfile, identity) is False
+    assert acquire_pidfile(pidfile, identity, pid=os.getpid()) is True
+    assert acquire_pidfile(pidfile, identity, pid=os.getpid()) is False
     assert pidfile.read_text().strip() == str(os.getpid())
 
 
@@ -106,7 +109,7 @@ def test_acquire_reclaims_stale_dead_pid(tmp_path: Path) -> None:
     pidfile = tmp_path / "svc.pid"
     pidfile.write_text("99999999\n")
     assert pidfile_holds_daemon(pidfile, "svc.daemon") is False
-    assert acquire_pidfile(pidfile, "svc.daemon") is True
+    assert acquire_pidfile(pidfile, "svc.daemon", pid=os.getpid()) is True
     assert pidfile.read_text().strip() == str(os.getpid())
 
 
@@ -114,7 +117,7 @@ def test_acquire_reclaims_recycled_pid(tmp_path: Path) -> None:
     pidfile = tmp_path / "svc.pid"
     pidfile.write_text(f"{os.getpid()}\n")
     assert pidfile_holds_daemon(pidfile, "svc.daemon") is False
-    assert acquire_pidfile(pidfile, "svc.daemon") is True
+    assert acquire_pidfile(pidfile, "svc.daemon", pid=os.getpid()) is True
 
 
 def test_pidfile_holds_daemon_false_when_argv_mismatch(tmp_path: Path) -> None:

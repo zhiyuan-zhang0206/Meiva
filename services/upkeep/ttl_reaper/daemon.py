@@ -24,6 +24,7 @@ Usage:
 
 import asyncio
 import logging
+import os
 import random
 import signal
 import sys
@@ -137,7 +138,9 @@ async def run(
 ) -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> loops."""
     if _is_running(process_config, runtime=runtime) or not acquire_pidfile(
-        _pidfile(process_config, runtime=runtime), "services.upkeep.ttl_reaper.daemon"
+        _pidfile(process_config, runtime=runtime),
+        "services.upkeep.ttl_reaper.daemon",
+        pid=os.getpid(),
     ):
         _log.info(
             "[ttl-reaper] daemon already running (pidfile=%s), exiting",

@@ -49,7 +49,10 @@ def pidfile_holds_daemon(path: Path, module: str) -> bool:
     return module in " ".join(cmdline)
 
 
-def acquire_pidfile(path: Path, module: str) -> bool:
+# meiva:note
+# The pid is the claiming entry's fact, not this module's: a pidfile records the process that
+# runs the daemon, so the entry reads its own pid once and hands it here.
+def acquire_pidfile(path: Path, module: str, *, pid: int) -> bool:
     """Atomically claim ``path`` for the current process as daemon ``module``.
 
     Returns True when this process now owns the pidfile; False when another
@@ -69,7 +72,7 @@ def acquire_pidfile(path: Path, module: str) -> bool:
                 path.unlink()
             continue
         try:
-            os.write(fd, f"{os.getpid()}\n".encode())
+            os.write(fd, f"{pid}\n".encode())
         finally:
             os.close(fd)
         return True

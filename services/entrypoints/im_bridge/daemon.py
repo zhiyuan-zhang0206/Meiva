@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import signal
 import sys
@@ -92,7 +93,7 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
-        _pidfile(config, runtime=runtime), "services.entrypoints.im_bridge.daemon"
+        _pidfile(config, runtime=runtime), "services.entrypoints.im_bridge.daemon", pid=os.getpid()
     ):
         _log.info(
             "[im_bridge] daemon already running (pidfile=%s), exiting",

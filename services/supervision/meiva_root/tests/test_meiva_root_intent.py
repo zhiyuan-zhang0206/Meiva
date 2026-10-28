@@ -310,7 +310,10 @@ async def test_restart_down_abort_records_stage_down_and_retry_settles(
         UnitRegistry([unit]),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.4, stop_kill_reap_s=0.1),
-        process_control=FakeProcessControl(),
+        # meiva:note
+        # The supervisor reads its own group through this port when it is built; the fake
+        # table answers for the process running the test, as the real one would.
+        process_control=FakeProcessControl(groups={os.getpid(): os.getpgrp()}),
         clock=system_clock(),
         root_pid=os.getpid(),
     )

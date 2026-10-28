@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import sys
 
@@ -513,7 +514,7 @@ async def serve_ops_daemon(
             boot.pidfile(config, runtime=runtime_dir),
         )
         sys.exit(1)
-    boot.write_pidfile(config, runtime=runtime_dir)
+    boot.write_pidfile(config, runtime=runtime_dir, pid=os.getpid())
 
     dispatch_sem = asyncio.Semaphore(config.view.services.ops_concurrency)
 

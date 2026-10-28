@@ -511,7 +511,7 @@ async def run(
             resources.pidfile(process_config, runtime=runtime),
         )
         sys.exit(1)
-    resources.write_pidfile(process_config, runtime=runtime)
+    resources.write_pidfile(process_config, runtime=runtime, pid=os.getpid())
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
