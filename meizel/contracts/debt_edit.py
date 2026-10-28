@@ -14,7 +14,7 @@ from meizel.contracts.ledger import resolve_debt_conflicts, tally
 from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
-from meizel.graph.universe import EditPlan, GitRepo
+from meizel.graph.universe import Checkout, EditPlan
 
 __all__ = ["plan_baseline_write", "prune", "record", "resolve", "write_baseline"]
 
@@ -35,7 +35,7 @@ def _copy(table: DebtTable) -> DebtTable:
 
 
 def plan_baseline_write(
-    repo: GitRepo, owner: str, before: str, table: DebtTable
+    repo: Checkout, owner: str, before: str, table: DebtTable
 ) -> tuple[EditPlan, str | None]:
     rel = manifest_path(owner)
     path = repo.root / rel
@@ -49,15 +49,15 @@ def plan_baseline_write(
     return EditPlan(deletes=(path,)), rel
 
 
-def _manifest_text(repo: GitRepo, owner: str) -> str:
+def _manifest_text(repo: Checkout, owner: str) -> str:
     return repo.load_text(manifest_path(owner), default="")
 
 
-def write_baseline(repo: GitRepo, owner: str, table: DebtTable) -> str | None:
+def write_baseline(repo: Checkout, owner: str, table: DebtTable) -> str | None:
     """Rewrite the `[debt]` tables of `owner`'s manifest; the path written, or None if unchanged."""
     before = _manifest_text(repo, owner)
     plan, changed = plan_baseline_write(repo, owner, before, table)
-    plan.apply()
+    repo.apply_plan(plan)
     return changed
 
 
@@ -93,7 +93,7 @@ def _recordable(analysis: Analysis, targets: list[str]) -> list[Diagnostic]:
 
 
 def record(
-    repo: GitRepo, targets: list[str], jobs: int | None = None
+    repo: Checkout, targets: list[str], jobs: int | None = None
 ) -> tuple[list[str], list[str], list[Diagnostic]]:
     """Record the violations under `targets`.
 
@@ -131,7 +131,7 @@ def record(
     return written, created, unrecordable
 
 
-def prune(repo: GitRepo, jobs: int | None = None) -> list[str]:
+def prune(repo: Checkout, jobs: int | None = None) -> list[str]:
     """Lower every baseline to what still occurs; returns a line per manifest rewritten."""
     analysis = analyze(repo.universe(), jobs=jobs)
     _refuse_malformed(analysis, "prune")
@@ -163,7 +163,7 @@ def prune(repo: GitRepo, jobs: int | None = None) -> list[str]:
 # between two authors: both sides are kept, the lower count wins where both changed, and `prune`
 # settles the rest. A conflict outside the debt tables, or a file that has none, refuses the whole
 # command and writes nothing.
-def resolve(repo: GitRepo, paths: list[str], jobs: int | None = None) -> list[str]:
+def resolve(repo: Checkout, paths: list[str], jobs: int | None = None) -> list[str]:
     plans: dict[Path, str] = {}
     problems: list[str] = []
     for rel in paths:
@@ -177,7 +177,7 @@ def resolve(repo: GitRepo, paths: list[str], jobs: int | None = None) -> list[st
             plans[repo.root / rel] = resolved
     if problems:
         raise MeizelError("\n".join(problems))
-    EditPlan(writes=plans).apply()
+    repo.apply_plan(EditPlan(writes=plans))
     lines = [
         f"meizel: resolved {rel}"
         for rel in sorted(path.relative_to(repo.root).as_posix() for path in plans)

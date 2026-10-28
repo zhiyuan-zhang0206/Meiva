@@ -22,7 +22,7 @@ from meizel.contracts.debt import (
 from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
+from meizel.graph.universe import MANIFEST, Checkout, Universe, parent_of
 
 __all__ = [
     "Baselines",
@@ -54,7 +54,7 @@ def read_baselines(universe: Universe, texts: Mapping[str, str] | None = None) -
     found: Baselines = {}
     for directory in sorted(universe.manifest_dirs):
         path = manifest_path(directory)
-        raw = texts[path] if texts is not None and path in texts else universe.load_text(path)
+        raw = texts[path] if texts is not None and path in texts else universe.repo.load_text(path)
         table = _parse(raw, path)
         if table:
             found[directory] = table
@@ -134,7 +134,7 @@ def _text(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def summarize(repo: GitRepo, *, as_json: bool) -> str:
+def summarize(repo: Checkout, *, as_json: bool) -> str:
     data = _report(repo.universe())
     return json.dumps(data, indent=2, sort_keys=True) if as_json else _text(data)
 
@@ -166,7 +166,7 @@ def _totals_in(text: str) -> Counter[str]:
     return counts
 
 
-def _manifest_texts_at(repo: GitRepo, ref: str) -> list[str]:
+def _manifest_texts_at(repo: Checkout, ref: str) -> list[str]:
     """The text of every `meizel.toml` at a git ref."""
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
@@ -189,14 +189,14 @@ def _manifest_texts_at(repo: GitRepo, ref: str) -> list[str]:
     return texts
 
 
-def totals_at(repo: GitRepo, ref: str) -> Counter[str]:
+def totals_at(repo: Checkout, ref: str) -> Counter[str]:
     totals: Counter[str] = Counter()
     for text in _manifest_texts_at(repo, ref):
         totals.update(_totals_in(text))
     return totals
 
 
-def changed_under(repo: GitRepo, ref: str, pathspecs: list[str]) -> list[str]:
+def changed_under(repo: Checkout, ref: str, pathspecs: list[str]) -> list[str]:
     """The files that differ between `ref` and the working tree under the given git pathspecs.
 
     No pathspecs lists every changed file.
@@ -207,7 +207,7 @@ def changed_under(repo: GitRepo, ref: str, pathspecs: list[str]) -> list[str]:
     return [p for p in listing.decode().split("\0") if p]
 
 
-def diff(repo: GitRepo, ref: str) -> tuple[list[str], bool]:
+def diff(repo: Checkout, ref: str) -> tuple[list[str], bool]:
     """Per-code totals against `ref`, and whether any code grew.
 
     Totals, not directories, are compared: debt that moves with a file between directories
@@ -286,7 +286,7 @@ def _grouped(
     return groups
 
 
-def by_target(repo: GitRepo, ref: str, prefixes: list[str], depth: int) -> list[str]:
+def by_target(repo: Checkout, ref: str, prefixes: list[str], depth: int) -> list[str]:
     """Recorded patch debt per target group against `ref`: what a change paid down or added.
 
     Counts come from the baselines, keyed by the target of each entry, so debt that moves with
