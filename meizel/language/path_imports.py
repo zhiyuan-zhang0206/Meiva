@@ -1,16 +1,31 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+from dataclasses import dataclass
 
 from meizel import allowances, lint_common
 
-__all__ = ["FIX", "SECTION", "Sites", "measure"]
+__all__ = ["FIX", "SECTION", "Scopes", "Sites", "measure"]
 
-_POLICY = allowances.load(Path(__file__).resolve().parents[2])
 SECTION = "path_imports"
-_SCOPE = _POLICY.names("path-imports", "scope")
-_SKILLS_SCOPE = _POLICY.names("path-imports", "skills-scope")
+
+
+# meiva:note
+# The directories this rule governs, as one policy states them: the caller loads the policy (or
+# the checker hands over the one the run admitted), and nothing here reads a repository.
+@dataclass(frozen=True, slots=True)
+class Scopes:
+    scope: tuple[str, ...]
+    skills: tuple[str, ...]
+
+    @classmethod
+    def of(cls, policy: allowances.Policy) -> Scopes:
+        return cls(
+            tuple(policy.names("path-imports", "scope")),
+            tuple(policy.names("path-imports", "skills-scope")),
+        )
+
+
 FIX = (
     "move the shared code into a governed package (or the plugin's own "
     "package) and import it normally; keep the script a thin entry point"
@@ -216,8 +231,8 @@ def _guard_target(rel_path: str, expr: ast.expr) -> list[str] | None:
     return file_dir_parts[: len(file_dir_parts) - up] + appended
 
 
-def _is_within_own_skill(rel_path: str, target_parts: list[str]) -> bool:
-    if not any(rel_path.startswith(prefix) for prefix in _SKILLS_SCOPE):
+def _is_within_own_skill(rel_path: str, target_parts: list[str], skills: tuple[str, ...]) -> bool:
+    if not any(rel_path.startswith(prefix) for prefix in skills):
         return False
     file_parts = rel_path.split("/")
     if len(file_parts) < 4:
@@ -226,7 +241,7 @@ def _is_within_own_skill(rel_path: str, target_parts: list[str]) -> bool:
     return target_parts[: len(skill_root)] == skill_root
 
 
-def _is_allowed_skill_guard(rel_path: str, call: ast.Call) -> bool:
+def _is_allowed_skill_guard(rel_path: str, call: ast.Call, skills: tuple[str, ...]) -> bool:
     """True for a `sys.path.insert(0, <file-derived>)` / `.append(<file-derived>)`
     call at `rel_path` whose argument resolves to a directory inside the same
     top-level skill. Only these two mutators are ever eligible — `extend` /
@@ -246,11 +261,11 @@ def _is_allowed_skill_guard(rel_path: str, call: ast.Call) -> bool:
     else:
         return False
     target = _guard_target(rel_path, arg)
-    return target is not None and _is_within_own_skill(rel_path, target)
+    return target is not None and _is_within_own_skill(rel_path, target, skills)
 
 
-def measure(tree: ast.Module, rel_path: str) -> Sites:
-    if not any(rel_path.startswith(prefix) for prefix in _SCOPE) or lint_common.is_test_path(
+def measure(tree: ast.Module, rel_path: str, scopes: Scopes) -> Sites:
+    if not any(rel_path.startswith(prefix) for prefix in scopes.scope) or lint_common.is_test_path(
         rel_path
     ):
         return {}
@@ -258,7 +273,7 @@ def measure(tree: ast.Module, rel_path: str) -> Sites:
     sites: Sites = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and (target := bindings.call_target(node)) is not None:
-            if target == "sys.path" and _is_allowed_skill_guard(rel_path, node):
+            if target == "sys.path" and _is_allowed_skill_guard(rel_path, node, scopes.skills):
                 continue
             sites.setdefault(f"{rel_path}::{target}", []).append(node.lineno)
         elif isinstance(node, ast.stmt) and any(map(bindings.is_sys_path, _assigned(node))):

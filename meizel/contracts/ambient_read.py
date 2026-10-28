@@ -275,7 +275,7 @@ def _missing_reader(universe: Universe, target: str, *, call: bool) -> str | Non
     if located is None:
         return "names no tracked module"
     module, file, member = located
-    bindings = module_bindings(universe.root, file)
+    bindings = module_bindings(universe, file)
     head = member[0]
     if bindings.dynamic:
         return None
