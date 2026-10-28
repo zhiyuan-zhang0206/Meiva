@@ -108,6 +108,15 @@ RELAY_HEARTBEAT_SECONDS = 10.0
 RELAY_HEARTBEAT_STALE_SECONDS = 45.0
 RELAY_FAILURE_STAMP_SECONDS = 600
 
+# meiva:note
+# The waits one relay spends on a database connection the pool could not provide, in order; the
+# sum is the whole retry budget. It stays under RELAY_HEARTBEAT_STALE_SECONDS because a relay
+# that cannot reach the database cannot beat either: past that window every other reader
+# already treats the lease as stale and the host ends it, so further retrying only guards a
+# lease that is gone. It stays above one heartbeat interval so a single pooled-connection blip
+# never ends a relay.
+RELAY_CONNECTION_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 12.0)
+
 
 def is_log_native(lease: Mapping[str, object]) -> bool:
     """Whether this lease records its events in its own entries (protocol v2)."""
