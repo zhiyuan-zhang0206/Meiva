@@ -22,6 +22,7 @@ from cli.commands.converge.plans.browser_plan import (
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.lifecycle import converge_host as cv
 from cli.commands.lifecycle.tests.converge_host.context_inputs import capable_mac
+from services.desktop.browser.profile import profile_dir
 
 _NO_DISPLAY = "no display (headless server)"
 _NO_CHROME = "no Chrome (install it or set MEIVA_CHROME_BINARY)"
@@ -99,6 +100,28 @@ def test_profile_offer_uses_the_captured_session_home(
         cv.ensure_browser(ready)
 
     assert str(source) in capsys.readouterr().out
+
+
+# meiva:note
+# The offer stands down for a profile that already exists, and the profile it looks for is the one
+# under the context's home. With the daily profile present and a person at the terminal, the step
+# reaches the prompt unless that exact profile exists, so the home here is neither the process's nor
+# the session's: only a step that names the context's home finds the profile and stays silent.
+def test_profile_offer_stands_down_for_the_profile_under_the_context_home(
+    ctx: ConvergeCtx, tmp_path: Path, default_home: Path
+) -> None:
+    session_home = tmp_path / "captured-session"
+    (session_home / "Library/Application Support/Google/Chrome").mkdir(parents=True)
+    context_home = tmp_path / "context-home"
+    ready = replace(
+        _browser_ctx(ctx, npx=True),
+        session=replace(ctx.session, user_home=session_home, interactive=True),
+        meiva_home=context_home,
+    )
+    assert context_home != default_home
+    profile_dir(context_home).mkdir(parents=True)
+
+    cv.ensure_browser(ready)
 
 
 # meiva:note
