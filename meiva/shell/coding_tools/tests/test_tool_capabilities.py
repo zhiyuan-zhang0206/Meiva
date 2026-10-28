@@ -325,3 +325,28 @@ def test_cancel_terminalizes_exactly_the_named_generation(
     assert "status=terminal" in capsys.readouterr().out
     assert _common.cancel(owner.key, "11111111-2222-3333-4444-555555555555", sessions=sessions) == 1
     assert "cancel refused" in capsys.readouterr().err
+
+
+# meiva:note
+# A candidate install path spelled with a `~` expands against the home the probe is handed, not the
+# process's own: the two differ here, so a probe that reached for the real home would look in a
+# directory this test never filled and answer "not found".
+def test_a_tilde_candidate_expands_against_the_home_the_probe_is_handed(
+    tmp_path: Path, operator_home: Path
+) -> None:
+    binary = operator_home / ".local" / "bin" / "fake-claude"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    spec = caps.ToolSpec(
+        tool="fake-claude",
+        candidates=("~/.local/bin/fake-claude",),
+        features=(),
+    )
+    run, _calls = _runner()
+
+    probe = caps.probe_tool(
+        spec, run=run, store=tmp_path / "probes.json", now=NOW, user_home=operator_home
+    )
+
+    assert probe.path == str(binary)

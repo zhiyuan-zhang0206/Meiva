@@ -21,13 +21,24 @@ from meiva.shell.tests.live_shell import live_shell as live_shell
 
 
 # meiva:note
+# The operator home a coding-tool test binds: a directory of the test's own, never this process's
+# `Path.home()`, so a launcher that expanded a `~` against the process instead of the context
+# answers a different path and the test says so.
+@pytest.fixture
+def operator_home(tmp_path: Path) -> Path:
+    home = tmp_path / "operator-home"
+    home.mkdir()
+    return home
+
+
+# meiva:note
 # The context a coding tool reads its homes, its instant and its generator from: the test's Meiva
-# home, this test process's own user home (what a `~` in an operator's path expands against), a real
-# clock and a seeded generator.
-def _roots_context(home: Path) -> MeivaContext:
+# home, the operator home that a `~` in an operator's path expands against, a real clock and a
+# seeded generator.
+def _roots_context(home: Path, user_home: Path) -> MeivaContext:
     return MeivaContext(
         meiva_home=home,
-        user_home=Path.home(),
+        user_home=user_home,
         clock_factory=system_clock,
         rng=seeded_rng(),
     )
@@ -36,9 +47,9 @@ def _roots_context(home: Path) -> MeivaContext:
 # meiva:note
 # Bind that context for a test that never acts as an agent (a status, a cancel, a capability report).
 @pytest.fixture(autouse=True)
-def coding_tools_context(unit_home: Path) -> Iterator[None]:
+def coding_tools_context(unit_home: Path, operator_home: Path) -> Iterator[None]:
     previous = process_context.unbind_context()
-    process_context.bind_context(_roots_context(unit_home))
+    process_context.bind_context(_roots_context(unit_home, operator_home))
     try:
         yield
     finally:
@@ -52,10 +63,10 @@ def coding_tools_context(unit_home: Path) -> Iterator[None]:
 # its setup and binds a bare one per call, so this fixture binds the roots context again before the
 # test body runs (a launch can precede the agent binding) and completes every context a call binds.
 @pytest.fixture
-def bound_agent(unit_home: Path) -> Iterator[BindAgent]:
+def bound_agent(unit_home: Path, operator_home: Path) -> Iterator[BindAgent]:
     rng = seeded_rng()
     with agent_binder() as shared:
-        process_context.bind_context(_roots_context(unit_home))
+        process_context.bind_context(_roots_context(unit_home, operator_home))
 
         def bind(
             agent_id: int,
@@ -68,7 +79,7 @@ def bound_agent(unit_home: Path) -> Iterator[BindAgent]:
                 replace(
                     process_context.current_context(),
                     meiva_home=unit_home,
-                    user_home=Path.home(),
+                    user_home=operator_home,
                     rng=rng,
                 )
             )
