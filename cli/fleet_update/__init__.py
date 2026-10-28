@@ -11,7 +11,7 @@ from pathlib import Path
 from . import choices
 from .down import down
 from .plan.host_failures import PARTIAL_FAILURE_EXIT, incomplete_summary
-from .session import FailedError, Pacing, RefusedError, Session
+from .session import FailedError, Pacing, RefusedError, Session, Timers
 from .up import up
 
 
@@ -19,11 +19,18 @@ from .up import up
 # One window, from argv to exit code. Every ambient fact arrives as a value, read once by the
 # entry point: the repository the NEW commit is resolved in, the environment (the PATH that finds
 # `ssh`, and the agent marker that refuses a run from inside an agent), the time the log and the
-# one-shot job names are stamped with, and how often to look again while waiting.
+# one-shot job names are stamped with, how often to look again while waiting, and the clock those
+# waits are spent on.
 # Exit codes: 0 done, 1 failed after the first effect, 2 refused before any, 3 a partial `up`.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def main(
-    argv: list[str], *, repo: Path, env: Mapping[str, str], now: datetime, pacing: Pacing
+    argv: list[str],
+    *,
+    repo: Path,
+    env: Mapping[str, str],
+    now: datetime,
+    pacing: Pacing,
+    timers: Timers,
 ) -> int:
     args = choices.parse(argv, env)
     # meiva:note
@@ -43,6 +50,7 @@ def main(
         env=env,
         now=now,
         pacing=pacing,
+        timers=timers,
     )
     phase = "down" if args.half == "run" else args.half
     try:

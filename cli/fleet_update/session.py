@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
+from typing import Protocol
 
 from .plan.host_commands import login_shell
 from .plan.redaction import redact
@@ -44,6 +45,17 @@ class Pacing:
     lease_tick_s: float = 5.0
 
 
+# meiva:note
+# The clock a window measures its waits with: the roster window is the only one, and it is spent as
+# a started instant, a poll interval and a sleep between polls. This is the module's own port rather
+# than `base.clock.Timers` because nothing here imports application code (a window runs from a bare
+# operator checkout); the entry point wraps the process clock and a test hands in a counter.
+class Timers(Protocol):
+    def monotonic(self) -> float: ...
+
+    def sleep(self, seconds: float) -> None: ...
+
+
 class Session:
     def __init__(
         self,
@@ -55,12 +67,14 @@ class Session:
         env: Mapping[str, str],
         now: datetime,
         pacing: Pacing,
+        timers: Timers,
     ) -> None:
         self.dry_run = dry_run
         self.repo = repo
         self.env = env
         self.pacing = pacing
         self.now = now
+        self.timers = timers
         self.stamp = f"{now:%Y%m%dT%H%M%S}"
         self.os: dict[str, str] = {}
         log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)

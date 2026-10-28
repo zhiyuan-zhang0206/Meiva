@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import main
 from .session import Pacing
+from .timers import ProcessTimers
 
 if __name__ == "__main__":
     raise SystemExit(
@@ -16,5 +17,6 @@ if __name__ == "__main__":
             env=os.environ,
             now=datetime.now(UTC),
             pacing=Pacing(),
+            timers=ProcessTimers(),
         )
     )

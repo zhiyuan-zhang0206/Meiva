@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import argparse
-import time
 
 from .plan.gateway_commands import (
     drift_command,
@@ -30,10 +29,6 @@ from .plan.roster import (
 )
 from .plan.verify_steps import drift_checks, duplicate_names, machine_name, smoke_plan
 from .session import FailedError, Session
-
-
-def _pause(delay: float) -> None:
-    time.sleep(delay)
 
 
 def machine_names(s: Session, aliases: tuple[str, ...]) -> dict[str, str]:
@@ -62,7 +57,7 @@ def roster(
     expect_offline: frozenset[str],
 ) -> tuple[tuple[RosterRow, ...], str]:
     wanted = frozenset(names.values())
-    started = time.monotonic()
+    started = s.timers.monotonic()
     while True:
         out = s.run(args.gateway, roster_command(), effect=False, stdin=gateway_stdin)
         try:
@@ -76,12 +71,14 @@ def roster(
             for line in unlisted_lines(rows, wanted):
                 s.say(line)
             return seen.listed, seen.commit
-        delay = poll_delay(time.monotonic() - started, args.roster_timeout, s.pacing.roster_poll_s)
+        delay = poll_delay(
+            s.timers.monotonic() - started, args.roster_timeout, s.pacing.roster_poll_s
+        )
         if delay is None:
             for line in unlisted_lines(rows, wanted):
                 s.say(line)
             raise FailedError(timeout_message(args.roster_timeout, seen))
-        _pause(delay)
+        s.timers.sleep(delay)
 
 
 def refresh(s: Session, hosts: tuple[str, ...]) -> list[HostFailure]:
