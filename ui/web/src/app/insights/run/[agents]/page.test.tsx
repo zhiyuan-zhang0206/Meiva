@@ -49,7 +49,7 @@ import {
   look,
   mockCanvas,
   paintFrame,
-} from "@/components/run-timeline/canvas/run-timeline-test-canvas-mock";
+} from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
 import { useMediaQuery } from "@/lib/layout/use-media-query";
 import RunTimelinePage from "./page";
 
@@ -58,7 +58,7 @@ import {
   LIFETIME,
   lifetimeResponse,
   messagesResponse,
-} from "./run-timeline-test-fixtures-mock";
+} from "./run-timeline-test-mock";
 import { renderWithApi as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {

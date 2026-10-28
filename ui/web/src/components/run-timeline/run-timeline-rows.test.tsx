@@ -8,7 +8,7 @@ import { RunTimelineRows } from "./run-timeline-rows";
 import type { UnitHeights } from "./canvas/run-timeline-paint";
 import { LINK_KINDS } from "./model/links/resolve";
 import { ALL_ROWS } from "./model/timeline-nav-rows";
-import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-test-canvas-mock";
+import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-canvas-test-mock";
 import type { Selection } from "./model/timeline-model-selection";
 import { renderWithApi as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
