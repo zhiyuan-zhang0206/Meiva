@@ -6,7 +6,7 @@
 // (user 2026-10-20): harness, then the models that harness runs, then the efforts
 // that model offers — each column narrows the next, and the stored spawn config
 // marks its rows selected as soon as it renders.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -260,7 +260,7 @@ describe("spawn table", () => {
     // The footer names no machine when there is only one: the host name is a
     // deployment detail, and "Spawn on preview" read as if the product knew it
     // was a preview build (user 2026-10-20).
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     expect(screen.getByRole("button", { name: "Spawn" })).toBeTruthy();
     expect(screen.queryByText(/Spawn on/)).toBeNull();
   });
@@ -276,7 +276,7 @@ describe("spawn table", () => {
     expect(selected(form, MODEL_COLUMN, /claude-opus-4-8/)).toBe(true);
     // meiva:note
     // A model without an effort ladder leaves the column empty.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     expect(within(column(form, EFFORT_COLUMN)).queryByRole("button")).toBeNull();
   });
 
@@ -327,7 +327,7 @@ describe("spawn table", () => {
     // Closing without spawning keeps the previous spawn's config: the next open
     // must answer "what did the last agent run on", not "what did I click last"
     // (user 2026-10-20). A click that wrote through would surface here.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     cleanup();
     wrap();
     const reopened = await table();
@@ -344,7 +344,7 @@ describe("spawn table", () => {
     // meiva:note
     // No stored model or effort means the cascade filled them in; the spawn
     // writes what it actually sent, so the next open marks the same rows.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     await waitFor(() =>
       expect(mockSetSettingCalls()).toEqual([
         { key: "behavior.spawn_model", value: "deepseek-v4-pro" },
@@ -378,7 +378,7 @@ describe("spawn table", () => {
     // model whose published harnesses name an external CLI appears in that CLI's
     // column with no frontend change, and one that does not is absent from it. The
     // DeepSeek model is deliberately not the CLI's own vendor.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     vi.mocked(api.getModels).mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro"], gpt: ["gpt-5.6"] },
       models: {

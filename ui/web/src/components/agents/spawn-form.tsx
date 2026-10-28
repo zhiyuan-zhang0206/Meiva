@@ -8,7 +8,7 @@
 // whose footer spawns there; several list the hosts in that footer, down entries
 // disabled and explained. A gateway-hosted frontend never calls
 // `onSpawn(undefined)` — the backend would read it as "spawn here" and reject it.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
 import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
@@ -34,7 +34,7 @@ interface SpawnOpts {
 // meiva:note
 // Picks made while the form is open, laid over the stored spawn config. An
 // empty object means "show the last spawn".
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 interface SpawnPicks {
   machine?: string;
   harness?: Harness;
@@ -45,7 +45,7 @@ interface SpawnPicks {
 // meiva:note
 // `onDone` lets the host popover close once the request is issued: the form
 // never owns a popover of its own.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 interface Props {
   onSpawn: (opts: SpawnOpts) => void;
   onDone: () => void;
@@ -53,7 +53,7 @@ interface Props {
   // The shell owns the arrangement: below md the popover is 94vw and the
   // four-column table leaves the model column 4px (2026-10-21), so the same
   // decisions render stacked. The form keeps one rule set either way.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   layout?: "table" | "stack";
 }
 
@@ -69,7 +69,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     queryFn: () => api.getModels(),
     // meiva:note
     // Config writes invalidate this catalog, including its effective birth default.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     staleTime: Infinity,
   });
   const modelsData = modelsQuery.error ? undefined : modelsQuery.data;
@@ -81,7 +81,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // So reopening answers "what did the last agent run on", and a settings load
   // that lands after mount still reaches the form because nothing copies it.
   // `null` in the DB means "no override"; exposed here as `undefined`.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const storedHarness = (settings["behavior.spawn_harness"] as Harness | null) ?? DEFAULT_HARNESS;
   const storedModel = (settings["behavior.spawn_model"] as string | null) ?? undefined;
   const storedEffort = (settings["behavior.spawn_reasoning_effort"] as string | null) ?? undefined;
@@ -95,7 +95,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // meiva:note
   // Ops reachability is not agent-host readiness. Keep the existing host-alive
   // verdict's meaning, and show non-spawnable hosts in the form with a reason.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const allMachines = statusData?.cluster.machines ?? [];
   const eligible = allMachines.filter(
     (m) => m.serve_agent_runner && m.online && m.paused === false,
@@ -107,7 +107,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // another's. Every agent-runner machine is a row; a host that is down keeps its
   // row and is disabled with the reason, so the picker says what exists instead
   // of hiding it (user 2026-10-20).
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const machines: SpawnMachine[] = allMachines
     .filter((m) => m.serve_agent_runner && !m.paused)
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -126,7 +126,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // A pick survives a status refresh only while that machine is still offered;
   // otherwise the form falls back to the first machine whose host is up, so a
   // vanished host never leaves the form targeting a machine that is not on screen.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const pickedMachine =
     picks.machine !== undefined && machines.some((row) => row.name === picks.machine)
       ? picks.machine
@@ -141,7 +141,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // cannot start falls through to the first one it can, so switching machine
   // never lands on a dead end - the pick itself is left alone, so switching back
   // restores it.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const tableHarnessRows = harnessRows(harnessByMachine.get(selectedMachine ?? "") ?? []);
   const pickedHarness = picks.harness ?? storedHarness;
   const selectedHarness: Harness =
@@ -151,23 +151,17 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const harnessBlocked = !tableHarnessRows.find((row) => row.harness === selectedHarness)?.launchable;
 
   // meiva:note
-  // Models the chosen harness can run: user-hidden models (setting models.hidden)
-  // and registry-superseded models are excluded, and the model's published
-  // `harnesses` decides which harnesses offer it.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // API visibility preferences apply to native execution. External CLI catalogs
+  // remain selectable when their API providers or models are hidden.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
-  // meiva:note
-  // A provider switched off in Control > Display contributes no models here
-  // either: the per-model list is not consulted for it, so one switch takes the
-  // whole family out of the spawn picker (user 2026-10-20).
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const hiddenProviders: string[] = (settings["models.hidden_providers"] as string[] | undefined) ?? [];
   const modelGroups = groupedModels(
     modelsData,
     (m) =>
-      !hiddenModels.includes(m) &&
       !isSuperseded(modelsData, m) &&
-      !hiddenProviders.includes(modelsData?.models[m]?.provider ?? "") &&
+      (selectedHarness !== DEFAULT_HARNESS ||
+        (!hiddenModels.includes(m) && !hiddenProviders.includes(modelsData?.models[m]?.provider ?? ""))) &&
       runsOnHarness(modelsData, m, selectedHarness),
   );
   const defaultModel = modelsData?.default;
@@ -177,7 +171,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // harness can run it, else this harness's first model (the stored value stays,
   // so switching the harness back restores it). Undefined only when the catalog
   // offers nothing for that harness.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const visibleModels = modelGroups.flatMap(([, models]) => models);
   const effectiveModel: string | undefined =
     selectedModel !== undefined && visibleModels.includes(selectedModel)
@@ -195,7 +189,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // collapsed into one empty list: the model carries no effort knob (wire null),
   // the models query has not resolved yet, and the resolved name is absent from
   // the catalog.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const effortLevels = executionSettings?.reasoning_effort_options ?? [];
   // meiva:note
   // The model's concrete default effort, published by GET /api/models from the
@@ -203,7 +197,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // server-side). The table pre-selects it, so selecting a model immediately
   // marks the level that model runs at; there is no synthetic "Effort: default"
   // row.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const modelDefaultEffort =
     typeof executionSettings?.reasoning_effort_default === "string"
       ? executionSettings.reasoning_effort_default
@@ -215,7 +209,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // model the catalog has not resolved publishes no default, and nothing is sent
   // for it. The stored setting is left as the user last set it, so switching back
   // to a model that offers it restores it.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const effectiveReasoningEffort: string | undefined =
     selectedReasoningEffort !== undefined && effortLevels.includes(selectedReasoningEffort)
       ? selectedReasoningEffort
@@ -227,7 +221,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // write nothing. Releasing the draft afterwards lets the stored values — now
   // this spawn's — re-seed it, so a cascade-filled model or effort becomes the
   // visible pick instead of staying an invisible default.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   function rememberSpawnedConfig() {
     if (selectedHarness !== storedHarness) setSetting("behavior.spawn_harness", selectedHarness);
     if (effectiveModel !== undefined && effectiveModel !== storedModel) {
@@ -247,7 +241,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
       // meiva:note
       // The built-in runtime is the server's own default: naming it adds nothing,
       // and an omitted field keeps a spawn request byte-identical to the old one.
-      // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
       ...(selectedHarness === DEFAULT_HARNESS ? {} : { harness: selectedHarness }),
     };
   }
@@ -275,7 +269,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // Rates are the decision only when the harness meters them. A subscription
   // harness pays nothing per token, so the price column stays empty there
   // (user 2026-10-20); the harness row is the authority on which it is.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const pickerProps = {
     machines,
     machine: selectedMachine,
@@ -316,7 +310,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
       // The narrow arrangement: the four decisions stack, the action sits under
       // them at full width, and a refusal is written out instead of titled — a
       // phone has no hover for a tooltip (2026-10-21).
-      // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
       <div className={cn("rounded-md border border-border bg-popover text-popover-foreground", FLEX, FLEX_COL)}>
         <SpawnStack {...pickerProps} />
         {spawnReason !== undefined && (
@@ -335,7 +329,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     // the popover read as a narrow, tall strip (user 2026-10-20). The rail is a
     // fixed-width column, so the table keeps its own width and the button lines up
     // with the columns it acts on.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     <div className={cn("rounded-md border border-border bg-popover text-popover-foreground", FLEX)}>
       <div className={cn(MIN_W_0, FLEX_1)}>
         <SpawnTable {...pickerProps} />

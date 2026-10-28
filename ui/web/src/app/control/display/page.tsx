@@ -109,14 +109,14 @@ export default function DisplaySettingsPage() {
   // rows: the models keep the state the user gave them, and while the provider is
   // off those rows are not editable (user 2026-10-20). The spawn picker reads the
   // same two lists, so an off provider contributes no models there either.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md
   const hiddenProviders: string[] = (settings["models.hidden_providers"] as string[] | undefined) ?? [];
   // meiva:note
   // A superseded model is not a toggle: the spawn picker already refuses it, so a
   // switch here would change nothing a spawn would read (user 2026-10-20: entries
   // that occupy space and do nothing). It is dropped from the list rather than
   // shown disabled with an explanation.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md
   const modelGroups = groupedModels(modelsData, (m) => !isSuperseded(modelsData, m));
 
   return (

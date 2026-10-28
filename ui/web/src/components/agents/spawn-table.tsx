@@ -7,7 +7,7 @@
 // last chose is marked on entry, so opening the form answers "what will the next
 // agent be born on, and where" before it asks anything (user 2026-10-20: the
 // machine comes first — a harness is only available *on* a machine).
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
 import { Check, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -30,7 +30,7 @@ import {
 // it holds while the effort column was pinned to 4.5rem and clipped levels like
 // "minimal". With `auto` tracks the table is exactly as wide as its widest row and
 // the panel follows it instead of the other way round.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 const COLUMNS = "grid grid-cols-[auto_auto_auto_auto] border-b border-border text-xs";
 const HEADER = "border-b border-r border-border px-2 py-1.5 font-medium text-muted-foreground";
 const CELL = "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left";
@@ -40,7 +40,7 @@ const IDLE = "text-muted-foreground hover:bg-accent hover:text-foreground";
 // meiva:note
 // One machine row: the host the agent would be born on, and why it cannot be
 // picked when it cannot.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export interface SpawnMachine {
   name: string;
   reason?: string;
@@ -63,7 +63,7 @@ export interface SpawnPickerProps {
   // meiva:note
   // Whether this harness bills per token: a subscription pays nothing per token,
   // so its rates are noise beside the model name (user 2026-10-20).
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   prices: boolean;
 }
 
@@ -91,7 +91,7 @@ export function SpawnTable({
   // the column is for; everything the old full-width row carried - every rate
   // behind that price, and the vendor TPS record with its source - is one hover
   // away. A 5rem column cannot hold four prices (user 2026-10-20).
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   function detailFor(candidate: string): string | undefined {
     const info = models?.[candidate];
     if (info === undefined) return undefined;
@@ -240,7 +240,7 @@ export function SpawnTable({
 // born, and where" before it asks anything, and every row is a 44px touch
 // target. The two arrangements share this file and the same props so a rule
 // (availability, cascade, selection) can never exist in only one of them.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 const STACK_SECTION = "border-b border-border";
 const STACK_CELL = "flex w-full min-h-11 items-center gap-2 px-3 py-2 text-left";
 const STACK_LIST = "max-h-[40vh] overflow-y-auto border-t border-border py-1";
@@ -344,7 +344,7 @@ export function SpawnStack({
   // meiva:note
   // One open section at a time: the panel stays short enough to keep the action
   // visible, and picking a value closes the section it belongs to.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const [open, setOpen] = useState<StackSectionKey | null>(null);
   const toggle = (key: StackSectionKey) =>
     setOpen((current) => (current === key ? null : key));

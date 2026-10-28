@@ -37,7 +37,7 @@ in the header as a badge.
 The + opens the spawn form and mounts `SpawnButton` only while the popover is
 open, so the machine / model / effort / harness pickers never cost the closed
 sidebar a row. The form itself is unchanged — placement, pricing and harness
-gating stay with [[ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md|Creation Availability]].
+gating stay with [[ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md|Creation Availability]].
 An empty roster replaces the list with one explanatory line and a full-width
 create button, because a bare + does not explain itself to someone who has
 never spawned an agent.
