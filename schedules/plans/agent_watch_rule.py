@@ -34,7 +34,9 @@
 
 from __future__ import annotations
 
+import re
 import statistics
+from collections.abc import Iterable, Mapping
 from itertools import pairwise
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -43,14 +45,23 @@ from typing import Literal
 __all__ = [
     "ESCALATE_MINUTES",
     "MINUTE",
+    "SEAT_COOLDOWN_SECONDS",
+    "SEAT_REGISTRY_VERSION",
+    "SEAT_SETTLE_SECONDS",
     "Action",
     "Observation",
     "RoundPlan",
     "ScheduleVerdict",
+    "SeatReadings",
+    "SeatRegistry",
+    "SeatRegistryError",
+    "SeatState",
+    "SeatWake",
     "WatchState",
     "WatchedAgent",
     "judge_schedule",
     "plan_round",
+    "plan_seats",
     "repeat_seconds",
     "silent_reasons",
     "watched_agents",
@@ -345,3 +356,231 @@ def plan_round(
     state = replace(state, silent_since=silent_since)
     log = (f"{entry.agent_id}: silent {silent_minutes:.0f}m ({', '.join(reasons)}){blind}",)
     return RoundPlan(state, silent_minutes, reasons, tuple(actions), log)
+
+
+# meiva:note
+# Seats: what this host owes each agent, read against the sessions it is running.
+#
+# A duty's cadence says whether its owner is still taking rounds. It cannot say whether one of the
+# fifteen watchers that owner keeps is gone: a count of live sessions reads the same at fifteen and
+# at fourteen. So each agent keeps its own registry of named seats (`MEIVA_HOME/state/
+# seat-registry/<agent>.json`), the backend names a session after the seat, and a round compares the
+# two by name.
+#
+# Two readings stay with their owners. This module judges **presence** only: a seat's script, its
+# cadence, its health rule and its rebuild belong to the agent that wrote the registry. Whether a
+# running seat is *advancing* is a different finding from a different reader, and neither may be
+# reported as the other. The registry's `version` is a refusal rather than a hint: a newer owner may
+# mean something else by a seat, and rebuilding the wrong thing on a guess is worse than a blind
+# line. The whole judgement is one public call (`plan_seats`); a registry it cannot read becomes a
+# `seats-blind=` note for that owner, never a silent skip.
+SEAT_REGISTRY_VERSION = 1
+
+# meiva:note
+# One wake per absence, not one per round: the same absent set inside the cool-down stays quiet,
+# while a *different* set wakes at once -- a second seat dying is news one minute after the first
+# wake. Thirty minutes is six rounds of this schedule.
+SEAT_COOLDOWN_SECONDS = 1800.0
+
+# meiva:note
+# How long after the tree's own start a missing seat is read as "the start is still finishing". A
+# wake during that window would send the owner to re-arm into a runtime that is about to launch its
+# own recovery, and it is the only window in which a wake is withheld: a missing seat during a stop
+# or an update is exactly what the owner needs to hear, so `intent` never suppresses this wake.
+SEAT_SETTLE_SECONDS = 300.0
+
+# meiva:note
+# The backend names an agent's session `meiva-agent-<agent>-shell-<session>[-<label>]`, and the label
+# is the name the agent gave the seat. `base/sessions/coding_session_owner_record.py` composes the
+# same shape for coding-tool sessions and `ops/cluster_status/model.py` reads it back with its own
+# expression; a test builds names through the base composer and parses them here, so a change to the
+# shape fails that test instead of reading every seat as absent.
+_SESSION_RE = re.compile(r"-agent-(\d+)-shell-(\d+)(?:-(.+))?$")
+
+
+# meiva:note
+# A registry this round cannot read as the version it knows.
+class SeatRegistryError(ValueError):
+    pass
+
+
+# meiva:note
+# What one agent's registry says this host owes it.
+@dataclass(frozen=True, slots=True)
+class SeatRegistry:
+    agent_id: int
+    seats: tuple[str, ...]
+
+
+# meiva:note
+# What the last round said about one agent, so the cool-down survives a restart.
+@dataclass(frozen=True, slots=True)
+class SeatState:
+    absent: tuple[str, ...] = ()
+    woke_at: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SeatWake:
+    agent_id: int
+    absent: tuple[str, ...]
+    text: str
+
+
+# meiva:note
+# One round's readings about the seats, grouped so the decision takes one value: the host's session
+# names as the backend listed them, what the database says each owner is doing, what the last round
+# remembered, and the two policy numbers the decision is made against.
+@dataclass(frozen=True, slots=True)
+class SeatReadings:
+    sessions: Iterable[str]
+    statuses: Mapping[int, str]
+    states: Mapping[int, SeatState]
+    now: float
+    cooldown_s: float
+    registry_dir: str
+
+
+# meiva:note
+# Everything beyond `version` and the seat names belongs to the other readers (script, cadence,
+# health rule), so it is ignored rather than validated here: a field this module does not read
+# cannot make a registry unreadable.
+def _parse_seat_registry(agent_id: int, payload: object) -> SeatRegistry:
+    if not isinstance(payload, Mapping):
+        raise SeatRegistryError("registry is not an object")
+    version = payload.get("version")
+    if version != SEAT_REGISTRY_VERSION:
+        raise SeatRegistryError(f"registry version {version!r} is not {SEAT_REGISTRY_VERSION}")
+    raw = payload.get("seats")
+    if not isinstance(raw, list):
+        raise SeatRegistryError("registry has no seats list")
+    names: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, Mapping):
+            raise SeatRegistryError("seat entry is not an object")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise SeatRegistryError("seat entry has no name")
+        if name in names:
+            raise SeatRegistryError(f"seat {name!r} appears twice")
+        names.append(name)
+    return SeatRegistry(agent_id, tuple(names))
+
+
+# meiva:note
+# Who owns a session, and under which seat name. Three answers, and only the last is a seat: a name
+# that is not an agent shell session at all (`meiva-agent-<id>`, a service session) answers None; an
+# agent's shell without a label answers a None label; a labelled one answers its name.
+def _seat_owner(session_name: str) -> tuple[int, str | None] | None:
+    match = _SESSION_RE.search(session_name)
+    if match is None:
+        return None
+    return int(match.group(1)), match.group(3)
+
+
+# meiva:note
+# The seat names each agent currently has, from one listing of the host's sessions.
+def _live_seat_names(session_names: Iterable[str]) -> dict[int, frozenset[str]]:
+    owned: dict[int, set[str]] = {}
+    for name in session_names:
+        owner = _seat_owner(name)
+        if owner is None:
+            continue
+        agent_id, label = owner
+        if label is None:
+            continue
+        owned.setdefault(agent_id, set()).add(label)
+    return {agent_id: frozenset(names) for agent_id, names in owned.items()}
+
+
+# meiva:note
+# The registry's seats this host does not have, in registry order.
+def _absent_seats(registry: SeatRegistry, live: Mapping[int, frozenset[str]]) -> tuple[str, ...]:
+    present = live.get(registry.agent_id, frozenset())
+    return tuple(name for name in registry.seats if name not in present)
+
+
+def _seat_wake_wanted(
+    absent: Iterable[str],
+    *,
+    previous: Iterable[str] | None,
+    woke_at: float | None,
+    now: float,
+    cooldown_s: float,
+) -> bool:
+    current = tuple(sorted(absent))
+    if not current:
+        return False
+    if previous is None or tuple(sorted(previous)) != current:
+        return True
+    return woke_at is None or now - woke_at >= cooldown_s
+
+
+# meiva:note
+# The message that owns the absence. It names the seats and the file, never a cause.
+def _seat_wake_text(agent_id: int, absent: Iterable[str], *, registry_path: str) -> str:
+    names = tuple(absent)
+    return (
+        f"[seat-ensure] {len(names)} of your seats are not running on this host: "
+        f"{', '.join(names)}. Registry: {registry_path} (agent {agent_id}). "
+        "Put them back the way you normally re-arm them; the stop that took them was the intended "
+        "one, so nothing else will restore them. This repeats only after 30 minutes or when a "
+        "different seat goes missing."
+    )
+
+
+# meiva:note
+# The round's decision, as values: who to wake, what to remember, and what could not be read. A
+# terminated agent is finished rather than absent -- its registry stops owing anything the moment
+# the user ended it, and a wake would resurrect a duty that was deliberately closed. An agent whose
+# row this round could not read is left alone for the same reason a blind session listing wakes
+# nobody. `registries` carries each owner's raw file payload: validation happens here, at the one
+# boundary, so a registry written by a newer owner becomes a note instead of a guess.
+def plan_seats(
+    registries: Iterable[tuple[int, object]], readings: SeatReadings
+) -> tuple[tuple[SeatWake, ...], dict[int, SeatState], tuple[str, ...]]:
+    live = _live_seat_names(readings.sessions)
+    wakes: list[SeatWake] = []
+    next_states: dict[int, SeatState] = {}
+    notes: list[str] = []
+    for agent_id, payload in registries:
+        try:
+            registry = _parse_seat_registry(agent_id, payload)
+        except SeatRegistryError:
+            notes.append(f"{agent_id}: seats-blind=registry")
+            continue
+        missing = _absent_seats(registry, live)
+        if not missing:
+            continue
+        previous = readings.states.get(agent_id)
+        status = readings.statuses.get(agent_id)
+        if status == "terminated":
+            notes.append(f"{agent_id}: seats=finished")
+            continue
+        if status is None:
+            notes.append(f"{agent_id}: seats=status-unknown")
+            continue
+        wanted = _seat_wake_wanted(
+            missing,
+            previous=None if previous is None else previous.absent,
+            woke_at=None if previous is None else previous.woke_at,
+            now=readings.now,
+            cooldown_s=readings.cooldown_s,
+        )
+        next_states[agent_id] = SeatState(
+            absent=missing,
+            woke_at=readings.now if wanted else (previous.woke_at if previous else None),
+        )
+        if wanted:
+            wakes.append(
+                SeatWake(
+                    agent_id=agent_id,
+                    absent=missing,
+                    text=_seat_wake_text(
+                        agent_id,
+                        missing,
+                        registry_path=f"{readings.registry_dir}/{agent_id}.json",
+                    ),
+                )
+            )
+    return tuple(wakes), next_states, tuple(notes)
