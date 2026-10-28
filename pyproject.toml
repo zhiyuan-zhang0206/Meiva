@@ -317,6 +317,11 @@ check-typed-exception = true
 # argv (uvx / npm / gh) — every site is a literal with static arguments, so the
 # bandit heuristics would only restate those two lines.
 "scripts/ci/dependency_audit.py" = ["S310", "S603"]
+# The policy-removal gate reads a queued batch's pull request bodies through fixed
+# `gh pr view <n> --json title,body` argv. The number is the only variable in it, it is
+# an integer parsed out of the batch's own pull request body, and no shell is involved,
+# so S603 (untrusted subprocess input) has nothing to flag.
+"scripts/lint/policy_removal.py" = ["S603"]
 "meizel/**" = ["ANN", "T20"]
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.

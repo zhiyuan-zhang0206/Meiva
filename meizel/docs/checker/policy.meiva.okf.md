@@ -37,9 +37,7 @@ those (`import-sources` keeps callers' edges, not their behavior — see
 the deliberate direction: a directory that joins the list becomes judged with a
 new manifest of its own, its existing reads turn into recorded debt, and the
 recorded-debt gate reports the growth as the rules' doing rather than the
-change's. Narrowing again is a decision review must see, which is why
-`meizel policy diff --against <ref>` lists every entry a change adds, moves or
-removes.
+change's. Narrowing again is a decision review must see.
 
 ## Lint-rule tables
 
@@ -104,9 +102,11 @@ name a table (`ambient-readers.environ`) or a rule (`ambient-state`) when that m
 at once — a deleted section is explained once, not once per name — and it reaches that
 table or rule alone. `scripts/lint/policy_removal.py` fails the pull request while a
 removal is unanswered and writes `N removed, M added` into the check summary either way;
-a widened table needs no line; the reviewer reads it in the diff. The record is
-the pull request's title and body; a run without one reads the commits `--against..HEAD` — a local run, and the Trunk merge branch, which
-carries each landing message as a commit. `--record <file>` reads a file.
+a widened table needs no line. The record is the pull request's title and body. A Trunk batch
+writes its own body and keeps each member's commit behind a merge the job's shallow checkout never
+walks to, so there the record is the pull request(s) the batch tests, read through `gh`;
+unreadable, the run lists the removals and passes instead of ejecting the batch. A run with no
+pull request reads the commits `--against..HEAD`; `--record <file>` reads a file.
 
 When a rename or a move touches a listed path or name, the same PR updates the entry (a
 renamed file leaves a stale one), and that removal says which one it was.
