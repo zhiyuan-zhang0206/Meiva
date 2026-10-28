@@ -221,10 +221,9 @@ def collect(evidence: Evidence, container: str) -> None:
         evidence.result.setdefault("collected", {})[name] = copied.returncode == 0
 
 
-def run(ref: str, evidence_root: Path, memory: str, shm: str, *, home: Path) -> int:
+def run(ref: str, evidence_root: Path, memory: str, shm: str, *, home: Path, stamp: str) -> int:
     commit = resolve_commit(REPO, ref)
     objects = git_objects_dir(REPO, home=home)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
     evidence = Evidence(
         evidence_root / f"{stamp}-{commit[:8]}",
         {"ref": ref, "commit": commit, "recipe_repo": str(REPO), "steps": [], "result": "running"},
@@ -284,7 +283,14 @@ def main() -> int:
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, _interrupted)
     args.evidence_root.mkdir(parents=True, exist_ok=True)
-    return run(args.ref, args.evidence_root.resolve(), args.memory, args.shm_size, home=Path.home())
+    return run(
+        args.ref,
+        args.evidence_root.resolve(),
+        args.memory,
+        args.shm_size,
+        home=Path.home(),
+        stamp=time.strftime("%Y%m%d-%H%M%S"),
+    )
 
 
 if __name__ == "__main__":

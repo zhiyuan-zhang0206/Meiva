@@ -11,9 +11,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _GUARD = _REPO_ROOT / "scripts" / "host_ops" / "guard_editable_venv.py"
 
 
-def _run(checkout: Path, *, virtual_env: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _run(
+    checkout: Path, *, virtual_env: Path | None = None, home: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run the real script under a deliberate environment, never the host's venv."""
     env = {"PATH": os.environ["PATH"]}
+    if home is not None:
+        env["HOME"] = str(home)
     if virtual_env is not None:
         env["VIRTUAL_ENV"] = str(virtual_env)
     return subprocess.run(  # noqa: S603 — sys.executable + repository-owned script
@@ -45,6 +49,23 @@ def test_symlinked_worktree_venv_is_refused_with_its_real_target(tmp_path: Path)
     assert result.returncode == 1
     assert str(external) in result.stderr
     assert "symlink" in result.stderr
+
+
+def test_a_home_shorthand_checkout_is_expanded_against_home(tmp_path: Path) -> None:
+    # meiva:note
+    # `~/checkout` names the operator's home: the symlink the guard reports must be the one under
+    # that home, so the expansion happens before anything is resolved.
+    home = tmp_path / "home"
+    checkout = home / "checkout"
+    checkout.mkdir(parents=True)
+    external = tmp_path / "external-venv"
+    external.mkdir()
+    (checkout / ".venv").symlink_to(external, target_is_directory=True)
+
+    result = _run(Path("~/checkout"), home=home)
+
+    assert result.returncode == 1
+    assert str(external) in result.stderr
 
 
 def test_external_virtual_env_is_refused_with_unset_hint(tmp_path: Path) -> None:

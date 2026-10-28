@@ -6,5 +6,5 @@ exports = ["relay.py"]
 [purity]
 "__init__.py" = "strict"
 
-[debt.ambient-read]
-"relay.py#clock time.strftime()" = 1
+[roots]
+"relay.py" = { kinds = ["clock"], why = "The relay is a whole process in one stdlib-only file (the root supervisor runs it under /usr/bin/python3, so it imports nothing from the project): it timestamps its own log lines with the wall clock, once per message, and composes nothing else" }

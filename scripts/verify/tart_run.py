@@ -179,9 +179,8 @@ def collect(evidence: Evidence, tart: Tart, vm: str) -> None:
             unpack_logs(base64.b64decode(done.stdout), evidence.root / name)
 
 
-def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart) -> int:
+def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart, stamp: str) -> int:
     commit = resolve_commit(repo, ref)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
     evidence = Evidence(
         evidence_root / f"{stamp}-{commit[:8]}",
         {"ref": ref, "commit": commit, "recipe_repo": str(REPO), "steps": [], "result": "running"},
@@ -244,6 +243,7 @@ def _interrupted(_signum: int, _frame: FrameType | None) -> None:
 
 def main() -> int:
     user_home = Path.home()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", required=True, help="branch, tag or commit of this repository")
     parser.add_argument("--golden", default=GOLDEN, help="the stopped golden image to clone")
@@ -267,6 +267,7 @@ def main() -> int:
         repo=REPO,
         golden=args.golden,
         tart=Tart(args.tart, home=user_home),
+        stamp=stamp,
     )
 
 

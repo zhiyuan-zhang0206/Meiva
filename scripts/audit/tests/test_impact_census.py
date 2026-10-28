@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from scripts.audit import impact_census
+from scripts.audit.analysis import census, report_lines
 
 
 def _write(root: Path, name: str, text: str = "") -> None:
@@ -36,7 +37,7 @@ def _repo(root: Path) -> Path:
 
 
 def test_census_counts_shared_sources_and_unbounded_consumers(tmp_path: Path) -> None:
-    report = impact_census.census(_repo(tmp_path))
+    report = impact_census.measure(_repo(tmp_path))
     assert (report.tests, report.full_minutes) == (2, 3.0)
     assert report.sources_reached_by_every_test == 2  # base/__init__.py and base/core.py
     assert report.by_package == {"base": (3, 2)}
@@ -68,10 +69,32 @@ def test_census_retains_unrelated_resource_unknown_in_the_same_file(tmp_path: Pa
     root = _repo(tmp_path)
     with (root / "base/leaf.py").open("a") as source:
         source.write("def read(file):\n    return file.read_text()\n")
-    report = impact_census.census(root)
+    report = impact_census.measure(root)
     assert (report.unbounded_sites, report.tests_reaching_unbounded) == (2, 1)
     assert report.tests_reaching_unbounded_minutes == 1.0
     assert {site.reason for site in report.heaviest_unbounded} == {
         "importlib.import_module target is not bounded literal text",
         "Resource read has no proven repository or external path anchor",
     }
+
+
+def test_the_census_is_a_pure_function_of_the_graph_and_an_injected_timer() -> None:
+    tests = frozenset({"t/a.py", "t/b.py"})
+    graph = {
+        "pkg/core.py": tests,
+        "pkg/leaf.py": frozenset({"t/a.py"}),
+        "t/a.py": frozenset({"t/a.py"}),
+    }
+    seconds = {"t/a.py": 60.0, "t/b.py": 120.0}
+    report = census(
+        tests,
+        graph,
+        (("pkg/leaf.py", 3, "unbounded input"),),
+        seconds_of=lambda selected: sum(seconds[path] for path in selected),
+    )
+    assert (report.tests, report.full_minutes) == (2, 3.0)
+    assert (report.source_files, report.sources_reached_by_every_test) == (2, 1)
+    assert [
+        (site.path, site.line, site.tests, site.minutes) for site in report.heaviest_unbounded
+    ] == [("pkg/leaf.py", 3, 1, 1.0)]
+    assert report_lines(report)[0] == "sources reached by every test: 1 / 2"

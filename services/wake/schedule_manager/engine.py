@@ -103,6 +103,7 @@ class RunnerRoot:
     plugins: PluginInputs
     policy: StallPolicy
     home: Path
+    main_thread_id: int
     pid: int = 0
 
 
@@ -333,6 +334,7 @@ class StallGuard:
         run_id: int | None,
         *,
         policy: StallPolicy,
+        main_thread_id: int,
         pid: int = 0,
     ) -> None:
         self.database = database
@@ -340,7 +342,7 @@ class StallGuard:
         self.run_id = run_id
         self.policy = policy
         self.pid = pid
-        self.main_thread_id = threading.get_ident()
+        self.main_thread_id = main_thread_id
         self.stop = threading.Event()
         self.admission = threading.Lock()
         self._admitted = Admission()
@@ -421,7 +423,14 @@ def run_python_script(
     # (2026-08-03 self-evolution miss). Started before plugin loading
     # so an import hang is covered too. Stopped before _mark_completed
     # so a clean return cannot be overtaken by a spurious kill.
-    guard = StallGuard(root.database, schedule_id, run_id, policy=root.policy, pid=root.pid)
+    guard = StallGuard(
+        root.database,
+        schedule_id,
+        run_id,
+        policy=root.policy,
+        pid=root.pid,
+        main_thread_id=root.main_thread_id,
+    )
     # The gateway launches this runner as `python -m services.wake.schedule_manager.runner
     # <id>`, so sys.argv carries the schedule id. The script must not
     # inherit that runner-only argv: hand it the argv `python <script>`
