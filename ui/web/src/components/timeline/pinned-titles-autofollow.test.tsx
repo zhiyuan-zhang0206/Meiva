@@ -5,7 +5,8 @@ import { ApiTestProvider } from "@/test-support/fake-api";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { __resetHighlighterCacheForTests, __setHighlighterImportForTests } from "@/components/content/python-code";
+import { createLazyChunk } from "@/components/content/lazy-chunk";
+import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
 
 import { TimelineView } from ".";
@@ -45,14 +46,18 @@ function mockRect(top: number, bottom: number, height: number): DOMRect {
 }
 
 function setupStuckBlock() {
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(() => new Promise(() => undefined));
+  const highlighter = createLazyChunk({
+    name: "test-highlighter",
+    importModule: () => new Promise<never>(() => undefined),
+  });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(["config", null], { fields: [] });
   qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.expand_runs_mode": "all" });
   const { container } = wallClockRender(
     <QueryClientProvider client={qc}>
-      <TimelineView items={makeItems()} />
+      <PythonCodeHighlighterProvider value={highlighter}>
+        <TimelineView items={makeItems()} />
+      </PythonCodeHighlighterProvider>
     </QueryClientProvider>,
     { wrapper: ApiTestProvider },
   );
@@ -67,12 +72,19 @@ function setupStuckBlock() {
 
 afterEach(() => {
   cleanup();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
   vi.restoreAllMocks();
 });
 
 describe("TimelineView pinned titles during auto-follow", () => {
+  it("renders its code blocks from the injected pending chunk", async () => {
+    // meiva:note
+    // The setup injects a chunk whose import never resolves so the code item stays plain text while the test drives scroll geometry; a macrotask is long enough for the real prism chunk to load, so a tree that lost its provider would show .token spans here.
+    // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+    const { container } = setupStuckBlock();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(container.querySelector("[data-testid='python-code'] .token")).toBeNull();
+  });
+
   it("keeps the pinned header through an auto-follow growth pin", async () => {
     const { viewport, toggle } = setupStuckBlock();
     expect(toggle.getAttribute("data-stuck")).toBe("false");

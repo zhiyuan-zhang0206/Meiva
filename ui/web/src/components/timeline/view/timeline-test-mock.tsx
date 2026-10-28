@@ -5,10 +5,8 @@ import { renderWithBrowser, type BrowserRenderOptions } from "@/test-support/ren
 import type { ReactElement, ReactNode } from "react";
 import { vi } from "vitest";
 
-import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
-} from "@/components/content/python-code";
+import { createLazyChunk } from "@/components/content/lazy-chunk";
+import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
 import { useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
@@ -18,8 +16,10 @@ import { transport } from "@/test-support/fake-api";
 notifyManager.setScheduler((cb) => {
   cb();
 });
-__resetHighlighterCacheForTests();
-__setHighlighterImportForTests(() => new Promise(() => undefined));
+const pendingHighlighter = createLazyChunk({
+  name: "timeline-test-highlighter",
+  importModule: () => new Promise<never>(() => undefined),
+});
 
 export const timelineQueryClient = new QueryClient({
   defaultOptions: {
@@ -40,7 +40,11 @@ function TimelineQueryWrapper({ children }: { children: ReactNode }) {
   return (
     <WallClockProvider wallNow={realWallNow}>
       <QueryClientProvider client={timelineQueryClient}>
-        <ApiProvider api={transport}>{children}</ApiProvider>
+        <ApiProvider api={transport}>
+          <PythonCodeHighlighterProvider value={pendingHighlighter}>
+            {children}
+          </PythonCodeHighlighterProvider>
+        </ApiProvider>
       </QueryClientProvider>
     </WallClockProvider>
   );
@@ -194,8 +198,6 @@ export function cleanupTimelineTest() {
   displayLimits.clear();
   syncSettingsCache();
   syncDisplayLimitsCache();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(() => new Promise(() => undefined));
   vi.unstubAllGlobals();
 }
 

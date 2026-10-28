@@ -9,10 +9,10 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
-} from "@/components/content/python-code";
+import type { Highlight as HighlightComponentType } from "prism-react-renderer";
+
+import { createLazyChunk, type LazyChunk } from "@/components/content/lazy-chunk";
+import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { useStore } from "@/lib/state/store";
 import type { ScheduleSummary, ScheduleView } from "@/lib/contracts/types";
 
@@ -23,7 +23,13 @@ beforeEach(() => {
   resetTransport();
 });
 
-const preloadPythonCodeHighlighter = vi.fn(() => new Promise<never>(() => undefined));
+// meiva:note
+// Every render keeps the highlighter pending: a script block's plain text is what these assertions read, and the real chunk would tokenize it mid-test.
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+const pendingHighlighter = createLazyChunk({
+  name: "schedules-test-highlighter",
+  importModule: () => new Promise<never>(() => undefined),
+});
 
 const FULL: ScheduleView = {
   id: 1,
@@ -43,15 +49,10 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
 
 afterEach(() => {
   cleanup();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
 });
 beforeEach(() => {
   vi.restoreAllMocks();
   pushSpy.mockReset();
-  preloadPythonCodeHighlighter.mockClear();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(preloadPythonCodeHighlighter);
 });
 
 function makeQc() {
@@ -60,8 +61,15 @@ function makeQc() {
   });
 }
 
-function wrap(ui: React.ReactElement) {
-  return renderWithBrowser(<QueryClientProvider client={makeQc()}>{ui}</QueryClientProvider>);
+function wrap(
+  ui: React.ReactElement,
+  highlighter: LazyChunk<typeof HighlightComponentType> = pendingHighlighter,
+) {
+  return renderWithBrowser(
+    <QueryClientProvider client={makeQc()}>
+      <PythonCodeHighlighterProvider value={highlighter}>{ui}</PythonCodeHighlighterProvider>
+    </QueryClientProvider>,
+  );
 }
 
 const SCHEDULE: ScheduleSummary = {
@@ -206,23 +214,22 @@ describe("SchedulesPage", () => {
   });
 
   it("hovering or focusing the expand button warms the code-highlighter chunk (intent prefetch)", async () => {
-    // Regression coverage for the P2 adversarial-review finding on Meiva #3463:
-    // this wiring had no assertion that pointer-enter/focus actually invokes
-    // the prefetch, only that a mocked no-op didn't blow up.
+    // meiva:note
+    // Regression coverage for the P2 adversarial-review finding on Meiva #3463: this wiring had no assertion that pointer-enter/focus actually invokes the prefetch, only that a mocked no-op did not blow up. Each event gets a fresh chunk and that chunk's import is the probe, so a row wired to anything else never calls it.
+    // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
-    wrap(<SchedulesPage />);
+    const hoverImport = vi.fn(() => new Promise<never>(() => undefined));
+    wrap(<SchedulesPage />, createLazyChunk({ name: "test-highlighter", importModule: hoverImport }));
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Expand" }));
+    expect(hoverImport).toHaveBeenCalledTimes(1);
 
-    preloadPythonCodeHighlighter.mockClear();
-    __resetHighlighterCacheForTests();
-    const expandButton = screen.getByRole("button", { name: "Expand" });
-
-    fireEvent.pointerEnter(expandButton);
-    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
-
-    __resetHighlighterCacheForTests();
-    fireEvent.focus(expandButton);
-    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
+    cleanup();
+    const focusImport = vi.fn(() => new Promise<never>(() => undefined));
+    wrap(<SchedulesPage />, createLazyChunk({ name: "test-highlighter", importModule: focusImport }));
+    await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
+    fireEvent.focus(screen.getByRole("button", { name: "Expand" }));
+    expect(focusImport).toHaveBeenCalledTimes(1);
   });
 
   it("expand: shows script, last_error, logs, and run history", async () => {
