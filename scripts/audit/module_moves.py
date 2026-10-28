@@ -94,6 +94,17 @@ def _missing(module: str, refs: set[str]) -> list[str]:
     return missing
 
 
+def _module_pair(value: str) -> tuple[str, str]:
+    # meiva:note
+    # Adapt the pure pair decision to argparse's error protocol: argparse renders a ValueError
+    # raised by a `type=` callable as its generic "invalid <callable> value", so translate it to
+    # the exception type that carries the decision's own message to the CLI.
+    try:
+        return module_pair(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     """Audit tracked content in an explicit checkout, defaulting to this checkout.
 
@@ -101,7 +112,7 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     Diagnostics and exit codes are shared by command-line and direct callers.
     """
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("## What it checks")[0])
-    parser.add_argument("pairs", nargs="+", metavar="OLD=NEW", type=module_pair)
+    parser.add_argument("pairs", nargs="+", metavar="OLD=NEW", type=_module_pair)
     args = parser.parse_args(argv)
     texts = _tracked_text(_REPO if repo_root is None else repo_root.resolve())
     failed = False

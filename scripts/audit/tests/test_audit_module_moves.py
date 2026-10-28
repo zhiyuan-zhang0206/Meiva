@@ -206,10 +206,13 @@ def test_import_failure_does_not_hide_remaining_pairs(
 
 
 @pytest.mark.parametrize("pair", ["missing_separator", "old.mod=new-mod", "old.mod="])
-def test_invalid_move_pair_fails_at_the_cli_boundary(pair: str, tmp_path: Path) -> None:
+def test_invalid_move_pair_fails_at_the_cli_boundary(
+    pair: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit) as exit_info:
         gate.main([pair], repo_root=tmp_path)
     assert exit_info.value.code == 2
+    assert "expected OLD=NEW with dotted Python module names" in capsys.readouterr().err
 
 
 def test_old_references_counts_dotted_from_import_and_path_forms() -> None:
