@@ -182,16 +182,16 @@ def missing_summary(report: GateReport) -> str:
 
 
 # meiva:note
-# The gate as a long-lived process serves it (the gateway): the host it was built for, the clock
-# every pass is stamped with, and the generator its run ids are drawn from. Each call is one pass.
+# The gate as the gateway serves it: the host it was built for, the clock every pass is stamped
+# with, and the generator its run ids are drawn from. Each call is one pass.
 class GateService:
     def __init__(self, *, host: GateHost, clock: Clock, rng: random.Random) -> None:
         self.host = host
-        self._clock = clock
-        self._rng = rng
+        self.clock = clock
+        self.rng = rng
 
     def check(self) -> GateReport:
-        return check(host=self.host, now=self._clock.now(), run_id=self._run_id())
+        return check(host=self.host, now=self.clock.now(), run_id=self._run_id())
 
     def onboard(
         self,
@@ -202,7 +202,7 @@ class GateService:
     ) -> GateReport:
         return onboard(
             host=self.host,
-            clock=self._clock,
+            clock=self.clock,
             run_id=self._run_id(),
             automatic=automatic,
             timeout_s=timeout_s,
@@ -210,10 +210,10 @@ class GateService:
         )
 
     def defer(self) -> None:
-        defer(host=self.host, now=self._clock.now())
+        defer(host=self.host, now=self.clock.now())
 
     def restart_helper(self) -> str:
         return restart_helper()
 
     def _run_id(self) -> str:
-        return new_uuid(self._rng).hex
+        return new_uuid(self.rng).hex

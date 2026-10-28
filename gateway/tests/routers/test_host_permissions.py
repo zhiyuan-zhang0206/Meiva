@@ -165,6 +165,8 @@ def test_the_gate_service_describes_its_host_from_the_gateway_process(
 
     service = host_permissions.gate_service(Request({"type": "http", "app": app}))
 
+    assert service.clock is app.state.clock
+    assert service.rng is app.state.gateway_config.rng
     seat = service.host
     assert seat.home == tmp_path / "h" / "account"
     assert seat.workdir == home / "permissions-onboarding"

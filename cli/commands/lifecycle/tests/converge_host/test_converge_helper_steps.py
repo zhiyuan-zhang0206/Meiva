@@ -369,3 +369,26 @@ def test_the_onboarding_step_acts_on_the_context_home_and_clock(
     ).env
     assert helper.envs[0] == forwarded
     assert forwarded != from_the_hosts_launch
+
+
+# meiva:note
+# The first pass over a home prints the whole checklist; a later one, over the record the first
+# wrote, prints the one-line state and where to ask. The step finds the record under the home the
+# context names.
+def test_the_onboarding_step_reports_in_full_only_on_the_first_pass(
+    ctx: ConvergeCtx, unit_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    helper = _PreflightHelper()
+    mac = replace(
+        _mac(ctx, unit_home, serve(cast("PermissionsHelperClient", helper))),
+        clock=clock_at(datetime(2026, 10, 17, 8, 0, tzinfo=UTC)),
+    )
+
+    converge_host.ensure_permissions_onboarding(mac)
+    first = capsys.readouterr().err
+    converge_host.ensure_permissions_onboarding(mac)
+    second = capsys.readouterr().err
+
+    later = "with someone at the machine to request what is still askable"
+    assert later not in first
+    assert later in second

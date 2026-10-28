@@ -233,3 +233,30 @@ def test_the_manual_pass_asks_the_folders_of_the_session_account(
     cmd.run(args)
 
     assert helper.folders == [str(runtime.session.user_home / FOLDER_PATHS["desktop-folder"])]
+    run_id = new_uuid(seeded_rng()).hex
+    workdir = runtime.home / "permissions-onboarding"
+    assert (workdir / f"desktop-folder-{run_id}-ask.result").exists()
+    stored = gate.read_record(gate.record_path(runtime.home))
+    assert stored is not None
+    assert stored.checked_at == runtime.clock.now()
+
+
+# meiva:note
+# `meiva permissions defer` records the instant of the invocation's own clock.
+def test_defer_records_the_instant_of_the_invocation_clock(
+    command_runtime: CommandRuntime, tmp_path: Path
+) -> None:
+    runtime = replace(
+        command_runtime,
+        home=tmp_path / "meiva-home",
+        helper=serve(cast("PermissionsHelperClient", FakeHelper())),
+    )
+    args = _args(permissions_cmd="defer")
+    args.runtime = runtime
+
+    assert cmd.run(args) == 0
+
+    stored = gate.read_record(gate.record_path(runtime.home))
+    assert stored is not None
+    assert stored.state is gate.GateState.DEFERRED
+    assert stored.checked_at == runtime.clock.now()

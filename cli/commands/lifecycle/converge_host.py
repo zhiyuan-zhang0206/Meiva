@@ -345,9 +345,9 @@ def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
     )
     first_run = gate.read_record(host.record_path) is None
     # meiva:note
-    # A converge runs under the home's lifecycle lock, so one pass per home is in flight; its
-    # children are named by the instant the converge asked the clock, a namespace the other roots'
-    # random run ids cannot collide with.
+    # The pass's children are named by the instant this converge asked its clock, to the microsecond:
+    # one converge asks once, and the `converge-` prefix keeps the name apart from the random run
+    # ids the CLI verb and the gateway draw.
     run_id = f"converge-{ctx.clock.now():%Y%m%dT%H%M%S%f}"
     report = onboarding.onboard(host=host, clock=ctx.clock, run_id=run_id)
     if report.state in (gate.GateState.COMPLETE, gate.GateState.NOT_APPLICABLE):

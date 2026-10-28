@@ -386,3 +386,32 @@ def test_the_service_defers_on_its_clock(tmp_path: Path) -> None:
     assert stored is not None
     assert stored.state is gate.GateState.DEFERRED
     assert stored.checked_at == NOW
+
+
+# meiva:note
+# The service's manual pass asks what an automatic one leaves alone (a denied grant), on the
+# service's clock and under run ids drawn one per call from its generator.
+def test_the_service_onboards_on_its_clock_under_run_ids_from_its_generator(
+    tmp_path: Path,
+) -> None:
+    helper = FakeHelper(_codes(1), screen=False, ax=False)
+    seat = host(tmp_path, client=helper)
+    service = onboarding.GateService(host=seat, clock=clock_at(NOW), rng=seeded_rng(7))
+
+    service.onboard()
+    assert helper.requests == 0
+    service.onboard(automatic=False)
+
+    assert helper.requests == 1
+    stored = gate.read_record(seat.record_path)
+    assert stored is not None
+    assert stored.checked_at == NOW
+    ids = seeded_rng(7)
+    automatic, manual = new_uuid(ids).hex, new_uuid(ids).hex
+    left = {path.name for path in seat.workdir.glob("preflight-*")}
+    assert left == {
+        f"preflight-{run}-{stage}.results.json"
+        for run in (automatic, manual)
+        for stage in ("probe", "verify")
+        if (run, stage) != (automatic, "verify")
+    }
