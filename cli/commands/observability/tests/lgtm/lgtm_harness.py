@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import os
@@ -202,11 +203,18 @@ def zip_bytes(member: str, payload: bytes) -> bytes:
 
 
 def tar_bytes(entries: dict[str, bytes]) -> bytes:
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as bundle:
+    # meiva:note
+    # The archive is a function of `entries` alone, so a second build is byte-identical: the tar is
+    # written uncompressed and gzipped with a zero mtime, because a gzip header that records the
+    # build time would give the same release another SHA whenever the two builds cross a second.
+    plain = io.BytesIO()
+    with tarfile.open(fileobj=plain, mode="w") as bundle:
         for name, payload in entries.items():
             info = tarfile.TarInfo(name)
             info.size = len(payload)
             info.mode = 0o755
             bundle.addfile(info, io.BytesIO(payload))
-    return buffer.getvalue()
+    compressed = io.BytesIO()
+    with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0) as archive:
+        archive.write(plain.getvalue())
+    return compressed.getvalue()
