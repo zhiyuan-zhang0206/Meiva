@@ -150,11 +150,10 @@ async def apply_hosted_lifecycle(
 # meiva:note
 # Hand the agent's open impersonation lease to the incarnation this admission just wrote.
 #
-# Adoption runs in a savepoint: a lease this successor cannot carry is closed exactly as it
-# was before carry existed, and the admission itself never fails because of a takeover. The
-# two outcomes are exclusive by construction — a failure inside the savepoint rolls its
-# writes back, so the fallback never closes a half-moved lease, and the lease is never left
-# in the intermediate state "closed here, not adopted there".
+# A lease this successor cannot carry is closed exactly as it was before carry existed, and the
+# admission itself never fails because of a takeover. The two outcomes stay exclusive because
+# the move is one statement (`adopt_for_successor`): there is no half-moved lease for a
+# savepoint to roll back, so a database failure fails the admission instead of being caught.
 async def _termination_pending(conn: AsyncConnectionLike, agent_id: int) -> bool:
     # meiva:note
     # Whether this admission is the one that will terminate the agent.
@@ -179,14 +178,10 @@ async def _carry_impersonation(
 ) -> tuple[Adoption | None, str | None]:
     if await _termination_pending(conn, agent_id):
         return None, await end_for_replacement(conn, agent_id, incarnation)
-    try:
-        async with conn.transaction():
-            return await adopt_for_successor(conn, agent_id, incarnation), None
-    except Exception:
-        logger.exception(
-            "impersonation lease adoption failed; ending the inherited lease", agent_id=agent_id
-        )
-    return None, await end_for_replacement(conn, agent_id, incarnation)
+    adoption = await adopt_for_successor(conn, agent_id, incarnation)
+    if adoption is None:
+        return None, await end_for_replacement(conn, agent_id, incarnation)
+    return adoption, None
 
 
 # meiva:note

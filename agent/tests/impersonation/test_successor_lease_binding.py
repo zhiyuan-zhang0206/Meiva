@@ -156,3 +156,46 @@ async def test_successor_admission_carries_an_active_lease(
         "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
         (agent_id,),
     ).fetchone() == (successor.generation, successor.owner)
+
+
+# meiva:note
+# The move and the entry that records it are one statement, and this is the guard: a recording
+# connection counts the writes `adopt_for_successor` makes and reads their shape. Splitting them
+# back into an update followed by an insert is the change this pins against, and no database
+# failure can pin it — the only constructible one, a log sequence collision, also breaks the
+# fallback's own trigger, so both shapes fail identically.
+class _RecordedConnection:
+    def __init__(self, row: tuple[Any, ...]) -> None:
+        self.row = row
+        self.statements: list[str] = []
+
+    async def execute(self, query: str, params: Any = None) -> Any:
+        self.statements.append(query)
+        row = self.row if len(self.statements) == 1 else None
+
+        class Cursor:
+            async def fetchone(self) -> tuple[Any, ...] | None:
+                return row
+
+        return Cursor()
+
+    def transaction(self) -> Any:
+        raise AssertionError("the move is one statement and needs no savepoint")
+
+
+async def test_the_move_and_its_record_are_one_statement() -> None:
+    from base.agents.impersonation.replacement import adopt_for_successor
+    from base.native_process.runtime_incarnation import RuntimeIncarnation
+
+    lease_id = str(uuid4())
+    from_generation, from_owner = uuid4(), uuid4()
+    incarnation = RuntimeIncarnation(7, uuid4(), uuid4())
+    conn = _RecordedConnection((lease_id, 3, "active", from_generation, from_owner, "codex"))
+
+    adoption = await adopt_for_successor(conn, 7, incarnation)
+
+    assert adoption is not None
+    assert len(conn.statements) == 2
+    move = conn.statements[1]
+    assert "UPDATE agent_impersonations" in move
+    assert "INSERT INTO agent_impersonation_entries" in move
