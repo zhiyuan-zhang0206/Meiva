@@ -1,35 +1,21 @@
-exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "memory_pressure.py", "net", "permissions_helper", "private_storage.py", "proc.py", "resource_sample.py", "runtime_interpreter.py", "system", "tests", "verified_file.py"]
+exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "memory_pressure.py", "net", "permissions_helper", "private_storage.py", "proc.py", "resource", "runtime_interpreter.py", "system", "tests", "verified_file"]
 
 [uses]
 "brew_pin.py" = ["proc.py"]
 "config_validators.py" = ["system"]
 "converge" = ["system"]
-"db_authority" = ["net", "private_storage.py", "verified_file.py"]
+"db_authority" = ["net", "private_storage.py", "verified_file"]
 "env" = ["atomic_io.py", "db_authority", "net", "private_storage.py", "proc.py"]
 "git" = ["proc.py"]
 "net" = ["__init__.py"]
 "permissions_helper" = ["converge", "net"]
 "system" = ["atomic_io.py", "brew_pin.py", "env", "proc.py", "runtime_interpreter.py"]
-"tests" = ["atomic_io.py", "config_validators.py", "env", "private_storage.py", "proc.py", "resource_sample.py", "system"]
+"tests" = ["atomic_io.py", "config_validators.py", "env", "private_storage.py", "proc.py", "resource", "system", "verified_file"]
 
 [purity]
 "__init__.py" = "strict"
 "exit_codes.py" = "strict"
-"resource_sample.py" = "strict-to-be"
-"verified_file.py" = "strict-to-be"
 
 [debt.ambient-read]
 "private_storage.py#pid base.paths.private_dir.is_foreign_owned" = 5
 "proc.py#clock time.monotonic" = 1
-"resource_sample.py#clock time.time" = 1
-
-[debt.impure-call]
-"resource_sample.py#import subprocess" = 1
-"resource_sample.py#time.time" = 1
-"verified_file.py#Path.lstat" = 2
-"verified_file.py#os.fdopen" = 1
-"verified_file.py#os.fstat" = 2
-"verified_file.py#os.open" = 1
-
-[debt.impure-edge]
-"resource_sample.py#base/native_process/os_platform.py" = 1

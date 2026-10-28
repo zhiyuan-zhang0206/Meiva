@@ -24,7 +24,7 @@ from pydantic import Field, model_validator
 from base.clock import Timers
 from base.cluster.port_preflight import require_listener
 from base.host.atomic_io import write_text_atomic
-from base.host.verified_file import regular_bytes
+from base.host.verified_file.reader import regular_bytes
 from base.log import logger
 from base.native_process.evidence import EvidenceModel, ExpectedProcess
 from base.native_process.kernel_identity import native_boot_id

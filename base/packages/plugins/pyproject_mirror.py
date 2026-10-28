@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from base.host.git.host_version import Version, parse_version
+from base.host.git.host_version_plan import Version, parse_version
 from base.packages.plugins.manifest import (
     CLAUSE_SPLIT_RE,
     LOWER_OPS,

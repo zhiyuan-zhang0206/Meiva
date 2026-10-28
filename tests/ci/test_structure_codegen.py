@@ -549,7 +549,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "base/agents/impersonation/history.py",
         "base/agents/sdk/telemetry.py",
         "base/agents/observation/snapshot.py",
-        "base/host/resource_sample.py",
+        "base/host/resource/reading.py",
         "ops/rpc_schemas/__init__.py",
         "ops/rpc_schemas/terminate.py",
         "ui/web/src/lib/contracts/types-generated.ts",

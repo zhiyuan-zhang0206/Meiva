@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from base.api_contracts.status import PausedReason
-from base.host.resource_sample import ResourceSample
+from base.host.resource.reading import ResourceSample
 from ops.cluster_status.report import (
     ClusterStatus,
     DbSnapshot,
