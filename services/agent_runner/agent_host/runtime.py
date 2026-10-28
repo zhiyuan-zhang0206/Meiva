@@ -92,6 +92,10 @@ class HostPolicy:
     harness_registration_ttl_seconds: float
     stall: StallTiming
     # meiva:note
+    # The budget this host's takeover wake may spend settling its owed handoff write, read from
+    # `MEIVA_HOST_HELD_SETTLE_BUDGET_S` at boot; the deploy family's value is only the default.
+    held_settle_budget_s: float
+    # meiva:note
     # The environment an external harness session starts from (`child_env("runner", ...)`).
     harness_environ: Mapping[str, str]
     # meiva:note
