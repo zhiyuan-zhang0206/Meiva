@@ -165,6 +165,7 @@ def with_fast_variants(
         models[fast_id] = replace(
             standard,
             fast_of=standard_id,
+            external_harnesses={},
             reference_tps=throughput.get(standard_id),
             superseded_by=f"{replacement}-fast" if replacement in prices else None,
         )

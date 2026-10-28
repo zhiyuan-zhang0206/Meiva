@@ -61,12 +61,17 @@ def test_plain_spawn_records_the_requested_harness(
 ) -> None:
     agent = spawn_agent(
         harness="codex",
+        config={"llm_model": "gpt-6.1-sol", "reasoning_effort": "high"},
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
         local_machine=machine_identity,
     )
     assert _harness(db_conn, agent) == "codex"
+    assert db_conn.execute(
+        "SELECT birth_config->>'harness_model_selection' FROM agents_meta WHERE id=%s",
+        (agent,),
+    ).fetchone() == ("1",)
 
 
 def test_fork_inherits_the_source_harness(
@@ -141,6 +146,14 @@ def test_fork_of_an_external_harness_source_is_refused(
 ) -> None:
     source = spawn_agent(
         harness=external_harness,
+        config={
+            "llm_model": {
+                "claude_code": "claude-sonnet-5-5",
+                "codex": "gpt-6.1-sol",
+                "antigravity": "gemini-4-argon",
+            }[external_harness],
+            "reasoning_effort": "high",
+        },
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
@@ -173,6 +186,7 @@ def test_fork_naming_another_harness_is_refused(
 ) -> None:
     source = spawn_agent(
         harness="codex",
+        config={"llm_model": "gpt-6.1-sol", "reasoning_effort": "high"},
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,

@@ -110,6 +110,9 @@ cache reads outside the prompt, a model missing from the catalog — logs
 `harness_usage_log_failed` and leaves the reply in the window. The gap belongs in
 the log, not in answers the user already paid for.
 
+Execution model/effort resolve through the registry binding described in
+[[base/agents/docs/harness/harness-models.meiva.okf.md|Harness execution models]].
+
 ## Capability boundary
 
 Because an external harness CLI owns its context window and turn loop, native

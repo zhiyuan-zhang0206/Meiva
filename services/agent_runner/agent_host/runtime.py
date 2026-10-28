@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
 from base.agents.inbox.harness_notice import insert_harness_notice
+from base.agents.model.birth_config import uses_harness_model_selection
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.db import Database
@@ -141,7 +142,7 @@ class AgentRuntime:
     """
 
     fingerprint: str
-    llm: BaseChatModel
+    llm: BaseChatModel | None
     # meiva:note
     # The turn engine this runtime was built for, and the external session it drives.
     # Both belong to the cached runtime because an external session is expensive to
@@ -232,7 +233,20 @@ def admit_stored_model(
     """
     model = pins.get("llm_model") or default_model
     try:
-        validate_model_launch(model=model, catalog=catalog, keys=keys, llm_override=llm_override)
+        if Harness(stored.harness) is not Harness.MEIVA and not uses_harness_model_selection(
+            stored.birth_config
+        ):
+            rejected.pop(agent_id, None)
+            normalized.pop(agent_id, None)
+            return True
+        validate_model_launch(
+            model=model,
+            config=pins,
+            catalog=catalog,
+            keys=keys,
+            llm_override=llm_override,
+            harness=Harness(stored.harness),
+        )
     except ValueError as exc:
         stats.config_rejected += 1
         if rejected.get(agent_id) != stored.fingerprint:
@@ -388,6 +402,7 @@ async def build_runtime(
     permissions_notice_key: UUID,
     home: Path,
     harness: Harness = Harness.MEIVA,
+    birth_config: Mapping[str, object] | None = None,
     registry: SessionRegistry | None = None,
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
@@ -407,7 +422,16 @@ async def build_runtime(
         llm_override=llm_override,
         permissions_notice_key=permissions_notice_key,
         home=home,
+        harness=harness,
     )
+    model = None
+    effort = None
+    if harness is not Harness.MEIVA and uses_harness_model_selection(birth_config):
+        model, effort = catalog.models[slices.brain.llm_model].harness_model(
+            slices.brain.llm_model,
+            harness,
+            slices.overrides.reasoning_effort,
+        )
     return AgentRuntime(
         fingerprint=fingerprint,
         llm=llm,
@@ -421,6 +445,8 @@ async def build_runtime(
             machine=machine,
             environ=harness_environ,
             root=harness_root,
+            model=model,
+            reasoning_effort=effort,
             skip_permissions=slices.harness_cli.harness_skip_permissions,
             contributions=contributions,
             unsolicited=unsolicited,
@@ -439,6 +465,8 @@ def harness_bridge_for(
     machine: str,
     environ: Mapping[str, str],
     root: BridgeRootValues,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
     unsolicited: UnsolicitedSink | None = None,
@@ -460,6 +488,8 @@ def harness_bridge_for(
         registration_ttl_seconds=registration_ttl_seconds,
         environ=environ,
         root=root,
+        model=model,
+        reasoning_effort=reasoning_effort,
         skip_permissions=skip_permissions,
         contributions=contributions,
         unsolicited=unsolicited,

@@ -7,6 +7,7 @@ canonical registry's vendor reference TPS metadata.
 
 from pydantic import (
     BaseModel,
+    Field,
 )
 
 from base.api_contracts.agent_contract import DefaultModelSource, Harness
@@ -21,6 +22,11 @@ class ModelPricing(BaseModel):
     output: float  # output rate
     cache_write_5m: float | None = None
     cache_write_1h: float | None = None
+
+
+class HarnessModelInfo(BaseModel):
+    reasoning_effort_options: list[str]
+    reasoning_effort_default: str
 
 
 class ModelInfo(BaseModel):
@@ -47,6 +53,7 @@ class ModelInfo(BaseModel):
     # registry's per-model declaration is the single authority for that cascade.
     # meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
     harnesses: list[Harness]
+    harness_settings: dict[Harness, HarnessModelInfo] = Field(default_factory=dict)
 
 
 class ModelsResponse(BaseModel):

@@ -97,6 +97,11 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
+    attempt_id = uuid4()
+    db_conn.execute(
+        "UPDATE agents_meta SET last_launch_attempt_id=%s WHERE id=%s",
+        (attempt_id, lifecycle_agent_id),
+    )
     before = db_conn.execute(
         "SELECT status, birth_config, termination_source FROM agents_meta WHERE id=%s",
         (lifecycle_agent_id,),
@@ -105,7 +110,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     assert before is not None
     body = LaunchAgentRequest(
         agent_id=lifecycle_agent_id,
-        launch_attempt_id=uuid4(),
+        launch_attempt_id=attempt_id,
         birth_config=before[1],
         config={"llm_model": "not-a-registered-launch-model"},
     )

@@ -224,7 +224,14 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
         self._starting = True
         try:
-            result = await self._call(*turn_start_request(self._session_id, ticket.text))
+            result = await self._call(
+                *turn_start_request(
+                    self._session_id,
+                    ticket.text,
+                    model=self.config.model,
+                    reasoning_effort=self.config.reasoning_effort,
+                )
+            )
         except Exception as exc:
             self._fail_turn(ticket, exc)
             return

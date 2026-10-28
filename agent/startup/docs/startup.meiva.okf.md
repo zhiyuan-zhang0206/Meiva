@@ -85,3 +85,7 @@ owns verification and rollback.
 - [[../../docs/loop.meiva.okf.md]] — host turn loop
 - [[../../docs/state.meiva.okf.md]] — checkpoint persistence
 - [[page-restore.meiva.okf.md]] — page reconciliation
+
+External harness agents retain the shared workspace/document and desktop-permission
+preparation in `boot_agent_scope`, then skip native chat-model construction.
+Their model and effort are resolved into the external session adapter instead.

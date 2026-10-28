@@ -171,3 +171,21 @@ def resolve_birth_config(
             continue
         stamped[name] = _json_safe(values[name])
     return stamped
+
+
+HARNESS_MODEL_SELECTION_KEY = "harness_model_selection"
+HARNESS_MODEL_SELECTION_VERSION = 1
+
+
+# meiva:note
+# Before execution selection existed, external agents stored a native history model in the same
+# fields. Only a stamped birth opts those pins into CLI execution; old sessions keep their CLI
+# defaults on resume. Unknown stored versions fail rather than reinterpret historical choices.
+# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+def uses_harness_model_selection(birth_config: Mapping[str, object] | None) -> bool:
+    if birth_config is None or HARNESS_MODEL_SELECTION_KEY not in birth_config:
+        return False
+    version = birth_config[HARNESS_MODEL_SELECTION_KEY]
+    if type(version) is not int or version != HARNESS_MODEL_SELECTION_VERSION:
+        raise ValueError(f"unsupported harness model selection version: {version!r}")
+    return True
