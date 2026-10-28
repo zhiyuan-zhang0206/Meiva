@@ -19,6 +19,7 @@ from pathlib import Path
 from base.clock import SYSTEM_TIMERS
 from base.log import logger
 from base.log.sinks import add_sink
+from base.native_process import child_env
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import meiva_home, run_dir
@@ -72,6 +73,7 @@ def main() -> int:
 def _run(run: Path, home: Path) -> int:
     service = PtyService(
         home=home,
+        base_environ=child_env.inherited_process_env(),
         process_control=SYSTEM_PROCESS_CONTROL,
         timers=SYSTEM_TIMERS,
         pid=os.getpid(),

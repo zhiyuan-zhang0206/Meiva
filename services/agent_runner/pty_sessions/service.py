@@ -26,7 +26,7 @@ import os
 import re
 import signal
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -35,7 +35,6 @@ import psutil
 
 from base.clock import Timers
 from base.log import logger
-from base.native_process import child_env
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import ProcessControl
@@ -111,7 +110,11 @@ def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 
-def _child_env(overlay: object) -> dict[str, str]:
+# meiva:note
+# `base_environ` is the environment this service was started with: its daemon reads it once and hands
+# it in, so a shell child gets that base plus the caller's overlay and never a fresh read of the
+# process's own environment (the service writes no variable after start).
+def _child_env(overlay: object, *, base_environ: Mapping[str, str]) -> dict[str, str]:
     """The shell's environment: this service's, minus its own markers, then the caller's.
 
     The service environment is the base (the creator's own variables, an
@@ -122,7 +125,7 @@ def _child_env(overlay: object) -> dict[str, str]:
     """
     if not _is_object_dict(overlay):
         raise RequestError(protocol.BAD_REQUEST, "env must be an object of strings")
-    env = child_env.inherited_process_env()
+    env = dict(base_environ)
     env.pop("MEIVA_PROCESS_PROFILE", None)
     env.pop("VIRTUAL_ENV", None)
     for key, value in overlay.items():
@@ -143,6 +146,7 @@ class PtyService:
         self,
         *,
         home: Path,
+        base_environ: Mapping[str, str],
         process_control: ProcessControl,
         timers: Timers,
         now: Callable[[], float],
@@ -150,6 +154,7 @@ class PtyService:
         host_generation: str = "",
     ) -> None:
         self._home = home
+        self._base_environ = base_environ
         self._process_control = process_control
         self._timers = timers
         self._pid = pid
@@ -255,7 +260,7 @@ class PtyService:
         cmd = req.get("cmd")
         if cmd is not None and not isinstance(cmd, str):
             raise RequestError(protocol.BAD_REQUEST, "cmd must be a string")
-        env = _child_env(req.get("env", {}))
+        env = _child_env(req.get("env", {}), base_environ=self._base_environ)
         # The allocation lock is held until the session is registered: once a
         # concurrent freeze returns, every earlier allocation is visible here
         # and every later one observes the marker.
