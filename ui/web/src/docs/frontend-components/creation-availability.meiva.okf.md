@@ -24,8 +24,9 @@ to the first one it can (the pick itself is left alone, so switching back
 restores it). The model column keeps only the models whose published
 `harnesses` name the chosen harness (`GET /api/models`, `ModelInfo.harnesses`;
 the built-in `meiva` runtime runs every spawnable model and is always listed
-first), grouped under a vendor heading, with hidden and superseded catalog
-entries excluded and a provider switched off in Control contributing nothing.
+first), grouped under a vendor heading, excluding superseded catalog entries.
+Hidden models and providers filter native API execution only; external CLI
+choices remain selectable without changing those preferences.
 Which harness runs which model is the registry's declaration, not a frontend
 table. Model and Effort select actual execution settings in both layouts.
 Native uses the model's `reasoning_effort_options` and
@@ -70,12 +71,12 @@ never stand in for the vendor figure.
 Declared `fast_of` services appear directly after their visible Standard model.
 Families sort by the Standard input price; a service whose Standard model is
 hidden remains an independent row sorted by its own price. Names do not imply
-family membership, and grouping never restores hidden or superseded entries.
+family membership; grouping preserves the chosen harness's visibility filters.
 
 Control > Display lists a switch per provider above its models: switching a
-provider off takes its whole family out of the spawn picker at once and leaves
-the per-model switches non-editable, while each model keeps the state the user
-gave it, so switching the provider back on restores that state. A superseded
+provider off removes its native API models from the picker and leaves
+the per-model switches non-editable, retaining each model's state when the
+provider is re-enabled. A superseded
 model is not listed at all — the picker refuses it, so a switch there would
 change nothing a spawn reads — instead of appearing disabled with an explanation.
 

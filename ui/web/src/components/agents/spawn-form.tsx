@@ -151,23 +151,17 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const harnessBlocked = !tableHarnessRows.find((row) => row.harness === selectedHarness)?.launchable;
 
   // meiva:note
-  // Models the chosen harness can run: user-hidden models (setting models.hidden)
-  // and registry-superseded models are excluded, and the model's published
-  // `harnesses` decides which harnesses offer it.
+  // API visibility preferences apply to native execution. External CLI catalogs
+  // remain selectable when their API providers or models are hidden.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
-  // meiva:note
-  // A provider switched off in Control > Display contributes no models here
-  // either: the per-model list is not consulted for it, so one switch takes the
-  // whole family out of the spawn picker (user 2026-10-20).
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const hiddenProviders: string[] = (settings["models.hidden_providers"] as string[] | undefined) ?? [];
   const modelGroups = groupedModels(
     modelsData,
     (m) =>
-      !hiddenModels.includes(m) &&
       !isSuperseded(modelsData, m) &&
-      !hiddenProviders.includes(modelsData?.models[m]?.provider ?? "") &&
+      (selectedHarness !== DEFAULT_HARNESS ||
+        (!hiddenModels.includes(m) && !hiddenProviders.includes(modelsData?.models[m]?.provider ?? ""))) &&
       runsOnHarness(modelsData, m, selectedHarness),
   );
   const defaultModel = modelsData?.default;
