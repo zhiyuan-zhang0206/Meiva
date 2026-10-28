@@ -1,1 +1,4 @@
 exports = ["labels.ts", "task-palette.ts"]
+
+[uses]
+"labels.test.ts" = ["labels.ts"]

@@ -9,5 +9,3 @@ exports = ["budget_plans.py", "directory_budget.py", "limits.py"]
 "." = "strict"
 "directory_budget.py" = { mode = "none", why = "the shell that reads the file budget's paths: it lists one directory level with scandir and walks a judged path's ancestors for links; which entries are candidates and which of a target and a structure directory is judged are decided in budget_plans.py" }
 "limits.py" = { mode = "none", why = "the shell that runs both ceilings over the checkout: it walks the directories a target judges, stats each entry, reads each judged file and asks Git for the tracked paths; the ceilings, the exclusions, the directory selection and every word of the report are decided in budget_plans.py" }
-
-[debt.impure-call]

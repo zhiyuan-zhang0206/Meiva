@@ -1,0 +1,63 @@
+exports = ["fleet-view.tsx"]
+
+[uses]
+"fleet-route-jump.test.tsx" = ["fleet-view.tsx", "graph-view.tsx", "task-graph.tsx"]
+"fleet-route.test.ts" = ["fleet-route.ts"]
+"fleet-view.test.tsx" = ["fleet-view.tsx", "graph-view.tsx"]
+"fleet-view.tsx" = ["fleet-route.ts", "graph-view.tsx", "inbox-queue", "left-graph-panel.tsx", "task-graph.tsx"]
+"force-graph-geometry.ts" = ["force-controls.tsx"]
+"force-graph-layout.test.ts" = ["force-graph.tsx"]
+"force-graph.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "presentation"]
+"graph-view.test.tsx" = ["graph-view.tsx"]
+"graph-view.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx"]
+"left-graph-panel.tsx" = ["graph-view.tsx", "task-graph.tsx"]
+"task-graph-chrome.tsx" = ["presentation"]
+"task-graph-forces.test.ts" = ["force-controls.tsx"]
+"task-graph.test.tsx" = ["task-graph.tsx"]
+"task-graph.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx", "presentation", "task-graph-chrome.tsx", "task-kanban.tsx"]
+"tests" = ["force-controls.tsx", "graph-view.tsx", "presentation", "task-graph-chrome.tsx", "task-graph.tsx", "task-kanban.tsx"]
+
+[debt.ambient-read]
+"fleet-view.tsx#environ localStorage" = 2
+"fleet-view.tsx#environ window.location" = 2
+"task-graph-chrome.tsx#clock Date" = 3
+
+[debt.first-party-patch]
+"fleet-route-jump.test.tsx#vi.mock ui/web/src/components/fleet/graph-view.tsx" = 1
+"fleet-route-jump.test.tsx#vi.mock ui/web/src/components/fleet/task-graph.tsx" = 1
+"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
+"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/agents/use-fleet-agents.ts" = 1
+"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
+"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"fleet-view.test.tsx#vi.mock ui/web/src/components/fleet/graph-view.tsx" = 1
+"fleet-view.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
+"fleet-view.test.tsx#vi.mock ui/web/src/lib/agents/use-fleet-agents.ts" = 1
+"fleet-view.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
+"fleet-view.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"fleet-view.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"graph-view.test.tsx#vi.mock ui/web/src/lib/fleet/use-fleet-graph.ts" = 1
+"graph-view.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"graph-view.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"task-graph.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"task-graph.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"task-graph.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.third-party-patch]
+"fleet-route-jump.test.tsx#vi.mock next/link" = 1
+"fleet-route-jump.test.tsx#vi.mock next/navigation" = 1
+"fleet-view.test.tsx#vi.mock next/link" = 1
+"fleet-view.test.tsx#vi.mock next/navigation" = 1
+"graph-view.test.tsx#vi.mock next/navigation" = 1
+"task-graph.test.tsx#vi.mock next/navigation" = 1
+
+[debt.type-cast]
+"force-graph.tsx#cast ForceGraph.<lambda>" = 1
+"graph-view.tsx#cast GraphView.<lambda>" = 3
+"task-graph-chrome.tsx#cast FilterCluster.<lambda>" = 1
+"task-graph.tsx#cast TaskGraph.<lambda>" = 1
+
+[debt.unresolved-patch]
+"task-graph.test.tsx#vi.spyOn canvas.\"getBoundingClientRect\"" = 6
+"task-graph.test.tsx#vi.spyOn group.\"getBoundingClientRect\"" = 6
+"task-graph.test.tsx#vi.spyOn legend.\"getBoundingClientRect\"" = 1

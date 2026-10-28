@@ -1,0 +1,4 @@
+exports = ["en", "zh"]
+
+[purity]
+"." = "strict"

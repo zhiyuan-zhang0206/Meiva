@@ -1,0 +1,9 @@
+exports = ["permission-banner.tsx", "permission-checklist.tsx"]
+
+[uses]
+"permission-banner.tsx" = ["use-host-permissions.ts"]
+"permission-checklist.test.tsx" = ["permission-checklist.tsx"]
+"permission-checklist.tsx" = ["use-host-permissions.ts"]
+
+[debt.first-party-patch]
+"permission-checklist.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1

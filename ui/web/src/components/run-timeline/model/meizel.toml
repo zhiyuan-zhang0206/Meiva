@@ -1,0 +1,20 @@
+exports = ["links", "object-identity.ts", "run-timeline-readout.ts", "timeline-canvas-hit.ts", "timeline-canvas-model.ts", "timeline-model-axis.ts", "timeline-model-classes.ts", "timeline-model-selection.ts", "timeline-model-tree.ts", "timeline-model-viewport.ts", "timeline-model.ts", "timeline-nav-items.ts", "timeline-nav-rows.ts", "timeline-nav.ts"]
+
+[uses]
+"links" = ["object-identity.ts", "timeline-model-selection.ts"]
+"run-timeline-readout.test.ts" = ["run-timeline-readout.ts"]
+"run-timeline-readout.ts" = ["timeline-model-selection.ts"]
+"timeline-canvas-hit.ts" = ["timeline-model-axis.ts", "timeline-nav-rows.ts"]
+"timeline-canvas-model.test.ts" = ["timeline-canvas-hit.ts", "timeline-canvas-model.ts", "timeline-model.ts", "timeline-nav-rows.ts"]
+"timeline-canvas-model.ts" = ["timeline-canvas-hit.ts", "timeline-model-axis.ts", "timeline-model-context.ts", "timeline-model-viewport.ts", "timeline-nav-items.ts", "timeline-nav-rows.ts"]
+"timeline-model-axis.ts" = ["timeline-model-selection.ts", "timeline-model-viewport.ts"]
+"timeline-model-tree.ts" = ["timeline-model-classes.ts", "timeline-model-selection.ts"]
+"timeline-model-viewport.ts" = ["timeline-model-selection.ts"]
+"timeline-model.test.ts" = ["timeline-model-axis.ts", "timeline-model-classes.ts", "timeline-model-context.ts", "timeline-model-selection.ts", "timeline-model-tree.ts", "timeline-model-viewport.ts", "timeline-model.ts", "timeline-nav-items.ts", "timeline-nav-rows.ts", "timeline-nav.ts"]
+"timeline-model.ts" = ["timeline-model-axis.ts", "timeline-model-viewport.ts"]
+"timeline-nav-items.ts" = ["timeline-model-axis.ts", "timeline-model-context.ts", "timeline-model-selection.ts", "timeline-model-viewport.ts", "timeline-nav-rows.ts"]
+"timeline-nav-rows.ts" = ["timeline-model-axis.ts", "timeline-model-context.ts", "timeline-model-selection.ts"]
+"timeline-nav.ts" = ["timeline-model-axis.ts", "timeline-model-selection.ts", "timeline-model-viewport.ts", "timeline-nav-items.ts", "timeline-nav-rows.ts"]
+
+[debt.type-cast]
+"timeline-canvas-hit.ts#cast aggregateColumns" = 1

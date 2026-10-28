@@ -1,0 +1,7 @@
+exports = ["cluster.ts", "geometry.ts", "resolve.ts", "selection.ts"]
+
+[uses]
+"cluster.ts" = ["resolve.ts"]
+"geometry.ts" = ["resolve.ts"]
+"links.test.ts" = ["cluster.ts", "geometry.ts", "resolve.ts", "selection.ts"]
+"selection.ts" = ["geometry.ts"]

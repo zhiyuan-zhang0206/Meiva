@@ -1,0 +1,28 @@
+exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "markdown.tsx", "python-code.tsx", "zoomable-image.tsx"]
+
+[uses]
+"code-highlighter-preloader.test.tsx" = ["code-highlighter-preloader.tsx", "python-code.tsx"]
+"code-highlighter-preloader.tsx" = ["python-code.tsx"]
+"copy-button.test.tsx" = ["copy-button.tsx"]
+"markdown-lazy.test.tsx" = ["markdown-renderer.tsx", "markdown.tsx"]
+"markdown-renderer.tsx" = ["copy-button.tsx", "python-code.tsx"]
+"markdown.test.tsx" = ["fixtures", "markdown.tsx", "python-code.tsx"]
+"markdown.tsx" = ["markdown-renderer.tsx"]
+"python-code.test.tsx" = ["python-code.tsx"]
+"python-code.tsx" = ["copy-button.tsx"]
+
+[debt.first-party-patch]
+"markdown.test.tsx#vi.mock ui/web/src/components/content/python-code.tsx" = 1
+
+[debt.private-name]
+"code-highlighter-preloader.test.tsx -> python-code.tsx#__resetHighlighterCacheForTests" = 1
+"code-highlighter-preloader.test.tsx -> python-code.tsx#__setHighlighterImportForTests" = 1
+"markdown-lazy.test.tsx -> markdown.tsx#__resetMarkdownCacheForTests" = 1
+"markdown-lazy.test.tsx -> markdown.tsx#__setMarkdownImportForTests" = 1
+"python-code.test.tsx -> python-code.tsx#__resetHighlighterCacheForTests" = 1
+"python-code.test.tsx -> python-code.tsx#__setHighlighterImportForTests" = 1
+
+[debt.stdlib-patch]
+"code-highlighter-preloader.test.tsx#vi.stubGlobal cancelIdleCallback" = 1
+"code-highlighter-preloader.test.tsx#vi.stubGlobal requestIdleCallback" = 2
+"python-code.test.tsx#vi.spyOn console.warn" = 2

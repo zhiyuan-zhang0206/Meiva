@@ -1,6 +1,26 @@
+exports = ["proxy.ts"]
+
 [uses]
-"app" = ["lib", "test-support"]
+"app" = ["components", "lib", "test-support"]
 "components" = ["i18n", "lib", "test-support"]
 "i18n" = ["lib"]
 "proxy.ts" = ["lib"]
 "test-support" = ["lib"]
+
+[purity]
+"proxy.ts" = "strict-to-be"
+
+[debt.ambient-read]
+"proxy.ts#environ process.env" = 1
+"proxy.ts#random crypto.randomUUID" = 1
+
+[debt.impure-call]
+"proxy.ts#proxy#crypto.randomUUID" = 1
+
+[debt.private-name]
+"app/control/schedules/page.test.tsx -> components/content/python-code.tsx#__resetHighlighterCacheForTests" = 1
+"app/control/schedules/page.test.tsx -> components/content/python-code.tsx#__setHighlighterImportForTests" = 1
+
+[debt.undeclared-edge]
+"components/run-timeline/agent-view/agent-view-links.test.tsx -> app/insights/run/[agents]/page.tsx" = 1
+"components/run-timeline/agent-view/agent-view.test.tsx -> app/insights/run/[agents]/page.tsx" = 1
