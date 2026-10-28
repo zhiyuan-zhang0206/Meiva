@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, assert_never
 
@@ -133,7 +134,11 @@ def _execute(
         case ReportConverge():
             print_converge_section(command.home)
         case PrintServiceRows(table):
-            _print_service_rows(table, specs, root_tree_units(command.home))
+            _print_service_rows(
+                table,
+                specs,
+                root_tree_units(command.home, environ=command.config.process_environment()),
+            )
         case ProbeDataPlane():
             print_data_plane_status(
                 data_plane_config_from_boot(command.config),
@@ -189,9 +194,9 @@ def print_converge_section(home: Path) -> None:
 # The root is the only service owner. Liveness is never inferred from old records. A root
 # that answers with a status the commands cannot read is named on stderr and the table still
 # prints: `meiva status` is the command to run on a host whose root is misbehaving.
-def root_tree_units(home: Path) -> dict[str, dict[str, Any]]:
+def root_tree_units(home: Path, *, environ: Mapping[str, str]) -> dict[str, dict[str, Any]]:
     try:
-        snapshot = root_driver.root_status(root_driver.root_client(home))
+        snapshot = root_driver.root_status(root_driver.root_client(home, environ=environ))
     except root_driver.RootDriverError as exc:
         print(f"  ! {exc}", file=sys.stderr)
         return {}
