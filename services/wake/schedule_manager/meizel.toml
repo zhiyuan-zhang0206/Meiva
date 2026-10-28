@@ -26,6 +26,3 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 [roots]
 "daemon.py" = { kinds = ["clock", "home", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources; builds the process clock from SYSTEM_TIMERS" }
 "runner.py" = { kinds = ["clock", "home", "pid", "random", "settings"], why = "Service or operator process entry boots configuration before composing its resources; it resolves the account home and builds the random generator once, for the SDK context it binds; builds the process clock from SYSTEM_TIMERS" }
-
-[debt.ambient-read]
-"engine.py#pid threading.get_ident" = 1
