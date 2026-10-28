@@ -41,6 +41,7 @@ from meizel.language.scan import (
     scan_file,
     scan_typescript_files,
     typescript_files,
+    typescript_scopes,
 )
 from meizel.lint_common import is_test_path
 from meizel.roles import select_packages
@@ -88,6 +89,9 @@ class Analysis:
     stale_loads: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     stale_externals: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     stale_exports: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    # meiva:note
+    # Warnings the run cannot turn into a violation: (manifest, the line to print).
+    inert: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
     def language_counts(self) -> dict[str, int]:
         return {
@@ -673,6 +677,41 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) 
 # declaration, but not stale graph declarations: those need the whole repository's facts.
 # Generated role lists and copies are checked globally in both modes, using this universe
 # and the parsed root roles; they do not widen the fact scan.
+# meiva:note
+# A `[roots]` table no rule can consult: an exemption is read when that file's own reads are judged,
+# so a table in a directory this run never analyses exempts nothing while looking like a repaid read
+# (#5691 probe B: adding it and deleting it left `check` byte-identical). It is a warning, never a
+# violation: no rule forbids the table, the tool just cannot honour it.
+def _inert_roots(
+    manifests: Mapping[str, Manifest],
+    *,
+    analysed: Collection[str],
+    tracked: Collection[str],
+    scopes: tuple[str, ...],
+) -> list[tuple[str, str]]:
+    judged = frozenset(path.rpartition("/")[0] for path in analysed)
+    source_dirs = {
+        path.rpartition("/")[0] for path in tracked if path.rsplit("/", 1)[-1] != "meizel.toml"
+    }
+    covered = ", ".join(scopes) if scopes else "no directory"
+    found: list[tuple[str, str]] = []
+    for directory, manifest in sorted(manifests.items()):
+        if not manifest.roots or directory in judged or directory not in source_dirs:
+            continue
+        names = ", ".join(f'"{name}"' for name in sorted(manifest.roots))
+        line = min(manifest.line_of(name) for name in manifest.roots)
+        where = directory or "the repository root"
+        found.append(
+            (
+                manifest_path(directory),
+                f"meizel: warning: {manifest_path(directory)}:{line}: [roots] {names} exempt "
+                f"nothing: this run analyses no file in {where}, because [typescript].scopes "
+                f"covers {covered} -- add the directory to [typescript].scopes, or delete the entries",
+            )
+        )
+    return found
+
+
 def analyze(
     universe: Universe, *, jobs: int | None = None, changed: Collection[str] | None = None
 ) -> Analysis:
@@ -712,6 +751,7 @@ def analyze(
     diagnostics.extend(_type_checking_diagnostics(judged_scans, manifests, policy))
     purity_diags = purity_diagnostics(scans.values(), judged_scans, manifests, policy)
     stale = StaleDeclarations()
+    inert: list[tuple[str, str]] = []
     if scope is None:
         export_diags, unused_exports = stale_exports(manifests, projections)
         purity_diags.extend(export_diags)
@@ -723,6 +763,12 @@ def analyze(
         )
         diagnostics.extend(_stale_diagnostics(manifests, stale))
         diagnostics.extend(stale_roots(scans, manifests))
+        inert = _inert_roots(
+            manifests,
+            analysed=scans,
+            tracked=universe.files,
+            scopes=typescript_scopes(policy),
+        )
         diagnostics.extend(stale_readers(universe, policy))
         diagnostics.extend(
             _stale_approvals(policy, universe.files, {p: len(s.patches) for p, s in scans.items()})
@@ -744,4 +790,5 @@ def analyze(
         stale.loads,
         stale.externals,
         stale.exports,
+        inert,
     )

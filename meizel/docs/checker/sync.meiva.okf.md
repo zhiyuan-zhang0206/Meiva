@@ -33,6 +33,10 @@ files included), it writes what the rule asks for:
 
 It first does the work of `--prune` and `debt prune`, so a stale edge or a paid
 back-edge does not block a new edge in the opposite direction, and then declares.
+Only the edges and `exports` entries the facts derive are written: a hand-written
+`exports` entry an import rule cannot see, and a `[purity]` value written by a
+person, are not restored — re-read the manifest after `--declare` and put back
+what it dropped.
 Existing entries are merged and comments
 outside the touched lists stay. A manifest it creates must be staged (`git add`)
 before `check` sees it, because `check` reads tracked files only.

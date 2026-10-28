@@ -25,6 +25,10 @@ repository can narrow selection in its tracked `meizel.policy.toml`:
 - `import-sources` adds callers whose imports into those directories are included;
   it does not assert that the callers' behavior has been checked. With explicit
   scopes, only edges into those scopes are judged (the existing policy contract).
+  A `[roots]` table written in a directory outside the scopes exempts nothing —
+  the exemption is read when that file's own reads are judged, and no file there
+  is — so `check` reports each such table as a warning naming the scopes that
+  were selected instead of passing over it in silence.
 - `extensions` can narrow the supported extensions.
 
 The nearest `tsconfig.json`, its `extends`, `paths`, module-resolution mode and

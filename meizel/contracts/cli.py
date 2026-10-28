@@ -78,6 +78,12 @@ def _run_check(
             raise MeizelError(f"{raw}: not a tracked file or directory")
     diagnostics = _select(analysis, targets)
     print(analysis.coverage_line())
+    # meiva:note
+    # Warnings report a declaration the run cannot honour; they never change the verdict, because
+    # no rule is violated by writing a table the policy does not reach.
+    for manifest, warning in analysis.inert:
+        if not targets or _within(manifest, targets):
+            print(warning, file=sys.stderr)
     if diagnostics:
         _print_verdict(diagnostics, limit)
         return 1
