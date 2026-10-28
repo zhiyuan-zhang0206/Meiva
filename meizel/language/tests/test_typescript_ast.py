@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 
 from meizel.allowances import parse
+from meizel.checkout import GitRepo
 from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import GitRepo, Universe
+from meizel.graph.universe import Universe
 from meizel.language.typescript import scan_typescript
 
 

@@ -35,7 +35,7 @@ from meizel.contracts.manifest import Manifest, Root, load_manifests, manifest_p
 from meizel.contracts.manifest_text import set_scope
 from meizel.contracts.sync import prepare_policy_snapshot, prune, with_table
 from meizel.graph.model import AmbientKind, Code, MeizelError
-from meizel.graph.universe import EditPlan, GitRepo, Universe, parent_of
+from meizel.graph.universe import Checkout, EditPlan, Universe, parent_of
 from meizel.language.scan import invalidate_policy_caches
 
 __all__ = ["RuleDiff", "purity_changed", "rule_diff"]
@@ -178,7 +178,7 @@ def _refuse_unreadable(analysis: Analysis, ref: str) -> None:
 # meiva:note
 # The baseline this checker would write for the checkout `base`: the commands a rule change runs on
 # it, staged after each write because the checker reads tracked files only.
-def regenerated(base: GitRepo, ref: str, jobs: int | None) -> Baselines:
+def regenerated(base: Checkout, ref: str, jobs: int | None) -> Baselines:
     _refuse_unreadable(analyze(base.universe(), jobs=jobs), ref)
     prune(base, jobs)
     prune_debt(base, jobs)
@@ -225,11 +225,11 @@ def _strict_to_be_targets(text: str) -> set[str]:
 
 # meiva:note
 # Reads a tracked manifest blob from a git ref using a fixed git show argv without invoking a shell.
-def _base_text(repo: GitRepo, ref: str, path: str) -> str:
+def _base_text(repo: Checkout, ref: str, path: str) -> str:
     return repo.show_optional_text(ref, path) or ""
 
 
-def purity_changed(repo: GitRepo, ref: str) -> bool:
+def purity_changed(repo: Checkout, ref: str) -> bool:
     changed = set(changed_under(repo, ref, [":(glob)**/meizel.toml", "meizel.toml"]))
     if not changed:
         return False
@@ -352,7 +352,7 @@ def _ambient_snapshot(
     return prepared
 
 
-def _sync_rule_files(repo: GitRepo, ref: str, base: GitRepo) -> set[str]:
+def _sync_rule_files(repo: Checkout, ref: str, base: Checkout) -> set[str]:
     byte_writes: dict[Path, bytes] = {}
     deletes: list[Path] = []
     copied: set[str] = set()
@@ -364,7 +364,7 @@ def _sync_rule_files(repo: GitRepo, ref: str, base: GitRepo) -> set[str]:
                 copied.add(rel)
         elif base.has_file(rel):
             deletes.append(dst)
-    EditPlan(byte_writes=byte_writes, deletes=tuple(deletes)).apply()
+    repo.apply_plan(EditPlan(byte_writes=byte_writes, deletes=tuple(deletes)))
     return copied
 
 
@@ -372,11 +372,11 @@ def _sync_rule_files(repo: GitRepo, ref: str, base: GitRepo) -> set[str]:
 # The base's own approvals of patches, over the policy copied from the head: a change that approves
 # a file does not get its patches judged as approved while the base's content is regenerated, so the
 # growth it hides shows (as a decrease of the tree below it, never as a rule change).
-def _keep_approvals(repo: GitRepo, approved: Mapping[str, str]) -> None:
+def _keep_approvals(repo: Checkout, approved: Mapping[str, str]) -> None:
     old = repo.load_text("meizel.policy.toml", default="")
     new = with_table(old, _APPROVED, approved)
     if new != old:
-        EditPlan(writes={repo.root / "meizel.policy.toml": new}).apply()
+        repo.apply_plan(EditPlan(writes={repo.root / "meizel.policy.toml": new}))
 
 
 def _scope_text(
@@ -406,9 +406,9 @@ def _scope_text(
 # facts, including when a checker manifest is copied with the rule code. All scope edits use
 # this existing manifest effect loop rather than a second migration writer.
 def _sync_purity_scope(
-    repo: GitRepo,
+    repo: Checkout,
     ref: str,
-    base: GitRepo,
+    base: Checkout,
     original: dict[str, Manifest],
     approved: Mapping[str, str],
 ) -> None:
@@ -436,13 +436,13 @@ def _sync_purity_scope(
         new_text = _scope_text(old_text, manifest, baseline, known)
         if new_text != old_text:
             writes[base.root / rel] = new_text
-    EditPlan(writes=writes).apply()
+    base.apply_plan(EditPlan(writes=writes))
     base.stage_all()
 
 
 # meiva:note
 # Compare the tree `repo` reads with `ref`, given the per-code debt the base records.
-def rule_diff(repo: GitRepo, ref: str, base: Counter[str], jobs: int | None = None) -> RuleDiff:
+def rule_diff(repo: Checkout, ref: str, base: Counter[str], jobs: int | None = None) -> RuleDiff:
     with repo.checkout(ref) as checkout:
         historical = prepare_policy_snapshot(checkout)
         # meiva:note
