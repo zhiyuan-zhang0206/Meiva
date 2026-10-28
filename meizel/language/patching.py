@@ -63,7 +63,7 @@ class PatchForms(PythonCommands):
     def __init__(self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool) -> None:
         super().__init__(universe, path, tree, walrus=walrus)
         self.test_file = fixtures.is_test_file(path)
-        self.purity_state = purity.make_state(universe.root)
+        self.purity_state = purity.make_state(universe)
         self.patches: list[Patch] = []
 
     # meiva:note
@@ -145,7 +145,7 @@ class PatchForms(PythonCommands):
             return False
         if self.u.resolve_module(f"{dotted}.{name}") is not None:
             return False
-        return is_imported_binding(module_bindings(self.u.root, module.file), name)
+        return is_imported_binding(module_bindings(self.u, module.file), name)
 
     def written(self, owner: ast.expr, names: tuple[str, ...], line: int, form: str) -> None:
         dotted = self.dotted(owner)
@@ -189,7 +189,7 @@ class PatchForms(PythonCommands):
         module = self.u.resolve_module(dotted)
         if module is None or module.file is None or module.file == self.path:
             return
-        bindings = module_bindings(self.u.root, module.file)
+        bindings = module_bindings(self.u, module.file)
         for name in names:
             if provides(bindings, name) or self.u.resolve_module(f"{dotted}.{name}") is not None:
                 continue
