@@ -7,7 +7,7 @@ Current delivery, retention and failure contracts belong to their component owne
 - [OTLP producer export](../../../../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.meiva.okf.md),
   [delivery topology and recovery mirror](../../../../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.meiva.okf.md),
   [bounded queues and loss](../../../../base/telemetry/otlp/docs/telemetry-otlp/export-backpressure.meiva.okf.md).
-- [Infrastructure metrics](../../../../base/telemetry/otlp/docs/telemetry-otlp/infra-metrics.meiva.okf.md)
+- [Infrastructure metrics](../../../../base/telemetry/otlp/docs/telemetry-otlp/infra-metrics/infra-metrics.meiva.okf.md)
   and [event labels](../../../../base/telemetry/otlp/docs/telemetry-otlp/event-resource-labels.meiva.okf.md).
 
 ## Change backend selection

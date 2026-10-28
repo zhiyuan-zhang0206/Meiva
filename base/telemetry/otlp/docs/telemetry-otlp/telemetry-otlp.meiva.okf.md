@@ -38,7 +38,7 @@ are specified in [[cluster-isolation.meiva.okf.md|Telemetry cluster isolation]].
   collector's authenticated receiver with the telemetry token.
 - The sidecar also **scrapes** the traditional SRE layer — host, Postgres,
   Redis — into the same metrics fan-out:
-  [[infra-metrics.meiva.okf.md|Infrastructure metrics]].
+  [[infra-metrics/infra-metrics.meiva.okf.md|Infrastructure metrics]].
 
 ## Core responsibilities
 
@@ -117,7 +117,7 @@ Enablement flags, endpoint defaults and the read topology have their own node:
   collector self-metrics keep their series. Every exporter keeps a bounded
   in-memory sending queue; a collector restart drops what was queued.
   Queue/drop/silence observability lives in
-  [[infra-metrics.meiva.okf.md|Infrastructure metrics]].
+  [[infra-metrics/infra-metrics.meiva.okf.md|Infrastructure metrics]].
 - Exit flush (task #4320) — both providers build with
   `shutdown_on_exit=False`; the single ordered exit seam and its accepted
   semantics: [[exit-flush.meiva.okf.md|OTLP exit flush]].

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Inspector section details
-description: What each Inspector section renders — cost/activity metrics and their formatting, shells, pages, the config-overlay diff, liveness cells, the notice reply surface and the no-fabrication rule.
+description: What each Inspector section renders — shells, pages, the config-overlay diff, the notice reply surface and the no-fabrication rule; the Activity and Liveness sections have their own nodes.
 tags: [frontend]
 ---
 
@@ -57,30 +57,10 @@ model is the agent's state, and it reads in Liveness instead (user 2026-10-21). 
 in the runtime's underscore Python projection and render in the canonical dash
 spelling (the same rule as the `# Capabilities` index); `*` stays `*`.
 
-**Liveness** (one merged section, user rulings Task #1195 / 2026-08-12 and
-2026-09-18 field order, Task #3952 / #3904). Cells in display order: agent birth
-— `spawned_at` (the true birth, written once at spawn), rendered as
-"relative, absolute" on a single line (user ruling 2026-08-24) and deliberately
-not `started_at`, which refreshes on every restart; harness (roster's display
-label, em dash until the roster loads) and the model the agent was born on
-(`config_overlay.llm_model`, user 2026-10-21); next heartbeat — both
-projected instants (the end of an active pause and the check-in time) render
-through `formatUpcoming`, so the day boundary is part of the value: clock time
-later today, `Tomorrow 15:21` across local midnight, a weekday name two to six
-days out, a date countdown from seven days, and a plain date from a month on. A
-bare clock time is never shown for a future day — `15:21` read at 16:26 looks
-like a time that already passed (user report 2026-10-17, in the 12-hour
-wording then in use). A queued
-check-in renders "pending" (the daemon will not send another while an inbound is
-pending), a running or terminated agent an em dash, and a projected time already
-in the past renders "due" (a past "*next*" time must never read "Xm ago"); last
-pause (relative time · duration, or "never paused"); then machine and lifecycle
-status. The status cell reuses the fleet's active-lease projection so an
-impersonated agent reads "Impersonated" while its native lifecycle stays idling;
-a terminated panel keeps "Terminated" even if a stale roster card is cached. The
-gateway's derived liveness state colors the heart icon when offline. The "every
-N" interval badge, the old "Last judged" cell and all observation details stay
-omitted.
+**Liveness.** One merged section whose cells are birth, harness and model, the
+next heartbeat, the last pause, machine and status — the cell rules, including
+what a pause or a queued wake renders, are in
+[[ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md|the Liveness section]].
 
 **Notice** renders the agent's single open notice at the bottom as the
 interactive reply surface (a `require_response` notice gets a reply box +
