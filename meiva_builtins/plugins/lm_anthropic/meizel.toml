@@ -1,2 +1,5 @@
+[uses]
+"provider.py" = ["models.py", "prices.py"]
+
 [purity]
 "plugin.py" = "strict"
