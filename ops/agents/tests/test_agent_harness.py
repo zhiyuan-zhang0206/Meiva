@@ -68,6 +68,10 @@ def test_plain_spawn_records_the_requested_harness(
         local_machine=machine_identity,
     )
     assert _harness(db_conn, agent) == "codex"
+    assert db_conn.execute(
+        "SELECT birth_config->>'harness_model_selection' FROM agents_meta WHERE id=%s",
+        (agent,),
+    ).fetchone() == ("1",)
 
 
 def test_fork_inherits_the_source_harness(

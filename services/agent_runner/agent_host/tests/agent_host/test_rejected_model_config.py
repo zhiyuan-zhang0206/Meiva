@@ -7,16 +7,21 @@ from typing import Any
 
 import pytest
 
+from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.tests.model_catalog import AddModels
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
-from services.agent_runner.agent_host.runtime import HostCachePolicy
-from services.agent_runner.agent_host.scheduling.stored_config import config_fingerprint
+from services.agent_runner.agent_host.runtime import HostCachePolicy, HostStats, admit_stored_model
+from services.agent_runner.agent_host.scheduling.stored_config import (
+    StoredConfig,
+    config_fingerprint,
+)
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.host_support import Build, Row
 
@@ -394,3 +399,42 @@ class TestSchedulerIntegration:
         await poll_until_async(lambda: len(graph.observations) >= 2)
         assert len(graph.observations) >= 2, "the wake during the turn must be served"
         await sched.aclose()
+
+
+@pytest.mark.parametrize(
+    "harness",
+    [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY, Harness.KIMI_CODE],
+)
+@pytest.mark.parametrize(
+    ("version", "accepted"), [(None, True), (1, False), (2, False), (False, False)]
+)
+def test_only_legacy_history_pins_bypass_execution_validation(
+    model_catalog: ModelCatalog, harness: Harness, version: object, accepted: bool
+) -> None:
+    pins: dict[str, object] = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
+    stats = HostStats()
+    rejected: dict[int, str] = {}
+    stored = StoredConfig(
+        machine="test",
+        status="idling",
+        harness=harness.value,
+        config_overlay=None,
+        birth_config=pins if version is None else {**pins, "harness_model_selection": version},
+    )
+    assert (
+        admit_stored_model(
+            dict(pins),
+            agent_id=71,
+            stored=stored,
+            stats=stats,
+            rejected=rejected,
+            normalized={},
+            catalog=model_catalog,
+            keys=ProviderKeys({}),
+            llm_override="",
+            default_model="deepseek-flash",
+        )
+        is accepted
+    )
+    assert stats.config_rejected == (0 if accepted else 1)
+    assert bool(rejected) is not accepted
