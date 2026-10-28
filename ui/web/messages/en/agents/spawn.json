@@ -23,7 +23,5 @@
   "harnessStatus": {
     "unavailable": "unavailable"
   },
-  "newAgent": "Create agent",
-  "historyModel": "Meiva history model",
-  "historyEffort": "Summary effort"
+  "newAgent": "Create agent"
 }

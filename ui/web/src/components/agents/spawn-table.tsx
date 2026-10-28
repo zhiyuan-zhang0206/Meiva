@@ -84,8 +84,8 @@ export function SpawnTable({
   prices,
 }: SpawnPickerProps) {
   const t = useTranslations("spawn");
-  const modelLabel = t(harness === "meiva" ? "model" : "historyModel");
-  const effortLabel = t(harness === "meiva" ? "reasoningEffort" : "historyEffort");
+  const modelLabel = t("model");
+  const effortLabel = t("reasoningEffort");
   // meiva:note
   // The model cell keeps the input rate visible, because comparing models is what
   // the column is for; everything the old full-width row carried - every rate
@@ -339,8 +339,8 @@ export function SpawnStack({
   prices,
 }: SpawnPickerProps) {
   const t = useTranslations("spawn");
-  const modelLabel = t(harness === "meiva" ? "model" : "historyModel");
-  const effortLabel = t(harness === "meiva" ? "reasoningEffort" : "historyEffort");
+  const modelLabel = t("model");
+  const effortLabel = t("reasoningEffort");
   // meiva:note
   // One open section at a time: the panel stays short enough to keep the action
   // visible, and picking a value closes the section it belongs to.

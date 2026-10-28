@@ -38,6 +38,8 @@ from base.lm.harness import (
     handle_digest,
 )
 from base.lm.harness.antigravity import AgySession
+from base.lm.harness.claude.session import ClaudeSession
+from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.kimi import KimiSession
 from base.lm.harness.registration import SecureRandom
 from base.lm.harness.tests.roots import bridge_root_values
@@ -364,6 +366,46 @@ async def test_close_closes_the_session_and_refuses_later_turns() -> None:
     assert session.close_reason == "evicted"
     with pytest.raises(HarnessClosedError):
         await bridge.run_turn("again", key="inbound-2")
+
+
+@pytest.mark.parametrize(
+    ("harness", "model", "effort"),
+    [
+        (Harness.CLAUDE_CODE, "claude-opus-5-5", "low"),
+        (Harness.CODEX, "gpt-6.1-sol", "xhigh"),
+        (Harness.ANTIGRAVITY, "gemini-4-argon-low", "low"),
+        (Harness.KIMI_CODE, "kimi-k3.1-pro", "max"),
+    ],
+)
+def test_execution_selection_reaches_the_adapter(
+    tmp_path: Path,
+    harness: Harness,
+    model: str,
+    effort: str,
+) -> None:
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    for name in ("claude", "codex"):
+        binary = binary_dir / name
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+    session = open_session(
+        harness,
+        agent_id=71,
+        cwd=tmp_path,
+        registry=FileSessionRegistry(tmp_path / "sessions"),
+        environ={"HOME": str(tmp_path), "PATH": str(binary_dir)},
+        clock=system_clock(),
+        model=model,
+        reasoning_effort=effort,
+    )
+    assert isinstance(session, (ClaudeSession, CodexSession, AgySession, KimiSession))
+    assert session.config.model == model
+    if isinstance(session, AgySession):
+        command = session.config.command(resume=None)
+        assert command[command.index("--model") + 1] == model
+    else:
+        assert session.config.reasoning_effort == effort
 
 
 def test_the_built_in_loop_has_no_bridge() -> None:

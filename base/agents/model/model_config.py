@@ -6,7 +6,7 @@ from base.agents.model.birth_config import resolve_birth_config
 from base.agents.model.restart_config import (
     validate_restart_model_config as validate_restart_model_config,
 )
-from base.api_contracts.agent_contract import AgentNotFound, InvalidModelConfig
+from base.api_contracts.agent_contract import AgentNotFound, Harness, InvalidModelConfig
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.lm import factory
@@ -25,6 +25,7 @@ def validate_spawn_model_config(
     keys: ProviderKeys,
     llm_override: str,
     authority: ConfigAuthority,
+    harness: Harness = Harness.MEIVA,
 ) -> str:
     inherited = None
     if fork_from is not None:
@@ -42,6 +43,7 @@ def validate_spawn_model_config(
             catalog=catalog,
             keys=keys,
             llm_override=llm_override,
+            harness=harness,
         )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc

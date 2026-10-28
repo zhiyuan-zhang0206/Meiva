@@ -12,12 +12,12 @@ from typing import Any, NamedTuple, TypeGuard
 import psycopg
 
 from base.api_contracts.agent_contract import (
+    AgentNotFound,
     ForkHarnessMismatch,
     Harness,
     HarnessNotLaunchable,
     HarnessStatus,
 )
-from base.db import fetch_one
 from base.host.env.harness_binaries import (
     HARNESS_BIN_DIRS,
     harness_child_path,
@@ -123,7 +123,9 @@ def resolve_birth_harness(
     if fork_from is None:
         return _require_launchable(coerce_harness(requested), fork_from, launchable).value
     cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (fork_from,))
-    row = fetch_one(cur, "harness: read fork source")
+    row = cur.fetchone()
+    if row is None:
+        raise AgentNotFound(f"fork source agent {fork_from} does not exist")
     source = Harness(row[0])
     if requested is not None:
         requested_harness = coerce_harness(requested)

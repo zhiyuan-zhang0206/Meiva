@@ -18,7 +18,7 @@ from loguru import logger
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.compat.stop import StopSpec
-from base.lm.effort import validate_effort
+from base.lm.effort import HarnessModelSpec, validate_effort
 from base.lm.provider_api import (
     BuildContext,
     PriceRates,
@@ -120,7 +120,7 @@ PROVIDER = ProviderContribution(
                 llm_stream_ttft_timeout_seconds=120.0,
             ),
             media_types=frozenset({"image"}),
-            external_harnesses=frozenset({Harness.KIMI_CODE}),
+            external_harnesses={Harness.KIMI_CODE: HarnessModelSpec(("low", "high", "max"), "max")},
         ),
         # meiva:note
         # K3.1 Pro repeats K3's capability facts — the K3-series 1,048,576-token window,
@@ -144,7 +144,7 @@ PROVIDER = ProviderContribution(
                 llm_stream_ttft_timeout_seconds=120.0,
             ),
             media_types=frozenset({"image"}),
-            external_harnesses=frozenset({Harness.KIMI_CODE}),
+            external_harnesses={Harness.KIMI_CODE: HarnessModelSpec(("low", "high", "max"), "max")},
         ),
         "kimi-k3.1-pro-highspeed": ModelSpec(
             provider="kimi",
@@ -160,7 +160,7 @@ PROVIDER = ProviderContribution(
                 llm_stream_ttft_timeout_seconds=120.0,
             ),
             media_types=frozenset({"image"}),
-            external_harnesses=frozenset({Harness.KIMI_CODE}),
+            external_harnesses={Harness.KIMI_CODE: HarnessModelSpec(("low", "high", "max"), "max")},
         ),
     },
     pricing={

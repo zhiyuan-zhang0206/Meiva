@@ -67,15 +67,21 @@ exports come from `base.lm.harness.claude.session`, so the door itself stays `st
 | Field | Default | Reason |
 |---|---|---|
 | `model` | `claude-sonnet-5-5` | full id from the bundled CLI's model table; an alias would let an upgrade change the model |
-| `tools` | Read/Grep/Glob/Edit/Write/Bash | the CLI default set is wider (web, notebook, agent tools); naming it keeps the capability surface reviewable |
+| `tools` | `None` | retain the complete native CLI tool set; an explicit tuple restricts it |
 | `permission_mode` | `bypassPermissions` | headless session with no approval layer: the CLI must not park on a prompt nobody can answer. The workspace is the boundary. |
-| `max_turns` | 24 | observed turns use 1–4; 24 stops a runaway loop long before a provider budget would |
+| `max_turns` | `None` | retain native completion behavior without an artificial 24-step cutoff; the bridge deadline still bounds stalled turns |
 | `turn_timeout_seconds` | 900 | a wedged CLI surfaces as a bridge fault instead of a hung agent |
 | `cancel_settle_seconds` | 5 | observed reaping is ~40ms; 5s tolerates load without hiding a leak |
 | `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
 | `dedupe_window` | 256 | a redelivery inside the window replays the outcome instead of re-running the turn |
 | `injected_turn_timeout_seconds` | 30 | the CLI answers a background-task notification in a turn of its own; dispatch is held until that turn reports, and this bound turns a CLI that never reports into one wait instead of a wedged agent. Observed notification turns are two to three seconds, so 30 is an order above them and still bounds a user's wait |
+
+Native user, project and local settings remain enabled, including CLAUDE.md,
+skills, hooks, plugins and configured MCP servers. The adapter does not set
+`setting_sources=[]` or strict MCP isolation. It adds no Meiva MCP configuration
+and never overrides the provider system prompt. Model/effort selections override
+only those execution choices; authentication still follows the credential boundary.
 
 ## Background tasks
 

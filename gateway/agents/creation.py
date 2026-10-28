@@ -14,11 +14,12 @@ from base.agents.birth.creation_identity import (
     creation_request_hash,
     find_creation,
 )
+from base.agents.birth.harness import resolve_birth_harness
 from base.agents.birth.spawn import create_agent_row
 from base.agents.labels import spawn_prompt_with_label
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
-from base.api_contracts.agent_contract import AgentNotFound, ForkConfigChangeNotAllowed
+from base.api_contracts.agent_contract import AgentNotFound, ForkConfigChangeNotAllowed, Harness
 from base.clock import Clock
 from base.cluster.machines import is_paused, lookup_role
 from base.config.service_read import ConfigAuthority
@@ -283,6 +284,8 @@ def spawn_preflight_blocking(
         raise refusal
     tail_skills: list[str] | None = None
     if body.fork_from is not None:
+        with pool.connection() as conn, conn.cursor() as cur:
+            resolve_birth_harness(cur, body.harness, body.fork_from)
         tail_skills = _validate_fork_config(pool, body)
     # Settle a withdrawn llm_model BEFORE the overlay is stored or forwarded —
     # the row, fork copies and the launch op all carry the registered fallback,
@@ -307,6 +310,7 @@ def spawn_preflight_blocking(
             keys=keys,
             authority=authority,
             llm_override=authority.service_field_value("llm_override"),
+            harness=body.harness or Harness.MEIVA,
         )
     if model_receipt is not None:
         logger.warning(

@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 import meiva
+from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
@@ -120,6 +121,7 @@ async def boot_agent_scope(
     llm_override: str,
     permissions_notice_key: UUID,
     home: Path,
+    harness: Harness = Harness.MEIVA,
 ) -> tuple[Any, ProviderBinding | None]:
     workspace = workspace_dir(agent_id, home=home)
 
@@ -130,6 +132,9 @@ async def boot_agent_scope(
     from .startup import notify_desktop_permissions_at_startup
 
     await notify_desktop_permissions_at_startup(home, idempotency_key=permissions_notice_key)
+
+    if harness is not Harness.MEIVA:
+        return None, None
 
     from base.lm.factory import build_chat_model_bound
 
