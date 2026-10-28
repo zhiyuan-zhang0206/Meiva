@@ -71,6 +71,7 @@ def _preflight_ctx(
         services=frozenset(),
         timers=command_runtime.timers,
         clock=command_runtime.clock,
+        terminal=command_runtime.terminal,
     )
 
 
@@ -409,6 +410,7 @@ def _git_repo(
         services=frozenset(),
         timers=command_runtime.timers,
         clock=command_runtime.clock,
+        terminal=command_runtime.terminal,
     )
     return ctx, head, first
 
@@ -486,6 +488,7 @@ def test_checkout_worktree_skipped(
         services=frozenset(),
         timers=command_runtime.timers,
         clock=command_runtime.clock,
+        terminal=command_runtime.terminal,
     )
     (wt / "stray.txt").write_text("dirty\n")
 

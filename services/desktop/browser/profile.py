@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -160,16 +159,13 @@ def human_size(n_bytes: int) -> str:
 
 # meiva:note
 # The two streams a prompt talks over: `say` writes a line to `stdout`, `ask` writes the prompt
-# and reads one line from `stdin` (end of input is an `EOFError`, as with `input()`). The process
-# entry builds the real one (`Console.of_process()`); a test hands in `io.StringIO` streams.
+# and reads one line from `stdin` (end of input is an `EOFError`, as with `input()`). The caller
+# hands in the streams of the invocation that runs the offer (converge passes the command's
+# terminal); a test hands in `io.StringIO` streams.
 @dataclass(frozen=True)
 class Console:
     stdin: TextIO
     stdout: TextIO
-
-    @classmethod
-    def of_process(cls) -> Console:
-        return cls(stdin=sys.stdin, stdout=sys.stdout)
 
     def say(self, text: str = "") -> None:
         self.stdout.write(text + "\n")

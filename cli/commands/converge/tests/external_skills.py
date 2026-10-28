@@ -14,6 +14,7 @@ from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.database.runtime import UserSession
+from cli.database.tests.command_inputs import inert_terminal
 
 SKILL = "operating-meiva-cluster"
 
@@ -54,6 +55,7 @@ def skill_ctx(
         clock=Clock(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
         ),
+        terminal=inert_terminal(),
     )
 
 
