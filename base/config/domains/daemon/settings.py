@@ -328,6 +328,18 @@ class DaemonSettings(
         },
     )
 
+    heartbeat_backoff_max_interval_seconds: float = Field(
+        default=86400.0,
+        alias="MEIVA_HEARTBEAT_BACKOFF_MAX_INTERVAL_SECONDS",
+        description="Ceiling (seconds) on the backoff-stretched heartbeat reminder interval: an agent that keeps receiving check-ins without doing work has its reminder floor stretched to heartbeat_interval_seconds * 2^level, and this is where that floor stops growing. Why a day: a check-in is a backed-off agent's only route back to work, so the ceiling is what decides how long a genuinely wedged agent can stay silent — a day keeps it reachable without giving up on it, while the steady-state nudge rate stays near zero (at the default 5-minute interval the stretch is already 21 hours at level 8).",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     wedged_agent_inbound_age_seconds: float = Field(
         default=2400.0,
         alias="MEIVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",

@@ -147,6 +147,7 @@ class MemorySearchSettings:
 class HeartbeatTiming:
     idle_threshold_seconds: float
     interval_seconds: float
+    backoff_max_interval_seconds: float
 
 
 @dataclass(frozen=True)
@@ -359,6 +360,7 @@ def gateway_config_from_boot(
         heartbeat=HeartbeatTiming(
             idle_threshold_seconds=daemon.heartbeat_idle_threshold_seconds,
             interval_seconds=daemon.heartbeat_interval_seconds,
+            backoff_max_interval_seconds=daemon.heartbeat_backoff_max_interval_seconds,
         ),
         status_probe_timeout_seconds=gateway.status_probe_timeout_seconds,
         notice_ttl_limit_seconds=daemon.notice_ttl_limit_seconds,

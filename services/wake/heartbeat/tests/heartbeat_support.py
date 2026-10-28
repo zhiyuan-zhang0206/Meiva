@@ -16,6 +16,11 @@ from base.lm.catalog import ModelCatalog
 
 THRESHOLD_S = 300.0
 
+# meiva:note
+# The configured ceiling on the backoff-stretched reminder floor. Selection takes it as a
+# value, so a test hands in the same ceiling the daemon passes from its dispatch config.
+BACKOFF_MAX_INTERVAL_S = settings.daemon.heartbeat_backoff_max_interval_seconds
+
 
 @pytest.fixture
 def pool(db_url: str):

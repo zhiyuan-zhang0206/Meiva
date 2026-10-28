@@ -12,7 +12,7 @@ sidebar's fleet-wide stats card. Only the selected agent is read, only while the
 panel is open; current state, window statistics and plugin widgets load and fail
 independently ([[ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md|reads and refresh]]),
 and each section's own rendering facts live in
-[[ui/web/src/docs/frontend-components/inspector/section-details.meiva.okf.md|section details]],
+[[ui/web/src/docs/frontend-components/inspector/section-details/section-details.meiva.okf.md|section details]],
 except the Activity section, which has its own node
 ([[ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md|Activity section]]).
 

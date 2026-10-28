@@ -47,6 +47,8 @@
   "neverPaused": "never paused",
   "pending": "pending",
   "due": "due",
+  "pausedUntil": "paused until {time}",
+  "pausedRemaining": "in {remaining}",
   "windowedUnavailable": "Windowed inspector data unavailable",
   "retryWindowed": "Retry windowed data",
   "openRunTimeline": "Open run timeline",

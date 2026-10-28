@@ -87,7 +87,9 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
         database,
         event_bus,
         config=heartbeat_daemon.DispatchConfig(
-            idle_threshold, settings.daemon.heartbeat_interval_seconds
+            idle_threshold,
+            settings.daemon.heartbeat_interval_seconds,
+            settings.daemon.heartbeat_backoff_max_interval_seconds,
         ),
         clock=clock,
     )

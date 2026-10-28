@@ -31,6 +31,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import reconcile_checkin_outcomes, sweep_backoff_resets
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
+from services.wake.heartbeat.tests.heartbeat_support import BACKOFF_MAX_INTERVAL_S
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0
@@ -121,7 +122,7 @@ def _selected(pool: ConnectionPool) -> dict[int, float]:
     return {
         agent_id: idle
         for agent_id, idle, _reason in select_idle_agents_needing_heartbeat(
-            pool, _THRESHOLD_S, now=time.time()
+            pool, _THRESHOLD_S, backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S, now=time.time()
         )
     }
 
