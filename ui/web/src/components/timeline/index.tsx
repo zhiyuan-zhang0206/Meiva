@@ -179,34 +179,28 @@ export const TimelineView = memo(function TimelineView({
 
   // meiva:note
   // The commit that shrinks the content is the only place that knows a clamp is
-  // coming: by the time the clamp's scroll event dispatches, a later commit has
-  // usually added rows again, so `scrollHeight < prevScrollHeight` no longer
-  // holds and the move reads as a user scroll-up (#5678).
+  // coming and is not itself about to re-pin: by the time the clamp's scroll
+  // event dispatches, a later commit has usually added rows again, so
+  // `scrollHeight < prevScrollHeight` no longer holds and the move reads as a
+  // user scroll-up (#5678). The controller owns the baseline this comparison
+  // runs against and drops it for a parked reader, so a reader who is not
+  // following pays no layout read here.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
-  const contentHeightRef = useRef<number | null>(null);
-  useLayoutEffect(() => {
+  const declareShrink = useCallback(() => {
     const viewport = viewportRef.current;
-    // meiva:note
-    // Only a follower can be clamped, and the controller ignores the report from
-    // anyone else: skip the layout read that a parked reader would pay.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
-    if (!viewport || !controller.isSticky()) return;
-    const height = viewport.scrollHeight;
-    const previous = contentHeightRef.current;
-    contentHeightRef.current = height;
-    // meiva:note
-    // A shrink only clamps a reader who was on the tail, and the clamp leaves
-    // the viewport exactly at the new bottom. Anything short of that is a
-    // shrink below a reader parked mid-history - nothing to declare.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
-    if (previous === null || height >= previous || height - viewport.clientHeight - viewport.scrollTop > 1) {
+    if (!viewport) return;
+    if (!controller.isSticky()) {
+      controller.recordContentHeight(null);
       return;
     }
     controller.notifyContentShrunk({
       scrollTop: viewport.scrollTop,
-      scrollHeight: height,
+      scrollHeight: viewport.scrollHeight,
       clientHeight: viewport.clientHeight,
     });
+  }, [controller, viewportRef]);
+  useLayoutEffect(() => {
+    declareShrink();
   });
 
   const [announcedTurnActive, setAnnouncedTurnActive] = useState(turnActive);

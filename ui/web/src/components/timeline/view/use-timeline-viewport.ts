@@ -142,6 +142,14 @@ export function useTimelineViewport({
       if (probe.height === viewport.scrollHeight) probe.passes += 1;
       else { probe.height = viewport.scrollHeight; probe.passes = 1; }
 
+      // meiva:note
+      // A layout change that only rewrote inline styles reaches here and no
+      // commit, so this is the only reading of the height that a later commit
+      // could otherwise compare against a stale baseline. The pin below re-seats
+      // the reader anyway, which is why this pass records the height and does
+      // not declare a shrink.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      controller.recordContentHeight(snapshot());
       prepareHistoryPull(viewport);
       applyPendingRestore(viewport);
       settleRestoredPosition(viewport, true);

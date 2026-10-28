@@ -332,6 +332,58 @@ describe("a clamp after a shrink the commit declared (#5678)", () => {
   });
 });
 
+describe("the baseline a shrink is measured against (#5680)", () => {
+  // meiva:note
+  // A pin is a measurement of the content, so the commit that follows one is
+  // measured against the height the pin put the reader at. Without that, the
+  // commit's 69px shrink reads as growth and the clamp releases the follower.
+  // The clamp's echo carries the height already regrown, so only the
+  // declaration keeps that 204px move out of the upward run.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  it("a pin refreshes it, so a commit right after a pin declares the shrink", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 21759);
+    ctl.notifyContentShrunk({ scrollTop: 21159, scrollHeight: 21690, clientHeight: 600 });
+    expect(ctl.handleScroll({ scrollTop: 20955, scrollHeight: 21797, clientHeight: 600 })).toBe("none");
+    expect(ctl.isSticky()).toBe(true);
+  });
+  it("without that declaration the same echo is a departure", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 21759);
+    expect(ctl.handleScroll({ scrollTop: 20955, scrollHeight: 21797, clientHeight: 600 })).toBe("up");
+    expect(ctl.isSticky()).toBe(false);
+  });
+  // meiva:note
+  // A layout pass records the height and never declares: the observer's own pin
+  // follows in the same callback, and the scroll event that pin writes would
+  // spend the declaration on its echo instead of the clamp it predicted. Rows
+  // are added again before the reader moves, so the next snapshot carries a
+  // bigger height than the previous event saw.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  it("a layout pass records the height and never declares", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 15665);
+    ctl.recordContentHeight(view(14811, 15311));
+    expect(ctl.handleScroll({ scrollTop: 14600, scrollHeight: 18842, clientHeight: 600 })).toBe("up");
+  });
+  // meiva:note
+  // A parked reader keeps no baseline, and a requested stick measures nothing:
+  // a height from the position they left cannot predict a shrink, so the first
+  // gesture after they come back is theirs.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  it("a parked reader keeps no baseline, so a re-stick cannot read one as a shrink", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 5000);
+    ctl.handleScroll(view(2000, 5000));
+    expect(ctl.isSticky()).toBe(false);
+    ctl.recordContentHeight(view(7400, 8000));
+    ctl.requestStick();
+    ctl.handleScroll(view(6400, 7000));
+    ctl.notifyContentShrunk(view(6400, 7000));
+    expect(ctl.handleScroll(view(6300, 7000))).toBe("up");
+  });
+});
+
 describe("layout changes with no scroll event (handleLayoutChange)", () => {
   // A height change moves the bottom without firing a scroll event, so it
   // is the one way the flag and the real position can drift apart. The
