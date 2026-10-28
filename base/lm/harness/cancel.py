@@ -101,3 +101,13 @@ def observed_cancel(
         cli_alive=cli_alive,
         killed=killed,
     )
+
+
+# meiva:note
+# The descendants a cancel may signal: those the turn started that are still alive, never the
+# runtime itself. The caller reads `alive` off its probe and does the killing; which pids are
+# candidates is decided here so every adapter sweeps the same set.
+def term_candidates(
+    spawned: Mapping[int, str], *, agent_pid: int | None, alive: Collection[int]
+) -> tuple[int, ...]:
+    return tuple(child for child in sorted(spawned) if child != agent_pid and child in alive)

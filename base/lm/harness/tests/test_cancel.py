@@ -7,6 +7,7 @@ from base.lm.harness.cancel import (
     describe,
     observed_cancel,
     spawned_since,
+    term_candidates,
     unobserved_cancel,
 )
 
@@ -93,3 +94,20 @@ def test_a_process_that_outlived_the_sweep_is_named_and_the_sweep_is_not_settled
     assert report.observed == describe(TREE, [11, 12])
     assert report.killed == (11,)
     assert report.cli_alive is False
+
+
+def test_term_candidates_keeps_the_live_descendants_in_pid_order() -> None:
+    assert term_candidates({12: "sleep 90", 10: "bash -c sleep 90"}, agent_pid=10, alive=[12]) == (
+        12,
+    )
+    assert term_candidates(TREE, agent_pid=10, alive=[13, 11]) == (11, 13)
+
+
+def test_term_candidates_never_signals_the_runtime_itself() -> None:
+    assert term_candidates({10: "dsh", 11: "sleep 90"}, agent_pid=10, alive=[10, 11]) == (11,)
+    assert term_candidates({11: "sleep 90"}, agent_pid=None, alive=[11]) == (11,)
+
+
+def test_term_candidates_skips_what_the_probe_no_longer_sees() -> None:
+    assert term_candidates(TREE, agent_pid=10, alive=[]) == ()
+    assert term_candidates(TREE, agent_pid=None, alive=[99]) == ()

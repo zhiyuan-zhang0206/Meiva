@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable, Mapping
-from pathlib import Path
 from typing import Any, Protocol
 
 from base.lm.harness.acp import (
@@ -22,10 +21,32 @@ from base.lm.harness.cancel import (
     describe,
     observed_cancel,
     spawned_since,
+    term_candidates,
     unobserved_cancel,
 )
 from base.lm.harness.deepseek.config import BridgeConfig
-from base.lm.harness.deepseek.mapping import assistant_text, map_update, parse_prompt_result
+from base.lm.harness.deepseek.environment import environment
+from base.lm.harness.deepseek.mapping import map_update
+from base.lm.harness.deepseek.requests import (
+    INITIALIZE_PARAMS,
+    config_option_requests,
+    created_session_id,
+    permission_choice,
+    prompt_params,
+    scope_params,
+    session_ref,
+)
+from base.lm.harness.deepseek.settle import (
+    ContextOccupancy,
+    IgnoredNotification,
+    TurnMeasurement,
+    TurnSubject,
+    TurnUpdate,
+    UnclaimedUpdate,
+    route_notification,
+    settle_turn,
+    survivor_fault,
+)
 from base.lm.harness.deepseek.types import (
     EVENT_STREAM_END,
     BaseHarnessSession,
@@ -37,14 +58,9 @@ from base.lm.harness.deepseek.types import (
     TurnOutcome,
     TurnTicket,
 )
-from base.lm.harness.deepseek.usage import UsageSnapshot, read_usage
-from base.lm.harness.events import (
-    SessionFaulted,
-    SessionStarted,
-    TextDelta,
-    TurnCompleted,
-    Usage,
-)
+from base.lm.harness.deepseek.usage import UsageSnapshot
+from base.lm.harness.deepseek.usage_files import read_usage
+from base.lm.harness.events import SessionFaulted, SessionStarted, TextDelta
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     SIGKILL,
@@ -54,7 +70,7 @@ from base.lm.harness.process import (
     snapshot,
     wait_gone,
 )
-from base.lm.pricing import PriceBook, quote
+from base.lm.pricing import PriceBook
 
 # meiva:note
 # One session is one ACP connection with a single in-flight prompt, because the
@@ -77,23 +93,6 @@ from base.lm.pricing import PriceBook, quote
 # meiva:link base/lm/harness/deepseek/docs/deepseek.meiva.okf.md
 CANCEL_POLL_SECONDS = 0.05
 _EVENT_STREAM_END = EVENT_STREAM_END
-
-
-# meiva:note
-# Summarize the latest turn's token usage from a parsed `UsageSnapshot`.
-def _summarize_turn_usage(observed: UsageSnapshot) -> tuple[Usage, bool]:
-    if not observed.per_turn_usage:
-        return (Usage(), False)
-    steps = observed.latest_turn()
-    return (
-        Usage(
-            input_tokens=sum(step.input_tokens for step in steps),
-            output_tokens=sum(step.output_tokens for step in steps),
-            cache_creation_input_tokens=sum(step.cache_write_tokens for step in steps),
-            cache_read_input_tokens=sum(step.cache_read_tokens for step in steps),
-        ),
-        True,
-    )
 
 
 class DeepSeekProbe(ChildProbe, Protocol):
@@ -143,32 +142,33 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         self._agent_pid = connection.pid
         await connection.request(
             "initialize",
-            {"protocolVersion": 1, "clientCapabilities": {}},
+            INITIALIZE_PARAMS,
             timeout=self.config.startup_timeout_seconds,
         )
         resume = self._resolve_resume(resume)
         if resume:
             await connection.request(
                 "session/resume",
-                {
-                    "sessionId": resume,
-                    "cwd": self.config.workspace,
-                    "mcpServers": list(self.config.mcp_servers),
-                },
+                scope_params(
+                    session_id=resume,
+                    workspace=self.config.workspace,
+                    mcp_servers=self.config.mcp_servers,
+                ),
                 timeout=self.config.startup_timeout_seconds,
             )
             self._session_id = resume
         else:
             created = await connection.request(
                 "session/new",
-                {"cwd": self.config.workspace, "mcpServers": list(self.config.mcp_servers)},
+                scope_params(workspace=self.config.workspace, mcp_servers=self.config.mcp_servers),
                 timeout=self.config.startup_timeout_seconds,
             )
-            session_id = created.get("sessionId")
-            if not isinstance(session_id, str) or not session_id:
-                raise AcpError(f"session/new returned no sessionId: {created!r}")
-            self._session_id = session_id
-        for option_params in self._config_option_requests():
+            self._session_id = created_session_id(created)
+        for option_params in config_option_requests(
+            session_id=self._session_id,
+            model=self.config.model,
+            reasoning_effort=self.config.reasoning_effort,
+        ):
             with contextlib.suppress(AcpRpcError):
                 await connection.request(
                     "session/set_config_option",
@@ -199,7 +199,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
                 with contextlib.suppress(AcpError, AcpClosedError):
                     await connection.request(
                         "session/close",
-                        {"sessionId": self._session_id},
+                        session_ref(self._session_id),
                         timeout=self.config.cancel_settle_seconds,
                     )
             await connection.close(reason=reason)
@@ -255,7 +255,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
         if self._session_id is not None:
-            await connection.notify("session/cancel", {"sessionId": self._session_id})
+            await connection.notify("session/cancel", session_ref(self._session_id))
         settle_deadline = self._monotonic() + self.config.cancel_settle_seconds
         while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
             await self._clock.asleep(CANCEL_POLL_SECONDS)
@@ -286,14 +286,12 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         )
 
     def _term_spawned(self, spawned: Mapping[int, str]) -> tuple[int, ...]:
-        reaped: list[int] = []
-        for child in sorted(spawned):
-            if child == self._agent_pid or not self._probe.is_alive(child):
-                continue
+        alive = {child for child in spawned if self._probe.is_alive(child)}
+        reaped = term_candidates(spawned, agent_pid=self._agent_pid, alive=alive)
+        for child in reaped:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 self._deepseek_probe.kill(child, SIGTERM)
-            reaped.append(child)
-        return tuple(reaped)
+        return reaped
 
     def _kill_survivors(self, reaped: tuple[int, ...]) -> None:
         for child in reaped:
@@ -318,14 +316,9 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
     ) -> tuple[ProcessObservation, ...]:
         if not survivors:
             return ()
-        still = [child for child in survivors if self._probe.is_alive(child)]
+        still = tuple(child for child in survivors if self._probe.is_alive(child))
         if still:
-            self._emit(
-                SessionFaulted(
-                    turn_id=None,
-                    error=f"{len(still)} descendant(s) survived {reason}; inspect before reuse",
-                )
-            )
+            self._emit(survivor_fault(len(still), reason=reason))
         return describe(observed, still)
 
     def open_connection(self) -> AcpConnection:
@@ -339,38 +332,15 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         )
 
     def _environment(self) -> dict[str, str]:
-        env = dict(self._environ)
-        env["DSH_HOME"] = str(self.config.dsh_home)
-        env.update(self.config.env_overrides)
-        return env
+        return environment(
+            self._environ, dsh_home=self.config.dsh_home, overrides=self.config.env_overrides
+        )
 
     def permission_decision(self, request: PermissionRequest) -> str | None:
-        mode = self.config.permission_mode
-        if mode == "allow":
-            option = request.option("allow_once")
-            return option.option_id if option else None
-        denial = request.option("reject_once")
-        self._permission_denials.append(
-            str(request.tool_call.get("title") or request.tool_call.get("toolCallId") or "tool")
-        )
-        return denial.option_id if denial else None
-
-    # meiva:note
-    # Build the `session/set_config_option` payloads for configured model and reasoning effort.
-    def _config_option_requests(self) -> tuple[dict[str, str], ...]:
-        session_id = self._session_id
-        if session_id is None or self.config.model is None:
-            return ()
-        requests = [{"sessionId": session_id, "configId": "model", "value": self.config.model}]
-        if self.config.reasoning_effort is not None:
-            requests.append(
-                {
-                    "sessionId": session_id,
-                    "configId": "reasoning_effort",
-                    "value": self.config.reasoning_effort,
-                }
-            )
-        return tuple(requests)
+        choice = permission_choice(mode=self.config.permission_mode, request=request)
+        if choice.denial is not None:
+            self._permission_denials.append(choice.denial)
+        return choice.option_id
 
     async def _read_loop(self, connection: AcpConnection) -> None:
         try:
@@ -383,37 +353,36 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             self._fail_active(exc)
 
     def _dispatch(self, notification: AcpNotification) -> None:
-        if notification.method != "session/update":
-            return
-        params = notification.params
-        if params.get("sessionId") != self._session_id:
-            return
-        raw_update: dict[str, Any] | list[Any] | str | int | float | bool | None = params.get(
-            "update"
+        route = route_notification(
+            notification, session_id=self._session_id, turn_in_flight=self._active is not None
         )
-        if not isinstance(raw_update, dict):
-            return
-        update: dict[str, Any] = raw_update
-        if update.get("sessionUpdate") == "usage_update":
-            used, size = update.get("used"), update.get("size")
-            self._context_used = used if isinstance(used, int) else self._context_used
-            self._context_size = size if isinstance(size, int) else self._context_size
-            return
-        ticket = self._active
-        if ticket is None:
-            # meiva:note
-            # An update with no turn in flight is the runtime's own work — a background
-            # command it started, a sub-session — and `session/update` carries no turn
-            # id to attribute it with, so it is dropped and counted here instead of
-            # being carried into the next turn (#5664). Mid-turn the two are
-            # indistinguishable; that is the adapter's documented residual risk.
-            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
-            self._unclaimed_updates += 1
-            return
-        for event in map_update(update, turn_id=ticket.turn_id):
-            if isinstance(event, TextDelta):
-                ticket.parts.append(event.text)
-            self._emit(event)
+        match route:
+            case IgnoredNotification():
+                return
+            case ContextOccupancy(used=used, size=size):
+                self._context_used = self._context_used if used is None else used
+                self._context_size = self._context_size if size is None else size
+            case UnclaimedUpdate():
+                # meiva:note
+                # An update with no turn in flight is the runtime's own work — a background
+                # command it started, a sub-session — and `session/update` carries no turn
+                # id to attribute it with, so it is dropped and counted here instead of
+                # being carried into the next turn (#5664). Mid-turn the two are
+                # indistinguishable; that is the adapter's documented residual risk.
+                # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+                self._unclaimed_updates += 1
+            case TurnUpdate(update=update):
+                ticket = self._active
+                if ticket is None:
+                    # meiva:note
+                    # The route was cut from this same read of `_active`; a turn that is gone by
+                    # now is the runtime's own work like any other unclaimed update.
+                    self._unclaimed_updates += 1
+                    return
+                for event in map_update(update, turn_id=ticket.turn_id):
+                    if isinstance(event, TextDelta):
+                        ticket.parts.append(event.text)
+                    self._emit(event)
 
     async def _begin(self, ticket: TurnTicket) -> None:
         connection = self._require_connection()
@@ -422,10 +391,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         try:
             result = await connection.request(
                 "session/prompt",
-                {
-                    "sessionId": self._session_id,
-                    "prompt": [{"type": "text", "text": ticket.text}],
-                },
+                prompt_params(session_id=self._session_id, text=ticket.text),
                 timeout=self.config.turn_timeout_seconds,
             )
         except asyncio.CancelledError:
@@ -460,72 +426,37 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         result: Mapping[str, Any],
         observed: UsageSnapshot | None,
     ) -> None:
-        fields = parse_prompt_result(result)
-        text = "\n".join(ticket.parts).strip()
-        if observed is None:
-            usage, measured = (Usage(), False)
-        else:
-            self._usage = observed
-            usage, measured = _summarize_turn_usage(observed)
-        cost = self._turn_cost(usage) if measured else None
-        self._totals = self._totals.with_turn(usage, measured=measured, cost=cost)
-        outcome = TurnOutcome(
-            turn_id=ticket.turn_id,
-            text=text,
-            subtype=fields.subtype,
-            is_error=fields.is_error,
-            interrupted=ticket.interrupt_requested or fields.interrupted,
-            stop_reason=fields.stop_reason,
-            usage=usage,
-            cost_usd=cost,
-            permission_denials=tuple(self._permission_denials),
-            per_turn_usage=measured,
-        )
-        self._permission_denials.clear()
-        assistant = assistant_text(text, turn_id=ticket.turn_id)
-        if assistant is not None:
-            self._emit(assistant)
-        now_mono = self._monotonic()
-        self._emit(
-            TurnCompleted(
+        settled = settle_turn(
+            TurnSubject(
                 turn_id=ticket.turn_id,
                 session_id=self._session_id,
-                text=text,
-                subtype=outcome.subtype,
-                is_error=outcome.is_error,
-                interrupted=outcome.interrupted,
-                stop_reason=outcome.stop_reason,
-                num_turns=len(ticket.parts),
-                duration_ms=int((now_mono - (ticket.started_at or now_mono)) * 1000),
-                usage=usage,
-                cost_usd=cost,
-                cumulative_cost_usd=self._totals.cost_usd if self._totals.cost_known else None,
-                permission_denials=outcome.permission_denials,
-            )
+                parts=tuple(ticket.parts),
+                result=result,
+                interrupt_requested=ticket.interrupt_requested,
+                permission_denials=tuple(self._permission_denials),
+                started_at=ticket.started_at,
+            ),
+            TurnMeasurement(
+                observed=observed,
+                model=self.config.model,
+                prices=self._prices,
+                totals=self._totals,
+            ),
+            now_monotonic=self._monotonic(),
         )
-        self._complete(ticket, outcome)
-
-    def _turn_cost(self, usage: Usage) -> float | None:
-        model = self.config.model
-        if self._prices is None or model is None:
-            return None
-        quoted = quote(
-            model,
-            usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
-            usage.output_tokens,
-            usage.cache_read_input_tokens,
-            prices=self._prices,
-        )
-        return None if quoted is None else quoted.cost_usd
+        if observed is not None:
+            self._usage = observed
+        self._permission_denials.clear()
+        self._totals = settled.totals
+        if settled.assistant is not None:
+            self._emit(settled.assistant)
+        self._emit(settled.completed)
+        self._complete(ticket, settled.outcome)
 
     def _require_connection(self) -> AcpConnection:
         if self._connection is None:
             raise SessionClosedError("session not started")
         return self._connection
-
-
-def dsh_home_for(workspace: Path) -> Path:
-    return Path(workspace) / ".dsh"
 
 
 __all__ = [
@@ -538,5 +469,4 @@ __all__ = [
     "SessionTotals",
     "TurnOutcome",
     "TurnTicket",
-    "dsh_home_for",
 ]

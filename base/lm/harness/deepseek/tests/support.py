@@ -8,7 +8,8 @@ from typing import Any
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import Handoff
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.deepseek import BridgeConfig, DeepSeekSession
+from base.lm.harness.deepseek import BridgeConfig
+from base.lm.harness.deepseek.session import DeepSeekSession
 from base.lm.harness.deepseek.tests.fake_acp import FakeConnection, ScriptedProbe
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.pricing import PriceBook
