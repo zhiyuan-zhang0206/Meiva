@@ -1,9 +1,5 @@
 """The failures plugin config registration, binding and overlay validation raise."""
 
-from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
-
-_DOMAIN_ATTRS: frozenset[str] = frozenset(FIELD_DOMAINS.values())
-
 
 class PluginConfigError(Exception):
     """Root of plugin config register / bind failures. Plugin author / CLI use this for coarse catch."""
@@ -52,23 +48,3 @@ class UndeclaredFlag(PluginFlagError):  # noqa: N818
 # The running process profile did not construct a declared flag's domain.
 class FlagDomainUnavailable(PluginFlagError):  # noqa: N818
     pass
-
-
-# meiva:note
-# Validate one fully qualified, non-sensitive Settings key and return it.
-def validate_flag_key(key: str) -> str:
-    if not isinstance(key, str) or key.count(".") != 1:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")
-    domain, field = key.split(".")
-    if not domain or not field:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")
-    if domain not in _DOMAIN_ATTRS:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: {domain!r} is not a Settings domain.")
-
-    if FIELD_DOMAINS.get(field) != domain:
-        raise UnknownFlag(
-            f"unknown plugin flag {key!r}: {field!r} is not a field in the {domain!r} domain."
-        )
-    if field in SENSITIVE_FIELDS:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: secrets are not flags.")
-    return key
