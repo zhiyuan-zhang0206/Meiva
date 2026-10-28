@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from base.sessions import log_prefix
+from base.sessions import log_prefix, log_writer
 
 
 @pytest.mark.parametrize("pid", [None, 42])
@@ -37,7 +37,7 @@ def test_header_identity_changes_with_name_pid_and_time() -> None:
 
 def test_new_log_has_header_before_output(tmp_path: Path) -> None:
     path = tmp_path / "session.log"
-    fd, created = log_prefix.open_session_log(path, "one", pid=42)
+    fd, created = log_writer.open_session_log(path, "one", pid=42)
     try:
         assert created
         header = path.read_bytes()
@@ -53,7 +53,7 @@ def test_new_log_has_header_before_output(tmp_path: Path) -> None:
 def test_existing_log_is_unchanged_and_appends(tmp_path: Path, content: bytes) -> None:
     path = tmp_path / "session.log"
     path.write_bytes(content)
-    fd, created = log_prefix.open_session_log(path, "one", pid=42)
+    fd, created = log_writer.open_session_log(path, "one", pid=42)
     try:
         assert not created
         assert path.read_bytes() == content
@@ -66,10 +66,10 @@ def test_existing_log_is_unchanged_and_appends(tmp_path: Path, content: bytes) -
 
 def test_reopening_new_log_does_not_repeat_header(tmp_path: Path) -> None:
     path = tmp_path / "session.log"
-    fd, _ = log_prefix.open_session_log(path, "one")
+    fd, _ = log_writer.open_session_log(path, "one")
     os.close(fd)
     original = path.read_bytes()
-    fd, created = log_prefix.open_session_log(path, "two", pid=42)
+    fd, created = log_writer.open_session_log(path, "two", pid=42)
     os.close(fd)
     assert not created
     assert path.read_bytes() == original
