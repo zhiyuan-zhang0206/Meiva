@@ -15,13 +15,27 @@ height on controls.
 
 ## Footer icon row
 
+The row is the shell's bottom band ([[ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md|Home Shell Chrome]]): it draws the
+same rule, padding and 36px control row the composer draws, and follows the
+composer's measured band height, so the footer's rule and the composer's rule are
+one line at every composer height (user ruling 2026-10-29).
+
 Below the list, one row of shortcuts in a fixed order: the unresolved-alert bell,
-Fleet, Insights, Control, then whatever a plugin contributes. The bell leads the
+Fleet, Insights, Control, then whatever a plugin contributes (`PluginNavIcons` renders
+nothing when no plugin declares an entry). The bell leads the
 row because a standing cluster state outranks navigation (user 2026-10-21), it
 links to the alert section, and it renders only while the count is non-zero. The
 row leaves with the rail when it collapses; the count then rides `HeaderBar`'s
 restore button (desktop) or its menu button (phone drawer) instead of vanishing
 ([[ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md|Home Shell Chrome]]).
+
+## Statistics popover
+
+The chart icon at the head of the footer row opens a small panel rather than a
+toolbar: the 2×3 stats grid (live agents, tokens, cache hit, cost, average turn
+time, warnings/errors) and the window selector live there, so the closed sidebar
+spends no height on numbers a reader checks occasionally (the old inline bar
+occupied a row permanently).
 
 ## Display settings popover
 

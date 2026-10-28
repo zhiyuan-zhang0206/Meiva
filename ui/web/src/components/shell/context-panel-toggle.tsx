@@ -3,6 +3,8 @@
 import { FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { ICON_SIZE_CLASS } from "@/lib/layout/layout";
+
 const pressedClass = "p-1 rounded shrink-0 hover:bg-sidebar-accent";
 
 // meiva:note
@@ -10,7 +12,7 @@ const pressedClass = "p-1 rounded shrink-0 hover:bg-sidebar-accent";
 // is chrome. Its button is the document glyph, because that is what the panel
 // shows (the active agent's to-user document + inspector), not a collapsing rail.
 // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
-export function ContextPanelToggle({ open, onToggle, iconClass = "size-5" }: { open: boolean; onToggle: () => void; iconClass?: string }) {
+export function ContextPanelToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const t = useTranslations("sidebar");
   return (
     <button
@@ -21,7 +23,7 @@ export function ContextPanelToggle({ open, onToggle, iconClass = "size-5" }: { o
       data-testid="context-panel-toggle"
       className={`${pressedClass} ${open ? "text-foreground" : "text-muted-foreground"}`}
     >
-      <FileText className={iconClass} />
+      <FileText className={ICON_SIZE_CLASS} />
     </button>
   );
 }
