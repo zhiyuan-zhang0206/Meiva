@@ -28,7 +28,8 @@ import {
 } from "@/components/conversation/slash-autocomplete";
 import { SendButton } from "@/components/ui/send-button";
 import { Textarea } from "@/components/ui/textarea";
-import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
+import { MessageDeliveryUnknownError } from "@/lib/transport/api";
+import { useApi } from "@/lib/transport/transport-context";
 import { errMsg } from "@/lib/contracts/errors";
 import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
 import { track } from "@/lib/telemetry/telemetry";
@@ -62,6 +63,7 @@ interface Props {
 }
 
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
+  const client = useApi();
   const t = useTranslations("common");
   const session = useBrowser().session;
   const prevAgentIdRef = useRef(agentId);
@@ -105,7 +107,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     queryKey: ["agent-commands", agentId],
     queryFn: async () => {
       try {
-        return await (agentId == null ? api.getCommands() : api.getCommands(agentId));
+        return await (agentId == null ? client.getCommands() : client.getCommands(agentId));
       } catch (e) {
         console.warn(`[composer] getCommands failed: ${errMsg(e)}`);
         throw new Error("command catalog unavailable", { cause: e });

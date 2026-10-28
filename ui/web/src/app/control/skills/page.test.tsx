@@ -4,13 +4,18 @@
 // useSectionVisible defaults true so the query enables. Mock at the api layer.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import type { SkillsView } from "@/lib/contracts/types";
 
 import SkillsPage from "./page";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
+
 
 const pushSpy = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
@@ -39,26 +44,26 @@ const SKILLS: SkillsView = {
 
 describe("SkillsPage", () => {
   it("loading shows a spinner", () => {
-    vi.spyOn(api, "getSkills").mockReturnValue(new Promise(() => undefined));
+    transport.getSkills.mockReturnValue(new Promise(() => undefined));
     const { container } = wrap(<SkillsPage />);
     expect(container.querySelector(".animate-spin")).toBeTruthy();
   });
 
   it("error shows a quiet line, not the raw error", async () => {
-    vi.spyOn(api, "getSkills").mockRejectedValue(new Error("boom 500"));
+    transport.getSkills.mockRejectedValue(new Error("boom 500"));
     wrap(<SkillsPage />);
     await waitFor(() => screen.getByText(/Couldn't load skills/));
     expect(screen.queryByText(/boom 500/)).toBeNull();
   });
 
   it("empty → (no skills installed)", async () => {
-    vi.spyOn(api, "getSkills").mockResolvedValue({ skills: [] });
+    transport.getSkills.mockResolvedValue({ skills: [] });
     wrap(<SkillsPage />);
     await waitFor(() => screen.getByText(/no skills installed/));
   });
 
   it("renders each skill with its layer + enabled", async () => {
-    vi.spyOn(api, "getSkills").mockResolvedValue(SKILLS);
+    transport.getSkills.mockResolvedValue(SKILLS);
     wrap(<SkillsPage />);
     await waitFor(() => screen.getByText("alpha"));
     // names
@@ -82,8 +87,8 @@ describe("SkillsPage", () => {
   });
 
   it("install entry posts kind=skill and opens the installer's conversation", async () => {
-    vi.spyOn(api, "getSkills").mockResolvedValue({ skills: [] });
-    const draft = vi.spyOn(api, "draftPackage").mockResolvedValue({ agent_id: 55 });
+    transport.getSkills.mockResolvedValue({ skills: [] });
+    const draft = transport.draftPackage.mockResolvedValue({ agent_id: 55 });
     wrap(<SkillsPage />);
     await waitFor(() => screen.getByText(/no skills installed/));
 
@@ -99,7 +104,7 @@ describe("SkillsPage", () => {
   });
 
   it("install entry survives a failed list read", async () => {
-    vi.spyOn(api, "getSkills").mockRejectedValue(new Error("boom 500"));
+    transport.getSkills.mockRejectedValue(new Error("boom 500"));
     wrap(<SkillsPage />);
     await waitFor(() => screen.getByText(/Couldn't load skills/));
     expect(screen.getByRole("button", { name: "Find and install a skill" })).toBeTruthy();

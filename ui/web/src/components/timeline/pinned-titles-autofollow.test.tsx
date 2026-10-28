@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { render } from "@/lib/transport/tests/wall-clock-render";
+import { render as wallClockRender } from "@/lib/transport/tests/wall-clock-render";
+import { ApiTestProvider } from "@/test-support/fake-api";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -49,10 +50,11 @@ function setupStuckBlock() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(["config", null], { fields: [] });
   qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.expand_runs_mode": "all" });
-  const { container } = render(
+  const { container } = wallClockRender(
     <QueryClientProvider client={qc}>
       <TimelineView items={makeItems()} />
     </QueryClientProvider>,
+    { wrapper: ApiTestProvider },
   );
   const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
   Object.defineProperty(viewport, "scrollHeight", { value: 2000, configurable: true });

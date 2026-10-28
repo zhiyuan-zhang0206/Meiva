@@ -20,8 +20,6 @@ exports = ["insights"]
 "page-dispatch.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
 "page-dispatch.test.tsx#vi.mock ui/web/src/lib/timeline/timeline-store.ts" = 1
 "page-dispatch.test.tsx#vi.mock ui/web/src/lib/timeline/use-timeline.ts" = 1
-"page-dispatch.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"page-dispatch.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
 "page.test.tsx#vi.mock ui/web/src/components/agent-sidebar/index.tsx" = 1
 "page.test.tsx#vi.mock ui/web/src/components/conversation/composer.tsx" = 1
 "page.test.tsx#vi.mock ui/web/src/components/conversation/upload-button.tsx" = 1
@@ -35,8 +33,6 @@ exports = ["insights"]
 "page.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
 "page.test.tsx#vi.mock ui/web/src/lib/timeline/timeline-store.ts" = 1
 "page.test.tsx#vi.mock ui/web/src/lib/timeline/use-timeline.ts" = 1
-"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"page.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
 
 [debt.stdlib-patch]
 "page-dispatch.test.tsx#vi.stubGlobal crypto" = 1

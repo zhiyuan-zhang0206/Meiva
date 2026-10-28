@@ -8,11 +8,6 @@ exports = ["context-panel-toggle.tsx", "header-bar.tsx", "home-layout.tsx", "pag
 "theme-color-sync.test.tsx" = ["theme-color-sync.tsx"]
 "visual-viewport-height-sync.test.tsx" = ["visual-viewport-height-sync.tsx"]
 
-[debt.first-party-patch]
-"providers.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"providers.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"providers.test.tsx#vi.spyOn ui/web/src/lib/transport/stream/sse-share.ts.prototype.subscribe" = 1
-
 [debt.stdlib-patch]
 "providers.test.tsx#vi.spyOn globalThis.EventSource" = 1
 "visual-viewport-height-sync.test.tsx#vi.stubGlobal innerHeight" = 2

@@ -13,11 +13,9 @@
 "inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
 "inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
 "inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
-"inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "inbox-queue.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
 "inbox-queue.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
 "inbox-queue.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
-"inbox-queue.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 
 [debt.stdlib-patch]
 "inbox-queue.test.tsx#vi.spyOn window.requestAnimationFrame" = 1

@@ -5,32 +5,30 @@
 // happy-dom + RTL — vitest globals=false; explicit cleanup.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
-import { api } from "@/lib/transport/api";
 
 import { ContextButton, type ContextButtonProps } from "./context-breakdown";
 import { ContextBreakdownCard } from "./context-breakdown-body";
 import { ContextMeter, ContextMeterGhost, resolveContextMeterWidth } from "./context-meter";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getContextBreakdown: vi.fn(),
-    getRunTimelineContext: vi.fn(),
-    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
-  },
-}));
 
 function apiError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
 }
 
-const getContextBreakdown = vi.mocked(api.getContextBreakdown);
-const getRunTimelineContext = vi.mocked(api.getRunTimelineContext);
+const getContextBreakdown = transport.getContextBreakdown;
+const getRunTimelineContext = transport.getRunTimelineContext;
 
 afterEach(() => {
   cleanup();

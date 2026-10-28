@@ -1,20 +1,17 @@
 
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 
 import { DefaultModelPanel } from "./_default_model";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getDefaultModel: vi.fn(),
-    getModels: vi.fn(),
-    putDefaultModel: vi.fn(),
-  },
-}));
 
 function wrap() {
   const qc = new QueryClient({
@@ -38,12 +35,12 @@ const MODELS = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.getModels).mockResolvedValue(MODELS);
-  vi.mocked(api.getDefaultModel).mockResolvedValue({
+  transport.getModels.mockResolvedValue(MODELS);
+  transport.getDefaultModel.mockResolvedValue({
     model: "deepseek-flash",
     source: "cluster",
   });
-  vi.mocked(api.putDefaultModel).mockResolvedValue({
+  transport.putDefaultModel.mockResolvedValue({
     model: "claude-sonnet-5",
     source: "cluster",
   });
@@ -64,16 +61,16 @@ describe("DefaultModelPanel", () => {
     );
     const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");
     await waitFor(() => expect(select.value).toBe("deepseek-flash"));
-    vi.mocked(api.getModels).mockResolvedValue({ ...MODELS, default: "claude-sonnet-5" });
-    vi.mocked(api.getDefaultModel).mockResolvedValue({ model: "claude-sonnet-5", source: "cluster" });
+    transport.getModels.mockResolvedValue({ ...MODELS, default: "claude-sonnet-5" });
+    transport.getDefaultModel.mockResolvedValue({ model: "claude-sonnet-5", source: "cluster" });
     fireEvent.change(select, { target: { value: "claude-sonnet-5" } });
     fireEvent.click(screen.getByTestId("save-default-model"));
     await waitFor(() => expect(qc.getQueryData<{ default: string }>(["models"])?.default).toBe("claude-sonnet-5"));
   });
 
   it("shows a disabled loading placeholder before the current model resolves", () => {
-    vi.mocked(api.getModels).mockReturnValue(new Promise(() => undefined));
-    vi.mocked(api.getDefaultModel).mockReturnValue(new Promise(() => undefined));
+    transport.getModels.mockReturnValue(new Promise(() => undefined));
+    transport.getDefaultModel.mockReturnValue(new Promise(() => undefined));
     wrap();
 
     const select = screen.getByTestId<HTMLSelectElement>("select-default-model");
@@ -97,7 +94,7 @@ describe("DefaultModelPanel", () => {
   });
 
   it("omits superseded roster options while preserving a stored superseded default", async () => {
-    vi.mocked(api.getModels).mockResolvedValue({
+    transport.getModels.mockResolvedValue({
       providers: {
         deepseek: ["deepseek-v4-pro", "deepseek-flash", "deepseek-v4-legacy"],
       },
@@ -123,7 +120,7 @@ describe("DefaultModelPanel", () => {
       },
       default: "deepseek-flash",
     });
-    vi.mocked(api.getDefaultModel).mockResolvedValue({
+    transport.getDefaultModel.mockResolvedValue({
       model: "deepseek-v4-pro",
       source: "cluster",
     });
@@ -146,7 +143,7 @@ describe("DefaultModelPanel", () => {
     fireEvent.change(select, { target: { value: "claude-sonnet-5" } });
     fireEvent.click(screen.getByTestId("save-default-model"));
 
-    await waitFor(() => expect(api.putDefaultModel).toHaveBeenCalledWith("claude-sonnet-5"));
+    await waitFor(() => expect(transport.putDefaultModel).toHaveBeenCalledWith("claude-sonnet-5"));
   });
 
   it("keeps save disabled until the pick differs from the stored value", async () => {
@@ -164,7 +161,7 @@ describe("DefaultModelPanel", () => {
   });
 
   it("flags a value that is only the .env / code default showing through", async () => {
-    vi.mocked(api.getDefaultModel).mockResolvedValue({
+    transport.getDefaultModel.mockResolvedValue({
       model: "deepseek-v4-pro",
       source: "config",
     });
@@ -179,7 +176,7 @@ describe("DefaultModelPanel", () => {
   });
 
   it("shows a quiet error instead of the raw failure", async () => {
-    vi.mocked(api.getDefaultModel).mockRejectedValue(new Error("boom 500"));
+    transport.getDefaultModel.mockRejectedValue(new Error("boom 500"));
     wrap();
     expect(await screen.findByText(/Couldn't load the default model/)).toBeTruthy();
     expect(screen.queryByText(/boom 500/)).toBeNull();
@@ -187,7 +184,7 @@ describe("DefaultModelPanel", () => {
 });
 
 it("keeps the default model read-only when the catalog fails", async () => {
-  vi.mocked(api.getModels).mockRejectedValue(new Error("provider private diagnostic"));
+  transport.getModels.mockRejectedValue(new Error("provider private diagnostic"));
   wrap();
   expect(await screen.findByText(/Couldn't load the default model/)).toBeTruthy();
   expect(screen.queryByTestId("save-default-model")).toBeNull();

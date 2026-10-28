@@ -1,7 +1,6 @@
-import type * as ApiModule from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { BrowserProvider } from "@/lib/browser/browser-provider";
 import { fakeBrowser } from "@/lib/browser/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,11 +42,6 @@ const {
     getAgentRoster: vi.fn(),
   }));
 
-vi.mock("@/lib/transport/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof ApiModule>()),
-  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown },
-}));
-
 import {
   clickAt,
   drawn,
@@ -59,13 +53,25 @@ import {
 import { useMediaQuery } from "@/lib/layout/use-media-query";
 import RunTimelinePage from "./page";
 
-
 import {
   cbdFixture,
   LIFETIME,
   lifetimeResponse,
   messagesResponse,
 } from "./run-timeline-test-fixtures-mock";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getRunTimeline.mockImplementation(getRunTimeline);
+  transport.getRunTimelineMessages.mockImplementation(getRunTimelineMessages);
+  transport.getRunTimelineContext.mockImplementation(getRunTimelineContext);
+  transport.getRunTimelineLinks.mockImplementation(getRunTimelineLinks);
+  transport.getAgentRoster.mockImplementation(getAgentRoster);
+  transport.getSettings.mockImplementation(getSettings);
+  transport.getContextBreakdown.mockImplementation(getContextBreakdown);
+});
+
 const wallNow = () => Date.now();
 function renderPage({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -148,7 +154,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
-
 
 describe("the default window", () => {
   it("asks for the latest day with bounded message detail", async () => {

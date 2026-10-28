@@ -1,6 +1,6 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,21 +49,22 @@ const payload = (over: Partial<HostPermissionsPayload> = {}): HostPermissionsPay
 });
 
 import { useStore } from "@/lib/state/store";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getHostPermissions.mockImplementation(() => getHostPermissions());
+  transport.recheckHostPermissions.mockImplementation(() => recheckHostPermissions());
+  transport.requestHostPermissions.mockImplementation(() => requestHostPermissions());
+  transport.deferHostPermissions.mockImplementation(() => deferHostPermissions());
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
+});
+
 
 const getHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
 const recheckHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
 const requestHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
 const deferHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
-
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getHostPermissions: () => getHostPermissions(),
-    recheckHostPermissions: () => recheckHostPermissions(),
-    requestHostPermissions: () => requestHostPermissions(),
-    deferHostPermissions: () => deferHostPermissions(),
-    getSettings: () => Promise.resolve({ settings: [] }),
-  },
-}));
 
 const { PermissionChecklist } = await import("./permission-checklist");
 

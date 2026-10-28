@@ -7,13 +7,15 @@ import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse 
 import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import { cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
+import { resetTransport, transport } from "@/test-support/fake-api";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { TimelineView } from ".";
-vi.mock("@/lib/transport/api", () => ({ api: {
-  getConfig: vi.fn().mockResolvedValue({ fields: [] }),
-} }));
-vi.mock("@/lib/transport/useEventStream", () => ({ useAgentEventStream: vi.fn() }));
+import { TestStreamProvider } from "@/test-support/fake-stream";
+
+beforeEach(() => {
+  resetTransport();
+  transport.getConfig.mockResolvedValue({ fields: [] });
+});
 vi.mock("../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: ReactNode }) => (
@@ -30,7 +32,10 @@ let height = 5000;
 let aboveSettle = 0;
 let client: QueryClient;
 let resizeCallbacks: Set<() => void>;
-const gateway = cacheOnlyApi();
+// meiva:note
+// The timeline's config read is the only transport call this file needs; everything else
+// must stay unanswered so an accidental read fails loudly.
+const gateway = transport;
 
 function Conversation({ agentId, entry }: { agentId: number | null; entry: string }) {
   const timeline = useTimeline(agentId, () => undefined);
@@ -41,7 +46,9 @@ function conversation(agentId: number | null, entry: string) {
   return (
     <QueryClientProvider client={client}>
       <WallClockProvider wallNow={wallNow}>
-        <ApiProvider api={gateway}><Conversation agentId={agentId} entry={entry} key={entry} /></ApiProvider>
+        <ApiProvider api={gateway}>
+          <TestStreamProvider><Conversation agentId={agentId} entry={entry} key={entry} /></TestStreamProvider>
+        </ApiProvider>
       </WallClockProvider>
     </QueryClientProvider>
   );
@@ -277,7 +284,9 @@ function tabs(agentId: number, entry: string) {
   return (
     <QueryClientProvider client={client}>
       <WallClockProvider wallNow={wallNow}>
-        <ApiProvider api={gateway}><AgentTabs agentId={agentId} entry={entry} /></ApiProvider>
+        <ApiProvider api={gateway}>
+          <TestStreamProvider><AgentTabs agentId={agentId} entry={entry} /></TestStreamProvider>
+        </ApiProvider>
       </WallClockProvider>
     </QueryClientProvider>
   );

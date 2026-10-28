@@ -5,16 +5,6 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as ApiModule from "@/lib/transport/api";
-
-// EventStreamProvider opens a real EventSource (happy-dom ships one that hits
-// the network); stub it to a pass-through so the smoke test stays offline. The
-// connection behavior itself is covered in useEventStream.test.ts. With the
-// module mocked, the root AgentsCacheSync subscriber's useEventStream is a noop.
-vi.mock("@/lib/transport/useEventStream", () => ({
-  EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  useEventStream: vi.fn(),
-}));
 
 vi.mock("next-themes", () => ({
   ThemeProvider: ({ children, nonce }: { children: ReactNode; nonce?: string }) => (
@@ -27,24 +17,13 @@ vi.mock("next-themes", () => ({
 // Authentication stays pending while real root readers own their explicit wire
 // boundaries. Alert I/O is asserted blocked; settings and themes still read.
 // meiva:link ui/web/src/docs/frontend.meiva.okf.md
-vi.mock("@/lib/transport/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof ApiModule>();
-  return {
-    ...actual,
-    api: {
-      getClusterStatus: vi.fn(() => new Promise(() => undefined)),
-      checkAuth: vi.fn(() => new Promise(() => undefined)),
-      getSettings: vi.fn<typeof actual.api.getSettings>(() => new Promise(() => undefined)),
-      getUiContributions: vi.fn<typeof actual.api.getUiContributions>(() => new Promise(() => undefined)),
-      getAlerts: vi.fn<typeof actual.api.getAlerts>(() => new Promise(() => undefined)),
-    },
-  };
-});
 
-import { ApiError, api } from "@/lib/transport/api";
-import { ProfileSseTransport } from "@/lib/transport/stream/sse-share";
+import { ApiError } from "@/lib/transport/api";
 import { setSessionInvalidHandler, useAuth } from "@/lib/auth/auth-context";
 import { useNonce } from "@/lib/auth/nonce-context";
+import { useApi } from "@/lib/transport/transport-context";
+import { transport as fakeTransport } from "@/test-support/fake-api";
+import { fakeStreamHub } from "@/test-support/fake-stream";
 
 import { createQueryClient, Providers } from "./providers";
 
@@ -71,9 +50,15 @@ function testQueryClient() {
 
 function RootProbe() {
   const client = useQueryClient();
+  const provided = useApi();
   const { status } = useAuth();
   useEffect(() => { clients.add(client); }, [client]);
-  return <span data-testid="auth-status">{status}</span>;
+  return (
+    <>
+      <span data-testid="auth-status">{status}</span>
+      <span data-testid="provider-client" data-is-app-client={String(provided === fakeTransport)} />
+    </>
+  );
 }
 
 function QueryProbe({ queryFn }: { queryFn: () => Promise<unknown> }) {
@@ -137,24 +122,25 @@ describe("QueryClient defaults", () => {
 });
 
 describe("Providers", () => {
-  it("passes children through", async () => {
+  it("passes children through and provides the running app's client", () => {
+    const { hub, tab } = fakeStreamHub();
     const sources = vi.spyOn(globalThis, "EventSource");
-    const subscriptions = vi.spyOn(ProfileSseTransport.prototype, "subscribe");
     const view = render(
-      <Providers>
+      <Providers client={fakeTransport} hub={hub}>
         <RootProbe />
         <span data-testid="child">child</span>
       </Providers>,
     );
     expect(screen.getByTestId("child")).toBeTruthy();
-    await waitFor(() => expect(api.checkAuth).toHaveBeenCalledTimes(1));
-    expect(screen.getByTestId("auth-status").textContent).toBe("loading");
-    expect(api.getSettings).toHaveBeenCalledTimes(1);
-    expect(api.getUiContributions).toHaveBeenCalledTimes(1);
-    expect(api.getAlerts).not.toHaveBeenCalled();
-    expect(api.getClusterStatus).not.toHaveBeenCalled();
+    // meiva:note
+    // The composition root's job is to hand the app's own client to every reader; the
+    // readers of settings / contributions then read through it, so this asserts the
+    // identity the provider supplies rather than counting calls on a replaced module.
+    expect(screen.getByTestId("provider-client").getAttribute("data-is-app-client")).toBe("true");
     expect(sources).not.toHaveBeenCalled();
-    expect(subscriptions).not.toHaveBeenCalled();
+    // meiva:note
+    // Mounting must not open the stream: the hub's tab constructs a source per channel.
+    expect(tab.sources).toHaveLength(0);
     view.unmount();
     for (const client of clients) {
       expect(client.getQueryCache().getAll().every((query) => query.getObserversCount() === 0)).toBe(true);
@@ -163,7 +149,7 @@ describe("Providers", () => {
 
   it("passes the request nonce to the theme bootstrap script", () => {
     render(
-      <Providers nonce="request-nonce">
+      <Providers client={fakeTransport} hub={fakeStreamHub().hub} nonce="request-nonce">
         <RootProbe />
         <span>child</span>
       </Providers>,
@@ -178,7 +164,7 @@ describe("Providers", () => {
     }
 
     render(
-      <Providers nonce="request-nonce">
+      <Providers client={fakeTransport} hub={fakeStreamHub().hub} nonce="request-nonce">
         <RootProbe />
         <NonceProbe />
       </Providers>,

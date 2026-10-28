@@ -6,17 +6,17 @@
 // carries no trailing slash while the declaration does.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 
 import PluginPage from "./page";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: { getUiContributions: vi.fn() },
-  API_BASE: "http://gateway.test:8000",
-}));
 
 function renderRoute(plugin: string, path?: string[]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -29,7 +29,7 @@ function renderRoute(plugin: string, path?: string[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.getUiContributions).mockResolvedValue({
+  transport.getUiContributions.mockResolvedValue({
     themes: [],
     stats: [],
     nav: [
@@ -54,7 +54,7 @@ describe("plugin page route", () => {
     await waitFor(() => expect(screen.getByText("Task board")).toBeTruthy());
     const iframe = container.querySelector("iframe");
     expect(iframe?.getAttribute("src")).toBe(
-      "http://gateway.test:8000/api/plugin-ui/board/board",
+      "http://localhost:8000/api/plugin-ui/board/board",
     );
     // Provenance is on screen next to the label.
     expect(screen.getByText("board")).toBeTruthy();
@@ -65,7 +65,7 @@ describe("plugin page route", () => {
 
     await waitFor(() => expect(container.querySelector("iframe")).not.toBeNull());
     expect(container.querySelector("iframe")?.getAttribute("src")).toBe(
-      "http://gateway.test:8000/api/plugin-ui/board/reports/q3.html",
+      "http://localhost:8000/api/plugin-ui/board/reports/q3.html",
     );
     expect(screen.getByRole("heading").textContent).toBe("board");
   });
@@ -75,7 +75,7 @@ describe("plugin page route", () => {
 
     await waitFor(() => expect(container.querySelector("iframe")).not.toBeNull());
     expect(container.querySelector("iframe")?.getAttribute("src")).toBe(
-      "http://gateway.test:8000/api/plugin-ui/board/",
+      "http://localhost:8000/api/plugin-ui/board/",
     );
   });
 });

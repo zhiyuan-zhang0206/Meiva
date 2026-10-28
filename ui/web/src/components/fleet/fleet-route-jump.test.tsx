@@ -88,16 +88,6 @@ const putSettingMock = vi.fn((key: string, value: unknown) =>
   Promise.resolve({ key, value, updated_at: "2026-06-14T00:00:00Z" }),
 );
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getNotices: () =>
-      Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }),
-    resolveNotice: () => Promise.resolve({ status: "ok" }),
-    getSettings: () => Promise.resolve({ settings: [] }),
-    putSetting: (key: string, value: unknown) => putSettingMock(key, value),
-  },
-}));
-
 interface TestNoticesFeed {
   open: NoticeItem[];
   awaiting: NoticeItem[];
@@ -128,6 +118,16 @@ vi.mock("@/lib/notifications/use-tasks", () => ({ useTasks: () => useTasksMock()
 vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
 
 import { FleetView } from "./fleet-view";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getNotices.mockImplementation(() =>
+      Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }));
+  transport.resolveNotice.mockImplementation(() => Promise.resolve({ status: "ok" }));
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
+  transport.putSetting.mockImplementation((key: string, value: unknown) => putSettingMock(key, value));
+});
 
 function notice(over: Partial<NoticeItem> & { id: number; title: string }): NoticeItem {
   return {

@@ -9,20 +9,21 @@
 // happy-dom + RTL — vitest globals=false; explicit cleanup.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 
 import { ContextButton, type ContextButtonProps } from "./context-breakdown";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: { getContextBreakdown: vi.fn(), getRunTimelineContext: vi.fn(), getSettings: vi.fn() },
-}));
 
-const getContextBreakdown = vi.mocked(api.getContextBreakdown);
-const getSettings = vi.mocked(api.getSettings);
+const getContextBreakdown = transport.getContextBreakdown;
+const getSettings = transport.getSettings;
 // display.context_meter_width unset — useUserSettings falls back to its
 // USER_SETTING_DEFAULTS entry ("comfortable"), same as an unconfigured user.
 getSettings.mockResolvedValue({ settings: [] });

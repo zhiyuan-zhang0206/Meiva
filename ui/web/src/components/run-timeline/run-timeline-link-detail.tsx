@@ -7,18 +7,19 @@ import { useTranslations } from "next-intl";
 import { Metric, Section } from "@/components/inspector/inspector-section";
 import { buttonVariants } from "@/components/ui/button";
 import { useTimeFormat } from "@/lib/format/use-time-format";
-import { api } from "@/lib/transport/api";
 
 import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
 import type { ResolvedLink } from "./model/links/resolve";
 import { PreviewMessage, TimelineMessages } from "./run-timeline-messages";
+import { useApi } from "@/lib/transport/transport-context";
 
 function LinkText({ link }: { link: ResolvedLink["link"] }) {
+  const client = useApi();
   const t = useTranslations("runTimeline");
   const ref = link.inbound_id !== null ? { inbound_id: link.inbound_id } : link.notice_id !== null ? { notice_id: link.notice_id } : null;
   const read = useQuery({
     queryKey: ["run-timeline-link-content", ref],
-    queryFn: () => (ref === null ? Promise.reject(new Error("an event with no text to read")) : api.getRunTimelineLinkContent(ref)),
+    queryFn: () => (ref === null ? Promise.reject(new Error("an event with no text to read")) : client.getRunTimelineLinkContent(ref)),
     enabled: ref !== null,
     staleTime: Infinity,
   });

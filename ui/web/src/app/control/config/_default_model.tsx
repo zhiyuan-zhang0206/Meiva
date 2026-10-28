@@ -6,7 +6,6 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { groupedModels, isSuperseded, providerLabel } from "@/lib/contracts/models";
 import { useStore } from "@/lib/state/store";
@@ -14,12 +13,14 @@ import { useStore } from "@/lib/state/store";
 import { useSectionVisible } from "../visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 const DEFAULT_MODEL_QUERY_KEY = ["default-model"] as const;
 const MODELS_QUERY_KEY = ["models"] as const;
 
 // meiva:link ui/web/src/app/control/config/docs/configuration.meiva.okf.md
 export function DefaultModelPanel({ id }: { id: string }) {
+  const client = useApi();
   const t = useTranslations("config");
   const visible = useSectionVisible();
   const qc = useQueryClient();
@@ -29,18 +30,18 @@ export function DefaultModelPanel({ id }: { id: string }) {
 
   const current = useQuery({
     queryKey: DEFAULT_MODEL_QUERY_KEY,
-    queryFn: api.getDefaultModel,
+    queryFn: client.getDefaultModel,
     enabled: visible,
   });
   const models = useQuery({
     queryKey: MODELS_QUERY_KEY,
-    queryFn: () => api.getModels(),
+    queryFn: () => client.getModels(),
     staleTime: Infinity,
     enabled: visible,
   });
 
   const save = useMutation({
-    mutationFn: (model: string) => api.putDefaultModel(model),
+    mutationFn: (model: string) => client.putDefaultModel(model),
     onSuccess: () => {
       setPicked(null);
       showToast(t("defaultModelSaved"));

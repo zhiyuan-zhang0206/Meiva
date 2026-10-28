@@ -46,12 +46,6 @@ vi.mock("@/lib/inspector/use-token-usage", () => ({
 vi.mock("@/lib/state/use-user-settings", () => ({
   useUserSettings: () => ({ settings: hooksState.settings, setSetting: hooksState.setSetting, isLoading: false }),
 }));
-vi.mock("@/lib/transport/useEventStream", () => ({
-  EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  AgentEventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  useEventStream: vi.fn(),
-  useAgentEventStream: vi.fn(),
-}));
 vi.mock("@/lib/state/store", () => ({
   useStore: <T,>(selector: (s: unknown) => T): T =>
     selector({
@@ -75,21 +69,6 @@ vi.mock("@/lib/layout/breakpoint", () => ({
 vi.mock("@/lib/timeline/timeline-store", () => ({
   useTimelineStore: <T,>(selector: (s: unknown) => T): T =>
     selector({ requestScrollToBottom: hooksState.requestScrollToBottom }),
-}));
-vi.mock("@/lib/transport/api", () => ({
-  API_BASE: "",
-  MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
-    constructor(readonly clientMessageId: string) {
-      super("delivery unconfirmed");
-    }
-  },
-  api: {
-    sendMessage: vi.fn().mockResolvedValue(undefined),
-    cancel: vi.fn().mockResolvedValue(undefined),
-    uploadFiles: vi.fn().mockResolvedValue(undefined),
-    submitUploadedFiles: vi.fn().mockResolvedValue(undefined),
-    listPages: vi.fn().mockResolvedValue([]),
-  },
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ bfcacheId: "_b_test_" }),
