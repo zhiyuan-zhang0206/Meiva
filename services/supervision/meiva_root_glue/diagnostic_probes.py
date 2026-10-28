@@ -26,6 +26,7 @@ from base.host.db_authority.api import read_telemetry_token
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.url_secret import names_foreign_host
 from base.host.proc import CommandRunner
+from base.native_process.ownership import OwnedProcess
 from base.telemetry.station_endpoint import StationEndpointConfig
 from services.desktop.browser.probe import probe_browser as _default_probe_browser
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
@@ -57,6 +58,7 @@ from services.supervision.meiva_root_glue.diagnostics import DIAGNOSTIC_TIMEOUT_
 @dataclass(frozen=True)
 class ProbeConfig:
     home: Path
+    helper_socket: Path
     redis_url: str = field(repr=False)
     db_url: str = field(repr=False)
     pgbouncer_enabled: bool
@@ -488,6 +490,7 @@ def build_diagnostics(
     macos: bool,
     launchd: LaunchdFacts,
     run: CommandRunner,
+    root: OwnedProcess,
 ) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
     checks: list[Diagnostic] = []
@@ -522,7 +525,14 @@ def build_diagnostics(
         checks.append(
             Diagnostic(
                 "permissions-helper",
-                partial(probe, home=config.home, facts=launchd, run=run),
+                partial(
+                    probe,
+                    home=config.home,
+                    facts=launchd,
+                    run=run,
+                    sock_path=config.helper_socket,
+                    root=root,
+                ),
                 report=episode_reporter(),
             )
         )

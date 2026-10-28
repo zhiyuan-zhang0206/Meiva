@@ -9,6 +9,7 @@ from typing import Any
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.host.proc import CommandRunner, run_bounded
+from base.native_process.ownership import OwnedProcess
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
 from services.supervision.meiva_root_glue.diagnostic_probes import ProbeConfig
@@ -22,9 +23,11 @@ __all__ = [
 ]
 
 # meiva:note
-# The account the diagnostics' launchd probe would read, and a runner that fails a test which lets
-# that probe run: the roster tests build the checks without ever calling them.
+# The account the diagnostics' launchd probe would read, the root process it would observe, and a
+# runner that fails a test which lets that probe run: the roster tests build the checks without
+# ever calling them.
 LAUNCHD = LaunchdFacts(uid=501, platform="darwin", user_home=Path("/unused/user"))
+ROOT = OwnedProcess(pid=4242, birth=1.0, starttime=None)
 
 
 def refuse_launchctl(
@@ -41,8 +44,15 @@ def refuse_launchctl(
 
 # meiva:note
 # `probes.build_diagnostics` for a roster test: the account's launchd probe is built, never run.
-def checks_for(requested: set[str], **inputs: Any) -> list[Diagnostic]:
-    return probes.build_diagnostics(requested, launchd=LAUNCHD, run=refuse_launchctl, **inputs)
+def checks_for(
+    requested: set[str],
+    *,
+    root: OwnedProcess = ROOT,
+    launchd: LaunchdFacts = LAUNCHD,
+    run: CommandRunner = refuse_launchctl,
+    **inputs: Any,
+) -> list[Diagnostic]:
+    return probes.build_diagnostics(requested, launchd=launchd, run=run, root=root, **inputs)
 
 
 # meiva:note
@@ -85,6 +95,7 @@ def system_clock() -> Clock:
 def probe_config(**overrides: Any) -> ProbeConfig:
     base = ProbeConfig(
         home=Path("/unused"),
+        helper_socket=Path("/unused/permissions-helper.sock"),
         redis_url="redis://localhost:6380",
         db_url="postgresql://localhost/meiva_main",
         pgbouncer_enabled=False,

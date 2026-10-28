@@ -359,7 +359,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 ),
             }
             units.append(entry)
-        own_identity = OwnedProcess.capture(psutil.Process(self._root_pid))
+        own_identity = self.root_identity()
         root: dict[str, object] = {
             "pid": own_identity.pid,
             "create_time": own_identity.birth,
@@ -402,6 +402,11 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
     def attach_metrics(self, source: MetricsSource) -> None:
         """Embed the self-check's metrics in `status()`; absent until wired."""
         self._metrics = source
+
+    # meiva:note
+    # The native birth of the root process this supervisor serves, captured now.
+    def root_identity(self) -> OwnedProcess:
+        return OwnedProcess.capture(psutil.Process(self._root_pid))
 
     def tree_view(self) -> dict[str, object]:
         """Raw per-unit facts for the self-check: `{"root_pid", "units": [...]}`.
