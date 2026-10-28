@@ -86,8 +86,7 @@ from base.agents.history.hierarchy.rebuild import (
 from base.agents.history.hierarchy.units import divide_units
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.snapshot import agent_model_target
-from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import clock_config_from_boot
+from base.clock import Clock
 from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
@@ -178,6 +177,7 @@ def describe(
     agent_id: int,
     *,
     config: ConfigBoot,
+    clock: Clock,
 ) -> ChunkResult:
     # meiva:note
     # Blocking: the agent's own model's groups and summaries of a located chunk.
@@ -194,7 +194,7 @@ def describe(
         corrections=config.view.agent.understanding_group_corrections,
         on_call=calls.append,
         timeline_inputs=TimestampPolicy.from_clock(
-            Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            clock,
             timestamps_enabled=config.view.general.message_timestamps,
         ),
     )
@@ -271,6 +271,7 @@ async def run_job(
     executor: ThreadPoolExecutor | None = None,
     *,
     config: ConfigBoot,
+    clock: Clock,
 ) -> Outcome:
     # meiva:note
     # Describe one claimed chunk and store its nodes; the outcome says how it ended.
@@ -316,7 +317,7 @@ async def run_job(
         for unit in divide_units(
             list(located.messages),
             timeline_inputs=TimestampPolicy.from_clock(
-                Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+                clock,
                 timestamps_enabled=config.view.general.message_timestamps,
             ),
         )
@@ -337,6 +338,7 @@ async def run_job(
             calls,
             job.agent_id,
             config=config,
+            clock=clock,
         )
     except GenerateError as exc:
         return Outcome("failed", str(exc))
@@ -410,11 +412,13 @@ class Consumer:
         keys: ProviderKeys,
         llm_override: str,
         config: ConfigBoot,
+        clock: Clock,
         poll_seconds: float = POLL_SECONDS,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
         self.models = ModelCache(catalog, keys, llm_override)
         self.config = config
+        self.clock = clock
         self.poll_seconds = poll_seconds
         self.in_flight = 0
         # meiva:note
@@ -482,7 +486,14 @@ class Consumer:
         try:
             try:
                 outcome = await run_job(
-                    self.pool, self.db, job, self.tools, self.models, executor, config=self.config
+                    self.pool,
+                    self.db,
+                    job,
+                    self.tools,
+                    self.models,
+                    executor,
+                    config=self.config,
+                    clock=self.clock,
                 )
             except asyncio.CancelledError:
                 # meiva:note
@@ -513,6 +524,7 @@ class Consumer:
                     job.agent_id,
                     executor=executor,
                     config=self.config,
+                    clock=self.clock,
                 )
         except Exception:
             # meiva:note
@@ -540,6 +552,7 @@ class Consumer:
                     rebuild.agent_id,
                     executor=executor,
                     config=self.config,
+                    clock=self.clock,
                 )
             except asyncio.CancelledError:
                 try:
@@ -652,6 +665,7 @@ async def replay_jobs(
     keys: ProviderKeys,
     llm_override: str,
     config: ConfigBoot,
+    clock: Clock,
 ) -> None:
     # meiva:note
     # Describe every enqueued job of one agent, its segments in parallel (the replay tool).
@@ -664,6 +678,7 @@ async def replay_jobs(
         keys=keys,
         llm_override=llm_override,
         config=config,
+        clock=clock,
     ).run_until_idle()
 
 
@@ -676,6 +691,7 @@ async def understanding_loop_forever(
     keys: ProviderKeys,
     llm_override: str,
     config: ConfigBoot,
+    clock: Clock,
     poll_seconds: float = POLL_SECONDS,
 ) -> None:
     # meiva:note
@@ -695,5 +711,6 @@ async def understanding_loop_forever(
         keys=keys,
         llm_override=llm_override,
         config=config,
+        clock=clock,
         poll_seconds=poll_seconds,
     ).run_forever()

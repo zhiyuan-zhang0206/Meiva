@@ -1,6 +1,5 @@
 # meiva:note
 # The operation root reaches real checkpoint, SDK, wire and audit resources.
-
 from __future__ import annotations
 
 import json
@@ -14,6 +13,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy.chunks import Chunk, enqueue_chunk
+from base.clock.tests.fakes import clock_with_unknown_timezone, system_clock
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
@@ -147,6 +147,7 @@ async def test_real_chunk_provider_receipt_survives_success_and_failure(
             database,
             [],
             7,
+            clock=system_clock(),
             catalog=catalog,
             keys=inert_keys(catalog),
             llm_override="",
@@ -173,13 +174,16 @@ async def test_real_chunk_provider_receipt_survives_success_and_failure(
         _assert_job_outcome(job, nodes, kind=kind, emitted_events=emitted_events)
 
 
-async def test_generation_does_not_reuse_the_matter_filter_rendering_policy(
+async def test_generation_renders_with_the_clock_the_caller_built(
     database: Database,
     db_url: str,
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
     emitted_events: EmittedEvents,
 ) -> None:
+    # meiva:note
+    # A settings change after the model was built -- the way an owner test moves a field -- cannot
+    # reach the chunk's render policy: the zone is the caller's clock's, not a late settings read.
     from base.lm.provider_api import BuildContext
 
     _checkpoint(database, db_url, compact_note=True)
@@ -191,8 +195,6 @@ async def test_generation_does_not_reuse_the_matter_filter_rendering_policy(
 
         def build(ctx: BuildContext):
             model = wire.build(ctx)
-            # meiva:note
-            # Matter filtering has already minted its valid UTC policy.
             config.set_field("timezone", "Invalid/AfterMatterFilter")
             return model
 
@@ -213,16 +215,73 @@ async def test_generation_does_not_reuse_the_matter_filter_rendering_policy(
             database,
             [],
             7,
+            clock=system_clock(),
             catalog=catalog,
             keys=inert_keys(catalog),
             llm_override="",
             config=config,
         )
-        assert wire.build_efforts == ["high"] and wire.requests == []
+        assert wire.build_efforts == ["high"] and len(wire.requests) == 1
+        async with aops_pool.connection() as conn:
+            cursor = await conn.execute("SELECT status, error FROM understanding_chunk_jobs")
+            [(status, error)] = await cursor.fetchall()
+        assert status == "done" and error is None
+        assert (
+            emitted_events.names() == []
+            or "understanding_chunk_failed" not in emitted_events.names()
+        )
+
+
+async def test_an_unusable_zone_in_the_callers_clock_fails_the_chunk(
+    database: Database,
+    db_url: str,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    emitted_events: EmittedEvents,
+) -> None:
+    # meiva:note
+    # The clock this pass was handed names a zone that does not exist: the failure is loud -- no
+    # provider call, no node, and the job records why.
+    from base.lm.provider_api import BuildContext
+
+    _checkpoint(database, db_url, compact_note=True)
+    config = consumer_config()
+    config.set_field("understanding_group_corrections", 0)
+    config.set_field("message_timestamps", True)
+    config.set_field("timezone", "UTC")
+    with ProviderWire(200, completion('<group first="1" last="4">summary</group>')) as wire:
+
+        def build(ctx: BuildContext):
+            return wire.build(ctx)
+
+        binding = ProviderBinding(
+            prefix="deepseek-",
+            display_name="Local SDK transport",
+            key_env="DEEPSEEK_API_KEY",
+            build=build,
+            effort_levels=("high", "max"),
+            provider_key="openai",
+        )
+        catalog = replace(model_catalog, bindings={**model_catalog.bindings, "deepseek-": binding})
+        assert await enqueue_chunk(
+            aops_pool, 7, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3"
+        )
+        await replay_jobs(
+            aops_pool,
+            database,
+            [],
+            7,
+            clock=clock_with_unknown_timezone(),
+            catalog=catalog,
+            keys=inert_keys(catalog),
+            llm_override="",
+            config=config,
+        )
+        assert wire.requests == []
         async with aops_pool.connection() as conn:
             cursor = await conn.execute("SELECT status, error FROM understanding_chunk_jobs")
             [(status, error)] = await cursor.fetchall()
             cursor = await conn.execute("SELECT count(*) FROM understanding_chunk_calls")
             assert await cursor.fetchone() == (0,)
-        assert status == "failed" and "Invalid/AfterMatterFilter" in error
+        assert status == "failed" and "Not/A_Zone" in error
         assert "understanding_chunk_failed" in emitted_events.names()

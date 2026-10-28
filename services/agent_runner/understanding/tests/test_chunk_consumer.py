@@ -6,7 +6,6 @@
 # pyright: reportUnknownVariableType = warning
 # meiva:note
 # The understanding consumer loop: claim, locate, describe, store, settle.
-
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +30,7 @@ from base.agents.history.hierarchy.chunks import (
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -53,6 +53,11 @@ from services.agent_runner.understanding.tests.consumer_history import (
     notes_history,
     written_nodes,
 )
+
+# meiva:note
+# One clock for every consumer in this file: the value a host builds once at its entry and hands
+# to each loop, so the tests pass what production passes.
+CLOCK = system_clock()
 
 
 async def test_round_describes_a_due_chunk_and_stores_its_node(
@@ -109,189 +114,6 @@ async def test_a_database_blink_fails_the_job_with_an_event_and_is_not_retried(
     [(status, attempts, error)] = await job_statuses(aops_pool)
     assert (status, attempts) == ("failed", 1) and "closed the connection" in error
     assert emitted_events.names() == ["understanding_chunk_failed"]
-
-
-async def test_a_released_job_waits_its_spacing_from_the_release_not_from_the_claim(
-    aops_pool: AsyncConnectionPool,
-) -> None:
-    from base.agents.history.hierarchy.chunks import claim_job, release_job
-
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    job = await claim_job(aops_pool)
-    assert job is not None
-    # meiva:note
-    # a slow attempt: claimed long ago
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '10 minutes'"
-        )
-    await release_job(aops_pool, job.id, error="checkpoint behind")
-    # meiva:note
-    # just released: not due for the spacing
-    assert await claim_job(aops_pool) is None
-
-
-async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: dict
-) -> None:
-    # meiva:note
-    # A manual close and the producers' next size cut (or a replay after a restart) can cover
-    # the same stretch: the later job is shortened to the undescribed part, and skipped when
-    # nothing is left.
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
-            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
-            " schema_version) VALUES (5, 1, 0, 0, 'k', 'old', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
-        )
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    # meiva:note
-    # m0 was already covered
-    assert [m.id for m in chunk_seams["described"][0].messages] == ["m1"]
-    assert await written_nodes(aops_pool) == [(5, 1, 0, 0, "old"), (5, 1, 1, 1, "what happened")]
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 2), end_msg_id="m0")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    status = (await job_statuses(aops_pool))[-1]
-    assert status[0] == "skipped" and "already described" in status[2]
-
-
-async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dropped(
-    model_catalog: ModelCatalog,
-    aops_pool: AsyncConnectionPool,
-    chunk_seams: dict,
-    emitted_events: EmittedEvents,
-) -> None:
-    # meiva:note
-    # A node covering the middle of a chunk splits it into two undescribed runs: the first is
-    # described, the other is named in an event (the old prefix-only trim lost it silently).
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
-            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
-            " schema_version) VALUES (5, 1, 1, 1, 'k', 'mid', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
-        )
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    assert [m.id for m in chunk_seams["described"][0].messages] == ["m0"]
-    assert {r[2:4] for r in await written_nodes(aops_pool)} == {(0, 0), (1, 1)}
-    [(name, attrs)] = [(event.event_name, event.attributes) for event in emitted_events]
-    assert attrs is not None
-    assert name == "understanding_chunk_gap" and attrs["gaps"] == "2-3"
-
-
-async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
-    chunk_timestamps: TimestampPolicy,
-    model_catalog: ModelCatalog,
-    aops_pool: AsyncConnectionPool,
-    chunk_seams: dict,
-    emitted_events: EmittedEvents,
-) -> None:
-    # meiva:note
-    # The host stops while a job runs (a rollout): the job ends failed at once, so it neither
-    # holds its agent's queue for the 60-minute lease nor runs a second time.
-    started = threading.Event()
-    release = threading.Event()
-
-    def hang(located: LocatedChunk) -> ChunkResult:
-        started.set()
-        release.wait(10)
-        return chunk_result(located, timeline_inputs=chunk_timestamps)
-
-    chunk_seams["answer"] = hang
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
-    )
-    task = asyncio.create_task(consumer.run_until_idle())
-    try:
-        assert await asyncio.to_thread(started.wait, 10)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    finally:
-        release.set()
-    [(status, attempts, error)] = await job_statuses(aops_pool)
-    assert (status, attempts, error) == ("failed", 1, "host stopping")
-    assert emitted_events.names() == ["understanding_chunk_failed"]
-
-
-async def test_the_give_up_clock_starts_at_the_first_wait_and_a_queued_job_has_none(
-    aops_pool: AsyncConnectionPool,
-) -> None:
-    from base.agents.history.hierarchy.chunks import claim_job, release_job
-
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    # meiva:note
-    # queued for days while the feature was off
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "UPDATE understanding_chunk_jobs SET created_at = now() - interval '3 days'"
-        )
-    job = await claim_job(aops_pool)
-    assert job is not None and job.age_seconds == 0.0
-    await release_job(aops_pool, job.id, error="wait")
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '1 hour',"
-            " waiting_since = now() - interval '2 hours'"
-        )
-    again = await claim_job(aops_pool)
-    assert again is not None and 7000 < again.age_seconds < 7400
-    # meiva:note
-    # waiting spends no attempt
-    assert again.attempts == 1
-    await release_job(aops_pool, again.id, error="wait")
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '1 h'"
-        )
-    last = await claim_job(aops_pool)
-    # meiva:note
-    # a second wait keeps the clock
-    assert last is not None and 7000 < last.age_seconds < 7400
-
-
-async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
-) -> None:
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "UPDATE understanding_chunk_jobs SET waiting_since = now() - interval '7 hours'"
-        )
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    [(status, _, error)] = await job_statuses(aops_pool)
-    assert status == "failed" and "gave up" in error
-
-
-async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_reports_the_rest(
-    model_catalog: ModelCatalog,
-    aops_pool: AsyncConnectionPool,
-    chunk_seams: dict,
-    emitted_events: EmittedEvents,
-) -> None:
-    # meiva:note
-    # The boundary snapshot of segment 0 holds fewer messages than the closing chunk's end (the
-    # checkpoint of the segment's last super-step was still in flight at compaction). The part the
-    # snapshot holds is described and written; the missing request indices are in the event.
-    chunk_seams["closing_segment"] = 0
-    await enqueue_chunk(
-        aops_pool,
-        5,
-        compact_version=0,
-        chunk=Chunk(1, 9),
-        end_msg_id="m8",
-        boundary_checkpoint_id="cp-1",
-    )
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    [(status, _, error)] = await job_statuses(aops_pool)
-    assert (status, error) == ("done", None)
-    assert [m.id for m in chunk_seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
-    assert len(await written_nodes(aops_pool)) == 1
-    [(name, attrs)] = [(event.event_name, event.attributes) for event in emitted_events]
-    assert attrs is not None and name == "understanding_chunk_gap"
-    assert "request 5-9 (not in the snapshot)" in attrs["gaps"]
 
 
 async def test_generation_error_fails_on_the_first_attempt_with_an_event(
@@ -371,7 +193,12 @@ async def test_loop_is_idle_when_the_feature_is_off(
     # meiva:note
     # returns at once
     await loop.understanding_loop_forever(
-        MagicMock(), MagicMock(), [], **lm_wiring(model_catalog), config=config
+        MagicMock(),
+        MagicMock(),
+        [],
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=config,
     )
 
 
@@ -507,7 +334,7 @@ async def test_each_group_is_a_node_covering_the_chunk_to_its_end(
         (5, 1, 3, 3, "third"),
     ]
     assert await job_spans(aops_pool) == [("done", 1, 5)]
-    assert set(chunk_seams["kw"]) == {"config"}
+    assert set(chunk_seams["kw"]) == {"clock", "config"}
     assert isinstance(chunk_seams["kw"]["config"], ConfigBoot)
 
 
@@ -576,7 +403,7 @@ async def test_a_done_job_is_followed_by_the_upper_level_checks(
     config.set_field("understanding_group_corrections", 0)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await loop.Consumer(
-        aops_pool, MagicMock(), [], **lm_wiring(catalog), config=config
+        aops_pool, MagicMock(), [], clock=CLOCK, **lm_wiring(catalog), config=config
     ).run_until_idle()
     async with aops_pool.connection() as conn:
         rows = await (
@@ -624,7 +451,12 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
     # agent 2: b
     await _enqueue_ends(aops_pool, 2, "m2")
     await loop.Consumer(
-        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+        aops_pool,
+        MagicMock(),
+        [],
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=consumer_config(),
     ).run_until_idle()
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 3
     # meiva:note
@@ -653,7 +485,12 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
     for agent in range(1, 6):
         await _enqueue_ends(aops_pool, agent, "m1")
     consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+        aops_pool,
+        MagicMock(),
+        [],
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=consumer_config(),
     )
     await consumer.run_until_idle()
     jobs = await job_statuses(aops_pool)
@@ -678,7 +515,12 @@ async def test_one_jobs_failure_touches_no_other_job(
     for agent, end in ((1, "m1"), (2, "m2"), (3, "m1")):
         await _enqueue_ends(aops_pool, agent, end)
     await loop.Consumer(
-        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+        aops_pool,
+        MagicMock(),
+        [],
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=consumer_config(),
     ).run_until_idle()
     status = [(s, e) for s, _, e in await job_statuses(aops_pool)]
     assert [s for s, _ in status] == ["done", "failed", "done"]
@@ -699,7 +541,12 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
     for agent in (1, 2):
         await _enqueue_ends(aops_pool, agent, "m1")
     consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+        aops_pool,
+        MagicMock(),
+        [],
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=consumer_config(),
     )
     # meiva:note
     # does not raise
@@ -713,7 +560,12 @@ async def test_the_backlog_event_carries_in_flight(
 ) -> None:
     await _enqueue_ends(aops_pool, 1, "m1")
     consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+        aops_pool,
+        MagicMock(),
+        [],
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=consumer_config(),
     )
     consumer.in_flight = 1
     await consumer.emit_backlog()
@@ -734,6 +586,7 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
             aops_pool,
             MagicMock(),
             [],
+            clock=CLOCK,
             **lm_wiring(model_catalog),
             config=config,
             poll_seconds=0.05,
@@ -781,7 +634,15 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
     await enqueue_chunk(aops_pool, 2, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     config = consumer_config()
     config.set_field("understanding_group_check_open", 6)
-    await loop.replay_jobs(aops_pool, MagicMock(), [], 1, **lm_wiring(model_catalog), config=config)
+    await loop.replay_jobs(
+        aops_pool,
+        MagicMock(),
+        [],
+        1,
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=config,
+    )
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done", "done", "pending"]
     async with aops_pool.connection() as conn:
         rows = await (await conn.execute("SELECT 1 FROM understanding_group_state")).fetchall()

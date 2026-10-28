@@ -23,13 +23,16 @@ base planning and generation receive values and explicit model, clock and databa
 Feature admission stays at the resident loop's first execution. Replay bypasses that gate.
 A group check reads cadence before its lease, under the lease and after model construction for
 `must_close`; each level and each rebuild horizon repeat those phases. Group generation reads
-reasoning before model construction, then corrections, the clock and cadence. A chunk mints
-separate `TimestampPolicy` values for matter filtering and generation, with the latter after
-model construction. One generation conversation keeps its captured correction budget.
+reasoning before model construction, then corrections and cadence. The clock is not read at any
+phase: the consumer receives the process clock the agent host built at its entry, and every
+`TimestampPolicy` a chunk mints -- the matter filter's and the generation's -- renders with it,
+while the timestamp switch is still read at that phase. One generation conversation keeps its
+captured correction budget.
 
 The source remains the host's next-start configuration. A later explicit change to this same
 owner is observed at the next phase; this is not a configuration-file watcher or automatic hot
-reload. `GroupingModels` remains the model-cache contract shared by root grouping and rebuild.
+reload. The clock is the exception: it is fixed when the host starts, so a change to the timezone
+applies at the next start, not at the next phase. `GroupingModels` remains the model-cache contract shared by root grouping and rebuild.
 
 - The loop owns one `TaskGroup`. While a job is due it claims and starts the job as a task of that
   group; a finishing job wakes the loop (else it polls every 2 s). A job is in flight from claim

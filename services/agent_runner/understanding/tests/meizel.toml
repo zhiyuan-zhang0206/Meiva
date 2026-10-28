@@ -3,6 +3,7 @@
 "test_configuration.py" = ["consumer_helpers.py", "provider_wire.py"]
 "test_provider_receipts.py" = ["consumer_helpers.py", "provider_wire.py"]
 "test_chunk_consumer.py" = ["chunk_faults.py", "consumer_helpers.py", "consumer_history.py"]
+"test_chunk_queue_lifecycle.py" = ["chunk_faults.py", "consumer_helpers.py", "consumer_history.py"]
 "test_group_consumer.py" = ["consumer_helpers.py", "provider_wire.py"]
 "test_rebuild.py" = ["consumer_helpers.py", "provider_wire.py"]
 
