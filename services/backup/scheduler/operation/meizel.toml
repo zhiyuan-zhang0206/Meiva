@@ -11,6 +11,3 @@ exports = ["cleanup_plan.py", "staging.py", "worker_bootstrap.py", "worker_proce
 "__init__.py" = "strict"
 "cleanup_plan.py" = "strict"
 "worker_bootstrap.py" = { mode = "none", why = "the worker process entry: it confirms that the worker module and the packages it imports resolve inside the code root it was started with, then runs the module; it imports nothing first-party before that check, so the check cannot live in a module it would have to import" }
-
-[debt.ambient-read]
-"worker_process.py#clock asyncio.loop.time" = 2

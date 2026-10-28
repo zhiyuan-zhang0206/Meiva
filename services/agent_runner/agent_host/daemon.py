@@ -557,6 +557,7 @@ async def run(
             activity_clock=host.last_active_at,
             config_fingerprint=host.turn_fingerprints.get,
             clock=stamping.clock,
+            timers=stamping.clock,
         )
         host.bind_wake(scheduler.wake)
         endpoint = _endpoint()
@@ -602,6 +603,7 @@ async def run(
                 InboundWakeDispatcher(
                     bus,
                     scheduler,
+                    timers=stamping.clock,
                     pending_scan=host.pending_inbound_wakes,
                     scan_interval_s=wait_s,
                     subscription_read_timeout_s=wait_s,

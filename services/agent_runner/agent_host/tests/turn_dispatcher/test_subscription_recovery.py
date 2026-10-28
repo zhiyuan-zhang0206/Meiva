@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
@@ -44,6 +45,7 @@ class TestSubscriptionRecovery:
             max_scan_backoff_s=0.04,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
+            timers=SYSTEM_TIMERS,
         )
         task = asyncio.create_task(disp.run())
         try:
@@ -79,6 +81,7 @@ class TestSubscriptionRecovery:
             scan_interval_s=0.02,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
+            timers=SYSTEM_TIMERS,
         )
         task = asyncio.create_task(disp.run())
         try:
@@ -121,6 +124,7 @@ class TestSubscriptionRecovery:
             scan_interval_s=0.02,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
+            timers=SYSTEM_TIMERS,
         )
         task = asyncio.create_task(disp.run())
         try:
@@ -182,6 +186,7 @@ class TestSubscriptionRecovery:
             subscription_read_timeout_s=0.01,
             subscription_read_deadline_grace_s=0.01,
             reconnect_delay_s=0.0,
+            timers=SYSTEM_TIMERS,
         )
         task = asyncio.create_task(disp.run())
         try:
@@ -237,7 +242,10 @@ class TestReconnectExhaustion:
 
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()), ScanScheduler(), reconnect_delay_s=0.0
+            EventBus.from_settings(rng=seeded_rng()),
+            ScanScheduler(),
+            reconnect_delay_s=0.0,
+            timers=SYSTEM_TIMERS,
         )
 
         with pytest.raises(dispatcher.DispatcherReconnectExhaustedError) as raised:
@@ -272,6 +280,7 @@ class TestReconnectExhaustion:
             subscription_read_timeout_s=0.005,
             subscription_read_deadline_grace_s=0.05,
             reconnect_delay_s=0.0,
+            timers=SYSTEM_TIMERS,
         )
         task = asyncio.create_task(disp.run())
         try:

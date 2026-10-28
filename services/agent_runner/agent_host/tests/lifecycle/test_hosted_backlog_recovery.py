@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import AgentState
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -143,11 +144,12 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
         commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
     host._owner = incarnation.owner
-    scheduler = TurnScheduler(host.run_turn)
+    scheduler = TurnScheduler(host.run_turn, timers=SYSTEM_TIMERS)
     dispatcher = InboundWakeDispatcher(
         EventBus.from_settings(rng=seeded_rng()),
         scheduler,
         pending_scan=host.pending_inbound_wakes,
+        timers=SYSTEM_TIMERS,
     )
     try:
         scheduler.wake(agent)

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock
 from uuid import uuid4
 
+from base.clock import SYSTEM_TIMERS
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.health_routes import stats_route
 from services.agent_runner.agent_host.host import AgentHost
@@ -36,7 +37,7 @@ async def test_reports_the_home_pid_and_owner_the_root_handed_in(tmp_path: Path)
     async def idle(_agent_id: int) -> None:
         return None
 
-    scheduler = TurnScheduler(idle)
+    scheduler = TurnScheduler(idle, timers=SYSTEM_TIMERS)
     try:
         status, response, _ = await stats_route(host, scheduler, pid=4321, home=tmp_path)(b"")
     finally:

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.daemon import health, health_schema
 from base.daemon.tests.health_support import unknown_image
 from base.host.env import port_lease
@@ -486,6 +487,7 @@ async def test_run_job_commits_the_workers_dump_into_the_pool(tmp_path: Path) ->
         tree=tree,
         launch=_launch("dump", log),
         now=datetime(2026, 9, 26, 3, tzinfo=UTC),
+        timers=SYSTEM_TIMERS,
     )
 
     [published] = tree.managed.iterdir()
@@ -497,6 +499,12 @@ async def test_run_job_refuses_a_restore_result_of_another_shape(tmp_path: Path)
     tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
 
     with pytest.raises(RuntimeError, match="invalid result"):
-        await run_job("restore", settings=_settings(), tree=tree, launch=_launch("ok", log))
+        await run_job(
+            "restore",
+            settings=_settings(),
+            tree=tree,
+            launch=_launch("ok", log),
+            timers=SYSTEM_TIMERS,
+        )
 
     assert not list(tree.controls("restore-drill").glob(".operation-*"))

@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from agent.state import BaseAgentState
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
@@ -30,7 +31,7 @@ class TestReapedSuccessorMarker:
             if outcome == "error":
                 raise failure
 
-        scheduler = TurnScheduler(run_turn)
+        scheduler = TurnScheduler(run_turn, timers=SYSTEM_TIMERS)
         try:
             original = scheduler.wake(1)
             assert original is not None

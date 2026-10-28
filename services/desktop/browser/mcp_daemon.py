@@ -584,7 +584,7 @@ async def serve_with_upstream(
             ),
             clock=clock,
         )
-        tab_groups = AgentTabGroups(browser_cdp_port, tasks)
+        tab_groups = AgentTabGroups(browser_cdp_port, tasks, timers=clock)
         session_task = tasks.create_task(
             contained(gateway.refresh_loop(stop), "gateway session refresh")
         )
@@ -623,7 +623,7 @@ async def run(
     stop = stop_on_signals()
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(tasks, browser_cdp_port, access=gateway_access, clock=clock)
-        tab_groups = AgentTabGroups(browser_cdp_port, tasks)
+        tab_groups = AgentTabGroups(browser_cdp_port, tasks, timers=clock)
         session_task = tasks.create_task(
             contained(gateway.refresh_loop(stop), "gateway session refresh")
         )
