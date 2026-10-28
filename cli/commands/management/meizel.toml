@@ -9,6 +9,8 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
 
 [roots]
+"fleet_leases.py" = { kinds = ["home"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself" }
+"schedules_verify_read_rows.py" = { kinds = ["home"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself" }
 "schedule_verify_child.py" = { kinds = ["cwd"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis" }
 "fleet_gateway.py" = { kinds = ["clock", "random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key; builds the process clock from SYSTEM_TIMERS" }
 
@@ -17,11 +19,6 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "child_verdict.py" = "strict"
 "schedule_verify_child.py" = "strict-to-be"
 "sweep_outcome.py" = "strict"
-
-[debt.ambient-read]
-"fleet_leases.py#home base.paths.home.resolve_meiva_home" = 1
-"schedules_verify.py#clock base.clock.Clock" = 1
-"schedules_verify_read_rows.py#home base.paths.home.resolve_meiva_home" = 1
 
 [debt.impure-call]
 "schedule_verify_child.py#Path.resolve" = 2
