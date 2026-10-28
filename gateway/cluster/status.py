@@ -36,7 +36,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
-from base.host.resource_sample import ResourceSample
+from base.host.resource.reading import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.surface import stats
 from base.telemetry.observability import cluster_label
@@ -329,7 +329,7 @@ async def probe_agent_runner(env: RosterEnv, row: RosterRowSpec) -> MachineStatu
 def _local_resource_sample() -> ResourceSample | None:
     import psutil
 
-    from base.host.resource_sample import resource_sample
+    from base.host.resource.sample import resource_sample
 
     try:
         return resource_sample()

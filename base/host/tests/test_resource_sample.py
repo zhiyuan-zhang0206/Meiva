@@ -3,13 +3,8 @@ from __future__ import annotations
 import psutil
 import pytest
 
-from base.host.resource_sample import (
-    CPU_INTERVAL_S,
-    ResourceSample,
-    battery_sample,
-    parse_battery,
-    resource_sample,
-)
+from base.host.resource.reading import CPU_INTERVAL_S, ResourceSample, parse_battery
+from base.host.resource.sample import battery_sample, resource_sample
 
 
 class TestResourceSample:

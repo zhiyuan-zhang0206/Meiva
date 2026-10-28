@@ -44,7 +44,7 @@ from dotenv import dotenv_values
 
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import write_private_bytes
-from base.host.verified_file import regular_bytes
+from base.host.verified_file.reader import regular_bytes
 from ops.env_audit import EnvWriteAudit
 from services.backup.artifact import passphrase
 
