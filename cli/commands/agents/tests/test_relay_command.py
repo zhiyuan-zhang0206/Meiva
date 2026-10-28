@@ -16,9 +16,11 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.impersonation import RELAY_CONNECTION_RETRY_DELAYS
 from base.agents.impersonation import relay as lease_relay
 from base.agents.impersonation.status import ImpersonationStatus
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -29,6 +31,7 @@ from cli.commands.agents.impersonation_relay import (
     read_relay_inbox,
     write_heartbeat,
 )
+from cli.commands.agents.relay.steps import ConnectionRetry
 from cli.commands.agents.tests.lease_support import (
     START_MESSAGE,
     ActiveSession,
@@ -48,6 +51,11 @@ UNMINTED = "not-the-relay-token"
 # meiva:note
 # The account home a relay is given; none of these relays reads a codex socket under it.
 USER_HOME = Path("/nonexistent-relay-user-home")
+
+# meiva:note
+# The production retry policy on a manual clock: these tests ask for one heartbeat or one
+# command, not for a budget of waits.
+RETRY = ConnectionRetry(RELAY_CONNECTION_RETRY_DELAYS, ManualTimers())
 
 
 def _relay_args(lease: dict[str, Any], **overrides: Any) -> argparse.Namespace:
@@ -332,11 +340,11 @@ def test_write_heartbeat_stops_at_a_terminal_lease(
     lease, _, _ = active
     name = machine_identity.name()
     token, lease_id = lease["relay_token"], UUID(lease["id"])
-    assert write_heartbeat(database, lease_id, token, local_machine=name) is True
+    assert write_heartbeat(database, lease_id, token, local_machine=name, retry=RETRY) is True
     beat = db_conn.execute(
         "SELECT relay_heartbeat_at IS NOT NULL FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
     ).fetchone()
     assert beat == (True,)
     leases.release(database, event_bus, lease["id"], "Done", local_machine=name)
-    assert write_heartbeat(database, lease_id, token, local_machine=name) is False
+    assert write_heartbeat(database, lease_id, token, local_machine=name, retry=RETRY) is False
