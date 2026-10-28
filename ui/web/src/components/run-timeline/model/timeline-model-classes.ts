@@ -1,5 +1,5 @@
 import type { RunTimelineUnit } from "@/lib/contracts/types";
-import { categoryColor } from "@/lib/context-colors";
+import { categoryColor } from "@/lib/context/category-colors";
 import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 
 // meiva:note

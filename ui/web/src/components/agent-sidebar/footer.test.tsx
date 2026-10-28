@@ -7,7 +7,8 @@
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render as rtlRender, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
@@ -29,11 +30,11 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-function render(ui: React.ReactElement) {
+function renderFooter(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
   qc.setQueryData(ALERTS_QUERY_KEY, { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } });
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
     wrapper: apiWrapper(cacheOnlyApi()),
   });
 }
@@ -47,13 +48,13 @@ afterEach(() => {
 
 describe("SidebarFooter icon row", () => {
   it("leads the row with the unresolved-alert bell", () => {
-    render(<SidebarFooter activeAgentId={7} />);
+    renderFooter(<SidebarFooter activeAgentId={7} />);
     const bell = screen.getByTestId("alerts-badge");
     expect(bell.parentElement?.firstElementChild).toBe(bell);
   });
 
   it("puts Fleet, Insights and Control after the bell", () => {
-    render(<SidebarFooter activeAgentId={7} />);
+    renderFooter(<SidebarFooter activeAgentId={7} />);
     const row = screen.getByTestId("alerts-badge").parentElement!;
     const labels = [...row.querySelectorAll("[aria-label]")].map((node) => node.getAttribute("aria-label"));
     expect(labels.slice(0, 4)).toEqual(["3 unresolved alerts", "Fleet", "Insights", "Control"]);

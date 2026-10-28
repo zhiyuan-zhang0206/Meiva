@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categoryColor } from "@/lib/context-colors";
+import { categoryColor } from "@/lib/context/category-colors";
 import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 import { axisBox, timeAxis, panView, zoomView } from "./timeline-model";
 import { axisTicks, clampViewport, MIN_VIEW_MS, panViewport, zoomViewport } from "./timeline-model-viewport";

@@ -13,6 +13,8 @@
 
 import { useEffect } from "react";
 
+import { useBrowser } from "@/lib/browser/browser-provider";
+
 // meiva:note
 // Re-scroll only while the content height keeps changing; stop once it has
 // been stable this long (the async sections above the target have landed).
@@ -32,10 +34,14 @@ const USER_SCROLL_SLACK_PX = 32;
 // it settles (or the cap elapses). A no-op when `targetId` is null or the
 // target element is missing — the caller resolves the URL hash.
 export function useSettledAnchorScroll(scrollId: string, targetId: string | null): void {
+  const view = useBrowser().view;
   useEffect(() => {
     if (!targetId) return;
     const container = document.getElementById(scrollId);
-    const scroll = () => document.getElementById(targetId)?.scrollIntoView({ block: "start" });
+    const scroll = () => {
+      const target = document.getElementById(targetId);
+      if (target) view.scrollIntoView(target, "start");
+    };
     scroll();
     // meiva:note
     // No ResizeObserver (happy-dom tests): the initial scroll is the whole
@@ -81,5 +87,5 @@ export function useSettledAnchorScroll(scrollId: string, targetId: string | null
       window.clearTimeout(stableTimer);
       window.clearTimeout(cap);
     };
-  }, [scrollId, targetId]);
+  }, [scrollId, targetId, view]);
 }

@@ -1,4 +1,5 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("./python-code", () => ({
@@ -19,7 +20,7 @@ afterEach(cleanup);
 
 describe("ChatMarkdown", () => {
   it("preserves KaTeX radicals and accessible math in inline labels", async () => {
-    render(<h4><ChatMarkdown inline content={"Choose $\\sqrt{x}$"} /></h4>);
+    renderWithBrowser(<h4><ChatMarkdown inline content={"Choose $\\sqrt{x}$"} /></h4>);
     const heading = screen.getByRole("heading");
     await waitFor(() => expect(heading.querySelector(".katex svg path")).not.toBeNull());
     expect(heading.querySelector("math msqrt")).not.toBeNull();
@@ -27,7 +28,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("still sanitizes authored HTML and links in inline labels", () => {
-    render(<h4><ChatMarkdown inline content={'[unsafe](javascript:alert(1))<svg><path d="M0 0" /></svg><script>unsafe script</script> **Safe**'} /></h4>);
+    renderWithBrowser(<h4><ChatMarkdown inline content={'[unsafe](javascript:alert(1))<svg><path d="M0 0" /></svg><script>unsafe script</script> **Safe**'} /></h4>);
     const heading = screen.getByRole("heading");
     expect(heading.querySelector("svg, script, a[href]")).toBeNull();
     expect(heading.textContent).not.toContain("unsafe script");
@@ -35,7 +36,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("renders inline formatting inside a heading without block elements or copy controls", () => {
-    render(<h4><ChatMarkdown inline content={"**Decision** [details](https://example.com) `option`\n\nNext paragraph\n\n```\ncode\n```"} /></h4>);
+    renderWithBrowser(<h4><ChatMarkdown inline content={"**Decision** [details](https://example.com) `option`\n\nNext paragraph\n\n```\ncode\n```"} /></h4>);
     const heading = screen.getByRole("heading");
     expect(heading.querySelector("strong")?.textContent).toBe("Decision");
     expect(heading.querySelector("code")?.textContent).toBe("option");
@@ -45,12 +46,12 @@ describe("ChatMarkdown", () => {
   });
 
   it("renders plain text", () => {
-    render(<ChatMarkdown content="hello world" />);
+    renderWithBrowser(<ChatMarkdown content="hello world" />);
     expect(screen.getByText("hello world")).toBeTruthy();
   });
 
   it("external link (https://) auto-adds target=_blank rel=noopener noreferrer", () => {
-    render(<ChatMarkdown content="[link](https://example.com)" />);
+    renderWithBrowser(<ChatMarkdown content="[link](https://example.com)" />);
     const a = screen.getByRole("link", { name: "link" });
     expect(a.getAttribute("target")).toBe("_blank");
     expect(a.getAttribute("rel")).toContain("noopener");
@@ -58,7 +59,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("ends a literal autolink before fullwidth punctuation and CJK text", () => {
-    render(<ChatMarkdown content={"\u6d4f\u89c8\u5668\u5f00 https://ip.sb\uff1a\u663e\u793a"} />);
+    renderWithBrowser(<ChatMarkdown content={"\u6d4f\u89c8\u5668\u5f00 https://ip.sb\uff1a\u663e\u793a"} />);
 
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
@@ -68,7 +69,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("keeps a CJK period outside a literal autolink", () => {
-    render(<ChatMarkdown content={"https://ip.sb\u3002"} />);
+    renderWithBrowser(<ChatMarkdown content={"https://ip.sb\u3002"} />);
 
     const link = screen.getByRole("link", { name: "https://ip.sb" });
     expect(link.getAttribute("href")).toBe("https://ip.sb");
@@ -76,7 +77,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("renders a CJK-bounded literal URL inside strong", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"**http://127.0.0.1:18025**\u3002"} />,
     );
 
@@ -87,7 +88,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("renders a letter-bounded literal URL inside strong", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content="**http://127.0.0.1:18025**x" />,
     );
 
@@ -100,7 +101,7 @@ describe("ChatMarkdown", () => {
   it("renders the reported bold URL without swallowed delimiters", () => {
     const content =
       "\u65b9\u6848\u62a5\u544a\u5728 **http://10.0.0.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
-    const { container } = render(<ChatMarkdown content={content} />);
+    const { container } = renderWithBrowser(<ChatMarkdown content={content} />);
 
     const link = container.querySelector("strong > a");
     expect(link?.getAttribute("href")).toBe(
@@ -111,7 +112,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("leaves delimiter characters in a bare literal URL", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content="http://example.com/a**b" />,
     );
 
@@ -122,7 +123,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("renders a literal URL with query parameters inside strong", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"**https://example.com/a?b=c&d=1**\u3002"} />,
     );
 
@@ -135,7 +136,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("keeps a Unicode ellipsis outside a literal autolink", () => {
-    render(<ChatMarkdown content="https://ip.sb……" />);
+    renderWithBrowser(<ChatMarkdown content="https://ip.sb……" />);
 
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
@@ -145,33 +146,33 @@ describe("ChatMarkdown", () => {
   });
 
   it("same-page anchor (#foo) does not add target=_blank", () => {
-    render(<ChatMarkdown content="[a](#foo)" />);
+    renderWithBrowser(<ChatMarkdown content="[a](#foo)" />);
     const a = screen.getByRole("link", { name: "a" });
     expect(a.getAttribute("target")).toBeNull();
     expect(a.getAttribute("href")).toBe("#foo");
   });
 
   it("javascript: URL never reaches the DOM (XSS guard)", () => {
-    const { container } = render(<ChatMarkdown content="[evil](javascript:alert(1))" />);
+    const { container } = renderWithBrowser(<ChatMarkdown content="[evil](javascript:alert(1))" />);
     const anchor = container.querySelector("a");
     expect(anchor?.textContent).toBe("evil");
     expect(anchor?.getAttribute("href")).toBeNull();
   });
 
   it("fenced ```python``` block routes to PythonCode component", () => {
-    render(<ChatMarkdown content={"```python\nprint('hi')\n```"} />);
+    renderWithBrowser(<ChatMarkdown content={"```python\nprint('hi')\n```"} />);
     expect(screen.getByTestId("python-code").textContent).toBe("print('hi')");
   });
 
   it("inline `code` does not route to PythonCode (no language-* className)", () => {
-    render(<ChatMarkdown content="some `inline` code" />);
+    renderWithBrowser(<ChatMarkdown content="some `inline` code" />);
     expect(screen.queryByTestId("python-code")).toBeNull();
     const codes = document.querySelectorAll("code");
     expect(codes.length).toBeGreaterThan(0);
   });
 
   it("non-python fenced block uses plain <pre><code>", () => {
-    render(<ChatMarkdown content={"```bash\necho hi\n```"} />);
+    renderWithBrowser(<ChatMarkdown content={"```bash\necho hi\n```"} />);
     expect(screen.queryByTestId("python-code")).toBeNull();
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
@@ -179,7 +180,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("no-language fence renders as a <pre> block, not inline (newlines kept)", () => {
-    render(<ChatMarkdown content={"```\nline1\nline2\n```"} />);
+    renderWithBrowser(<ChatMarkdown content={"```\nline1\nline2\n```"} />);
     expect(screen.queryByTestId("python-code")).toBeNull();
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
@@ -188,7 +189,7 @@ describe("ChatMarkdown", () => {
 
   it("multi-line ASCII diagram in a bare fence stays a <pre> block", () => {
     const diagram = "```\n┌──┐\n│\u4f60│\n└──┘\n```";
-    render(<ChatMarkdown content={diagram} />);
+    renderWithBrowser(<ChatMarkdown content={diagram} />);
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
     expect(pre?.textContent).toContain("┌──┐");
@@ -196,7 +197,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("inline `code` with no newline still renders inline (not a <pre>)", () => {
-    render(<ChatMarkdown content="some `inline` code" />);
+    renderWithBrowser(<ChatMarkdown content="some `inline` code" />);
     const inlineCode = screen.getByText("inline");
     expect(inlineCode.tagName).toBe("CODE");
     expect(inlineCode.closest("pre")).toBeNull();
@@ -205,7 +206,7 @@ describe("ChatMarkdown", () => {
 
 describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
   it("renders bold for the reported sentence (curly quotes)", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown
         content={"\u4e0d\u7b97\u5168\u9a97\u5c40\uff0c\u4f46**\u201c\u7f8e\u767d\u201d\u8fd9\u4e2a\u8bcd\u88ab\u7528\u6b6a\u4e86**\u3002\u62c6\u5f00\u770b\u5c31\u6e05\u695a\u4e86\uff1a"}
       />,
@@ -217,7 +218,7 @@ describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
   });
 
   it("renders bold with straight ASCII quotes", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"\u4f46**\"\u7f8e\u767d\"\u8fd9\u4e2a\u8bcd**\u3002"} />,
     );
     expect(container.querySelector("strong")?.textContent).toBe(
@@ -226,7 +227,7 @@ describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
   });
 
   it("renders bold with corner brackets", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"\u4f46**\u300c\u7f8e\u767d\u300d\u8fd9\u4e2a\u8bcd**\u3002"} />,
     );
     expect(container.querySelector("strong")?.textContent).toBe(
@@ -235,7 +236,7 @@ describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
   });
 
   it("renders strikethrough for quoted CJK (GFM companion)", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"\u4f46~~\u201c\u7f8e\u767d\u201d\u8fd9\u4e2a\u8bcd~~\u3002"} />,
     );
     expect(container.querySelector("del")?.textContent).toBe(
@@ -244,7 +245,7 @@ describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
   });
 
   it("leaves plain CJK and ASCII emphasis unchanged", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"\u4f46**\u7f8e\u767d**\u8fd9\u4e2a\u8bcd\u3002 word**bold**word."} />,
     );
     const strongs = container.querySelectorAll("strong");
@@ -256,7 +257,7 @@ describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
 
 describe("single tilde stays literal (task #3653)", () => {
   it("renders the reported sentence without strikethrough", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"57 \u4e2a worktree \u5171 ~61G\u3002\u7ee7\u7eed\u76d8\u70b9\uff1aworktree \u7684\u5f52\u5c5e repo\u3001~/work \u5176\u4f59\u73af\u5883\u3001\u4ee5\u53ca Group Containers/eagle-local \u7b49\u533a\u57df\u3002"} />,
     );
     expect(container.querySelector("del")).toBeNull();
@@ -265,7 +266,7 @@ describe("single tilde stays literal (task #3653)", () => {
   });
 
   it("keeps a lone ~ pair literal in CJK text", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"\u4e2d\u6587 ~x~ \u4e2d\u6587"} />,
     );
     expect(container.querySelector("del")).toBeNull();
@@ -273,7 +274,7 @@ describe("single tilde stays literal (task #3653)", () => {
   });
 
   it("keeps ~~...~~ strikethrough, including emoji-adjacent", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"~~\u5b8c\u6210~~\u2705 \u548c \u2705~~\u5b8c\u6210~~"} />,
     );
     const dels = container.querySelectorAll("del");
@@ -282,7 +283,7 @@ describe("single tilde stays literal (task #3653)", () => {
   });
 
   it("only the double form strikes in a mixed line", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"~~a~~ \u548c ~b~ \u6df7\u5408"} />,
     );
     const dels = container.querySelectorAll("del");
@@ -291,7 +292,7 @@ describe("single tilde stays literal (task #3653)", () => {
   });
 
   it("leaves tildes inside inline code alone", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"`~/work` \u548c `~61G` \u548c `~/.meiva`"} />,
     );
     expect(container.querySelector("del")).toBeNull();
@@ -305,7 +306,7 @@ describe("single tilde stays literal (task #3653)", () => {
 
 describe("raw HTML safe subset", () => {
   it("renders the allowed subset: details, figure, mark, kbd, br, img", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={`<details><summary>More</summary>hidden body</details>
 
 <img src="https://example.com/chart.png" alt="chart" width="120">
@@ -326,7 +327,7 @@ line<br>break <mark>m</mark> <kbd>K</kbd>
   });
 
   it("strips scripts, styles, iframes, templates and event or style attributes", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={`<script>alert(1)</script><style>body{color:red}</style><iframe src="https://x.test">fallback</iframe><template><i>t</i></template><div onclick="alert(2)" style="color:red">d</div>`} />,
     );
     expect(container.querySelector("script,style,iframe,template")).toBeNull();
@@ -340,7 +341,7 @@ line<br>break <mark>m</mark> <kbd>K</kbd>
   });
 
   it("rewrites javascript: and data: URLs before they reach the DOM", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={`<a href="javascript:alert(1)">j</a> <img src="data:image/svg+xml,boom" alt="d">`} />,
     );
     expect(container.querySelector("a")?.getAttribute("href") ?? "").not.toContain("javascript");
@@ -357,12 +358,12 @@ describe("math through the lazy KaTeX surface", () => {
   it("never loads the math chunk for content without $", () => {
     const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
     setMarkdownMathImportForTests(load);
-    render(<ChatMarkdown content="no formulas here" />);
+    renderWithBrowser(<ChatMarkdown content="no formulas here" />);
     expect(load).not.toHaveBeenCalled();
   });
 
   it("keeps a lone $ written as a symbol out of math", async () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ChatMarkdown content={"root condition $\uff08\u6839\u6761\u4ef6\uff09$ and then prose"} />,
     );
 
@@ -373,7 +374,7 @@ describe("math through the lazy KaTeX surface", () => {
   });
 
   it("does not read a pair around inline code as math", async () => {
-    const { container } = render(<ChatMarkdown content={"cost $ `a` and `b` $ end"} />);
+    const { container } = renderWithBrowser(<ChatMarkdown content={"cost $ `a` and `b` $ end"} />);
 
     await waitFor(() => expect(container.textContent).toContain("cost $`a` and `b`$ end"), { timeout: 5000 });
     expect(container.querySelector(".katex")).toBeNull();
@@ -381,14 +382,14 @@ describe("math through the lazy KaTeX surface", () => {
   });
 
   it("renders the reported 2026-10-19 reply without a katex-error", async () => {
-    const { container } = render(<ChatMarkdown content={reportedMessage.text} />);
+    const { container } = renderWithBrowser(<ChatMarkdown content={reportedMessage.text} />);
 
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBeGreaterThan(0), { timeout: 5000 });
     expect(container.querySelector(".katex-error")).toBeNull();
   });
 
   it("keeps the reported reply's stray $ literal and its arrows as math", async () => {
-    const { container } = render(<ChatMarkdown content={reportedMessage.text} />);
+    const { container } = renderWithBrowser(<ChatMarkdown content={reportedMessage.text} />);
 
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBeGreaterThan(0), { timeout: 5000 });
     const arrows = [...container.querySelectorAll("annotation")].filter((node) => node.textContent === "\\to");
@@ -408,7 +409,7 @@ describe("math through the lazy KaTeX surface", () => {
       "$$\\phi(u_{l,j}) = \\frac{\\tau_{e,l,j}}{\\tau_{e,l}} \\cdot \\mathbb{I}(u_{l,j} > 0)$$",
       "- \u5217\u8868\u9879 $x^2$ \u4ecd\u7136\u662f\u884c\u5185\u516c\u5f0f",
     ].join("\n");
-    const { container } = render(<ChatMarkdown content={content} />);
+    const { container } = renderWithBrowser(<ChatMarkdown content={content} />);
 
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBe(3), { timeout: 5000 });
     expect(container.querySelectorAll(".katex-display").length).toBe(2);
@@ -422,7 +423,7 @@ describe("math through the lazy KaTeX surface", () => {
   });
 
   it("renders inline and display math once the math chunk loads", async () => {
-    const { container } = render(<ChatMarkdown content={`inline $x^2$ math
+    const { container } = renderWithBrowser(<ChatMarkdown content={`inline $x^2$ math
 
 $$\\int_0^1 x dx$$`} />);
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBe(2), { timeout: 5000 });
@@ -432,7 +433,7 @@ $$\\int_0^1 x dx$$`} />);
 
 describe("document anchors", () => {
   it("gives headings stable slug ids and keeps same-document links", () => {
-    const { container } = render(<ChatMarkdown content={`## Section One
+    const { container } = renderWithBrowser(<ChatMarkdown content={`## Section One
 
 [go](#section-one)
 
@@ -449,7 +450,7 @@ describe("document anchors", () => {
 
 describe("GFM footnotes", () => {
   it("keeps every footnote anchor pair matching after sanitizing", () => {
-    const { container } = render(<ChatMarkdown content={`Text[^1].
+    const { container } = renderWithBrowser(<ChatMarkdown content={`Text[^1].
 
 [^1]: Note body.`} />);
     const reference = container.querySelector("a[data-footnote-ref]");

@@ -1,6 +1,7 @@
 import type * as ApiModule from "@/lib/transport/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineLink, RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
@@ -59,9 +60,9 @@ const BY_AGENT: Record<number, RunTimelineResponse> = {
 };
 const BASE_78 = viewportOf({ from: at(0), to: at(120) });
 
-function render(agents = "7", { contextSize = true }: { contextSize?: boolean } = {}) {
+function renderAgentView(agents = "7", { contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = rtlRender(
+  const view = renderWithBrowser(
     <QueryClientProvider client={queryClient}>
       <AgentViewPage params={Promise.resolve({ agents })} />
     </QueryClientProvider>,
@@ -151,7 +152,7 @@ describe("arrows between agents", () => {
   const canvasOf = (agent: number, row: string) => within(group(agent)).getByTestId(`run-timeline-canvas-${row}`);
   const ready = async () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-other");
     await waitFor(() => expect(screen.getAllByTestId("run-timeline-link-tick")).toHaveLength(2));
     await paintFrame();
@@ -284,7 +285,7 @@ describe("arrows between agents", () => {
         link({ kind: "notice", ts: at(55), sender: 7, receiver: null, notice_id: 11 }),
       ],
     });
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-user");
     await waitFor(() => expect(within(screen.getByTestId("agent-view-user")).getAllByTestId("run-timeline-link-tick")).toHaveLength(4));
 
@@ -342,7 +343,7 @@ describe("arrows between agents", () => {
   it("draws every arrow while they fit the limit, with no count badge", async () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
     getRunTimelineLinks.mockResolvedValue({ links: [link({ ts: at(40) }), link({ ts: at(40.5) }), link({ ts: at(41) }), link({ kind: "spawn", ts: at(40.2) })] });
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-other");
     await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 3"));
     await paintFrame();
@@ -359,7 +360,7 @@ describe("arrows between agents", () => {
         link({ kind: "spawn", ts: at(41) }),
       ],
     });
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-other");
     await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 40"));
     await paintFrame();
@@ -410,7 +411,7 @@ describe("arrows between agents", () => {
       ),
     );
     getRunTimelineLinks.mockResolvedValue({ links: [link({ ts: at(40) })] });
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-user");
     await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 1"));
     expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 1");
@@ -424,7 +425,7 @@ describe("arrows between agents", () => {
   it("limits the arrows shown to 20 by default, and to any valid number typed; an invalid one changes nothing and says why", async () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
     getRunTimelineLinks.mockResolvedValue({ links: Array.from({ length: 120 }, (_, i) => link({ ts: at(20 + i * 0.7) })) });
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-user");
     await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 120"));
     const input = screen.getByTestId<HTMLInputElement>("agent-view-max-arrows");

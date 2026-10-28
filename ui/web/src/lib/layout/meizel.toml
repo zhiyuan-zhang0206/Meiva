@@ -18,8 +18,3 @@ exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", 
 "scroll-memory.ts" = "strict"
 "sticky.ts" = "strict"
 "switch-budget.ts" = "strict"
-
-[debt.ambient-read]
-"panel-layout-storage.ts#environ localStorage" = 1
-"use-client-ready.ts#environ window.location" = 1
-"use-media-query.ts#platform window.matchMedia" = 2

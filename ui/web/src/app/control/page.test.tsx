@@ -6,7 +6,8 @@
 // own test file); that also keeps the heavy per-section deps (api) out.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/control/guide/page", () => ({ default: () => <div>GUIDE_BODY</div> }));
@@ -31,14 +32,13 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.restoreAllMocks();
   window.location.hash = "";
-  Element.prototype.scrollIntoView = vi.fn();
 });
 
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
 describe("ControlPage shell", () => {
@@ -86,17 +86,17 @@ describe("ControlPage shell", () => {
   });
 
   it("nav lists every section and jumps to its anchor on click", () => {
-    wrap(<ControlPage />);
+    const { browser } = wrap(<ControlPage />);
     const nav = screen.getByRole("navigation", { name: /control sections/i });
     // Every section is a nav entry (scope to the nav — labels also appear as
     // section headings on the page).
     for (const section of CONTROL_SECTIONS) {
       expect(within(nav).getAllByText(section.label).length).toBeGreaterThan(0);
     }
-    const skillsEl = document.getElementById("skills");
-    const spy = vi.spyOn(skillsEl as Element, "scrollIntoView");
     fireEvent.click(within(nav).getByRole("button", { name: "Skills" }));
-    expect(spy).toHaveBeenCalled();
+    expect(browser.actions.scrolled.map((scrolled) => (scrolled.target as HTMLElement).id)).toEqual([
+      "skills",
+    ]);
     expect(window.location.hash).toBe("#skills");
   });
 

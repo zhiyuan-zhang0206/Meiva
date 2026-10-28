@@ -1,1 +1,1 @@
-exports = ["enter-key.ts", "user-settings-mock.ts"]
+exports = ["browser.ts", "enter-key.ts", "render.tsx", "user-settings-mock.ts"]

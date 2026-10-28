@@ -5,67 +5,61 @@
 // reopens it. It used to be a user_settings row (`display.context_panel_open`),
 // which made collapsing a panel look like a cross-agent save (user 2026-10-20).
 // Read through useSyncExternalStore so the server snapshot is the default and
-// hydration never disagrees with the first paint; blocked storage reads open and
-// blocked writes keep the choice for this page view only.
+// hydration never disagrees with the first paint.
+//
+// The value lives in the browser port's local storage, whose read answers which
+// of three things happened: a stored value is the truth; `absent` (nobody chose
+// on this browser yet) opens the panel, which is its product default; and
+// `unavailable` (a frame with no storage — a server render, or a browser that
+// refuses site data) leaves the page view's own choice standing in, so toggling
+// still works for as long as the tab lives.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 
 import { useCallback, useSyncExternalStore } from "react";
 
+import type { BrowserStorage } from "@/lib/browser/browser";
+import { useBrowser } from "@/lib/browser/browser-provider";
+
 const CONTEXT_PANEL_KEY = "meiva.home.contextPanelOpen";
 
-export interface ContextPanelStorage {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
-}
+const pageView: { choice: boolean | undefined } = { choice: undefined };
 
-const panelStore: {
-  listeners: Set<() => void>;
-  storage: ContextPanelStorage | undefined;
-  fallbackOpen: boolean | undefined;
-} = {
-  listeners: new Set<() => void>(),
-  storage: undefined,
-  fallbackOpen: undefined,
-};
+const listeners = new Set<() => void>();
 
-function resolveStorage(storage?: ContextPanelStorage): ContextPanelStorage {
-  return storage ?? panelStore.storage ?? localStorage;
-}
-
-export function readContextPanelOpen(storage?: ContextPanelStorage): boolean {
-  try {
-    const raw = resolveStorage(storage).getItem(CONTEXT_PANEL_KEY);
-    panelStore.fallbackOpen = undefined;
-    return raw !== "0";
-  } catch {
-    return panelStore.fallbackOpen ?? true;
+export function readContextPanelOpen(storage: BrowserStorage): boolean {
+  const stored = storage.read(CONTEXT_PANEL_KEY);
+  switch (stored.state) {
+    case "found":
+      return stored.value !== "0";
+    case "absent":
+      return pageView.choice ?? true;
+    case "unavailable":
+      return pageView.choice ?? true;
   }
 }
 
-function writeContextPanelOpen(open: boolean, storage?: ContextPanelStorage): void {
-  panelStore.fallbackOpen = open;
-  try {
-    resolveStorage(storage).setItem(CONTEXT_PANEL_KEY, open ? "1" : "0");
-  } catch {
-    return;
-  }
-}
-
-function subscribe(listener: () => void): () => void {
-  panelStore.listeners.add(listener);
-  return () => panelStore.listeners.delete(listener);
-}
-
-export function setContextPanelStorageForTest(storage?: ContextPanelStorage): void {
-  panelStore.storage = storage;
-  panelStore.fallbackOpen = undefined;
+export function writeContextPanelOpen(storage: BrowserStorage, open: boolean): void {
+  pageView.choice = open;
+  storage.write(CONTEXT_PANEL_KEY, open ? "1" : "0");
+  for (const listener of listeners) listener();
 }
 
 export function useContextPanelOpen(): [open: boolean, setOpen: (open: boolean) => void] {
-  const open = useSyncExternalStore(subscribe, () => readContextPanelOpen(), () => true);
-  const setOpen = useCallback((next: boolean) => {
-    writeContextPanelOpen(next);
-    for (const listener of panelStore.listeners) listener();
-  }, []);
+  const browser = useBrowser();
+  const storage = browser.local;
+  const open = useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => readContextPanelOpen(storage),
+    () => true,
+  );
+  const setOpen = useCallback(
+    (next: boolean) => {
+      writeContextPanelOpen(storage, next);
+    },
+    [storage],
+  );
   return [open, setOpen];
 }

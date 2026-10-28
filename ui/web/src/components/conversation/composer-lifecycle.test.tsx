@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
 import { Composer } from "./composer";
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
@@ -48,33 +50,26 @@ const baseProps = {
   onStop: vi.fn(),
 };
 
-function render(ui: React.ReactElement) {
+function renderComposerTree(
+  ui: React.ReactElement,
+  failStorage?: "write" | "remove",
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(ui, { wrapper: ({ children }) =>
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
+  const browser = fakeBrowser();
+  if (failStorage !== undefined) browser.failStorage("session", failStorage);
+  return renderWithBrowser(ui, {
+    browser,
+    wrapper: ({ children }) =>
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>,
+  });
 }
 
-function storageWith(
-  persistent: Storage,
-  overrides: Partial<Pick<Storage, "getItem" | "setItem" | "removeItem">>,
-): Storage {
-  return {
-    get length() {
-      return persistent.length;
-    },
-    clear: persistent.clear.bind(persistent),
-    getItem: overrides.getItem ?? persistent.getItem.bind(persistent),
-    key: persistent.key.bind(persistent),
-    removeItem: overrides.removeItem ?? persistent.removeItem.bind(persistent),
-    setItem: overrides.setItem ?? persistent.setItem.bind(persistent),
-  };
-}
-const renderComposer = render;
+const renderComposer = renderComposerTree;
 
 describe("Composer input lifecycle", () => {
   it("send succeeds (returns true) → input cleared", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -82,7 +77,7 @@ describe("Composer input lifecycle", () => {
   });
   it("send fails (returns false) → input preserved, no lost user text (H2 fix)", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(false));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "important draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -91,7 +86,7 @@ describe("Composer input lifecycle", () => {
   });
   it("mode='busy' send fails (returns false) → input preserved (busy goes through the same submit path; failure branch must be covered)", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(false));
-    render(<Composer {...baseProps} mode="busy" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "queued draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -105,7 +100,7 @@ describe("Composer input lifecycle", () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(
       () => new Promise<boolean>((resolve) => { deferred.resolve = resolve; }),
     );
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "first" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -125,7 +120,7 @@ describe("Composer input lifecycle", () => {
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "uncertain delivery" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -148,7 +143,7 @@ describe("Composer input lifecycle", () => {
         Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
       )
       .mockResolvedValueOnce(true);
-    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "uncertain delivery" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -174,7 +169,7 @@ describe("Composer input lifecycle", () => {
       )
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
-    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "still ambiguous" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -196,7 +191,7 @@ describe("Composer input lifecycle", () => {
         Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
       )
       .mockResolvedValueOnce(true);
-    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "old uncertain" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -221,18 +216,15 @@ describe("Composer input lifecycle", () => {
       }),
     );
     expect(persistentStorage.getItem(attemptKey)).toContain("stale-client-id");
-    const setItem = vi.fn((_key: string, _value: string) => {
-      throw new DOMException("quota", "QuotaExceededError");
-    });
-    vi.stubGlobal("sessionStorage", storageWith(persistentStorage, { setItem }));
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
         Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
       )
       .mockResolvedValueOnce(true);
-    const first = render(
+    const first = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />,
+      "write",
     );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "send despite storage" } });
@@ -241,10 +233,13 @@ describe("Composer input lifecycle", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     const firstId = onSend.mock.calls[0][2];
     expect(firstId).not.toBe("stale-client-id");
-    expect(setItem).toHaveBeenCalled();
+    // meiva:note
+    // The page refused the write, so the attempt lives in memory for this page view; the stale copy
+    // the server-rendered tab started with is still there.
+    // meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
     expect(sessionStorage.getItem(attemptKey)).toContain("stale-client-id");
     first.unmount();
-    render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
@@ -256,21 +251,21 @@ describe("Composer input lifecycle", () => {
   it("successful send keeps an authoritative tombstone when storage removal fails", async () => {
     const agentId = 7072;
     const persistentStorage = sessionStorage;
-    const removeItem = vi.fn((_key: string) => {
-      throw new DOMException("blocked", "SecurityError");
-    });
-    vi.stubGlobal("sessionStorage", storageWith(persistentStorage, { removeItem }));
+    const attemptKey = `composer-send-attempt-${agentId}`;
+    persistentStorage.setItem(attemptKey, "stale tombstone");
     const onSend = vi.fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>(() => Promise.resolve(true));
-    const first = render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
+    const first = renderComposerTree(
+      <Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />,
+      "remove",
+    );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "sent message" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(ta.value).toBe(""));
-    expect(removeItem).toHaveBeenCalledWith(`composer-send-attempt-${agentId}`);
-    expect(persistentStorage.getItem(`composer-send-attempt-${agentId}`)).toBeTruthy();
+    expect(persistentStorage.getItem(attemptKey)).toBeTruthy();
     const firstId = onSend.mock.calls[0][2];
     first.unmount();
-    render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
     const restored = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     expect(restored.value).toBe("");
     fireEvent.change(restored, { target: { value: "sent message" } });
@@ -283,7 +278,7 @@ describe("Composer input lifecycle", () => {
     const onSend = vi.fn(
       () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
     );
-    const { rerender } = render(
+    const { rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />,
     );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
@@ -303,7 +298,7 @@ describe("Composer input lifecycle", () => {
       () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
     );
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/new.png"));
-    render(
+    renderComposerTree(
       <Composer
         {...baseProps}
         mode="idle"
@@ -336,7 +331,7 @@ describe("Composer input lifecycle", () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockResolvedValue(false);
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "first draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -348,7 +343,7 @@ describe("Composer input lifecycle", () => {
   });
   it("whitespace-only input → does not trigger onSend (button also disabled)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "   \n  " } });
     expect((screen.getByRole<HTMLButtonElement>("button")).disabled).toBe(true);
@@ -360,7 +355,7 @@ describe("Composer input lifecycle", () => {
 
 describe("Composer context meter (opt-in)", () => {
   it("renders no context readout by default — those numbers live in the inspector", () => {
-    render(
+    renderComposerTree(
       <Composer
         {...baseProps}
         mode="idle"
@@ -376,7 +371,7 @@ describe("Composer context meter (opt-in)", () => {
     expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
   it("renders no meta line when the agent has no LLM call yet and no hint", () => {
-    render(<Composer {...baseProps} mode="idle" contextTokens={0} showContextMeter />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" contextTokens={0} showContextMeter />);
     expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
   it("shows the loading ghost while the token snapshot is pending (cold switch)", () => {

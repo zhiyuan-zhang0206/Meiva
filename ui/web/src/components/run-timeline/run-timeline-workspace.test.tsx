@@ -1,4 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -21,7 +22,7 @@ afterEach(() => {
 
 describe("RunTimelineWorkspace", () => {
   it("splits the page with a keyboard-reachable, labelled separator on a wide viewport", async () => {
-    render(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
+    renderWithBrowser(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
 
     const handle = await screen.findByRole("separator", { name: "Resize the details panel" });
     expect(handle.getAttribute("aria-orientation")).toBe("vertical");
@@ -38,7 +39,7 @@ describe("RunTimelineWorkspace", () => {
 
   it("stacks the details under the timeline on a narrow viewport, with no separator", async () => {
     window.innerWidth = 800;
-    render(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
+    renderWithBrowser(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
 
     expect(await screen.findByTestId("run-timeline-reader")).toBeTruthy();
     expect(screen.queryByRole("separator")).toBeNull();
@@ -51,7 +52,7 @@ describe("RunTimelineWorkspace", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("blocked");
     });
-    render(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
+    renderWithBrowser(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
 
     expect(await screen.findByRole("separator")).toBeTruthy();
   });

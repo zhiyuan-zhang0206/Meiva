@@ -5,11 +5,15 @@
 // re-scroll. happy-dom has no ResizeObserver and no real layout, so the
 // re-scroll path is exercised through a fake ResizeObserver whose trigger()
 // runs the hook's callback, with the container's scrollHeight stubbed to
-// simulate async content growth.
+// simulate async content growth. The scroll itself is the browser port's, so a
+// case reads what was scrolled where from the fake page instead of a DOM stub.
+// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
 
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BrowserProvider } from "@/lib/browser/browser-provider";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { useSettledAnchorScroll } from "./anchor-scroll";
 
 class FakeResizeObserver {
@@ -48,39 +52,48 @@ function Harness({ targetId }: { targetId: string | null }) {
   );
 }
 
+function mount(targetId: string | null) {
+  const browser = fakeBrowser();
+  const result = render(
+    <BrowserProvider browser={browser}>
+      <Harness targetId={targetId} />
+    </BrowserProvider>,
+  );
+  const scrolled = () => browser.actions.scrolled;
+  return { browser, scrolled, ...result };
+}
+
 function installFakeObserver(): FakeResizeObserver[] {
   const instances: FakeResizeObserver[] = (FakeResizeObserver.instances = []);
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   return instances;
 }
 
-let scrollIntoView: (arg?: boolean | ScrollIntoViewOptions) => void;
-
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  scrollIntoView = vi.fn();
-  Element.prototype.scrollIntoView = scrollIntoView;
 });
 
 afterEach(cleanup);
 
 describe("useSettledAnchorScroll", () => {
   it("scrolls the resolved target into view on mount", () => {
-    render(<Harness targetId="alerts" />);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    const { scrolled } = mount("alerts");
+    expect(scrolled()).toHaveLength(1);
+    expect((scrolled()[0].target as HTMLElement).id).toBe("alerts");
+    expect(scrolled()[0].block).toBe("start");
   });
 
   it("does nothing for a null target", () => {
-    render(<Harness targetId={null} />);
-    expect(scrollIntoView).not.toHaveBeenCalled();
+    const { scrolled } = mount(null);
+    expect(scrolled()).toEqual([]);
   });
 
   it("re-scrolls when the content height changes, then stops once settled", () => {
     vi.useFakeTimers();
     try {
       const instances = installFakeObserver();
-      const { container } = render(<Harness targetId="alerts" />);
+      const { container, scrolled } = mount("alerts");
       const scrollContainer = container.querySelector("#scroll")!;
       expect(instances).toHaveLength(1);
       const observer = instances[0];
@@ -94,7 +107,7 @@ describe("useSettledAnchorScroll", () => {
         value: 4000,
       });
       observer.trigger();
-      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+      expect(scrolled()).toHaveLength(2);
 
       // meiva:note
       // A further height change within the settle window re-scrolls again.
@@ -103,7 +116,7 @@ describe("useSettledAnchorScroll", () => {
         value: 5000,
       });
       observer.trigger();
-      expect(scrollIntoView).toHaveBeenCalledTimes(3);
+      expect(scrolled()).toHaveLength(3);
 
       // meiva:note
       // Once the height stays stable for the grace period the observer
@@ -117,7 +130,7 @@ describe("useSettledAnchorScroll", () => {
 
   it("stops re-scrolling once the user takes over the scroll position", () => {
     const instances = installFakeObserver();
-    const { container } = render(<Harness targetId="alerts" />);
+    const { container, scrolled } = mount("alerts");
     const scrollContainer = container.querySelector("#scroll")!;
     const observer = instances[0];
 
@@ -136,6 +149,6 @@ describe("useSettledAnchorScroll", () => {
     expect(observer.disconnected).toBe(true);
     // meiva:note
     // The user-takeover re-scroll is suppressed: only the mount scroll ran.
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrolled()).toHaveLength(1);
   });
 });

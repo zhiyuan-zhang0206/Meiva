@@ -1,10 +1,8 @@
-exports = ["context-panel-open.ts", "reference-url.ts", "use-to-user.ts"]
+exports = ["category-colors.ts", "context-panel-open.ts", "reference-url.ts", "use-to-user.ts"]
 
 [uses]
-"context-panel-open.test.ts" = ["context-panel-open.ts"]
+"context-panel-open.test.tsx" = ["context-panel-open.ts"]
 
 [purity]
+"category-colors.ts" = "strict"
 "reference-url.ts" = "strict"
-
-[debt.ambient-read]
-"context-panel-open.ts#environ localStorage" = 1

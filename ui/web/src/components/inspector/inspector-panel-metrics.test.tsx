@@ -1,10 +1,5 @@
-import {
-  act,
-  render as rtlRender,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BACK_VISIT_REVALIDATE_MAX } from "@/lib/layout/switch-budget";
@@ -244,7 +239,7 @@ describe("Inspector read ownership", () => {
     );
     getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
     const client = createInspectorQueryClient();
-    const view = rtlRender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
+    const view = renderWithBrowser(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
     await screen.findByText("dev-server");
     view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={2} /></QueryClientProvider>);
     await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)));
@@ -266,7 +261,7 @@ describe("Inspector read ownership", () => {
     );
     getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
     const client = createInspectorQueryClient();
-    const view = rtlRender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
+    const view = renderWithBrowser(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
     await screen.findByText("dev-server");
     view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={2} /></QueryClientProvider>);
     await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)));

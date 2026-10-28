@@ -1,7 +1,10 @@
 // meiva:note
-// One session owner retains browser storage and module-lifetime fallback state for draft and submit identity.
+// One session owner retains the composer's drafts and submit identity: the page's
+// session storage when it has it, and this page view's memory when it does not, so
+// a refused storage costs the draft at the next visit rather than the draft now.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
+import type { BrowserStorage } from "@/lib/browser/browser";
 import { newOperationKey as newClientMessageId } from "@/lib/transport/operation-key";
 
 export const draftKey = (id: number) => `composer-draft-${id}`;
@@ -21,38 +24,40 @@ export function isAttempt(attempt: SendAttempt | null, clientMessageId: string):
 
 const memorySession = new Map<string, string | null>();
 
-export function readSession(key: string): string | null {
+export function readSession(session: BrowserStorage, key: string): string | null {
   if (memorySession.has(key)) return memorySession.get(key) ?? null;
-  try {
-    return sessionStorage.getItem(key);
-  } catch {
-    return null;
+  const stored = session.read(key);
+  switch (stored.state) {
+    case "found":
+      return stored.value;
+    case "absent":
+      return null;
+    case "unavailable":
+      return null;
   }
 }
 
-export function writeSession(key: string, value: string): void {
+export function writeSession(session: BrowserStorage, key: string, value: string): void {
+  const written = session.write(key, value);
+  if (written === "stored") {
+    memorySession.delete(key);
+    return;
+  }
   memorySession.set(key, value);
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    return;
-  }
-  memorySession.delete(key);
 }
 
-export function removeSession(key: string): void {
+export function removeSession(session: BrowserStorage, key: string): void {
+  const removed = session.remove(key);
+  if (removed === "removed") {
+    memorySession.delete(key);
+    return;
+  }
   memorySession.set(key, null);
-  try {
-    sessionStorage.removeItem(key);
-  } catch {
-    return;
-  }
-  memorySession.delete(key);
 }
 
-export function readSendAttempt(agentId: number): SendAttempt | null {
+export function readSendAttempt(session: BrowserStorage, agentId: number): SendAttempt | null {
   try {
-    const parsed = JSON.parse(readSession(sendAttemptKey(agentId)) ?? "null") as unknown;
+    const parsed = JSON.parse(readSession(session, sendAttemptKey(agentId)) ?? "null") as unknown;
     if (
       typeof parsed !== "object" ||
       parsed === null ||
@@ -75,6 +80,7 @@ export function readSendAttempt(agentId: number): SendAttempt | null {
 }
 
 export function resolveSendAttempt(
+  session: BrowserStorage,
   current: SendAttempt | null,
   sendingAgentId: number | null,
   content: string,
@@ -83,7 +89,7 @@ export function resolveSendAttempt(
   const signature = JSON.stringify([sendingAgentId, content, imageUrls]);
   let candidate = current;
   if (candidate?.signature !== signature && sendingAgentId != null) {
-    const persisted = readSendAttempt(sendingAgentId);
+    const persisted = readSendAttempt(session, sendingAgentId);
     candidate = persisted?.signature === signature ? persisted : null;
   }
   return candidate?.signature === signature

@@ -6,7 +6,8 @@
 // (each body has its own test file), and keeps the heavy deps (api) out.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Stubs carry the section element ids (their bodies are covered by each
@@ -31,15 +32,13 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.restoreAllMocks();
   window.location.hash = "";
-  // happy-dom doesn't implement scrollIntoView; the nav + hash effect call it.
-  Element.prototype.scrollIntoView = vi.fn();
 });
 
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
 describe("InsightsPage shell", () => {
@@ -98,20 +97,18 @@ describe("InsightsPage shell", () => {
   });
 
   it("nav lists every Insights section under the label and jumps on click", () => {
-    wrap(<InsightsPage />);
+    const { browser } = wrap(<InsightsPage />);
     const nav = screen.getByRole("navigation", { name: /insights sections/i });
     for (const section of INSIGHTS_SECTIONS) {
       expect(within(nav).getAllByText(section.label).length).toBeGreaterThan(0);
     }
-    const opsEl = document.getElementById("ops");
-    const spy = vi.spyOn(opsEl as Element, "scrollIntoView");
     fireEvent.click(within(nav).getByRole("button", { name: "Ops" }));
-    expect(spy).toHaveBeenCalled();
+    expect(browser.actions.scrolled.map((scrolled) => (scrolled.target as HTMLElement).id)).toEqual(["ops"]);
     expect(window.location.hash).toBe("#ops");
   });
 
   it("nav lists every section sub-anchor and jumps to it", async () => {
-    wrap(<InsightsPage />);
+    const { browser } = wrap(<InsightsPage />);
     await waitFor(() => expect(document.getElementById("ops-metrics")).toBeTruthy());
     const nav = screen.getByRole("navigation", { name: /insights sections/i });
     // Every sub-anchor (Status' blocks, Ops' Metrics/Alerts) appears in the nav.
@@ -122,11 +119,11 @@ describe("InsightsPage shell", () => {
     }
     // Clicking a sub link jumps to the sub element (stubbed with its id here)
     // and writes the sub hash, not the parent section's.
-    const metricsEl = document.getElementById("ops-metrics");
-    expect(metricsEl).toBeTruthy();
-    const spy = vi.spyOn(metricsEl as Element, "scrollIntoView");
+    expect(document.getElementById("ops-metrics")).toBeTruthy();
     fireEvent.click(within(nav).getByRole("button", { name: "Metrics (Grafana)" }));
-    expect(spy).toHaveBeenCalled();
+    expect(browser.actions.scrolled.map((scrolled) => (scrolled.target as HTMLElement).id)).toEqual([
+      "ops-metrics",
+    ]);
     expect(window.location.hash).toBe("#ops-metrics");
   });
 });

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SIDEBAR_SORT_DEFAULT } from "@/lib/agents/sidebar";
 import type * as SidebarModule from "@/lib/agents/sidebar";
@@ -466,7 +467,7 @@ describe("stable ID ordering (RCS: no resort on status / activity change)", () =
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     qc.setQueryData(["alerts"], NO_ALERTS);
-    const view = render(
+    const view = renderWithBrowser(
       <QueryClientProvider client={qc}>
         <AgentSidebar {...handlers} />
       </QueryClientProvider>,

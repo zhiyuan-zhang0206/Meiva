@@ -11,15 +11,25 @@ import { ThemeColorSync } from "@/components/shell/theme-color-sync";
 import { ToastHost } from "@/components/notifications/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
 import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
+import { BrowserProvider } from "@/lib/browser/browser-provider";
+import { browser } from "@/lib/browser/system-browser";
 import { API_BASE, ApiError, api } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
 import { systemStreamTransport } from "@/lib/transport/system-transport";
 import { ApiProvider, StreamHubProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { EventStreamProvider } from "@/lib/transport/useEventStream";
+import { initTelemetry } from "@/lib/telemetry/telemetry";
 import { setNavFallbackMs, useNavTimingReport } from "@/lib/telemetry/nav-timing";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { AlertsProvider } from "@/lib/notifications/use-alerts";
+
+// meiva:note
+// The frontend's composition root wires the page into the two module-level
+// singletons that cannot take a provider: telemetry (it flushes from a timer) and
+// the transport's module-scope client. Components get the same value through
+// <BrowserProvider> below.
+initTelemetry(browser);
 
 // The inline script next-themes injects toggles .dark on <html> before
 // hydrate, no FOUC; a matchMedia listener follows system settings.
@@ -106,13 +116,15 @@ function RootContexts({ children, nonce }: { children: React.ReactNode; nonce?: 
     ),
   );
   return (
-    <ApiProvider api={api}>
-      <StreamHubProvider hub={hub}>
-        <WallClockProvider wallNow={wallNow}>
-          <NonceProvider value={nonce}>{children}</NonceProvider>
-        </WallClockProvider>
-      </StreamHubProvider>
-    </ApiProvider>
+    <BrowserProvider browser={browser}>
+      <ApiProvider api={api}>
+        <StreamHubProvider hub={hub}>
+          <WallClockProvider wallNow={wallNow}>
+            <NonceProvider value={nonce}>{children}</NonceProvider>
+          </WallClockProvider>
+        </StreamHubProvider>
+      </ApiProvider>
+    </BrowserProvider>
   );
 }
 

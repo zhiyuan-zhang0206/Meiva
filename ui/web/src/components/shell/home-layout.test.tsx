@@ -1,7 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
 import type * as ResizablePanels from "react-resizable-panels";
 import { renderToString } from "react-dom/server";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { BrowserProvider } from "@/lib/browser/browser-provider";
+import { browserOver } from "@/lib/browser/system-browser";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // meiva:note
@@ -163,7 +166,7 @@ describe("HomeLayout frame contract", () => {
     // The placeholder exists for the hydrating load's SSR-safe frame only; a
     // client-side navigation must paint the real frame in its first commit
     // (a back/forward into the home page must not flash a blank frame).
-    render(
+    renderWithBrowser(
       <HomeLayout
         {...panes()}
         isNarrow={false}
@@ -177,13 +180,19 @@ describe("HomeLayout frame contract", () => {
   });
 
   it("server render reserves the layout without mounting a panel group", () => {
+    // meiva:note
+    // A server render has no page to read: the provider carries the inert browser the composition
+    // root builds there.
+    // meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
     const html = renderToString(
-      <HomeLayout
-        {...panes()}
-        isNarrow={false}
-        isLarge
-        sidebarCollapsed={false}
-      />,
+      <BrowserProvider browser={browserOver(null, () => undefined)}>
+        <HomeLayout
+          {...panes()}
+          isNarrow={false}
+          isLarge
+          sidebarCollapsed={false}
+        />
+      </BrowserProvider>,
     );
 
     expect(html).toContain('data-testid="home-layout-placeholder"');
@@ -192,7 +201,7 @@ describe("HomeLayout frame contract", () => {
   });
 
   it("desktop frame uses fixed horizontal groups whose defaults each total 100", () => {
-    render(
+    renderWithBrowser(
       <HomeLayout
         {...panes()}
         isNarrow={false}
@@ -216,7 +225,7 @@ describe("HomeLayout frame contract", () => {
   });
 
   it("draws both desktop dividers edge to edge", () => {
-    render(
+    renderWithBrowser(
       <HomeLayout
         {...panes()}
         isNarrow={false}
@@ -244,7 +253,7 @@ describe("HomeLayout frame contract", () => {
   it("collapsed desktop frame keeps the group and drops only the sidebar panel, without writing panel layout storage", () => {
     localStorage.setItem("sentinel", "unchanged");
 
-    render(
+    renderWithBrowser(
       <HomeLayout
         {...panes()}
         inspector={null}
@@ -271,7 +280,7 @@ describe("HomeLayout frame contract", () => {
   });
 
   it("closed inspector frame gives its sole main panel the full group", () => {
-    render(
+    renderWithBrowser(
       <HomeLayout
         {...panes()}
         inspector={null}
@@ -288,7 +297,7 @@ describe("HomeLayout frame contract", () => {
   });
 
   it("compact frame has an independent layout id and keeps overlays outside its horizontal split", () => {
-    render(
+    renderWithBrowser(
       <HomeLayout
         {...panes()}
         isNarrow={false}
@@ -311,7 +320,7 @@ describe("HomeLayout frame contract", () => {
   });
 
   it("remounts onto the independent frame when the breakpoint flips", () => {
-    const { rerender } = render(
+    const { rerender } = renderWithBrowser(
       <HomeLayout
         {...panes()}
         isNarrow={false}
@@ -335,7 +344,7 @@ describe("HomeLayout frame contract", () => {
   });
 
   it("persists only user-driven commits, under each frame's own layout id", () => {
-    render(
+    renderWithBrowser(
       <HomeLayout
         {...panes()}
         isNarrow={false}
@@ -371,7 +380,7 @@ describe("HomeLayout collapsed frame", () => {
     const main = <section data-testid="main-timeline" />;
     const props = { sidebar: <aside data-testid="agent-tree" />, main, inspector: null, isNarrow: false, isLarge: true };
 
-    const view = render(<HomeLayout {...props} sidebarCollapsed={false} />);
+    const view = renderWithBrowser(<HomeLayout {...props} sidebarCollapsed={false} />);
     const before = screen.getByTestId("main-timeline");
 
     view.rerender(<HomeLayout {...props} sidebarCollapsed />);

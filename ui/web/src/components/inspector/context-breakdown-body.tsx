@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { api } from "@/lib/transport/api";
-import { categoryColor } from "@/lib/context-colors";
+import { categoryColor } from "@/lib/context/category-colors";
 import { errMsg } from "@/lib/contracts/errors";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { approx, formatTokens } from "@/lib/format/format-number";

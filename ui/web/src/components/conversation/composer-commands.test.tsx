@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/transport/api";
@@ -52,14 +53,14 @@ const baseProps = {
 };
 
 
-function render(ui: React.ReactElement) {
+function renderComposerTree(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(ui, { wrapper: ({ children }) =>
+  return renderWithBrowser(ui, { wrapper: ({ children }) =>
     <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
 }
 
 
-const renderComposer = render;
+const renderComposer = renderComposerTree;
 
 
 describe("Composer slash commands", () => {
@@ -81,14 +82,14 @@ describe("Composer slash commands", () => {
   }
 
   it("requests the global command list when no agent is selected", async () => {
-    render(<Composer {...baseProps} mode="idle" agentId={null} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={null} />);
 
     await waitFor(() => expect(getCommandsMock).toHaveBeenCalledTimes(1));
     expect(getCommandsMock).toHaveBeenCalledWith();
   });
 
   it("requests the selected agent's command list", async () => {
-    render(<Composer {...baseProps} mode="idle" agentId={7} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
 
     await waitFor(() => expect(getCommandsMock).toHaveBeenCalledWith(7));
   });
@@ -105,7 +106,7 @@ describe("Composer slash commands", () => {
         ? Promise.resolve([recap])
         : new Promise((resolve) => { resolveCompact = resolve; }),
     );
-    const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} />);
+    const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
 
     fireEvent.change(input(), { target: { value: "/" } });
     expect(await screen.findByTestId("slash-option-recap")).toBeTruthy();
@@ -129,7 +130,7 @@ describe("Composer slash commands", () => {
         ? Promise.reject(new Error("catalog unavailable"))
         : Promise.resolve([]),
     );
-    const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} />);
+    const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
 
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(
@@ -148,7 +149,7 @@ describe("Composer slash commands", () => {
 
   it("typing '/' opens the dropdown with available commands", async () => {
     commandList = [recap];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "/" } });
     expect(await screen.findByTestId("slash-option-recap")).toBeTruthy();
@@ -160,7 +161,7 @@ describe("Composer slash commands", () => {
     const onSend = vi.fn(
       () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
     );
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = input();
     typeInto(ta, "/rec");
     const option = await screen.findByTestId("slash-option-recap");
@@ -182,7 +183,7 @@ describe("Composer slash commands", () => {
 
   it("ArrowDown / ArrowUp move the active option (and wrap around the ends)", async () => {
     commandList = abc;
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "/" } });
     await screen.findByTestId("slash-option-alpha");
@@ -204,7 +205,7 @@ describe("Composer slash commands", () => {
   it("Tab picks the active option — fills `/<name> ` and waits, does not send", async () => {
     commandList = abc;
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/" } });
     await screen.findByTestId("slash-option-alpha");
@@ -218,7 +219,7 @@ describe("Composer slash commands", () => {
 
   it("once the name is committed, the command's instruction_hint shows in the meta row", async () => {
     commandList = [recap];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const ta = screen.getByTestId("composer-input");
     const meta = () => screen.getByTestId("composer-meta").textContent;
     fireEvent.change(ta, { target: { value: "/recap" } });
@@ -245,7 +246,7 @@ describe("Composer slash commands", () => {
   it("Enter on a partial name fills `/<name> ` and waits — does not send", async () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/rec" } });
     await screen.findByTestId("slash-option-recap");
@@ -258,7 +259,7 @@ describe("Composer slash commands", () => {
   it("after filling, typing the instruction + Enter sends the raw `/<name> <instruction>`", async () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/rec" } });
     await screen.findByTestId("slash-option-recap");
@@ -274,7 +275,7 @@ describe("Composer slash commands", () => {
   it("a fully-typed slash message (whitespace present) sends raw — dropdown is open but Enter sends", async () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "/recap just the PRs" } });
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
@@ -287,7 +288,7 @@ describe("Composer slash commands", () => {
   it("clicking a command option fills `/<name> ` and waits — does not send", async () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/" } });
     const option = await screen.findByTestId("slash-option-recap");
@@ -299,7 +300,7 @@ describe("Composer slash commands", () => {
   it("Escape dismisses the dropdown, then Enter sends the raw text", async () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "/recap" } });
     await screen.findByTestId("slash-option-recap");
@@ -314,7 +315,7 @@ describe("Composer slash commands", () => {
   it("a non-matching /token sends as plain text (no dropdown)", async () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "/nope" } });
     await Promise.resolve();
@@ -330,7 +331,7 @@ describe("Composer slash commands", () => {
   it("sends raw multi-command text through to onSend", async () => {
     commandList = [recap, compact];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = input();
     typeInto(ta, "/compact /update");
     await Promise.resolve();
@@ -344,7 +345,7 @@ describe("Composer slash commands", () => {
   it("a slash mid-message never opens the dropdown — Enter sends the raw text (user ruling #836)", async () => {
     commandList = [recap, compact];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = input();
     typeInto(ta, "hello /compact");
     await Promise.resolve();
@@ -357,7 +358,7 @@ describe("Composer slash commands", () => {
 
   it("the instruction hint follows the FIRST command only (#836)", async () => {
     commandList = [recap, compact];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const ta = input();
     const meta = () => screen.getByTestId("composer-meta").textContent;
     typeInto(ta, "/compact ping /recap the PRs");
@@ -370,14 +371,14 @@ describe("Composer slash commands", () => {
 
   it("mid-message slash does not surface a hint (#836)", async () => {
     commandList = [recap, compact];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     typeInto(input(), "heads up /compact ping");
     await waitFor(() => expect(screen.queryByTestId("composer-meta")).toBeNull());
   });
 
   it("a later command in the message gets no dropdown (#836)", async () => {
     commandList = [recap, compact];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     typeInto(input(), "/compact ping /rec");
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
@@ -385,7 +386,7 @@ describe("Composer slash commands", () => {
 
   it("a command started mid-message gets no dropdown (#836)", async () => {
     commandList = [recap];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     typeInto(input(), "look at this /rec");
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
@@ -393,7 +394,7 @@ describe("Composer slash commands", () => {
 
   it("a command typed in front of existing text gets a dropdown", async () => {
     commandList = [recap];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     typeInto(input(), " /rec| the PRs are piling up");
     expect(await screen.findByTestId("slash-option-recap")).toBeTruthy();
   });
@@ -401,7 +402,7 @@ describe("Composer slash commands", () => {
   it("a mid-message slash cannot be selected — Enter sends the raw text (#836)", async () => {
     commandList = [recap, compact];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = input();
     typeInto(ta, "/compact ping /rec");
     await Promise.resolve();
@@ -414,7 +415,7 @@ describe("Composer slash commands", () => {
 
   it("selecting mid-message keeps both sides and reuses the existing space", async () => {
     commandList = [recap];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const ta = input();
     typeInto(ta, " /rec| the PRs");
     await screen.findByTestId("slash-option-recap");
@@ -425,7 +426,7 @@ describe("Composer slash commands", () => {
 
   it("selecting a name that is already spelled out just moves the caret past it", async () => {
     commandList = [recap];
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const ta = input();
     typeInto(ta, "/recap| ");
     await screen.findByTestId("slash-option-recap");
@@ -438,7 +439,7 @@ describe("Composer slash commands", () => {
   it("a path-shaped token doesn't open the dropdown", async () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = input();
     typeInto(ta, "read /etc/hosts");
     await Promise.resolve();

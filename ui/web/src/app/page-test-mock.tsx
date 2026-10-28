@@ -1,5 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
+
+import { renderWithBrowser } from "@/test-support/render";
 import { useState } from "react";
 import { vi } from "vitest";
 
@@ -139,7 +141,7 @@ export function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
     wrapper: gatewayWrapper,
   });
 }

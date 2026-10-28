@@ -1,11 +1,5 @@
-import {
-  act,
-  fireEvent,
-  render as rtlRender,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -75,7 +69,7 @@ describe("InspectorPanel desktop", () => {
 
   it("uses the shared scroll surface and resets its viewport on agent switch", () => {
     const qc = createInspectorQueryClient();
-    const { container, rerender } = rtlRender(
+    const { container, rerender } = renderWithBrowser(
       <QueryClientProvider client={qc}><InspectorPanel agentId={1} /></QueryClientProvider>,
     );
     const surface = container.querySelector('[data-slot="scroll-area"]');
@@ -245,7 +239,7 @@ describe("InspectorPanel mobile", () => {
       return new Promise<AgentInspectLive>(() => undefined);
     });
     const qc = createInspectorQueryClient();
-    const view = rtlRender(
+    const view = renderWithBrowser(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,
@@ -272,7 +266,7 @@ describe("InspectorPanel mobile", () => {
       return new Promise<AgentInspectStatistics>(() => undefined);
     });
     const qc = createInspectorQueryClient();
-    const view = rtlRender(
+    const view = renderWithBrowser(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,
@@ -380,7 +374,7 @@ describe("InspectorPanel agent switch (task #1939)", () => {
     const qc = createInspectorQueryClient({
       queries: { retry: false, staleTime: 5 * 60_000 },
     });
-    const { rerender } = rtlRender(
+    const { rerender } = renderWithBrowser(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,

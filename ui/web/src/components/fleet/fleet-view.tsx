@@ -40,7 +40,8 @@ import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
-import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
+import { usePanelLayoutStorage } from "@/lib/layout/panel-layout-storage";
+import { useBrowser } from "@/lib/browser/browser-provider";
 
 // Which mobile tab is on screen is an EPHEMERAL, per-device selection ("which
 // surface am I looking at right now"), not a durable preference — so it stays
@@ -55,12 +56,15 @@ const LS_MOBILE_TAB = "meiva.fleet.mobileTab";
 const PANEL_GRAPH = "panel-graph";
 const PANEL_QUEUE = "panel-queue";
 const FLEET_SPLIT_LAYOUT_ID = "meiva.fleet.split";
-const FLEET_SPLIT_STORAGE = panelLayoutStorage();
 // The desktop left-panel view (Graph vs Task Graph) and the collapsed-queue
 // choice ARE durable preferences — DB-backed (display.fleet_left_view /
 // display.fleet_queue_collapsed) so they follow the user across frontends.
 
 type MobileTab = "agents" | "tasks" | "inbox";
+
+function isMobileTab(value: string): value is MobileTab {
+  return value === "agents" || value === "tasks" || value === "inbox";
+}
 export function FleetView() {
   const agents = useFleetAgents();
   const { isLarge } = useBreakpoint();
@@ -76,22 +80,28 @@ export function FleetView() {
   // Mobile tab selection (Agents | Decisions | Reviews).
   const [mobileTab, setMobileTab] = useState<MobileTab>("agents");
 
-  // Restore persisted state once after mount (avoids SSR hydration mismatch).
+  // meiva:note
+  // Restore persisted state once after mount (avoids SSR hydration mismatch). The tab read answers
+  // one of three things: `found` is the stored choice, `absent` leaves the default ("agents")
+  // standing, and `unavailable` only means the tab is not remembered across visits — this visit
+  // still works.
+  // meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+  const browser = useBrowser();
+  const storage = browser.local;
+  const navigation = browser.navigation;
   const hydrated = useRef(false);
   useEffect(() => {
-    try {
-      const mt = localStorage.getItem(LS_MOBILE_TAB);
-      if (mt === "agents" || mt === "tasks" || mt === "inbox") {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage hydration: must run once after mount to avoid a hydration mismatch
-        setMobileTab(mt);
-      }
-    } catch {
-      // ignore malformed / unavailable storage — fall back to defaults
+    const stored = storage.read(LS_MOBILE_TAB);
+    if (stored.state === "found" && isMobileTab(stored.value)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage hydration: must run once after mount to avoid a hydration mismatch
+      setMobileTab(stored.value);
     }
     hydrated.current = true;
-  }, []);
+  }, [storage]);
   useEffect(() => {
-    const search = new URLSearchParams(window.location.search);
+    const where = navigation.location();
+    if (where === null) return;
+    const search = new URLSearchParams(where.search);
     const route = readFleetRouteIds(search);
     if (route.agentId != null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Route state is hydrated after mount to avoid an SSR mismatch.
@@ -105,13 +115,13 @@ export function FleetView() {
       setSelectedTaskId(route.taskId);
       setRouteTaskId(route.taskId);
       setMobileTab("tasks");
-    } else if (window.location.hash === "#inbox" || search.get("tab") === "inbox") {
+    } else if (where.hash === "#inbox" || search.get("tab") === "inbox") {
       setMobileTab("inbox");
     }
-  }, []);
+  }, [navigation]);
   useEffect(() => {
-    if (hydrated.current) localStorage.setItem(LS_MOBILE_TAB, mobileTab);
-  }, [mobileTab]);
+    if (hydrated.current) storage.write(LS_MOBILE_TAB, mobileTab);
+  }, [mobileTab, storage]);
 
   const terminatedCount = useMemo(
     () => agents.filter((a) => a.status === "terminated").length,
@@ -198,6 +208,7 @@ const DesktopLayout = memo(function DesktopLayout({
   // badge, no count, nothing that pulses in the periphery. Expanding is the
   // user's pull. DB-backed (display.fleet_queue_collapsed) so the choice follows
   // the user across frontends.
+  const splitStorage = usePanelLayoutStorage();
   const { settings, setSetting } = useUserSettings();
   const queueCollapsed = settings["display.fleet_queue_collapsed"] === true;
   const setQueueCollapsed = (v: boolean) => setSetting("display.fleet_queue_collapsed", v);
@@ -206,7 +217,7 @@ const DesktopLayout = memo(function DesktopLayout({
   // must not overwrite the user's dragged split.
   const splitLayout = useDefaultLayout({
     id: FLEET_SPLIT_LAYOUT_ID,
-    storage: FLEET_SPLIT_STORAGE,
+    storage: splitStorage,
     onlySaveAfterUserInteractions: true,
   });
 

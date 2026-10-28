@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
@@ -48,15 +49,15 @@ const baseProps = {
   onStop: vi.fn(),
 };
 
-function render(ui: React.ReactElement) {
+function renderComposerTree(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(ui, { wrapper: ({ children }) =>
+  return renderWithBrowser(ui, { wrapper: ({ children }) =>
     <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
 }
-const renderComposer = render;
+const renderComposer = renderComposerTree;
 
 function renderComposerAgent(agentId: number) {
-  render(<Composer {...baseProps} mode="idle" agentId={agentId} />);
+  renderComposerTree(<Composer {...baseProps} mode="idle" agentId={agentId} />);
   return screen.getByTestId<HTMLTextAreaElement>("composer-input");
 }
 
@@ -73,12 +74,12 @@ describe("Composer file upload (drag + paste)", () => {
     expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
   it("does not show the file-upload hint when no file delivery is in flight", () => {
-    render(<Composer {...baseProps} mode="idle" filesUploading={false} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" filesUploading={false} />);
     expect(screen.queryByTestId("composer-upload-hint")).toBeNull();
   });
   it("shows the file-upload hint without blocking Enter-to-send", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(
+    renderComposerTree(
       <Composer
         {...baseProps}
         mode="idle"
@@ -98,7 +99,7 @@ describe("Composer file upload (drag + paste)", () => {
   });
   it("dropping files calls onUploadFiles", () => {
     const onUploadFiles = vi.fn();
-    render(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
     const f1 = new File(["a"], "a.png", { type: "image/png" });
     const f2 = new File(["bb"], "b.png", { type: "image/png" });
     fireEvent.drop(screen.getByTestId("composer"), {
@@ -108,7 +109,7 @@ describe("Composer file upload (drag + paste)", () => {
   });
   it("dropping with no files does not call onUploadFiles", () => {
     const onUploadFiles = vi.fn();
-    render(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
     fireEvent.drop(screen.getByTestId("composer"), {
       dataTransfer: { files: [], types: [] },
     });
@@ -116,7 +117,7 @@ describe("Composer file upload (drag + paste)", () => {
   });
   it("pasting files calls onUploadFiles", () => {
     const onUploadFiles = vi.fn();
-    render(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
     const img = new File(["x"], "img.png", { type: "image/png" });
     fireEvent.paste(screen.getByTestId("composer-input"), {
       clipboardData: { files: [img] },
@@ -129,7 +130,7 @@ describe("Composer file upload (drag + paste)", () => {
       () => new Promise<void>((resolve) => { finishUpload = resolve; }),
     );
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(
+    renderComposerTree(
       <Composer
         {...baseProps}
         mode="idle"
@@ -157,7 +158,7 @@ describe("Composer file upload (drag + paste)", () => {
   });
   it("pasting plain text (no files) does not call onUploadFiles", () => {
     const onUploadFiles = vi.fn();
-    render(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
     fireEvent.paste(screen.getByTestId("composer-input"), {
       clipboardData: { files: [] },
     });
@@ -181,7 +182,7 @@ describe("Composer image attachments", () => {
   const imageFile = () => new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
   it("pasting an image attaches a thumbnail and uploads it", async () => {
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    render(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(onAttachImage).toHaveBeenCalledTimes(1));
@@ -195,7 +196,7 @@ describe("Composer image attachments", () => {
       value: revoke,
     });
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    const { unmount } = render(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+    const { unmount } = renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(screen.getByTestId("composer-attachments")).toBeTruthy());
@@ -205,7 +206,7 @@ describe("Composer image attachments", () => {
   it("sends text + the resolved image url as onSend's second arg", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} onAttachImage={onAttachImage} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} onAttachImage={onAttachImage} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(onAttachImage).toHaveBeenCalled());
@@ -225,7 +226,7 @@ describe("Composer image attachments", () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onUploadFiles = vi.fn();
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/807/uploads/shot.png"));
-    const { rerender } = render(
+    const { rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={807} onSend={onSend} onAttachImage={onAttachImage} />,
     );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
@@ -251,7 +252,7 @@ describe("Composer image attachments", () => {
     const revoke = vi.fn();
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(revoke);
     const onAttachImage = vi.fn(() => new Promise<string>(() => undefined));
-    const { rerender } = render(
+    const { rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={837} onAttachImage={onAttachImage} />,
     );
     act(() => {
@@ -267,7 +268,7 @@ describe("Composer image attachments", () => {
     let resolveUpload!: (url: string) => void;
     const onAttachImage = vi.fn(() => new Promise<string>((resolve) => { resolveUpload = resolve; }));
     const onSend = vi.fn(() => Promise.resolve(true));
-    const { rerender } = render(
+    const { rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={817} onSend={onSend} onAttachImage={onAttachImage} />,
     );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
@@ -295,7 +296,7 @@ describe("Composer image attachments", () => {
     const oldAttach = vi.fn(() => new Promise<string>((resolve) => { resolveOldUpload = resolve; }));
     const newAttach = vi.fn((_file: File) => new Promise<string>((resolve) => { resolveNewUpload = resolve; }));
     const onSend = vi.fn(() => Promise.resolve(true));
-    const { rerender } = render(
+    const { rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} onAttachImage={oldAttach} />,
     );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
@@ -328,7 +329,7 @@ describe("Composer image attachments", () => {
       )
       .mockResolvedValueOnce(true);
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    render(
+    renderComposerTree(
       <Composer
         {...baseProps}
         mode="idle"
@@ -351,7 +352,7 @@ describe("Composer image attachments", () => {
   it("send stays disabled while an image is still uploading", async () => {
     let resolve!: (u: string) => void;
     const onAttachImage = vi.fn(() => new Promise<string>((r) => { resolve = r; }));
-    render(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "hi" } });
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
@@ -364,7 +365,7 @@ describe("Composer image attachments", () => {
   it("image-only (no text) is sendable once uploaded", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/a.png"));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} onAttachImage={onAttachImage} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} onAttachImage={onAttachImage} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(onAttachImage).toHaveBeenCalled());
@@ -409,7 +410,7 @@ describe("Composer sessionStorage draft persistence", () => {
   });
   it("clears the draft on a successful send", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "send this" } });
     expect(sessionStorage.getItem(draftKey(7))).toBe("send this");
@@ -421,7 +422,7 @@ describe("Composer sessionStorage draft persistence", () => {
     let now = 100;
     vi.spyOn(performance, "now").mockImplementation(() => now);
     const onSend = vi.fn(() => Promise.resolve(false));
-    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "failed send" } });
     expect(sessionStorage.getItem(draftKey(7))).toBe("failed send");
@@ -436,7 +437,7 @@ describe("Composer sessionStorage draft persistence", () => {
     expect(sessionStorage.getItem(draftKey(7))).toBe("failed send");
   });
   it("switches draft when agentId prop changes", () => {
-    const { rerender } = render(
+    const { rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={7} />,
     );
     const ta = screen.getByTestId("composer-input");
@@ -450,7 +451,7 @@ describe("Composer sessionStorage draft persistence", () => {
     );
   });
   it("does not write to sessionStorage when agentId is null", () => {
-    render(<Composer {...baseProps} mode="disabled" agentId={null} />);
+    renderComposerTree(<Composer {...baseProps} mode="disabled" agentId={null} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "no agent" } });
     for (let i = 0; i < 100; i++) {
@@ -458,7 +459,7 @@ describe("Composer sessionStorage draft persistence", () => {
     }
   });
   it("clears old draft on empty input after switching agents", () => {
-    const { rerender } = render(
+    const { rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={7} />,
     );
     const ta = screen.getByTestId("composer-input");

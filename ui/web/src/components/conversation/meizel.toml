@@ -13,7 +13,6 @@ exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
 "upload-button.test.tsx" = ["upload-button.tsx"]
 
 [debt.ambient-read]
-"composer-session.ts#environ sessionStorage" = 3
 "composer.tsx#clock Date.now" = 1
 "composer.tsx#random Math.random" = 1
 
@@ -28,7 +27,6 @@ exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
 "composer-attachments.test.tsx#vi.spyOn performance.now" = 1
 "composer-commands.test.tsx#vi.spyOn console.warn" = 1
 "composer-lifecycle.test.tsx#vi.spyOn performance.now" = 1
-"composer-lifecycle.test.tsx#vi.stubGlobal sessionStorage" = 2
 "composer.test.tsx#vi.spyOn performance.now" = 1
 
 [debt.type-cast]

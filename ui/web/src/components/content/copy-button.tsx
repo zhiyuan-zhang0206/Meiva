@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/format/utils";
-import { copyToClipboard } from "@/lib/format/clipboard";
+import { useBrowser } from "@/lib/browser/browser-provider";
 
 interface Props {
   text: string;
@@ -18,23 +18,21 @@ interface Props {
   streaming?: boolean;
 }
 
-/**
- * A small copy-to-clipboard button for code/command blocks.
- *
- * Uses the shared `copyToClipboard` helper (Clipboard API with an
- * `execCommand` fallback for non-secure contexts). On success, briefly shows
- * a Check icon and a "Copied!" tooltip before resetting to the Copy icon.
- *
- * Designed to be absolutely positioned inside a `group` container that reveals
- * it on hover (GitHub-style UX).
- */
+// meiva:note
+// A small copy-to-clipboard button for code and command blocks. The copy goes through the browser
+// port (`browser.clipboard`: the Clipboard API, with the `execCommand` fallback for non-secure
+// contexts behind it), so a test asserts on the answer the page gave rather than stubbing
+// `navigator.clipboard`. On success the button briefly shows a Check icon and a "Copied!" tooltip
+// before resetting. It is positioned inside a `group` container that reveals it on hover.
+// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
 export function CopyButton({ text, label = "code", streaming = false }: Props) {
   const t = useTranslations("common");
+  const browser = useBrowser();
   const [copied, setCopied] = useState(false);
 
   const timerRef = useRef<number | null>(null);
   const handleCopy = useCallback(async () => {
-    const ok = await copyToClipboard(text);
+    const ok = await browser.clipboard.write(text);
     if (ok) {
       setCopied(true);
       // One reset timer at a time, cleared on unmount (same pattern as
@@ -45,7 +43,7 @@ export function CopyButton({ text, label = "code", streaming = false }: Props) {
         timerRef.current = null;
       }, 2000);
     }
-  }, [text]);
+  }, [browser, text]);
 
   useEffect(() => {
     return () => {

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -34,12 +35,6 @@ const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
 vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
 
 import { InboxQueue } from "../inbox-queue";
-
-const scrollIntoViewMock = vi.fn();
-Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
-  configurable: true,
-  value: scrollIntoViewMock,
-});
 
 afterEach(() => {
   cleanup();
@@ -146,7 +141,7 @@ function renderQueue(
   props: Omit<ComponentProps<typeof InboxQueue>, "agents"> = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+  return renderWithBrowser(
     <QueryClientProvider client={qc}>
       <InboxQueue agents={agents} {...props} />
     </QueryClientProvider>,

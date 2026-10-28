@@ -2,6 +2,8 @@ import type * as ApiModule from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { BrowserProvider } from "@/lib/browser/browser-provider";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextBreakdownResponse, RunTimelineContext, RunTimelineLinks, RunTimelineMessages, RunTimelineResponse, UserSettingListResponse } from "@/lib/contracts/types";
 const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown } =
@@ -23,13 +25,15 @@ import RunTimelinePage from "./page";
 import Loading from "./loading";
 import { cbdFixture, lifetimeResponse, messagesResponse } from "./run-timeline-test-fixtures-mock";
 const wallNow = () => Date.now();
-function render({ contextSize = true }: { contextSize?: boolean } = {}) {
+function renderPage({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = rtlRender(
     <WallClockProvider wallNow={wallNow}>
+      <BrowserProvider browser={fakeBrowser()}>
       <QueryClientProvider client={queryClient}>
         <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
       </QueryClientProvider>
+      </BrowserProvider>
     </WallClockProvider>,
   );
   if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
@@ -128,7 +132,7 @@ describe("failure and loading", () => {
         signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
       });
     });
-    const view = render();
+    const view = renderPage();
     await waitFor(() => expect(signal).toBeDefined());
     expect(signal?.aborted).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
@@ -139,7 +143,7 @@ describe("failure and loading", () => {
   it("offers a retry after a pending read times out, then loads the fresh result", async () => {
     let fail: ((error: DOMException) => void) | undefined;
     getRunTimeline.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
-    render();
+    renderPage();
     await waitFor(() => expect(fail).toBeDefined());
     const initialSignal = getRunTimeline.mock.calls[0]?.[1]?.signal;
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
@@ -158,7 +162,7 @@ describe("failure and loading", () => {
   });
   it("offers a retry when the read fails", async () => {
     getRunTimeline.mockRejectedValueOnce(new Error("boom"));
-    render();
+    renderPage();
     expect(await screen.findByText("Could not load the timeline of agent 42.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByTestId("run-timeline-chart");
@@ -208,7 +212,7 @@ describe("failure and loading", () => {
       ],
     };
     getRunTimeline.mockResolvedValue(response);
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-canvas-units");
     clickAt("units", itemX(response, "units", "uthinking-2-2"));
     let detail = await screen.findByTestId("run-timeline-unit-detail");
@@ -221,7 +225,7 @@ describe("failure and loading", () => {
     expect(within(detail).queryByText("need a plan")).toBeNull();
   });
   it("draws every block on one lane and lists the block colors in a legend", async () => {
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     await paintFrame();
     expect(screen.getAllByTestId(/^run-timeline-canvas-/).map((el) => el.getAttribute("data-testid"))).toEqual([
@@ -237,7 +241,7 @@ describe("failure and loading", () => {
 
 describe("legend highlight", () => {
   it("lights one class, fades every other block and every summary block, and clears on a second click", async () => {
-    render();
+    renderPage();
     const human = await unitOf("inbound");
     const text = await unitOf("text");
     const legendHuman = screen.getByTestId("run-timeline-legend-human");
@@ -258,7 +262,7 @@ describe("legend highlight", () => {
       const wide = this.hasAttribute("data-track");
       return { left: 100, top: 0, width: wide ? 1000 : 0, height: 0, right: 1100, bottom: 0, x: 100, y: 0, toJSON: () => ({}) };
     });
-    render();
+    renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
     fireEvent.click(screen.getByTestId("run-timeline-legend-human"));
     wheel(chart, { deltaY: -400, clientX: 100 });
@@ -270,7 +274,7 @@ describe("legend highlight", () => {
     expect(screen.getByTestId("run-timeline-legend-human").getAttribute("aria-pressed")).toBe("true");
   });
   it("links to the context breakdown rows: a row lights its class, and the legend lights its row", async () => {
-    render();
+    renderPage();
     clickItem(await unitOf("thinking"));
     const row = await screen.findByTestId("context-breakdown-category-user_input");
     expect(row.getAttribute("aria-pressed")).toBe("false");
@@ -293,7 +297,7 @@ describe("legend highlight", () => {
       ],
     };
     getRunTimeline.mockResolvedValue(sourceResponse);
-    render();
+    renderPage();
     fireEvent.click(await screen.findByTestId("run-timeline-legend-agent"));
     const select = await screen.findByTestId("run-timeline-source-select");
     expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
@@ -319,7 +323,7 @@ describe("legend highlight", () => {
 describe("hover", () => {
   const ringAfter = async (item: Item) => ringOf(item);
   it("highlights hovered items without visible text or selection announcements", async () => {
-    render();
+    renderPage();
     const human = await unitOf("inbound");
     const live = screen.getByTestId("run-timeline-selection-live");
     hoverItem(human);
@@ -333,7 +337,7 @@ describe("hover", () => {
     expect(await ringOf(await nodeOf("1"))).toBe("none");
   });
   it("lights a hovered block's ancestor chain softly", async () => {
-    render();
+    renderPage();
     hoverItem(await unitOf("text"));
     expect(await ringAfter(await nodeOf("1"))).toBe("hover");
     expect(await ringAfter(await nodeOf("3"))).toBe("hover");
@@ -342,7 +346,7 @@ describe("hover", () => {
     expect(await ringAfter(await nodeOf("1"))).toBe("none");
   });
   it("lights a hovered node's covered blocks and its ancestors", async () => {
-    render();
+    renderPage();
     hoverItem(await nodeOf("1"));
     expect(await ringAfter(await nodeOf("1"))).toBe("hover");
     expect(await ringAfter(await nodeOf("3"))).toBe("hover");
@@ -351,7 +355,7 @@ describe("hover", () => {
     expect(await ringAfter(await nodeOf("2"))).toBe("none");
   });
   it("gives the selection priority over the hover", async () => {
-    render();
+    renderPage();
     clickItem(await nodeOf("2"));
     hoverItem(await unitOf("text"));
     expect(await ringOf(await nodeOf("2"))).toBe("primary");
@@ -362,7 +366,7 @@ describe("hover", () => {
 
 describe("side panel links", () => {
   it("lists a node's ancestors and children as chips that jump to them", async () => {
-    render();
+    renderPage();
     clickItem(await nodeOf("1"));
     let detail = await screen.findByTestId("run-timeline-node-detail");
     const up = within(detail).getAllByTestId("run-timeline-chip");
@@ -377,7 +381,7 @@ describe("side panel links", () => {
     expect(await ringOf(await nodeOf("2"))).toBe("primary");
   });
   it("shows the summary block a message block belongs to, and jumps to it", async () => {
-    render();
+    renderPage();
     clickItem(await unitOf("text"));
     const detail = await screen.findByTestId("run-timeline-unit-detail");
     fireEvent.click(within(detail).getByTestId("run-timeline-chip"));
@@ -389,7 +393,7 @@ describe("side panel links", () => {
       ...lifetimeResponse,
       units: [{ ...lifetimeResponse.units[0], parent: null }],
     });
-    render();
+    renderPage();
     clickItem(await unitOf("inbound"));
     expect(await screen.findByTestId("run-timeline-uncovered")).toBeTruthy();
   });
@@ -397,7 +401,7 @@ describe("side panel links", () => {
 
 describe("context breakdown follows selection", () => {
   it("follows a selected block, then a selected node, and is titled with its session and time", async () => {
-    render();
+    renderPage();
     expect(getRunTimelineContext).not.toHaveBeenCalled();
     clickItem(await unitOf("text"));
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
@@ -411,7 +415,7 @@ describe("context breakdown follows selection", () => {
     );
   });
   it("does not read context on pan and keeps a selected context through pan and zoom", async () => {
-    render();
+    renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
     wheel(chart, { deltaY: -600, clientX: 100 });
     expect(getRunTimelineContext).not.toHaveBeenCalled();
@@ -430,7 +434,7 @@ describe("context breakdown follows selection", () => {
 
 describe("context size row", () => {
   it("draws one bar per block, as tall as the context through it, with visual hover only", async () => {
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     await paintFrame();
     const key = (k: string) => ({ row: "input", key: k });
@@ -450,7 +454,7 @@ describe("context size row", () => {
     expect(screen.queryByTestId("run-timeline-readout")).toBeNull();
   });
   it("has exactly the blocks of the Messages row, to the pixel", async () => {
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     await paintFrame();
     const fillsOf = (row: string) => drawn(row).filter((d) => d.op === "fill").map((d) => [d.x, d.w]);
@@ -458,7 +462,7 @@ describe("context size row", () => {
     expect(fillsOf("input")).toHaveLength(lifetimeResponse.units.length);
   });
   it("shows the LLM request of an AIMessage in the details of each of its blocks, not on the timeline", async () => {
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     await paintFrame();
     clickAt("input", xOf({ row: "input", key: "utext-2-2" }));
@@ -469,7 +473,7 @@ describe("context size row", () => {
     await waitFor(() => expect(screen.queryByTestId("run-timeline-request")).toBeNull());
   });
   it("is off by default, switches on and off, and has no Added context row", async () => {
-    render({ contextSize: false });
+    renderPage({ contextSize: false });
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
     expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
@@ -480,7 +484,7 @@ describe("context size row", () => {
   });
   it("has no context row for an agent no request has read", async () => {
     getRunTimeline.mockResolvedValue({ ...lifetimeResponse, units: lifetimeResponse.units.map((u) => ({ ...u, context_tokens: null, context_total: null, request: null })) });
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("run-timeline-row-context")).toBeNull();
   });

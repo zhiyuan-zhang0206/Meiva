@@ -1,10 +1,5 @@
-import {
-  fireEvent,
-  render as rtlRender,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -123,7 +118,7 @@ describe("InspectorPanel", () => {
       });
     });
     const qc = createInspectorQueryClient();
-    const view = rtlRender(
+    const view = renderWithBrowser(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,

@@ -8,7 +8,6 @@ exports = ["shared-context-panel.tsx"]
 
 [debt.ambient-read]
 "to-user-document.tsx#clock Date" = 1
-"to-user-document.tsx#environ window.location" = 3
 
 [debt.first-party-patch]
 "shared-context-panel.test.tsx#vi.mock ui/web/src/components/inspector/inspector-panel.tsx" = 1
@@ -18,14 +17,6 @@ exports = ["shared-context-panel.tsx"]
 "to-user-document.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getToUser" = 2
 "to-user-empty-state.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getToUser" = 1
 
-[debt.stdlib-patch]
-"to-user-document.test.tsx#vi.spyOn window.history.back" = 1
-"to-user-empty-state.test.tsx#vi.spyOn window.addEventListener" = 1
-"to-user-empty-state.test.tsx#vi.spyOn window.removeEventListener" = 1
-
 [debt.third-party-patch]
 "shared-context-panel.test.tsx#vi.mock next-intl" = 1
 "to-user-document.test.tsx#vi.mock next-intl" = 1
-
-[debt.type-cast]
-"to-user-document.tsx#cast pushedEntry" = 1

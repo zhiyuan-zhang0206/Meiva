@@ -30,6 +30,7 @@ import OpsPage from "@/app/insights/ops/page";
 import AlertsSection from "@/components/ops/alerts-section";
 import StatusPage from "@/app/insights/status/page";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
 
 export default function InsightsPage() {
@@ -40,9 +41,11 @@ export default function InsightsPage() {
   // which scroll themselves). The scroll itself is re-applied by
   // useSettledAnchorScroll until the async section bodies stop growing, so
   // the deep link lands on the section at its final position.
+  const navigation = useBrowser().navigation;
   const [anchorTarget] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    const id = window.location.hash.slice(1);
+    const where = navigation.location();
+    if (where === null) return null;
+    const id = where.hash.slice(1);
     return id || null;
   });
   useSettledAnchorScroll(INSIGHTS_SCROLL_ID, anchorTarget);

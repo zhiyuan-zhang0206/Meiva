@@ -4,7 +4,9 @@ import {
   QueryClientProvider as TanstackQueryClientProvider,
   type DefaultOptions,
 } from "@tanstack/react-query";
-import { cleanup, render as rtlRender } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
+
+import { renderWithBrowser } from "@/test-support/render";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 
@@ -166,14 +168,14 @@ export function render(
   }
   useStore.getState().setMobileInspectorOpen(panelState.open);
   useStore.getState().setInspectorHours(panelState.hours);
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
 export function renderWithGlobalRetries(ui: React.ReactElement) {
   const qc = createInspectorQueryClient({
     queries: { retry: 3, retryDelay: 0 },
   });
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
 export function useFrozenClock(iso: string) {

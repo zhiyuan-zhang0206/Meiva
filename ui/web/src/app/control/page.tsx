@@ -40,6 +40,7 @@ import {
 } from "./sections";
 import { ControlSection } from "./section";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
 
 export default function ControlPage() {
@@ -52,9 +53,11 @@ export default function ControlPage() {
   // which scroll themselves). The target scrolls into the container — no
   // smooth, it's the initial position, re-applied by useSettledAnchorScroll
   // while the async section bodies settle.
+  const navigation = useBrowser().navigation;
   const [anchorTarget] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    const id = window.location.hash.slice(1);
+    const where = navigation.location();
+    if (where === null) return null;
+    const id = where.hash.slice(1);
     return id || null;
   });
   useSettledAnchorScroll(CONTROL_SCROLL_ID, anchorTarget);

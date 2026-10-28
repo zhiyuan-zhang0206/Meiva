@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,7 +30,7 @@ afterEach(() => {
 function renderEmpty(messages: typeof en, locale: "en" | "zh") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
-  return render(
+  return renderWithBrowser(
     <QueryClientProvider client={qc}>
       <NextIntlClientProvider locale={locale} messages={{ toUser: messages.toUser }}>
         <ToUserDocumentView
@@ -55,15 +56,13 @@ describe("To user empty state", () => {
   it("keeps one literal for both locales instead of a per-locale branch", () => {
     expect(en.toUser.empty).toBe("No content");
     expect(zh.toUser.empty).toBe("No content");
-    const added = vi.spyOn(window, "addEventListener");
-    const removed = vi.spyOn(window, "removeEventListener");
     const view = renderEmpty(zh, "zh");
     expect(screen.getByText("No content")).toBeTruthy();
     expect(api.getToUser).not.toHaveBeenCalled();
-    const listener = added.mock.calls.find(([event]) => event === "popstate")?.[1];
-    expect(listener).toBeDefined();
+    const { browser } = view;
+    expect(browser.actions.traversals).toBe(1);
     view.unmount();
-    expect(removed).toHaveBeenCalledWith("popstate", listener);
+    expect(browser.actions.traversals).toBe(0);
     for (const client of clients) {
       expect(client.getQueryCache().getAll().every((query) => query.getObserversCount() === 0)).toBe(true);
     }

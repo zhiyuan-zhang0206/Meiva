@@ -1,38 +1,37 @@
 // meiva:note
-// @vitest-environment happy-dom
+// The library adapter over the browser port: a saved layout reads back, and the
+// two "there is no layout" answers leave the group on its defaults.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
+import { fakeBrowser } from "@/lib/browser/testing";
 import { panelLayoutStorage } from "./panel-layout-storage";
 
 const KEY = "react-resizable-panels:test";
-
-beforeEach(() => {
-  localStorage.clear();
-});
-
-afterEach(() => {
-  localStorage.clear();
-});
+const VALUE = JSON.stringify({ "panel-sidebar": 30, "panel-main": 70 });
 
 describe("panelLayoutStorage", () => {
-  it("reads and writes plain v4 layout values", () => {
-    const storage = panelLayoutStorage();
+  it("reads back what it wrote, through the page's own storage", () => {
+    const browser = fakeBrowser({ local: {} });
+    const storage = panelLayoutStorage(browser.local);
 
     expect(storage.getItem(KEY)).toBeNull();
-
-    const value = JSON.stringify({ "panel-sidebar": 30, "panel-main": 70 });
-    storage.setItem(KEY, value);
-    expect(storage.getItem(KEY)).toBe(value);
-    expect(localStorage.getItem(KEY)).toBe(value);
+    storage.setItem(KEY, VALUE);
+    expect(storage.getItem(KEY)).toBe(VALUE);
+    expect(browser.localValues.get(KEY)).toBe(VALUE);
   });
 
-  it("survives a storage that throws on read or write", () => {
-    const boom = () => {
-      throw new Error("storage unavailable");
-    };
-    const storage = panelLayoutStorage({ getItem: boom, setItem: boom });
+  it("answers no layout when this browser never saved one", () => {
+    const storage = panelLayoutStorage(fakeBrowser({ local: {} }).local);
     expect(storage.getItem(KEY)).toBeNull();
-    expect(() => storage.setItem(KEY, "{}")).not.toThrow();
+  });
+
+  it("answers no layout, and drops the write, when the frame has no storage", () => {
+    const browser = fakeBrowser({ local: {} });
+    browser.refuseStorage(true);
+    const storage = panelLayoutStorage(browser.local);
+    expect(storage.getItem(KEY)).toBeNull();
+    expect(() => storage.setItem(KEY, VALUE)).not.toThrow();
+    expect(browser.localValues.has(KEY)).toBe(false);
   });
 });

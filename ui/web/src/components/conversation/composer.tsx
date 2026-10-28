@@ -33,6 +33,7 @@ import { errMsg } from "@/lib/contracts/errors";
 import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
 import { track } from "@/lib/telemetry/telemetry";
 import type { CommandItem } from "@/lib/contracts/types";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
@@ -62,10 +63,11 @@ interface Props {
 
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
   const t = useTranslations("common");
+  const session = useBrowser().session;
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
     if (agentId == null) return '';
-    return readSession(draftKey(agentId)) ?? '';
+    return readSession(session, draftKey(agentId)) ?? '';
   });
   const [replySelection, setReplySelection] = useState<{
     options: readonly string[];
@@ -90,7 +92,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [initialSendAttempt] = useState<SendAttempt | null>(() =>
-    agentId == null ? null : readSendAttempt(agentId),
+    agentId == null ? null : readSendAttempt(session, agentId),
   );
   const sendAttemptRef = useRef<SendAttempt | null>(initialSendAttempt);
   // meiva:note
@@ -184,30 +186,30 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       const snapshot = valueRef.current;
       const trimmed = snapshot.trim();
       if (trimmed) {
-        writeSession(draftKey(prevId), snapshot);
+        writeSession(session, draftKey(prevId), snapshot);
       } else {
-        removeSession(draftKey(prevId));
+        removeSession(session, draftKey(prevId));
       }
     }
     if (agentId != null && agentId !== prevId) {
-      const draft = readSession(draftKey(agentId)) ?? "";
+      const draft = readSession(session, draftKey(agentId)) ?? "";
       setValue(draft);
       setCaret(draft.length);
-      const attempt = readSendAttempt(agentId);
+      const attempt = readSendAttempt(session, agentId);
       sendAttemptRef.current = attempt;
     }
     prevAgentIdRef.current = agentId;
-  }, [agentId]);
+  }, [agentId, session]);
 
   useEffect(() => {
     if (agentId == null) return;
     const trimmed = value.trim();
     if (trimmed) {
-      writeSession(draftKey(agentId), value);
+      writeSession(session, draftKey(agentId), value);
     } else {
-      removeSession(draftKey(agentId));
+      removeSession(session, draftKey(agentId));
     }
-  }, [value, agentId]);
+  }, [value, agentId, session]);
 
   const removeImage = (key: string) => {
     if (composerLocked) return;
@@ -248,11 +250,11 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     const sendingAgentId = agentId;
     let activeAttempt: SendAttempt | null = null;
     try {
-      const attempt = resolveSendAttempt(sendAttemptRef.current, sendingAgentId, content, imageUrls);
+      const attempt = resolveSendAttempt(session, sendAttemptRef.current, sendingAgentId, content, imageUrls);
       activeAttempt = attempt;
       sendAttemptRef.current = attempt;
       if (sendingAgentId != null) {
-        writeSession(sendAttemptKey(sendingAgentId), JSON.stringify(attempt));
+        writeSession(session, sendAttemptKey(sendingAgentId), JSON.stringify(attempt));
         markMessageSent(sendingAgentId);
       }
       const ok = await onSend(content, imageUrls, attempt.clientMessageId);
@@ -269,8 +271,8 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           clearImages();
         }
         if (sendingAgentId != null) {
-          removeSession(draftKey(sendingAgentId));
-          removeSession(sendAttemptKey(sendingAgentId));
+          removeSession(session, draftKey(sendingAgentId));
+          removeSession(session, sendAttemptKey(sendingAgentId));
         }
         if (isAttempt(sendAttemptRef.current, attempt.clientMessageId)) {
           sendAttemptRef.current = null;

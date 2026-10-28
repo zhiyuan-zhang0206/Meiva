@@ -25,6 +25,15 @@ hint raises the open-tasks notice (display-only, no state write).
 
 `display.*`/`behavior.*` covers: Thinking/Code/Output expand defaults, inspector toggles, sidebar collapse/view mode/sort/stats/show terminated, fleet queue collapse + left panel tab, task graph mode + done/canceled filters, force params (graph + task graph), shell terminal theme, spawn model/reasoning_effort, notification and confirmation toggles, `behavior.replySuggestions`, one-realtime-connection (`web.sseSingleStream`, off by default), UI language (`display.language`, i18n locale via `i18n/language-provider.tsx`; framework copy only, data plane never translated — `docs/decisions/frontend/browser/2026-08-05-frontend-i18n-next-intl.md`) — defaults in `lib/contracts/types.ts:USER_SETTING_DEFAULTS`. `content-toggle-store.ts` stays a thin `useUserSettings` wrapper.
 
+## Reaching the browser
+
+Every read of the page itself — its address, its two storage areas, its media
+queries, its clipboard, its unload-safe beacon, the view it scrolls — goes through
+one port handed down from the composition root, never through `window`. A test
+mounts `fakeBrowser()` and reads what the component asked for instead of stubbing
+a global. [[ui/web/src/docs/frontend-state/browser-port.meiva.okf.md|Browser capability port]]
+owns the port, its three-answer storage reads, and the fake.
+
 ## Inspector open state
 
 `inspector-panel-store.ts` is breakpoint-aware (task #793): on desktop (≥ lg) the inspector is the right panel's secondary view, so `display.inspector_open` stays a DB-backed workspace preference (default closed) that selects that view; on mobile (< lg) the reading surfaces are full-screen overlays that hide the timeline, so the inspector's open state is **per-session volatile state** (`mobileInspectorOpen` in `store.ts`, default closed) and mobile toggles never write the shared setting — opening or closing on a phone must not yank the desktop view. The statistics window select (`inspectorHours`) is session state and is not persisted.

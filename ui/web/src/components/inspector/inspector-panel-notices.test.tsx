@@ -1,11 +1,5 @@
-import {
-  act,
-  fireEvent,
-  render as rtlRender,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
@@ -131,7 +125,7 @@ describe("InspectorPanel", () => {
   it("updates the notice without rereading statistics when notice SSE arrives", async () => {
     const queryClient = createInspectorQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    rtlRender(
+    renderWithBrowser(
       <QueryClientProvider client={queryClient}>
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,
@@ -333,7 +327,7 @@ describe("InspectorPanel", () => {
   it("stale refresh: a failed background poll keeps the sections and shows the stale dot (no cold-error swap)", async () => {
     const qc = createInspectorQueryClient();
     getAgentInspectStatistics.mockResolvedValueOnce(fixture());
-    rtlRender(
+    renderWithBrowser(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,

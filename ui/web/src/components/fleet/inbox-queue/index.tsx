@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { PRIORITY_RANK } from "@/lib/notifications/notices";
 import { groupByTaskSubtree } from "@/lib/notifications/task-notify";
 import type { AgentRow, PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
@@ -51,6 +52,7 @@ export const InboxQueue = memo(function InboxQueue({
   focusNoticeId?: number | null;
 }) {
   const t = useTranslations("fleet");
+  const view = useBrowser().view;
   const {
     awaiting,
     resolved,
@@ -137,16 +139,15 @@ export const InboxQueue = memo(function InboxQueue({
     const key = openKey(item.notice.id);
     setAnchorHighlightKey(key);
     anchorFrameRef.current = window.requestAnimationFrame(() => {
-      listRef.current
-        ?.querySelector<HTMLElement>(`[data-notice-key="${key}"]`)
-        ?.scrollIntoView({ block: "nearest" });
+      const target = listRef.current?.querySelector<HTMLElement>(`[data-notice-key="${key}"]`);
+      if (target) view.scrollIntoView(target, "nearest");
       anchorFrameRef.current = null;
     });
     anchorTimerRef.current = window.setTimeout(() => {
       setAnchorHighlightKey((current) => (current === key ? null : current));
       anchorTimerRef.current = null;
     }, 1_600);
-  }, [anchorAgentId, isLoading, openItems]);
+  }, [anchorAgentId, isLoading, openItems, view]);
 
   useEffect(
     () => () => {

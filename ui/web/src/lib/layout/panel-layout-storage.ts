@@ -1,46 +1,42 @@
-// Storage for react-resizable-panels `useDefaultLayout`.
-//
-// A group's layout is stored as a single Layout map keyed by panel id under
-// `react-resizable-panels:<id>`:
-//
-//   { "panel-sidebar": 30, "panel-main": 70 }
-//
-// The library's own `storage = localStorage` default is not usable here: the
-// components that call the hook server-render too, and the server has no
-// localStorage (the default would throw there). This wrapper keeps the
-// browser-only access in one guarded place.
+"use client";
 
+// meiva:note
+// Storage for react-resizable-panels `useDefaultLayout`, over the browser port's local storage.
+// A group's layout is one map keyed by panel id under `react-resizable-panels:<id>`
+// (`{ "panel-sidebar": 30, "panel-main": 70 }`). The port answers a read with one of three
+// states: `absent` (this browser never saved a layout) and `unavailable` (a frame with no
+// storage — a server render, or a browser that refuses site data) both leave the group on its
+// declared defaults, which is the frame the library renders with nothing stored at all; the
+// distinction still matters on the write side, where the port reports whether the layout was
+// kept.
+// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+
+import { useMemo } from "react";
 import type { LayoutStorage } from "react-resizable-panels";
 
-function browserStorage(): Storage | null {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    // Storage access can throw (e.g. blocked third-party storage).
-    return null;
-  }
-}
+import type { BrowserStorage } from "@/lib/browser/browser";
+import { useBrowser } from "@/lib/browser/browser-provider";
 
-/** SSR-safe LayoutStorage for `useDefaultLayout`. */
-export function panelLayoutStorage(
-  backing?: Pick<Storage, "getItem" | "setItem"> | null,
-): LayoutStorage {
-  const resolveStorage = () => (backing === undefined ? browserStorage() : backing);
+export function panelLayoutStorage(storage: BrowserStorage): LayoutStorage {
   return {
     getItem(key) {
-      try {
-        return resolveStorage()?.getItem(key) ?? null;
-      } catch {
-        // A read can throw too (private mode, cleared site data): no saved layout.
-        return null;
+      const stored = storage.read(key);
+      switch (stored.state) {
+        case "found":
+          return stored.value;
+        case "absent":
+          return null;
+        case "unavailable":
+          return null;
       }
     },
     setItem(key, value) {
-      try {
-        resolveStorage()?.setItem(key, value);
-      } catch {
-        // A write can throw (quota, private mode): the layout just is not remembered.
-      }
+      storage.write(key, value);
     },
   };
+}
+
+export function usePanelLayoutStorage(): LayoutStorage {
+  const browser = useBrowser();
+  return useMemo(() => panelLayoutStorage(browser.local), [browser]);
 }
