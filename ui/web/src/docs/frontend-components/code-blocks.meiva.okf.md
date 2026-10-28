@@ -18,4 +18,17 @@ that expands it. Not yet resolved → plain unhighlighted text (copy control
 first render is already highlighted, no flash. Tokenization still only
 runs when a code block renders or its source changes.
 
+The chunk itself is a value, not module state: `components/content/lazy-chunk.ts`
+holds one deferred module — the cached value, one import attempt shared by every
+caller, and a failed attempt dropped so the next call retries — and `PythonCode`
+reads it from `usePythonCodeHighlighter()`. Production wires nothing: the
+module's own chunk is the provider's default, so the whole page shares one
+cache. A test wraps its tree in `PythonCodeHighlighterProvider` with a chunk
+built from a fake `importModule`, which is what replaced the old
+`__…ForTests` setters: no production module exports a test-only reset or
+import override.
+
+A test hook is not the way to reach that seam: what may be imported from a
+shipped module at all is [[ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md|Test-only modules]].
+
 Parent: [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md]].

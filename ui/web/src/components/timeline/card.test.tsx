@@ -10,24 +10,17 @@
  * afterEach(cleanup), which unmounts and clears those intervals per test.
  * De-quarantined 2026-08-24.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
-} from "@/components/content/python-code";
+import { createLazyChunk } from "@/components/content/lazy-chunk";
+import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
 import { resolveTimelineColors } from "@/lib/timeline/timeline-colors";
 import { formatItemTime } from "./timestamp";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
-
-afterEach(() => {
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
-});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -330,24 +323,31 @@ describe("CardHeader", () => {
   });
 
   it("hovering or focusing the toggle warms the code-highlighter chunk (intent prefetch)", () => {
-    // Regression coverage for the P2 adversarial-review finding on Meiva #3463:
-    // this wiring had no assertion that pointer-enter/focus actually invokes
-    // the prefetch, only that a mocked no-op didn't blow up.
-    const preloadPythonCodeHighlighter = vi.fn(() => new Promise<never>(() => undefined));
-    __resetHighlighterCacheForTests();
-    __setHighlighterImportForTests(preloadPythonCodeHighlighter);
+    // meiva:note
+    // Regression coverage for the P2 adversarial-review finding on Meiva #3463: this wiring had no assertion that pointer-enter/focus actually invokes the prefetch, only that a mocked no-op did not blow up. Each event gets a fresh chunk and that chunk's import is the probe, so a header wired to anything else never calls it.
+    // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
     const cfg = messageCardConfig(baseItem)!;
-    const { getByTestId } = renderWithQuery(
-      <CardHeader item={baseItem} config={cfg} expanded={false} onToggle={noop} />,
+
+    const hoverImport = vi.fn(() => new Promise<never>(() => undefined));
+    const hoverChunk = createLazyChunk({ name: "test-highlighter", importModule: hoverImport });
+    const hover = renderWithQuery(
+      <PythonCodeHighlighterProvider value={hoverChunk}>
+        <CardHeader item={baseItem} config={cfg} expanded={false} onToggle={noop} />
+      </PythonCodeHighlighterProvider>,
     );
-    const btn = getByTestId("card-toggle");
+    fireEvent.pointerEnter(hover.getByTestId("card-toggle"));
+    expect(hoverImport).toHaveBeenCalledTimes(1);
+    hover.unmount();
 
-    fireEvent.pointerEnter(btn);
-    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
-
-    __resetHighlighterCacheForTests();
-    fireEvent.focus(btn);
-    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
+    const focusImport = vi.fn(() => new Promise<never>(() => undefined));
+    const focusChunk = createLazyChunk({ name: "test-highlighter", importModule: focusImport });
+    const focus = renderWithQuery(
+      <PythonCodeHighlighterProvider value={focusChunk}>
+        <CardHeader item={baseItem} config={cfg} expanded={false} onToggle={noop} />
+      </PythonCodeHighlighterProvider>,
+    );
+    fireEvent.focus(focus.getByTestId("card-toggle"));
+    expect(focusImport).toHaveBeenCalledTimes(1);
   });
 
   it("renders rich summary for system_prompt kind", () => {

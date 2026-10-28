@@ -19,8 +19,6 @@ exports = ["agent-sidebar", "app", "auth", "connection", "content", "context", "
 "timeline" = ["content", "notifications", "ui"]
 
 [debt.private-name]
-"timeline/card.test.tsx -> content/python-code.tsx#__resetHighlighterCacheForTests" = 1
-"timeline/card.test.tsx -> content/python-code.tsx#__setHighlighterImportForTests" = 1
 "timeline/pinned-titles-autofollow.test.tsx -> content/python-code.tsx#__resetHighlighterCacheForTests" = 1
 "timeline/pinned-titles-autofollow.test.tsx -> content/python-code.tsx#__setHighlighterImportForTests" = 1
 "timeline/view/timeline-test-mock.tsx -> content/python-code.tsx#__resetHighlighterCacheForTests" = 1
