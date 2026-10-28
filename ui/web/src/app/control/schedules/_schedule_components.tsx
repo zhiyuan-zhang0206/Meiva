@@ -14,7 +14,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { PythonCode, preloadPythonCodeHighlighter } from "@/components/content/python-code";
+import { PythonCode, usePythonCodeHighlighter } from "@/components/content/python-code";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
@@ -55,6 +55,7 @@ export function ScheduleRow({
   onEdited: () => void;
 }) {
   const t = useTranslations("schedules");
+  const highlighter = usePythonCodeHighlighter();
   const [editing, setEditing] = useState(false);
 
   return (
@@ -64,8 +65,8 @@ export function ScheduleRow({
           <button
             type="button"
             onClick={onExpand}
-            onPointerEnter={preloadPythonCodeHighlighter}
-            onFocus={preloadPythonCodeHighlighter}
+            onPointerEnter={() => void highlighter.preload()}
+            onFocus={() => void highlighter.preload()}
             className="text-muted-foreground hover:text-foreground"
             aria-label={expanded ? "Collapse" : "Expand"}
           >

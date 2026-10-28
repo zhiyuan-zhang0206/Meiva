@@ -24,7 +24,7 @@ import {
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
-import { preloadPythonCodeHighlighter } from "@/components/content/python-code";
+import { usePythonCodeHighlighter } from "@/components/content/python-code";
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
@@ -390,6 +390,7 @@ export const CardHeader = memo(function CardHeader({
     SUMMARY_PARSE_INTERVAL_MS,
   );
   const Icon = config.icon;
+  const highlighter = usePythonCodeHighlighter();
   // Sticky only while expanded: a collapsed card has nothing to scroll under
   // its header, and the collapsed rest position must stay in flow.
   const sticky = !!stickyHeader && expanded;
@@ -410,8 +411,8 @@ export const CardHeader = memo(function CardHeader({
       // python code block, so hovering/focusing its toggle starts the same
       // dynamic import the eventual expand would trigger anyway, ahead of
       // the click. Idempotent — a no-op once the chunk is loading/loaded.
-      onPointerEnter={preloadPythonCodeHighlighter}
-      onFocus={preloadPythonCodeHighlighter}
+      onPointerEnter={() => void highlighter.preload()}
+      onFocus={() => void highlighter.preload()}
       className={cn(
         HEADER_CLS,
         "flex-wrap",

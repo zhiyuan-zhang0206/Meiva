@@ -9,6 +9,7 @@ from typing import Any, Protocol
 import pytest
 
 from meizel.state import ambient_state
+from meizel.state.ambient_state.module import Tree
 
 SOURCE = """
 import threading
@@ -43,7 +44,7 @@ class Service:
 
 
 def _sites(source: str, root: pathlib.Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/service.py", root)
+    return ambient_state.measure(ast.parse(source), "base/service.py", _tree(root))
 
 
 def test_visible_lifecycle_is_accepted(tmp_path: pathlib.Path) -> None:
@@ -313,3 +314,11 @@ def test_stop_only_fence_can_overwrite_a_live_thread_and_is_rejected(
         assert service.stop()
         original.join(timeout=1)
         assert not original.is_alive()
+
+
+# meiva:note
+# The files a test wrote under `root`, as the tree the rule is handed.
+def _tree(root: pathlib.Path) -> Tree:
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)

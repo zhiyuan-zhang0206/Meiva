@@ -27,4 +27,10 @@ inside these labels.
 Queue-row titles render the same formatting but keep link labels inert inside
 the row-selection button; links remain active in the notice detail.
 
+The renderer arrives through the same chunk seam as the code highlighter
+(`components/content/lazy-chunk.ts`): the boundary reads it from
+`useChatMarkdownRenderer()`, production shares one chunk per page, and a test
+supplies its own chunk with a fake renderer instead of swapping the module's
+import.
+
 Verbatim monospace `pre` stays for content that is not Markdown prose: human messages, command output, attach captions, compact requests, the system prompt, guidance-note markers, logs, JSON and code.

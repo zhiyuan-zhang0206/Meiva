@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterator
-from pathlib import Path
 
-from meizel.lint_common import read_utf8_text
+from meizel.state.ambient_state.tree import Tree
 
 MUTATORS = frozenset(
     {
@@ -261,16 +260,35 @@ def _from_base(node: ast.ImportFrom, rel: str) -> str | None:
     return ".".join([*anchor, *([node.module] if node.module else [])])
 
 
-_PARSED: dict[tuple[str, int], Module] = {}
+# meiva:note
+# The first-party module `dotted_name` names, parsed once per tree: the parse cache lives with the
+# tree, so two checkouts judged in one run never share one.
+def _load(index: Tree, dotted_name: str) -> Module | None:
+    if dotted_name in index.modules:
+        cached = index.modules[dotted_name]
+        return cached if isinstance(cached, Module) else None
+    found: Module | None = None
+    rel = index.module_path(dotted_name)
+    if rel is not None:
+        text = index.read(rel)
+        if text is not None:
+            try:
+                parsed = ast.parse(text, filename=rel)
+            except SyntaxError:
+                parsed = None
+            if parsed is not None:
+                found = Module(parsed, rel, index)
+    index.modules[dotted_name] = found
+    return found
 
 
 class Module:
     """One parsed module: its import table, the names it defines, and callee resolution."""
 
-    def __init__(self, tree: ast.Module, rel: str, repo_root: Path) -> None:
+    def __init__(self, tree: ast.Module, rel: str, index: Tree) -> None:
         self.tree = tree
         self.rel = rel
-        self.repo_root = repo_root
+        self.index = index
         self.qualifier = _module_name(rel)
         self.imports: dict[str, tuple[str, str | None]] = {}
         self.defs: set[str] = set()
@@ -326,8 +344,7 @@ class Module:
         return name
 
     def is_repo_module(self, dotted_name: str) -> bool:
-        path = self.repo_root.joinpath(*dotted_name.split("."))
-        return path.with_suffix(".py").is_file() or path.is_dir()
+        return self.index.has_module(dotted_name)
 
     def module_of(self, node: ast.expr) -> str | None:
         """The first-party module an attribute-assignment base names, if any."""
@@ -356,7 +373,7 @@ class Module:
         owner, _, name = full.rpartition(".")
         if not owner:
             return None
-        module = self if owner == self.qualifier else _load(self.repo_root, owner)
+        module = self if owner == self.qualifier else _load(self.index, owner)
         if module is None:
             return None
         found = module.classes().get(name)
@@ -380,28 +397,6 @@ class Module:
         owner, cls = definition
         method = _direct_classmethod(owner, cls, method_name)
         return method is not None and _returns_bound_class(method)
-
-
-# meiva:note
-# The first-party module `dotted_name` names, parsed once per file version.
-def _load(repo_root: Path, dotted_name: str) -> Module | None:
-    base = repo_root.joinpath(*dotted_name.split("."))
-    for path in (base.with_suffix(".py"), base / "__init__.py"):
-        try:
-            stamp = (str(path), path.stat().st_mtime_ns)
-        except OSError:
-            continue
-        if stamp not in _PARSED:
-            text = read_utf8_text(path)
-            if text is None:
-                return None
-            try:
-                tree = ast.parse(text, filename=str(path))
-            except SyntaxError:
-                return None
-            _PARSED[stamp] = Module(tree, path.relative_to(repo_root).as_posix(), repo_root)
-        return _PARSED[stamp]
-    return None
 
 
 def _class_binding_names(st: ast.stmt) -> set[str]:

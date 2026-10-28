@@ -47,13 +47,13 @@ reconnect (`loadingNewer`, the composed reconcile) is in flight it rests on
 the same ring the pull-to-load gesture draws — one component, so the two
 cannot drift; it swaps to the arrow on hover or focus, so waiting never
 hides that it is still a button
-(user report 2026-10-19). That ring is not driven by `isFetching`: a
-settled thread's background refetch would spin it for no arrival and could
-overlap an older-history load for two rings at once (user report 2026-10-20);
-the two loads cannot co-occur, and the pull strip wins if they ever do. The pull strip's own ring scales with the
-revealed pull space, so
-the first pixels of a pull show a small whole circle instead of a fixed circle
-sliced into a bar by the strip's clipping (same report). Its smooth ride requests the stick instead of pinning, so the
+(user report 2026-10-19). That ring is not driven by `isFetching`: a settled
+thread's background refetch would spin it for no arrival and could overlap an
+older-history load for two rings at once (user report 2026-10-20); the two loads
+cannot co-occur, and the pull strip wins if they ever do. How the ring is drawn
+and how it moves — the pull space it scales with and the state it takes when the
+reader asked for less motion — is
+[[ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md|The loading ring]]. Its smooth ride requests the stick instead of pinning, so the
 asynchronous ride survives; growth mid-ride pins instantly because the
 controller already follows. An agent switch hides the button in the same
 commit, supersedes an unreachable restore target, and pins with a fresh run so a

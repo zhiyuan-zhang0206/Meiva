@@ -17,6 +17,10 @@ from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
 _SKILL = "meiva_builtins/skills/demo/reference/run.py"
+# meiva:note
+# The rule reads the policy of the checkout it judges, so a fixture checkout states the two lists
+# `meizel.policy.toml` owns instead of borrowing this repository's.
+_POLICY = '[path-imports]\nscope = ["meiva_builtins/"]\nskills-scope = ["meiva_builtins/skills/"]\n'
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> None:
@@ -34,9 +38,11 @@ def _baseline(root: pathlib.Path) -> None:
 @pytest.fixture
 def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     _baseline(tmp_path)
+    _write(tmp_path, "meizel.policy.toml", _POLICY)
     run_bounded(["git", "-C", str(tmp_path), "init", "--quiet"], timeout=30).check_returncode()
     run_bounded(
-        ["git", "-C", str(tmp_path), "add", baseline_shards.SHARD_DIR], timeout=30
+        ["git", "-C", str(tmp_path), "add", baseline_shards.SHARD_DIR, "meizel.policy.toml"],
+        timeout=30,
     ).check_returncode()
     run_bounded(
         [

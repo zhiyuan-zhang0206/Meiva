@@ -9,6 +9,7 @@ from typing import Any, Protocol
 import pytest
 
 from meizel.state import ambient_state
+from meizel.state.ambient_state.module import Tree
 
 SOURCE = """
 import asyncio
@@ -88,7 +89,7 @@ class Service:
 
 
 def _sites(source: str, root: Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/service.py", root)
+    return ambient_state.measure(ast.parse(source), "base/service.py", _tree(root))
 
 
 def test_visible_task_owner_wiring_is_supported(tmp_path: Path) -> None:
@@ -516,3 +517,11 @@ def test_request_native_owner_names_and_module_aliases_are_semantically_irreleva
     for old, new in (("Service", "Lifecycle"), ("_stop", "signal"), ("_request", "request_close")):
         source = source.replace(old, new)
     assert _sites(source, tmp_path) == {}
+
+
+# meiva:note
+# The files a test wrote under `root`, as the tree the rule is handed.
+def _tree(root: Path) -> Tree:
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)

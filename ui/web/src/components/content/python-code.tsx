@@ -1,132 +1,53 @@
+// meiva:note
+// Python code block with syntax highlighting, a copy button and a streaming cursor on the last line. React.memo skips re-highlighting while `code` / `streaming` are unchanged, which matters during streaming: Prism tokenization is this component's main CPU cost. The ~85KB highlighter must stay out of the first-load bundle, so one shared lazy chunk carries it — every code block reads that chunk from context, and the prefetch triggers (a card header's pointer-enter/focus intent, CodeHighlighterPreloader's idle callback, the schedules row's expand button) warm the same chunk ahead of the click that needs it. Until it resolves the block renders plain source with the copy control; a rejected load drops the attempt so the next mount retries.
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
 "use client";
 
-// Python code block with syntax highlighting, a copy button, and an optional
-// streaming cursor on the last line.
-//
-// React.memo wraps the whole component — during streaming the timeline
-// re-renders often, but as long as `code` / `streaming` props don't
-// change we skip re-highlighting (Prism tokenization is the main CPU
-// cost of this component). React's default shallow comparator handles
-// string + bool, so no custom areEqual is needed.
-
-import { memo, useEffect, useState } from "react";
+import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
 import type * as PrismReactRenderer from "prism-react-renderer";
 import type { Highlight as HighlightComponentType, PrismTheme } from "prism-react-renderer";
 
 import { CopyButton } from "@/components/content/copy-button";
-import { errMsg } from "@/lib/contracts/errors";
+import { createLazyChunk, type LazyChunk } from "@/components/content/lazy-chunk";
 
-// prism-react-renderer is ~85KB uncompressed — too large to ship in the "/"
-// route's initial bundle (ui/web/scripts/check-first-load-js.mjs budget).
-// Lazy-load it via a plain dynamic import (still its own webpack chunk, kept
-// out of first load) rather than next/dynamic, so this module fully controls
-// the loading state below instead of flashing nothing while the chunk is
-// in flight.
-//
-// The same `loadHighlight` call is reused as the prefetch trigger
-// (preloadPythonCodeHighlighter, called from CodeHighlighterPreloader on
-// idle and from pointer-enter/focus "intent" on a code block's collapsed
-// header — see card.tsx / schedules page). By the time a user actually
-// expands a block the chunk is almost always already resolved, so the
-// `useState` initializer below picks up the cached component on the very
-// first render — no flash of unhighlighted content. When it isn't resolved
-// yet (a cold render with no prior intent signal), the component falls back
-// to plain, unhighlighted text and swaps to the highlighted version once the
-// chunk arrives, instead of rendering nothing.
-let highlightPromise: Promise<typeof HighlightComponentType> | null = null;
-let resolvedHighlight: typeof HighlightComponentType | null = null;
+const REAL_IMPORT = () => import("prism-react-renderer");
 
-// Indirection so tests can substitute a rejecting/resolving stub without
-// depending on how a bundler's dynamic-import chunk cache behaves on
-// failure (see __setHighlighterImportForTests below).
-let importHighlighterModule: () => Promise<typeof PrismReactRenderer> = () =>
-  import("prism-react-renderer");
+// meiva:note
+// TEMPORARY (task #5732, blocked on #7548 merging): the import is a `let`, and the chunk behind the default provider is swappable, only so the two __…ForTests delegates at the bottom of this file keep serving the three test files whose rewrite waits on that PR. Production never swaps it; once that lands this collapses into one `const defaultChunk = createLazyChunk({ name, importModule: REAL_IMPORT })`.
+// meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
+let importHighlighterModule: () => Promise<typeof PrismReactRenderer> = REAL_IMPORT;
 
-function loadHighlight(): Promise<typeof HighlightComponentType> {
-  highlightPromise ??= importHighlighterModule()
-    .then((mod) => {
-      resolvedHighlight = mod.Highlight;
-      return mod.Highlight;
-    })
-    .catch((err: unknown) => {
-      // A rejected chunk load (CDN hiccup, offline, ad-blocker, transient
-      // network blip during the idle/intent prefetch) must not be cached
-      // forever: `??=` only assigns once, so without this reset every later
-      // call (idle prefetch, pointer/focus intent, a fresh mount) would
-      // replay the same dead promise and permanently pin every code block on
-      // the plain-text fallback for the rest of the session. Clearing the
-      // cache here lets the next call retry the import from scratch.
-      highlightPromise = null;
-      // This .catch is part of the `highlightPromise` chain itself — for a
-      // given import attempt it runs exactly once, no matter how many call
-      // sites (idle prefetch, hover/focus intent on several code blocks, a
-      // fresh mount) share the same in-flight promise. That makes it the one
-      // place to log: a single console.warn here reports every real failure
-      // exactly once, with no separate dedup bookkeeping needed.
-      console.warn(`[python-code] failed to load syntax highlighter chunk: ${errMsg(err)}`);
-      throw err;
-    });
-  return highlightPromise;
+function createHighlighterChunk(): LazyChunk<typeof HighlightComponentType> {
+  return createLazyChunk({
+    name: "python-code",
+    importModule: () => importHighlighterModule().then((module) => module.Highlight),
+  });
 }
 
-/**
- * Starts fetching the syntax-highlighter chunk without waiting for a code
- * block to mount and need it. Safe to call from multiple sites (idle
- * prefetch, pointer/focus intent, the component's own mount) — the
- * underlying dynamic import is cached after the first call, so a later call
- * is a no-op that resolves to the same (possibly already-resolved) module.
- *
- * Callers are fire-and-forget (an idle callback, a pointer-enter/focus
- * handler) that never attach their own `.catch` — this swallows a rejection
- * rather than letting it surface as an unhandled promise rejection. A
- * chunk-load failure still only ever shows up as the PlainCode fallback;
- * loadHighlight() has already cleared its cache on rejection, so a later
- * call (another prefetch, or the eventual mount) still retries.
- */
-export function preloadPythonCodeHighlighter(): Promise<void> {
-  return loadHighlight().then(
-    () => undefined,
-    () => {
-      // No logging here: loadHighlight()'s own .catch has already reported
-      // this attempt's failure once, and it's attached to `highlightPromise`
-      // before this handler ever subscribes to it — so by the time this runs
-      // the failure has already been logged. This only swallows the
-      // rejection so it doesn't surface as an unhandled promise rejection.
-    },
-  );
+let defaultChunk = createHighlighterChunk();
+
+const activeChunk: LazyChunk<typeof HighlightComponentType> = {
+  peek: () => defaultChunk.peek(),
+  load: () => defaultChunk.load(),
+  preload: () => defaultChunk.preload(),
+};
+
+const HighlighterChunkContext = createContext<LazyChunk<typeof HighlightComponentType>>(activeChunk);
+
+export function PythonCodeHighlighterProvider({
+  value,
+  children,
+}: {
+  value: LazyChunk<typeof HighlightComponentType>;
+  children: ReactNode;
+}) {
+  return <HighlighterChunkContext.Provider value={value}>{children}</HighlighterChunkContext.Provider>;
 }
 
-/**
- * Test-only: clears the module-level highlighter cache so a test can control
- * whether a render starts warm (prefetched) or cold. Not called by
- * production code — python-code.test.tsx uses it instead of vi.resetModules()
- * + a fresh dynamic re-import, which reinstantiates prism-react-renderer
- * itself (an ESM dependency Vite doesn't externalize) as a second, partially
- * initialized copy and crashes.
- */
-export function __resetHighlighterCacheForTests(): void {
-  highlightPromise = null;
-  resolvedHighlight = null;
+export function usePythonCodeHighlighter(): LazyChunk<typeof HighlightComponentType> {
+  return useContext(HighlighterChunkContext);
 }
 
-/**
- * Test-only: substitutes the dynamic import itself, so a test can simulate a
- * rejected chunk load deterministically. A real bundler retries a dynamic
- * import after a prior failure (a failed webpack chunk is dropped from its
- * install cache), but that isn't something a plain `vi.mock` of the module
- * can be relied on to reproduce for a *subsequent* call within one test —
- * this seam sidesteps that entirely. Pass `null` to restore the real import.
- */
-export function __setHighlighterImportForTests(
-  fn: (() => Promise<typeof PrismReactRenderer>) | null,
-): void {
-  importHighlighterModule = fn ?? (() => import("prism-react-renderer"));
-}
-
-// The theme references CSS variables — actual colors live in globals.css
-// under :root / .dark. next-themes toggles the .dark class on system
-// changes; the theme follows automatically without needing JS to
-// subscribe to matchMedia.
 const theme: PrismTheme = {
   plain: {
     color: "var(--foreground)",
@@ -145,10 +66,7 @@ const theme: PrismTheme = {
       types: ["builtin", "class-name"],
       style: { color: "var(--syntax-builtin)" },
     },
-    {
-      types: ["punctuation", "operator"],
-      style: { color: "var(--syntax-punct)" },
-    },
+    { types: ["punctuation", "operator"], style: { color: "var(--syntax-punct)" } },
   ],
 };
 
@@ -158,35 +76,24 @@ interface Props {
 }
 
 export const PythonCode = memo(function PythonCode({ code, streaming = false }: Props) {
-  // Lazy initializer reads the module-level cache synchronously at mount
-  // time — if a prior prefetch already resolved it, the very first render
-  // is already the highlighted tree.
-  const [Highlight, setHighlight] = useState<typeof HighlightComponentType | null>(
-    () => resolvedHighlight,
+  const highlighter = usePythonCodeHighlighter();
+  const [Highlight, setHighlight] = useState<typeof HighlightComponentType | null>(() =>
+    highlighter.peek(),
   );
 
   useEffect(() => {
     if (Highlight !== null) return;
     let active = true;
-    void loadHighlight().then(
+    void highlighter.load().then(
       (Comp) => {
-        // setHighlight(Comp) would be misread by React as a functional
-        // updater (any function passed to a state setter is called with the
-        // previous state instead of stored) — the () => Comp wrapper stores
-        // the component itself.
         if (active) setHighlight(() => Comp);
       },
-      () => {
-        // A rejected chunk load: stay on PlainCode (Highlight remains
-        // null — no state change needed) rather than let this surface as an
-        // unhandled promise rejection. loadHighlight() already cleared its
-        // cache, so the next mount or prefetch call retries the import.
-      },
+      () => undefined,
     );
     return () => {
       active = false;
     };
-  }, [Highlight]);
+  }, [Highlight, highlighter]);
 
   if (Highlight === null) {
     return <PlainCode code={code} streaming={streaming} />;
@@ -221,9 +128,6 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false }: 
   );
 });
 
-// Rendered while the highlighter chunk is still loading (no prior prefetch
-// caught up in time) — plain, unhighlighted source rather than a blank body,
-// so the copy control and the code itself are always available immediately.
 function PlainCode({ code, streaming }: Props) {
   return (
     <div className="group relative">
@@ -244,4 +148,17 @@ function BlinkCursor() {
   return (
     <span className="inline-block w-1.5 h-3 ml-0.5 bg-foreground/70 animate-pulse align-middle" />
   );
+}
+
+// meiva:note
+// TEMPORARY (task #5732, blocked on #7548 merging): the pre-injection test seams as thin delegates onto the chunk above. Exactly three test files still call them (timeline/pinned-titles-autofollow.test.tsx, timeline/view/timeline-test-mock.tsx, app/control/schedules/page.test.tsx); #5732 deletes both, with the `let` and `activeChunk` indirection, once that PR has landed.
+// meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
+export function __resetHighlighterCacheForTests(): void {
+  defaultChunk = createHighlighterChunk();
+}
+
+export function __setHighlighterImportForTests(
+  fn: (() => Promise<typeof PrismReactRenderer>) | null,
+): void {
+  importHighlighterModule = fn ?? REAL_IMPORT;
 }

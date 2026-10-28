@@ -8,11 +8,9 @@ import types
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache
-from pathlib import Path
 
 from meizel.graph.imports import Scope, collect_scope, dotted_chain
 from meizel.graph.universe import Universe
-from meizel.lint_common import read_utf8_text
 
 __all__ = [
     "Bindings",
@@ -74,23 +72,22 @@ def is_imported_binding(bindings: Bindings, name: str) -> bool:
 
 
 # meiva:note
-# The bindings of `root/file`; an unreadable or unparsable file is treated as dynamic.
-def module_bindings(root: Path, file: str) -> Bindings:
-    try:
-        stat = (root / file).stat()
-    except OSError:
+# The bindings of the tracked `file` in `universe`; an untracked, unreadable or unparsable file is
+# treated as dynamic.
+def module_bindings(universe: Universe, file: str) -> Bindings:
+    if file not in universe.files:
         return Bindings(frozenset(), dynamic=True)
-    return _read(str(root / file), stat.st_mtime_ns, stat.st_size, file)
+    try:
+        source = universe.load_text(file)
+    except (OSError, ValueError):
+        return Bindings(frozenset(), dynamic=True)
+    return _read(source, file)
 
 
 @cache
-def _read(path: str, mtime_ns: int, size: int, file: str) -> Bindings:
-    del mtime_ns, size  # the cache key: a rewritten file is read again
-    source = read_utf8_text(Path(path))
-    if source is None:
-        return Bindings(frozenset(), dynamic=True)
+def _read(source: str, file: str) -> Bindings:
     try:
-        tree = ast.parse(source, filename=path)
+        tree = ast.parse(source, filename=file)
     except (SyntaxError, ValueError):
         return Bindings(frozenset(), dynamic=True)
     defined: set[str] = set()
@@ -104,7 +101,7 @@ def _read(path: str, mtime_ns: int, size: int, file: str) -> Bindings:
             defined.update(_names_bound(node))
         all_names.update(_all_entries(node))
         dynamic |= _serves_names(node)
-    if path.endswith("__init__.py"):
+    if file.endswith("__init__.py"):
         defined.add("__path__")  # the import system sets it on a package
     names = frozenset(defined | imported)
     scope = Scope(None)
@@ -268,7 +265,7 @@ def find_class(universe: Universe, dotted: str, hops: int = _REEXPORT_HOPS) -> C
     module = universe.resolve_module(owner) if owner else None
     if module is None or module.file is None:
         return None
-    read = module_bindings(universe.root, module.file)
+    read = module_bindings(universe, module.file)
     for facts in read.classes:
         if facts.name == name:
             return facts
