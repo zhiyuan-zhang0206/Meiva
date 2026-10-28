@@ -17,7 +17,8 @@ export default {
     },
     schema: [],
     messages: {
-      testOnly: "'{{source}}' is a test-only module; production code must not import it.",
+      testOnly:
+        "'{{source}}' is a test-only module; production code must not import it. If the importing file is itself a test double, name it *-test-mock.",
     },
   },
   create(context) {
