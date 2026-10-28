@@ -1,4 +1,4 @@
-exports = ["agents", "auth", "composer", "context", "context-colors.ts", "contracts", "fleet", "fold", "format", "harness", "inspector", "layout", "markdown", "notifications", "plugins", "state", "telemetry", "timeline", "transport"]
+exports = ["agents", "auth", "composer", "context", "context-colors.ts", "contracts", "fleet", "fold", "format", "harness", "input", "inspector", "layout", "markdown", "notifications", "plugins", "state", "telemetry", "timeline", "transport"]
 
 [uses]
 "agents" = ["context", "contracts", "fold", "format", "layout", "state", "telemetry", "transport"]
@@ -9,6 +9,7 @@ exports = ["agents", "auth", "composer", "context", "context-colors.ts", "contra
 "fold" = ["contracts"]
 "format" = ["contracts", "state", "telemetry", "transport"]
 "harness" = ["contracts", "transport"]
+"input" = ["layout"]
 "inspector" = ["agents", "contracts", "layout", "state", "timeline", "transport"]
 "layout" = ["contracts", "fold", "state", "transport"]
 "notifications" = ["agents", "auth", "contracts", "layout", "state", "transport"]

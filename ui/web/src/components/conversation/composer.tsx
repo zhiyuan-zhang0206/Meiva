@@ -34,6 +34,7 @@ import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timi
 import { track } from "@/lib/telemetry/telemetry";
 import type { CommandItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
+import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 
 export type ComposerMode = "disabled" | "idle" | "busy";
@@ -357,6 +358,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
 
   const trimmed = value.trim();
   const hasContent = !!trimmed || readyImageUrls.length > 0;
+  const coarsePointer = useCoarsePointer();
   const showStop = mode === "busy" && !hasContent && !composerLocked;
   const buttonDisabled =
     composerLocked || mode === "disabled" || uploadingImages || (!showStop && !hasContent);
@@ -442,6 +444,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
               replyIndex,
               agentId,
               mode,
+              coarsePointer,
               acceptSuggestion,
               onCycleSuggestion: (nextIndex) => {
                 if (!suggestions) return;

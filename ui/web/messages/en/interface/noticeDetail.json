@@ -12,7 +12,7 @@
   "singleSelect": "Choose one",
   "multiSelect": "Choose one or more",
   "openQuestion": "Your answer",
-  "openPlaceholder": "Write your answer…",
+  "openPlaceholder": "Write your answer… (Enter to send)",
   "other": "Other",
   "closeQuestion": "Close without answering",
   "submitAnswer": "Submit answer",

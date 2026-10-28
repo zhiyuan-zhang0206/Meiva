@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/transport/api";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
+import { pressEnter } from "@/test-support/enter-key";
 import { Composer } from "./composer";
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
 vi.mock("@/lib/transport/api", () => ({
@@ -433,6 +434,27 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "line1" } });
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
+    await Promise.resolve();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+  it("Shift+Enter breaks the line at the caret and keeps the draft", async () => {
+    const onSend = vi.fn(() => Promise.resolve(true));
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "firstsecond" } });
+    ta.setSelectionRange(5, 5);
+    pressEnter(ta, { shiftKey: true });
+    await Promise.resolve();
+    expect(ta.value).toBe("first\nsecond");
+    expect(ta.selectionStart).toBe(6);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+  it("the legacy IME key code 229 → Enter does not trigger", async () => {
+    const onSend = vi.fn(() => Promise.resolve(true));
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
+    fireEvent.keyDown(ta, { key: "Enter", keyCode: 229 });
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
   });
