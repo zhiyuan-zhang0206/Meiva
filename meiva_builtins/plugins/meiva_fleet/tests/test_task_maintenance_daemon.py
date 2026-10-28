@@ -754,6 +754,7 @@ class TestRemind:
         unreachable_bus = EventBus(
             EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="lost-hints"),
             rng=seeded_rng(),
+            timers=SYSTEM_TIMERS,
         )
 
         assert run_reminders(pool, database, unreachable_bus, 3600.0) == 1

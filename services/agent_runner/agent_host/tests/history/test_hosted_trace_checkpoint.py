@@ -18,7 +18,7 @@ from agent.state import BaseAgentState
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import MeivaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -81,7 +81,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                     checkpointer=saver,
                     graph=graph,
                     machine=machine_identity,
-                    bus=EventBus.from_settings(rng=seeded_rng()),
+                    bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                     db=Database.from_settings(gate=database_gate),
                     catalog=model_catalog,
                     commands=CommandCatalog.system(skills=list, home=meiva_home()),
@@ -94,7 +94,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                                 ops_pool=aops_pool,
                                 agent=AgentSlices.resolve(default_reader=defaults()),
                                 db=Database.from_settings(gate=database_gate),
-                                bus=EventBus.from_settings(rng=seeded_rng()),
+                                bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                                 catalog=model_catalog,
                                 clock_factory=Clock.from_settings,
                                 machine=machine_identity,

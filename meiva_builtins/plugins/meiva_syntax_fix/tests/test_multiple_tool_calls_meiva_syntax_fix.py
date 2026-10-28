@@ -19,7 +19,7 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_meiva_kwargs
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -76,7 +76,7 @@ def runtime_for(database_gate: ProcessDbGate) -> Iterator[Callable[..., Runtime[
                 event_publisher=idle_publisher(),
                 agent=agent_slices(llm_override=llm_override, **pins),
                 db=Database.from_settings(gate=database_gate),
-                bus=EventBus.from_settings(rng=seeded_rng()),
+                bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                 clients=clients,
                 clock_factory=Clock.from_settings,
                 catalog=build_model_catalog(home=meiva_home()),

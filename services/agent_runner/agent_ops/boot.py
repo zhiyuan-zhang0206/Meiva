@@ -24,6 +24,7 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
+from base.clock import Timers
 from base.cluster.machine import GatewayAccess, MachineIdentityReader, accepted_digests
 from base.cluster.port_preflight import serves_off_box
 from base.config import ConfigBoot
@@ -140,7 +141,11 @@ def ops_acceptance(*, home: Path, access: GatewayAccess) -> frozenset[str]:
 
 
 def ops_handles(
-    *, database: Callable[[], Database], authority: ConfigAuthority, rng: random.Random
+    *,
+    database: Callable[[], Database],
+    authority: ConfigAuthority,
+    rng: random.Random,
+    timers: Timers,
 ) -> tuple[Database, EventBus]:
     """The cluster handles every in-process lifecycle op works with, as this root's authority names them."""
     return database(), EventBus(
@@ -149,6 +154,7 @@ def ops_handles(
             events_channel=authority.service_field_value("events_channel"),
         ),
         rng=rng,
+        timers=timers,
     )
 
 

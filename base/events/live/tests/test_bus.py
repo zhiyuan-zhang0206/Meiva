@@ -5,13 +5,18 @@ from __future__ import annotations
 
 import redis.asyncio as aredis
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live.bus import EventBus, EventBusConfig
 
 
 def _bus(url: str = "redis://secret@host:1/0", channel: str = "meiva:test") -> EventBus:
-    return EventBus(EventBusConfig(redis_url=url, events_channel=channel), rng=seeded_rng())
+    return EventBus(
+        EventBusConfig(redis_url=url, events_channel=channel),
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
+    )
 
 
 def test_config_hides_the_url_from_repr() -> None:
@@ -19,7 +24,7 @@ def test_config_hides_the_url_from_repr() -> None:
 
 
 def test_from_settings_reads_the_live_settings() -> None:
-    bus = EventBus.from_settings(rng=seeded_rng())
+    bus = EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
     assert bus.channel == settings.data_plane.events_channel
     assert bus._config.redis_url == settings.data_plane.redis_url
 

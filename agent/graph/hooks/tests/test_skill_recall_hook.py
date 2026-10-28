@@ -33,7 +33,7 @@ from agent.state import CompactState, SkillRecallState, build_agent_state
 from base import paths
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -131,7 +131,7 @@ def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[
                 default_reader=defaults(),
             ),
             db=database,
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=catalog,
             provider_keys=inert_keys(catalog),
             clock_factory=Clock.from_settings,

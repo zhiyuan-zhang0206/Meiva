@@ -64,7 +64,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
         pool=aops_pool,
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
@@ -137,7 +137,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
         pool=aops_pool,
         graph=graph,
         checkpointer=saver,
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
@@ -146,7 +146,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
     host._owner = incarnation.owner
     scheduler = TurnScheduler(host.run_turn, timers=SYSTEM_TIMERS)
     dispatcher = InboundWakeDispatcher(
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         scheduler,
         pending_scan=host.pending_inbound_wakes,
         timers=SYSTEM_TIMERS,
@@ -200,7 +200,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         pool=aops_pool,
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),

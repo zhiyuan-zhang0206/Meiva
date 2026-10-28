@@ -272,7 +272,7 @@ class TestSchedulerIntegration:
             return [2, 3]
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng()),
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             fresh,
             pending_scan=_pending,
             timers=SYSTEM_TIMERS,

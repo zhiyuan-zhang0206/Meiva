@@ -28,7 +28,7 @@ from agent.state import AgentState, CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import Harness
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
@@ -90,7 +90,7 @@ def _runtime(
             agent=AgentSlices.resolve(pins, default_reader=defaults()),
             extensions=extensions,
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )

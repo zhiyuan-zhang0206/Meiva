@@ -25,7 +25,7 @@ from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState, CompactState, checkpoint_msgpack_allowlist
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -76,7 +76,7 @@ def _runtime(
                 default_reader=defaults(),
             ),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
             commands=CommandCatalog.system(skills=list, home=meiva_home()),

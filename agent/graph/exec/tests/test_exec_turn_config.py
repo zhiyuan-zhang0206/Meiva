@@ -18,7 +18,7 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
@@ -103,7 +103,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
                 meiva_home=resolve_meiva_home(),
                 agent=slices or AgentSlices.resolve(default_reader=defaults()),
                 db=database,
-                bus=EventBus.from_settings(rng=seeded_rng()),
+                bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                 clients=snapshot_clients_over(lambda: database),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
                 catalog=build_model_catalog(home=unit_home),

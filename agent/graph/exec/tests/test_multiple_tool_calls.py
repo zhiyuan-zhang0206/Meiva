@@ -24,7 +24,7 @@ from agent.state import AgentState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_meiva_kwargs
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -139,7 +139,7 @@ def _runtime(
             event_publisher=idle_publisher(),
             agent=agent or AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             clients=snapshot_clients(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
             catalog=build_model_catalog(home=meiva_home()),

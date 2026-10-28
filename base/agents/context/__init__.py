@@ -54,7 +54,7 @@ from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 from base.api_contracts.agent_contract import Harness
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
 from base.lm.catalog import ModelCatalog
@@ -106,7 +106,7 @@ class ContextCaptureOwner(SdkCaptureOwner, Protocol):
 # to get one: the first call builds an `EventBus` over `boot`'s data-plane configuration, drawing
 # its retry jitter from `rng`, and every later call answers that same bus. Nothing connects until
 # the bus is used.
-def deferred_event_bus(boot: ConfigBoot, *, rng: random.Random) -> BusFactory:
+def deferred_event_bus(boot: ConfigBoot, *, rng: random.Random, timers: Timers) -> BusFactory:
     lock = threading.Lock()
     built: list[EventBus] = []
 
@@ -115,7 +115,7 @@ def deferred_event_bus(boot: ConfigBoot, *, rng: random.Random) -> BusFactory:
             if not built:
                 from base.events.live.bus import EventBus, event_bus_config_from_config
 
-                built.append(EventBus(event_bus_config_from_config(boot), rng=rng))
+                built.append(EventBus(event_bus_config_from_config(boot), rng=rng, timers=timers))
             return built[0]
 
     return bus

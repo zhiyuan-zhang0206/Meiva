@@ -25,7 +25,7 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.idempotency import keyed_headers
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -63,7 +63,7 @@ async def _admit(
     assert await settle_hosted_runtime(
         pool,
         incarnation,
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
     )
     return incarnation
 
