@@ -66,6 +66,11 @@ def test_a_forged_login_is_replaced_by_the_endpoint_and_refused(
     assert env["MEIVA_DB_URL"] == ENDPOINT
     refusal = result.db_authority_refusal
     assert refusal is not None and "only the root launcher delivers" in refusal
+    # meiva:note
+    # The refusal is the only thing a launcher's author sees, so it carries the way out:
+    # the keys to deliver and the two functions that read this home's installed login.
+    assert "unit_delivery" in refusal and "unit_api_delivery" in refusal
+    assert delivery.GENERATION_ENV in refusal and API_TOKEN_ENV in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
         guard_db_url(ENDPOINT, refusal=refusal)
 

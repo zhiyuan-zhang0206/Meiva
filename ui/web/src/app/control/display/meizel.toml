@@ -1,10 +1,12 @@
 exports = ["page.tsx"]
 
 [uses]
+"_model_picker.test.tsx" = ["_model_picker.tsx"]
+"_model_picker.tsx" = []
 "_notification-categories.tsx" = ["_rows.tsx"]
 "page-models-and-themes.test.tsx" = ["page.tsx"]
 "page.test.tsx" = ["page.tsx"]
-"page.tsx" = ["_notification-categories.tsx", "_rows.tsx"]
+"page.tsx" = ["_model_picker.tsx", "_notification-categories.tsx", "_rows.tsx"]
 
 [debt.first-party-patch]
 "page-models-and-themes.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1

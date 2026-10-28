@@ -147,10 +147,18 @@ def deliver_unit_authority(env: MutableMapping[str, str], *, home: Path) -> EnvB
     home = home.resolve()
     context = launcher_context(env)
     if context is not None:
+        # meiva:note
+        # The refusal names the way out, because the marker is written by the platform's
+        # session bootstrap and cannot be removed by the process that carries it (2026-10-28:
+        # a seat respawner spent a night on this, then found unit_delivery/unit_api_delivery).
         return EnvBootResult(
             db_authority_refusal=(
                 f"this {context}-profile agent-runner process was launched without its unit's "
-                "database login; only the root launcher delivers it"
+                "database login; only the root launcher delivers it. Where this process is "
+                f"launched, deliver MEIVA_DB_URL, {_GENERATION_ENV} and {_API_TOKEN_ENV} from "
+                "this home's db-authority/unit.json "
+                "(base.host.db_authority.unit.unit_delivery / unit_api_delivery); while a "
+                "profile marker is set the boot path does not consume the installed login itself"
             )
         )
     from base.host.db_authority.model import AuthorityRefusedError
