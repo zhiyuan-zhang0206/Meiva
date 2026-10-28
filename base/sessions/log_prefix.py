@@ -1,37 +1,20 @@
-"""Unique session prefixes prevent filelog content-fingerprint collisions.
+# meiva:note
+# The identity line of a session transcript.
+#
+# Identical shell or CLI banners otherwise give separate logs the same leading content, so a new
+# transcript starts with one line naming the session and the instant it began. Rendering it is a
+# function of the name, the process id and the instant; `log_writer.open_session_log` is what
+# writes it into the file it creates.
 
-Identical shell or CLI banners otherwise give separate logs the same leading
-content. Only newly created files receive a header; existing logs stay intact.
-"""
+from __future__ import annotations
 
-import os
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import datetime
 
 
+# meiva:note
+# The bracketed-free identity line for session `name`: its UTF-8 bytes, with the process id when
+# the caller knows it and the UTC start instant in ISO form.
 def session_log_header(name: str, *, pid: int | None = None, now: datetime) -> bytes:
-    """Return a UTF-8 session identity line with a UTC start timestamp."""
     start = now.isoformat()
     process = f" pid={pid}" if pid is not None else ""
     return f"--- meiva session {name} start={start}{process} ---\n".encode()
-
-
-def open_session_log(path: Path, name: str, *, pid: int | None = None) -> tuple[int, bool]:
-    """Open a transcript, writing its identity only when exclusively created."""
-    flags = os.O_WRONLY | getattr(os, "O_BINARY", 0)
-    try:
-        fd = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o644)
-    except FileExistsError:
-        return os.open(path, flags | os.O_APPEND), False
-    try:
-        created_at = datetime.fromtimestamp(os.fstat(fd).st_mtime, tz=UTC)
-        header = session_log_header(name, pid=pid, now=created_at)
-        while header:
-            written = os.write(fd, header)
-            if written == 0:
-                raise OSError("Session log header write made no progress")  # noqa: TRY301 - close fd on failure
-            header = header[written:]
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd, True
