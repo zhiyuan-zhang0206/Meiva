@@ -10,6 +10,7 @@ from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Gatewa
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
 from base.paths import meiva_home
+from base.paths.expand import expand_home
 from base.sessions import coding_session_owner, tool_capabilities
 from base.sessions import provenance as provenance_block
 from base.sessions.backend import get_shell_backend
@@ -81,6 +82,13 @@ def launch_site() -> LaunchSite:
 # a cancel or a launch of this process reads and writes.
 def cluster_home() -> Path:
     return process_context.current_context().require_meiva_home()
+
+
+# meiva:note
+# The home `~` in an operator's path names, read once from the bound context: a workspace, a task
+# file or a cluster directory a command was given.
+def user_home() -> Path:
+    return process_context.current_context().require_user_home()
 
 
 # meiva:note
@@ -169,6 +177,7 @@ def capability_report(tool: str, *, mode: str = "auto", force: bool = False) -> 
         spec,
         store=tool_capabilities.cache_path(context.require_meiva_home()),
         now=context.require_clock().now(),
+        user_home=context.require_user_home(),
     )
     decision = tool_capabilities.decide(spec, requested=mode, force=force, probe=probe)
     return tool_capabilities.render(tool, decision, probe), 2 if decision.refused else 0
@@ -240,8 +249,8 @@ def new_generation(
     return coding_session_owner.launch_generation(
         key,
         owner_agent_id=owner_agent_id,
-        tasks_file=tasks_file,
-        work_file=work_file,
+        tasks_file=(None if tasks_file is None else expand_home(tasks_file, user_home=user_home())),
+        work_file=(None if work_file is None else expand_home(work_file, user_home=user_home())),
         ttl_seconds=ttl_seconds,
         writer=AtomicWriter(SYSTEM_FS),
         now=context.require_clock().now(),
