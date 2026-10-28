@@ -21,14 +21,24 @@ const RING_SIZE = 20;
 // 36-unit box, which read as a dial rather than a loader (user report
 // 2026-10-20). An arc fraction of 1 is a whole circle; the pull strip's grows
 // with the pull, the button's is fixed.
+// meiva:note
+// Two presentations, one ring: it turns while a load is in flight, and a
+// reader who asked for reduced motion gets the same ring breathing (opacity
+// only) instead of a frozen one.
+// meiva:note
+// The scale rides the `scale` property, never `transform`. An inline transform
+// makes the spin keyframes interpolate as matrices, and `rotate(360deg)`
+// decomposes to 0deg — the ring then paints the same frame forever while
+// getAnimations() reports it running (user report 2026-10-29: "it doesn't spin
+// any more, it's a static animation").
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
 function LoadingRing({ arc = 0.72, scale = 1, testId, className }: {
   arc?: number; scale?: number; testId?: string; className?: string;
 }) {
   const circumference = 2 * Math.PI * 8;
   return (
-    <svg data-testid={testId} viewBox="0 0 24 24" style={{ transform: `scale(${scale})` }} aria-hidden="true"
-      className={cn("size-5 shrink-0 animate-spin motion-reduce:animate-none pointer-events-none", className)}>
+    <svg data-testid={testId} viewBox="0 0 24 24" style={{ scale: `${scale}` }} aria-hidden="true"
+      className={cn("size-5 shrink-0 animate-spin motion-reduce:animate-pulse pointer-events-none", className)}>
       <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" opacity="0.15" />
       <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
         strokeDasharray={`${circumference * arc} ${circumference * (1 - arc)}`} />

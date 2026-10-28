@@ -87,3 +87,4 @@ only a small bottom padding, and shares the same column cap with one
 - [[ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md|Per-Thread Timeline Cache]] — the store that feeds this view, including the compact-replace edge and the retention re-attach.
 - [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|Card chrome]] — the hover band in the gap under a block (timestamp and Copy) and its pointer gating.
 - [[ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md|System markers]] — system-marker dispatch and the fail-loud unrecognized alarm.
+- [[ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md|The loading ring]] — the one ring every loading state draws, the pull scale that rides `scale` instead of `transform`, and the reduced-motion state.
