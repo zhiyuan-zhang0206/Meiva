@@ -3,3 +3,4 @@
 "test_healthcheck_gateway.py" = ["http_stub.py"]
 "test_healthcheck_lgtm.py" = ["loki_stub.py"]
 "test_healthcheck_memory_search.py" = ["http_stub.py"]
+"test_healthcheck_permissions_helper.py" = ["helper_endpoint.py"]

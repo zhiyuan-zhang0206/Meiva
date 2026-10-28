@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
-import socket
 import subprocess
-import tempfile
-import threading
 from collections.abc import Sequence
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
 
 import pytest
 
@@ -20,27 +16,39 @@ from base.host.permissions_helper import client
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
-from services.desktop.permissions_helper.launchd_job import LaunchdFacts
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts, helper_job_label
 from services.supervision.healthchecks import permissions_helper as hc
+from services.supervision.healthchecks.tests.helper_endpoint import (
+    live_root,
+    serving,
+    socket_dir,
+    under_other_parent,
+    wire_reply,
+)
 
-
-def _refuse_launchctl(
-    cmd: Sequence[str], /, *, timeout: float, capture_output: bool = True
-) -> subprocess.CompletedProcess[bytes]:
-    del timeout, capture_output
-    raise AssertionError(f"this test must not run {list(cmd)}")
+_DARWIN = LaunchdFacts(uid=7731, platform="darwin", user_home=Path("/unused/user"))
 
 
 # meiva:note
-# `hc.probe` over what it reads of the world: a home, the account's launchd facts and a runner.
-# The cases below hand the probe the job text they want classified, so the runner is never asked.
-def _probe(**changes: Any) -> DaemonProbe:
-    return hc.probe(
-        home=Path("/unused/home"),
-        facts=LaunchdFacts(uid=501, platform="darwin", user_home=Path("/unused/user")),
-        run=_refuse_launchctl,
-        **changes,
-    )
+# The account's `launchctl`, as the probe runs it: answers a `print` with the dump it was given (or
+# raises what it was given) and records every command, so a case reads which job was asked for and
+# whether launchctl was consulted at all.
+class _Launchctl:
+    def __init__(self, dump: str | None = None, *, error: Exception | None = None) -> None:
+        self._dump = dump
+        self._error = error
+        self.commands: list[list[str]] = []
+
+    def __call__(
+        self, cmd: Sequence[str], /, *, timeout: float, capture_output: bool = True
+    ) -> subprocess.CompletedProcess[bytes]:
+        del timeout, capture_output
+        self.commands.append(list(cmd))
+        if self._error is not None:
+            raise self._error
+        if self._dump is None:
+            return subprocess.CompletedProcess(cmd, 113, b"", b"Could not find service")
+        return subprocess.CompletedProcess(cmd, 0, self._dump.encode(), b"")
 
 
 # Real `launchctl print` excerpts (F5 run-09/10c/11 evidence), shortened. The
@@ -116,45 +124,6 @@ def recorder(loguru_records: LogRecords) -> _Recorder:
     return _Recorder(loguru_records)
 
 
-def test_ping_uses_short_timeout_and_helper_wire_protocol(tmp_path: Path) -> None:
-    received: list[bytes] = []
-    response = (
-        b'{"id":0,"ok":true,"result":{"pong":true,"pid":42,'
-        b'"preflight_screen":true,"ax_trusted":true}}\n'
-    )
-    with tempfile.TemporaryDirectory(prefix="meiva-helper-", dir="/tmp") as directory:
-        socket_path = f"{directory}/helper.sock"
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind(socket_path)
-        server.listen(1)
-
-        def _serve() -> None:
-            conn, _ = server.accept()
-            with conn:
-                received.append(conn.recv(4096))
-                conn.sendall(response)
-
-        worker = threading.Thread(target=_serve, daemon=True)
-        worker.start()
-        try:
-            root = cast(OwnedProcess, SimpleNamespace(pid=10, live=lambda: True))
-            parent = cast(OwnedProcess, SimpleNamespace(pid=42, live=lambda: True))
-            assert hc.ping(
-                home=tmp_path,
-                sock_path=socket_path,
-                root=root,
-                parent=parent,
-                peer_pid=42,
-                parent_live=True,
-            )
-        finally:
-            server.close()
-            worker.join(timeout=2)
-
-    assert len(received) == 1
-    assert json.loads(received[0]) == {"id": 0, "method": "ping"}
-
-
 # -- parsing and the LWCR truth table (pure) ----------------------------------
 
 
@@ -200,8 +169,6 @@ def test_ping_alive_short_circuits_to_healthy() -> None:
 
 
 def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
-    from base.daemon.health import DaemonProbe
-
     report = hc.episode_reporter()
     bad = DaemonProbe.down("lwcr-stuck; needs LWCR update")
     report(bad)
@@ -214,74 +181,179 @@ def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
     assert not hasattr(hc, "main")
 
 
-def test_probe_alive_and_classified_down() -> None:
-    assert _probe(macos=True, ping_ok=True).alive
-
-    verdict = _probe(
-        macos=True,
-        ping_error=client.PermissionsHelperError("socket unavailable"),
-        job_text=_STUCK_JOB,
-    )
-    assert not verdict.alive
-    assert "lwcr-stuck" in verdict.detail
-    assert "needs LWCR update" in verdict.detail
-
-    assert _probe(
-        macos=True,
-        ping_error=client.PermissionsHelperError("socket unavailable"),
-        job_text=None,
-    ).detail.startswith(hc.ABSENT)
+def test_ping_speaks_the_wire_protocol_to_the_native_parent_of_the_root() -> None:
+    with socket_dir() as directory, live_root() as root:
+        sock_path = directory / "helper.sock"
+        with serving(sock_path, wire_reply(os.getpid())) as received:
+            assert hc.ping(sock_path=sock_path, root=root)
+        assert len(received) == 1
+        assert json.loads(received[0]) == {"id": 0, "method": "ping"}
 
 
-def test_probe_is_total_and_non_macos_is_up() -> None:
-    assert _probe(macos=False).alive
-
-    verdict = _probe(
-        macos=True,
-        ping_error=client.PermissionsHelperError("socket unavailable"),
-        job_error=RuntimeError("boom"),
-    )  # never raises
-    assert not verdict.alive
-    assert "probe error" in verdict.detail
+def test_ping_reports_a_pong_that_is_not_true() -> None:
+    with socket_dir() as directory, live_root() as root:
+        sock_path = directory / "helper.sock"
+        with serving(sock_path, wire_reply(os.getpid(), pong=False)):
+            assert hc.ping(sock_path=sock_path, root=root) is False
 
 
-def test_ping_dials_the_socket_of_the_home_it_is_given(tmp_path: Path) -> None:
-    from base.sessions.helperproc import helper_client
-
-    socket_path = str(helper_client(home=tmp_path).sock_path)
-
-    with pytest.raises(client.PermissionsHelperError, match=re.escape(socket_path)):
-        hc.ping(home=tmp_path)
-
-
-def test_unverifiable_helper_parent_never_reports_protocol_health() -> None:
-    assert (
-        _probe(
-            macos=True,
-            ping_error=hc.ParentEvidenceError("root parent is not observable"),
-            job_text=_RUNNING_JOB,
-        ).verdict.value
-        == "unavailable"
-    )
+@pytest.mark.parametrize("answering_pid", [None, 1])
+def test_ping_refuses_a_reply_that_does_not_name_the_root_parent(answering_pid: int | None) -> None:
+    with socket_dir() as directory, live_root() as root:
+        sock_path = directory / "helper.sock"
+        with (
+            serving(sock_path, wire_reply(answering_pid)),
+            pytest.raises(hc.ParentEvidenceError, match="lost captured parent identity"),
+        ):
+            hc.ping(sock_path=sock_path, root=root)
 
 
-def test_connected_helper_peer_must_be_root_native_parent(tmp_path: Path) -> None:
-    root = cast(OwnedProcess, SimpleNamespace(pid=10, live=lambda: True))
-    parent = cast(OwnedProcess, SimpleNamespace(pid=20, live=lambda: True))
+def test_ping_refuses_a_peer_that_is_not_the_native_parent_of_the_root() -> None:
+    with socket_dir() as directory, under_other_parent() as root:
+        sock_path = directory / "helper.sock"
+        with (
+            serving(sock_path, wire_reply(os.getpid())) as received,
+            pytest.raises(hc.ParentEvidenceError, match="not the captured root parent"),
+        ):
+            hc.ping(sock_path=sock_path, root=root)
+        assert all(b"ping" not in request for request in received)
 
-    with pytest.raises(hc.ParentEvidenceError, match="not the captured root parent"):
-        hc.helper_parent(
-            cast(socket.socket, object()),
+
+def test_ping_refuses_a_root_that_no_longer_exists() -> None:
+    with socket_dir() as directory:
+        with live_root() as root:
+            pass
+        sock_path = directory / "helper.sock"
+        with (
+            serving(sock_path, wire_reply(os.getpid())),
+            pytest.raises(hc.ParentEvidenceError, match="evidence unavailable"),
+        ):
+            hc.ping(sock_path=sock_path, root=root)
+
+
+def test_ping_dials_the_socket_it_is_given() -> None:
+    with socket_dir() as directory:
+        sock_path = directory / "nobody-listens.sock"
+        root = OwnedProcess(pid=os.getpid(), birth=1.0, starttime=None)
+        with pytest.raises(client.PermissionsHelperError, match=re.escape(str(sock_path))):
+            hc.ping(sock_path=sock_path, root=root)
+
+
+@pytest.mark.parametrize(
+    ("job_text", "classification"),
+    [
+        (_STUCK_JOB, hc.LWCR_STUCK),
+        (_SPAWN_FAILED_BARE, hc.SPAWN_FAILED),
+        (_RUNNING_JOB, hc.UNRESPONSIVE),
+        (None, hc.ABSENT),
+    ],
+)
+def test_a_failed_ping_is_down_with_the_launchd_classification(
+    job_text: str | None, classification: str
+) -> None:
+    result = hc.verdict(failure="PermissionsHelperError: socket unavailable", job_text=job_text)
+    assert not result.alive
+    assert result.detail.startswith(classification)
+    assert "PermissionsHelperError: socket unavailable" in result.detail
+
+
+def test_a_failed_ping_names_the_launchd_facts_behind_the_class() -> None:
+    detail = hc.verdict(failure="pong was not true", job_text=_STUCK_JOB).detail
+    for fact in ("job state=spawn failed", "last exit=78", "needs LWCR update", "runs=26"):
+        assert fact in detail
+
+
+def test_an_answered_ping_is_up_whatever_launchd_says() -> None:
+    result = hc.verdict(failure=None, job_text=_STUCK_JOB)
+    assert result.alive
+    assert result.detail == "ping answered; helper serving"
+
+
+def test_probe_is_up_when_the_native_parent_of_the_root_answers(tmp_path: Path) -> None:
+    launchctl = _Launchctl()
+    with socket_dir() as directory, live_root() as root:
+        sock_path = directory / "helper.sock"
+        with serving(sock_path, wire_reply(os.getpid())):
+            result = hc.probe(
+                home=tmp_path, facts=_DARWIN, run=launchctl, sock_path=sock_path, root=root
+            )
+    assert result.alive
+    assert launchctl.commands == []
+
+
+def test_probe_classifies_a_helper_that_does_not_answer_from_its_own_launchd_job(
+    tmp_path: Path,
+) -> None:
+    launchctl = _Launchctl(_STUCK_JOB)
+    with socket_dir() as directory, live_root() as root:
+        result = hc.probe(
             home=tmp_path,
+            facts=_DARWIN,
+            run=launchctl,
+            sock_path=directory / "nobody-listens.sock",
             root=root,
-            parent=parent,
-            peer_pid=30,
         )
+    assert not result.alive
+    assert result.detail.startswith(hc.LWCR_STUCK)
+    assert "PermissionsHelperError" in result.detail
+    assert launchctl.commands == [
+        ["launchctl", "print", f"{_DARWIN.domain}/{helper_job_label(tmp_path)}"]
+    ]
+
+
+def test_probe_reads_a_pong_that_is_not_true_as_a_failure_of_the_helper(tmp_path: Path) -> None:
+    with socket_dir() as directory, live_root() as root:
+        sock_path = directory / "helper.sock"
+        with serving(sock_path, wire_reply(os.getpid(), pong=False)):
+            result = hc.probe(
+                home=tmp_path, facts=_DARWIN, run=_Launchctl(None), sock_path=sock_path, root=root
+            )
+    assert not result.alive
+    assert result.detail.startswith(hc.ABSENT)
+    assert "pong was not true" in result.detail
+
+
+def test_probe_never_reports_health_for_a_peer_it_cannot_bind_to_the_root(tmp_path: Path) -> None:
+    launchctl = _Launchctl(_RUNNING_JOB)
+    with socket_dir() as directory, under_other_parent() as root:
+        sock_path = directory / "helper.sock"
+        with serving(sock_path, wire_reply(os.getpid())):
+            result = hc.probe(
+                home=tmp_path, facts=_DARWIN, run=launchctl, sock_path=sock_path, root=root
+            )
+    assert result.verdict.value == "unavailable"
+    assert "ParentEvidenceError" in result.detail
+    assert launchctl.commands == []
+
+
+def test_probe_is_unavailable_when_the_job_cannot_be_read(tmp_path: Path) -> None:
+    with socket_dir() as directory, live_root() as root:
+        result = hc.probe(
+            home=tmp_path,
+            facts=_DARWIN,
+            run=_Launchctl(error=RuntimeError("boom")),
+            sock_path=directory / "nobody-listens.sock",
+            root=root,
+        )
+    assert result.verdict.value == "unavailable"
+    assert "probe error: RuntimeError: boom" in result.detail
+
+
+def test_probe_off_macos_is_up_without_asking_anyone(tmp_path: Path) -> None:
+    launchctl = _Launchctl()
+    root = OwnedProcess(pid=os.getpid(), birth=1.0, starttime=None)
+    result = hc.probe(
+        home=tmp_path,
+        facts=LaunchdFacts(uid=501, platform="linux", user_home=Path("/unused/user")),
+        run=launchctl,
+        sock_path=tmp_path / "unused.sock",
+        root=root,
+    )
+    assert result.alive
+    assert launchctl.commands == []
 
 
 def test_episode_reporting_memory_is_local_to_each_diagnostic(recorder: _Recorder) -> None:
-    from base.daemon.health import DaemonProbe
-
     first = hc.episode_reporter()
     second = hc.episode_reporter()
     bad = DaemonProbe.down("spawn-failed; helper unavailable")
