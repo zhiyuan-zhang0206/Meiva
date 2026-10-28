@@ -33,9 +33,8 @@ class Plan:
     left: list[str] = field(default_factory=list[str])
 
 
-def changed_files(root: Path) -> list[str]:
+def changed_files(repo: GitRepo) -> list[str]:
     """Files that differ from the branch point with origin/main (HEAD when there is none)."""
-    repo = GitRepo(root)
     base = repo.default_base()
     changed = repo.run_text("diff", "--name-only", "--no-renames", "-z", base).split("\0")
     untracked = repo.run_text("ls-files", "--others", "--exclude-standard", "-z").split("\0")
@@ -198,16 +197,15 @@ def plan_declare_writes(root: Path, texts: Mapping[str, str], plan: Plan) -> Edi
 
 
 def declare(
-    root: Path, targets: list[str] | None, jobs: int | None = None
+    repo: GitRepo, targets: list[str] | None, jobs: int | None = None
 ) -> tuple[list[str], list[str]]:
     """Declare the legal new dependencies under `targets` (default: the changed files).
 
     Returns a line per declaration and a line per dependency left as an error.
     """
-    scope = targets if targets is not None else changed_files(root)
-    plan = _plan(analyze(root, jobs=jobs), scope)
-    repo = GitRepo(root)
+    scope = targets if targets is not None else changed_files(repo)
+    plan = _plan(analyze(repo.universe(), jobs=jobs), scope)
     directories = sorted(set(plan.uses) | set(plan.exports))
     texts = {d: repo.load_text(manifest_path(d), default="") for d in directories}
-    plan_declare_writes(root, texts, plan).apply()
+    plan_declare_writes(repo.root, texts, plan).apply()
     return plan.lines, plan.left

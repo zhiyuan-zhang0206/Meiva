@@ -24,32 +24,18 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 
 [purity]
 "." = "strict"
-"ambient_read.py" = "strict-to-be"
-"analysis.py" = "strict-to-be"
+"ambient_read.py" = "strict"
+"analysis.py" = "strict"
 "cli.py" = "strict-to-be"
-"debt_carry.py" = "strict-to-be"
-"debt_edit.py" = "strict-to-be"
-"debt_report.py" = "strict-to-be"
-"debt_rules.py" = "strict-to-be"
-"declare.py" = "strict-to-be"
-"enumerations.py" = "strict-to-be"
-"policy.py" = "strict-to-be"
-"sync.py" = "strict-to-be"
+"debt_carry.py" = "strict"
+"debt_edit.py" = "strict"
+"debt_report.py" = "strict"
+"debt_rules.py" = "strict"
+"declare.py" = "strict"
+"enumerations.py" = "strict"
+"policy.py" = "strict"
+"sync.py" = "strict"
 
 [debt.impure-call]
-"ambient_read.py#meizel.graph.universe.GitRepo" = 1
-"analysis.py#meizel.graph.universe.load_universe" = 1
 "cli.py#Path.resolve" = 2
-"cli.py#meizel.graph.universe.load_universe" = 1
-"debt_carry.py#meizel.graph.universe.GitRepo" = 3
-"debt_carry.py#meizel.graph.universe.load_universe" = 2
-"debt_edit.py#meizel.graph.universe.GitRepo" = 1
-"debt_report.py#meizel.graph.universe.GitRepo" = 2
-"debt_report.py#meizel.graph.universe.load_universe" = 3
-"debt_rules.py#meizel.graph.universe.GitRepo" = 6
-"debt_rules.py#meizel.graph.universe.load_universe" = 6
-"declare.py#meizel.graph.universe.GitRepo" = 2
-"enumerations.py#meizel.graph.universe.GitRepo" = 2
-"enumerations.py#meizel.graph.universe.load_universe" = 1
-"policy.py#meizel.graph.universe.GitRepo" = 1
-"sync.py#meizel.graph.universe.GitRepo" = 1
+"cli.py#meizel.graph.universe.GitRepo" = 1
