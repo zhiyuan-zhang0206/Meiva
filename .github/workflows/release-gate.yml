@@ -1,0 +1,275 @@
+# The release gate (task #5762): the one place a tree is certified for a release wave.
+#
+# A release wave may only deploy a commit that descends from (or is) a tree this gate passed.
+# The gate runs when the wave is launched, not when a tag is made and not on every version
+# bump: the wave is the human-controlled event, and a tag is only its record.
+#
+# Two products on success:
+#   - the annotated tag `vX.Y.Z`, pointing at the certified commit (the human marker);
+#   - `release/<version>.json`, the machine-readable proof the deployment precheck reads
+#     (`scripts/host_ops/release/base.py`), opened as a pull request because every change to
+#     main goes through one.
+# A tag alone can never create release eligibility: the reader ignores tags entirely.
+#
+# A red nightly verdict (`.github/workflows/refresh-test-durations.yml`) does not fail main's
+# merge ability, but it does block this gate: the wave refuses to certify a tree whose nightly
+# full suite was red.
+
+name: Release gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Commit the release wave would deploy (default main HEAD)
+        required: false
+        default: ''
+      version:
+        description: Version this gate certifies, three parts (e.g. 1.4.0)
+        required: true
+      reason:
+        description: Why this release is being cut (recorded in the tag and the record)
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+env:
+  UV_FROZEN: "1"
+  MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+  MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+
+concurrency:
+  group: release-gate
+  cancel-in-progress: false
+
+jobs:
+  precheck:
+    # Refuses before spending a runner-hour on a tree that may not be released at all: the
+    # target must exist and descend from a commit an earlier gate certified.
+    name: Precheck (release base)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Resolve the target commit
+        id: target
+        run: |
+          target="${{ inputs.target_sha }}"
+          if [ -z "$target" ]; then target="$GITHUB_SHA"; fi
+          sha="$(git rev-parse --verify --quiet "${target}^{commit}")" || {
+            echo "::error::target '$target' does not resolve to a commit in this checkout"
+            exit 1
+          }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "certifying $sha as v${{ inputs.version }}"
+
+      - name: Refuse a tree without a certified base
+        run: >
+          uv run python scripts/host_ops/release/base.py
+          --repo .
+          --target ${{ steps.target.outputs.sha }}
+          --provenance-dir release
+
+  backend:
+    needs: precheck
+    name: Backend full suite (${{ matrix.group }}/8)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.precheck.outputs.sha }}
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
+      # The whole backend population, sharded exactly as CI shards it, with no selection:
+      # the gate certifies the tree, not a computed subset of it.
+      - name: Run the backend suite
+        run: >
+          uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests
+          --ignore=tests/e2e -m "not flaky" -n 4
+          --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration
+
+  e2e:
+    needs: precheck
+    name: e2e full matrix (${{ matrix.group }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.precheck.outputs.sha }}
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
+      - name: Install frontend deps
+        working-directory: ui/web
+        run: npm ci
+
+      - name: Install Playwright chromium
+        timeout-minutes: 10
+        run: timeout 300 uv run playwright install chromium
+
+      - name: Install Playwright system deps
+        uses: ./.github/actions/install-playwright-deps
+        timeout-minutes: 15
+
+      - name: Run the e2e suite
+        run: >
+          uv run pytest tests/e2e/ -v -n 2
+          --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration
+
+  platform-smoke:
+    # The platform half of the gate: the vendored Postgres runtime must actually serve a
+    # pgvector query, which unit tests cannot prove because they provision their own server.
+    needs: precheck
+    name: Platform smoke (vendored runtime)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.precheck.outputs.sha }}
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Install locked Python environment
+        uses: ./.github/actions/uv-sync
+
+      - name: Vendored PG + injected pgvector (CREATE EXTENSION + query)
+        run: uv run python scripts/ci/pgvector_runtime_smoke.py
+
+  certify:
+    # Only a tree that passed every leg above gets a version. Both products are written here
+    # and nowhere else, so "who decided this tree is releasable" has one answer.
+    needs: [precheck, backend, e2e, platform-smoke]
+    name: Certify and record
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.precheck.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Refuse a version that is not three parts
+        run: |
+          case "${{ inputs.version }}" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::version must be three numeric parts, got '${{ inputs.version }}'"; exit 1 ;;
+          esac
+
+      - name: Write the release record
+        run: |
+          mkdir -p release
+          python3 - <<'PY'
+          import json, os, pathlib
+          version = os.environ["VERSION"]
+          record = {
+              "version": version,
+              "sha": os.environ["SHA"],
+              "gate_run": f"{os.environ['SERVER']}/{os.environ['REPO']}/actions/runs/{os.environ['RUN_ID']}",
+              "passed": True,
+              "reason": os.environ.get("REASON", ""),
+          }
+          path = pathlib.Path("release") / f"{version}.json"
+          path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+          print(path.read_text())
+          PY
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ needs.precheck.outputs.sha }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REASON: ${{ inputs.reason }}
+
+      - name: Publish the tag the humans read
+        run: |
+          git config user.name "meiva release gate"
+          git config user.email "release-gate@meiva.invalid"
+          git tag -a "v${{ inputs.version }}" "${{ needs.precheck.outputs.sha }}" -m "v${{ inputs.version }} certified by the release gate
+
+          run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          reason: ${{ inputs.reason }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Open the pull request that lands the record
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="release/v${{ inputs.version }}"
+          git checkout -b "$branch"
+          git add release
+          git commit -m "release: v${{ inputs.version }} certified by the release gate
+
+          Gate run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Certified commit: ${{ needs.precheck.outputs.sha }}"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "release: v${{ inputs.version }}" \
+            --body "Certified by the release gate: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          - certified commit: \`${{ needs.precheck.outputs.sha }}\`
+          - version: \`v${{ inputs.version }}\`
+          - reason: ${{ inputs.reason }}
+
+          Merging this pull request makes the certification visible to the deployment precheck
+          (\`scripts/host_ops/release/base.py\` reads \`release/<version>.json\`). The tag
+          already exists and carries the same run link."

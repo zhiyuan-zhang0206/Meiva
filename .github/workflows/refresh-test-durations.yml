@@ -94,11 +94,14 @@ jobs:
         working-directory: ui/web
         run: npm ci
 
+      # The junit comes from the first attempt only: a retry is a measurement device, and the
+      # nightly verdict must not inherit a first-attempt failure washed green by it.
       - name: Measure backend shard
         run: >
           uv run python scripts/ci/refresh_test_durations.py measure backend
           --group ${{ matrix.group }}
           --output "$RUNNER_TEMP/durations/backend-${{ matrix.group }}.json"
+          --junit-xml "$RUNNER_TEMP/verdict/backend-${{ matrix.group }}.xml"
 
       - name: Upload backend duration measurement
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -106,6 +109,14 @@ jobs:
           name: test-durations-backend-${{ matrix.group }}
           path: ${{ runner.temp }}/durations/backend-${{ matrix.group }}.json
           if-no-files-found: error
+
+      - name: Upload backend test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verdict-junit-backend-${{ matrix.group }}
+          path: ${{ runner.temp }}/verdict/backend-${{ matrix.group }}.xml
+          if-no-files-found: warn
 
   measure-e2e:
     needs: plan
@@ -178,6 +189,7 @@ jobs:
         run: >
           uv run python scripts/ci/refresh_test_durations.py measure e2e
           --group ${{ matrix.group }}
+          --junit-xml "$RUNNER_TEMP/verdict/e2e-${{ matrix.group }}.xml"
           --output "$RUNNER_TEMP/durations/e2e-${{ matrix.group }}.json"
 
       - name: Upload e2e duration measurement
@@ -186,6 +198,75 @@ jobs:
           name: test-durations-e2e-${{ matrix.group }}
           path: ${{ runner.temp }}/durations/e2e-${{ matrix.group }}.json
           if-no-files-found: error
+
+      - name: Upload e2e test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verdict-junit-e2e-${{ matrix.group }}
+          path: ${{ runner.temp }}/verdict/e2e-${{ matrix.group }}.xml
+          if-no-files-found: warn
+
+  verdict:
+    # The nightly full-suite verdict for this commit. It is deliberately independent of the
+    # duration leg: `publish`/`verify` own the timing model, this job owns "was main green".
+    # It reads junit artifacts only - never a job's exit code - so an auxiliary measurement
+    # step cannot turn the nightly red, and a retried shard cannot turn it green.
+    # A red verdict is an alert: it fails this job and records the shard that failed, and it
+    # blocks the release gate. It does not touch main's merge ability.
+    needs: [measure-backend, measure-e2e]
+    if: always() && !cancelled()
+    name: Nightly verdict (regression)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Download shard junit results
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: verdict-junit-*
+          path: ${{ runner.temp }}/junit
+          merge-multiple: true
+
+      - name: Judge the nightly run
+        id: judge
+        run: >
+          uv run python scripts/host_ops/release/nightly.py
+          --junit-dir "$RUNNER_TEMP/junit"
+          --sha "$GITHUB_SHA"
+          --output "$RUNNER_TEMP/nightly/$GITHUB_SHA.json"
+          --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload the nightly record
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-${{ github.sha }}
+          path: ${{ runner.temp }}/nightly/${{ github.sha }}.json
+          if-no-files-found: warn
+
+      - name: Record the verdict in the run summary
+        if: always()
+        run: |
+          record="$RUNNER_TEMP/nightly/$GITHUB_SHA.json"
+          if [ -f "$record" ]; then
+            {
+              echo "### Nightly verdict: $(python3 -c "import json,sys;print('GREEN' if json.load(open(sys.argv[1]))['ok'] else 'RED')" "$record")"
+              echo
+              echo '```json'
+              cat "$record"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Nightly verdict: RED (no record was written - the shards produced no junit)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
   publish:
     needs: [plan, measure-backend, measure-e2e]

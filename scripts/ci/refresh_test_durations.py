@@ -124,6 +124,7 @@ def run_suite(
     *,
     coverage: bool,
     run_process: SuiteProcess,
+    junit_path: Path | None = None,
 ) -> int:
     """Run one suite with duration recording; return the pytest exit code.
 
@@ -149,6 +150,8 @@ def run_suite(
             f"--durations-path={durations_path}",
         ]
     )
+    if junit_path is not None:
+        cmd.append(f"--junit-xml={junit_path}")
     print(f"  running: {' '.join(cmd)}")
     return run_process(cmd, cwd=_REPO_ROOT, check=False).returncode
 
@@ -161,7 +164,13 @@ def _seed_shard_durations(path: Path, *, target_path: Path) -> None:
 
 
 def _measure_shard(
-    suite: str, group: int, output_path: Path, *, target_path: Path, run_process: SuiteProcess
+    suite: str,
+    group: int,
+    output_path: Path,
+    *,
+    target_path: Path,
+    run_process: SuiteProcess,
+    junit_path: Path | None = None,
 ) -> int:
     """Record one CI-equivalent shard, retrying only that isolated measurement."""
     if suite == "backend":
@@ -205,9 +214,17 @@ def _measure_shard(
         print("shard output must not overwrite .test_durations", file=sys.stderr)
         return 1
 
+    # meiva:note
+    # Only the first attempt writes junit: a retry is a measurement device, and letting it overwrite the results would turn a first-attempt failure into a green nightly verdict.
     for attempt in range(1, _MEASUREMENT_ATTEMPTS + 1):
         _seed_shard_durations(output_path, target_path=target_path)
-        result = run_suite(pytest_args, output_path, coverage=coverage, run_process=run_process)
+        result = run_suite(
+            pytest_args,
+            output_path,
+            coverage=coverage,
+            run_process=run_process,
+            junit_path=junit_path if attempt == 1 else None,
+        )
         if result == 0:
             return 0
         print(
@@ -343,6 +360,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     measure.add_argument("suite", choices=("backend", "e2e"))
     measure.add_argument("--group", type=int, required=True)
     measure.add_argument("--output", type=Path, required=True)
+    measure.add_argument(
+        "--junit-xml",
+        type=Path,
+        default=None,
+        help="where the first attempt writes its junit results",
+    )
 
     merge = commands.add_parser("merge", help="merge all isolated shard measurements")
     merge.add_argument("--durations-dir", type=Path, required=True)
@@ -355,8 +378,15 @@ def main(argv: list[str] | None = None, *, target_path: Path, run_process: Suite
     if args.command in (None, "refresh"):
         return _refresh_all(target_path=target_path, run_process=run_process)
     if args.command == "measure":
+        if args.junit_xml is not None:
+            args.junit_xml.parent.mkdir(parents=True, exist_ok=True)
         return _measure_shard(
-            args.suite, args.group, args.output, target_path=target_path, run_process=run_process
+            args.suite,
+            args.group,
+            args.output,
+            target_path=target_path,
+            run_process=run_process,
+            junit_path=args.junit_xml,
         )
     if args.command == "merge":
         return _merge_shard_measurements(args.durations_dir, target_path=target_path)

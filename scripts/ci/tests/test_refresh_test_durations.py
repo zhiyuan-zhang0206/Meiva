@@ -463,3 +463,46 @@ def _run_sample_shard(
         f"test_sample.py::{case.attrib['name']}"
         for case in ElementTree.parse(report).iter("testcase")  # noqa: S314 — test-owned local pytest report
     }
+
+
+def test_measure_writes_junit_only_for_the_first_attempt(tmp_path: Path) -> None:
+    source = tmp_path / ".test_durations"
+    source.write_text("{}\n")
+    output = tmp_path / "backend-2.json"
+    junit = tmp_path / "verdict" / "backend-2.xml"
+    junit_arguments: list[str | None] = []
+
+    def _fail_once_then_record(
+        argv: Sequence[str], *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]:
+        durations_path = Path(
+            next(a.split("=", 1)[1] for a in argv if a.startswith("--durations-path="))
+        )
+        junit_arguments.append(
+            next((argument for argument in argv if argument.startswith("--junit-xml=")), None)
+        )
+        if len(junit_arguments) == 1:
+            junit.parent.mkdir(parents=True, exist_ok=True)
+            junit.write_text('<testsuite tests="1" failures="1"></testsuite>')
+            return subprocess.CompletedProcess(argv, 1)
+        durations_path.write_text("{}\n")
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert (
+        refresh.main(
+            [
+                "measure",
+                "backend",
+                "--group",
+                "2",
+                "--output",
+                str(output),
+                "--junit-xml",
+                str(junit),
+            ],
+            target_path=source,
+            run_process=_fail_once_then_record,
+        )
+        == 0
+    )
+    assert junit_arguments == [f"--junit-xml={junit}", None]
