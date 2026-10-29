@@ -29,7 +29,7 @@ from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
@@ -257,12 +257,14 @@ def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
 
 
 # meiva:note
-# "This turn already acted" is the message this call follows, not a walk back through history: the llm node runs immediately after the exec node, so a tool return appended in this turn is the tail at that moment, and a turn only ends on a message with no tool calls - a tail ToolMessage can therefore never belong to an earlier turn. Walking back to the last human message would answer a different question (what the conversation ever did) and would let a previous turn's tool work excuse a genuinely stuck one. Only a successful return counts: LangChain types a failure as `ToolMessage.status="error"`, and halting on that would report a real failure to the user as a finished turn, so a failed return keeps the nudge and the cap.
+# "This turn already acted" is the message this call follows, not a walk back through history: the llm node runs right after exec, so a tool return appended in this turn is the tail at that moment, and a turn only ends on a message with no tool calls - a tail ToolMessage therefore cannot belong to an earlier turn. Walking back to the last human message would answer a different question (what the conversation ever did) and would let a previous turn's tool work excuse a genuinely stuck one. Only a run the exec envelope records as completed counts: `meiva_exec_status` is the typed outcome of that call, and halting on a failed, timed-out, cancelled or not-run return would report a real failure to the user as a silent completion, so every outcome other than completed keeps the nudge and the cap.
 def _turn_already_acted(messages: list[AnyMessage]) -> bool:
     if not messages:
         return False
     last = messages[-1]
-    return isinstance(last, ToolMessage) and last.status != "error"
+    if not isinstance(last, ToolMessage):
+        return False
+    return read_meiva_kwargs(last).get("meiva_exec_status") == ExecStatus.COMPLETED
 
 
 def _is_silent_idle(final_msg: AIMessage) -> bool:
