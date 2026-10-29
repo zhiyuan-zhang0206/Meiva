@@ -211,3 +211,17 @@ def test_audit_dir_without_a_value_is_rejected(capsys: pytest.CaptureFixture[str
     """A bare --audit-dir is a usage error, not an IndexError traceback."""
     assert lint.main(["--audit-dir"]) == 2
     assert "--audit-dir requires a value" in capsys.readouterr().err
+
+
+# meiva:note
+# A manifest error names the file and the problem; the block under the count says what the range is
+# for and where the format is written. Asserted on fragments, not sentences.
+def test_the_failure_block_carries_the_reason_and_the_owner_doc(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_plugin(repo, "bar", manifest=False)
+    assert lint.main([], repo_root=repo) == 1
+    err = capsys.readouterr().err.lower()
+
+    assert "host version" in err
+    assert "package-manifest.meiva.okf.md" in err

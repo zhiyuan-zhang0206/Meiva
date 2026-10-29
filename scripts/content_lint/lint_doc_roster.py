@@ -62,6 +62,17 @@ from services.supervision.roster.composition import build_services
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SERVICE_ROSTER = _REPO_ROOT / "services" / "supervision" / "roster" / "docs" / "service-roster.md"
 
+
+# meiva:note
+# A roster path as the reader should meet it: repo-relative under this checkout, and a plain name
+# for a path a test built outside it (whose absolute tmp path says nothing about the repository).
+def _shown(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return path.name
+
+
 _SENTINEL = "<!-- lint:roster-table -->"
 
 # Rows that appear in the roster table but are not build_services() entries.
@@ -146,6 +157,13 @@ def check(
                 f"  registered services missing from roster: {sorted(missing)}",
                 file=sys.stderr,
             )
+        print(
+            f"  The roster is a derived view: the fact it lists lives in code, so a row "
+            f"that runs ahead of build_services() teaches a service that does not exist, "
+            f"and a missing row hides one that does. Move the row, add the missing service, "
+            f"or register it. See {_shown(service_roster)}.",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"roster lint OK: {len(documented)} services match build_services().")
@@ -282,6 +300,12 @@ def check_healthcheck_roster(
                 f"  healthcheck modules missing from the roster: {sorted(missing)}",
                 file=sys.stderr,
             )
+        print(
+            f"  The table is a derived view of the module directory, so a row that runs "
+            f"ahead of it names a healthcheck nothing runs, and a missing row hides one that "
+            f"does. Move the row or add the module. See {_shown(roster_path)}.",
+            file=sys.stderr,
+        )
         return 1
     if registered != dir_set:
         print(
@@ -302,6 +326,13 @@ def check_healthcheck_roster(
                 f"{sorted(missing)}",
                 file=sys.stderr,
             )
+        print(
+            f"  Registering a healthcheck is what makes the supervisor run it: a module "
+            f"nobody registers is dead code, and a registration with no module fails at "
+            f"startup. Add the ServiceSpec entry, the composition import, or the module. "
+            f"See {_shown(roster_path)}.",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"healthcheck roster lint OK: {len(parsed)} modules match.")

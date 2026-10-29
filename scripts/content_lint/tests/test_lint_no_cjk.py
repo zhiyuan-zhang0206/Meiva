@@ -155,3 +155,18 @@ def test_unknown_only_target_is_rejected_before_explicit_scan(repo: Path) -> Non
     _write(repo, "docs/clean.md", "clean\n")
     with pytest.raises(SystemExit, match=r"not found: typo\.txt"):
         gate.main(["docs/clean.md", "--only", "typo.txt"], repo_root=repo)
+
+
+# meiva:note
+# The block under the facts is where an author learns why the rule exists and what to do: the fact
+# line stays machine-readable, the block carries the reason, the repair and the owner document.
+# Asserted on fragments so the wording can improve without a test rewrite.
+def test_the_failure_block_carries_the_reason_and_the_owner_document(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(repo, "docs/guide.md", "\u4e2d text\n")
+    assert gate.main(["docs/guide.md"], repo_root=repo) == 1
+    err = capsys.readouterr().err.lower()
+
+    assert "one language" in err
+    assert "agents.md" in err

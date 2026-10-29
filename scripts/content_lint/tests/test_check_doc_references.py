@@ -286,3 +286,23 @@ def test_scan_preserves_checkout_and_skill_symlink_paths(
         ".agents/skills/sample/SKILL.md:1: "
         "`references/missing.md` — no such file (skill references/)\n"
     )
+
+
+# meiva:note
+# The message is the only place an author learns why the reference matters and what to do: the
+# facts stay one line each, and the block under them carries the reason, the repair and the owner
+# document. Asserted on fragments, so the wording can improve without a test rewrite.
+def test_a_failure_carries_the_reason_the_repair_and_the_owner_doc(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # okf_nodes reads the checkout's git index, so the tmp tree has to be a repository first.
+    run_bounded(("git", "-C", str(tmp_path), "init", "-q"), timeout=30)
+    doc = tmp_path / "doc.md"
+    doc.write_text("See [the note](missing.md).\n")
+
+    assert check_doc_references.main(repo=tmp_path, commands=_NO_COMMANDS, docs=[doc]) == 1
+    err = capsys.readouterr().err.lower()
+
+    assert "dead end" in err
+    assert "docs/conventions/doc-maintenance.md" in err

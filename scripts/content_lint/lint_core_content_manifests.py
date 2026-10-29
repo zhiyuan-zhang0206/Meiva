@@ -208,7 +208,17 @@ def main(
             _audit_one(path, derived, repo_root=root)
 
     if errors:
-        print(f"\n{errors} core-content manifest error(s).", file=sys.stderr)
+        print(
+            f"\n{errors} core-content manifest error(s). A core-content manifest states which "
+            f"host versions carry the plugin, checked against the host version derived from this "
+            f"commit: a range that misses it ships a plugin the host refuses to load, and a "
+            f"`requires_commit` that does not resolve claims support nothing tested. Set the "
+            f"range and the pin from the derived version above, or move the manifest to the "
+            f"plugin that really owns the code. See "
+            f"docs/plugins/package-manifest.meiva.okf.md and "
+            f"docs/conventions/engineering/host-versioning.md.",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

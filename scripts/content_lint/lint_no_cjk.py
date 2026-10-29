@@ -140,10 +140,12 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
 
     if total:
         print(
-            "\nRaw CJK found in the repo. Translate prose/copy to English, or "
-            "escape functional CJK data as \\uXXXX (runtime-identical). The only "
-            "exemption is i18n / locale copy: <dir>/messages/*.json, */locales/*, "
-            "*.po, and the base/*_copy.py locale modules. See the docstring at the top of "
+            "\nRaw CJK found in the repo. The tree is read in one language by every "
+            "contributor and agent, so a passage a reader cannot read is a passage nobody "
+            "maintains. Translate prose/copy to English, or escape functional CJK data as "
+            "\\uXXXX (runtime-identical); the only exemption is i18n / locale copy — "
+            "<dir>/messages/*.json, */locales/*, *.po, and the base/*_copy.py locale modules. "
+            "See AGENTS.md (project invariants: English source) and the docstring at the top of "
             "scripts/content_lint/lint_no_cjk.py.",
             file=sys.stderr,
         )

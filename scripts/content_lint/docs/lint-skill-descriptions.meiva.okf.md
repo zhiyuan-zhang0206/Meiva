@@ -36,10 +36,13 @@ Every repo-shipped SKILL.md under meiva_builtins/skills/, meiva_builtins/plugins
 
 A description is the index line an agent reads to decide whether to reach for
 the skill — and for skills injected into the system prompt it sits in *every*
-system prompt. The hard half of a two-tier rule is enforced here: over 80
-units fails. The soft target of 50 units is NOT enforced here — the sweeper's
-`skill-desc` class flags 50-80 descriptions for an agent to trim with
-judgment; mechanical truncation in the prompt was the wrong fix (full
+system prompt. One hard line is enforced here: over 80 units fails, and the
+message says the detail belongs in the skill body rather than in this line —
+where the skill is read only after it is chosen. There is no band below the
+line, not even a non-blocking one: a requested inspection lists the longest
+descriptions by measured length as facts, with no threshold and no "should
+shorten", because a 50-80 flag would teach 50 as the target and buy compressed
+descriptions. Mechanical truncation in the prompt was the wrong fix (full
 descriptions render, length is governed at the source instead).
 
 Units come from the shared `count_words` in `base/packages/text_budget.py` —
@@ -50,7 +53,7 @@ is ~12 words, 80 CJK characters are 80 meaningful characters — so a CJK
 character and a word each count as one unit, which tracks information
 content (and prompt tokens) far better.
 
-A description over the 80-unit hard ceiling prints one error and exits 1; the 50-unit soft target is not enforced by this lint — the sweeper's skill-desc class flags 50-80 descriptions for judgment. The length is measured through the shared count_words in base/packages/text_budget.py (one CJK code point or one non-CJK alphanumeric run is one unit; underscores do not join runs), and the constants move only as a deliberate change in the same PR, justified in the commit message.
+A description over the 80-unit hard ceiling prints one error and exits 1 and names the body as the place for the detail; nothing below the line is enforced, and an inspection lists the longest descriptions as facts rather than flagging a band. The length is measured through the shared count_words in base/packages/text_budget.py (one CJK code point or one non-CJK alphanumeric run is one unit; underscores do not join runs), and the constants move only as a deliberate change in the same PR, justified in the commit message.
 
 ## Identity gate
 

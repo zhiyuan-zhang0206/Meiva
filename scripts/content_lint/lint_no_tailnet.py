@@ -116,12 +116,13 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
 
     if total:
         print(
-            "\nTailnet IP literal found in the repo. Derive the address from "
-            "configuration (MEIVA_GATEWAY_URL / reachable_host()), use a neutral "
-            "site like a 10.x literal for opaque test fixtures, or, when the "
-            "test genuinely exercises the 100.64.0.0/10 range, annotate the "
-            "line with `# tailnet-ip-ok: <reason>`. The CIDR notation "
-            "`100.64.0.0/10` is allowed — it names the range, it is not an "
+            "\nTailnet IP literal found in the repo. This repository is public: a private "
+            "overlay address copies a deployment's topology into it and misleads a consumer "
+            "that runs a different overlay. Derive the address from configuration "
+            "(MEIVA_GATEWAY_URL / reachable_host()), use a neutral site like a 10.x literal "
+            "for opaque test fixtures, or, when the test genuinely exercises the "
+            "100.64.0.0/10 range, annotate the line with `# tailnet-ip-ok: <reason>`. The "
+            "CIDR notation `100.64.0.0/10` is allowed — it names the range, it is not an "
             "address. See the docstring at the top of scripts/content_lint/lint_no_tailnet.py.",
             file=sys.stderr,
         )

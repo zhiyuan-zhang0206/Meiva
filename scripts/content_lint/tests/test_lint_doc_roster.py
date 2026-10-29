@@ -251,3 +251,17 @@ def test_real_healthcheck_documentation_matches_current_sources():
     from services.supervision.roster.composition import build_services
 
     assert lint.check_healthcheck_roster(services=build_services(home=meiva_home())) == 0
+
+
+# meiva:note
+# A set difference alone says which names disagree but not why anyone should care or what the
+# roster is. The block under it does; asserted on fragments so the wording stays free to change.
+def test_the_failure_block_says_what_the_roster_is_and_what_to_do(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = _roster_table("gateway", "labeler", "scheduler")
+    assert _run_service_check(["gateway", "labeler"], text, tmp_path) == 1
+    err = capsys.readouterr().err.lower()
+
+    assert "derived view" in err
+    assert "runbook.md" in err
