@@ -19,7 +19,7 @@ import {
   type FormatShortOptions,
   type FormatUpcomingOptions,
 } from "./time";
-import { DEFAULT_DATE_FORMAT, type DateFormat } from "../contracts/types-settings";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "../contracts/types";
 
 function isClockFormat(value: unknown): value is ClockFormat {
   return value === "24h" || value === "12h";
