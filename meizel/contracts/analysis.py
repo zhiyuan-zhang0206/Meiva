@@ -17,9 +17,18 @@ from meizel.contracts.ambient_read import (
     stale_readers,
     stale_roots,
 )
-from meizel.contracts.debt import PATCH_HINT, PATCH_REASONING, PATCH_WHAT, file_key, set_debt
+from meizel.contracts.debt import (
+    PATCH_HINT,
+    PATCH_REASONING,
+    PATCH_WHAT,
+    DebtEntry,
+    entry_value,
+    file_key,
+    read_entry,
+    set_debt,
+)
 from meizel.contracts.enumerations import check as check_roles
-from meizel.contracts.ledger import debts_in, reconcile
+from meizel.contracts.ledger import account_line, reconcile
 from meizel.contracts.manifest import Manifest, effective_purity, load_manifests, manifest_path
 from meizel.contracts.policy import POLICY, Policy, load_policy, render_policy
 from meizel.contracts.policy import check as check_policy
@@ -49,11 +58,14 @@ from meizel.roles import select_packages
 __all__ = [
     "POLICY",
     "Analysis",
+    "DebtEntry",
     "Policy",
     "analyze",
     "diagnose",
+    "entry_value",
     "load_manifests",
     "load_policy",
+    "read_entry",
     "render_policy",
     "scan_all",
     "set_debt",
@@ -108,17 +120,10 @@ class Analysis:
         )
 
     def ok_line(self) -> str:
-        debts = debts_in(self.manifests)
         scope = "" if self.changed is None else f"{len(self.changed)} changed paths, "
-        carried = (
-            ""
-            if not debts
-            else f"; {debts} recorded debts remain in "
-            f"{sum(1 for m in self.manifests.values() if m.debt)} strict-to-be directories"
-        )
         return (
             f"meizel: ok ({scope}{len(self.facts)} fact edges, "
-            f"{len(self.manifests)} manifests{carried}); "
+            f"{len(self.manifests)} manifests{account_line(self.manifests)}); "
             "implemented checks passed for the reported scope; "
             "not a semantic purity proof or test-resource assessment"
         )

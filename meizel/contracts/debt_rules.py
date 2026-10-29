@@ -155,9 +155,10 @@ def _excess(tree: Baselines, found: Baselines) -> list[tuple[str, str, str, int,
     for owner, table in sorted(tree.items()):
         for code, rows in table.items():
             for key, have in sorted(rows.items()):
-                want = found.get(owner, {}).get(code, {}).get(key, 0)
-                if have > want:
-                    out.append((owner or ".", code.value, key, have, want))
+                entry = found.get(owner, {}).get(code, {}).get(key)
+                want = entry.count if entry is not None else 0
+                if have.count > want:
+                    out.append((owner or ".", code.value, key, have.count, want))
     return out
 
 

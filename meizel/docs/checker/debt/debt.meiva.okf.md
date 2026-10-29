@@ -65,11 +65,33 @@ cycle any more, or is no longer declared, its entries are `debt-paid`. A malform
 `[debt]` is `manifest-debt`. Unresolved imports, stale declarations and manifest
 syntax errors cannot be recorded.
 
+## What one entry says
+
+A `[debt.<code>]` line records a count, and may name the owner paying it down and the condition it
+waits for:
+
+```toml
+[debt.ambient-read]
+"page.py#clock time.time()" = 2                                   # no owner yet
+"boot.py#environ os.environ" = { count = 1, owner = "#7139", until = "waits for the Settings port" }
+```
+
+Both spellings read back as one entry. `count` is required and positive; `owner` and `until` are
+optional, and an empty or unknown field is `manifest-debt` rather than dropped — a misspelt `owner`
+must not read as "no owner". A baseline that names nobody stays byte-identical (a bare count), and
+`record` and `prune` keep the metadata while they change the count.
+
+`check` says how many entries name no owner, and `debt --unowned` lists them as
+`<manifest>: <code> <key> (<count>)`. That number is a to-do, not a gate: requiring an owner on every
+new entry is a later change, once the recorded baseline has been backfilled.
+
 ## Commands
 
 - `debt` inventories manifests without source analysis, even for unparsable code.
-  JSON adds `basis` describing that limit; its legacy `directories.strict_to_be`
-  and `strict` mean with/without recorded debt, not manifest purity modes.
+  JSON adds `basis` describing that limit and `unowned` (the entries naming no owner, and the
+  occurrences they carry); its legacy `directories.strict_to_be` and `strict` mean with/without
+  recorded debt, not manifest purity modes. `--unowned` appends a list of them below the
+  tables, one entry per line.
 - `debt record <paths...>` writes the current violations under the paths into
   their owners' manifests, creating one where there is none (stage it: `check`
   reads tracked files). It is the only way a baseline grows: `check` and
@@ -79,7 +101,8 @@ syntax errors cannot be recorded.
 - `debt prune` lowers counts and drops entries to what still occurs.
 - `debt resolve <meizel.toml>...` resolves merge conflicts inside `[debt.*]` tables: recorded debt is
   derived, so both sides' entries are kept, the lower count wins where both changed, and `prune` follows.
-  A conflict outside the debt tables is refused; nothing is written.
+  Two sides that name different owners are refused: who pays a debt down is not derived, so a person
+  decides it. A conflict outside the debt tables is refused too; nothing is written.
 - `debt carry [--base ref]` follows a move. A baseline names files, so a
   `git mv` leaves the old entries paid and the new place unrecorded. For the
   files git detects as renamed since the branch point with `origin/main`
