@@ -419,10 +419,10 @@ def test_a_file_that_does_not_parse_contributes_nothing() -> None:
 
 def test_a_marker_without_a_reason_is_still_read() -> None:
     # meiva:note
-    # The gate is the marker's own text, so the shortest spelling has to reach the reader
-    # too: `# host-ok:` with nothing after it exempts with an empty reason, and the record
-    # layer is what rejects a reason that names nothing. Narrowing the gate to
-    # `"# host-ok: "` would silently stop reading this line.
+    # The gate is the marker's own text, so its shortest spelling has to reach the reader
+    # too: the marker with nothing after its colon exempts with an empty reason, and the
+    # record layer is what rejects a reason that names nothing. Narrowing the gate to one
+    # that also demands a space after the colon would silently stop reading this line.
     src = "def test_x():\n    assert sys.platform == 'darwin'  # host-ok:\n"
     assert _lint.exemptions_in_source(src) == [("test_x", "")]
     assert _lint.judge_source(src)[0] == []
