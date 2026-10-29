@@ -11,7 +11,14 @@ import type { ReactNode } from "react";
 
 import { AlertsCountPill } from "@/components/notifications/alerts-badge";
 import { cn } from "@/lib/format/utils";
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
+import {
+  BAR_DIVIDER_CLASS,
+  BAR_HEIGHT_CLASS,
+  FLEX,
+  FLEX_1,
+  ICON_SIZE_CLASS,
+  MIN_W_0,
+} from "@/lib/layout/layout";
 
 interface Props {
   label: string;
@@ -77,7 +84,7 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
           aria-pressed={false}
           data-testid="sidebar-toggle"
         >
-          <PanelLeft className="size-4" />
+          <PanelLeft className={ICON_SIZE_CLASS} />
           {alertCount > 0 ? (
             <AlertsCountPill count={alertCount} testId="sidebar-toggle-alert-count" />
           ) : null}
@@ -108,7 +115,7 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
                 : t("openSidebar")
             }
           >
-            <Menu className="size-5" />
+            <Menu className={ICON_SIZE_CLASS} />
             {alertCount > 0 ? (
               <AlertsCountPill count={alertCount} testId="mobile-sidebar-alert-count" />
             ) : null}
