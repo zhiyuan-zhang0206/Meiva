@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import ast
+import os
 import subprocess
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +16,7 @@ from base.host.system.tests.fake_commands import (
     Reply,
     fake_host,
 )
+from base.paths import repo_root
 
 
 def test_it_is_a_command_runner_that_records_each_call() -> None:
@@ -116,3 +121,76 @@ def test_a_fake_host_finds_only_the_programs_it_was_given_and_runs_nothing_unscr
     with pytest.raises(AssertionError, match="unscripted"):
         host.run(["gh", "auth", "status"], timeout=5)
     assert fake_host().platform == LINUX_X86
+
+
+# meiva:note
+# The identity a test host impersonates comes from the process running the test. A canned
+# default agrees with the files a test makes only on a machine whose uid happens to be that
+# constant, which is how #7529 and #7648 passed locally and failed on CI.
+def test_a_fake_host_is_owned_by_the_user_running_the_test_unless_it_is_told_otherwise() -> None:
+    assert fake_host().uid == os.geteuid()
+    assert fake_host(uid=501).uid == 501
+
+
+# meiva:note
+# The guard against writing that trap again: no test double may pin an identity it should
+# derive. A fixture whose parameter *is* the behaviour under test says so here, with why.
+#
+# What it cannot see: a *call site* that omits the argument and then asserts a literal
+# identity (`launchctl bootstrap gui/1000 ...`). That keeps passing here and fails only
+# where the machine's uid differs — `autostart/test_registration.py` was exactly that
+# (2026-10-29). Deriving a default moves the risk from the signature to the literal, so
+# a scan of signatures says nothing about the assertions around them.
+_PINNED_IDENTITY: dict[tuple[str, str, str], str] = {
+    ("base/host/system/tests/test_boot_unit.py", "_linux", "uid"): (
+        "every caller but one exercises the root-only branch of the boot unit; a derived uid "
+        "would select the unprivileged branch instead"
+    ),
+}
+_IDENTITY_PARAMETERS = frozenset({"uid", "euid", "hostname", "host_name", "os_user", "user_name"})
+_SKIPPED_DIRECTORIES = frozenset({"__pycache__", "node_modules"})
+
+
+def _test_modules(repo: Path) -> Iterator[Path]:
+    for current, directories, files in os.walk(repo):
+        directories[:] = sorted(
+            d for d in directories if d not in _SKIPPED_DIRECTORIES and not d.startswith(".")
+        )
+        if "tests" not in Path(current).relative_to(repo).parts:
+            continue
+        for name in sorted(files):
+            if name.endswith(".py"):
+                yield Path(current) / name
+
+
+def _pinned_identity_defaults(tree: ast.AST) -> Iterator[tuple[str, str]]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        positional = [*node.args.posonlyargs, *node.args.args]
+        filled: list[ast.expr | None] = [None] * (len(positional) - len(node.args.defaults))
+        pairs = [*zip(positional, [*filled, *node.args.defaults], strict=True)]
+        pairs += [*zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)]
+        for argument, default in pairs:
+            if argument.arg not in _IDENTITY_PARAMETERS or default is None:
+                continue
+            if isinstance(default, ast.Constant) and default.value is None:
+                continue
+            yield node.name, argument.arg
+
+
+def test_no_test_double_pins_an_identity_it_should_derive() -> None:
+    repo = repo_root()
+    pinned: list[tuple[str, str, str]] = []
+    for path in _test_modules(repo):
+        source = path.read_text(encoding="utf-8")
+        if "fake_host(" not in source and "Host(" not in source:
+            continue
+        for function, parameter in _pinned_identity_defaults(ast.parse(source)):
+            pinned.append((path.relative_to(repo).as_posix(), function, parameter))
+
+    unexplained = [entry for entry in pinned if entry not in _PINNED_IDENTITY]
+    assert unexplained == [], (
+        "a test double pins an identity the running user owns; derive it (uid=None) and let "
+        f"the caller pass a specific account, or record why the constant is the point: {unexplained}"
+    )
