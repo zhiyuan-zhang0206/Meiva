@@ -779,3 +779,22 @@ def test_a_patch_added_where_an_approval_was_taken_away_is_content_growth(
     out = capsys.readouterr().out
     assert "guards.py#exec" in out
     assert "guards.py#monkeypatch.setattr lib.helper (first-party-patch) 2 recorded, 1 found" in out
+
+
+# meiva:note
+# The failure names the ref and the table shows the movement; the block after it says what a grown
+# baseline costs and where to look. Asserted on fragments, so the wording stays free to change.
+def test_the_growth_failure_says_why_and_where_to_look(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo)
+    rule_change(root)
+    write(root, {"app/y.py": "import lib._hidden\n"})
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 1
+    err = capsys.readouterr().err.lower()
+
+    assert "only shrink" in err
+    assert "debt diff --by-target" in err
+    assert "meizel/docs/checker/debt/debt.meiva.okf.md" in err
