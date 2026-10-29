@@ -28,6 +28,12 @@ from gateway.tests.support.runner_ops.ops_stub import (
 
 _UP = datetime(2026, 5, 24, tzinfo=UTC)
 
+# meiva:note
+# The budget this file's blackhole tests hand the probe — this test's own input, not a copy of the
+# shipped `gateway.status_probe_timeout_seconds`. A whole second keeps a localhost dial well inside
+# one window, so "the first attempt arrived" is never a race while a second window stays observable.
+_BLACKHOLE_BUDGET_S = 1.0
+
 
 def _row(
     url: str | None, *, description: str | None = None, stopped_at: datetime | None = None
@@ -74,6 +80,16 @@ async def test_a_missing_registered_url_is_offline_without_a_dial(
 # meiva:note
 # Retry is inside one roster deadline: a blackholed first attempt is cancelled at the
 # configured budget rather than getting a second full timeout window.
+#
+# The judge is the wire, not a clock. Two facts make the count structural here: the dispatcher's
+# total deadline is no larger than one attempt's own window, and a blackholed first attempt spends
+# that whole window, so the retry's backoff (`retry_delay_s(0, jitter)` = 0.5s x jitter, with jitter
+# in [0.5, 1.5] -> 0.25-0.75s) can only land past the deadline and the second attempt never opens:
+# exactly one `status_probe` envelope arrives. A fast failure (a 503) does retry inside the window,
+# as it should -- that path has its own test. `elapsed < 0.5` judged how busy the batch runner was
+# instead: it went red on a loaded trunk batch (2026-10-29T15:22Z, `assert 0.565 < 0.5`) with this
+# budget logic unchanged, and on the base tree the same per-segment budget that spends the window
+# twice passed it.
 @pytest.mark.asyncio
 async def test_a_blackhole_stays_inside_the_single_total_budget(
     db_conn: psycopg.Connection,
@@ -90,18 +106,25 @@ async def test_a_blackhole_stays_inside_the_single_total_budget(
         return completed({})
 
     with runner_ops(db_conn, "runner-a", {"status_probe": never_answers}) as runner:
-        started = time.monotonic()
         try:
             row = await status_router.probe_agent_runner(
-                roster_env(database, machine_identity, home=tmp_path, probe_timeout_s=0.05),
+                roster_env(
+                    database,
+                    machine_identity,
+                    home=tmp_path,
+                    probe_timeout_s=_BLACKHOLE_BUDGET_S,
+                ),
                 _row(runner.url),
             )
         finally:
             release.set()
-        elapsed = time.monotonic() - started
 
     assert row.online is False
-    assert elapsed < 0.5
+    # meiva:note
+    # One envelope, one window. A second one means the retry got a budget of its own — the total
+    # deadline was dropped, or the budget was spent per segment — which is exactly the shape this
+    # row is protected from, whatever the machine's load.
+    assert len(runner.calls_of("status_probe")) == 1
 
 
 @pytest.mark.asyncio
