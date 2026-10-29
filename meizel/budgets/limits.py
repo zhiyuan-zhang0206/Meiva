@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from meizel.budgets import budget_plans, directory_budget
-from meizel.graph.universe import GitRepo
+from meizel.checkout import GitRepo
 from meizel.lint_common import read_utf8_text
 
 __all__ = ["budget_files", "check"]

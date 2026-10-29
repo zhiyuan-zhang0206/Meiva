@@ -24,7 +24,7 @@ from meizel.contracts.debt import (
 from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
+from meizel.graph.universe import MANIFEST, Checkout, Universe, parent_of
 
 __all__ = [
     "Baselines",
@@ -56,7 +56,7 @@ def read_baselines(universe: Universe, texts: Mapping[str, str] | None = None) -
     found: Baselines = {}
     for directory in sorted(universe.manifest_dirs):
         path = manifest_path(directory)
-        raw = texts[path] if texts is not None and path in texts else universe.load_text(path)
+        raw = texts[path] if texts is not None and path in texts else universe.repo.load_text(path)
         table = _parse(raw, path)
         if table:
             found[directory] = table
@@ -195,7 +195,7 @@ def _unowned_lines(baselines: Baselines) -> list[str]:
     return lines
 
 
-def summarize(repo: GitRepo, *, as_json: bool, unowned_list: bool = False) -> str:
+def summarize(repo: Checkout, *, as_json: bool, unowned_list: bool = False) -> str:
     data = _report(repo.universe(), unowned_list=unowned_list)
     return json.dumps(data, indent=2, sort_keys=True) if as_json else _text(data)
 
@@ -229,7 +229,7 @@ def _totals_in(text: str) -> Counter[str]:
 
 # meiva:note
 # The text of every `meizel.toml` at a git ref, by repository path.
-def manifest_texts_at(repo: GitRepo, ref: str) -> dict[str, str]:
+def manifest_texts_at(repo: Checkout, ref: str) -> dict[str, str]:
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
     listing = repo.run_bytes("ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0")
@@ -251,14 +251,14 @@ def manifest_texts_at(repo: GitRepo, ref: str) -> dict[str, str]:
     return texts
 
 
-def totals_at(repo: GitRepo, ref: str) -> Counter[str]:
+def totals_at(repo: Checkout, ref: str) -> Counter[str]:
     totals: Counter[str] = Counter()
     for text in manifest_texts_at(repo, ref).values():
         totals.update(_totals_in(text))
     return totals
 
 
-def diff(repo: GitRepo, ref: str) -> tuple[list[str], bool]:
+def diff(repo: Checkout, ref: str) -> tuple[list[str], bool]:
     """Per-code totals against `ref`, and whether any code grew.
 
     Totals, not directories, are compared: debt that moves with a file between directories
@@ -336,7 +336,7 @@ def _grouped(
     return groups
 
 
-def by_target(repo: GitRepo, ref: str, prefixes: list[str], depth: int) -> list[str]:
+def by_target(repo: Checkout, ref: str, prefixes: list[str], depth: int) -> list[str]:
     """Recorded patch debt per target group against `ref`: what a change paid down or added.
 
     Counts come from the baselines, keyed by the target of each entry, so debt that moves with

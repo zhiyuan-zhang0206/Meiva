@@ -1,7 +1,7 @@
 exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "graphs.py" = "strict"
 "imports.py" = "strict"
 "model.py" = "strict"
@@ -9,16 +9,3 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 
 [uses]
 "imports.py" = ["model.py", "scopes.py", "universe.py"]
-"universe.py" = ["model.py"]
-
-[debt.impure-call]
-"universe.py#Path.is_file" = 4
-"universe.py#Path.is_symlink" = 2
-"universe.py#Path.mkdir" = 3
-"universe.py#Path.read_bytes" = 3
-"universe.py#Path.resolve" = 1
-"universe.py#Path.rmdir" = 2
-"universe.py#Path.unlink" = 3
-"universe.py#Path.write_bytes" = 1
-"universe.py#import subprocess" = 1
-"universe.py#os.walk" = 1
