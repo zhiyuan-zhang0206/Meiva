@@ -6,9 +6,9 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from meizel import is_repo_test_file, is_test_path, restrict, split_only
-from meizel.checkout import tracked_files
+from meizel.checkout import roles_at, tracked_files
 from meizel.graph.model import MeizelError
-from meizel.roles import packages, pytest_test_hosts
+from meizel.roles import pytest_test_hosts, select_packages
 
 __all__ = [
     "FRAMEWORK_DIRS",
@@ -27,10 +27,11 @@ __all__ = [
 ]
 
 # meiva:note
-# The governed production code, including independently packaged projects. Lints
-# whose scope is "the framework" import this instead of keeping their own copy,
-# so a new or renamed package cannot drift out of one lint's scope unnoticed.
-FRAMEWORK_DIRS = packages("application", "standalone")
+# The governed production code, including independently packaged projects. Lints whose scope is
+# "the framework" import this instead of keeping their own copy, so a new or renamed package cannot
+# drift out of one lint's scope unnoticed. `meizel.roles` decides nothing about where a repository
+# is, so this file reads the roles once, where it already owns the checkout dependency.
+FRAMEWORK_DIRS = select_packages(roles_at(Path(__file__).parents[1]), "application", "standalone")
 
 
 # meiva:note

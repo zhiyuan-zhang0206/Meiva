@@ -16,11 +16,12 @@ from pathlib import Path, PurePosixPath
 from radon.complexity import ComplexityVisitor
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 — standalone script
-from meizel.budgets import limits  # noqa: E402 — standalone script
-from meizel.checkout import load_universe  # noqa: E402
+from meizel import lint_common  # noqa: E402
+from meizel.budgets import limits  # noqa: E402
+from meizel.checkout import load_universe, roles_at  # noqa: E402
 from meizel.contracts.analysis import (  # noqa: E402
     load_manifests,
     load_policy,
@@ -29,13 +30,15 @@ from meizel.contracts.analysis import (  # noqa: E402
 )
 from meizel.graph.model import MeizelError, Sources  # noqa: E402
 from meizel.graph.universe import Universe  # noqa: E402
-from meizel.language import path_imports  # noqa: E402 — standalone script
+from meizel.language import path_imports  # noqa: E402
 from meizel.language.scan import scan_tree  # noqa: E402
-from meizel.owners import decisions  # noqa: E402 — standalone script
-from meizel.roles import packages, select_packages  # noqa: E402
-from meizel.state import ambient_state, machine_role  # noqa: E402 — standalone script
-from scripts.structure import baseline_shards, locality  # noqa: E402 — standalone script
-from scripts.structure.budgets import quality_budget  # noqa: E402 — standalone script
+from meizel.owners import decisions  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
+from meizel.state import ambient_state, machine_role  # noqa: E402
+from scripts.structure import baseline_shards, locality  # noqa: E402
+from scripts.structure.budgets import quality_budget  # noqa: E402
+
+ROLES = roles_at(_REPO_ROOT)
 
 __all__ = ["main"]
 
@@ -45,8 +48,10 @@ _MEASURED_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SE
 
 # AST rules track the application packages; budgets also cover tooling/tests.
 _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
-_AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
-_STRUCTURE_DIRS = packages("application", "standalone", "tests", "tooling")
+_AST_DIRS = select_packages(
+    ROLES, "application", "standalone", "templates"
+)  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
+_STRUCTURE_DIRS = select_packages(ROLES, "application", "standalone", "tests", "tooling")
 
 
 def _scan_file(tree: ast.Module, rel_path: str) -> list[tuple[int, str]]:
@@ -73,7 +78,7 @@ def _parse_baseline(
     """Validate the remaining site exemptions; any other section is an error."""
     baseline = baseline_shards.merge(shards, _SITE_SECTIONS)
     for kind in _SITE_SECTIONS:
-        scope = ambient_state.SCOPE if kind == ambient_state.SECTION else _SCAN_DIRS
+        scope = _AST_DIRS if kind == ambient_state.SECTION else _SCAN_DIRS
         locality.validate_entries(kind, baseline[kind], _carried_scope(scope, renames or {}))
     return baseline
 
@@ -324,7 +329,7 @@ def _governed(
     in_ast = path in ast_files
     return (
         in_ast and _in_scan_scope(rel),
-        in_ast and ambient_state.in_scope(rel),
+        in_ast and ambient_state.in_scope(rel, _AST_DIRS),
         type_ctx.in_scope(path, rel),
     )
 
@@ -383,7 +388,7 @@ def _check_ast_and_quality(
             errors.extend(f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel))
             _collect_locality(tree, rel, sites, scanned, type_ctx.scopes)
         if ambient:
-            errors.extend(ambient_state.collect(tree, rel, ambient_tree, sites, scanned))
+            errors.extend(ambient_state.collect(tree, rel, ambient_tree, sites, scanned, _AST_DIRS))
         if path in files:
             for kind, values in measure_quality(tree, rel).items():
                 measurements[kind].update(values)

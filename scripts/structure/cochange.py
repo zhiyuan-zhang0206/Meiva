@@ -50,7 +50,11 @@ from scripts.structure import imports
 
 __all__ = ["main"]
 
+from meizel.checkout import roles_at
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+ROLES = roles_at(_REPO_ROOT)
 _DEFAULT_DAYS = 90
 _DEFAULT_MIN_SUPPORT = 8
 _DEFAULT_MIN_CONFIDENCE = 0.6

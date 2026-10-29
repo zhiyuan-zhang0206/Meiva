@@ -3,11 +3,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from meizel.roles import packages
+from meizel.checkout import roles_at
+from meizel.roles import select_packages
 
 _REPO = Path(__file__).resolve().parents[3]
 
-_SCAN_DIRS = packages("application")
+_SCAN_DIRS = select_packages(roles_at(_REPO), "application")
 
 _REAPER_STAMP = re.compile(r"termination_source\s*=\s*'reaper'")
 _MARKER_CLEAR = re.compile(r"last_turn_fatal_at\s*=\s*NULL")

@@ -9,6 +9,7 @@ import pytest
 from meizel.state import ambient_state
 from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state.module import Module, Tree
+from meizel.state.ambient_state.tests.conftest import SCOPE
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -28,7 +29,7 @@ def _sites(
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, _tree(root))
+    measured = ambient_state.measure(tree, rel, _tree(root), SCOPE)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 

@@ -17,10 +17,13 @@ from time import perf_counter
 
 import pytest
 
+from meizel.checkout import roles_at
 from scripts.ci import shard_counts, test_selector
 from scripts.ci.test_impact import python_files
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+ROLES = roles_at(_REPO_ROOT)
 _ESTIMATE_CHILD = Path(__file__).with_name("child_estimate_seconds.py")
 
 

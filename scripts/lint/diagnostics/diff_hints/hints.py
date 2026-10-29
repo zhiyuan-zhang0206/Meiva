@@ -31,10 +31,12 @@ from typing import TypeGuard
 # A standalone script: the repository root goes on the path before the first import of
 # the repository's own packages.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
+
 sys.path.insert(0, str(_REPO_ROOT))
 
+from meizel.checkout import roles_at  # noqa: E402
 from meizel.graph.model import AmbientKind  # noqa: E402
-from meizel.roles import all_packages, packages  # noqa: E402
+from meizel.roles import all_packages, select_packages  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.acks import (  # noqa: E402
     answers,
     parse_acks,
@@ -64,6 +66,8 @@ from scripts.lint.diagnostics.diff_hints.render import (  # noqa: E402
 )
 from scripts.lint.diagnostics.diff_hints.scope import classify, is_test_path  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.stats import statistics  # noqa: E402
+
+ROLES = roles_at(_REPO_ROOT)
 
 # meiva:note
 # The diff the hints read. Prefixes are explicit because `diff.mnemonicPrefix` and
@@ -102,9 +106,9 @@ def _git(*args: str) -> bytes:
 
 def _roles() -> Roles:
     return Roles(
-        production=frozenset(packages("application", "standalone", "templates")),
-        tests=frozenset(packages("tests")),
-        first_party=frozenset(all_packages()),
+        production=frozenset(select_packages(ROLES, "application", "standalone", "templates")),
+        tests=frozenset(select_packages(ROLES, "tests")),
+        first_party=frozenset(all_packages(ROLES)),
     )
 
 

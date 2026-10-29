@@ -3,3 +3,12 @@ exports = ["conftest.py"]
 [external]
 "test_task_owner.py" = "executes sample source the lint rule is exercised on"
 "test_thread_owner.py" = "executes sample source the lint rule is exercised on"
+
+[uses]
+"test_ambient_bundle.py" = ["conftest.py"]
+"test_ambient_effects.py" = ["conftest.py"]
+"test_ambient_state.py" = ["conftest.py"]
+"test_task_owner.py" = ["conftest.py"]
+"test_task_owner_span.py" = ["conftest.py"]
+"test_thread_admission.py" = ["conftest.py"]
+"test_thread_owner.py" = ["conftest.py"]
