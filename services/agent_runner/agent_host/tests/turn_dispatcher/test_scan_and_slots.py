@@ -19,9 +19,10 @@ from services.agent_runner.agent_host.dispatcher import (
 )
 from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import (
     QueueingPubSub,
+    QueueingRedisOpener,
     Recorder,
     StuckTurn,
-    patch_redis,
+    redis_bus,
     releasing_stuck_turn,
     settle,
 )
@@ -238,18 +239,16 @@ class TestStallRestartEscalation:
         await settle()
         assert sched.restart_required is False
 
-    async def test_the_dispatcher_loop_exits_when_restart_is_required(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_the_dispatcher_loop_exits_when_restart_is_required(self) -> None:
         pubsub = QueueingPubSub()
-        patch_redis(monkeypatch, pubsub)
+        opener = QueueingRedisOpener(pubsub)
         scheduler = ScanScheduler(restart_required=True)
 
         async def _pending() -> list[int]:
             return []
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            redis_bus(opener),
             scheduler,
             pending_scan=_pending,
             scan_interval_s=0.005,
@@ -259,6 +258,7 @@ class TestStallRestartEscalation:
         )
         with pytest.raises(dispatcher.HostRestartRequiredError, match="supervisor recovery"):
             await asyncio.wait_for(disp.run(), timeout=2.0)
+        assert len(opener.clients) == 1
 
 
 class TestScanNeverCancelsATurn:
