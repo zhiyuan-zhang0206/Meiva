@@ -63,6 +63,7 @@ __all__ = [
     "analyze",
     "diagnose",
     "entry_value",
+    "exempt_test_modules",
     "load_manifests",
     "load_policy",
     "read_entry",
@@ -315,8 +316,9 @@ def _stale_approvals(
 # The modules the run's facts show as test code that nothing outside the tests imports, each named
 # the way a patch target names it: a TypeScript file by its path, a Python module by its dotted name
 # (`meizel/tests/codes/test_x.py` is `meizel.tests.codes.test_x`). An importer the run did not scan cannot
-# clear the exemption: the answer is as complete as the run's fact graph.
-def _test_code_modules(facts: Iterable[Fact]) -> frozenset[str]:
+# clear the exemption: the answer is as complete as the run's fact graph. Public because the check's own
+# test states this set and the production import that empties one entry.
+def exempt_test_modules(facts: Iterable[Fact]) -> frozenset[str]:
     reached = [fact for fact in facts if fact.kind in (FactKind.IMPORT, FactKind.PATCH)]
     shipped = {fact.dst for fact in reached if not is_test_file(fact.src)}
     return frozenset(
@@ -378,7 +380,7 @@ def _patch_diagnostics(
     scans: Iterable[FileScan], approved: Collection[str], facts: Iterable[Fact]
 ) -> list[Diagnostic]:
     found: list[Diagnostic] = []
-    test_code = _test_code_modules(facts)
+    test_code = exempt_test_modules(facts)
     for scan in scans:
         if scan.path in approved:
             continue

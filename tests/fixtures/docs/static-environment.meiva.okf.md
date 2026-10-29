@@ -18,7 +18,9 @@ tags:
 and selection canaries.
 Directory ownership includes descendant tests and their existing local fixtures,
 except the exact `NATIVE_TEST_PATHS` compiler-contract files: the TypeScript
-scanner, AST, language parity, holder-evidence and `[roots]`-warning scope tests. They use the real Node
+scanner, AST, language parity, holder-evidence, `[roots]`-warning scope tests and the
+whole-tree test-code accounting table, which analyzes this repository and so needs the same
+Node producer. They use the real Node
 producer and locked TypeScript package and run in the existing native backend
 job with Node/npm dependencies. Static recursion excludes those files, explicit
 static requests refuse them, and native `--omit-static-tests` traverses the owned
