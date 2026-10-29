@@ -1,0 +1,4 @@
+# meiva:note
+# `status_root.py` is the fake root control socket: other components' tests point an observation
+# at it, so this directory exports it.
+exports = ["status_root.py"]

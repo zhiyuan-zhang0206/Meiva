@@ -72,6 +72,8 @@ from tests.e2e._ports import (
 from tests.e2e._truncate import truncate_with_deadlock_retry
 from tests.e2e.fixture_environment import E2EEnv
 from tests.e2e.process_support import (
+    SERVING_OWNER,
+    SERVING_READER,
     gc_orphan_e2e_dirs,
     listener_evidence,
     managed_proc,
@@ -494,6 +496,7 @@ def gateway_proc(scenario_env: None) -> Iterator[str]:
         sys.executable,
         "-m",
         "tests.e2e.process_support",
+        SERVING_OWNER,
         generation,
         "uvicorn",
         "gateway.app:create_app_from_environment",
@@ -604,7 +607,14 @@ def agent_host_proc(
     agent_host_health_reservation: PortReservation,
 ) -> Iterator[None]:
     """Run the local agent host with this test's model and machine identity."""
-    cmd = [sys.executable, "-m", "tests.e2e.process_support", gateway_proc, _AGENT_HOST_MODULE]
+    cmd = [
+        sys.executable,
+        "-m",
+        "tests.e2e.process_support",
+        SERVING_READER,
+        gateway_proc,
+        _AGENT_HOST_MODULE,
+    ]
     env = os.environ.copy()
     # Prod-shaped launch: the `agent` profile (marker-less construction masked a
     # `runner`-profile soak crash, 2026-08-30) dialing as a write generation's
@@ -662,7 +672,14 @@ def ops_proc(gateway_proc: str, agent_host_health_reservation: PortReservation) 
     log_path = _LOG_DIR / f"ops-{_E2E_SUFFIX}.log"
     reservation.release()
     with managed_proc(
-        [sys.executable, "-m", "tests.e2e.process_support", gateway_proc, _AGENT_OPS_MODULE],
+        [
+            sys.executable,
+            "-m",
+            "tests.e2e.process_support",
+            SERVING_READER,
+            gateway_proc,
+            _AGENT_OPS_MODULE,
+        ],
         env=env,
         label="ops",
         log_path=str(log_path),

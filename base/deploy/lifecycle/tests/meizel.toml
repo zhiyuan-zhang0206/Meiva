@@ -1,11 +1,8 @@
-exports = ["serving_entrypoint.py", "serving_root.py"]
+exports = ["second_root_owner.py", "serving_root.py"]
 
 [uses]
 "conftest.py" = ["serving_root.py"]
 "test_pause_markers.py" = ["pause_lock_child.py"]
-"test_start_serving.py" = ["serving_entrypoint.py", "serving_root.py"]
+"test_start_serving.py" = ["serving_root.py"]
 "test_status_journal.py" = ["reaped_child.py"]
-
-[debt.first-party-patch]
-"serving_entrypoint.py#assignment base.deploy.lifecycle.start_serving.is_serving" = 1
-"serving_entrypoint.py#assignment base.deploy.lifecycle.start_serving.recovery_permitted" = 1
+"test_status_root.py" = ["second_root_owner.py"]
