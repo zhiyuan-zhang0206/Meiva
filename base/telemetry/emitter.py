@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from base.events.contract import EVENTS
@@ -52,7 +53,7 @@ from base.telemetry.delivery.reporting import (
 )
 from base.telemetry.delivery.serialization import event_line, event_line_digest, event_payload
 from base.telemetry.delivery.state import ambient_agent_id, process_state, resolve_machine
-from base.telemetry.observability import cluster_label
+from base.telemetry.observability import UNKNOWN_CLUSTER, cluster_label
 
 __all__ = [
     "Category",
@@ -115,6 +116,7 @@ def init_telemetry(
     process: str = "unknown",
     agent_id: int | None = None,
     pipeline: EventPipeline,
+    home: Path,
     machine_reader: Callable[[], str] | None = None,
 ) -> None:
     """Bind process identity and bring up the event pipeline. Idempotent.
@@ -137,8 +139,12 @@ def init_telemetry(
     process_state["agent_id"] = agent_id
     if machine_reader is not None or process_state["machine"] is None:
         process_state["machine"] = resolve_machine(machine_reader)
+    # meiva:note
+    # The cluster label is materialized once, here, from the home the boot hands in: every
+    # later event row reads the slot, so a process cannot emit rows that answer for another
+    # unit's home. A process that never calls this emits `.unknown` instead (see `_event`).
     if process_state["cluster"] is None:
-        process_state["cluster"] = cluster_label()
+        process_state["cluster"] = cluster_label(home)
     if process_state["pipeline"] is None:
         process_state["pipeline"] = pipeline
 
@@ -269,7 +275,7 @@ def prepare_event(
             if machine_reader is not None
             else process_state["machine"] or resolve_machine()
         ),
-        cluster=process_state["cluster"] or cluster_label(),
+        cluster=process_state["cluster"] or UNKNOWN_CLUSTER,
         process=process_state["process"],
         category=category,
         event_name=event_name,

@@ -29,6 +29,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.paths import meiva_home
 from services.wake.heartbeat.daemon import reconcile_checkin_outcomes, sweep_backoff_resets
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 from services.wake.heartbeat.tests.heartbeat_support import BACKOFF_MAX_INTERVAL_S
@@ -47,7 +48,10 @@ def event_pipeline(
     )
     try:
         telemetry.init_telemetry(
-            process="test-wake-service", pipeline=pipeline, machine_reader=machine_identity.name
+            home=meiva_home(),
+            process="test-wake-service",
+            pipeline=pipeline,
+            machine_reader=machine_identity.name,
         )
         yield pipeline
     finally:

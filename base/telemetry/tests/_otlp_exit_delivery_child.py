@@ -28,7 +28,7 @@ def main() -> None:
         machine=ConfiguredMachineIdentity(config),
         home=meiva_home(),
     )
-    telemetry.init_telemetry(process="exit-seam-probe", pipeline=pipeline)
+    telemetry.init_telemetry(home=meiva_home(), process="exit-seam-probe", pipeline=pipeline)
     telemetry.emit("log", "log", attributes={"seq": "early", "marker": marker})
     telemetry.sync()
     telemetry.emit("log", "log", attributes={"seq": "tail", "marker": marker})

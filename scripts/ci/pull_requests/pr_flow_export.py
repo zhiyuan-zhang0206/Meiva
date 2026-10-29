@@ -603,18 +603,20 @@ def build_snapshot(
     }
 
 
-def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool, pipeline: EventPipeline) -> None:
+def emit_snapshot(
+    snapshot: dict[str, Any], *, dry_run: bool, pipeline: EventPipeline, home: Path
+) -> None:
     """Emit the daily + run events through the unified telemetry pipeline."""
     if dry_run:
         return
-    emit_events(snapshot, pipeline=pipeline)
+    emit_events(snapshot, pipeline=pipeline, home=home)
 
 
-def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline) -> None:
+def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Path) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
     from base import telemetry
 
-    telemetry.init_telemetry(process=PROCESS_NAME, pipeline=pipeline)
+    telemetry.init_telemetry(home=home, process=PROCESS_NAME, pipeline=pipeline)
     pipeline.warmup_exports()
     for day, entry in sorted(snapshot["days"].items()):
         attributes = {key: value for key, value in entry.items() if value is not None}
@@ -711,7 +713,7 @@ def main(
         from scripts.ci.pull_requests.export_process import owned_event_pipeline
 
         with owned_event_pipeline(PROCESS_NAME, image=image, home=home) as pipeline:
-            emit_snapshot(snapshot, dry_run=False, pipeline=pipeline)
+            emit_snapshot(snapshot, dry_run=False, pipeline=pipeline, home=home)
 
     if args.print_snapshot:
         print(json.dumps(snapshot, indent=1, sort_keys=True))

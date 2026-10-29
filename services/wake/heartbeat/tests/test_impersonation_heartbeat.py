@@ -17,6 +17,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.paths import meiva_home
 from base.tests.impersonation.support import accept_controller, create_native_owner
 from meiva.sdk_surface.installation import Installation
 from services.wake.heartbeat.daemon import (
@@ -66,7 +67,10 @@ def event_pipeline(
     )
     try:
         telemetry.init_telemetry(
-            process="test-wake-service", pipeline=pipeline, machine_reader=machine_identity.name
+            home=meiva_home(),
+            process="test-wake-service",
+            pipeline=pipeline,
+            machine_reader=machine_identity.name,
         )
         yield pipeline
     finally:

@@ -178,6 +178,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
         database=lambda: database, machine=machine_identity, home=meiva_home()
     )
     sink_id = add_event_sink(
+        home=meiva_home(),
         process="test-exec-envelope",
         producer=lambda: pipeline,
         machine_reader=machine_identity.name,

@@ -25,7 +25,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from base import telemetry
 from base.db import Database
-from base.paths import logs_path
+from base.paths import logs_path, meiva_home
 from base.telemetry.delivery import loss
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -253,7 +253,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
             home=tmp_path,
         )
     try:
-        telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
+        telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
         telemetry.emit("log", "log", agent_id=AGENT, attributes={"msg": "boom"})
         telemetry.sync()
     finally:
