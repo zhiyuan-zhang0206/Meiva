@@ -833,9 +833,9 @@ jobs:
         # A Trunk batch is the exception: the queue writes the batch's body itself, and its branch
         # keeps each member's own commit behind a queue merge that this job's shallow checkout never
         # walks to, so a batch's record is the pull request(s) the batch names and tests, read through
-        # `gh`. A run that cannot read them lists the removals and passes: ejecting a batch over a
-        # record the run never held costs the queue more than an unanswered removal costs its
-        # reviewer. A local run reads the commits; --record names a file to read. Added entries are
+        # `gh`. A batch with a removal standing that cannot read them names the record it could not
+        # read and fails; with nothing removed it never reads a record at all. A local run reads the
+        # commits; --record names a file to read. Added entries are
         # reported in the summary and never asked about: a widening is what the reviewer reads in the
         # diff, not a declaration to write.
         #
@@ -858,6 +858,19 @@ jobs:
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-removal=fail \
             --event "${GITHUB_EVENT_PATH:-}" --summary "$GITHUB_STEP_SUMMARY" \
             --record-out "$RUNNER_TEMP/pull-request-record.md"
+
+      - name: Detection surface against the base (listed, never required)
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
+        # What the checker can still report is decided by this repository's meizel.policy.toml and by
+        # every directory's meizel.toml `[roots]` and `[state]`; only a *removal* of one has a gate
+        # (the step above). An added allowance, an added `unless` clause and an added root all narrow
+        # the surface quietly: every gate still passes and nothing is printed anywhere. So the whole
+        # comparison is printed here as one block, by direction - narrower, wider, moved, unknown -
+        # and it never fails a run. The block exists so a reviewer sees a quiet narrowing, not so a
+        # run stops on one.
+        run: |
+          env -u VIRTUAL_ENV uv run python -m meizel policy surface \
+            --against "$LINT_STRUCTURE_BASELINE_BASE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Recorded locality debt against the base (fails on growth)
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}

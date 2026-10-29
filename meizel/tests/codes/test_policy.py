@@ -267,3 +267,132 @@ def test_policy_diff_lists_a_clause_change_on_its_own(
     out = capsys.readouterr().out.splitlines()
     assert "~ [ambient-readers.pid unless] app.reader(): unless euid -> unless uid" in out
     assert not [line for line in out if line.startswith(("+", "-"))]
+
+
+READER = {"app/reader.py": 'import os\n\n\ndef host() -> str:\n    return os.environ["HOME"]\n'}
+ROOTS = (
+    '[roots]\n"reader.py" = { kinds = ["environ"], why = "the host environment is the input" }\n'
+)
+
+
+def surface_repo(make_repo: RepoFactory, manifest: str = MANIFEST) -> Path:
+    files = {**LOADER, **READER, "app/meizel.toml": manifest, "meizel.toml": ROOT}
+    return make_repo({**files, "meizel.policy.toml": POLICY})
+
+
+def test_policy_surface_reports_an_added_root_as_narrower(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo)
+    commit(root)
+    write(root, {"app/meizel.toml": MANIFEST + "\n" + ROOTS})
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "1 narrower" in out
+    assert "**added** `app/meizel.toml [roots]` `reader.py` = [environ]" in out
+    assert "| `app/meizel.toml` | `roots` | 1 | 0 | 0 | 0 |" in out
+
+
+def test_policy_surface_reports_a_removed_allowance_as_wider(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo)
+    commit(root)
+    write(root, {"meizel.policy.toml": '[loads]\n"app/loader.py" = ["lib"]\n'})
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "1 wider" in out
+    assert "**removed** `meizel.policy.toml [external]` `app/runner.py`" in out
+
+
+def test_policy_surface_does_not_call_a_reason_edit_a_direction(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo)
+    commit(root)
+    write(
+        root,
+        {"meizel.policy.toml": POLICY.replace("runs the user's code", "runs the schedule script")},
+    )
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "1 unknown" in out
+    assert "**modified** `meizel.policy.toml [external]` `app/runner.py`" in out
+    assert "narrower" not in out
+
+
+def test_policy_surface_reads_a_vocabulary_the_other_way_round(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo)
+    commit(root)
+    write(
+        root,
+        {"meizel.policy.toml": POLICY + '\n[ambient-readers.environ]\n"os.environ" = "reads it"\n'},
+    )
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "1 wider" in out
+    assert "**added** `meizel.policy.toml [ambient-readers.environ]` `os.environ`" in out
+
+
+def test_policy_surface_pairs_a_declaration_with_git_rename(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo)
+    commit(root)
+    git(root, "mv", "app/runner.py", "app/launcher.py")
+    write(
+        root,
+        {
+            "meizel.policy.toml": POLICY.replace("app/runner.py", "app/launcher.py"),
+            "app/meizel.toml": MANIFEST.replace('"runner.py"', '"launcher.py"'),
+        },
+    )
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "1 moved" in out
+    assert "**moved** `meizel.policy.toml [external]` `app/launcher.py` was `app/runner.py`" in out
+    assert "**added**" not in out and "**removed**" not in out
+
+
+def test_policy_surface_is_quiet_when_nothing_changed(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo)
+    commit(root)
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    assert "no change" in capsys.readouterr().out
+
+
+def test_policy_surface_claims_nothing_about_a_manifest_it_cannot_read(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo, manifest="[roots\n")
+    commit(root)
+    write(root, {"app/meizel.toml": MANIFEST + "\n" + ROOTS})
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "1 unread" in out
+    assert "**Could not be read**" in out
+    assert "`app/meizel.toml`" in out
+    assert "**added**" not in out and "no change" not in out
+
+
+# meiva:note
+# The third way to narrow, and the quietest: an `unless` clause stops counting the calls whose
+# argument matches. It has no gate of its own, so this report is the only place it shows up.
+def test_policy_surface_reports_an_added_unless_clause_as_narrower(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = surface_repo(make_repo)
+    commit(root)
+    narrower = (
+        POLICY + '\n[ambient-readers.pid]\n"app.reader()" = { why = "reads the process", '
+        'unless = "euid" }\n'
+    )
+    write(root, {"meizel.policy.toml": narrower})
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "1 narrower" in out
+    assert "**added** `meizel.policy.toml [ambient-readers.pid unless]` `app.reader()`" in out
