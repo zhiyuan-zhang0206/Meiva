@@ -108,7 +108,9 @@ by the existing SDK surface metadata and Installation; do not introduce another 
   reason — an allowed module that stops bypassing (or disappears) fails as
   stale, so the map cannot rot into a permission wall. Add a new single-owner
   decision only once its owner exists: an entry in `DECISIONS` with its owning
-  module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
+  module(s), a `find(tree, roots)` AST scanner, a `fix` message and the `why`
+  the failure prints — why the decision has one owner and what a site that
+  decides it again takes on.
 
 Rules 5 and 6 reject every measured site directly. The retired
 `private_imports`, `owner_bypasses`, `path_imports` and `patch_targets` baseline fields may not
@@ -116,7 +118,16 @@ be reintroduced, even empty, in the working tree or in the comparison revision.
 
 Only ambient-state sites retain exact `path::target -> site count` maps in their
 baseline shards until the remaining debt is cleared. Their guards remain shrink-only,
-including when a rule version changes; see the ambient-state lint owner.
+including when a rule version changes; see the ambient-state lint owner. Why that
+baseline may only shrink, and who owns an entry that no longer matches the code, is
+written once in `scripts/structure/baseline_shards.py` and printed by every guard.
+
+Every structure violation carries the same four parts: the rule and the repair, why the
+rule exists, what the author of the site now owns, and the document that states it. The
+reason is written once in the rule's own module — `meizel/owners/decisions.py`,
+`meizel/language/path_imports.py`, `meizel/state/ambient_state/`,
+`scripts/structure/budgets/quality_budget.py`, `scripts/structure/baseline_shards.py` —
+and every site that breaks that rule prints it. A new rule brings its reason with it.
 
 A test in the top-level `tests/` has no baseline section to be frozen in. Complete
 subject evidence with a repository-root LCA needs no filename registration;

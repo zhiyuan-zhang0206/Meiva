@@ -111,3 +111,20 @@ def test_renaming_an_owner_bypass_still_fails_directly(
     output = capsys.readouterr().out
     assert "gateway/importer_moved.py:3: bypasses the single owner of `postgres-dial`" in output
     assert "migrate the baseline" not in output
+
+
+# meiva:note
+# A bypass line names the site, the decision and the repair (asserted above); the reason it is
+# printed with, what the site now owns and the rule's document make the failure a handover rather
+# than a label. Asserted on fragments, so the wording stays free to change.
+def test_a_bypass_line_carries_the_reason_and_the_rule_document(
+    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(_repo, "gateway/db.py", "import psycopg\ndef dial():\n    psycopg.connect('dsn')\n")
+
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
+    out = capsys.readouterr().out
+
+    assert "second transport posture" in out
+    assert "whoever dials here now owns that posture" in out
+    assert "docs/conventions/python-conventions.md" in out

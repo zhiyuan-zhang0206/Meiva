@@ -29,6 +29,19 @@ from typing import TypeGuard
 
 SHARD_DIR = "scripts/structure/baseline"
 RULES_FILE = "rules.json"
+
+# meiva:note
+# Why the baseline may only shrink, printed with every guard that refuses growth or a stale entry.
+# The number is not a budget to refill: it is the list of exceptions this repository accepted, and
+# an entry that no longer matches the code is a violation the next author reads as allowed. Written
+# once here — the module that owns the shard format — instead of at each guard.
+SHRINK_ONLY = (
+    "The baseline records the exceptions this repository accepted, so it must match the code and "
+    "may only shrink: an entry the code no longer produces, or one the code never had, reads as a "
+    "violation presented as allowed, and growth turns the rule it covers into a suggestion. "
+    "Whoever edits an entry owns either paying it down or explaining why the exception is the "
+    "right shape. See scripts/structure/baseline/README.md."
+)
 _SHARD_DEPTH = 2
 
 
