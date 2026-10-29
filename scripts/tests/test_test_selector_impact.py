@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -329,3 +330,50 @@ def test_interface_early_cutoff_isolates_strict_module_internal_edits(tmp_path: 
     )
     assert signature_changed.decision == "SELECTED"
     assert signature_changed.tests == ("base/lm/tests/test_lm.py", "tests/consumer/test_cli.py")
+
+
+_BATCH_BODY = """This pull request is based on the [main branch](https://github.com/o/r/tree/main) at [SHA 02af8a4dc690](https://github.com/o/r/commit/02af8a4dc690).
+
+See more details about each PR in the batch here:
+* [PR 7603](https://app.trunk.io/ava/merge-queue/queue/7603)
+* [PR 7610](https://app.trunk.io/ava/merge-queue/queue/7610)
+
+## Pull Requests Being Tested
+
+This pull request is testing a batch with the changes from pull requests [7603](https://www.github.com/o/r/pull/7603) and [7610](https://www.github.com/o/r/pull/7610) - [batching documentation](https://docs.trunk.io/merge-queue/batching).
+"""
+
+
+def test_the_members_are_the_links_under_the_queue_heading() -> None:
+    assert test_impact.member_numbers(_BATCH_BODY) == [7603, 7610]
+
+
+def test_a_link_outside_the_heading_is_not_a_member() -> None:
+    body = "See the change in [7603](https://x/pull/7603).\n\n## Pull Requests Being Tested\n\n"
+    assert test_impact.member_numbers(body) == []
+
+
+def test_a_body_without_the_heading_names_nobody() -> None:
+    assert test_impact.member_numbers("An ordinary pull request [7603](https://x/pull/7603).") == []
+
+
+def test_the_event_payload_carries_the_members_without_a_token(tmp_path: Path) -> None:
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"pull_request": {"body": _BATCH_BODY, "number": 7659}}))
+    assert test_impact.members_from_event(payload) == (7603, 7610)
+
+
+def test_an_unreadable_payload_answers_none_rather_than_no_members(tmp_path: Path) -> None:
+    # meiva:note
+    # None is "this run cannot tell", never "the batch has no members": the selector keeps the full
+    # suite on None, and would otherwise select from a list it never read.
+    assert test_impact.members_from_event(tmp_path / "absent.json") is None
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    assert test_impact.members_from_event(broken) is None
+    no_request = tmp_path / "push.json"
+    no_request.write_text(json.dumps({"ref": "refs/heads/main"}))
+    assert test_impact.members_from_event(no_request) is None
+    no_members = tmp_path / "plain.json"
+    no_members.write_text(json.dumps({"pull_request": {"body": "An ordinary pull request."}}))
+    assert test_impact.members_from_event(no_members) is None

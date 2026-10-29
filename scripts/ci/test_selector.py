@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import math
 import os
 import re
 import sys
@@ -13,7 +12,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
 
 _SCRIPT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
@@ -23,13 +21,19 @@ from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry ne
     is_doc_path,
 )
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402 - standalone script
-from scripts.ci.test_impact import (  # noqa: E402 - standalone script
+from scripts.ci.shard_counts import (  # noqa: E402
+    estimate_seconds,
+    load_durations,
+    subset_shard_count,
+)
+from scripts.ci.test_impact import (  # noqa: E402
     Impact,
     apply_interface_cutoff,
     base_checkout,
     blocking_gaps,
     build_impact,
     code_names,
+    members_from_event,
     module_files,
     plugin_modules,
     pyproject_change_is_local,
@@ -37,7 +41,7 @@ from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     unbounded_tests,
     unknown_diagnostics,
 )
-from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone script
+from scripts.structure.placement import ModuleIndex  # noqa: E402
 
 # Global paths apply to every test, so a change keeps the full suite. This is the
 # one owner of the concept; the root conftest's `pytest_plugins` modules join it
@@ -199,11 +203,6 @@ class Checkout:
     collectable: frozenset[str]
     test_dirs: frozenset[str]  # `tests` directories that contain a collectable test
     global_files: frozenset[str]  # root-conftest plugin modules and their package inits
-
-
-# meiva:note
-# The width of the full backend fan-out in ci.yml: its matrix, `--count` and job names.
-FULL_FANOUT_SHARDS = 8
 
 
 def selection_mode(env: Mapping[str, str]) -> str:
@@ -463,6 +462,29 @@ def _owner_tests(changed: dict[str, PathClass], checkout: Checkout, impact: Impa
 
 
 # meiva:note
+# A batch that changes a frontend path and a backend one runs everything. The two sides meet in a
+# contract — a route, a payload, a generated type — that no owner rule crosses, so a subset built
+# from each side separately can miss the test that reads both. `infra` is backend here; only
+# documentation joins neither side.
+def _batch_domains(classes: dict[str, PathClass]) -> str | None:
+    kinds = set(classes.values())
+    if PathClass.FRONTEND not in kinds:
+        return None
+    frontend = sorted(path for path, kind in classes.items() if kind is PathClass.FRONTEND)
+    backend = sorted(
+        path
+        for path, kind in classes.items()
+        if kind not in (PathClass.FRONTEND, PathClass.DOCUMENTATION)
+    )
+    if not backend:
+        return None
+    return (
+        "a batch that changes both a frontend path and a backend one keeps the full suite: "
+        f"frontend {frontend[0]} and backend {backend[0]}"
+    )
+
+
+# meiva:note
 # Only an impact that cannot be computed returns FULL: a queue branch or non-PR event, a global,
 # unmapped or deleted-without-base path. A large impact is still SELECTED, because the merge
 # queue runs the full suite before anything reaches main; the estimates only report and size.
@@ -474,6 +496,7 @@ def select_tests(
     event: str = "pull_request",
     head_ref: str = "",
     base_ref: str | None = None,
+    members: tuple[int, ...] | None = None,
 ) -> SelectionResult:
     """Apply the ordered conservative test-selection rules to one changed-file list."""
     repo_root = repo_root.resolve()
@@ -482,8 +505,18 @@ def select_tests(
     durations = load_durations(repo_root / ".test_durations")
     full_estimate = estimate_seconds(checkout.collectable, durations)
 
-    if event != "pull_request" or head_ref.startswith(_QUEUE_PREFIXES):
-        return _result("FULL", "queue-or-non-pr", full_estimate=full_estimate)
+    if event != "pull_request":
+        return _result("FULL", "non-pr-event", full_estimate=full_estimate)
+    # meiva:note
+    # A Trunk batch changes what the union of its members changes: the job's `changed.txt` is already
+    # that union, so the ordinary rules can measure it. What they cannot see is whether the list is
+    # complete, and that is the one thing this run has to be told: the queue writes the member list
+    # into the synthetic pull request's body, and a batch whose list cannot be read keeps the full
+    # suite rather than selecting from a union it cannot vouch for.
+    # meiva:link docs/conventions/engineering/test-selection.md
+    on_queue = head_ref.startswith(_QUEUE_PREFIXES)
+    if on_queue and not members:
+        return _result("FULL", "queue-members-unknown", full_estimate=full_estimate)
     if all(
         _is_documentation_path(path, checkout.hosts) for path in changed
     ) and not documentation_runtime_tests(list(changed), repo_root=repo_root, base_ref=base_ref):
@@ -491,6 +524,15 @@ def select_tests(
 
     local = _local_config_paths(changed, checkout, base_ref)
     classes = _classify_changed(changed, checkout, local)
+    if on_queue:
+        domains = _batch_domains(classes)
+        if domains is not None:
+            return _result(
+                "FULL",
+                "cross-domain-batch",
+                full_estimate=full_estimate,
+                diagnostics=(domains,),
+            )
     forced = _forced_full(classes, full_estimate)
     if forced is not None:
         return forced
@@ -652,18 +694,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--base-ref", help="Committed merge-base for removed dependencies and paths"
     )
+    parser.add_argument(
+        "--batch-body",
+        type=Path,
+        help="GitHub event payload whose pull request names the members a batch tests",
+    )
     args = parser.parse_args(argv)
 
     try:
         changed_files = args.changed_files.read_text().splitlines()
     except OSError as error:
         parser.error(f"cannot read changed files: {error}")
+    members = None if args.batch_body is None else members_from_event(args.batch_body)
     result = select_tests(
         changed_files,
         repo_root=args.repo_root,
         event=args.event,
         head_ref=args.head_ref,
         base_ref=args.base_ref,
+        members=members,
     )
     mode = selection_mode(os.environ)
     for diagnostic in result.diagnostics:
@@ -714,59 +763,6 @@ def _plugin_files(repo_root: Path) -> set[str]:
     """
     index = ModuleIndex(repo_root)
     return {file for module in _plugin_modules(repo_root) for file in module_files(module, index)}
-
-
-def load_durations(path: Path) -> dict[str, float]:
-    """Load measured pytest node durations; an absent timing file has no measurements."""
-    if not path.is_file():
-        return {}
-    data = cast(dict[object, object], json.loads(path.read_text()))
-    if not isinstance(data, dict):
-        raise TypeError(f"duration file must contain a JSON object: {path}")
-    durations: dict[str, float] = {}
-    for node_id, seconds in data.items():
-        if (
-            isinstance(node_id, str)
-            and isinstance(seconds, (int, float))
-            and not isinstance(seconds, bool)
-        ):
-            durations[node_id] = float(seconds)
-    return durations
-
-
-def estimate_seconds(
-    test_paths: set[str] | frozenset[str] | tuple[str, ...],
-    durations: dict[str, float],
-    *,
-    reference_paths: set[str] | None = None,
-) -> float:
-    """Estimate selected files using the reference population's average for unmeasured files."""
-    reference = test_paths if reference_paths is None else reference_paths
-    ordered_reference = tuple(sorted(reference))
-    ordered_tests = tuple(sorted(test_paths))
-    reference_set = set(reference)
-    # Group once: the complete timing model has an entry for every measured
-    # node, so scanning it again for each file makes selection unnecessarily slow.
-    by_file: dict[str, list[float]] = {}
-    for node_id, seconds in durations.items():
-        test_path, separator, _ = node_id.partition("::")
-        if separator and test_path in reference_set:
-            by_file.setdefault(test_path, []).append(seconds)
-    known_entries = [
-        seconds for test_path in ordered_reference for seconds in by_file.get(test_path, ())
-    ]
-    average = sum(known_entries) / len(known_entries) if known_entries else 0.0
-    return sum(
-        sum(by_file[test_path]) if test_path in by_file else average for test_path in ordered_tests
-    )
-
-
-# meiva:note
-# The shards a SELECTED subset runs on: its share of the suite in units of one full shard, by
-# estimated time (by file count without timings), rounded up, at most the fan-out and the files.
-def subset_shard_count(tests: int, estimate: float, full_estimate: float, collectable: int) -> int:
-    share = estimate / full_estimate if full_estimate > 0 else tests / max(collectable, 1)
-    return max(1, min(FULL_FANOUT_SHARDS, tests, math.ceil(round(share * FULL_FANOUT_SHARDS, 6))))
 
 
 def _result(

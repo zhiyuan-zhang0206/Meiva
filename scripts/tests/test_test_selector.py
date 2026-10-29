@@ -17,15 +17,16 @@ from time import perf_counter
 
 import pytest
 
-from scripts.ci import test_selector
+from scripts.ci import shard_counts, test_selector
 from scripts.ci.test_impact import python_files
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ESTIMATE_CHILD = Path(__file__).with_name("child_estimate_seconds.py")
 
 
-def test_queue_branch_always_keeps_the_full_suite(tmp_path: Path) -> None:
-    """A queue branch must never let a selected subset replace its full net."""
+def test_a_batch_without_its_member_list_keeps_the_full_suite(tmp_path: Path) -> None:
+    # meiva:note
+    # A batch whose members this run cannot read keeps the full net, and so does a non-PR event.
     repo_root = _selector_repo(tmp_path)
     result = test_selector.select_tests(
         ["cli/commands.py"],
@@ -34,13 +35,46 @@ def test_queue_branch_always_keeps_the_full_suite(tmp_path: Path) -> None:
         head_ref="trunk-merge/batch-42",
     )
 
-    assert result.decision == "FULL"
-    assert result.reason == "queue-or-non-pr"
+    assert (result.decision, result.reason) == ("FULL", "queue-members-unknown")
 
     push_result = test_selector.select_tests(["cli/commands.py"], repo_root=tmp_path, event="push")
 
-    assert push_result.decision == "FULL"
-    assert push_result.reason == "queue-or-non-pr"
+    assert (push_result.decision, push_result.reason) == ("FULL", "non-pr-event")
+
+
+def test_a_batch_with_its_members_selects_what_the_union_of_them_selects(tmp_path: Path) -> None:
+    # meiva:note
+    # The batch's changed list is already its members' union; the ordinary rules measure it.
+    repo_root = _selector_repo(tmp_path)
+    batch = test_selector.select_tests(
+        ["cli/commands.py"],
+        repo_root=repo_root,
+        event="pull_request",
+        head_ref="trunk-merge/batch-42",
+        members=(7603,),
+    )
+    alone = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
+
+    assert batch.decision == "SELECTED"
+    assert (batch.decision, batch.tests) == (alone.decision, alone.tests)
+
+
+def test_a_batch_that_changes_both_sides_keeps_the_full_suite(tmp_path: Path) -> None:
+    # meiva:note
+    # A frontend and a backend path in one batch meet in a contract no owner rule crosses.
+    repo_root = _selector_repo(tmp_path)
+    _write(repo_root, "ui/web/src/App.tsx", "export const app = 1;\n")
+
+    result = test_selector.select_tests(
+        ["cli/commands.py", "ui/web/src/App.tsx"],
+        repo_root=repo_root,
+        event="pull_request",
+        head_ref="trunk-merge/batch-42",
+        members=(7603, 7610),
+    )
+
+    assert (result.decision, result.reason) == ("FULL", "cross-domain-batch")
+    assert "frontend ui/web/src/App.tsx" in " ".join(result.diagnostics)
 
 
 def _write(repo_root: Path, relative_path: str, content: str = "") -> None:
@@ -289,8 +323,8 @@ def test_a_large_subset_is_still_selected_because_the_queue_is_the_backstop(
 def test_a_subset_runs_on_its_share_of_the_full_fanout(
     tests: int, estimate: float, full_estimate: float, collectable: int, shards: int
 ) -> None:
-    assert test_selector.FULL_FANOUT_SHARDS == 8
-    assert test_selector.subset_shard_count(tests, estimate, full_estimate, collectable) == shards
+    assert shard_counts.FULL_FANOUT_SHARDS == 8
+    assert shard_counts.subset_shard_count(tests, estimate, full_estimate, collectable) == shards
 
 
 def test_only_a_selected_subset_has_shards(tmp_path: Path) -> None:
@@ -651,11 +685,23 @@ def test_component_docs_skip_only_the_regular_pr_suite(tmp_path: Path) -> None:
     result = test_selector.select_tests(paths, repo_root=tmp_path)
     assert (result.decision, result.reason) == ("SKIP", "docs-only")
 
-    for event, head_ref in [("push", ""), ("pull_request", "trunk-merge/batch-42")]:
+    for event, head_ref, reason in [
+        ("push", "", "non-pr-event"),
+        ("pull_request", "trunk-merge/batch-42", "queue-members-unknown"),
+    ]:
         queued = test_selector.select_tests(
             paths, repo_root=tmp_path, event=event, head_ref=head_ref
         )
-        assert (queued.decision, queued.reason) == ("FULL", "queue-or-non-pr")
+        assert (queued.decision, queued.reason) == ("FULL", reason)
+
+    batch = test_selector.select_tests(
+        paths,
+        repo_root=tmp_path,
+        event="pull_request",
+        head_ref="trunk-merge/batch-42",
+        members=(7603,),
+    )
+    assert (batch.decision, batch.reason) == ("SKIP", "docs-only")
 
 
 def test_component_docs_preserve_selection_for_other_changes(tmp_path: Path) -> None:
