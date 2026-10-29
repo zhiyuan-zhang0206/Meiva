@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
 import json
 from pathlib import Path
 
@@ -381,3 +383,56 @@ def test_the_marker_inside_a_string_is_not_an_exemption() -> None:
     # meiva:note
     # A fixture that writes the marker into a string is data; only a comment is a claim.
     assert _lint.exemptions_in_source('X = "# host-ok: not mine"\n') == []
+
+
+# meiva:note
+# One parse answers both questions. A whole-tree run parses every test file it walks
+# (2026-10-29: 3192 files, 21.4 MB), so the findings and the exemptions must not each pay
+# for a tree of their own. The counting parser is the assertion: a second `ast.parse`
+# inside `judge_source` fails here, and no production symbol is patched to see it.
+def test_one_parse_yields_both_verdicts() -> None:
+    src = (
+        "import sys\n\n\n"
+        "def test_flagged():\n"
+        "    assert sys.platform == 'darwin'\n\n\n"
+        "def test_exempt():\n"
+        "    assert sys.platform == 'darwin'  "
+        "# host-ok: the subject is the launchd lane (`tests/fixtures/host_platform.py`)\n"
+    )
+    parsed: list[str] = []
+
+    def counting_parse(text: str) -> ast.Module:
+        parsed.append(text)
+        return ast.parse(text)
+
+    findings, exemptions = _lint.judge_source(src, parse=counting_parse)
+    assert parsed == [src]
+    assert [what for _, what, _ in findings] == ["sys.platform"]
+    assert exemptions == [
+        ("test_exempt", "the subject is the launchd lane (`tests/fixtures/host_platform.py`)")
+    ]
+
+
+def test_a_file_that_does_not_parse_contributes_nothing() -> None:
+    assert _lint.judge_source("def broken(\n") == ([], [])
+
+
+def test_a_marker_without_a_reason_is_still_read() -> None:
+    # meiva:note
+    # The gate is the marker's own text, so its shortest spelling has to reach the reader
+    # too: the marker with nothing after its colon exempts with an empty reason, and the
+    # record layer is what rejects a reason that names nothing. Narrowing the gate to one
+    # that also demands a space after the colon would silently stop reading this line.
+    src = "def test_x():\n    assert sys.platform == 'darwin'  # host-ok:\n"
+    assert _lint.exemptions_in_source(src) == [("test_x", "")]
+    assert _lint.judge_source(src)[0] == []
+
+
+def test_the_whole_tree_path_parses_a_file_once() -> None:
+    # meiva:note
+    # `judge_source` takes its parser as a parameter, so a second parse written next to the
+    # first would not show in a count of the calls it makes. The reading below catches both
+    # spellings: a direct `ast.parse` and a second use of the parameter.
+    body = inspect.getsource(_lint.judge_source)
+    assert "ast.parse(" not in body
+    assert body.count("parse(text)") == 1

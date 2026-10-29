@@ -111,6 +111,20 @@ opened, and saying which sites are theirs is the difference between a gate and a
 mystery. The baseline
 only shrinks; when the last entry goes, the file and this section go with it.
 
+## Cost
+
+The run is whole-tree, so its cost follows the corpus rather than the change: on
+2026-10-29, 3192 test files (21.4 MB) on a shared 16-CPU host at load 7-9 cost
+about 14s while the commit under judgement touched one file. Two facts about the marker make that cheaper without
+changing the verdict. Each file is parsed once — the findings and the exemptions
+read the same tree — and a file whose text does not contain `# host-ok:` carries
+no exemption at all, so the span scan and the tokenizer pass are skipped for it.
+The second check is the marker's own text, not a guess at the spellings a reading
+can take: every exemption is a comment token whose text is a substring of the
+source, so its absence is the end of the question. The same run then costs about
+6s at that load, and what is left is the whole-tree walk itself. The file count
+follows the tree; the times are one host's, not a promise.
+
 ## Scope
 
 Every tracked file inside a pytest test host (from
