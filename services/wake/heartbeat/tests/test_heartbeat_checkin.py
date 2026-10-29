@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS
+from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -36,6 +37,32 @@ from services.wake.heartbeat.tests.heartbeat_support import (
     make_idle,
 )
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
+
+# meiva:note
+# The listener's own budget for this wake, and a bound that only fails a wedged run: the
+# verdict is `wait_one`'s bool, so the guard is never what decides a slow-but-correct wake.
+_WAKE_BUDGET_S = 10.0
+_WAKE_HANG_GUARD_S = _WAKE_BUDGET_S * 3
+_SUBSCRIBED_POLL_S = 0.05
+
+
+async def _await_subscribed(bus: EventBus, channel: str) -> None:
+    # meiva:note
+    # Block until Redis reports a subscriber on this channel: pub/sub drops a publish that
+    # lands with no subscriber, so the check-in waits for that fact instead of a fixed sleep.
+    # One probe client serves every poll — a client per poll would open hundreds of
+    # connections if the wait ran long. redis-py types `pubsub_numsub` and its reply as
+    # partially unknown, so the ignore is narrow. The deadline bounds a failure; it is not
+    # the assertion.
+    probe = bus.sync_redis()
+    try:
+        deadline = time.monotonic() + _WAKE_BUDGET_S
+        while int(probe.pubsub_numsub(channel)[0][1]) < 1:  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            if time.monotonic() > deadline:
+                raise AssertionError(f"no subscriber appeared on {channel} in {_WAKE_BUDGET_S}s")
+            await asyncio.sleep(_SUBSCRIBED_POLL_S)
+    finally:
+        probe.close()
 
 
 @pytest.fixture
@@ -251,6 +278,10 @@ class TestSendHeartbeatCheckin:
         """The check-in publishes a Redis wake to the target agent's channel so an
         idle agent runs the heartbeat turn now instead of at its next SELECT
         recheck — park a per-agent listener, fire the check-in, assert it wakes."""
+        # meiva:note
+        # The verdict is `wait_one`'s own answer (did a publish arrive?), never a clock
+        # reading: a check-in that is slow on a loaded machine must not fail a test about the
+        # wake, and a missing wake must fail it without waiting out a wall-clock bound.
         aid = spawn_agent(
             spawner="user",
             catalog=model_catalog,
@@ -258,6 +289,7 @@ class TestSendHeartbeatCheckin:
             database_gate=database_gate,
             machine=machine_identity,
         )
+        channel = inbound_channel(aid, settings.data_plane.events_channel)
         listener = RedisInboundListener(
             settings.data_plane.redis_url,
             aid,
@@ -265,16 +297,13 @@ class TestSendHeartbeatCheckin:
             timers=SYSTEM_TIMERS,
         )
         try:
-            wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-            await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
-            t0 = time.monotonic()
+            wait_task = asyncio.create_task(listener.wait_one(timeout=_WAKE_BUDGET_S))
+            await _await_subscribed(event_bus, channel)
             await asyncio.to_thread(send_heartbeat_checkin, pool, database, event_bus, aid, 7.0)
-            await asyncio.wait_for(wait_task, timeout=5.0)
-            assert time.monotonic() - t0 < 5.0, (
-                "heartbeat check-in did not wake the parked listener"
-            )
+            woke = await asyncio.wait_for(wait_task, timeout=_WAKE_HANG_GUARD_S)
         finally:
             await listener.close()
+        assert woke is True, "heartbeat check-in did not wake the parked listener"
 
 
 # ───────────── consecutive-failure backoff (Task #1928) ─────────────

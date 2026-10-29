@@ -23,7 +23,10 @@ class PubSub:
         self.suppress_subscribe_cancel = False
         self.hold_subscribe = False
         self.closed = False
-        self.parent: asyncio.Task[None] | None = None
+        # meiva:note
+        # The caller's parked task: this double only cancels it. `wait_one` answers bool, so
+        # the slot keeps the value type as `object` rather than redis's `Task[None]`.
+        self.parent: asyncio.Task[object] | None = None
         self.message: dict[str, str] | None = None
 
     async def subscribe(self, channel: str) -> None:

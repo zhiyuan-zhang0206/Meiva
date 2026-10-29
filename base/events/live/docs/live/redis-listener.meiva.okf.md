@@ -20,7 +20,12 @@ The hosted agent wake service uses a separate subscription and durable scan.
 remaining budget; consume retains its existing two-second scheduling grace.
 Request timeout or caller cancellation cancels the known operation without
 waiting for its rollback. A return proves the request has returned, not that
-its Redis coroutine or resources have terminated.
+its Redis coroutine or resources have terminated. It answers whether a wake
+was consumed: True only for a publish on the agent's channel; False carries both
+other meanings — the budget ran out first, or the wake path degraded (ACL
+denial, an abandoned open or consume, a lost connection). The caller's SELECT
+recheck runs on either answer, so delivery is judged by that answer and never by
+elapsed time.
 
 Stop's unfinished identities describe registered work, not caller completion.
 A wake published while the subscription is down is not replayed on reconnect;
