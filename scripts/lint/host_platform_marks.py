@@ -428,11 +428,38 @@ def _write_exemptions(root: Path, found: dict[str, list[str]], jobs: frozenset[s
     print(f"{EXEMPTIONS}: {len(entries)} exemption(s)")
 
 
+def _exemption_problem(
+    key: str, reason: str, record: dict[str, str], jobs: frozenset[str]
+) -> str | None:
+    # meiva:note
+    # One exemption, judged: it has to be in the record, its reason has to be the one on disk,
+    # and that reason has to say where to look. Both the scoped and the whole-tree run ask
+    # this, so an entry cannot be acceptable to one and not the other.
+    if key not in record:
+        return (
+            f"{key}: unrecorded exemption {reason!r} - add it to {EXEMPTIONS} with a "
+            "reason that names a path in this repository or a CI job"
+        )
+    if record[key] != reason:
+        return (
+            f"{key}: the record's reason differs from the comment - {EXEMPTIONS} says "
+            f"{record[key]!r}, the tree says {reason!r}"
+        )
+    if not reason_is_grounded(reason, jobs):
+        return (
+            f"{key}: reason names no path or job: {reason!r} - say where to look "
+            f"(`base/...`, `docs/...`) or which CI job runs it"
+        )
+    return None
+
+
 # meiva:note
-# An exemption is a reviewed exception, not a comment: it has to be in the record, its
-# reason has to be the one on disk, and that reason has to say where to look. A record
-# entry whose site is gone is an error too - the count only shrinks when someone spends
-# the line to shrink it.
+# An exemption is a reviewed exception, not a comment. A scoped run (`--only`, the pre-commit
+# path) judges the files it was given, so an exemption written in one of them is this change's
+# and an unrecorded or drifted one fails here instead of at the merge gate - the cost that made
+# this the only gate an author meets a full CI round later. What one file cannot answer stays the
+# whole-tree run's question: a record entry whose site another change removed, and a record whose
+# count and length disagree.
 def _report_exemptions(
     found: dict[str, list[str]],
     *,
@@ -440,39 +467,26 @@ def _report_exemptions(
     jobs: frozenset[str],
     scope: frozenset[str] | None,
 ) -> bool:
-    if scope is not None:
-        return False
     allowed, record = _read_exemptions(root)
     failed = False
-    if len(record) != allowed:
+    if scope is None and len(record) != allowed:
         failed = True
         print(
             f"{EXEMPTIONS}: allowed says {allowed}, the record lists {len(record)}",
             file=sys.stderr,
         )
-    for key, reasons in sorted(found.items()):
-        reason = reasons[0]
-        if key not in record:
+    keys = (
+        sorted(found)
+        if scope is None
+        else [key for key in sorted(found) if key.split("::", 1)[0] in scope]
+    )
+    for key in keys:
+        problem = _exemption_problem(key, found[key][0], record, jobs)
+        if problem is not None:
             failed = True
-            print(
-                f"{key}: unrecorded exemption {reason!r} - add it to {EXEMPTIONS} with a "
-                "reason that names a path in this repository or a CI job",
-                file=sys.stderr,
-            )
-        elif record[key] != reason:
-            failed = True
-            print(
-                f"{key}: the record's reason differs from the comment - {EXEMPTIONS} says "
-                f"{record[key]!r}, the tree says {reason!r}",
-                file=sys.stderr,
-            )
-        elif not reason_is_grounded(reason, jobs):
-            failed = True
-            print(
-                f"{key}: reason names no path or job: {reason!r} - say where to look "
-                f"(`base/...`, `docs/...`) or which CI job runs it",
-                file=sys.stderr,
-            )
+            print(problem, file=sys.stderr)
+    if scope is not None:
+        return failed
     for key in sorted(set(record) - set(found)):
         failed = True
         print(
