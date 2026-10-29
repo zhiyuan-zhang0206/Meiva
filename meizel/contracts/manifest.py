@@ -12,6 +12,7 @@ from typing import TypeGuard
 from meizel.contracts.debt import (
     CYCLE_EDGE,
     TABLE_KEY,
+    DebtEntry,
     DebtTable,
     local_edge,
     parse_debt,
@@ -104,7 +105,7 @@ class Manifest:
         default_factory=dict[str, tuple[AmbientKind, ...]]
     )
     roots: dict[str, Root] = field(default_factory=dict[str, Root])
-    debt: DebtTable = field(default_factory=dict[Code, dict[str, int]])
+    debt: DebtTable = field(default_factory=dict[Code, dict[str, DebtEntry]])
     back: frozenset[tuple[str, str]] = frozenset()
     dangling: list[tuple[str, str | None, str | None]] = field(
         default_factory=list[tuple[str, str | None, str | None]]

@@ -229,6 +229,7 @@ def main(argv: Sequence[str], *, out: TextIO, err: TextIO) -> int:
         catalog=build_model_catalog(home=meiva_home()),
         timeout_s=inputs.embed_timeout_s,
         api_key=inputs.api_key,
+        embeddinggemma_config=inputs.embeddinggemma_config,
     )
     database = _reconcile_database(boot, machine=machine, home=meiva_home())
     backend_a, backend_b = build_backends(

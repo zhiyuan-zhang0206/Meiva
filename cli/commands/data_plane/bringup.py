@@ -299,7 +299,7 @@ def prepare_memory_vectors(
     from services.derived.memory_indexer.backends.pgvector import prepare_table
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
-    dim = get_descriptor(config.embedding_backend).dim
+    dim = get_descriptor(config.embedding_backend, revision=config.embedding_revision).dim
     if config.is_remote:
         with database_factory().connect(direct=True) as conn:
             prepare_table(conn, dim)

@@ -8,7 +8,16 @@ from meizel.contracts.analysis import analyze, diagnose, load_policy, scan_all
 from meizel.graph.model import AnyCollaboratorSite, Code, Sources
 from meizel.graph.universe import GitRepo, Universe
 from meizel.language.scan import FileScan, scan_source
-from meizel.tests.synthetic import RepoFactory, analysis_of, commit, git, run, seat, write
+from meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    commit,
+    counts,
+    git,
+    run,
+    seat,
+    write,
+)
 
 
 def scan(tmp_path: Path, source: str, path: str = "app.py") -> FileScan:
@@ -156,7 +165,9 @@ def test_same_line_duplicate_class_fields_keep_distinct_diagnostics_and_accumula
     assert {d.debt.key for d in full if d.debt is not None} == {"app.py#any C.x"}
     assert run(root, "debt", "record", ".") == 0
     write(root, {})
-    assert analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR] == {"app.py#any C.x": 2}
+    assert counts(analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR]) == {
+        "app.py#any C.x": 2
+    }
     assert not analysis_of(root).verdict
     write(
         root,
@@ -170,7 +181,7 @@ def test_debt_key_ignores_line_drift_and_tracks_file_moves(make_repo: RepoFactor
     root = make_repo({"app.py": source})
     assert run(root, "debt", "record", ".") == 0
     write(root, {})
-    assert analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR] == {
+    assert counts(analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR]) == {
         "app.py#any f.x": 1,
         "app.py#any f.y": 1,
     }
@@ -179,13 +190,17 @@ def test_debt_key_ignores_line_drift_and_tracks_file_moves(make_repo: RepoFactor
 
     write(root, {"app.py": source.replace(", y: Any", "")})
     assert run(root, "debt", "prune") == 0
-    assert analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR] == {"app.py#any f.x": 1}
+    assert counts(analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR]) == {
+        "app.py#any f.x": 1
+    }
 
     commit(root)
     (root / "app.py").rename(root / "moved.py")
     git(root, "add", "-A")
     assert run(root, "debt", "carry") == 0
-    assert analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR] == {"moved.py#any f.x": 1}
+    assert counts(analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR]) == {
+        "moved.py#any f.x": 1
+    }
 
 
 def test_unknown_any_collaborator_policy_table_is_rejected(make_repo: RepoFactory) -> None:

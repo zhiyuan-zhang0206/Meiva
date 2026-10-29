@@ -518,6 +518,7 @@ async def run(
             catalog=catalog,
             timeout_s=inputs.embed_timeout_s,
             api_key=inputs.api_key,
+            embeddinggemma_config=inputs.embeddinggemma_config,
         )
     except ValueError as exc:
         _log.critical("[indexer] embedding provider config invalid: %s", exc)
@@ -547,7 +548,9 @@ async def run(
     # retry storm; a merely-unreachable one rides into the retry loop with its
     # message attached to the terminal error (CTO ruling 2026-08-30 direction ②).
     db = database()
-    preflight = probe_backend(inputs.backend_name, db, uri=inputs.search_uri)
+    preflight = probe_backend(
+        inputs.backend_name, db, uri=inputs.search_uri, fingerprint=provider.fingerprint
+    )
     if preflight.fatal:
         _log.critical(
             "[indexer] %s backend preflight FAILED: %s",

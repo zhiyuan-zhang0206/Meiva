@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from base.daemon.health import DaemonProbe
+from services.derived.memory_indexer.backends.base import EMBEDDING_SPACE_HEADER, INDEX_API_PREFIX
 
 _TIMEOUT_S = 3.0
 
@@ -13,16 +14,17 @@ _TIMEOUT_S = 3.0
 # One POST /search with a zero vector returns the raw decoded JSON, or the down
 # verdict from an HTTP/decoding failure. The verdict owner validates the body
 # shape; provider configuration errors fail before the request.
-def post_search(uri: str, *, embedding_name: str) -> object:
+def post_search(uri: str, *, embedding_name: str, embedding_revision: str | None = None) -> object:
     import httpx
 
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
-    dim = get_descriptor(embedding_name).dim
+    descriptor = get_descriptor(embedding_name, revision=embedding_revision)
     try:
         resp = httpx.post(
-            f"{uri}/search",
-            json={"vector": [0.0] * dim, "k": 1},
+            f"{uri}{INDEX_API_PREFIX}/search",
+            json={"vector": [0.0] * descriptor.dim, "k": 1},
+            headers={EMBEDDING_SPACE_HEADER: descriptor.fingerprint},
             timeout=_TIMEOUT_S,
         )
         resp.raise_for_status()
@@ -48,8 +50,12 @@ def search_verdict(answer: object) -> DaemonProbe:
 # Probe the roster's captured endpoint and provider with a real search. Protocol
 # failures report down; an unknown provider remains a configuration error and
 # propagates to the caller before any request.
-def memory_search_probe(*, uri: str, embedding_name: str) -> DaemonProbe:
+def memory_search_probe(
+    *, uri: str, embedding_name: str, embedding_revision: str | None = None
+) -> DaemonProbe:
     try:
-        return search_verdict(post_search(uri, embedding_name=embedding_name))
+        return search_verdict(
+            post_search(uri, embedding_name=embedding_name, embedding_revision=embedding_revision)
+        )
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         return DaemonProbe.down(f"protocol probe failed: {exc}")

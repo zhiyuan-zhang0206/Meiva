@@ -19,6 +19,7 @@ def test_probe_numpy_unreachable_is_actionable(*, database_gate: ProcessDbGate) 
         "numpy",
         Database.from_settings(gate=database_gate),
         uri=f"http://127.0.0.1:{_free_port()}",
+        fingerprint="test-space",
     )
     assert not result.fatal
     assert "memory_search service is not reachable" in (result.message or "")

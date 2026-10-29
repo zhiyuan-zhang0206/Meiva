@@ -426,14 +426,18 @@ def test_process_paths_beats_per_embed_batch(tmp_path: Path, *, watched_root: Pa
 
 
 @pytest.mark.parametrize("fail_last_batch", [False, True])
+@pytest.mark.parametrize("provider_name", [PROVIDER, "embeddinggemma"])
 def test_process_paths_beats_during_commit(
     tmp_path: Path,
     fail_last_batch: bool,
+    provider_name: str,
     watched_root: Path,
 ) -> None:
     """The final embed, cleanup and upsert cannot share a beat-free interval."""
     now = 0.0
-    liveness = _manual_liveness(liveness_timeout(), lambda: now)
+    liveness = _manual_liveness(
+        config.liveness_timeout_seconds(provider_name, timeout_seconds=EMBED_TIMEOUT_S), lambda: now
+    )
     durations = {"delete_stale_rows": 5.0, "upsert_many": 300.0}
 
     def spend(op: str) -> None:
@@ -445,7 +449,7 @@ def test_process_paths_beats_during_commit(
     class SlowFinalProvider(FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             nonlocal now
-            now += factory.worst_case_batch_seconds(PROVIDER, timeout_seconds=EMBED_TIMEOUT_S)
+            now += factory.worst_case_batch_seconds(provider_name, timeout_seconds=EMBED_TIMEOUT_S)
             assert liveness.is_alive()
             if fail_last_batch and self.embed_batch_count == 1:
                 raise EmbeddingAPIError("last batch failed")

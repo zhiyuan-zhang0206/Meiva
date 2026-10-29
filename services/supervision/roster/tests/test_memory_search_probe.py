@@ -32,8 +32,8 @@ async def _foreign_service(_request: Request) -> JSONResponse:
 def test_memory_search_roster_captures_endpoint_and_provider_until_rebuilt() -> None:
     original_uri = get_field("memory_search_uri")
     original_backend = get_field("embedding_backend")
-    search = Starlette(routes=[Route("/search", _search, methods=["POST"])])
-    foreign = Starlette(routes=[Route("/search", _foreign_service, methods=["POST"])])
+    search = Starlette(routes=[Route("/v1/search", _search, methods=["POST"])])
+    foreign = Starlette(routes=[Route("/v1/search", _foreign_service, methods=["POST"])])
     try:
         with serve_asgi(search) as uri, serve_asgi(foreign) as foreign_uri:
             set_field("memory_search_uri", uri)

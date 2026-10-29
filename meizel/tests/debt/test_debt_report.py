@@ -41,10 +41,13 @@ def test_summary_counts_by_code_top_level_directory_and_mode(
         "restricted-python": 2,
         "undeclared-edge": 5,
     }
+    assert report["unowned"] == {"entries": 6, "occurrences": 18}
     assert report["by_top_level"]["base"] == {
         "total": 10,
         "by_code": {"private-module": 4, "private-name": 4, "restricted-python": 2},
         "strict_to_be_directories": 2,
+        "unowned_entries": 4,
+        "unowned": 10,
     }
     assert report["by_top_level"]["."]["total"] == 5
     assert report["directories"] == {"strict_to_be": 4, "strict": 2}
@@ -58,6 +61,7 @@ def test_summary_text_names_the_modes_and_the_counts(
     assert "18 recorded locality debts" in out
     assert "4 directories with recorded debt" in out
     assert "2 directories without recorded debt" in out
+    assert "6 recorded debts name no owner (18 occurrences)" in out
     assert "recorded manifest debt only; no source" in out
     assert "private-name" in out
     assert "base" in out

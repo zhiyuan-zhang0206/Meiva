@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 
 from base.config.base import EnvSettings, unit_home
 
@@ -354,7 +354,7 @@ class ServiceRuntimeSettings(EnvSettings):
         alias="MEIVA_EMBEDDING_BACKEND",
         description=(
             "Embedding provider for the memory index — 'gemini' (default: "
-            "the Gemini Embedding 2 REST adapter). Unknown values fail fast "
+            "the Gemini Embedding 2 REST adapter), or 'embeddinggemma' (pinned local HTTP model). Unknown values fail fast "
             "at startup (never a silent fallback to the default). The vector "
             "space is a provider property: switching providers changes the "
             "semantic space even at the same dim, so the indexer detects the "
@@ -368,12 +368,60 @@ class ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    embeddinggemma_endpoint: str | None = Field(
+        default=None,
+        alias="MEIVA_EMBEDDINGGEMMA_ENDPOINT",
+        description="Raw-input embedding HTTP endpoint ending in /v1/embeddings; no automatic task prefixes on the server.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    embeddinggemma_model: str | None = Field(
+        default=None,
+        alias="MEIVA_EMBEDDINGGEMMA_MODEL",
+        description="Pinned model locator understood by the embedding server; separate from semantic revision identity.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    embeddinggemma_revision: str | None = Field(
+        default=None,
+        alias="MEIVA_EMBEDDINGGEMMA_REVISION",
+        description="Operator-verified lowercase 40-hex checkpoint commit or 64-hex artifact SHA256. Must match the actual served weights and change for any artifact/quantization change.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    embeddinggemma_api_key: SecretStr | None = Field(
+        default=None,
+        alias="MEIVA_EMBEDDINGGEMMA_API_KEY",
+        description="Optional bearer token for the embedding server.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
     memory_embed_timeout_seconds: float = Field(
         default=60.0,
         alias="MEIVA_EMBED_TIMEOUT_SECONDS",
         description=(
             "HTTP operation timeout and asyncio cancellation deadline (seconds) for each "
-            "Gemini batchEmbedContents attempt, sync or async. The memory-indexer "
+            "embedding provider HTTP attempt, sync or async. The memory-indexer "
             "liveness ceiling is derived as max(180s, provider batch retry budget + 30s)."
         ),
         json_schema_extra={

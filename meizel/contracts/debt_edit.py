@@ -9,7 +9,16 @@ import tomllib
 from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
-from meizel.contracts.debt import CYCLE_EDGE, TABLE_KEY, DebtTable, local_edge, set_debt, total
+from meizel.contracts.debt import (
+    CYCLE_EDGE,
+    TABLE_KEY,
+    DebtEntry,
+    DebtTable,
+    entry_value,
+    local_edge,
+    set_debt,
+    total,
+)
 from meizel.contracts.ledger import resolve_debt_conflicts, tally
 from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
@@ -34,6 +43,22 @@ def _copy(table: DebtTable) -> DebtTable:
     return {code: dict(rows) for code, rows in table.items()}
 
 
+# meiva:note
+# A recorded entry raised to at least `count`, keeping who owns it and what it waits for: a change in
+# the count is not a change of owner.
+def _raised(entry: DebtEntry | None, count: int) -> DebtEntry:
+    if entry is None:
+        return DebtEntry(count)
+    return DebtEntry(max(entry.count, count), entry.owner, entry.until)
+
+
+# meiva:note
+# The entry lowered to what still occurs, metadata kept: paying a debt down does not hand it to
+# someone else.
+def _lowered(entry: DebtEntry, found: int) -> DebtEntry:
+    return DebtEntry(min(entry.count, found), entry.owner, entry.until)
+
+
 def plan_baseline_write(
     repo: GitRepo, owner: str, before: str, table: DebtTable
 ) -> tuple[EditPlan, str | None]:
@@ -42,7 +67,12 @@ def plan_baseline_write(
     after = set_debt(before, table)
     if after == before:
         return EditPlan(), None
-    if tomllib.loads(after).get(TABLE_KEY, {}) != {c.value: r for c, r in table.items() if r}:
+    written = {
+        c.value: {key: entry_value(entry) for key, entry in rows.items()}
+        for c, rows in table.items()
+        if rows
+    }
+    if tomllib.loads(after).get(TABLE_KEY, {}) != written:
         raise MeizelError(f"{rel}: the [debt] tables cannot be rewritten; edit by hand")
     if after.strip():
         return EditPlan(writes={path: after}), rel
@@ -108,12 +138,14 @@ def record(
     tables = {owner: _copy(m.debt) for owner, m in analysis.manifests.items()}
     for (owner, code, key), found in tally(_recordable(analysis, targets)).items():
         rows = tables.setdefault(owner, {}).setdefault(code, {})
-        rows[key] = max(rows.get(key, 0), len(found))
+        rows[key] = _raised(rows.get(key), len(found))
     for owner, manifest in analysis.manifests.items():
         if _within(owner, targets):
             facts = _cycle_facts(analysis, manifest)
             if facts:
-                tables[owner].setdefault(CYCLE_EDGE, {}).update(facts)
+                edges = tables[owner].setdefault(CYCLE_EDGE, {})
+                for key, count in facts.items():
+                    edges[key] = _raised(edges.get(key), count)
     written: list[str] = []
     created: list[str] = []
     for owner, table in sorted(tables.items()):
@@ -144,11 +176,11 @@ def prune(repo: GitRepo, jobs: int | None = None) -> list[str]:
         table: DebtTable = {}
         for code, rows in manifest.debt.items():
             kept = {
-                key: min(n, len(found.get((owner, code, key), ())))
-                for key, n in rows.items()
+                key: _lowered(entry, len(found.get((owner, code, key), ())))
+                for key, entry in rows.items()
                 if not (code is CYCLE_EDGE and local_edge(key) in unneeded)
             }
-            table[code] = {key: n for key, n in kept.items() if n > 0}
+            table[code] = {key: entry for key, entry in kept.items() if entry.count > 0}
         if write_baseline(repo, owner, table):
             lines.append(
                 f"{manifest_path(owner)}: {total(manifest.debt)} recorded debts lowered to {total(table)}"
