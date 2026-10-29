@@ -148,6 +148,52 @@ def test_reconcile_keeps_the_pro_band_open_after_the_withdrawn_retirement() -> N
 
 
 # meiva:note
+# A MODEL label's cited footnote prices the retired Flash ids; a rewrite under the same marker must
+# not pass as a match.
+def test_reconcile_fails_closed_when_a_cited_footnote_body_changes() -> None:
+    with pytest.raises(ValueError, match=r"footnote \(1\).*deepseek-flash"):
+        _reconcile(
+            _reviewed_catalog(),
+            _CURRENT_TABLE.replace("billed at the Flash price", "billed at twice the Flash price"),
+            "2026-10-29T12:34:56Z",
+        )
+
+
+# meiva:note
+# A cited marker whose text disappeared cannot be reviewed, so it fails instead of matching.
+def test_reconcile_fails_closed_when_a_cited_footnote_body_is_missing() -> None:
+    stripped = _CURRENT_TABLE.replace(
+        "<p>(1) Use deepseek-flash as the model name. The legacy names deepseek-v4-flash and "
+        "deepseek-v4-flash-vision-exp are still accepted, but the corresponding models have been "
+        "retired, their requests are served by the DeepSeek-V4.1-Flash-1017 model and billed at "
+        "the Flash price.</p>",
+        "",
+    )
+
+    with pytest.raises(ValueError, match="no such footnote body"):
+        _reconcile(_reviewed_catalog(), stripped, "2026-10-29T12:34:56Z")
+
+
+# meiva:note
+# Provenance compares normalized text: reflowing a reviewed footnote is not a change.
+def test_reconcile_ignores_whitespace_reflow_in_a_cited_footnote() -> None:
+    reflowed = _CURRENT_TABLE.replace("their requests are served", "their requests\n   are  served")
+
+    assert _reconcile(_reviewed_catalog(), reflowed, "2026-10-29T12:34:56Z") is None
+
+
+# meiva:note
+# Only the markers a MODEL label cites are compared, so an unrelated footnote may change.
+def test_reconcile_compares_only_the_footnotes_a_model_label_cites() -> None:
+    uncited = _CURRENT_TABLE.replace(
+        "(2) Off-peak rates are half of the peak rates.",
+        "(2) Off-peak rates are thirty percent of peak.",
+    )
+
+    assert _reconcile(_reviewed_catalog(), uncited, "2026-10-29T12:34:56Z") is None
+
+
+# meiva:note
 # The 2026-09-14 Flash-priced band was never true; it must not read as a match.
 def test_reconcile_reports_the_retired_band_as_drift_instead_of_matching() -> None:
     prior = _prior_catalog_with_the_retired_band()

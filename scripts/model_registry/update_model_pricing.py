@@ -10,11 +10,12 @@
 # deepseek-v4-flash-vision-exp names (DeepSeek keeps accepting and billing them at the Flash
 # price), and `deepseek-v4-pro` is a live column at its own rates.
 # meiva:note
-# A column's footnote marker and its MODEL VERSION cell are compared with the reviewed table and
-# never read as a billing rule. DeepSeek printed a V4 Pro retirement footnote on 2026-09-11 and
-# rewrote it the same day into "we have decided to continue providing API services for DeepSeek
-# V4 Pro", without moving a single price; a comparison of printed prices alone cannot see that,
-# and a rule inferred from the first wording goes on billing a retirement the vendor withdrew.
+# A column's footnote marker, the body of the footnote that marker cites, and its MODEL VERSION cell
+# are compared with the reviewed table, and none of them is read as a billing rule. DeepSeek
+# printed a V4 Pro retirement footnote on 2026-09-11 and rewrote it the same day into "we have
+# decided to continue providing API services for DeepSeek V4 Pro", without moving a single price; a
+# comparison of printed prices alone cannot see that, and a rule inferred from the first wording
+# goes on billing a retirement the vendor withdrew.
 # meiva:note
 # Peak windows are the page's daily UTC hours; the page scopes them Monday through Friday, so
 # this ledger bills weekend hours at peak rates — a known overestimate the archive's
@@ -65,12 +66,13 @@ class ColumnAnnotation(NamedTuple):
 
 
 # meiva:note
-# Everything one page fetch yields: the rates per model, the recurring peak windows, and each
-# column's annotation.
+# Everything one page fetch yields: the rates per model, the recurring peak windows, each column's
+# annotation, and the bodies of the page's numbered footnotes.
 class DeepSeekCatalog(NamedTuple):
     models: dict[str, DeepSeekPrices]
     peak_windows: tuple[tuple[str, str], ...]
     annotations: dict[str, ColumnAnnotation]
+    note_bodies: dict[str, str]
 
 
 _METERS = {
@@ -115,12 +117,27 @@ _DEEPSEEK_COLUMNS: dict[str, Column] = {
         version="DeepSeek-V4-Pro-0813",
     ),
 }
+# meiva:note
+# The body of each footnote a MODEL column cites, as reviewed. Only a marker that appears on a
+# MODEL label is compared: the flash column prices deepseek-v4-flash and
+# deepseek-v4-flash-vision-exp *because* footnote (1) says so, so a body rewritten under the same
+# marker would move what those three ids bill without moving a number. Whitespace is normalized;
+# nothing else on the page is compared.
+_DEEPSEEK_NOTE_BODIES: dict[str, str] = {
+    "1": (
+        "Use deepseek-flash as the model name. The legacy names deepseek-v4-flash and "
+        "deepseek-v4-flash-vision-exp are still accepted, but the corresponding models have been "
+        "retired, their requests are served by the DeepSeek-V4.1-Flash-1017 model and billed at "
+        "the Flash price."
+    ),
+}
 _PEAK_HOURS = re.compile(
     r"\bPeak hours are\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+"
     r"and\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+UTC\b"
 )
 _USD = re.compile(r"\$(?:0|[1-9]\d*)(?:\.\d+)?")
 _MODEL_LABEL_FOOTNOTE = re.compile(r"\s*\((\d+)\)$")
+_FOOTNOTE_PARAGRAPH = re.compile(r"\((\d+)\)\s+(\S.*)")
 _DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
 _CATALOG_PATH = Path(__file__).resolve().parents[2] / "base/lm/pricing/pricing_catalog_archive.json"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -235,6 +252,23 @@ def _model_prices(model: str, model_bands: dict[str, dict[str, Decimal]]) -> Dee
 
 
 # meiva:note
+# The cited-footnote bodies the page prints, keyed by marker. A marker printed twice with different
+# text is ambiguous and fails; whitespace reflow is not a change.
+def _note_bodies(soup: BeautifulSoup) -> dict[str, str]:
+    bodies: dict[str, str] = {}
+    for paragraph in soup.find_all("p"):
+        text = " ".join(paragraph.get_text(" ", strip=True).split())
+        match = _FOOTNOTE_PARAGRAPH.fullmatch(text)
+        if match is None:
+            continue
+        marker, body = match[1], match[2]
+        if marker in bodies and bodies[marker] != body:
+            raise ValueError(f"DeepSeek prints footnote ({marker}) twice with different text")
+        bodies[marker] = body
+    return bodies
+
+
+# meiva:note
 # The table uses rowspans, so a peak row inherits the meter named by the preceding off-peak row,
 # and column labels carry footnote markers (`deepseek-flash (1)`) that are stripped to the model
 # id and reported beside it, never read as a rule. All three meters and the documented 50%
@@ -258,6 +292,7 @@ def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
         models=parsed,
         peak_windows=peak_windows,
         annotations=annotations,
+        note_bodies=_note_bodies(soup),
     )
 
 
@@ -352,22 +387,46 @@ def _append_reviewed_period(
 
 
 # meiva:note
+# Compare the body of the footnote a column cites, when it cites one. Missing text and changed text
+# are review items; whitespace reflow is not.
+def _require_reviewed_note_body(column: str, reviewed: Column, fetched: DeepSeekCatalog) -> None:
+    if reviewed.note is None:
+        return
+    expected = _DEEPSEEK_NOTE_BODIES.get(reviewed.note)
+    if expected is None:
+        raise ValueError(f"the review recorded no text for DeepSeek footnote ({reviewed.note})")
+    found = fetched.note_bodies.get(reviewed.note)
+    if found is None:
+        raise ValueError(
+            f"DeepSeek {column!r} cites footnote ({reviewed.note}), but the page prints no such "
+            "footnote body; a cited marker without its text cannot be reviewed"
+        )
+    if found == expected:
+        return
+    raise ValueError(
+        f"DeepSeek footnote ({reviewed.note}), cited by {column!r}, changed: the review recorded "
+        f"{expected!r}, the page prints {found!r}. The adapter will not follow new wording on its "
+        "own; review it before the catalog does."
+    )
+
+
+# meiva:note
 # Fail closed unless the page annotates every column exactly as the review recorded. A footnote
-# marker on a column's label, or a changed MODEL VERSION cell, says the vendor is talking about
-# that column's meaning while the printed prices may stay identical; the adapter interprets
-# neither, so a marker it was not told about and an identity the catalog was not reviewed against
-# are review items.
+# marker on a column's label, a changed MODEL VERSION cell, or a rewritten footnote body the label
+# cites says the vendor is talking about that column's meaning while the printed prices may stay
+# identical; the adapter interprets none of it, so anything it was not reviewed against is a
+# review item.
 def _require_reviewed_annotations(fetched: DeepSeekCatalog) -> None:
     for column, reviewed in sorted(_DEEPSEEK_COLUMNS.items()):
         found = fetched.annotations[column]
-        if (found.note, found.version) == (reviewed.note, reviewed.version):
-            continue
-        raise ValueError(
-            f"DeepSeek {column!r} is published as {found.version!r} with footnote marker "
-            f"{found.note!r}; the catalog was reviewed against {reviewed.version!r} with "
-            f"marker {reviewed.note!r}. The adapter never reads a billing rule out of a "
-            "footnote — review the page's wording before the catalog records one."
-        )
+        if (found.note, found.version) != (reviewed.note, reviewed.version):
+            raise ValueError(
+                f"DeepSeek {column!r} is published as {found.version!r} with footnote marker "
+                f"{found.note!r}; the catalog was reviewed against {reviewed.version!r} with "
+                f"marker {reviewed.note!r}. The adapter never reads a billing rule out of a "
+                "footnote — review the page's wording before the catalog records one."
+            )
+        _require_reviewed_note_body(column, reviewed, fetched)
 
 
 # meiva:note
