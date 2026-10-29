@@ -184,6 +184,28 @@ it is not a production update mechanism.
 
 See [AGENTS.md](../../AGENTS.md) for the worktree and PR workflow.
 
+## The `user-code` dependency group
+
+`[dependency-groups].user-code` in `pyproject.toml` holds the libraries agent code may
+import from `execute_code` (pandas, scipy, matplotlib, openpyxl ...). No module of this
+repository imports one — `tests/contracts/test_user_code_group.py` re-derives that on every
+run, so code that starts importing a member fails the suite instead of quietly widening
+the group — and `[tool.uv] default-groups` installs the group on every `uv sync`. A
+worktree, CI and a fleet update therefore keep exactly the environment they had before
+the group existed; nothing is lost by the declaration moving.
+
+A build that runs no agent code drops the group, and with it 25 distributions (about
+290 MB installed). Exporting without it also drops the packages only it pulled in —
+matplotlib's fonttools and kiwisolver, pandas' narwhals, scipy's threadpoolctl:
+
+```bash
+uv sync --no-group user-code     # a service-only environment, for a build job
+uv export --no-group user-code   # the requirement set to install into an image
+```
+
+`lxml`, `aiohttp`, `python-dateutil` and `rich` stay installed in that mode anyway,
+because `trafilatura`, `traceloop-sdk`, `croniter` and `textual` require them.
+
 ## Machine Python indexes
 
 Dependency acquisition and updates share `cli.python_install`: operators invoke

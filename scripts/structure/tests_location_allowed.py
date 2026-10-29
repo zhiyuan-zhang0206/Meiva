@@ -307,6 +307,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "keeps the backend NoteTag enum in step with ui/web/src/components/timeline/model/marker-classify.ts",
     ),
+    "tests/contracts/test_user_code_group.py": (
+        "contract",
+        "reads the `user-code` dependency group in pyproject.toml and scans the tree for imports of its members",
+    ),
     "tests/contracts/test_lint_truncate_isolation.py": (
         "contract",
         "keeps the per-test TRUNCATE list in step with db/schema.sql and migrations/",
