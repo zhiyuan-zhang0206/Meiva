@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Timestamp display
-description: The shared timestamp formatters, the clock-format and zone-name settings, and the day-context rules for an upcoming instant.
+description: The shared timestamp formatters, the clock-format, zone-name and date-format settings, and the day-context rules for an upcoming instant.
 tags: [frontend, contracts]
 ---
 
@@ -14,15 +14,23 @@ cluster timezone an agent sees. Four shapes, one job each: `formatAbsolute`
 `formatRelative` (one signed wording, `in 4m` / `5m ago`) and `formatUpcoming`
 (an upcoming instant with its day context).
 
-## Clock format and zone name
+## Clock format, zone name and date format
 
-Two `display.*` user settings drive every clock render. Both defaults are what a
-viewer who never opened Display settings sees.
+Three `display.*` user settings drive every clock render. Their defaults are what
+a viewer who never opened Display settings sees.
 
 | Setting               | Values          | Default | Effect                                                              |
 | --------------------- | --------------- | ------- | ------------------------------------------------------------------- |
 | `display.clock_format` | `24h` \| `12h` | `24h`   | `15:45` vs `3:45 PM` on every clock surface                          |
 | `display.show_timezone` | boolean       | `false` | `formatAbsolute` appends `GMT+8` / `PDT` / `UTC`; off shows the clock alone |
+| `display.date_format`  | `absolute` \| `relative` | `absolute` | `formatFuture` on a future instant: `Tomorrow 15:21` vs `in 22h` |
+
+`formatFuture` is the one place that absolute/relative choice is made: it renders
+`formatUpcoming` under `absolute` and `formatRelative` (`in 22h`, `in 12m`) under
+`relative`, so no surface composes both and none prints a second, smaller line
+under the value it already shows. Absolute is the default because a bare span
+cannot say which day it lands on (user 2026-10-29, on the Inspector's paused
+heartbeat, which then carried a relative span as its sub line).
 
 `formatClockText` owns the 12/24-hour choice for the viewer's local zone;
 `formatShort` and the run-timeline axis labels compose it. `formatUpcoming`
