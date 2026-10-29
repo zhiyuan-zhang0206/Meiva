@@ -69,7 +69,8 @@ def test_shell_survivor_names_itself_and_persists_exact_inventory(
     )
     identity = identity_of(process)
     survivor_outcome = closure.Outcome(
-        survivors=(closure.Survivor("private-shell-session", identity, SurvivorRole.SHELL),)
+        grace_s=0.0,
+        survivors=(closure.Survivor("private-shell-session", identity, SurvivorRole.SHELL),),
     )
     assert status_journal.begin(home, "stop", pid=os.getpid())
     with pytest.raises(report.StopIncompleteError) as caught:
@@ -120,6 +121,7 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     assert len(children) == 1
     child = OwnedProcess.capture(children[0])
     outcome = closure.Outcome(
+        grace_s=0.0,
         closed=(closed_session("private-shell-session", ((child.pid, "python"),)),),
         survivors=(closure.Survivor("private-shell-session", child, SurvivorRole.JOB),),
     )

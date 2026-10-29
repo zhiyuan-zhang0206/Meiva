@@ -316,7 +316,7 @@ def test_the_sweep_never_signals_a_pid_that_is_no_longer_the_recorded_process(
             path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
         )
 
-        assert outcome == closure.Outcome()
+        assert outcome == closure.Outcome(grace_s=ledger.SWEEP_HANGUP_WAIT_S)
         assert bystander.poll() is None, "a recycled pid was signalled"
     finally:
         bystander.kill()
@@ -326,12 +326,9 @@ def test_the_sweep_never_signals_a_pid_that_is_no_longer_the_recorded_process(
 def test_an_unreadable_ledger_sweeps_nothing(tmp_path: Path) -> None:
     path = tmp_path / "ledger.json"
     path.write_text("{not json")
-    assert (
-        ledger.sweep(
-            path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
-        )
-        == closure.Outcome()
-    )
+    assert ledger.sweep(
+        path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+    ) == closure.Outcome(grace_s=ledger.SWEEP_HANGUP_WAIT_S)
     assert json.loads(path.read_text())["sessions"] == {}
     assert path.stat().st_mode & 0o777 == 0o600
 
