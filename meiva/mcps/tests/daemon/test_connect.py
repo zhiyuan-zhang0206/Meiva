@@ -101,6 +101,32 @@ async def test_a_command_that_cannot_start_raises(unit_home: Path, config: Daemo
         await daemon_mod.connect_server("gone", config, {})
 
 
+# meiva:note
+# The two budgets this test hands the same blackholed connect, the least difference in spent time
+# they must show, and the guard that only catches a hang. Both budgets are this test's own input
+# (the daemon's default lives in `DaemonConfig.connect_timeout_seconds`).
+_BUDGET_S = 0.5
+_LONG_BUDGET_S = 1.5
+_MIN_BUDGET_DIFFERENCE_S = 0.7
+_HANG_GUARD_S = 15.0
+
+
+# meiva:note
+# One blackholed connect at `budget_s`, returning what the whole call cost. The stack's teardown
+# (closing a child that never answers) is a constant inside the call, which is why the test below
+# compares two budgets instead of reading one: the constant cancels and the difference left is the
+# budget itself.
+async def _spent_on_a_blackholed_connect(
+    unit_home: Path, config: DaemonConfig, budget_s: float
+) -> float:
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        await daemon_mod.connect_server(
+            "mute", replace(config, connect_timeout_seconds=budget_s), {}
+        )
+    return time.monotonic() - started
+
+
 async def test_a_server_that_never_handshakes_times_out_and_leaves_no_child(
     unit_home: Path, config: DaemonConfig
 ) -> None:
@@ -109,12 +135,32 @@ async def test_a_server_that_never_handshakes_times_out_and_leaves_no_child(
         unit_home,
         {"mute": {"command": sys.executable, "args": [str(IDLE_PROCESS), marker]}},
     )
-    started = time.monotonic()
 
-    with pytest.raises(TimeoutError):
-        await daemon_mod.connect_server("mute", replace(config, connect_timeout_seconds=0.5), {})
+    short = await _spent_on_a_blackholed_connect(unit_home, config, _BUDGET_S)
+    await _assert_no_child_carries(marker)
+    long = await _spent_on_a_blackholed_connect(unit_home, config, _LONG_BUDGET_S)
+    await _assert_no_child_carries(marker)
 
-    assert time.monotonic() - started < 15
+    # meiva:note
+    # The budget is what ends the wait, measured as the difference between two budgets on the same
+    # connect: the teardown constant is in both numbers and cancels, so what is left is the second
+    # of budget the second call was given. A connect that ignores its budget, or spends a share of
+    # it, collapses the difference; a slower machine moves both numbers together and does not.
+    difference = long - short
+    assert difference >= _MIN_BUDGET_DIFFERENCE_S, (
+        f"the second connect must wait its extra {_LONG_BUDGET_S - _BUDGET_S:.1f}s of budget "
+        f"(spent {short:.2f}s then {long:.2f}s)"
+    )
+    # meiva:note
+    # Guard only: catches a connect that hangs, and says nothing about how fast this machine was.
+    assert short < _HANG_GUARD_S and long < _HANG_GUARD_S, (
+        "guard only: a hung connect is the one thing this catches"
+    )
+
+
+# meiva:note
+# No process that carries this marker may outlive the failed connect that spawned it.
+async def _assert_no_child_carries(marker: str) -> None:
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if not any(
