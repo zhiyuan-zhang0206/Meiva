@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from base import telemetry
 from base.db import Database
 from base.db.transaction import async_write_transaction
+from base.paths import meiva_home
 from base.telemetry import audit_events
 from base.telemetry.audit_events import record_audit, record_audit_standalone
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -142,7 +143,7 @@ def test_standalone_commits_the_row_before_it_emits(
 
     pipe = telemetry.EventPipeline(writer=writer, batch_size=1)
     try:
-        telemetry.init_telemetry(process="test-audit", pipeline=pipe)
+        telemetry.init_telemetry(home=meiva_home(), process="test-audit", pipeline=pipe)
         record_audit_standalone(database, _event(marker))
         assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
     finally:
@@ -193,7 +194,7 @@ async def test_async_standalone_commits_the_row_before_it_emits(
 
     pipe = telemetry.EventPipeline(writer=writer, batch_size=1)
     try:
-        telemetry.init_telemetry(process="test-audit-async", pipeline=pipe)
+        telemetry.init_telemetry(home=meiva_home(), process="test-audit-async", pipeline=pipe)
         await audit_events.record_audit_standalone_async(aops_pool, _event(marker))
         assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
     finally:
@@ -244,7 +245,7 @@ def test_standalone_many_commits_every_row_together_and_emits_after(
 
     pipe = telemetry.EventPipeline(writer=writer, batch_size=2)
     try:
-        telemetry.init_telemetry(process="test-audit-many", pipeline=pipe)
+        telemetry.init_telemetry(home=meiva_home(), process="test-audit-many", pipeline=pipe)
         audit_events.record_audit_standalone_many(database, [_event(first), _event(second)])
         assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
     finally:

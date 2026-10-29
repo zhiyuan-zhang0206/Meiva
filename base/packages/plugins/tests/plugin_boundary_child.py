@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.paths import meiva_home
+
 
 class Config(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -68,7 +70,7 @@ def failed_report_writer() -> None:
     records = LogRecords()
     sink = logger.add(lambda message: records.append(dict(message.record)))
     pipeline = EventPipeline(writer=unavailable, flush_interval_s=0.01)
-    init_telemetry(pipeline=pipeline)
+    init_telemetry(home=meiva_home(), pipeline=pipeline)
     try:
         report_plugin_load_failure("demo", RuntimeError("boom"))
         with pytest.raises(RuntimeError, match="telemetry down") as failed:

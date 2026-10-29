@@ -39,7 +39,6 @@ from base.deploy.lifecycle import start_serving
 from base.host.resource.reading import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.surface import stats
-from base.telemetry.observability import cluster_label
 from gateway.cluster._health import get_health
 from gateway.cluster.monitor import stats_events
 from gateway.cluster.monitor.alert_classes import read_alert_classes
@@ -63,7 +62,13 @@ from gateway.cluster.schemas import (
     StatsTokens,
     SystemStatus,
 )
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_rpc
+from gateway.http.config import (
+    GatewayConfig,
+    gateway_clock,
+    gateway_cluster,
+    gateway_config,
+    gateway_rpc,
+)
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import RpcClient
@@ -119,22 +124,28 @@ def get_stats_dashboard(
             hours,
             request.app.state.gateway_config,
             gateway_clock(request),
+            cluster=gateway_cluster(request),
         )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
 
 
 def _compute_stats_dashboard(
-    pool: ConnectionPool[Any], hours: StatsWindowHours, config: GatewayConfig, clock: Clock
+    pool: ConnectionPool[Any],
+    hours: StatsWindowHours,
+    config: GatewayConfig,
+    clock: Clock,
+    *,
+    cluster: str,
 ) -> StatsDashboard:
     """Assemble the payload from one pooled connection."""
-    cluster = cluster_label()
+
     now = clock.now()
     window_start = now - window_delta(hours)
     with pool.connection() as conn:
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
         totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
-        alert_classes = read_alert_classes(conn, start=window_start, end=now)
+        alert_classes = read_alert_classes(conn, cluster=cluster, start=window_start, end=now)
         live_count = int(
             conn.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'"
