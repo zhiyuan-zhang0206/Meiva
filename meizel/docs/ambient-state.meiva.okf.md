@@ -26,6 +26,10 @@ A baseline key is `path::rule:name`; the name is the assigned name, the callee (
 | `import-time-call` / `import-time-read` / `host-fact` | a bare call at import; a read of settings, `os.environ`, the clock or the filesystem; a platform constant | register or read where used; inject a `Platform` |
 | `asyncio-task` / `thread` | `asyncio.create_task`, `ensure_future`, `<loop>.create_task`; `threading.Thread(...)` | a service loop |
 
+A new or grown site fails with the rule and the repair, why that rule exists, what the author of
+the site now owns, and the rule ids table above: the reason is written once per mechanism in
+`ambient_state/__init__.py` and every site of that mechanism prints it.
+
 ## What passes
 
 Only the closed lists in the `[ambient-state]` tables of `meizel.policy.toml` (`ambient_state/allowlist.py` reads them), each entry with a reason, and a listed file or site that disappears fails as stale: write-only facades (`SINK_CALLEES`, and `SINK_FACADES` for the state inside the log/telemetry sinks — threads they start are still reported), framework wiring (`WIRING_CALLEES`: `FastAPI()`, `APIRouter()`, parser, `StateGraph`, locks, events, semaphores, `threading.local`), pure constants (`PURE_CALLEES`, `PURE_REPO_CALLEES`) and memoized pure functions (`ALLOWED`). `DEFERRED` exempts nothing: it annotates frozen sites whose fix waits on another redesign (today the log-throttle flags, `deferred: warning/alert redesign`). There is no inline exemption and no list for background work.
