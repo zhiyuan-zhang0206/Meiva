@@ -113,9 +113,10 @@ def test_collection_exit_preserved_and_worker_joined(
 # that window; faulthandler prints at most 100 frames per thread, so `recurse(123)` pushed the
 # thread's outermost `churn` frame past the cap (measured: invisible at 123, visible at 60 and 20);
 # and the dumper's first dump can precede the worker thread's entry, which leaves a file with no
-# churn frame at all. The thread now reaches its innermost recursive frame and stops there before the
-# sampler starts, so every dump taken while the sampler runs carries that whole chain, and the depth
-# fits the cap.
+# churn frame at all. So the test takes its evidence in two gated steps instead of one sample: the
+# thread parks in its innermost frame and a dump is awaited there (the deep chain must be complete),
+# then the frames resume and a second dump is awaited (a moving stack must still be safe to read).
+# Both waits are facts the test observes, not windows it hopes the scheduler honors.
 # meiva:link scripts/ci/collection_tracebacks.py
 def test_frame_churn_finishes_with_complete_tracebacks(
     tmp_path: Path, pytester: pytest.Pytester
@@ -127,27 +128,35 @@ def test_frame_churn_finishes_with_complete_tracebacks(
         "from scripts.ci.collection_tracebacks import periodic_tracebacks\n"
         "entered = threading.Event()\n"
         "released = threading.Event()\n"
-        "dumped = threading.Event()\n"
+        "stop = threading.Event()\n"
+        "parked_dump = threading.Event()\n"
+        "moving_dump = threading.Event()\n"
         "def recurse(depth):\n"
         "    a, b, c = 1, 2, 3\n"
         "    if depth:\n"
         "        return recurse(depth - 1)\n"
-        "    entered.set()\n"
-        "    assert released.wait(10), 'the parked frame was never released'\n"
+        "    if not released.is_set():\n"
+        "        entered.set()\n"
+        "        assert released.wait(10), 'the parked frame was never released'\n"
         "    return a + b + c\n"
         "def churn():\n"
         "    assert recurse(20) == 6\n"
+        "    while not stop.is_set():\n"
+        "        assert recurse(20) == 6\n"
         "def dump(*, file, all_threads):\n"
         "    faulthandler.dump_traceback(file=file, all_threads=all_threads)\n"
-        "    dumped.set()\n"
+        "    (moving_dump if released.is_set() else parked_dump).set()\n"
         "worker = threading.Thread(target=churn, name='churning-worker')\n"
         "worker.start()\n"
         f"with open({str(output)!r}, 'w') as stacks:\n"
         "    try:\n"
         "        assert entered.wait(10), 'the churn thread never reached its innermost frame'\n"
         "        with periodic_tracebacks(stacks, interval=0.001, dump_traceback=dump):\n"
-        "            assert dumped.wait(10), 'no periodic dump was taken'\n"
+        "            assert parked_dump.wait(10), 'no dump was taken while the frame was parked'\n"
+        "            released.set()\n"
+        "            assert moving_dump.wait(10), 'no dump was taken after the frames resumed'\n"
         "    finally:\n"
+        "        stop.set()\n"
         "        released.set()\n"
         "        worker.join()\n"
         "assert not any(t.name == 'collection-tracebacks' for t in threading.enumerate())\n",
@@ -157,7 +166,14 @@ def test_frame_churn_finishes_with_complete_tracebacks(
     trace = output.read_text()
     assert "Periodic traceback" in trace
     assert 'File "' in trace and ", line " in trace
-    assert "in recurse" in trace and "in churn" in trace
+    dumps = trace.split("Periodic traceback")
+    assert len(dumps) > 2, "expected a dump before and after the frames resumed"
+    assert "in recurse" in dumps[1] and "in churn" in dumps[1], (
+        "the first dump did not show the parked recursion"
+    )
+    assert any("in churn" in dump for dump in dumps[2:]), (
+        "no dump was taken after the frames resumed"
+    )
 
 
 @pytest.mark.parametrize(
