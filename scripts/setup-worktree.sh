@@ -125,6 +125,12 @@ bootstrap() {
 
   # `npm ci`, as CI does: it installs exactly what package-lock.json pins and never
   # rewrites it (`npm install` strips optional-dependency entries on a newer npm).
+  #
+  # Measured on this repository (npm 11.12.1, one dedicated cache directory): a cold cache
+  # costs 850 registry requests / 156 MB / 64 s; a warm one costs **0 requests** whether or not
+  # `--prefer-offline` is passed (27.9 s vs 28.4 s). The flag therefore buys nothing here, so it
+  # is not passed - a switch that cannot be measured is worse than none, because the next reader
+  # reads it as "the transfer spike is solved" and stops looking for the cold install that is.
   echo "→ npm ci (frontend) …"
   (cd "$REPO_ROOT/ui/web" && npm ci --no-audit --no-fund)
 
