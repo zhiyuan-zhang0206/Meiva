@@ -117,7 +117,7 @@ def _git(repository: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 
 # meiva:note
 # "Has release/ ever been committed here" is a history question, not a working-tree one: an empty directory answers true both before the first release and after someone deletes a record, and only one of those may bootstrap.
-def _has_release_history(repository: Path, directory: str) -> bool:
+def has_release_history(repository: Path, directory: str) -> bool:
     result = _git(repository, "log", "--all", "--format=%H", "--", f"{directory}/")
     return bool(result.stdout.strip())
 
@@ -154,7 +154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"ok": False, "reason": "unknown-target", "target": arguments.target}))
         return 1
     records = load_records(arguments.repo / arguments.provenance_dir)
-    bootstrap_allowed = arguments.bootstrap_when_empty and not _has_release_history(
+    bootstrap_allowed = arguments.bootstrap_when_empty and not has_release_history(
         arguments.repo, str(arguments.provenance_dir)
     )
     verdict = verify_release_base(

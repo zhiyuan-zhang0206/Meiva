@@ -210,7 +210,7 @@ def _repository(tmp_path: Path) -> Path:
 
 
 def test_a_repository_that_never_committed_a_record_has_no_history(tmp_path: Path) -> None:
-    assert release_base._has_release_history(_repository(tmp_path), "release") is False
+    assert release_base.has_release_history(_repository(tmp_path), "release") is False
 
 
 def test_a_committed_record_is_history(tmp_path: Path) -> None:
@@ -220,7 +220,7 @@ def test_a_committed_record_is_history(tmp_path: Path) -> None:
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "release: v1.0.0")
 
-    assert release_base._has_release_history(repo, "release") is True
+    assert release_base.has_release_history(repo, "release") is True
 
 
 def test_a_deleted_record_is_still_history(tmp_path: Path) -> None:
@@ -233,4 +233,4 @@ def test_a_deleted_record_is_still_history(tmp_path: Path) -> None:
     _git(repo, "commit", "-q", "-m", "chore: drop the record")
 
     assert not (repo / "release").exists() or not list((repo / "release").iterdir())
-    assert release_base._has_release_history(repo, "release") is True
+    assert release_base.has_release_history(repo, "release") is True
