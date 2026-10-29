@@ -60,6 +60,72 @@ def test_only_unit_test_changes_with_an_enforced_subset_skip_e2e() -> None:
 
 
 @pytest.mark.parametrize(
+    "path", ["meizel.toml", "ui/web/src/app/meizel.toml", "scripts/ci/meizel.toml"]
+)
+def test_a_locality_manifest_cannot_change_behavior(path: str) -> None:
+    assert e2e_scope.is_locality_manifest(path)
+    assert not e2e_scope.is_package_unit_test(path)
+
+
+@pytest.mark.parametrize("path", ["pyproject.toml", "meizel.policy.toml", "ui/web/package.json"])
+def test_configuration_is_not_a_locality_manifest(path: str) -> None:
+    assert not e2e_scope.is_locality_manifest(path)
+
+
+@pytest.mark.parametrize("path", ["docs/conventions/x.md", "ui/web/src/docs/state.md"])
+def test_documentation_prose_cannot_change_behavior(path: str) -> None:
+    assert e2e_scope.is_documentation(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/checker/x.meiva.okf.md",
+        "ui/web/src/docs/state.meiva.okf.md",
+        "index.meiva.okf.md",
+    ],
+)
+def test_an_okf_bundle_file_is_data_for_the_graph_route(path: str) -> None:
+    assert not e2e_scope.is_documentation(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "meiva_builtins/skills/meiva-workflow/SKILL.md",
+        ".agents/skills/review-contribution/SKILL.md",
+        "README.md",
+        "tests/e2e/README.md",
+    ],
+)
+def test_prompt_and_root_markdown_keep_e2e(path: str) -> None:
+    assert not e2e_scope.is_documentation(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "ui/web/src/app/page.tsx",
+        "ui/web/package.json",
+        "tests/e2e/test_browser.py",
+        "base/lm/engine.py",
+    ],
+)
+def test_code_and_e2e_inputs_are_not_manifests_or_documentation(path: str) -> None:
+    assert not e2e_scope.is_locality_manifest(path)
+    assert not e2e_scope.is_documentation(path)
+
+
+def test_a_manifest_change_alone_skips_e2e() -> None:
+    assert _skip(changed=[*_UNIT_TESTS, "ui/web/src/app/meizel.toml"])
+    assert _skip(changed=["ui/web/src/components/inspector/meizel.toml"])
+
+
+def test_a_documentation_change_alone_skips_e2e() -> None:
+    assert _skip(changed=["docs/conventions/x.md"])
+
+
+@pytest.mark.parametrize(
     "overrides",
     [
         {"decision": "FULL"},
@@ -74,7 +140,8 @@ def test_only_unit_test_changes_with_an_enforced_subset_skip_e2e() -> None:
         {"changed": []},
         {"changed": [*_UNIT_TESTS, "base/lm/engine.py"]},
         {"changed": [*_UNIT_TESTS, "tests/components/base/test_poll.py"]},
-        {"changed": [*_UNIT_TESTS, "meizel.toml"]},
+        {"changed": [*_UNIT_TESTS, "ui/web/src/app/page.tsx"]},
+        {"changed": [*_UNIT_TESTS, "tests/e2e/test_browser.py"]},
     ],
 )
 def test_any_other_case_keeps_e2e(overrides: dict[str, Any]) -> None:
