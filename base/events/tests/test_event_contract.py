@@ -43,6 +43,12 @@ def test_tier_for_applies_priority_rules_and_unknown_fallback() -> None:
     assert tier_for("unregistered", "telemetry", "info") == "observation"
 
 
+def test_retired_silent_idle_rows_use_historical_event_tiers() -> None:
+    assert "silent_idle" not in EVENTS
+    assert tier_for("silent_idle", "telemetry", "info") == "observation"
+    assert tier_for("silent_idle", "telemetry", "warning") == "anomaly"
+
+
 def test_tier_for_fails_fast_when_a_registered_event_lacks_a_tier() -> None:
     with pytest.raises(KeyError):
         tier_for("llm_usage", "telemetry", "info", tiers={})

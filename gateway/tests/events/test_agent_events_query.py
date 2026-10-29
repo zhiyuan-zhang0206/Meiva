@@ -56,6 +56,21 @@ class TestAgentEventsQuery:
         audit_event(db_conn, "spawn", minutes_ago=3)
         assert _events(_get()) == ["llm_usage", "log_line"]
 
+    def test_retired_silent_idle_history_keeps_its_payload(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        payload = {
+            "output_tokens": 618,
+            "cumulative_output_tokens": 618,
+            "estimated_cost_usd": 0.01236,
+            "halted": False,
+        }
+        telemetry_event(db_conn, "silent_idle", minutes_ago=1, attributes=payload)
+        items = _get({"event": "silent_idle"})
+        assert len(items) == 1
+        assert items[0]["event"] == "silent_idle"
+        assert items[0]["payload"] == payload
+
     def test_filter_event_is_exact(self, db_conn: psycopg.Connection) -> None:
         telemetry_event(db_conn, "llm_usage", minutes_ago=1)
         telemetry_event(db_conn, "turn_end", minutes_ago=2)

@@ -21,6 +21,12 @@ Every classified failure, including a retried transient, is observable; `fatal` 
 
 ## Historical silent-idle events
 
-`silent_idle` remains registered for retained event history. Its producer and
-continuation budget were removed: completed responses without a tool call now
-end normally, even with empty text or reasoning-only content.
+`silent_idle` has no active declaration or producer after removal of the
+continuation budget. Existing event rows keep their stored name, category and
+payload and remain readable through the historical event APIs. They use the
+standard undeclared historical-name tier: observation for informational rows,
+anomaly for warning-or-higher rows. Historical continuation notes retain their
+`NoteTag` value for checkpoint and timeline compatibility.
+
+Completed responses without a tool call now end normally, even with empty
+text or reasoning-only content.
