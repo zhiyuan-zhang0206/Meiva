@@ -9,6 +9,7 @@ import pytest
 from meizel.state import ambient_state
 from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state.module import Tree
+from meizel.state.ambient_state.tests.conftest import SCOPE
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -28,7 +29,7 @@ def _sites(
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, _tree(root))
+    measured = ambient_state.measure(tree, rel, _tree(root), SCOPE)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 
@@ -246,7 +247,7 @@ def test_a_thread_is_reported_by_function(tmp_path: pathlib.Path, call: str) -> 
 def test_the_rule_governs_the_packages_and_schedules_not_tests_or_skill_scripts(
     rel: str, governed: bool
 ) -> None:
-    assert ambient_state.in_scope(rel) is governed
+    assert ambient_state.in_scope(rel, SCOPE) is governed
 
 
 def test_an_out_of_scope_module_measures_nothing(tmp_path: pathlib.Path) -> None:
@@ -283,7 +284,7 @@ def test_a_sink_facade_file_lets_its_state_through_but_not_its_threads(
 
 def _stale(root: pathlib.Path, rel: str, source: str) -> list[str]:
     path = _write(root, rel, source)
-    errors = ambient_state.allowlist_errors(ast.parse(path.read_text()), rel, _tree(root))
+    errors = ambient_state.allowlist_errors(ast.parse(path.read_text()), rel, _tree(root), SCOPE)
     return [message for _, message in errors]
 
 

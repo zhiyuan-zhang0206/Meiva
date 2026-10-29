@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Collection
 from pathlib import Path
 
-from meizel.checkout import GitRepo, toplevel
+from meizel.checkout import GitRepo, read_roles, toplevel
 from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
@@ -305,7 +305,9 @@ def main(argv: list[str] | None = None) -> int:
             print(explain(analysis, node, report))
             return 0
         if args.command == "roles":
-            return enumerations.run_roles(repo, args.mode, tuple(getattr(args, "role_names", ())))
+            return enumerations.run_roles(
+                repo, read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))
+            )
         if args.command == "sync":
             return _run_sync(repo, base, args)
         print(bootstrap(repo, args.out, args.jobs))

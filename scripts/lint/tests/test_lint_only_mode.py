@@ -24,8 +24,10 @@ import pytest
 
 from base.host.proc import run_bounded
 from meizel import lint_common
+from meizel.checkout import roles_at
 from meizel.language import no_script_sibling_imports
 from meizel.owners import clock_lattice
+from meizel.roles import select_packages
 from meizel.state import no_os_environ, turn_scoped_config
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet
 from scripts.lint import (
@@ -43,6 +45,8 @@ from scripts.lint.diagnostics import (
     time_bomb,
 )
 from scripts.lint.plugins import no_plugin_wrap
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # A path every lint's tooling-edit check treats as "the lint itself changed".
 _TOOLING = "scripts/lint/some_lint.py"
@@ -164,7 +168,12 @@ CASES = [
         clock_lattice,
         "ops/x.py",
         "_SOME_REAP_GRACE_S = 100.0\n",
-        call=partial(clock_lattice.main, family_modules=(), independent={}),
+        call=partial(
+            clock_lattice.main,
+            scan_dirs=select_packages(roles_at(_REPO_ROOT), "application", "tooling"),
+            family_modules=(),
+            independent={},
+        ),
     ),
     Case(
         no_plugin_wrap,

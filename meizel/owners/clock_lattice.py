@@ -7,11 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.roles import packages
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-
-SCAN_DIRS = packages("application", "standalone", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -335,6 +332,7 @@ def _stale_entries(
 def main(
     argv: list[str] | None = None,
     *,
+    scan_dirs: tuple[str, ...],
     repo_root: Path | None = None,
     registered_clocks: frozenset[str] = REGISTERED_CLOCKS,
     family_modules: tuple[str, ...] = FAMILY_MODULES,
@@ -350,7 +348,7 @@ def main(
             return 1
         paths = [root / entry for entry in resolved if entry.endswith(".py")]
     else:
-        paths = lint_common.scan_roots(root, SCAN_DIRS)
+        paths = lint_common.scan_roots(root, scan_dirs)
     # `--only` (the commit hook) judges the changed files under the default scope; the
     # lattice's own family modules are inputs: editing one re-judges every file.
     scope = lint_common.changed_scope(only, root, inputs=family_modules)
@@ -363,4 +361,7 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(
+        "the entry of this rule is `python -m meizel.owners.clock_lattice_cli`: the rule takes its "
+        "scan directories from the shell that reads the roles"
+    )

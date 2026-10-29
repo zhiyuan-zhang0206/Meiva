@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Collection, Generator
+from collections.abc import Collection, Generator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +18,7 @@ from pathlib import Path
 from meizel.graph import project_metadata_paths, standalone_projects
 from meizel.graph.model import MeizelError
 from meizel.graph.universe import MANIFEST, EditPlan, Universe
+from meizel.roles import parse_roles
 
 __all__ = [
     "GitRepo",
@@ -25,10 +26,31 @@ __all__ = [
     "has_file",
     "load_universe",
     "read_bytes",
+    "read_roles",
     "read_text",
+    "roles_at",
     "toplevel",
     "tracked_files",
 ]
+
+
+# meiva:note
+# The roles a checkout's root manifest declares: the parse is the model's (`meizel.roles`),
+# the read is this shell's, so a module that only decides over roles never runs git.
+def read_roles(repo: GitRepo) -> Mapping[str, tuple[str, ...]]:
+    path = repo.root / MANIFEST
+    try:
+        text = repo.load_text(MANIFEST)
+    except OSError as error:
+        raise MeizelError(f"{path}: cannot read the roles: {error}") from error
+    return parse_roles(text, label=str(path))
+
+
+# meiva:note
+# The roles of a repository root, for an entry point that has no checkout yet: the script or
+# command that runs on this repository is the one place allowed to build one.
+def roles_at(root: Path) -> Mapping[str, tuple[str, ...]]:
+    return read_roles(GitRepo(root))
 
 
 # meiva:note

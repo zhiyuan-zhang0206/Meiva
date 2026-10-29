@@ -23,7 +23,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from meizel.roles import packages
+from meizel.checkout import roles_at
+from meizel.roles import select_packages
 from scripts.structure import service_units
 from scripts.structure.imports import cache, executed, facts
 
@@ -42,7 +43,14 @@ __all__ = [
 ]
 
 # First-party Python code participates in placement, including runnable templates.
-CODE_TOPS = packages("application", "standalone", "tooling", "templates", "examples")
+CODE_TOPS = select_packages(
+    roles_at(Path(__file__).resolve().parents[2]),
+    "application",
+    "standalone",
+    "tooling",
+    "templates",
+    "examples",
+)
 _ARTIFACT_TOPS = (
     "db",
     "deploy",

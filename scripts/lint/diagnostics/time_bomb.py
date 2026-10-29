@@ -84,13 +84,13 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+from meizel import checkout, lint_common, roles  # noqa: E402 - standalone script
 from scripts.structure.lazy_modules import ModuleMap  # noqa: E402 - standalone script
 
 __all__ = ["main"]
 
-_SCAN_DIRS = packages("application", "standalone", "tooling")
+_ROLES = checkout.roles_at(_REPO_ROOT)
+_SCAN_DIRS = roles.select_packages(_ROLES, "application", "standalone", "tooling")
 
 # A parameter carrying any of these names is treated as the caller-visible
 # logical clock (a `now`/`at` the caller can pin). `deadline` is deliberately

@@ -110,12 +110,19 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+# meiva:note
+# This entry puts the repository root on `sys.path` itself, so every import below that line is out of
+# order for ruff; the reason is the bootstrap, not a circular dependency.
+from meizel import lint_common  # noqa: E402
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
 
-SCAN_DIRS = packages("application", "standalone", "tooling")
+ROLES = roles_at(_REPO_ROOT)
+
+SCAN_DIRS = select_packages(ROLES, "application", "standalone", "tooling")
 
 _LOGURU_MODULES = frozenset({"base.log", "loguru"})
 _LEVEL_METHODS = frozenset(

@@ -1,11 +1,13 @@
-exports = ["clock_lattice.py", "decisions.py"]
+exports = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py"]
 
 [uses]
-"tests" = ["clock_lattice.py", "decisions.py"]
+"clock_lattice_cli.py" = ["clock_lattice.py"]
+"tests" = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py"]
 
 [purity]
 "." = "strict"
 "clock_lattice.py" = "strict-to-be"
+"clock_lattice_cli.py" = { mode = "none", why = "the command-line entry of the clock-lattice rule: it reads the roles this repository declares and hands the scan directories to the rule, which decides everything else" }
 "decisions.py" = "strict-to-be"
 
 [debt.impure-call]
