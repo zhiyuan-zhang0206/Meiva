@@ -8,7 +8,7 @@ exports = ["event_grants.py", "groups.py", "monitor.py", "roles.py", "tests"]
 "invariant.py" = ["catalog.py", "checks.py", "groups.py", "monitor.py", "roles.py"]
 "monitor.py" = ["catalog.py", "checks.py"]
 "roles.py" = ["catalog.py", "checks.py"]
-"tests" = ["__init__.py"]
+"tests" = ["__init__.py", "event_grants.py"]
 
 [purity]
 "checks.py" = "strict"
