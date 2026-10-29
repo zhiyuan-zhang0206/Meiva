@@ -1,32 +1,33 @@
-"""The client-side code-version gate on pooled Postgres sessions.
-
-A runner that is offline during an update (a closed laptop) is not stopped and
-its checkout does not move. When it wakes, its already-running processes keep
-writing with the old code. The gate closes that hole: `deployment_state` holds
-`min_code_version`, every gateway start raises it to that gateway's own code
-version (`raise_min_code_version`), and every pooled session reads it and
-refuses to work under a lower one.
-
-The check rides the baseline-session restore that every pooled borrow already
-runs (`base.db.connections.restore_pooled_session`): the read of the minimum is
-one more column of the restore's second statement, so it adds no round trip, and
-the entry-owned gate limits the read to once per `MIN_REFRESH_INTERVAL_S`.
-
-A stale process terminates itself, and does not raise. `psycopg_pool` swallows
-an `Exception` from a `check` or `configure` callback and retries until
-`PoolTimeout`, and `configure` runs on a worker thread that no caller sees.
-`os._exit` acts from any thread and gives the old code no chance to keep
-writing during a graceful shutdown. The gate trusts the process it stops to
-run this code: a process that predates the gate cannot be stopped by it (the
-first release carrying it cannot deliver its own protection), and a process
-holding one connection forever never re-reads the minimum. The trade-off is in
-`docs/decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md`.
-
-Direct connections (administrator, migration applier, `pg_dump`) and explicit
-targets (`connect_url`) are not gated. The `meiva` CLI is exempt by declaration
-(its operator factory passes an exempt `ProcessDbGate`): `meiva stop` writes to
-drain agents, and a host left behind must still be able to run it.
-"""
+# meiva:note
+# The client-side code-version gate on pooled Postgres sessions.
+#
+# A runner that is offline during an update (a closed laptop) is not stopped and
+# its checkout does not move. When it wakes, its already-running processes keep
+# writing with the old code. The gate closes that hole: `deployment_state` holds
+# `min_code_version`, every gateway start raises it to that gateway's own code
+# version (`raise_min_code_version`), and every pooled session reads it and
+# refuses to work under a lower one.
+#
+# The check rides the baseline-session restore that every pooled borrow already
+# runs (`base.db.pooled_session.restore_pooled_session`): the read of the minimum is
+# one more column of the restore's second statement, so it adds no round trip, and
+# the entry-owned gate limits the read to once per `MIN_REFRESH_INTERVAL_S`.
+#
+# A stale process terminates itself, and does not raise. `psycopg_pool` swallows
+# an `Exception` from a `check` or `configure` callback and retries until
+# `PoolTimeout`, and `configure` runs on a worker thread that no caller sees.
+# `os._exit` acts from any thread and gives the old code no chance to keep
+# writing during a graceful shutdown. The gate trusts the process it stops to
+# run this code: a process that predates the gate cannot be stopped by it (the
+# first release carrying it cannot deliver its own protection), and a process
+# holding one connection forever never re-reads the minimum. The trade-off is in
+# `docs/decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md`.
+#
+# Direct connections (administrator, migration applier, `pg_dump`) and explicit
+# targets (`connect_url`) are not gated. The `meiva` CLI is exempt by declaration
+# (its operator factory passes an exempt `ProcessDbGate`): `meiva stop` writes to
+# drain agents, and a host left behind must still be able to run it.
+#
 
 from __future__ import annotations
 
