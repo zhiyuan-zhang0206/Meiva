@@ -22,19 +22,27 @@ def _is_bundle(node: ast.ClassDef) -> bool:
 
 
 # meiva:note
-# The `@root_bundle` class names a module defines, read through the tree being judged.
+# The `@root_bundle` class names a module defines, read through the tree being judged and answered
+# once per tree: every importer of a module asks this question, and reading the file once per
+# importer was the largest repeated cost of a whole-tree ambient-state run (2026-10-29).
 def bundles_defined_in(index: Tree, module: str) -> frozenset[str]:
+    cached = index.bundle_names.get(module)
+    if cached is not None:
+        return cached
     rel = index.module_path(module)
     text = None if rel is None else index.read(rel)
-    if text is None:
-        return frozenset()
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
-        return frozenset()
-    return frozenset(
-        n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and _is_bundle(n)
-    )
+    found: frozenset[str] = frozenset()
+    if text is not None:
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            tree = None
+        if tree is not None:
+            found = frozenset(
+                n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and _is_bundle(n)
+            )
+    index.bundle_names[module] = found
+    return found
 
 
 def _imported_bundles(tree: ast.Module, index: Tree) -> set[str]:

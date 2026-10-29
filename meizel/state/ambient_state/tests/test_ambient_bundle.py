@@ -78,3 +78,41 @@ def _tree(root: pathlib.Path) -> Tree:
     files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
     dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
     return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)
+
+
+def _counting_tree(root: pathlib.Path) -> tuple[Tree, dict[str, int]]:
+    reads: dict[str, int] = {}
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+
+    def read(rel: str) -> str | None:
+        reads[rel] = reads.get(rel, 0) + 1
+        return (root / rel).read_text(encoding="utf-8")
+
+    return Tree(files, read, dirs), reads
+
+
+def test_every_importer_reads_the_defining_module_once(tmp_path: pathlib.Path) -> None:
+    # meiva:note
+    # Which bundle classes an import names is answered from the tree's module cache, so a module
+    # imported by many files is read and parsed once. Before the cache, a whole-tree run parsed the
+    # same module once per importer (2026-10-29).
+    _define_bundle(tmp_path)
+    importers: list[str] = []
+    for index in range(5):
+        rel = f"gateway/routers/thing{index}.py"
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "from gateway.wiring import GatewayWiring\n\n\n"
+            f"def f{index}(w: GatewayWiring) -> None: ...\n",
+            encoding="utf-8",
+        )
+        importers.append(rel)
+    tree, reads = _counting_tree(tmp_path)
+    for rel in importers:
+        source = (tmp_path / rel).read_text(encoding="utf-8")
+        assert ambient_state.measure(ast.parse(source), rel, tree) == {
+            f"{rel}::bundle-leak:GatewayWiring": [4]
+        }
+    assert reads["gateway/wiring.py"] == 1
