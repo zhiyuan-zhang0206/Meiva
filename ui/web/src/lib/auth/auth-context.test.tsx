@@ -12,6 +12,8 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BrowserProvider } from "../browser/browser-provider";
+import { fakeBrowser, type FakeBrowser } from "../browser/testing";
 import { ApiError, type Api } from "../transport/api";
 import { cacheOnlyApi } from "../transport/tests/api/api-provider";
 import { ApiProvider } from "../transport/transport-context";
@@ -36,15 +38,23 @@ const redeemedTicket = (): unknown => {
   return (JSON.parse(typeof body === "string" ? body : "{}") as { ticket?: unknown }).ticket;
 };
 
+// meiva:note
+// The provider reads the page's address through the browser port, so every test mounts it with a
+// fake page: the ticket tests set that page's address instead of arranging a global.
+let browser: FakeBrowser;
+
 function wrapper({ children }: { children: React.ReactNode }) {
   return (
-    <ApiProvider api={testApi}>
-      <AuthProvider>{children}</AuthProvider>
-    </ApiProvider>
+    <BrowserProvider browser={browser}>
+      <ApiProvider api={testApi}>
+        <AuthProvider>{children}</AuthProvider>
+      </ApiProvider>
+    </BrowserProvider>
   );
 }
 
 beforeEach(() => {
+  browser = fakeBrowser();
   checkAuth.mockReset();
   login.mockReset();
   logout.mockReset();
@@ -55,7 +65,6 @@ beforeEach(() => {
 afterEach(() => {
   setTicketFetchForTest(undefined);
   cleanup();
-  window.history.replaceState(null, "", "/");
 });
 
 describe("AuthProvider mount check", () => {
@@ -81,10 +90,10 @@ describe("AuthProvider mount check", () => {
 
 describe("one-time login link (#ticket=...)", () => {
   it("strips the fragment before redeeming, then trusts the session check", async () => {
-    window.history.replaceState(null, "", "/?tab=1#ticket=abc.def");
+    browser = fakeBrowser({ href: "/?tab=1#ticket=abc.def" });
     let hashWhenRedeemed: string | undefined;
     redeemFetch.mockImplementation(() => {
-      hashWhenRedeemed = window.location.hash;
+      hashWhenRedeemed = new URL(browser.href()).hash;
       return Promise.resolve(verdict(200));
     });
     checkAuth.mockResolvedValue({ authenticated: true });
@@ -96,35 +105,35 @@ describe("one-time login link (#ticket=...)", () => {
     expect(redeemFetch.mock.calls[0][0]).toMatch(/\/api\/auth\/login-ticket\/redeem$/);
     expect(redeemedTicket()).toBe("abc.def");
     expect(hashWhenRedeemed).toBe("");
-    expect(window.location.hash).toBe("");
-    expect(window.location.search).toBe("?tab=1");
+    expect(new URL(browser.href()).hash).toBe("");
+    expect(new URL(browser.href()).search).toBe("?tab=1");
   });
 
   it("keeps unrelated fragment parameters", async () => {
-    window.history.replaceState(null, "", "/#section=x&ticket=t1");
+    browser = fakeBrowser({ href: "/#section=x&ticket=t1" });
     redeemFetch.mockResolvedValue(verdict(200));
     checkAuth.mockResolvedValue({ authenticated: true });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("authenticated"));
 
-    expect(window.location.hash).toBe("#section=x");
+    expect(new URL(browser.href()).hash).toBe("#section=x");
     expect(redeemedTicket()).toBe("t1");
   });
 
   it("a spent or expired ticket lands on the login page", async () => {
-    window.history.replaceState(null, "", "/#ticket=old");
+    browser = fakeBrowser({ href: "/#ticket=old" });
     redeemFetch.mockResolvedValue(verdict(401));
     checkAuth.mockResolvedValue({ authenticated: false });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
 
-    expect(window.location.hash).toBe("");
+    expect(new URL(browser.href()).hash).toBe("");
   });
 
   it("a gateway that never answers leaves the browser on the login page", async () => {
-    window.history.replaceState(null, "", "/#ticket=t");
+    browser = fakeBrowser({ href: "/#ticket=t" });
     redeemFetch.mockRejectedValue(new TypeError("Failed to fetch"));
     checkAuth.mockResolvedValue({ authenticated: false });
 
@@ -133,7 +142,7 @@ describe("one-time login link (#ticket=...)", () => {
   });
 
   it("a rejected ticket does not sign out a browser that already has a session", async () => {
-    window.history.replaceState(null, "", "/#ticket=old");
+    browser = fakeBrowser({ href: "/#ticket=old" });
     redeemFetch.mockResolvedValue(verdict(401));
     checkAuth.mockResolvedValue({ authenticated: true });
 
@@ -142,14 +151,14 @@ describe("one-time login link (#ticket=...)", () => {
   });
 
   it("without a ticket nothing is redeemed and the check decides as before", async () => {
-    window.history.replaceState(null, "", "/#other=1");
+    browser = fakeBrowser({ href: "/#other=1" });
     checkAuth.mockResolvedValue({ authenticated: false });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
 
     expect(redeemFetch).not.toHaveBeenCalled();
-    expect(window.location.hash).toBe("#other=1");
+    expect(browser.href()).toContain("#other=1");
   });
 });
 

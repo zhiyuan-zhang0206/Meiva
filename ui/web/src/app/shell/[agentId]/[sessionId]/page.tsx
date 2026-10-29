@@ -26,6 +26,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useWallNow } from "@/lib/transport/transport-context";
 import { useDisplayLimit } from "@/lib/format/display-limits";
 import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
+import { useMediaQuery } from "@/lib/layout/use-media-query";
 import { useNow } from "@/lib/format/now/use-now";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { formatUptime } from "@/lib/format/time";
@@ -60,20 +61,13 @@ function useTerminalTheme(): [TerminalTheme, () => void] {
   return [theme, toggle];
 }
 
-/** Resolve "system" against `prefers-color-scheme: dark` in real time. */
+// meiva:note
+// Resolve "system" against `prefers-color-scheme: dark` in real time. The query is answered by
+// the browser port through `useMediaQuery` (the same hook the breakpoints use), so this page
+// never asks the window itself; the server frame is that hook's documented snapshot (light)
+// instead of the dark value this pane used to hardcode.
 function useResolvedTheme(theme: TerminalTheme): "light" | "dark" {
-  const [systemDark, setSystemDark] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  });
-
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-
+  const systemDark = useMediaQuery("(prefers-color-scheme: dark)");
   if (theme === "light") return "light";
   if (theme === "dark") return "dark";
   return systemDark ? "dark" : "light";

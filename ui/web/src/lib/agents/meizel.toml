@@ -17,7 +17,3 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 
 [purity]
 "agent-tree.ts" = "strict"
-
-[debt.ambient-read]
-"use-agents.ts#environ localStorage" = 3
-"use-agents.ts#environ window.location" = 4

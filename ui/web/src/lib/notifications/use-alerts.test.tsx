@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, notifySessionInvalid, useAuth } from "../auth/auth-context";
+import { BrowserProvider } from "../browser/browser-provider";
+import { fakeBrowser } from "../browser/testing";
 import {
   ALERTS_QUERY_KEY,
   ALERTS_SECTION_QUERY_KEY,
@@ -112,15 +114,20 @@ function alertsWrapper() {
   };
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <QueryClientProvider client={queryClient}>
-        <ApiProvider api={client}>
-          <StreamHubProvider hub={hub}>
-            <AuthProvider>
-              <AlertsProvider>{children}</AlertsProvider>
-            </AuthProvider>
-          </StreamHubProvider>
-        </ApiProvider>
-      </QueryClientProvider>
+      // meiva:note
+      // The auth provider reads the page's address through the browser port, so the wrapper
+      // mounts the provider the app mounts with a fake page whose address is this test's.
+      <BrowserProvider browser={fakeBrowser()}>
+        <QueryClientProvider client={queryClient}>
+          <ApiProvider api={client}>
+            <StreamHubProvider hub={hub}>
+              <AuthProvider>
+                <AlertsProvider>{children}</AlertsProvider>
+              </AuthProvider>
+            </StreamHubProvider>
+          </ApiProvider>
+        </QueryClientProvider>
+      </BrowserProvider>
     );
   };
 }

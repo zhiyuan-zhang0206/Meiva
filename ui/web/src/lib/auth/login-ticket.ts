@@ -27,24 +27,24 @@ export interface LoginTicketLocation {
 }
 
 export interface LoginTicketRuntime {
-  readonly location?: LoginTicketLocation;
-  readonly replaceUrl?: (url: string) => void;
+  readonly location: LoginTicketLocation;
+  readonly replaceUrl: (url: string) => void;
   readonly fetch?: typeof fetch;
 }
 
-export function takeTicketFromLocation(runtime?: LoginTicketRuntime): string | null {
-  const loc = runtime?.location ?? window.location;
+// meiva:note
+// The address and the rewrite both arrive as values: the caller is the composition root that
+// holds the browser port, so this module never reaches for `window` itself and a test hands it a
+// plain object instead of arranging a global.
+export function takeTicketFromLocation(runtime: LoginTicketRuntime): string | null {
+  const loc = runtime.location;
   const params = new URLSearchParams(loc.hash.replace(/^#/, ""));
   const ticket = params.get(TICKET_PARAM);
   if (!params.has(TICKET_PARAM)) return null;
   params.delete(TICKET_PARAM);
   const rest = params.toString();
   const nextUrl = `${loc.pathname}${loc.search}${rest ? `#${rest}` : ""}`;
-  if (runtime?.replaceUrl) {
-    runtime.replaceUrl(nextUrl);
-  } else {
-    window.history.replaceState(window.history.state, "", nextUrl);
-  }
+  runtime.replaceUrl(nextUrl);
   return ticket;
 }
 
@@ -69,11 +69,11 @@ async function redeem(
   }
 }
 
-export function redeemTicketFromLocation(runtime?: LoginTicketRuntime): Promise<void> {
+export function redeemTicketFromLocation(runtime: LoginTicketRuntime): Promise<void> {
   if (ticketState.inFlight !== undefined) return ticketState.inFlight;
   const ticket = takeTicketFromLocation(runtime);
   if (!ticket) return Promise.resolve();
-  const fetchImpl = runtime?.fetch ?? ticketState.fetchImpl ?? fetch;
+  const fetchImpl = runtime.fetch ?? ticketState.fetchImpl ?? fetch;
   const pending = redeem(ticket, fetchImpl);
   ticketState.inFlight = pending;
   void pending.then(() => {

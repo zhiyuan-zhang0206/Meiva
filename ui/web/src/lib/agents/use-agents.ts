@@ -5,6 +5,8 @@
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
 
+import type { BrowserStorage } from "../browser/browser";
+import { useBrowser } from "../browser/browser-provider";
 import { REFERENCE_PARAM } from "../context/reference-url";
 import { errMsg } from "../contracts/errors";
 import type { AgentRoster } from "../contracts/types";
@@ -20,19 +22,18 @@ const EMPTY_ROSTER: AgentRoster = { agents: [], ancestors: [] };
 const ACTIVE_ID_KEY = "meiva.active.agent_id";
 
 // meiva:note
-// A browser can refuse storage (private windows, disabled site data). The
-// selection still works for the session; it just stops being remembered.
+// The remembered selection is the page's local storage, read and written through the browser
+// port. `absent` (never set here) and `unavailable` (a private window, disabled site data) both
+// leave the selection working for the session; it just stops being remembered.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-function rememberAgent(): string | null;
-function rememberAgent(id: number | null): void;
-function rememberAgent(id?: number | null): string | null | void {
-  try {
-    if (id === undefined) return localStorage.getItem(ACTIVE_ID_KEY);
-    if (id === null) localStorage.removeItem(ACTIVE_ID_KEY);
-    else localStorage.setItem(ACTIVE_ID_KEY, String(id));
-  } catch {
-    return null;
-  }
+function rememberedAgent(storage: BrowserStorage): string | null {
+  const stored = storage.read(ACTIVE_ID_KEY);
+  return stored.state === "found" ? stored.value : null;
+}
+
+function rememberAgent(storage: BrowserStorage, id: number | null): void {
+  if (id === null) storage.remove(ACTIVE_ID_KEY);
+  else storage.write(ACTIVE_ID_KEY, String(id));
 }
 
 export function useAgentRoster() {
@@ -47,6 +48,14 @@ export function useAgentRoster() {
 export function useAgents(showError: (msg: string) => void) {
   const client = useApi();
   const queryClient = useQueryClient();
+  // meiva:note
+  // The page's address and its local storage enter through the browser port: the hook steers
+  // history, deep links and the remembered selection by the values the port returns, and a test
+  // hands in `fakeBrowser()` instead of arranging a global.
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  const browser = useBrowser();
+  const navigation = browser.navigation;
+  const selectionStorage = browser.local;
   const roster = useAgentRoster();
   const { agents, ancestors } = roster.data ?? EMPTY_ROSTER;
   const activeId = useStore((state) => state.activeId);
@@ -73,12 +82,13 @@ export function useAgents(showError: (msg: string) => void) {
   }, [roster.error, selected.error, showError]);
 
   useEffect(() => {
-    const raw = new URL(window.location.href).searchParams.get("agent_id");
-    const remembered = rememberAgent();
+    const location = navigation.location();
+    const raw = location === null ? null : new URLSearchParams(location.search).get("agent_id");
+    const remembered = rememberedAgent(selectionStorage);
     const candidate = [raw, remembered].map(Number).find((id) => Number.isSafeInteger(id) && id > 0);
     if (candidate != null) setActiveId(candidate);
     hydrated.current = true;
-  }, [setActiveId]);
+  }, [navigation, selectionStorage, setActiveId]);
 
   // meiva:note
   // Switching agents is a history entry: Back opens the agent that was selected
@@ -94,8 +104,10 @@ export function useAgents(showError: (msg: string) => void) {
     const id = useStore.getState().activeId;
     const previous = previousId.current;
     previousId.current = id;
-    rememberAgent(id);
-    const url = new URL(window.location.href);
+    rememberAgent(selectionStorage, id);
+    const location = navigation.location();
+    if (location === null) return;
+    const url = new URL(location.href);
     const selected = id == null ? null : String(id);
     if (url.searchParams.get("agent_id") !== selected) {
       if (selected == null) url.searchParams.delete("agent_id");
@@ -104,28 +116,28 @@ export function useAgents(showError: (msg: string) => void) {
     }
     const push = !traversal.current && previous != null && id != null && previous !== id;
     traversal.current = false;
-    if (url.toString() === window.location.href && !push) return;
-    const rawState: unknown = window.history.state;
+    if (url.href === location.href && !push) return;
+    const rawState: unknown = navigation.state();
     const state: Record<string, unknown> =
       typeof rawState === "object" && rawState !== null && !Array.isArray(rawState)
         ? { ...rawState }
         : {};
-    if (push) window.history.pushState(state, "", url);
-    else window.history.replaceState(state, "", url);
-  }, [activeId]);
+    if (push) navigation.push(url.href, state);
+    else navigation.replace(url.href, state);
+  }, [activeId, navigation, selectionStorage]);
 
   useEffect(() => {
     const restore = () => {
-      const raw = new URL(window.location.href).searchParams.get("agent_id");
+      const location = navigation.location();
+      const raw = location === null ? null : new URLSearchParams(location.search).get("agent_id");
       const next = raw == null ? null : Number(raw);
       if (next !== null && !(Number.isSafeInteger(next) && next > 0)) return;
       if (next === useStore.getState().activeId) return;
       traversal.current = true;
       setActiveId(next);
     };
-    window.addEventListener("popstate", restore);
-    return () => window.removeEventListener("popstate", restore);
-  }, [setActiveId]);
+    return navigation.onTraverse(restore);
+  }, [navigation, setActiveId]);
 
   useEffect(() => {
     if (!roster.isSuccess || useStore.getState().activeId != null) return;
