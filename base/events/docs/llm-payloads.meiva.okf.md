@@ -18,3 +18,15 @@ Rates are USD per million tokens. Optional cache-write subdivisions and their TT
 ## Provider error dimensions
 
 Every classified failure, including a retried transient, is observable; `fatal` describes whether it aborted the turn. `vendor` is the model-provider key and `model` is the model in force. `provider` identifies the SDK package raising the exception, which multiple vendors may share; it cannot identify whose billing key needs attention.
+
+## Historical silent-idle events
+
+`silent_idle` has no active declaration or producer after removal of the
+continuation budget. Existing event rows keep their stored name, category and
+payload and remain readable through the historical event APIs. They use the
+standard undeclared historical-name tier: observation for informational rows,
+anomaly for warning-or-higher rows. Historical continuation notes retain their
+`NoteTag` value for checkpoint and timeline compatibility.
+
+Completed responses without a tool call now end normally, even with empty
+text or reasoning-only content.

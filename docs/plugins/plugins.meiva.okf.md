@@ -49,7 +49,6 @@ Each declaration derives attribution records (`PluginContributions.as_records`):
 | meiva_fleet | multi-agent collaboration tool registration and task system |
 | meiva_memory | long-term memory pool—read/write and semantic search of markdown notes |
 | meiva_sdk_reminder | reminds agent to use more appropriate APIs after SDK calls |
-| meiva_silent_idle | controls output behavior when idle |
 | meiva_syntax_fix | deterministic syntax fixes for agent code |
 | meiva_to_user | reminds the agent when its to_user panel grows past the soft word limit |
 

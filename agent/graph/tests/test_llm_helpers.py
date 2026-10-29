@@ -28,7 +28,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
 from agent.graph.interrupt.tests.queued_commands import queue_command
-from agent.graph.llm_errors import LlmLedger
 from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_overview
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -59,12 +58,6 @@ CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 def _config(agent_id: int) -> RunnableConfig:
     return {"configurable": {"thread_id": str(agent_id)}}
-
-
-@pytest.fixture
-def ledger() -> LlmLedger:
-    """A fresh ledger per test: the node's error counts and silent-idle budget start empty."""
-    return LlmLedger()
 
 
 # ───────────── capture_meiva_overview ─────────────
@@ -211,7 +204,6 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     live_events: LiveEvents,
-    ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event arrives in done set first → llm_node must enter the cancel branch:
@@ -249,7 +241,6 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
             ops_pool=aops_pool,
         ),
         _config(agent_id),
-        ledger=ledger,
         rng=_rng(),
     )
     await trigger
@@ -276,7 +267,6 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
 async def test_stream_normal_completion_no_cancelled_event(
     hosted_resources: HostedTurnResources,
     live_events: LiveEvents,
-    ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
     """stream completes first (cancel_event never set) → takes stream-normal branch:
@@ -311,7 +301,6 @@ async def test_stream_normal_completion_no_cancelled_event(
             database_gate=database_gate,
         ),
         CONFIG,
-        ledger=ledger,
         rng=_rng(),
     )
     events = await live_events.typed()
@@ -330,15 +319,11 @@ async def test_stream_normal_completion_no_cancelled_event(
     )
 
 
-async def test_silent_idle_with_reasoning_continue_loops_not_raises(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger, database_gate: ProcessDbGate
+# meiva:note
+# A completed response without text or tools ends normally, retaining usage. LangGraph exposes Command.update dynamically, so these assertions validate the stored message at runtime.
+async def test_reasoning_tokens_without_action_end_the_turn(
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
-    """No tool_call AND empty text BUT output_tokens > 0 (model produced
-    reasoning) → the node no longer raises. It commits the reasoning AIMessage
-    and returns halted=False so the claim node loops straight back to the LLM
-    (the meiva_silent_idle plugin then injects a Continue nudge). No token-wasting
-    blind re-stream."""
-
     async def _empty_complete() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
             content="",
@@ -359,30 +344,24 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(
             database_gate=database_gate,
         ),
         CONFIG,
-        ledger=ledger,
         rng=_rng(),
     )
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
-    # continue-loop: halted=False so claim returns to before_llm without idling
-    assert result.update["halted"] is False
-    # the reasoning AIMessage is preserved in state.messages
+    assert result.update["halted"] is True
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
 
 
-async def test_truly_empty_no_reasoning_halts_with_warning(
+# meiva:note
+# A valid empty completion ends the turn and emits one ordinary halt record.
+async def test_empty_completed_response_ends_normally(
     hosted_resources: HostedTurnResources,
-    loguru_records,
-    ledger: LlmLedger,
+    loguru_records: list[dict[str, Any]],
     database_gate: ProcessDbGate,
 ) -> None:
-    """No tool_call AND empty text AND output_tokens=0 (model truly produced
-    nothing, not even reasoning) → the existing WARNING + halt path still
-    applies — retrying a deterministic empty output wastes API credits."""
-
     async def _empty_complete() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
             content="",
@@ -403,18 +382,14 @@ async def test_truly_empty_no_reasoning_halts_with_warning(
             database_gate=database_gate,
         ),
         CONFIG,
-        ledger=ledger,
         rng=_rng(),
     )
 
     assert isinstance(result, Command)
     assert result.update["halted"] is True
-    silent = [
-        r
-        for r in loguru_records
-        if "EMPTY text" in r["message"] and r["level"].name == "WARNING"  # pyright: ignore[reportUnknownMemberType]
-    ]
-    assert len(silent) == 1, "truly empty (no tokens) must log exactly one distinct WARNING"  # pyright: ignore[reportUnknownArgumentType]
+    halts = [r for r in loguru_records if r["extra"].get("event") == "halt"]
+    assert len(halts) == 1
+    assert halts[0]["level"].name == "INFO"
 
 
 # ───────────── extra actionable mutation kill ─────────────
@@ -468,7 +443,6 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     live_events: LiveEvents,
-    ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event set immediately (before first chunk) → cancel branch: the entire
@@ -498,7 +472,6 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
             ops_pool=aops_pool,
         ),
         _config(agent_id),
-        ledger=ledger,
         rng=_rng(),
     )
     events = await live_events.typed()
@@ -515,21 +488,11 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     assert "llm_done" not in [e.role for e in events]
 
 
-# ───────────── Silent idle supplementary tests (PR #35 review, agent #976) ─────────────
-
-
-async def test_silent_idle_with_thinking_blocks_continue_loops(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger, database_gate: ProcessDbGate
+# meiva:note
+# Thinking blocks remain in the final message on quiet completion. LangGraph exposes Command.update dynamically, so these assertions validate the stored message at runtime.
+async def test_thinking_blocks_without_action_end_the_turn(
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
-    """thinking blocks present but output_tokens=0 → still judged as silent idle.
-
-    The first condition of `has_reasoning`: when content contains a type="thinking" block,
-    even if output_tokens=0 it should be recognized as "produced reasoning but no action" →
-    continue-loop, rather than falling into the truly-empty WARNING + halt path.
-
-    Locks the silent_idle thinking-block condition so it is not coupled with the output_tokens > 0 condition.
-    """
-
     async def _thinking_only_chunk() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
             content=[{"type": "thinking", "thinking": "Let me reason...", "signature": "sig-x"}],
@@ -550,29 +513,22 @@ async def test_silent_idle_with_thinking_blocks_continue_loops(
             database_gate=database_gate,
         ),
         CONFIG,
-        ledger=ledger,
         rng=_rng(),
     )
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
-    assert result.update["halted"] is False
+    assert result.update["halted"] is True
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
 
 
-async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger, database_gate: ProcessDbGate
+# meiva:note
+# DeepSeek reasoning metadata is retained without another model call. LangGraph exposes Command.update dynamically, so these assertions validate the stored message at runtime.
+async def test_deepseek_reasoning_content_without_action_ends_the_turn(
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
-    """DeepSeek model's reasoning is in `additional_kwargs.reasoning_content`,
-    not in Anthropic's content blocks thinking type — silent_idle detection
-    must also cover this path, otherwise DeepSeek reasoning-only turn would be missed.
-
-    Construct: output_tokens=0, no text, no tool_call, no thinking blocks,
-    but has `additional_kwargs.reasoning_content` → judged silent idle → continue-loop.
-    """
-
     async def _ds_reasoning_only() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
             content="",
@@ -594,53 +550,15 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
             database_gate=database_gate,
         ),
         CONFIG,
-        ledger=ledger,
         rng=_rng(),
     )
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
-    assert result.update["halted"] is False
+    assert result.update["halted"] is True
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
-
-
-async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget(
-    hosted_resources: HostedTurnResources,
-    ledger: LlmLedger,
-    database_gate: ProcessDbGate,
-) -> None:
-    """Reasoning-content-only turns cannot bypass the silent-idle cost guard."""
-
-    async def _reasoning_content_only() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 5, "output_tokens": 0, "total_tokens": 5},
-            additional_kwargs={"reasoning_content": "I still need to think."},
-        )
-
-    for turn in range(1, 4):
-        fake_llm = MagicMock()
-        fake_llm.astream.return_value = _reasoning_content_only()
-        result = await llm_node(
-            AgentState(messages=[HumanMessage(content="hi")], halted=False),
-            make_runtime(
-                resources=hosted_resources,
-                llm=fake_llm,
-                event_publisher=MagicMock(),
-                database_gate=database_gate,
-                pins={"llm_silent_idle_max_output_tokens": 3},
-            ),
-            CONFIG,
-            ledger=ledger,
-            rng=_rng(),
-        )
-        assert isinstance(result, Command)
-        assert result.update["halted"] is (turn == 3)
-
-    assert ledger.silent_idle_output_tokens("7") == 0
 
 
 # ─────────── provider-error taxonomy: fail-fast (permanent) vs retry (transient) ───────────
@@ -671,7 +589,6 @@ def astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
 async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fields(
     hosted_resources: HostedTurnResources,
     loguru_records,
-    ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
     """A PERMANENT provider error (HTTP 400 — bad request / context length /
@@ -696,7 +613,6 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
                 database_gate=database_gate,
             ),
             CONFIG,
-            ledger=ledger,
             rng=_rng(),
         )
 

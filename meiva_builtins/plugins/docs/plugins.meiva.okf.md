@@ -26,7 +26,6 @@ compaction thresholds on its 1M context window.
 | [[meiva_builtins/plugins/meiva_fleet/docs/meiva_fleet.meiva.okf.md]] | Agent collaboration and tasks |
 | [[meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md]] | Long-term memory |
 | [[meiva_builtins/plugins/meiva_sdk_reminder/docs/meiva_sdk_reminder.meiva.okf.md]] | SDK usage reminders |
-| [[meiva_builtins/plugins/meiva_silent_idle/docs/meiva_silent_idle.meiva.okf.md]] | Silent-turn continuation |
 | [[meiva_builtins/plugins/meiva_syntax_fix/docs/meiva_syntax_fix.meiva.okf.md]] | Deterministic code corrections |
 | [[meiva_builtins/plugins/meiva_to_user/docs/meiva_to_user.meiva.okf.md]] | To-user panel soft-limit reminder |
 

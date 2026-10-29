@@ -62,11 +62,9 @@ Firing gates:
 - Trigger gate: fire when the message tail carries fresh inbound from a real
   source — user chat, a peer agent (`agent:`), a scheduled turn (`schedule:`),
   or a system notice — and skip machine-originated wake-ups (`watcher:` /
-  `shell:` prefixes; `tail_has_recallable_inbound`). A silent-idle continue or a
-  lifecycle marker carries no inbound at all and is skipped too. This same tail
-  shape (an inbound sits after the last AIMessage) makes recall mutually
-  exclusive with hooks that fire on a bare AIMessage tail (e.g. silent-idle), so
-  they never contend for the write.
+  `shell:` prefixes; `tail_has_recallable_inbound`). A lifecycle marker carries
+  no inbound at all and is skipped too. Historical continuation notes likewise
+  provide no fresh inbound.
 
 Same-window dedup: the injected paths accumulate in `state.memory` via the
 `memory` channel's reducer (`memory_state_merge`); this hook passes the

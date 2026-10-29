@@ -11,11 +11,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
-from langgraph.types import Command
 
 from agent.graph import llm_node
 from agent.graph.llm.node import Attempt, llm_attempt
-from agent.graph.llm_errors import LlmLedger
 from agent.graph.tests.test_llm_helpers import (
     CONFIG,
     FakeAnthropicError,
@@ -25,11 +23,7 @@ from agent.graph.tests.test_llm_helpers import (
     fatal,
     make_runtime,
 )
-from agent.graph.tests.test_llm_helpers import (
-    ledger as ledger,
-)
 from agent.state import AgentState
-from base.config import settings
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.agent_slices import AgentSlices
@@ -47,7 +41,6 @@ def _rng() -> random.Random:
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     hosted_resources: HostedTurnResources,
     loguru_records,
-    ledger: LlmLedger,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -69,7 +62,6 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
                 pins={"llm_model": "deepseek-flash"},
             ),
             CONFIG,
-            ledger=ledger,
             rng=_rng(),
         )
 
@@ -85,7 +77,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
 
 
 async def test_llm_node_transient_provider_error_propagates_for_retry(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger, *, database_gate: ProcessDbGate
+    hosted_resources: HostedTurnResources, *, database_gate: ProcessDbGate
 ) -> None:
     """A TRANSIENT provider error (HTTP 500) is re-raised as-is — NOT wrapped in
     FatalProviderError — so the node's retry loop retries it. Fail-fast is
@@ -103,13 +95,13 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
         database_gate=database_gate,
     )
     with pytest.raises(FakeProviderStatusError) as exc_info:
-        await llm_attempt(state, runtime, CONFIG, Attempt(1, time.time()), ledger=ledger)
+        await llm_attempt(state, runtime, CONFIG, Attempt(1, time.time()))
     assert not isinstance(exc_info.value, FatalProviderError)
     assert is_retryable_provider_error(exc_info.value)
 
 
 async def test_llm_node_configured_fatal_error_type_fails_fast(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger, *, database_gate: ProcessDbGate
+    hosted_resources: HostedTurnResources, *, database_gate: ProcessDbGate
 ) -> None:
     """A configured fatal error *type* (e.g. engine_overloaded_error) surfacing on
     a transient-nature status (429) still fails fast: retrying an overloaded engine
@@ -139,70 +131,15 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
                 pins={"llm_fatal_provider_error_types": "engine_overloaded_error"},
             ),
             CONFIG,
-            ledger=ledger,
             rng=_rng(),
         )
     assert exc_info.value.error_class == "transient"
     assert exc_info.value.status == 429
 
 
-async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
-    hosted_resources: HostedTurnResources,
-    loguru_records,
-    ledger: LlmLedger,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    """Silent-idle output consumes one token budget and reports its cost."""
-
-    cap = settings.lm.llm_silent_idle_max_output_tokens
-    assert cap == 2048
-
-    async def _reasoning_only() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1_100, "total_tokens": 1_101},
-        )
-
-    for turn in range(1, 3):
-        fake_llm = MagicMock()
-        fake_llm.astream.return_value = _reasoning_only()
-        state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-        result = await llm_node(
-            state,
-            make_runtime(
-                resources=hosted_resources,
-                llm=fake_llm,
-                event_publisher=MagicMock(),
-                database_gate=database_gate,
-            ),
-            CONFIG,
-            ledger=ledger,
-            rng=_rng(),
-        )
-        assert isinstance(result, Command)
-        assert result.goto == "after_exec"
-        if turn == 1:
-            assert result.update["halted"] is False
-        else:
-            assert result.update["halted"] is True
-
-    # The budget is popped at the cap, so the next run starts fresh.
-    assert ledger.silent_idle_output_tokens("7") == 0
-    silent_logs = [
-        r
-        for r in loguru_records
-        if r["extra"].get("event") == "silent_idle"  # pyright: ignore[reportUnknownMemberType]
-    ]
-    assert silent_logs[-1]["extra"]["cumulative_output_tokens"] == 2_200
-    assert silent_logs[-1]["extra"]["estimated_cost_usd"] > 0
-
-
 async def test_retried_llm_node_records_total_retry_duration(
     hosted_resources: HostedTurnResources,
     loguru_records,
-    ledger: LlmLedger,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -229,7 +166,6 @@ async def test_retried_llm_node_records_total_retry_duration(
         runtime,
         CONFIG,
         Attempt(2, time.time() - 3.0),
-        ledger=ledger,
     )
 
     retry_logs = [
@@ -239,79 +175,6 @@ async def test_retried_llm_node_records_total_retry_duration(
     ]
     assert retry_logs[-1]["extra"]["outcome"] == "succeeded"
     assert retry_logs[-1]["extra"]["duration_seconds"] >= 3.0
-
-
-async def test_silent_idle_streak_resets_after_normal_turn(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger, *, database_gate: ProcessDbGate
-) -> None:
-    """A real action clears the silent-idle output-token budget."""
-
-    async def _reasoning_only() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    async def _text_turn() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="here is my answer",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 4, "total_tokens": 5},
-        )
-
-    # 1) silent idle accumulates its output-token cost.
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _reasoning_only()
-    await llm_node(
-        AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        make_runtime(
-            resources=hosted_resources,
-            llm=fake_llm,
-            event_publisher=MagicMock(),
-            database_gate=database_gate,
-        ),
-        CONFIG,
-        ledger=ledger,
-        rng=_rng(),
-    )
-    assert ledger.silent_idle_output_tokens("7") == 1
-
-    # 2) a normal text turn resets the streak
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _text_turn()
-    result = await llm_node(
-        AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        make_runtime(
-            resources=hosted_resources,
-            llm=fake_llm,
-            event_publisher=MagicMock(),
-            database_gate=database_gate,
-        ),
-        CONFIG,
-        ledger=ledger,
-        rng=_rng(),
-    )
-    assert result.update["halted"] is True  # text, no tool_call → halt
-    assert ledger.silent_idle_output_tokens("7") == 0
-
-    # 3) a later silent idle starts back at one output token, not two.
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _reasoning_only()
-    result = await llm_node(
-        AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        make_runtime(
-            resources=hosted_resources,
-            llm=fake_llm,
-            event_publisher=MagicMock(),
-            database_gate=database_gate,
-        ),
-        CONFIG,
-        ledger=ledger,
-        rng=_rng(),
-    )
-    assert result.update["halted"] is False
-    assert ledger.silent_idle_output_tokens("7") == 1
 
 
 def test_parse_provider_error_type_openai_shape() -> None:
@@ -430,7 +293,6 @@ def test_is_fatal_provider_error_type_no_body(**changes: Any) -> None:
 async def test_llm_usage_event_carries_latency_ms(
     hosted_resources: HostedTurnResources,
     loguru_records,
-    ledger: LlmLedger,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -462,7 +324,6 @@ async def test_llm_usage_event_carries_latency_ms(
             database_gate=database_gate,
         ),
         CONFIG,
-        ledger=ledger,
         rng=_rng(),
     )
 

@@ -51,11 +51,7 @@ def harness_pre_turn_hooks(
     extensions: ExtensionRegistry,
 ) -> list[tuple[str | None, GraphHook]]:
     return [
-        *(
-            (plugin, hook)
-            for plugin, hook in extensions.hooks("before_llm")
-            if getattr(hook, "name", "") != "_SilentIdleContinueHook"
-        ),
+        *extensions.hooks("before_llm"),
         (None, SkillRecallHook()),
         (None, newly_installed_skills),
     ]

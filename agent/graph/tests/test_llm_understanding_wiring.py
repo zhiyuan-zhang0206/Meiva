@@ -16,7 +16,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import LlmLedger, llm_node
+from agent.graph import llm_node
 from agent.state import AgentState
 from agent.state_channels import CompactState
 from base.agents.context import MeivaContext
@@ -140,7 +140,6 @@ async def test_cut_rides_the_tool_and_the_idle_command(
         _state(),
         _runtime(_turn(2500, tool=tool), database_gate, aops_pool, agent_id, hosted_resources),
         {"configurable": {"thread_id": str(agent_id)}},
-        ledger=LlmLedger(),
         rng=_rng(),
     )
     assert isinstance(result, Command)
@@ -164,7 +163,6 @@ async def test_turn_under_the_threshold_leaves_the_state_alone(
         _state(),
         _runtime(_turn(10, tool=True), database_gate, aops_pool, agent_id, hosted_resources),
         {"configurable": {"thread_id": str(agent_id)}},
-        ledger=LlmLedger(),
         rng=_rng(),
     )
     assert "compact" not in result.update  # type: ignore[operator]
