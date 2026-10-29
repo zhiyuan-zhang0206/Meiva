@@ -524,15 +524,17 @@ def test_pinned_work_detail_seal(
 
 
 # meiva:note
-# Both home columns end with the same bottom band, so the sidebar footer's rule
-# and the composer's rule are one horizontal line, and the gap above that line is
-# the list's and the composer's halves of one measurement (user ruling
-# 2026-10-29). The jsdom half of these contracts is in composer.test.tsx /
-# footer.test.tsx / header-bar.test.tsx — those pin the classes, these measure
-# the pixels.
+# Both home columns end with the same bottom band, so their rules are one
+# horizontal line at rest — and only at rest: the composer's band grows with the
+# draft and the sidebar footer keeps the resting band, so a grown composer leaves
+# the footer's rule where it was (user report 2026-10-29 replaced the day the
+# footer tracked the composer's published height). The gap above the composer's
+# rule is the list's share plus the composer's. The jsdom half of these contracts
+# is in composer.test.tsx / footer.test.tsx / header-bar.test.tsx — those pin the
+# classes, these measure the pixels.
 # meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 BOTTOM_BAND_VIEWPORTS = [(768, 900), (1024, 900), (1440, 900), (1920, 1080)]
-BOTTOM_RULE_GAP_PX = 10
+BOTTOM_RULE_GAP_PX = 6
 SHELL_ICON_PX = 16
 
 
@@ -579,8 +581,10 @@ def test_bottom_rule_is_one_line(
         assert grown["height"] > band_box["height"], (
             "the composer band did not grow with the draft, so the grown-state check proves nothing"
         )
-        assert abs(grown["y"] - followed["y"]) <= 1, (
-            f"rules parted on a grown composer: footer y={followed['y']}, band y={grown['y']}"
+        assert abs(followed["y"] - footer_box["y"]) <= 1, (
+            f"the sidebar rule moved with the composer's: it was y={footer_box['y']} at rest "
+            f"and y={followed['y']} under a grown composer, while the band rose to "
+            f"y={grown['y']} (the sidebar keeps the resting band — user report 2026-10-29)"
         )
     finally:
         ctx.close()
@@ -603,8 +607,8 @@ def test_bottom_rule_gap_is_halved(
         gap = band_box["y"] - (row_box["y"] + row_box["height"])
         assert abs(gap - BOTTOM_RULE_GAP_PX) <= 1, (
             f"gap between the last row and the composer's rule is {gap:.2f}px at {width}px, "
-            f"expected {BOTTOM_RULE_GAP_PX}px +-1 (the timeline's pb-1.5 plus the composer's "
-            "pt-1; a row's own height is fractional, hence the 1px tolerance)"
+            f"expected {BOTTOM_RULE_GAP_PX}px +-1 (the timeline's pb-1 plus the composer's "
+            "pt-0.5; a row's own height is fractional, hence the 1px tolerance)"
         )
     finally:
         ctx.close()

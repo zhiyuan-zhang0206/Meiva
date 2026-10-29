@@ -33,7 +33,6 @@ import {
 import type { StatsDashboard } from "@/lib/contracts/types";
 import {
   BOTTOM_BAND_CLASS,
-  BOTTOM_BAND_HEIGHT_PX,
   BOTTOM_BAND_ROW_CLASS,
   FLEX,
   FLEX_COL,
@@ -320,16 +319,16 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
 
   return (
     // meiva:note
-    // The band primitive, not its own padding: this rule is the bottom rule of
-    // the screen, shared with the composer, so both rules land on the same y by
-    // construction (user ruling 2026-10-29). minHeight follows the composer's
-    // band, published on the root element — this band has no content that grows
-    // with the message input, so without it the rules would part again the
-    // moment the composer grows.
+    // The band primitive, not its own padding: both columns end with the same
+    // band, so their rules are one horizontal line at rest (user ruling
+    // 2026-10-29). They are one line only at rest: the composer's band is
+    // content-sized and its rule rises with a multi-line draft, while this one
+    // keeps the resting height — it follows no other column's geometry (user
+    // report 2026-10-29: a divider that moved with the composer's line read as
+    // an apparatus of its own).
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
     <div
       data-testid="sidebar-footer"
-      style={{ minHeight: `var(--composer-band-height, ${BOTTOM_BAND_HEIGHT_PX}px)` }}
       className={cn(BOTTOM_BAND_CLASS, "justify-end px-2", FLEX, FLEX_COL)}
     >
       <div className={cn(BOTTOM_BAND_ROW_CLASS, "items-center justify-between", FLEX)}>
