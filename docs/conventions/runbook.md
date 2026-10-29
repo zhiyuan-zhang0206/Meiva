@@ -285,8 +285,9 @@ systemd-run --user --scope -p MemoryMax=12G -- python heavy_job.py
 - A backend-side timeout cannot rescue this shape: `statement_timeout` and
   `transaction_timeout` are checked by a backend that is not being scheduled.
   The restore budget of task #5303 covers backend-visible waits; when the backend
-  never answers at all, the async restore abandons the borrow at its client
-  deadline (`db_pool_restore_client_deadline_seconds`) instead of waiting it out.
+  never answers at all, both restores abandon the borrow at their client
+  deadline (`db_pool_restore_client_deadline_seconds`) by shutting the
+  connection's socket down, instead of waiting it out.
 - `scripts/host_ops/host_memory_sample.py` samples the kernel pressure file, the
   slice's `memory.events` counters and the largest descendant units with their
   limits. On a host where it is installed as the operator unit

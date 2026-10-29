@@ -12,7 +12,10 @@
 from __future__ import annotations
 
 import asyncio
+import socket
+import threading
 import time
+from contextlib import suppress
 from typing import LiteralString
 
 import psycopg
@@ -161,6 +164,62 @@ def restore_client_deadline_seconds(client_deadline_seconds: float | None = None
 
 
 # meiva:note
+# The deadline's own way out of a restore: shut that connection's socket down from
+# outside the wait.
+#
+# Cancelling the waiting task is not enough. psycopg's `wait()` catches the
+# cancellation, sends a cancel request, and then waits for the same operation again
+# with no bound at all — the backend runs neither its own timers nor that cancel, so
+# the second wait lasts as long as the wedge (2026-10-30: an 8 s client deadline
+# produced waits up to 81.7 s). A handler inside the coroutine runs too late as well:
+# the cancellation has to unwind before it gets to run. The cut is therefore armed
+# independently of the wait — a loop timer for the async restore, a daemon thread for
+# the sync twin — and it touches nothing but the descriptor.
+#
+# Shutdown, never close: closing the descriptor frees the one the pending wait is
+# registered on (the waiter never wakes, and the number can be reused by an unrelated
+# socket), and `AsyncConnection.close()` hands the connection back to a
+# `close_returns` pool instead of ending it. A shut-down socket keeps the descriptor
+# valid, so the pending wait completes at once with a connection error, and
+# psycopg_pool discards the connection through the same failed-check path as every
+# other restore failure.
+class _DeadlineCut:
+    def __init__(self, fd: int) -> None:
+        self._fd = fd
+        self.fired = False
+
+    def __call__(self) -> None:
+        self.fired = True
+        try:
+            sock = socket.socket(fileno=self._fd)
+        except OSError:
+            return
+        # meiva:note
+        # A shutdown that fails found the socket already closed by the pool or shut down by
+        # the peer: nothing left to cut.
+        with suppress(OSError):
+            sock.shutdown(socket.SHUT_RDWR)
+        sock.detach()
+
+
+# meiva:note
+# The coroutine timeout stays this far above the cut, so the cut is what ends a wedged
+# restore and psycopg never starts its own cancel-and-wait (measured: the cut ends the
+# wait in about a millisecond). The timeout is a backstop for a wait no socket can break,
+# and 5 s is the window psycopg's own `_try_cancel` would have spent waiting anyway, so
+# the backstop is never tighter than the path it replaces.
+_CUT_BACKSTOP_S = 5.0
+
+
+# meiva:note
+# The connection's socket, or None when it has none to cut: a connection that is already
+# closed, or one a unit test built without a wire at all.
+def _socket_fd(conn: psycopg.Connection | psycopg.AsyncConnection) -> int | None:
+    fd = getattr(getattr(conn, "pgconn", None), "socket", None)
+    return fd if isinstance(fd, int) and fd >= 0 else None
+
+
+# meiva:note
 # Raised when a restore ran past its client deadline. It is a TimeoutError so a
 # caller that already treats a timed-out borrow as a retryable stall keeps doing
 # so; the pool counts any check failure as a failed connection and replaces it,
@@ -170,8 +229,24 @@ class RestoreAbandonedError(TimeoutError):
     pass
 
 
+# meiva:note
+# One abandoned restore: the event that names the deadline as what ended it, and the
+# error the borrower sees.
+def _abandoned(started: float, *, deadline: float, gate: ProcessDbGate) -> RestoreAbandonedError:
+    _log_restore_timeout(
+        started, budget_ms=int(deadline * 1000), gate=gate, ended_by="client_deadline"
+    )
+    return RestoreAbandonedError(
+        f"session restore abandoned after its {deadline:.3f}s client deadline"
+    )
+
+
 def restore_pooled_session(
-    conn: psycopg.Connection, *, gate: ProcessDbGate, budget_seconds: float | None = None
+    conn: psycopg.Connection,
+    *,
+    gate: ProcessDbGate,
+    budget_seconds: float | None = None,
+    client_deadline_seconds: float | None = None,
 ) -> None:
     # meiva:note
     # The per-borrow scrub: restore a pooled connection to its baseline session state.
@@ -208,7 +283,17 @@ def restore_pooled_session(
     # with `RestoreAbandonedError`, and the pool replaces that connection.
     #
     statement, budget_ms = restore_budget_statement(budget_seconds)
+    deadline = restore_client_deadline_seconds(client_deadline_seconds)
     started = time.monotonic()
+    fd = _socket_fd(conn)
+    cut = _DeadlineCut(fd) if fd is not None else None
+    timer: threading.Timer | None = None
+    if cut is not None:
+        timer = threading.Timer(deadline, cut)
+        # meiva:note
+        # A host whose process is going down must not be held open by a pending cut.
+        timer.daemon = True
+        timer.start()
     try:
         conn.execute(statement, prepare=False)
         name = (gate.application_name(),)
@@ -233,6 +318,18 @@ def restore_pooled_session(
             started, budget_ms=budget_ms, gate=gate, ended_by="transaction_timeout"
         )
         raise
+    # meiva:note
+    # Last of the psycopg branches: `QueryCanceled` is an `OperationalError`, so the server
+    # timers above must be matched first. The cut turning the connection into EOF is this
+    # deadline's verdict, not a server timer's — name the deadline instead of letting a bare
+    # connection error read as a dead data plane.
+    except psycopg.OperationalError:
+        if cut is None or not cut.fired:
+            raise
+        raise _abandoned(started, deadline=deadline, gate=gate) from None
+    finally:
+        if timer is not None:
+            timer.cancel()
 
 
 # meiva:note
@@ -261,10 +358,10 @@ def _log_restore_timeout(
 
 
 # meiva:note
-# Unlike the sync twin, this one also arms the client-side deadline: the server's two timers run
-# inside the backend, so they cannot end a wait on a backend that is stopped, black-holed or
-# wedged before it next runs. The task is cancelled in this same event loop at the deadline and
-# the connection is abandoned (`RestoreAbandonedError`), which the pool sees as a failed check.
+# The server's two timers run inside the backend, so they cannot end a wait on a backend
+# that is stopped, black-holed or wedged before it next runs; this twin ends it by cutting
+# the socket at the deadline (see `_DeadlineCut`). The coroutine timeout above the cut is
+# only a backstop, and a restore that raises a TimeoutError of its own keeps its meaning.
 async def restore_pooled_session_async(
     conn: psycopg.AsyncConnection,
     *,
@@ -282,7 +379,15 @@ async def restore_pooled_session_async(
     statement, budget_ms = restore_budget_statement(budget_seconds)
     deadline = restore_client_deadline_seconds(client_deadline_seconds)
     started = time.monotonic()
-    guard = asyncio.timeout(deadline)
+    fd = _socket_fd(conn)
+    cut = _DeadlineCut(fd) if fd is not None else None
+    handle: asyncio.TimerHandle | None = None
+    if cut is not None:
+        handle = asyncio.get_running_loop().call_later(deadline, cut)
+    # meiva:note
+    # With a socket the cut is the deadline itself; without one (a connection that is
+    # already closed, or a test double with no wire) the timeout is the only timer there is.
+    guard = asyncio.timeout(deadline if cut is None else deadline + _CUT_BACKSTOP_S)
     try:
         async with guard:
             await conn.execute(statement, prepare=False)
@@ -304,12 +409,7 @@ async def restore_pooled_session_async(
     except TimeoutError:
         if not guard.expired():
             raise
-        _log_restore_timeout(
-            started, budget_ms=int(deadline * 1000), gate=gate, ended_by="client_deadline"
-        )
-        raise RestoreAbandonedError(
-            f"session restore abandoned after its {deadline:.3f}s client deadline"
-        ) from None
+        raise _abandoned(started, deadline=deadline, gate=gate) from None
     except psycopg.errors.QueryCanceled:
         _log_restore_timeout(started, budget_ms=budget_ms, gate=gate, ended_by="statement_timeout")
         raise
@@ -318,3 +418,14 @@ async def restore_pooled_session_async(
             started, budget_ms=budget_ms, gate=gate, ended_by="transaction_timeout"
         )
         raise
+    # meiva:note
+    # Last of the psycopg branches: `QueryCanceled` is an `OperationalError`, so the server
+    # timers above must be matched first. A connection error the cut caused is the deadline's
+    # verdict; any other one keeps its own meaning.
+    except psycopg.OperationalError:
+        if cut is None or not cut.fired:
+            raise
+        raise _abandoned(started, deadline=deadline, gate=gate) from None
+    finally:
+        if handle is not None:
+            handle.cancel()

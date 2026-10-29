@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import socket
+import struct
 import threading
 import time
 from collections.abc import Generator
+from contextlib import suppress
 from typing import Any
 from uuid import uuid4
 
@@ -11,6 +14,7 @@ import psycopg
 import pytest
 from loguru import logger
 from psycopg import sql
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from base.config import settings
 from base.db import pooled_session
@@ -376,3 +380,237 @@ async def test_a_timeout_raised_by_the_restore_keeps_its_own_meaning(
 
     assert not isinstance(caught.value, pooled_session.RestoreAbandonedError)
     assert [event for event in events if event.get("event") == "db_pool_restore_timeout"] == []
+
+
+# meiva:note
+# A Postgres-shaped listener that finishes the handshake and then answers nothing — not the
+# query, and not the cancel request psycopg sends when the waiting task is cancelled. That
+# is the shape of the backend behind the 2026-10-29 stall: it accepts the connection (so no
+# connect timeout helps) and never runs (so no server timer fires).
+#
+# The protocol it must speak: answer an SSL/GSSENC request with "N" and read the startup
+# message that follows, authenticate (R with 0), publish the parameters psycopg needs,
+# send BackendKeyData and ReadyForQuery — and then hold the connection open in silence. A
+# CancelRequest (code 80877102) is read and deliberately never acted on.
+class _WedgedBackend:
+    def __init__(self) -> None:
+        self._listener = socket.socket()
+        self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(8)
+        self._port = self._listener.getsockname()[1]
+        self._open: list[socket.socket] = []
+        self._stop = threading.Event()
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def conninfo(self) -> str:
+        return f"host=127.0.0.1 port={self._port} user=x dbname=x connect_timeout=5"
+
+    def close(self) -> None:
+        self._stop.set()
+        for client in list(self._open):
+            with suppress(OSError):
+                client.close()
+        with suppress(OSError):
+            self._listener.close()
+
+    def _accept(self) -> None:
+        while not self._stop.is_set():
+            try:
+                client, _ = self._listener.accept()
+            except OSError:
+                return
+            self._open.append(client)
+            threading.Thread(target=self._handshake, args=(client,), daemon=True).start()
+
+    def _handshake(self, client: socket.socket) -> None:
+        try:
+            body = self._read_message(client)
+            while True:
+                (code,) = struct.unpack("!i", body[:4])
+                if code in (80877103, 80877104):
+                    client.sendall(b"N")
+                    body = self._read_message(client)
+                elif code == 80877102:
+                    return
+                else:
+                    break
+        except OSError:
+            return
+
+        def message(kind: bytes, payload: bytes) -> None:
+            client.sendall(kind + struct.pack("!i", len(payload) + 4) + payload)
+
+        try:
+            message(b"R", struct.pack("!i", 0))
+            for name, value in (
+                (b"server_version", b"17.0"),
+                (b"client_encoding", b"UTF8"),
+                (b"standard_conforming_strings", b"on"),
+                (b"DateStyle", b"ISO, MDY"),
+                (b"TimeZone", b"UTC"),
+                (b"integer_datetimes", b"on"),
+            ):
+                message(b"S", name + b"\x00" + value + b"\x00")
+            message(b"K", struct.pack("!ii", 4242, 2424))
+            message(b"Z", b"I")
+        except OSError:
+            return
+        self._stop.wait()
+
+    @staticmethod
+    def _read_message(client: socket.socket) -> bytes:
+        (length,) = struct.unpack("!i", client.recv(4))
+        body = b""
+        while len(body) < length - 4:
+            chunk = client.recv(length - 4 - len(body))
+            if not chunk:
+                raise OSError("client closed the handshake")
+            body += chunk
+        return body
+
+
+# meiva:note
+# The deadline this file hands the restores that must be cut, and the guard a test fails
+# inside (a wedged wait that the cut failed to end would otherwise hang the suite).
+_DEADLINE_S = 0.5
+_CUT_FAILED_S = _DEADLINE_S + 3.0
+
+
+# meiva:note
+# The cut is what ends a wedged restore: libpq reads EOF at the deadline and the restore
+# fails there, so the elapsed time is the deadline rather than the wedge.
+async def test_the_client_deadline_cuts_a_backend_that_never_answers(
+    postgres_access: None, events: list[dict[str, Any]]
+) -> None:
+    backend = _WedgedBackend()
+    try:
+        conn = await psycopg.AsyncConnection.connect(
+            backend.conninfo(), autocommit=True, prepare_threshold=None
+        )
+        restore: Any = pooled_session.restore_pooled_session_async
+        started = time.monotonic()
+        with pytest.raises(pooled_session.RestoreAbandonedError):
+            await asyncio.wait_for(
+                restore(
+                    conn, gate=_Gate(), budget_seconds=30.0, client_deadline_seconds=_DEADLINE_S
+                ),
+                timeout=_CUT_FAILED_S,
+            )
+        elapsed = time.monotonic() - started
+
+        assert elapsed >= _DEADLINE_S * 0.9, (
+            f"the restore ended before its deadline: {elapsed:.2f}s"
+        )
+        assert elapsed < _DEADLINE_S + 1.0, f"the cut did not end the wait: {elapsed:.2f}s"
+        assert conn.closed, "a cut connection must be unusable, so the pool discards it"
+        (reported,) = [event for event in events if event.get("event") == "db_pool_restore_timeout"]
+        assert reported["ended_by"] == "client_deadline"
+        assert reported["elapsed_ms"] >= int(_DEADLINE_S * 900)
+    finally:
+        backend.close()
+
+
+# meiva:note
+# Falsification for the cut: psycopg answers a cancellation by sending a cancel and then
+# waiting for the same operation again with no bound, so a cancelled wait on a wedged
+# backend stays pending. Cancelling the task is not a fix; only the socket ends it.
+async def test_cancelling_the_task_leaves_a_wedged_wait_pending(postgres_access: None) -> None:
+    backend = _WedgedBackend()
+    conn = await psycopg.AsyncConnection.connect(
+        backend.conninfo(), autocommit=True, prepare_threshold=None
+    )
+    task = asyncio.create_task(conn.execute("SELECT 1"))
+    try:
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+        assert not task.done(), "a cancellation alone must not end a wedged wait"
+    finally:
+        backend.close()
+        with suppress(BaseException):
+            await asyncio.wait_for(task, timeout=_CUT_FAILED_S)
+
+
+# meiva:note
+# The sync twin waits without a loop to cancel it, so its cut is a daemon thread. Same
+# contract: the deadline ends the wait, and the connection it leaves behind is unusable.
+def test_the_client_deadline_cuts_a_sync_backend_that_never_answers(
+    postgres_access: None, events: list[dict[str, Any]]
+) -> None:
+    backend = _WedgedBackend()
+    try:
+        with psycopg.connect(backend.conninfo(), autocommit=True, prepare_threshold=None) as conn:
+            restore: Any = pooled_session.restore_pooled_session
+            started = time.monotonic()
+            with pytest.raises(pooled_session.RestoreAbandonedError):
+                restore(
+                    conn, gate=_Gate(), budget_seconds=30.0, client_deadline_seconds=_DEADLINE_S
+                )
+            elapsed = time.monotonic() - started
+
+            assert elapsed >= _DEADLINE_S * 0.9, f"ended before the deadline: {elapsed:.2f}s"
+            assert elapsed < _CUT_FAILED_S, f"the cut did not end the wait: {elapsed:.2f}s"
+            assert conn.closed, "a cut connection must be unusable, so the pool discards it"
+        (reported,) = [event for event in events if event.get("event") == "db_pool_restore_timeout"]
+        assert (reported["ended_by"], reported["name"]) == ("client_deadline", "tests:restore")
+    finally:
+        backend.close()
+
+
+# meiva:note
+# Reverse control for both cuts: a restore that finishes inside its deadline is untouched —
+# no deadline event, and the connection still answers afterwards.
+def test_a_restore_that_finishes_inside_its_deadline_is_not_cut(
+    db_url: str, events: list[dict[str, Any]]
+) -> None:
+    restore: Any = pooled_session.restore_pooled_session
+    with psycopg.connect(db_url, prepare_threshold=None) as conn:
+        restore(conn, gate=_Gate(), budget_seconds=5.0, client_deadline_seconds=60.0)
+        assert not conn.closed
+        assert conn.execute("SELECT 1").fetchone() == (1,)
+
+    assert [event for event in events if event.get("event") == "db_pool_restore_timeout"] == []
+
+
+# meiva:note
+# The cut has to satisfy the pool, not just the connection: psycopg_pool runs this restore
+# as the borrow-time check and discards a connection whose check raises
+# (`_putconn(from_getconn=True)`), so a cut connection is never handed to the next
+# borrower and never parks in the pool for one. With every backend wedged, the borrower
+# ends where a wedged pool must end — a retryable PoolTimeout, not a wait on a dead socket.
+async def test_the_pool_replaces_a_connection_the_deadline_cut(postgres_access: None) -> None:
+    backend = _WedgedBackend()
+    checked: list[psycopg.AsyncConnection[Any]] = []
+
+    restore: Any = pooled_session.restore_pooled_session_async
+
+    async def check(conn: psycopg.AsyncConnection[Any]) -> None:
+        checked.append(conn)
+        await restore(conn, gate=_Gate(), budget_seconds=30.0, client_deadline_seconds=_DEADLINE_S)
+
+    pool: AsyncConnectionPool[psycopg.AsyncConnection] = AsyncConnectionPool(
+        backend.conninfo(),
+        min_size=0,
+        max_size=1,
+        open=False,
+        timeout=2.0,
+        kwargs={"autocommit": True, "prepare_threshold": None},
+        check=check,
+    )
+    try:
+        async with pool:
+            with pytest.raises(PoolTimeout):
+                async with pool.connection():
+                    pass
+    finally:
+        backend.close()
+
+    assert len(checked) >= 2, (
+        "the pool must retry another connection rather than hand out the cut one"
+    )
+    assert all(conn.closed for conn in checked), "every cut connection must be unusable"
+    assert checked[0] is not checked[1], (
+        "the pool must build a new connection, not reuse the cut one"
+    )
