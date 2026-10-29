@@ -60,6 +60,54 @@ def test_get_config_serializes_required_fields():
         assert isinstance(by_name[name]["current_value"], str)
 
 
+_FACTORY_CONFIG_FACE = """
+from pydantic import BaseModel, Field
+from base.packages.plugins.extensions import PluginContributions
+
+
+def default_rows():
+    return {"default": "seed"}
+
+
+class FactoryConfig(BaseModel):
+    factory_rows: dict[str, str] = Field(
+        default_factory=default_rows, json_schema_extra={"scope": "cluster-pinned"}
+    )
+    factory_required_label: str = Field(json_schema_extra={"scope": "cluster-pinned"})
+
+
+def contribute():
+    return PluginContributions(config=FactoryConfig)
+"""
+
+
+def test_get_config_serializes_plugin_factory_defaults(unit_home: Path) -> None:
+    from base.packages.plugins.config_registration import disk_image_path
+
+    plugin = unit_home / "plugins" / "factory_config"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.py").write_text("")
+    (plugin / "default_config.py").write_text(_FACTORY_CONFIG_FACE)
+    image = disk_image_path("factory_config", home=unit_home)
+    image.parent.mkdir(parents=True)
+    image.write_text(
+        json.dumps({"factory_rows": {"actual": "image"}, "factory_required_label": "present"})
+    )
+    with gateway_test_client() as client:
+        response = client.get("/api/config")
+    assert response.status_code == 200, response.text
+    fields = {field["name"]: field for field in response.json()["fields"]}
+    registration = fields["local_models"]
+    assert registration["owner"] == "lm_typesafe"
+    assert registration["default_value"] == {}
+    assert registration["current_value"] == {}
+    assert registration["scope"] == "cluster-pinned"
+    assert fields["factory_rows"]["default_value"] == {"default": "seed"}
+    assert fields["factory_rows"]["current_value"] == {"actual": "image"}
+    assert fields["factory_required_label"]["default_value"] is None
+    assert fields["factory_required_label"]["current_value"] == "present"
+
+
 def test_redis_url_masked_does_not_leak_cluster_secret() -> None:
     """redis_url carries the runtime ACL password as userinfo, so GET /api/config
     must mask it like db_url — the credential must never appear in the response."""

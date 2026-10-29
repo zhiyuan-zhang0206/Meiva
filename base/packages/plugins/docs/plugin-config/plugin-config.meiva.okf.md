@@ -51,6 +51,9 @@ fresh-file config-service reads, outbox ticks, and bootstrap delivery retain
 their own existing update boundaries. Provider credentials remain in the
 declared secret-delivery channel, outside plugin config images.
 
+Panel metadata evaluates default factories and gives required fields a null default;
+Pydantic's undefined sentinel never reaches JSON.
+
 Gateway and ops need no SDK installation to validate an overlay. They read
 enabled config declarations; an SDK caller additionally supplies its bound
 image so validation retains its existing base values. Unknown keys, ambiguous

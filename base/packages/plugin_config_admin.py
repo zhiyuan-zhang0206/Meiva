@@ -98,7 +98,9 @@ def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
                     name=name,
                     field_type=kind,
                     current_value=getattr(config, name),
-                    default_value=info.default,
+                    default_value=(
+                        None if info.is_required() else info.get_default(call_default_factory=True)
+                    ),
                     description=info.description or "",
                     group=f"Plugin: {owner.name}",
                     restart_required=extra.get("restart_required", "all"),

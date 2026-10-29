@@ -2,13 +2,32 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 
 from base.host.proc import run_bounded
-from base.packages.plugin_providers import build_model_catalog
-from base.paths import meiva_home
+
+
+# meiva:link tests/docs/test-fixtures/catalog-boot.meiva.okf.md
+def _roster_models() -> list[str]:
+    with tempfile.TemporaryDirectory(prefix="meiva-model-roster-") as home:
+        result = run_bounded(
+            [
+                sys.executable,
+                "-I",
+                str(Path(__file__).with_name("_model_config_cases.py")),
+                "catalog_roster",
+            ],
+            timeout=60,
+            capture_output=True,
+            text=True,
+            env={"MEIVA_HOME": home, "MEIVA_CONFIG_FETCH": "skip"},
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return TypeAdapter(list[str]).validate_json(result.stdout)
 
 
 def _provider_keys() -> dict[str, str]:
@@ -186,11 +205,7 @@ class TestValidateModelConfig:
 class TestThinkingDisabledAcrossRoster:
     @pytest.mark.parametrize(
         "model",
-        [
-            m
-            for models in build_model_catalog(home=meiva_home()).supported_models.values()
-            for m in models
-        ],
+        _roster_models(),
     )
     def test_roster_model_constructs_with_thinking_disabled(
         self, tmp_path: Path, model: str

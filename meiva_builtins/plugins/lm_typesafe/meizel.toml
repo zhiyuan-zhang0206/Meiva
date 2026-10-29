@@ -2,7 +2,6 @@
 "plugin.py" = "strict"
 "default_config.py" = "strict"
 "systemone.py" = "strict"
-"local_provider.py" = { mode = "none", why = "catalog composition adapter: snapshots operator config into typed model and price rows, and binds the external HTTP client without inference or ambient reads" }
 
 [uses]
 "local_binding.py" = ["default_config.py", "systemone.py"]

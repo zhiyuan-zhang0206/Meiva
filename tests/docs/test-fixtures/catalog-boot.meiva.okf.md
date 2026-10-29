@@ -28,6 +28,11 @@ with `plugin_bootstrap_config`. `skip` never grants local authority. It restores
 the previous carrier at session teardown. Catalog/authority subprocess tests
 receive explicit homes, roles and projections, including missing/invalid packets.
 
+Collection precedes session fixture setup. The provider roster matrix therefore
+reads its real catalog in one bounded child with a bare scratch home and an
+explicit environment. Pytest still expands and reports every model separately;
+collection neither installs parent-process policy nor loads its Settings.
+
 
 ## Import isolation
 

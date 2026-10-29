@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from collections.abc import Callable
@@ -407,8 +408,16 @@ def thinking_gemini_3_1_thinking_disabled_maps_to_lowest_declared_level(
     assert llm.include_thoughts is False
 
 
+def _model_roster(catalog: ModelCatalog) -> list[str]:
+    return [model for rows in catalog.supported_models.values() for model in rows]
+
+
 def main() -> None:
     case = sys.argv[1]
+    if case == "catalog_roster":
+        catalog = build_model_catalog(home=resolve_meiva_home())
+        sys.stdout.write(json.dumps(_model_roster(catalog)) + "\n")
+        return
     keys = TypeAdapter(dict[str, str]).validate_json(sys.argv[2])
     home = resolve_meiva_home()
     snapshot = settings.lm
