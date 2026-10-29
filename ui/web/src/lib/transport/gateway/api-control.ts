@@ -341,6 +341,9 @@ export function createControlApi(http: Http) {
       f(harnessAvailabilityPath(machine), { signal })
         .then((res) => (res.status === 404 ? [] : ok<HarnessAvailability[]>(res))),
 
+    refreshHarnessAvailability: (machine: string): Promise<HarnessAvailability[]> =>
+      f(`${harnessAvailabilityPath(machine)}/refresh`, postInit).then(ok<HarnessAvailability[]>),
+
     retryAgentLaunch: (agentId: number, priorAttempt: string, operationKey: string): Promise<RetryLaunchAccepted> =>
       f(`/api/keyed/v1/agents/${agentId}/retry-launch`, keyedJson({ expected_prior_attempt_id: priorAttempt }, operationKey))
         .then(ok<RetryLaunchAccepted>),

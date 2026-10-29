@@ -55,6 +55,24 @@ export function providerLabel(provider: string): string {
   );
 }
 
+// meiva:note
+// Labels are presentation only. Version separators become decimals, vendor
+// spellings retain their branding, and every selection still sends its exact ID.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md
+export function modelLabel(model: string): string {
+  const parts = model.replace(/(\d)-(\d)(?=-|$)/g, "$1.$2").split("-");
+  const [provider, ...words] = parts;
+  return [providerLabel(provider), ...words.map((word) => {
+    if (/^(?:oss|fp\d+|\d+b|v\d+(?:\.\d+)*)$/i.test(word)) return word.toUpperCase();
+    return word.length > 0 ? word[0].toUpperCase() + word.slice(1) : word;
+  })].join(" ");
+}
+
+export function reasoningEffortLabel(effort: string): string {
+  if (effort === "xhigh") return "Extra High";
+  return effort.length > 0 ? effort[0].toUpperCase() + effort.slice(1) : effort;
+}
+
 /**
  * Models grouped in API provider order, with each provider's models ordered
  * by Standard model input price descending, with declared Fast services

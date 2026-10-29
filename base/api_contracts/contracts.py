@@ -96,7 +96,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="control-plane read — cluster observability"
     ),
     ("GET", "/api/cluster/machines/{name}/harnesses"): RouteContract(
-        note="per-machine harness probe, cached 30s — a repeat reads the same install state"
+        note="read-only last successful per-machine harness snapshot; never runs a probe"
+    ),
+    ("POST", "/api/cluster/machines/{name}/harnesses/refresh"): RouteContract(
+        note="explicit install/auth re-probe; repeats safely inspect and replace the snapshot"
     ),
     ("DELETE", "/api/cluster/machines/{name}"): RouteContract(
         Idempotency.NON_IDEMPOTENT,

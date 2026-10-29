@@ -147,7 +147,7 @@ describe("InspectorPanel", () => {
     expect(livenessSection).not.toBeNull();
     expect(within(livenessSection!).getByText("Harness")).toBeTruthy();
     expect(within(livenessSection!).getByText("Model")).toBeTruthy();
-    expect(within(livenessSection!).getByText("claude-opus-4-8")).toBeTruthy();
+    expect(within(livenessSection!).getByText("Claude Opus 4.8")).toBeTruthy();
     const overlaySection = screen.getByText("Configuration overlay").closest("section");
     expect(overlaySection).not.toBeNull();
     expect(within(overlaySection!).queryByText("llm_model")).toBeNull();

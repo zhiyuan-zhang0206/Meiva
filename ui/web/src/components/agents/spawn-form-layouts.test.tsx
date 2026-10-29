@@ -1,9 +1,10 @@
+import { modelLabel, reasoningEffortLabel } from "@/lib/contracts/models";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { USER_SETTING_DEFAULTS, type ModelsResponse, type SystemStatus } from "@/lib/contracts/types";
-import { useWarmHarnessAvailability } from "@/lib/harness/use-harness-availability";
+import type { HarnessAvailability } from "@/lib/harness/harness";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
 import { SpawnForm } from "./spawn-form";
@@ -173,7 +174,9 @@ function column(element: HTMLElement, name: string): HTMLElement {
 }
 
 function row(element: HTMLElement, name: string, option: string | RegExp): HTMLElement {
-  return within(column(element, name)).getByRole("button", { name: option });
+  const raw = typeof option === "string" ? option : option.source;
+  const label = name === MODEL_COLUMN ? modelLabel(raw) : name === EFFORT_COLUMN ? reasoningEffortLabel(raw) : raw;
+  return within(column(element, name)).getByRole("button", { name: typeof option === "string" ? label : new RegExp(label, option.flags) });
 }
 
 function selected(element: HTMLElement, name: string, option: string | RegExp): boolean {
@@ -215,8 +218,8 @@ describe("spawn table model & effort columns", () => {
     setMockSetting("models.hidden_providers", ["claude"]);
     wrap();
     const form = await table();
-    expect(within(column(form, MODEL_COLUMN)).queryByText("claude-opus-4-8")).toBeNull();
-    expect(within(column(form, MODEL_COLUMN)).getByText("deepseek-v4-pro")).toBeTruthy();
+    expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("claude-opus-4-8"))).toBeNull();
+    expect(within(column(form, MODEL_COLUMN)).getByText(modelLabel("deepseek-v4-pro"))).toBeTruthy();
   });
 
   it("selecting an effort sends it", async () => {
@@ -238,7 +241,7 @@ describe("spawn table model & effort columns", () => {
     pick(form, EFFORT_COLUMN, "max");
     pick(form, MODEL_COLUMN, /gpt-5.6/);
     const efforts = within(column(form, EFFORT_COLUMN)).getAllByRole("button").map((b) => b.textContent);
-    expect(efforts).toEqual(["minimal", "low", "medium", "high"]);
+    expect(efforts).toEqual(["Minimal", "Low", "Medium", "High"]);
     expect(selected(form, EFFORT_COLUMN, "medium")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.6", reasoning_effort: "medium" }));
@@ -269,9 +272,9 @@ describe("spawn table model & effort columns", () => {
     wrap();
     const form = await table();
     const models = column(form, MODEL_COLUMN);
-    expect(within(models).getByText("deepseek-flash")).toBeTruthy();
-    expect(within(models).queryByText("deepseek-v4-pro")).toBeNull();
-    expect(within(models).queryByText("deepseek-legacy")).toBeNull();
+    expect(within(models).getByText(modelLabel("deepseek-flash"))).toBeTruthy();
+    expect(within(models).queryByText(modelLabel("deepseek-v4-pro"))).toBeNull();
+    expect(within(models).queryByText(modelLabel("deepseek-legacy"))).toBeNull();
   });
 
   it("lists every agent-runner machine, a down host disabled, and spawns on the chosen one", async () => {
@@ -299,14 +302,15 @@ describe("spawn table model & effort columns", () => {
 });
 
 describe("unavailable model catalog", () => {
-  it("says so instead of rendering the table", async () => {
+  it("keeps refresh available while preventing a spawn without the catalog", async () => {
     transport.getSystemStatus.mockResolvedValue(
       statusWith([{ name: "runner-a", online: true, paused: false, agentHostOnline: true }]),
     );
     transport.getModels.mockRejectedValue(new Error("catalog down"));
     wrap();
     expect(await screen.findByText("Models unavailable")).toBeTruthy();
-    expect(screen.queryByTestId("spawn-table")).toBeNull();
+    expect(screen.getByRole("button", { name: "Spawn" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
   });
 });
 
@@ -343,8 +347,8 @@ describe.each(["table", "stack"] as const)("%s API model visibility", (layout) =
     const { onSpawn } = wrap(layout);
     const form = await screen.findByTestId(`spawn-${layout}`);
     if (layout === "stack") {
-      expect(within(form).getByRole("button", { name: `Model ${model}` })).toBeTruthy();
-      fireEvent.click(within(form).getByRole("button", { name: "Effort medium" }));
+      expect(within(form).getByRole("button", { name: `Model ${modelLabel(model)}` })).toBeTruthy();
+      fireEvent.click(within(form).getByRole("button", { name: "Effort Medium" }));
     } else {
       expect(selected(form, MODEL_COLUMN, model)).toBe(true);
     }
@@ -361,9 +365,9 @@ describe.each(["table", "stack"] as const)("%s API model visibility", (layout) =
     }
     pick(form, HARNESS_COLUMN, "Meiva");
     if (layout === "stack") {
-      fireEvent.click(within(form).getByRole("button", { name: "Model deepseek-v4-pro" }));
+      fireEvent.click(within(form).getByRole("button", { name: "Model DeepSeek V4 Pro" }));
     }
-    expect(within(column(form, MODEL_COLUMN)).queryByRole("button", { name: model })).toBeNull();
+    expect(within(column(form, MODEL_COLUMN)).queryByRole("button", { name: modelLabel(model) })).toBeNull();
     expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
   });
 });
@@ -384,8 +388,8 @@ describe("stacked picker", () => {
     const form = await stack();
     expect(section(form, "Machine test-host").getAttribute("aria-expanded")).toBe("false");
     expect(section(form, "Harness Meiva")).toBeTruthy();
-    expect(section(form, "Model deepseek-v4-pro")).toBeTruthy();
-    expect(section(form, "Effort max")).toBeTruthy();
+    expect(section(form, "Model DeepSeek V4 Pro")).toBeTruthy();
+    expect(section(form, "Effort Max")).toBeTruthy();
     expect(within(form).queryByRole("list", { name: MODEL_COLUMN })).toBeNull();
     expect(screen.getByRole("button", { name: "Spawn" })).toBeTruthy();
   });
@@ -399,19 +403,19 @@ describe("stacked picker", () => {
     setMockSetting("behavior.spawn_harness", harness);
     wrap("stack");
     const form = await stack();
-    expect(section(form, `Model ${model}`)).toBeTruthy();
-    expect(section(form, `Effort ${effort}`)).toBeTruthy();
+    expect(section(form, `Model ${modelLabel(model)}`)).toBeTruthy();
+    expect(section(form, `Effort ${reasoningEffortLabel(effort)}`)).toBeTruthy();
 
-    fireEvent.click(section(form, `Model ${model}`));
+    fireEvent.click(section(form, `Model ${modelLabel(model)}`));
     expect(within(form).getByRole("list", { name: "Model" })).toBeTruthy();
     expect(selected(form, MODEL_COLUMN, model)).toBe(true);
-    fireEvent.click(section(form, `Effort ${effort}`));
+    fireEvent.click(section(form, `Effort ${reasoningEffortLabel(effort)}`));
     expect(within(form).getByRole("list", { name: "Effort" })).toBeTruthy();
 
     fireEvent.click(section(form, `Harness ${label}`));
     pick(form, HARNESS_COLUMN, "Meiva");
-    expect(section(form, "Model deepseek-v4-pro")).toBeTruthy();
-    expect(section(form, "Effort max")).toBeTruthy();
+    expect(section(form, "Model DeepSeek V4 Pro")).toBeTruthy();
+    expect(section(form, "Effort Max")).toBeTruthy();
   });
 
   it("sends the model and effort selected for an external harness on mobile", async () => {
@@ -424,10 +428,10 @@ describe("stacked picker", () => {
     setMockSetting("behavior.spawn_harness", "codex");
     const { onSpawn } = wrap("stack");
     const form = await stack();
-    expect(section(form, "Model gpt-5.6")).toBeTruthy();
-    fireEvent.click(section(form, "Effort medium"));
+    expect(section(form, "Model GPT 5.6")).toBeTruthy();
+    fireEvent.click(section(form, "Effort Medium"));
     pick(form, EFFORT_COLUMN, "ultra");
-    expect(section(form, "Effort ultra")).toBeTruthy();
+    expect(section(form, "Effort Ultra")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith({
       machine: "test-host", harness: "codex", model: "gpt-5.6", reasoning_effort: "ultra",
@@ -439,10 +443,10 @@ describe("stacked picker", () => {
     transport.getModels.mockResolvedValue(modelsWithEffort());
     const { onSpawn } = wrap("stack");
     const form = await stack();
-    fireEvent.click(section(form, "Model deepseek-v4-pro"));
+    fireEvent.click(section(form, "Model DeepSeek V4 Pro"));
     const models = within(form).getByRole("list", { name: MODEL_COLUMN });
-    fireEvent.click(within(models).getByRole("button", { name: /claude-opus-4-8/ }));
-    expect(section(form, "Model claude-opus-4-8")).toBeTruthy();
+    fireEvent.click(within(models).getByRole("button", { name: /Claude Opus 4.8/ }));
+    expect(section(form, "Model Claude Opus 4.8")).toBeTruthy();
     expect(within(form).queryByRole("list", { name: MODEL_COLUMN })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith(
@@ -487,36 +491,90 @@ describe("stacked picker", () => {
   });
 });
 
-// meiva:note
-// One probe per page load (user 2026-10-21): the sidebar warms every agent-runner
-// machine when the page mounts, and opening the picker afterwards answers from
-// that reading instead of dispatching another probe. The probe is not free — the
-// gateway RPCs the machine and the probe stats binaries and login stores — so a
-// session must not re-ask on every open.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-describe("harness availability freshness", () => {
-  it("a warm page answers the picker without asking again", async () => {
+describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layout) => {
+  beforeEach(() => {
+    resetMockSettings();
+    transport.getHarnessAvailability.mockResolvedValue([]);
     transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
-    transport.getModels.mockResolvedValue(modelsDefault());
+    transport.getModels.mockResolvedValue(modelsWithTwoLadders());
+  });
+
+  it("opening and reopening only reads snapshots; an explicit click checks the selected machine", async () => {
+    transport.refreshHarnessAvailability.mockResolvedValue([
+      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
+      { harness: "codex", status: "available", reason: "", launchable: true, billing: "subscription" },
+    ]);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    function Warm() {
-      useWarmHarnessAvailability();
-      return null;
-    }
-    const warm = render(
-      <QueryClientProvider client={qc}>
-        <Warm />
-      </QueryClientProvider>,
-    );
-    await waitFor(() => expect(transport.getHarnessAvailability.mock.calls.length).toBeGreaterThan(0));
-    const probed = transport.getHarnessAvailability.mock.calls.length;
-    warm.unmount();
-    render(
-      <QueryClientProvider client={qc}>
-        <SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} />
-      </QueryClientProvider>,
-    );
-    await screen.findByTestId("spawn-table");
-    expect(transport.getHarnessAvailability.mock.calls.length).toBe(probed);
+    const view = () => render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
+    const first = view();
+    await screen.findByTestId(`spawn-${layout}`);
+    await waitFor(() => expect(transport.getHarnessAvailability).toHaveBeenCalled());
+    expect(transport.refreshHarnessAvailability).not.toHaveBeenCalled();
+    first.unmount();
+    view();
+    await screen.findByTestId(`spawn-${layout}`);
+    expect(transport.refreshHarnessAvailability).not.toHaveBeenCalled();
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    const spawn = screen.getByRole("button", { name: "Spawn" });
+    expect(refresh.compareDocumentPosition(spawn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(refresh);
+    await waitFor(() => expect(transport.refreshHarnessAvailability).toHaveBeenCalledExactlyOnceWith("test-host"));
+    await waitFor(() => expect(qc.getQueryData(["harness-availability", "test-host"])).toMatchObject([
+      { harness: "meiva" }, { harness: "codex", launchable: true },
+    ]));
+    expect(transport.putSetting).not.toHaveBeenCalled();
+  });
+
+  it("keeps previous choices and shows a failed refresh without retrying automatically", async () => {
+    transport.getHarnessAvailability.mockResolvedValue([
+      { harness: "codex", status: "available", reason: "", launchable: true, billing: "subscription" },
+    ]);
+    resetMockSettings({ "behavior.spawn_harness": "codex", "behavior.spawn_model": "gpt-5.6", "behavior.spawn_reasoning_effort": "high" });
+    transport.refreshHarnessAvailability.mockRejectedValue(new Error("offline"));
+    const { onSpawn } = wrap(layout);
+    await screen.findByTestId(`spawn-${layout}`);
+    await waitFor(() => expect(transport.getHarnessAvailability).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByRole("alert");
+    expect(transport.refreshHarnessAvailability).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith({ machine: "test-host", harness: "codex", model: "gpt-5.6", reasoning_effort: "high" });
+  });
+
+  it("shows a shared pending state across picker reopen and rejects repeated clicks", async () => {
+    const pending = Promise.withResolvers<HarnessAvailability[]>();
+    transport.refreshHarnessAvailability.mockReturnValue(pending.promise);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = () => render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
+    const first = view();
+    await screen.findByTestId(`spawn-${layout}`);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    const busy = await screen.findByRole("button", { name: "Refreshing…" });
+    expect(busy.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(busy);
+    first.unmount();
+    view();
+    expect((await screen.findByRole("button", { name: "Refreshing…" })).hasAttribute("disabled")).toBe(true);
+    expect(transport.refreshHarnessAvailability).toHaveBeenCalledTimes(1);
+    pending.resolve(harnessAllAvailable());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" }).hasAttribute("disabled")).toBe(false));
+  });
+
+  it("keeps a late refresh result on its original machine after switching targets", async () => {
+    transport.getSystemStatus.mockResolvedValue(statusWith([
+      { name: "cloud", online: true }, { name: "a-host", online: true }, { name: "b-host", online: true },
+    ]));
+    const pending = Promise.withResolvers<HarnessAvailability[]>();
+    transport.refreshHarnessAvailability.mockReturnValue(pending.promise);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
+    const form = await screen.findByTestId(`spawn-${layout}`);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    if (layout === "stack") fireEvent.click(within(form).getByRole("button", { name: "Machine a-host" }));
+    pick(form, MACHINE_COLUMN, "b-host");
+    pending.resolve(harnessAllAvailable());
+    await waitFor(() => expect(qc.getQueryData(["harness-availability", "a-host"])).toEqual(harnessAllAvailable()));
+    expect(qc.getQueryData(["harness-availability", "b-host"])).toEqual([]);
+    expect(transport.refreshHarnessAvailability).toHaveBeenCalledExactlyOnceWith("a-host");
   });
 });

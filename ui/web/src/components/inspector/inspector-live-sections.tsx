@@ -1,5 +1,7 @@
 "use client";
 
+import { modelLabel } from "@/lib/contracts/models";
+
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
@@ -265,7 +267,7 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
           }
         />
         <Metric label={t("metricHarness")} value={harness ? harnessLabel(harness) : "—"} />
-        <Metric label={t("metricModel")} value={model ?? "—"} />
+        <Metric label={t("metricModel")} value={model === undefined ? "—" : modelLabel(model)} />
         <Metric label={t("metricMachine")} value={inspect.machine} />
         <Metric
           label={t("metricStatus")}

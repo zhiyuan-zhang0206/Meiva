@@ -8,6 +8,14 @@ tags:
 
 # Model Presentation
 
+Model IDs remain the exact stored and request values. A shared presentation
+helper renders human-readable names in both spawn layouts, Control model lists
+and the inspector: `gemini-4-argon` becomes `Gemini 4 Argon`,
+`claude-fable-5-1` becomes `Claude Fable 5.1`, and `gpt-6.1-sol` becomes
+`GPT 6.1 Sol`. Effort is shown as `High`, `Extra High`, or the other readable
+level names; the request still sends `high`, `xhigh`, and the original values.
+The model catalog is local registry metadata and its GET does not probe CLIs.
+
 Rates appear only for a **metered** harness. Billing travels with the harness
 (`HarnessAvailability.billing`: `api` for the built-in runtime, `subscription`
 for the external CLIs), because the same model costs differently depending on

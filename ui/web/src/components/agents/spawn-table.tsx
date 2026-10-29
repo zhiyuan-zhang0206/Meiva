@@ -14,7 +14,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import type { ModelsResponse } from "@/lib/contracts/types";
-import { providerLabel } from "@/lib/contracts/models";
+import { modelLabel as formatModelLabel, providerLabel, reasoningEffortLabel } from "@/lib/contracts/models";
 import { formatModelPrice } from "@/lib/format/format-price";
 import { cn } from "@/lib/format/utils";
 import { FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
@@ -184,7 +184,7 @@ export function SpawnTable({
                       className={cn(CELL, selected ? SELECTED : IDLE)}
                     >
                       <span className={cn(MIN_W_0, FLEX_1)}>
-                        <span className="block truncate">{candidate}</span>
+                        <span className="block truncate" title={candidate}>{formatModelLabel(candidate)}</span>
                         {prices && price != null && (
                           <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
                             {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
@@ -216,7 +216,7 @@ export function SpawnTable({
                 onClick={() => onEffort(level)}
                 className={cn(CELL, selected ? SELECTED : IDLE)}
               >
-                <span className="truncate">{level}</span>
+                <span className="truncate">{reasoningEffortLabel(level)}</span>
                 {selected && <Check className="ml-auto size-3 shrink-0" />}
               </button>
             </li>
@@ -422,7 +422,7 @@ export function SpawnStack({
       <StackSection
         id="model"
         label={modelLabel}
-        value={model ?? t("modelsUnavailable")}
+        value={model === undefined ? t("modelsUnavailable") : formatModelLabel(model)}
         expanded={open === "model"}
         onToggle={() => toggle("model")}
       >
@@ -440,7 +440,7 @@ export function SpawnStack({
                     <li key={candidate}>
                       <StackRow selected={selected} onClick={() => pick("model", () => onModel(candidate))}>
                         <span className={cn(MIN_W_0, FLEX_1)}>
-                          <span className="block truncate">{candidate}</span>
+                          <span className="block truncate" title={candidate}>{formatModelLabel(candidate)}</span>
                           {prices && price != null && (
                             <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
                               {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
@@ -464,7 +464,7 @@ export function SpawnStack({
       <StackSection
         id="effort"
         label={effortLabel}
-        value={effort ?? "—"}
+        value={effort === undefined ? "—" : reasoningEffortLabel(effort)}
         expanded={open === "effort"}
         onToggle={() => toggle("effort")}
       >
@@ -472,7 +472,7 @@ export function SpawnStack({
           {efforts.map((level) => (
             <li key={level}>
               <StackRow selected={level === effort} onClick={() => pick("effort", () => onEffort(level))}>
-                <span className="truncate">{level}</span>
+                <span className="truncate">{reasoningEffortLabel(level)}</span>
               </StackRow>
             </li>
           ))}
