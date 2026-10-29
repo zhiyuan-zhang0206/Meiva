@@ -8,6 +8,7 @@ import { type Viewport } from "./timeline-model-viewport";
 import { INPUT_ROW, UNITS_ROW, navRowIds, type NavData, type NavItem, type NavRow } from "./timeline-nav-rows";
 import { navRow } from "./timeline-nav-items";
 import { aggregateColumns, type Place, type RowLayout } from "./timeline-canvas-hit";
+import { countRelayouts } from "./render-stats";
 
 type Placer = Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">;
 
@@ -116,7 +117,9 @@ export function layoutsFor(
       return shifted;
     }
   }
+  const started = performance.now();
   const layouts = new Map(rows.map((row) => [row, rowLayout(row, data, axis, view, trackPx)]));
+  countRelayouts(rows.length, performance.now() - started);
   cache.set(data, { axis, from: view.from, to: view.to, trackPx, rows: rowsKey, layouts });
   return layouts;
 }

@@ -1,0 +1,5 @@
+exports = ["use-viewport.ts", "viewport-store.ts"]
+
+[uses]
+"use-viewport.ts" = ["viewport-store.ts"]
+"viewport-store.test.ts" = ["viewport-store.ts"]

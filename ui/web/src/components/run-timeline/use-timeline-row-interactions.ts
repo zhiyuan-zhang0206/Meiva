@@ -10,6 +10,7 @@ import { nearestUnit, selectionMs } from "./model/links/selection";
 import { panView, zoomView } from "./model/timeline-model";
 import { type AxisMap } from "./model/timeline-model-axis";
 import { type Viewport } from "./model/timeline-model-viewport";
+import { type ViewportStore } from "./viewport/viewport-store";
 import { revealView } from "./model/timeline-nav";
 import { UNITS_ROW, type NavKey } from "./model/timeline-nav-rows";
 
@@ -25,7 +26,7 @@ export interface LinkGroupEntry {
 export function useTimelineRowInteractions({
   chartRef,
   agents,
-  view,
+  store,
   base,
   axis,
   selection,
@@ -44,7 +45,7 @@ export function useTimelineRowInteractions({
 }: {
   chartRef: React.RefObject<HTMLDivElement | null>;
   agents: ViewAgent[];
-  view: Viewport;
+  store: ViewportStore;
   base: Viewport;
   axis: AxisMap;
   selection: AgentSelection | null;
@@ -61,7 +62,7 @@ export function useTimelineRowInteractions({
   hitRef: React.RefObject<LinkHit>;
   hoverArrowTo: (next: LinkHitResult | null) => void;
 }) {
-  const live = useRef({ base, view, onView, axis });
+  const live = useRef({ base, onView, axis });
   const pending = useRef<Viewport | null>(null);
 
   // meiva:note
@@ -86,17 +87,17 @@ export function useTimelineRowInteractions({
   }, []);
   useEffect(() => {
     const wanted = pending.current;
+    const view = store.get();
     if (wanted && (view.from !== wanted.from || view.to !== wanted.to)) {
       live.current = { ...live.current, base, onView, axis };
       return;
     }
     pending.current = null;
-    live.current = { base, view, onView, axis };
+    live.current = { base, onView, axis };
   });
 
   const nav = useRef({
     agents,
-    view,
     base,
     axis,
     selection,
@@ -112,7 +113,6 @@ export function useTimelineRowInteractions({
   useEffect(() => {
     nav.current = {
       agents,
-      view,
       base,
       axis,
       selection,
@@ -155,9 +155,10 @@ export function useTimelineRowInteractions({
         return;
       }
       const s = nav.current;
+      const view = waiting.current ?? store.get();
       const reveal = (ms: number) => {
-        const shown = revealView(s.axis, s.view, s.base, ms, ms);
-        if (shown !== s.view) s.onView(shown);
+        const shown = revealView(s.axis, view, s.base, ms, ms);
+        if (shown !== view) s.onView(shown);
       };
 
       const at = s.linkKey === null ? -1 : s.groups.findIndex((g) => g.links.some((l) => l.key === s.linkKey));
@@ -201,7 +202,7 @@ export function useTimelineRowInteractions({
         s.selection === null ? null : { ...s.selection, row: s.navRow },
         s.agents,
         s.axis,
-        s.view,
+        view,
       );
       event.preventDefault();
 
@@ -224,12 +225,12 @@ export function useTimelineRowInteractions({
       }
       s.setNavRow(next.row);
       s.onSelect({ agent: next.agent, selection: next.item.selection });
-      const shown = revealView(s.axis, s.view, s.base, next.item.start, next.item.end);
-      if (shown !== s.view) s.onView(shown);
+      const shown = revealView(s.axis, view, s.base, next.item.start, next.item.end);
+      if (shown !== view) s.onView(shown);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [chartRef]);
+  }, [chartRef, store]);
 
   const drag = useRef<{ x: number; view: Viewport; panning: boolean; id: number } | null>(null);
   const suppressClick = useRef(false);
@@ -240,7 +241,8 @@ export function useTimelineRowInteractions({
     const onWheel = (event: WheelEvent) => {
       const track = chart.querySelector("[data-track]")?.getBoundingClientRect();
       if (!track || track.width <= 0) return;
-      const { base: b, view: v, axis: a } = live.current;
+      const { base: b, axis: a } = live.current;
+      const v = waiting.current ?? store.get();
       const horizontal = !event.ctrlKey && Math.abs(event.deltaX) > Math.abs(event.deltaY);
       event.preventDefault();
       const rate = event.ctrlKey ? PINCH_ZOOM_RATE : WHEEL_ZOOM_RATE;
@@ -249,12 +251,11 @@ export function useTimelineRowInteractions({
         : zoomView(a, v, b, (event.clientX - track.left) / track.width, Math.exp(event.deltaY * rate));
 
       pending.current = next;
-      live.current = { ...live.current, view: next };
       show(next);
     };
     chart.addEventListener("wheel", onWheel, { passive: false });
     return () => chart.removeEventListener("wheel", onWheel);
-  }, [chartRef]);
+  }, [chartRef, store]);
 
   const onLinks = useRef(onSelectLinks);
   useEffect(() => {
@@ -282,7 +283,7 @@ export function useTimelineRowInteractions({
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const track = trackRect();
     if (event.button !== 0 || !track || event.clientX < track.left) return;
-    drag.current = { x: event.clientX, view, panning: false, id: event.pointerId };
+    drag.current = { x: event.clientX, view: store.get(), panning: false, id: event.pointerId };
   };
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const state = drag.current;

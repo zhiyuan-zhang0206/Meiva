@@ -15,7 +15,8 @@ import { cn } from "@/lib/format/utils";
 
 import { endIn, LINK_COLORS, type ResolvedLink } from "../model/links/resolve";
 import { projectBox, type AxisMap } from "../model/timeline-model-axis";
-import { type Viewport } from "../model/timeline-model-viewport";
+import type { ViewportStore } from "../viewport/viewport-store";
+import { useViewport } from "../viewport/use-viewport";
 import { RowShell } from "../run-timeline-row-shell";
 import { useLinkEndLabel, useLinkKindLabels } from "./agent-view-link-labels";
 
@@ -23,7 +24,7 @@ export function LinkRowGroup({
   variant,
   links,
   axis,
-  viewU,
+  store,
   selectedKey,
   onHover,
   onSelect,
@@ -33,13 +34,14 @@ export function LinkRowGroup({
   /** The links with an end in this group, left to right. */
   links: readonly ResolvedLink[];
   axis: AxisMap;
-  viewU: Viewport;
+  store: ViewportStore;
   selectedKey: string | null;
   onHover: (key: string | null) => void;
   onSelect: (key: string) => void;
   /** Hides the group and its arrows: the same state as its switch in the toolbar. */
   onClose: () => void;
 }) {
+  const viewU = axis.viewU(useViewport(store));
   const t = useTranslations("runTimeline");
   const labels = useLinkKindLabels();
   const endLabel = useLinkEndLabel();

@@ -11,6 +11,7 @@ import { hoverLit, inboundSources, type Highlight } from "./model/timeline-model
 import { timeAxis } from "./model/timeline-model";
 import { levelsTopFirst } from "./model/timeline-model-selection";
 import { type Viewport } from "./model/timeline-model-viewport";
+import { type ViewportStore } from "./viewport/viewport-store";
 import { INPUT_ROW, UNITS_ROW, levelRowId, navRowIds, selectionKey, type RowOptions } from "./model/timeline-nav-rows";
 import { SELECTION_LINE_BELOW_PX, selectionRoles } from "./model/timeline-nav";
 import { type AgentSelection, type ViewAgent } from "./agent-view/agent-view-nav";
@@ -20,11 +21,12 @@ import { LinkRowGroup } from "./agent-view/agent-view-link-group";
 import { LinksCanvas, type LinkHit, type LinkHitResult } from "./canvas/run-timeline-links-canvas";
 import { endIn, groupLinks, type LinkKind, type ResolvedLink } from "./model/links/resolve";
 import { MAX_ARROWS } from "./model/links/cluster";
-import { barTop, layoutsFor } from "./model/timeline-canvas-model";
+import { barTop } from "./model/timeline-canvas-model";
 import { frameOf, type RowLayout } from "./model/timeline-canvas-hit";
 import { RunTimelineAxis } from "./canvas/run-timeline-axis";
 import { TrackCanvas } from "./canvas/run-timeline-canvas";
-import { geometryKey, rowPaintKey, useThemeEpoch } from "./canvas/paint-key";
+import { rowPaintKey, useThemeEpoch } from "./canvas/paint-key";
+import { countRender } from "./model/render-stats";
 import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco, type UnitHeights } from "./canvas/run-timeline-paint";
 import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
@@ -49,7 +51,7 @@ export type AgentEntry =
 export function RunTimelineRows({
   entries,
   base,
-  view,
+  store,
   onView,
   selection,
   onSelect,
@@ -74,7 +76,7 @@ export function RunTimelineRows({
   entries: readonly AgentEntry[];
 
   base: Viewport;
-  view: Viewport;
+  store: ViewportStore;
   onView: (view: Viewport) => void;
   selection: AgentSelection | null;
   onSelect: (selection: AgentSelection) => void;
@@ -102,6 +104,7 @@ export function RunTimelineRows({
 
   maxArrows?: number;
 }) {
+  countRender();
   const linkKey = linkKeys.length === 1 ? linkKeys[0] : null;
   const onSelectLink = (key: string) => onSelectLinks([key]);
   const t = useTranslations("runTimeline");
@@ -160,12 +163,10 @@ export function RunTimelineRows({
     [loaded, options],
   );
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
-  const viewU = axis.viewU(view);
   const chartRef = useRef<HTMLDivElement>(null);
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   const theme = useThemeEpoch();
 
-  const layouts = new Map(agents.map((agent) => [agent.id, layoutsFor(agent.data, axis, viewU, trackPx, agent.rows)]));
   const selected = selection === null ? undefined : byId.get(selection.agent);
   const roles = selectionRoles(
     selection === null || selected === undefined ? null : { row: navRow, selection: selection.selection },
@@ -173,14 +174,8 @@ export function RunTimelineRows({
     selected?.rows,
   );
 
-  const boxesOf = (agent: number, row: string, keys: Iterable<string>) => {
-    const boxes = layouts.get(agent)?.get(row)?.boxes;
-    return [...keys].flatMap((key) => boxes?.get(key) ?? []);
-  };
-  const primaryBoxes =
-    roles.primary === null || selection === null ? [] : boxesOf(selection.agent, roles.primary.row, [roles.primary.key]);
-  const primaryRaw = frameOf(primaryBoxes, trackPx);
-  const lineX = primaryRaw !== null && primaryRaw.width < SELECTION_LINE_BELOW_PX ? primaryRaw.left + primaryRaw.width / 2 : null;
+  const boxesOf = (layout: RowLayout, keys: Iterable<string>) =>
+    [...keys].flatMap((key) => layout.boxes.get(key) ?? []);
   // meiva:note
   // The arrows that are lit and land on a block light that block with them, so an arrow's landing point
   // reads as one block instead of a place in a dense lane.
@@ -196,18 +191,22 @@ export function RunTimelineRows({
       linkTargets.set(link.to.agent, keys);
     }
   }
-  const decoFor = (agent: number, row: string): RowDeco => {
+  // meiva:note
+  // The frame around a selection is drawn into the canvas, so it is worked out from the layout the paint
+  // is about to use rather than from one a render happened to see (task #5738).
+  const decoFor = (agent: number, row: string, layout: RowLayout): RowDeco => {
     const mine = selection?.agent === agent;
     const primaryHere = mine && roles.primary?.row === row ? roles.primary.key : null;
     const targets = row === UNITS_ROW ? (linkTargets.get(agent) ?? EMPTY_KEYS) : EMPTY_KEYS;
     const own = mine ? (roles.linked.get(row) ?? EMPTY_KEYS) : EMPTY_KEYS;
     const linkedKeys = targets.size === 0 ? own : new Set([...own, ...targets]);
+    const primary = primaryHere === null ? null : frameOf(boxesOf(layout, [primaryHere]), trackPx);
     return {
       primaryKey: primaryHere,
       linkedKeys,
-      primary: primaryHere === null ? null : frameOf(boxesOf(agent, row, [primaryHere]), trackPx),
-      linked: frameOf(boxesOf(agent, row, linkedKeys), trackPx),
-      lineX,
+      primary,
+      linked: frameOf(boxesOf(layout, linkedKeys), trackPx),
+      lineX: primary !== null && primary.width < SELECTION_LINE_BELOW_PX ? primary.left + primary.width / 2 : null,
     };
   };
   useEffect(() => {
@@ -228,7 +227,7 @@ export function RunTimelineRows({
   const { onPointerDown, onPointerMove, endDrag, suppressClick } = useTimelineRowInteractions({
     chartRef,
     agents,
-    view,
+    store,
     base,
     axis,
     selection,
@@ -286,39 +285,37 @@ export function RunTimelineRows({
     height: number,
     paint: (p: Parameters<React.ComponentProps<typeof TrackCanvas>["paint"]>[0], layout: RowLayout) => void,
     extra: string,
-  ) => {
-    const layout = layouts.get(agent.id)?.get(row);
-    if (layout === undefined) return null;
-    return (
-      <TrackCanvas
-        width={trackPx}
-        height={height}
-        layout={layout}
-        paint={(p) => paint(p, layout)}
-        paintKey={rowPaintKey({
+  ) => (
+    <TrackCanvas
+      store={store}
+      data={agent.data}
+      rows={agent.rows}
+      row={row}
+      axis={axis}
+      width={trackPx}
+      height={height}
+      paint={paint}
+      paintKey={(layout) =>
+        rowPaintKey({
           layout,
           selection: selection?.agent === agent.id ? selection.selection : null,
           hover: hover?.agent === agent.id ? hover.selection : null,
           highlight,
-          deco: decoFor(agent.id, row),
+          deco: decoFor(agent.id, row, layout),
           width: trackPx,
           height,
           theme,
           extra,
-        })}
-        testId={`run-timeline-canvas-${row}`}
-        onHit={(key) => {
-          const item = key === null ? undefined : layout.items.get(key);
-          overItem.current = item !== undefined;
-          setHover(item === undefined ? null : { agent: agent.id, selection: item.selection });
-        }}
-        onChoose={(key) => {
-          const item = layout.items.get(key);
-          if (item !== undefined) choose(agent.id, row, item.selection);
-        }}
-      />
-    );
-  };
+        })
+      }
+      testId={`run-timeline-canvas-${row}`}
+      onHit={(item) => {
+        overItem.current = item !== null;
+        setHover(item === null ? null : { agent: agent.id, selection: item.selection });
+      }}
+      onChoose={(item) => choose(agent.id, row, item.selection)}
+    />
+  );
 
   const spoken = describe(selection);
   const empty = loaded.every(({ data }) => data.nodes.length === 0 && data.units.length === 0 && data.units_omitted === 0);
@@ -346,7 +343,7 @@ export function RunTimelineRows({
               agent,
               levelRowId(level),
               LEVEL_ROW_PX,
-              (p, layout) => paintNodes(p, layout, paintState, decoFor(agent.id, levelRowId(level))),
+              (p, layout) => paintNodes(p, layout, paintState, decoFor(agent.id, levelRowId(level), layout)),
               "nodes",
             )}
           </RowShell>
@@ -362,7 +359,7 @@ export function RunTimelineRows({
             agent,
             UNITS_ROW,
             UNIT_ROW_PX,
-            (p, layout) => paintUnits(p, layout, paintState, decoFor(agent.id, UNITS_ROW), unitHeights, barTop(UNITS_ROW, data)),
+            (p, layout) => paintUnits(p, layout, paintState, decoFor(agent.id, UNITS_ROW, layout), unitHeights, barTop(UNITS_ROW, data)),
             `${unitHeights}:${barTop(UNITS_ROW, data).toFixed(3)}`,
           )}
         </RowShell>
@@ -373,7 +370,7 @@ export function RunTimelineRows({
               agent,
               INPUT_ROW,
               CONTEXT_ROW_PX,
-              (p, layout) => paintBars(p, layout, barTop(INPUT_ROW, data), paintState, decoFor(agent.id, INPUT_ROW)),
+              (p, layout) => paintBars(p, layout, barTop(INPUT_ROW, data), paintState, decoFor(agent.id, INPUT_ROW, layout)),
               barTop(INPUT_ROW, data).toFixed(3),
             )}
           </RowShell>
@@ -406,9 +403,9 @@ export function RunTimelineRows({
         selectedKeys={selectedKeys}
         hoverKeys={hoverKeys}
         axis={axis}
-        view={view}
+        store={store}
         maxArrows={maxArrows}
-        geometryKey={`${theme}:${geometryKey([...layouts.values()].flatMap((rows) => [...rows.values()]))}`}
+        geometryKey={`${theme}:${trackPx}:${loaded.map(({ id, data }) => `${id}@${data.snapshot}`).join(",")}`}
         hitRef={hitRef}
       />
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
@@ -431,7 +428,7 @@ export function RunTimelineRows({
             variant={row}
             links={groupLinks(shownLinks)[row]}
             axis={axis}
-            viewU={viewU}
+            store={store}
             selectedKey={linkKey}
             onHover={(key) => hoverArrowTo(key === null ? null : { key, members: [key] })}
             onSelect={onSelectLink}
@@ -439,7 +436,7 @@ export function RunTimelineRows({
           />
         ))}
 
-      <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} />
+      <RunTimelineAxis store={store} base={base} onView={onView} axis={axis} />
 
       <RunTimelineLegend
         highlight={highlight}

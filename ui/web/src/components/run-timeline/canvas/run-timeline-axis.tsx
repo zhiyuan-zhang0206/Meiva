@@ -10,24 +10,27 @@ import { cn } from "@/lib/format/utils";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 
 import { axisTicks, type Viewport } from "../model/timeline-model-viewport";
+import type { ViewportStore } from "../viewport/viewport-store";
 import { zoomView } from "../model/timeline-model";
 import { type AxisMap } from "../model/timeline-model-axis";
+import { useViewport } from "../viewport/use-viewport";
 
 const BUTTON_ZOOM = 0.5;
 const AXIS_TICK_TARGET = 6;
 
 export function RunTimelineAxis({
-  view,
+  store,
   base,
   onView,
   axis,
 }: {
-  view: Viewport;
+  store: ViewportStore;
   /** The whole loaded extent: "reset" returns to it. */
   base: Viewport;
   onView: (view: Viewport) => void;
   axis: AxisMap;
 }) {
+  const view = useViewport(store);
   const t = useTranslations("runTimeline");
   const { clockFormat } = useTimeFormat();
   const ticks = axisTicks(view, AXIS_TICK_TARGET, clockFormat);
