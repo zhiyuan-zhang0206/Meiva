@@ -304,7 +304,6 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
 
 async def test_a_failing_rebuild_is_retried_then_failed(
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
     *,
     config_authority: ConfigAuthority,
@@ -313,7 +312,6 @@ async def test_a_failing_rebuild_is_retried_then_failed(
     async def broken(*_a: object, **_kw: object) -> int:
         raise RuntimeError("provider down")
 
-    monkeypatch.setattr(loop, "run_rebuild", broken)
     rebuild_id = await _enqueue_rebuild(aops_pool)
     consumer = loop.Consumer(
         aops_pool,
@@ -324,6 +322,7 @@ async def test_a_failing_rebuild_is_retried_then_failed(
         keys=inert_keys(model_catalog),
         llm_override=config_authority.service_field_value("llm_override"),
         config=consumer_config(),
+        run_rebuild=broken,
     )
     for attempt in (1, 2, 3):
         await _rows(

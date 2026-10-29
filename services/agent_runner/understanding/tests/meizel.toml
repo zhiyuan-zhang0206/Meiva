@@ -6,9 +6,3 @@
 "test_chunk_queue_lifecycle.py" = ["chunk_faults.py", "consumer_helpers.py", "consumer_history.py"]
 "test_group_consumer.py" = ["consumer_helpers.py", "provider_wire.py"]
 "test_rebuild.py" = ["consumer_helpers.py", "provider_wire.py"]
-
-[debt.first-party-patch]
-"chunk_faults.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.describe" = 1
-"chunk_faults.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.load_segments" = 1
-"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.settle_chunk_job" = 1
-"test_rebuild.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.run_rebuild" = 1

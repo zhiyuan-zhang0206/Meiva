@@ -2,6 +2,7 @@
 # The legacy chunk fault rig replaces precise generation and checkpoint boundaries;
 # ordinary SDK and provider behavior is covered by test_provider_receipts.py.
 import asyncio
+from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -48,22 +49,25 @@ def chunk_timestamps() -> TimestampPolicy:
     )
 
 
-@pytest.fixture(autouse=True)
-def chunk_seams(
-    monkeypatch: pytest.MonkeyPatch, chunk_timestamps: TimestampPolicy
-) -> dict[str, Any]:
-    seen: dict[str, Any] = {"described": []}
+# meiva:note
+# The fault rig's recording state and the two boundaries it replaces: the stitched history a job
+# describes and the model call that divides a chunk. The consumer takes both as constructor
+# arguments, so the rig wires the consumer a test builds instead of rewriting the module, and the
+# tests that need it pass `describe=seams.describe, load_segments=seams.load_segments`.
+@dataclass
+class ChunkSeams:
+    timestamps: TimestampPolicy
+    state: dict[str, Any]
 
-    def segments(
-        _db: Database, _agent_id: int, _boundary: str | None
+    def load_segments(
+        self, _db: Database, _agent_id: int, _boundary: str | None
     ) -> tuple[FullHistory, int | None]:
-        if "segments_error" in seen:
-            raise seen["segments_error"]
-        return seen.get("history", inbound_history()), seen.get("closing_segment")
-
-    monkeypatch.setattr(loop, "load_segments", segments)
+        if "segments_error" in self.state:
+            raise self.state["segments_error"]
+        return self.state.get("history", inbound_history()), self.state.get("closing_segment")
 
     def describe(
+        self,
         _models: object,
         _model: str,
         _overrides: object,
@@ -76,27 +80,29 @@ def chunk_seams(
         actual = kw["config"]
         assert isinstance(actual, ConfigBoot) and actual.is_full()
         assert (
-            chunk_timestamps.timezone,
-            chunk_timestamps.weekday,
-            chunk_timestamps.timestamps_enabled,
+            self.timestamps.timezone,
+            self.timestamps.weekday,
+            self.timestamps.timestamps_enabled,
         ) == (
             actual.view.general.timezone,
             actual.view.general.message_timestamp_weekday,
             actual.view.general.message_timestamps,
         )
-        calls.extend(seen.get("calls", ()))
-        if "error" in seen:
-            raise seen["error"]
-        seen["described"].append(located)
-        seen["kw"] = kw
+        calls.extend(self.state.get("calls", ()))
+        if "error" in self.state:
+            raise self.state["error"]
+        self.state["described"].append(located)
+        self.state["kw"] = kw
         return (
-            seen["answer"](located)
-            if "answer" in seen
-            else chunk_result(located, timeline_inputs=chunk_timestamps)
+            self.state["answer"](located)
+            if "answer" in self.state
+            else chunk_result(located, timeline_inputs=self.timestamps)
         )
 
-    monkeypatch.setattr(loop, "describe", describe)
-    return seen
+
+@pytest.fixture
+def chunk_seams(chunk_timestamps: TimestampPolicy) -> ChunkSeams:
+    return ChunkSeams(chunk_timestamps, {"described": []})
 
 
 async def run_rounds(
@@ -104,6 +110,7 @@ async def run_rounds(
     count: int,
     *,
     model_catalog: ModelCatalog,
+    seams: ChunkSeams,
     model: str = "deepseek-flash",
 ) -> None:
     # meiva:note
@@ -120,4 +127,6 @@ async def run_rounds(
                 clock=system_clock(),
                 **lm_wiring(model_catalog),
                 config=config,
+                describe=seams.describe,
+                load_segments=seams.load_segments,
             ).claim(tg)

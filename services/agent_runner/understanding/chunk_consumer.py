@@ -36,7 +36,7 @@ import asyncio
 import contextlib
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
@@ -262,6 +262,10 @@ async def _undescribed_part(
     return slice_chunk(located, *gaps[0]), gaps[1:]
 
 
+# meiva:note
+# The two boundaries one job crosses -- the stitched history it describes and the model call that
+# divides it -- are keyword arguments with the module function as the default, so a caller that
+# names none runs exactly the job it ran before and a test hands in the one it needs.
 async def run_job(
     pool: AsyncConnectionPool,
     db: Database,
@@ -272,6 +276,10 @@ async def run_job(
     *,
     config: ConfigBoot,
     clock: Clock,
+    load_segments: Callable[
+        [Database, int, str | None], tuple[FullHistory, int | None]
+    ] = load_segments,
+    describe: Callable[..., ChunkResult] = describe,
 ) -> Outcome:
     # meiva:note
     # Describe one claimed chunk and store its nodes; the outcome says how it ended.
@@ -401,6 +409,11 @@ class Consumer:
     # shut down when the job ends. Every task is owned by the `TaskGroup` handed to `claim`, and
     # `_process` catches everything, so no job outlives or breaks the loop.
 
+    # meiva:note
+    # The four effects one job crosses -- the stitched history, the model call that divides a
+    # chunk, settling the job's row and the upper-level rebuild -- are keyword arguments whose
+    # defaults are the functions this module already called, so a caller that names none runs
+    # the loop it ran before and a test hands in the one it needs.
     def __init__(
         self,
         pool: AsyncConnectionPool,
@@ -414,8 +427,20 @@ class Consumer:
         config: ConfigBoot,
         clock: Clock,
         poll_seconds: float = POLL_SECONDS,
+        load_segments: Callable[
+            [Database, int, str | None], tuple[FullHistory, int | None]
+        ] = load_segments,
+        describe: Callable[..., ChunkResult] = describe,
+        settle_chunk_job: Callable[
+            [AsyncConnectionPool, ChunkJob, Outcome], Awaitable[None]
+        ] = settle_chunk_job,
+        run_rebuild: Callable[..., Awaitable[int]] = run_rebuild,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
+        self._load_segments = load_segments
+        self._describe = describe
+        self._settle_chunk_job = settle_chunk_job
+        self._run_rebuild = run_rebuild
         self.models = ModelCache(catalog, keys, llm_override)
         self.config = config
         self.clock = clock
@@ -471,7 +496,7 @@ class Consumer:
         # Fail a job this consumer holds because its host is stopping; never raises.
         try:
             await asyncio.shield(
-                settle_chunk_job(self.pool, job, Outcome("failed", "host stopping"))
+                self._settle_chunk_job(self.pool, job, Outcome("failed", "host stopping"))
             )
         except Exception:
             logger.opt(exception=True).warning(
@@ -494,6 +519,8 @@ class Consumer:
                     executor,
                     config=self.config,
                     clock=self.clock,
+                    load_segments=self._load_segments,
+                    describe=self._describe,
                 )
             except asyncio.CancelledError:
                 # meiva:note
@@ -508,7 +535,7 @@ class Consumer:
                     agent=job.agent_id,
                 )
                 outcome = Outcome("failed", f"{type(exc).__name__}: {exc}")
-            await settle_chunk_job(self.pool, job, outcome)
+            await self._settle_chunk_job(self.pool, job, outcome)
             if (
                 outcome.status == "done"
                 and self.replay is None
@@ -545,7 +572,7 @@ class Consumer:
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="understanding")
         try:
             try:
-                leaves = await run_rebuild(
+                leaves = await self._run_rebuild(
                     self.pool,
                     self.db,
                     self.models,
@@ -655,6 +682,9 @@ class Consumer:
                     await asyncio.wait_for(self.finished.wait(), self.poll_seconds)
 
 
+# meiva:note
+# The replay tool's entry point carries the same four effects as the consumer and hands them on:
+# a caller that names none describes, settles and rebuilds exactly as before.
 async def replay_jobs(
     pool: AsyncConnectionPool,
     db: Database,
@@ -666,6 +696,14 @@ async def replay_jobs(
     llm_override: str,
     config: ConfigBoot,
     clock: Clock,
+    load_segments: Callable[
+        [Database, int, str | None], tuple[FullHistory, int | None]
+    ] = load_segments,
+    describe: Callable[..., ChunkResult] = describe,
+    settle_chunk_job: Callable[
+        [AsyncConnectionPool, ChunkJob, Outcome], Awaitable[None]
+    ] = settle_chunk_job,
+    run_rebuild: Callable[..., Awaitable[int]] = run_rebuild,
 ) -> None:
     # meiva:note
     # Describe every enqueued job of one agent, its segments in parallel (the replay tool).
@@ -679,6 +717,10 @@ async def replay_jobs(
         llm_override=llm_override,
         config=config,
         clock=clock,
+        load_segments=load_segments,
+        describe=describe,
+        settle_chunk_job=settle_chunk_job,
+        run_rebuild=run_rebuild,
     ).run_until_idle()
 
 
@@ -693,6 +735,14 @@ async def understanding_loop_forever(
     config: ConfigBoot,
     clock: Clock,
     poll_seconds: float = POLL_SECONDS,
+    load_segments: Callable[
+        [Database, int, str | None], tuple[FullHistory, int | None]
+    ] = load_segments,
+    describe: Callable[..., ChunkResult] = describe,
+    settle_chunk_job: Callable[
+        [AsyncConnectionPool, ChunkJob, Outcome], Awaitable[None]
+    ] = settle_chunk_job,
+    run_rebuild: Callable[..., Awaitable[int]] = run_rebuild,
 ) -> None:
     # meiva:note
     # Consume the chunk queue for the host's whole life; returns at once when the feature is off.
@@ -713,4 +763,8 @@ async def understanding_loop_forever(
         config=config,
         clock=clock,
         poll_seconds=poll_seconds,
+        load_segments=load_segments,
+        describe=describe,
+        settle_chunk_job=settle_chunk_job,
+        run_rebuild=run_rebuild,
     ).run_forever()
