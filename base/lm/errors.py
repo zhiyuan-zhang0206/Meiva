@@ -43,6 +43,8 @@ _PERMANENT_STATUSES: frozenset[int] = frozenset({400, 401, 402, 403, 404, 422})
 # conflict, 425 too-early). 5xx is caught by the `>= 500` range, not this set.
 _TRANSIENT_STATUSES: frozenset[int] = frozenset({408, 409, 425, 429})
 
+_TRANSIENT_OPENAI_STREAM_TYPES = frozenset({"service_unavailable_error", "server_error"})
+
 _CONTEXT_OVERFLOW_STATUS = 400
 # Provider wording for "the request exceeds the model's context window". Each
 # entry is matched case-folded against the error body's `type` / `code` /
@@ -327,6 +329,16 @@ def _error_field(body: object, key: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+# meiva:note
+# The SDK raises plain APIError for error frames after HTTP stream admission.
+def _transient_openai_stream_error(exc: BaseException, body: object) -> bool:
+    from openai import APIError
+
+    return (
+        isinstance(exc, APIError) and _error_field(body, "type") in _TRANSIENT_OPENAI_STREAM_TYPES
+    )
+
+
 def classify_error(exc: BaseException) -> ErrorClassification:
     """Classify trusted outer errors; unrecognized wrappers remain UNKNOWN."""
     status, body = _sdk_fields(exc)
@@ -338,7 +350,7 @@ def classify_error(exc: BaseException) -> ErrorClassification:
             error_class = ErrorClass.PERMANENT
         elif status in _TRANSIENT_STATUSES or status >= 500:
             error_class = ErrorClass.TRANSIENT
-    elif _is_transport_error(exc):
+    elif _is_transport_error(exc) or _transient_openai_stream_error(exc, body):
         error_class = ErrorClass.TRANSIENT
     return ErrorClassification(
         error_class,

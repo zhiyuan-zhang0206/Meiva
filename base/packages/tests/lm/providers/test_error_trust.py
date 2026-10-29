@@ -87,3 +87,50 @@ def test_typed_context_overflow_keeps_rescue_authority_without_guessing_http_sta
     assert classified.error_class is ErrorClass.PERMANENT
     assert classified.context_overflow
     assert classified.status is None
+
+
+@pytest.mark.parametrize("error_type", ["service_unavailable_error", "server_error"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_openai_stream_service_failure_retries_without_inventing_http_status(
+    error_type: str, nested: bool
+) -> None:
+    body = {"type": error_type, "message": "Our servers are currently overloaded."}
+    error = openai.APIError(
+        body["message"],
+        request=httpx2.Request("POST", "https://audit.invalid"),
+        body={"error": body} if nested else body,
+    )
+    classified = classify_error(error)
+    assert classified.error_class is ErrorClass.TRANSIENT
+    assert classified.status is None
+    assert classified.error_type == error_type
+    assert not classified.billing
+
+
+@pytest.mark.parametrize("error_type", ["unknown", "invalid_request_error", "insufficient_quota"])
+def test_openai_stream_message_alone_does_not_grant_retry(error_type: str) -> None:
+    error = openai.APIError(
+        "Our servers are currently overloaded. Please try again later.",
+        request=httpx2.Request("POST", "https://audit.invalid"),
+        body={"type": error_type},
+    )
+    assert classify_error(error).error_class is ErrorClass.UNKNOWN
+
+
+def test_openai_stream_service_type_does_not_override_permanent_http_status() -> None:
+    error = openai.BadRequestError(
+        "bad request",
+        response=httpx2.Response(400, request=httpx2.Request("POST", "https://audit.invalid")),
+        body={"type": "service_unavailable_error"},
+    )
+    assert classify_error(error).error_class is ErrorClass.PERMANENT
+
+
+def test_unrelated_wrapper_cannot_borrow_openai_stream_service_failure() -> None:
+    error = RuntimeError("application bug")
+    error.__cause__ = openai.APIError(
+        "overloaded",
+        request=httpx2.Request("POST", "https://audit.invalid"),
+        body={"type": "service_unavailable_error"},
+    )
+    assert classify_error(error).error_class is ErrorClass.UNKNOWN

@@ -7,6 +7,8 @@ import random
 from dataclasses import replace
 from typing import Any
 
+import httpx2
+import openai
 import pytest
 from langchain_core.exceptions import ModelConnectionError
 from langchain_core.messages import HumanMessage
@@ -204,6 +206,20 @@ async def test_the_node_retries_a_transient_failure_and_returns_the_next_success
     assert model.scripts == []
     retries = loguru_records.events("llm_retry")
     assert [record["extra"]["outcome"] for record in retries] == ["succeeded"]
+
+
+async def test_the_node_recovers_from_the_captured_openai_stream_overload(
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    error = openai.APIError(
+        "Our servers are currently overloaded. Please try again later.",
+        request=httpx2.Request("POST", "https://audit.invalid"),
+        body={"type": "service_unavailable_error"},
+    )
+    model = ScriptedModel(scripts=[[error], [end_turn_chunk("recovered")]])
+    result = await _node_run(model, model_catalog=model_catalog, database_gate=database_gate)
+    assert result.update["messages"][0].content == "recovered"
+    assert model.scripts == []
 
 
 # meiva:note
