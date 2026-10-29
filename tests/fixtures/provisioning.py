@@ -30,6 +30,35 @@ _OS_JOBS_AT_START = host_meiva_os_jobs()
 _PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 
+# meiva:link tests/docs/test-fixtures/catalog-boot.meiva.okf.md
+@pytest.fixture(scope="session", autouse=True)
+def _catalog_cluster_projection() -> Iterator[None]:
+    """Deliver real plugin policy for this test worker's catalog consumers.
+
+    Session environment belongs to the provisioning owner. Collections that import
+    neither configuration nor a model catalog keep their settings-free boot.
+    """
+    config = sys.modules.get("base.config")
+    if config is None and "base.packages.plugin_providers" not in sys.modules:
+        yield
+        return
+    if config is None:
+        from base import config
+    config.ensure_eager()
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+    from base.packages.plugins.config_registration import plugin_bootstrap_config
+
+    previous = os.environ.get(PLUGIN_CLUSTER_CONFIG_ENV)
+    os.environ[PLUGIN_CLUSTER_CONFIG_ENV] = plugin_bootstrap_config(home=TEST_MEIVA_HOME)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(PLUGIN_CLUSTER_CONFIG_ENV, None)
+        else:
+            os.environ[PLUGIN_CLUSTER_CONFIG_ENV] = previous
+
+
 @pytest.fixture(scope="session")
 def throwaway_config(process_config) -> ThrowawayConfig:
     return ThrowawayConfig(
