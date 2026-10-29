@@ -306,6 +306,20 @@ def _declared_symbols(repo: Checkout, path: str | None) -> list[SymbolMove]:
     return parse_symbol_move_lines(repo.load_text(path))
 
 
+# meiva:note
+# What a grown baseline costs, printed with the failure: the baseline is the repository's record of
+# accepted exceptions, so growth is not a number going up — it is a rule turning into a suggestion.
+# The two commands name where the movement sits, and the two documents own the rule.
+_GROWTH_GUIDE = (
+    "The baseline records exceptions this repository accepted, so it may only shrink: a baseline "
+    "that grows turns the rules it covers into suggestions and hands the next author a violation "
+    "presented as allowed. Pay the violation down; record it only when the exception is deliberate "
+    "and the change explains it. `python -m meizel debt diff --by-target` shows what moved per "
+    "target and `python -m meizel debt sites --code <code>` shows where it sits. See "
+    "meizel/docs/checker/debt/debt.meiva.okf.md and meizel/docs/checker/debt/diff.meiva.okf.md."
+)
+
+
 def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     symbols = _declared_symbols(repo, args.symbol_moves_file)
     rules_changed = rule_change(repo, ref, args.waive_if_changed) or bool(symbols)
@@ -329,7 +343,7 @@ def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace
             print(f"meizel: no growth against {ref}")
         return 0
     warning = "" if on_growth == "fail" else " warning:"
-    print(f"meizel:{warning} recorded debt grew against {ref}", file=sys.stderr)
+    print(f"meizel:{warning} recorded debt grew against {ref}. {_GROWTH_GUIDE}", file=sys.stderr)
     return 1 if on_growth == "fail" else 0
 
 
