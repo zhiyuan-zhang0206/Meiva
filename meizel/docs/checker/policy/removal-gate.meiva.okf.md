@@ -44,13 +44,17 @@ change, and a commit that more than one pull request contains is answered only w
 declare it. A merge is never the owner: it carries a branch's change a second time, and the queue's
 own merges belong to no pull request. The one exception is a conflict resolved by deleting an entry
 both parents still carry — no commit made that removal — and the run names that merge instead of
-reporting no removal at all.
+reporting no removal at all. That merge cannot be edited, but the batch's record is its members'
+bodies: a `Policy-Removal` line in any one member's body answers the removal before any attribution
+runs, which is how a conflict resolution's deletion is repaired.
 
-The job's checkout is shallow, so when the policy changed in `--against..HEAD` the workflow deepens
-the range until no commit inside it is a graft point. The gate checks that itself and, with a removal
-standing, reports a range it still cannot walk rather than naming no commit at all. A removal whose
-commit, or whose commit's pull request, cannot be read stays unanswered with the reason named in the
-summary; it is never reported as clean.
+The job's checkout is shallow. Only when a removal is left to attribute does the gate complete the
+history itself, with one `git fetch --unshallow origin HEAD` — everything the remote holds, never a
+depth or a date guessed at. A checkout that stays shallow names the commit it stops at inside
+`--against..HEAD` rather than reporting no commit at all, and a fetch that cannot run — a remote with
+no `HEAD` of its own, no credentials — says why instead. A removal whose commit, or whose commit's
+pull request, cannot be read stays unanswered with the reason named in the summary; it is never
+reported as clean.
 
 ## Renames and history
 
