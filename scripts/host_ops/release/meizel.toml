@@ -1,4 +1,4 @@
-exports = ["base.py", "nightly.py"]
+exports = ["base.py", "label.py", "nightly.py", "tag.py"]
 
 [uses]
-"tests" = ["base.py", "nightly.py"]
+"tests" = ["base.py", "label.py", "nightly.py", "tag.py"]

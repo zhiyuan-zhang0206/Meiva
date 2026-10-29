@@ -116,9 +116,11 @@ def _git(repository: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 
 
 # meiva:note
-# "Has release/ ever been committed here" is a history question, not a working-tree one: an empty directory answers true both before the first release and after someone deletes a record, and only one of those may bootstrap.
+# "Has a record ever been committed here" is a history question, not a working-tree one: an empty directory answers true both before the first release and after someone deletes a record, and only one of those may bootstrap.
+# meiva:note
+# The pathspec names the files the reader reads (`*.json`, non-recursive), never the directory: `-- release/` counted `release/README.md` or `release/.gitkeep` as a record, which closes the bootstrap door on a tree that carries none — the first-release deadlock wearing a different filename. `:(glob)` keeps `*` from crossing `/`, so a nested file counts for neither the reader nor this predicate.
 def has_release_history(repository: Path, directory: str) -> bool:
-    result = _git(repository, "log", "--all", "--format=%H", "--", f"{directory}/")
+    result = _git(repository, "log", "--all", "--format=%H", "--", f":(glob){directory}/*.json")
     return bool(result.stdout.strip())
 
 
@@ -154,6 +156,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"ok": False, "reason": "unknown-target", "target": arguments.target}))
         return 1
     records = load_records(arguments.repo / arguments.provenance_dir)
+    # meiva:note
+    # Known open edge, not closed here: a certificate becomes history only when the record PR it
+    # opens is merged, so between a successful certify and that merge `release/` still has no
+    # history and a second dispatch can bootstrap a certificate for another commit. Refusing when
+    # any v* tag exists would re-arm this deadlock for the tags a failed certify leaves behind
+    # (the workflow's skip-an-existing-tag case), so closing it needs a witness this predicate
+    # does not have. Read as a documented gap, not as a guarded boundary.
     bootstrap_allowed = arguments.bootstrap_when_empty and not has_release_history(
         arguments.repo, str(arguments.provenance_dir)
     )
