@@ -26,6 +26,7 @@ from agent.tests.impersonation.lease_support import Cluster, relay_program, stub
 from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents import impersonation as leases
 from base.agents.impersonation.host_transport import antigravity_endpoint_path
+from base.agents.impersonation.relay import RelayAction
 from base.agents.observation.relay_supervision import RelaySupervision, terminate_relay
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -462,3 +463,57 @@ def test_a_carried_takeover_with_no_usable_carrier_rolls_back_instead_of_activat
     assert ended["status"] == "rejected"
     assert ended["rejection_reason"] == NOT_READY_REASON
     assert not relays.children
+
+
+# meiva:note
+# The provisioning criterion asks whether a minting pair is recorded, not whether
+# `relay_generation` moved. The two questions disagree in exactly two states, and neither is one
+# the production path can reach — minting always writes both — so each test builds its state by
+# hand and pins the branch the criterion takes there: a lease with no recorded pair mints even
+# when its generation is high, and a lease with a beating recorded pair is adopted even at
+# generation zero.
+def test_a_lease_with_no_recorded_mint_pair_mints_even_with_a_generation(cluster: Cluster) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    cluster.db_conn.execute(
+        "UPDATE agent_impersonations SET relay_generation=1,relay_minted_generation=NULL,"
+        "relay_minted_owner=NULL WHERE id=%s",
+        (accepted["id"],),
+    )
+    cluster.db_conn.commit()
+    cluster.heartbeat(accepted["id"], seconds_ago=0.0)
+    successor = _hand_over(cluster, owner)
+
+    provision = leases.provision_relay(
+        cluster.database, accepted["id"], successor, "successor-token"
+    )
+
+    assert provision is not None
+    assert provision.action is RelayAction.MINTED
+    assert cluster.get(accepted["id"])["relay_generation"] == 2
+
+
+# meiva:note
+# The other side of the same criterion: a recorded pair whose carrier still beats is adopted at
+# generation zero, because `relay_generation` never decided it.
+def test_a_lease_with_a_beating_recorded_carrier_is_adopted_at_generation_zero(
+    cluster: Cluster,
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    cluster.db_conn.execute(
+        "UPDATE agent_impersonations SET relay_generation=0,relay_minted_generation=%s,"
+        "relay_minted_owner=%s WHERE id=%s",
+        (owner.generation, owner.owner, accepted["id"]),
+    )
+    cluster.db_conn.commit()
+    cluster.heartbeat(accepted["id"], seconds_ago=0.0)
+    successor = _hand_over(cluster, owner)
+
+    provision = leases.provision_relay(
+        cluster.database, accepted["id"], successor, "successor-token"
+    )
+
+    assert provision is not None
+    assert provision.action is RelayAction.ADOPTED
+    assert cluster.get(accepted["id"])["relay_generation"] == 0
