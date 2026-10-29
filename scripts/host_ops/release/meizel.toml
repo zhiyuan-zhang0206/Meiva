@@ -1,0 +1,4 @@
+exports = ["base.py"]
+
+[uses]
+"tests" = ["base.py"]
