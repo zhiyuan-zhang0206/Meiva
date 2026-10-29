@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Fetch official DeepSeek pricing and reconcile it with Meiva's archive.
-
-Provider adapters are intentionally strict and independent. A changed page
-shape, missing model, unknown meter, or unit invariant is an error: automation
-must never turn an upstream parsing mistake into a price used for billing.
-
-The page prices four catalog entries through two columns: the
-`deepseek-flash` column prices the canonical `deepseek-flash` id plus the
-retired deepseek-v4-flash / deepseek-v4-flash-vision-exp names (DeepSeek keeps
-accepting and billing them at the Flash price), and
-`deepseek-v4-pro` retires onto the Flash column at the page's published
-instant, recorded as the entry's future period. Peak windows are the page's
-daily UTC hours; the page scopes them Monday through Friday, so this ledger
-bills weekend hours at peak rates — a known overestimate the archive's
-daily-recurrence windows cannot express yet.
-"""
+# meiva:note
+# Fetch official DeepSeek pricing and reconcile it with Meiva's archive. Provider adapters are
+# intentionally strict and independent: a changed page shape, missing model, unknown meter,
+# unknown column annotation, unknown model identity, or unit invariant is an error, because
+# automation must never turn an upstream parsing mistake into a price used for billing.
+# meiva:note
+# The page prices four catalog entries through two columns: the `deepseek-flash` column prices
+# the canonical `deepseek-flash` id plus the retired deepseek-v4-flash and
+# deepseek-v4-flash-vision-exp names (DeepSeek keeps accepting and billing them at the Flash
+# price), and `deepseek-v4-pro` is a live column at its own rates.
+# meiva:note
+# A column's footnote marker, the body of the footnote that marker cites, and its MODEL VERSION cell
+# are compared with the reviewed table, and none of them is read as a billing rule. DeepSeek
+# printed a V4 Pro retirement footnote on 2026-09-11 and rewrote it the same day into "we have
+# decided to continue providing API services for DeepSeek V4 Pro", without moving a single price; a
+# comparison of printed prices alone cannot see that, and a rule inferred from the first wording
+# goes on billing a retirement the vendor withdrew.
+# meiva:note
+# Peak windows are the page's daily UTC hours; the page scopes them Monday through Friday, so
+# this ledger bills weekend hours at peak rates — a known overestimate the archive's
+# daily-recurrence windows cannot express yet.
+# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
 
 from __future__ import annotations
 
@@ -52,11 +58,21 @@ class DeepSeekPrices(NamedTuple):
     off_peak: Rates
 
 
-class DeepSeekCatalog(NamedTuple):
-    """All price and recurring-time facts parsed from the official page."""
+# meiva:note
+# One column's own label marker and MODEL VERSION cell, exactly as printed.
+class ColumnAnnotation(NamedTuple):
+    note: str | None
+    version: str
 
+
+# meiva:note
+# Everything one page fetch yields: the rates per model, the recurring peak windows, each column's
+# annotation, and the bodies of the page's numbered footnotes.
+class DeepSeekCatalog(NamedTuple):
     models: dict[str, DeepSeekPrices]
     peak_windows: tuple[tuple[str, str], ...]
+    annotations: dict[str, ColumnAnnotation]
+    note_bodies: dict[str, str]
 
 
 _METERS = {
@@ -64,39 +80,55 @@ _METERS = {
     "1M INPUT TOKENS (CACHE HIT)": "cache_read",
     "1M OUTPUT TOKENS": "output",
 }
-# Official page columns → the catalog entries each column prices. Since the
-# 2026-09-17 rename (task #3750) four entries are priced through two columns:
-# the flash column prices the canonical deepseek-flash id, and footnote (1)
-# keeps the retired deepseek-v4-flash and deepseek-v4-flash-vision-exp names
-# accepted and billed at the Flash price. An equality check below keeps the
-# fetched page in lockstep with this roster.
-_DEEPSEEK_COLUMNS: dict[str, tuple[str, ...]] = {
-    "deepseek-flash": (
-        "deepseek-flash",
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-vision-exp",
+
+
+# meiva:note
+# One MODEL-row column: the catalog entries it prices and the annotation the review recorded.
+class Column(NamedTuple):
+    models: tuple[str, ...]
+    note: str | None
+    version: str
+
+
+# meiva:note
+# Official page columns → the catalog entries each column prices plus what the
+# reviewed page said about that column. Since the 2026-09-17 rename (task
+# #3750) four entries are priced through two columns: the flash column prices
+# the canonical deepseek-flash id, and footnote (1) keeps the retired
+# deepseek-v4-flash and deepseek-v4-flash-vision-exp names accepted and billed
+# at the Flash price. `deepseek-v4-pro` carries no footnote and is a live
+# column: DeepSeek withdrew its 2026-09-11 retirement the same day, so the
+# catalogue bills the pro band the page kept printing. Both the label's
+# footnote marker and the MODEL VERSION cell are compared below, so a column
+# whose annotation moves while its prices stand still reaches a reviewer.
+_DEEPSEEK_COLUMNS: dict[str, Column] = {
+    "deepseek-flash": Column(
+        models=(
+            "deepseek-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp",
+        ),
+        note="1",
+        version="DeepSeek-V4.1-Flash-1017",
     ),
-    "deepseek-v4-pro": ("deepseek-v4-pro",),
+    "deepseek-v4-pro": Column(
+        models=("deepseek-v4-pro",),
+        note=None,
+        version="DeepSeek-V4-Pro-0813",
+    ),
 }
-
-
-class Succession(NamedTuple):
-    """A page column whose model another column prices from an instant on."""
-
-    successor: str
-    effective_from: str
-
-
-# Footnote (2): after 12:00 Beijing Time on 2026-09-14 (= 04:00 UTC) requests
-# to deepseek-v4-pro are routed to V4.1 Flash and billed at the V4.1 Flash
-# price. The reconcile records that succession as the entry's future period,
-# closing the pro band at the published instant; afterwards the pro column is
-# frozen history — nothing bills from it again, so the adapter never rewrites
-# the retired entry.
-_DEEPSEEK_SUCCESSION: dict[str, Succession] = {
-    "deepseek-v4-pro": Succession(
-        successor="deepseek-flash",
-        effective_from="2026-09-14T04:00:00Z",
+# meiva:note
+# The body of each footnote a MODEL column cites, as reviewed. Only a marker that appears on a
+# MODEL label is compared: the flash column prices deepseek-v4-flash and
+# deepseek-v4-flash-vision-exp *because* footnote (1) says so, so a body rewritten under the same
+# marker would move what those three ids bill without moving a number. Whitespace is normalized;
+# nothing else on the page is compared.
+_DEEPSEEK_NOTE_BODIES: dict[str, str] = {
+    "1": (
+        "Use deepseek-flash as the model name. The legacy names deepseek-v4-flash and "
+        "deepseek-v4-flash-vision-exp are still accepted, but the corresponding models have been "
+        "retired, their requests are served by the DeepSeek-V4.1-Flash-1017 model and billed at "
+        "the Flash price."
     ),
 }
 _PEAK_HOURS = re.compile(
@@ -104,7 +136,8 @@ _PEAK_HOURS = re.compile(
     r"and\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+UTC\b"
 )
 _USD = re.compile(r"\$(?:0|[1-9]\d*)(?:\.\d+)?")
-_MODEL_LABEL_FOOTNOTE = re.compile(r"\s*\(\d+\)$")
+_MODEL_LABEL_FOOTNOTE = re.compile(r"\s*\((\d+)\)$")
+_FOOTNOTE_PARAGRAPH = re.compile(r"\((\d+)\)\s+(\S.*)")
 _DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
 _CATALOG_PATH = Path(__file__).resolve().parents[2] / "base/lm/pricing/pricing_catalog_archive.json"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -131,16 +164,34 @@ def _peak_windows(page_text: str) -> tuple[tuple[str, str], ...]:
     return tuple((f"{clocks[index]}:00", f"{clocks[index + 1]}:00") for index in range(0, 4, 2))
 
 
-def _model_ids(rows: list[list[str]]) -> list[str]:
+# meiva:note
+# Each MODEL column's id, mapped to the footnote marker its label carries, if any.
+def _column_labels(rows: list[list[str]]) -> dict[str, str | None]:
     model_row = next((row for row in rows if row and row[0] == "MODEL"), None)
     if model_row is None or len(model_row) < 3:
         raise ValueError("DeepSeek MODEL row is missing or incomplete")
-    models = [_MODEL_LABEL_FOOTNOTE.sub("", cell) for cell in model_row[1:]]
-    if not all(models):
-        raise ValueError("DeepSeek MODEL row contains an empty model id")
-    if len(models) != len(set(models)):
-        raise ValueError("DeepSeek MODEL row contains duplicate model ids")
-    return models
+    labels: dict[str, str | None] = {}
+    for cell in model_row[1:]:
+        marker = _MODEL_LABEL_FOOTNOTE.search(cell)
+        model = _MODEL_LABEL_FOOTNOTE.sub("", cell)
+        if not model:
+            raise ValueError("DeepSeek MODEL row contains an empty model id")
+        if model in labels:
+            raise ValueError("DeepSeek MODEL row contains duplicate model ids")
+        labels[model] = marker.group(1) if marker is not None else None
+    return labels
+
+
+# meiva:note
+# Each MODEL VERSION cell, keyed by the MODEL column it belongs to.
+def _model_identities(rows: list[list[str]], labels: dict[str, str | None]) -> dict[str, str]:
+    version_row = next((row for row in rows if row and row[0] == "MODEL VERSION"), None)
+    if version_row is None or len(version_row) != len(labels) + 1:
+        raise ValueError("DeepSeek MODEL VERSION row is missing or does not match the MODEL row")
+    versions = [cell.strip() for cell in version_row[1:]]
+    if not all(versions):
+        raise ValueError("DeepSeek MODEL VERSION row contains an empty model identity")
+    return dict(zip(labels, versions, strict=True))
 
 
 def _meter_cells(
@@ -200,25 +251,49 @@ def _model_prices(model: str, model_bands: dict[str, dict[str, Decimal]]) -> Dee
     return DeepSeekPrices(peak=peak, off_peak=off_peak)
 
 
-def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
-    """Parse DeepSeek's official pricing table into exact USD/M rates.
+# meiva:note
+# The cited-footnote bodies the page prints, keyed by marker. A marker printed twice with different
+# text is ambiguous and fails; whitespace reflow is not a change.
+def _note_bodies(soup: BeautifulSoup) -> dict[str, str]:
+    bodies: dict[str, str] = {}
+    for paragraph in soup.find_all("p"):
+        text = " ".join(paragraph.get_text(" ", strip=True).split())
+        match = _FOOTNOTE_PARAGRAPH.fullmatch(text)
+        if match is None:
+            continue
+        marker, body = match[1], match[2]
+        if marker in bodies and bodies[marker] != body:
+            raise ValueError(f"DeepSeek prints footnote ({marker}) twice with different text")
+        bodies[marker] = body
+    return bodies
 
-    The table uses rowspans, so a peak row inherits the meter named by the
-    preceding off-peak row, and column labels carry footnote markers
-    (`deepseek-flash (1)`) that are stripped to the official model id. All
-    three meters and the documented 50% off-peak relationship are required
-    before any value is returned.
-    """
+
+# meiva:note
+# The table uses rowspans, so a peak row inherits the meter named by the preceding off-peak row,
+# and column labels carry footnote markers (`deepseek-flash (1)`) that are stripped to the model
+# id and reported beside it, never read as a rule. All three meters and the documented 50%
+# off-peak relationship are required before any value is returned.
+def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     soup = BeautifulSoup(html, "lxml")
     peak_windows = _peak_windows(soup.get_text(" ", strip=True))
     rows = [
         [cell.get_text(" ", strip=True) for cell in row.select("th,td")]
         for row in soup.select("table tr")
     ]
-    models = _model_ids(rows)
-    bands = _read_meter_rows(rows, models)
+    labels = _column_labels(rows)
+    versions = _model_identities(rows, labels)
+    bands = _read_meter_rows(rows, list(labels))
     parsed = {model: _model_prices(model, model_bands) for model, model_bands in bands.items()}
-    return DeepSeekCatalog(models=parsed, peak_windows=peak_windows)
+    annotations = {
+        model: ColumnAnnotation(note=note, version=versions[model])
+        for model, note in labels.items()
+    }
+    return DeepSeekCatalog(
+        models=parsed,
+        peak_windows=peak_windows,
+        annotations=annotations,
+        note_bodies=_note_bodies(soup),
+    )
 
 
 def _catalog_rates(raw: dict[str, str]) -> Rates:
@@ -311,93 +386,77 @@ def _append_reviewed_period(
     return True
 
 
-def _record_succession(
-    entry: dict[str, Any],
-    fetched: DeepSeekCatalog,
-    *,
-    column: str,
-    succession: Succession,
-    detected_at: str,
-) -> bool:
-    """Close a retired column's band at its succession instant onto the successor's rates.
-
-    Returns True when the successor period was appended. Once recorded the
-    retired column is frozen history: its closed band's rates must keep
-    matching the official column (any change fails closed for review; the peak
-    windows are a global page property the live columns reconcile), and the
-    successor period is never repriced — nothing bills from the retired column
-    after the succession instant.
-    """
-    own_prices = fetched.models[column]
-    periods = entry["periods"]
-    last = periods[-1]
-    if last["effective_from"] == succession.effective_from:
-        if (
-            last["effective_until"] is not None
-            or len(periods) < 2
-            or periods[-2]["effective_until"] != succession.effective_from
-        ):
-            raise ValueError(f"DeepSeek {column!r} succession periods are malformed")
-        frozen_prices, _frozen_windows = _period_deepseek_prices(periods[-2])
-        if frozen_prices != own_prices:
-            raise ValueError(
-                f"DeepSeek {column!r} is retired to {succession.successor!r}; its official "
-                "column no longer matches the frozen period — review manually"
-            )
-        return False
-    current_prices, _current_windows = _current_deepseek_prices(entry)
-    if current_prices != own_prices:
+# meiva:note
+# Compare the body of the footnote a column cites, when it cites one. Missing text and changed text
+# are review items; whitespace reflow is not.
+def _require_reviewed_note_body(column: str, reviewed: Column, fetched: DeepSeekCatalog) -> None:
+    if reviewed.note is None:
+        return
+    expected = _DEEPSEEK_NOTE_BODIES.get(reviewed.note)
+    if expected is None:
+        raise ValueError(f"the review recorded no text for DeepSeek footnote ({reviewed.note})")
+    found = fetched.note_bodies.get(reviewed.note)
+    if found is None:
         raise ValueError(
-            f"DeepSeek {column!r} changed before its recorded retirement; review manually"
+            f"DeepSeek {column!r} cites footnote ({reviewed.note}), but the page prints no such "
+            "footnote body; a cited marker without its text cannot be reviewed"
         )
-    current = next(period for period in periods if period["effective_until"] is None)
-    current["effective_until"] = succession.effective_from
-    periods.append(
-        _new_deepseek_period(
-            fetched.models[succession.successor], succession.effective_from, fetched.peak_windows
-        )
+    if found == expected:
+        return
+    raise ValueError(
+        f"DeepSeek footnote ({reviewed.note}), cited by {column!r}, changed: the review recorded "
+        f"{expected!r}, the page prints {found!r}. The adapter will not follow new wording on its "
+        "own; review it before the catalog does."
     )
-    entry["source_checked_at"] = detected_at[:10]
-    return True
 
 
+# meiva:note
+# Fail closed unless the page annotates every column exactly as the review recorded. A footnote
+# marker on a column's label, a changed MODEL VERSION cell, or a rewritten footnote body the label
+# cites says the vendor is talking about that column's meaning while the printed prices may stay
+# identical; the adapter interprets none of it, so anything it was not reviewed against is a
+# review item.
+def _require_reviewed_annotations(fetched: DeepSeekCatalog) -> None:
+    for column, reviewed in sorted(_DEEPSEEK_COLUMNS.items()):
+        found = fetched.annotations[column]
+        if (found.note, found.version) != (reviewed.note, reviewed.version):
+            raise ValueError(
+                f"DeepSeek {column!r} is published as {found.version!r} with footnote marker "
+                f"{found.note!r}; the catalog was reviewed against {reviewed.version!r} with "
+                f"marker {reviewed.note!r}. The adapter never reads a billing rule out of a "
+                "footnote — review the page's wording before the catalog records one."
+            )
+        _require_reviewed_note_body(column, reviewed, fetched)
+
+
+# meiva:note
+# Return a catalog copy with changed rates appended, or None if equal. The page's per-column
+# annotations are checked first: a column whose footnote marker or model identity differs from
+# the reviewed table fails closed, because a vendor changes what a column bills without moving
+# the numbers it prints. `detected_at` is the provisional effective time: the generated PR must
+# verify it against the provider announcement before merge, and retaining the prior period makes
+# that correction a one-field edit instead of rewriting price history.
 def reconcile_deepseek_catalog(
     catalog: dict[str, Any],
     fetched: DeepSeekCatalog,
     *,
     detected_at: str,
 ) -> dict[str, Any] | None:
-    """Return a catalog copy with changed rates appended, or None if equal.
-
-    `detected_at` is deliberately recorded as the provisional effective time.
-    The generated PR must verify it against the provider announcement before
-    merge; retaining the prior period makes that correction a one-field edit
-    instead of rewriting price history.
-    """
     instant = datetime.fromisoformat(detected_at.replace("Z", "+00:00"))
     if instant.tzinfo is None or instant.utcoffset() is None or not detected_at.endswith("Z"):
         raise ValueError("detected_at must be an ISO-8601 UTC instant ending in Z")
     if set(fetched.models) != set(_DEEPSEEK_COLUMNS):
         raise ValueError(f"DeepSeek source must contain exactly {sorted(_DEEPSEEK_COLUMNS)}")
+    _require_reviewed_annotations(fetched)
 
     updated = deepcopy(catalog)
     changed = False
-    for column, models in sorted(_DEEPSEEK_COLUMNS.items()):
-        succession = _DEEPSEEK_SUCCESSION.get(column)
-        for model in models:
+    for column, reviewed in sorted(_DEEPSEEK_COLUMNS.items()):
+        for model in reviewed.models:
             entry = updated["models"][model]
-            if succession is None:
-                appended = _append_reviewed_period(
-                    entry, fetched.models[column], fetched.peak_windows, detected_at
-                )
-            else:
-                appended = _record_succession(
-                    entry,
-                    fetched,
-                    column=column,
-                    succession=succession,
-                    detected_at=detected_at,
-                )
+            appended = _append_reviewed_period(
+                entry, fetched.models[column], fetched.peak_windows, detected_at
+            )
             changed = changed or appended
 
     if not changed:

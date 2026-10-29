@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-29-openai-default-cache-writes",
+  "catalog_version": "2026-10-29-deepseek-v4-pro-continuation",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -49,8 +49,8 @@
     "deepseek-v4-pro": {
       "vendor": "deepseek",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
-      "source_checked_at": "2026-09-11",
-      "effective_time_note": "DeepSeek retires V4 Pro into V4.1 Flash: requests route to V4.1 Flash and bill at its price from 12:00 Beijing Time on 2026-09-14 = 2026-09-14T04:00:00Z (pricing-page footnote (2)); the final period records that succession.",
+      "source_checked_at": "2026-10-29",
+      "effective_time_note": "Corrected 2026-10-29: the V4 Pro retirement recorded here never took effect. The pricing page's footnote (2) announced it on 2026-09-11 (\"From 12:00 Beijing Time on September 14, 2026, and until V4.1 Pro is released in the future, requests to deepseek-v4-pro will all be routed to V4.1 Flash and billed at the V4.1 Flash price\") and was rewritten the same day to \"In response to user demand, we have decided to continue providing API services for DeepSeek V4 Pro after September 14, 2026, with the billing method remaining unchanged\"; the 2026-09-10 entry of https://api-docs.deepseek.com/updates states the same reversal, and from 2026-10-17 the column carries no footnote at all. The page printed the V4 Pro band (`$0.022/$0.044` cache hit, `$0.66/$1.32` cache miss, `$1.98/$3.96` output, off-peak/peak) throughout, so no repricing happened on 2026-09-14 or on this correction date: the Flash-priced period that started at 2026-09-14T04:00:00Z was removed as a record that was never true, and the open end of this entry's band moved back from 2026-09-14T04:00:00Z to null. The two earlier periods keep their rates and start boundaries.",
       "periods": [
         {
           "effective_from": null,
@@ -70,7 +70,7 @@
         },
         {
           "effective_from": "2026-08-16T16:00:00Z",
-          "effective_until": "2026-09-14T04:00:00Z",
+          "effective_until": null,
           "tiers": [
             {
               "input_tokens_min": 0,
@@ -97,41 +97,6 @@
                     "input": "1.32",
                     "cache_read": "0.044",
                     "output": "3.96"
-                  }
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "effective_from": "2026-09-14T04:00:00Z",
-          "effective_until": null,
-          "tiers": [
-            {
-              "input_tokens_min": 0,
-              "input_tokens_max": null,
-              "rates": {
-                "input": "0.15",
-                "cache_read": "0.003",
-                "output": "0.6"
-              },
-              "utc_daily_overrides": [
-                {
-                  "start": "01:00:00",
-                  "end": "04:00:00",
-                  "rates": {
-                    "input": "0.3",
-                    "cache_read": "0.006",
-                    "output": "1.2"
-                  }
-                },
-                {
-                  "start": "06:00:00",
-                  "end": "10:00:00",
-                  "rates": {
-                    "input": "0.3",
-                    "cache_read": "0.006",
-                    "output": "1.2"
                   }
                 }
               ]
