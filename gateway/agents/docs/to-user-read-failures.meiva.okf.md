@@ -36,7 +36,7 @@ panel renders: `to_user_document_too_large` offers the file itself through the
 resource route (which serves it under `max_resource_bytes`), `to_user_reference_gone`
 says the link is gone, and only a retryable answer asks for a retry. The panel's
 copy is chosen from `code`, never from the status
-([shared context](../../../ui/web/src/docs/frontend-state/shared-context.meiva.okf.md)).
+([shared context](../../../ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md)).
 
 ## What stays refused
 

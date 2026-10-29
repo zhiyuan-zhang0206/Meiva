@@ -2,7 +2,7 @@
 
 import { ArrowLeft, House, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -58,7 +58,7 @@ function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
 // reference entry is marked, so the panel's own Back calls history.back() for it instead of
 // rewriting a deep link that has no in-app entry to return to.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, viewportRef, children }: {
+export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, viewportRef }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failure: unknown;
@@ -71,7 +71,6 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   onCollapse?: () => void;
   onNavigate?: () => void;
   viewportRef?: React.RefObject<HTMLDivElement | null>;
-  children?: ReactNode;
 }) {
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
@@ -129,11 +128,11 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   const rawQuery = new URLSearchParams(references.map((reference) => ["reference", reference]));
   const rawUrl = `${API_BASE}/api/agents/${agentId}/to-user/resource?${rawQuery}`;
   // meiva:note
-  // The caller owns the question and Inspector; the question arrives as this
-  // section's leading slot inside the reading area, so navigating the keyed
-  // document body cannot discard an unfinished answer, and the column's title
-  // bar above that area stays put while the area scrolls.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // This section owns the column's title bar and its reading area; the caller
+  // owns the question, which sits below this area as the column's own bottom
+  // region, and Inspector, so navigating the keyed body cannot discard an
+  // unfinished answer while the bar above the area stays put.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   // meiva:note
   // The inspector toggle changes nothing on hover: on a 14px icon the
   // background wash reads as a shadow, and the pointer cursor already says the
@@ -192,7 +191,6 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
         </div>
       </div>
       <ScrollArea data-testid="shared-document" hidden={bodyHidden} viewportRef={viewportRef} className={cn(MIN_H_0, FLEX_1)}>
-        {children}
         {bodyHidden ? null : (
           <>
             {failed && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}

@@ -142,7 +142,7 @@ describe("InspectorPanel", () => {
     // meiva:note
     // The model is the agent's state, not an override: it reads in Liveness beside the
     // harness, and the overlay no longer repeats it as llm_model (user 2026-10-21).
-    // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
     const livenessSection = screen.getByText("Liveness").closest("section");
     expect(livenessSection).not.toBeNull();
     expect(within(livenessSection!).getByText("Harness")).toBeTruthy();

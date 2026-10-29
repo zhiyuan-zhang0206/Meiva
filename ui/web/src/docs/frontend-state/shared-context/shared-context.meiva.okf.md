@@ -11,7 +11,7 @@ tags:
 The home page displays the selected agent's workspace document beside its message
 stream. Desktop gives the narrow agent tree 16% by default, then divides messages
 and the shared-context panel 4:3. The document is the panel's body — notifications
-tuck in above it — and it stays present for every selected agent: a missing or
+tuck in below it as the column's bottom region — and it stays present for every selected agent: a missing or
 empty document shows the empty state and a legacy `to_user.html` shows the
 migration placeholder — an empty document never collapses the panel. The column
 hides only when the user closes it: `display.context_panel_open` (default on) is
@@ -19,16 +19,19 @@ the title bar's PanelRight toggle, and the timeline takes the width until it is
 reopened. The panel itself is a lazy boundary, loaded when the right panel first
 renders.
 
-The question and the to-user document share one `ScrollArea` viewport. Its
-viewport reference owns reading-position capture and restoration across Inspector
-mode changes.
-Neither the question area nor the document body has a nested scrollbar; long
-choices, comments and document content remain in one continuous reading flow.
+The document body is the column's reading area: its `ScrollArea` viewport owns
+reading-position capture and restoration across Inspector mode changes, and the
+body has no nested scrollbar. The question is the column's own bottom region,
+pinned under that area instead of travelling inside it (user report 2026-10-30,
+replacing the 2026-10-29 order in which it was the reading area's first block).
+The column therefore reads title bar, reading area, question: the question keeps
+its place while the document scrolls, and one taller than the region's cap
+scrolls inside its own card rather than starving the reading area.
 Question controls use the timeline's 13px body size and compact row spacing.
 Touch inputs retain their 16px baseline; a narrow desktop column still uses 13px.
 The document bar is the right column's title bar, outside the reading viewport
-in both modes: only the reading area scrolls, never the bar (user 2026-10-29).
-The question is that area's first block, above the document body. There is no
+in both modes: only the reading area scrolls, never the bar (user 2026-10-29), and
+the bottom region never pushes that bar out of the column. There is no
 separate notice bar, queue counter or collapse control. Document padding supplies the initial spacing;
 the first Markdown block adds no top margin. Plain numbered choice rows avoid a card around every option.
 A persistent comment input and the shared send button match the chat composer;
@@ -39,24 +42,10 @@ Switching agents or navigating to another referenced document resets this shared
 reading position to the top.
 
 The inspector is a mode over the right column, not a peer tab: the magnifier at
-the end of the document bar switches the column to the inspector (its own queries
-and ordered section list) and the same pressed button is the way out. The mode
-owns only that column — the agent rail stays mounted, because the mode changes
-what the panel shows, not whether navigation is reachable (user 2026-10-20). The
-bar keeps just the controls the mode uses: its name, the pressed magnifier and the
-column's collapse; the document's home, back and refresh read the body the mode
-hides, so they leave with it. The question stays mounted but hidden in Inspector mode, preserving reply drafts
-and leaving the full body height for Inspector. Returning restores the shared
-document reading position. The panel itself never scrolls: Inspector keeps its
-own scrollbar under the same bar. Below the
-desktop breakpoint the shared context opens as a full-screen reading view from
-the header's To user action — available whenever an agent is selected. Its top
-bar pairs Back to messages with the Inspector mode toggle on the right. The
-toggle stays in that bar when active and becomes the exit. In narrow Inspector
-mode, the document bar disappears entirely and Inspector starts directly below
-the top bar. The document component stays mounted to retain reference navigation.
-The narrow document toolbar carries the document's own controls; the
-mode switch stays in the top bar beside Back.
+the end of the document bar switches the column to the inspector and the same
+pressed button is the way out. What the mode keeps mounted, what the bar carries,
+and how the narrow reading view and its own scrollbar behave have their own node:
+[[ui/web/src/docs/frontend-state/shared-context/inspector-mode/inspector-mode.meiva.okf.md|Inspector mode]].
 
 `["to-user", agentId]` owns the root document snapshot. Linked Markdown uses
 that query-key prefix followed by its reference chain. The home-machine ops
@@ -66,7 +55,7 @@ behavior and safe links for both conversation and document surfaces. The documen
 explicitly skips raw HTML. External links open in a new tab; linked Markdown
 opens in the panel and is pushed into browser history (`?agent_id=…&reference=…`),
 so Back and Forward walk the same chain and a reload or a shared link restores
-it; [panel navigation history](navigation-history.meiva.okf.md)
+it; [panel navigation history](../navigation-history.meiva.okf.md)
 owns that contract. Other files open or download through the authenticated gateway resource
 endpoint.
 
@@ -95,7 +84,7 @@ document, 1024 local references and 16 linked-document hops by default. The
 response that serves those files renders HTML inline in a script-only sandbox
 that keeps an opaque origin, media, PDFs and inert text inline under the plain
 sandbox, and archives, office documents, executables and unknown types as
-attachments; [to user resources](../../../../../gateway/agents/docs/to-user-resources.meiva.okf.md)
+attachments; [to user resources](../../../../../../gateway/agents/docs/to-user-resources.meiva.okf.md)
 owns that boundary and its contract. Every resource response carries nosniff and
 is never publicly cached.
 
