@@ -185,7 +185,7 @@ function displaySkillName(name: string): string {
 // meiva:note
 // llm_model is not an override a reader compares — it is the agent's own state, shown in
 // Liveness beside its harness (user 2026-10-21). Every other key stays.
-// meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
 const CONFIG_OVERLAY_HIDDEN_KEYS = new Set(["llm_model"]);
 
 export function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
@@ -226,7 +226,7 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   // current state, not to its configuration overrides: the title bar stopped naming the
   // harness (user 2026-10-21), and the overlay's llm_model row is hidden below, so the
   // two facts a reader checks first sit together here.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   const harness = rosterRow?.harness;
   const model = typeof inspect.config_overlay.llm_model === "string" ? inspect.config_overlay.llm_model : undefined;
   const offline = state === "offline";

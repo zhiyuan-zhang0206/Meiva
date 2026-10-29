@@ -80,4 +80,4 @@ entry's `bfcacheId`; the save/restore path has its own node:
 ## Shared user context
 
 The document reader, notification area, inspector view and file-change repair are
-owned by [[ui/web/src/docs/frontend-state/shared-context.meiva.okf.md|Shared user context]].
+owned by [[ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md|Shared user context]].

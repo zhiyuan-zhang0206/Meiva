@@ -121,13 +121,13 @@ function HomeShell({ showError }: HomeShellProps) {
   const activeNotices = [...noticeFeed.awaiting, ...noticeFeed.open]
     .filter((notice) => notice.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   const [contextPanelOpen, setContextPanelOpen] = useContextPanelOpen();
   // meiva:note
   // The mode owns the panel: entering inspector while the shared-context column
   // is closed still shows it, because otherwise the mode would be on with
   // nothing to inspect. On mobile the inspector keeps its own sheet.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   const showContext = isLarge
     ? activeId != null && (contextPanelOpen || inspectorOpen)
     : mobileContextOpen || inspectorOpen;
