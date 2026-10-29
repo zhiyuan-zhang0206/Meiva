@@ -385,7 +385,7 @@ def test_the_marker_inside_a_string_is_not_an_exemption() -> None:
 
 # meiva:note
 # One parse answers both questions. A whole-tree run parses every test file it walks
-# (2026-10-29: 3191 files, 21.3 MB), so the findings and the exemptions must not each pay
+# (2026-10-29: about 3.2k files, 21.3 MB), so the findings and the exemptions must not each pay
 # for a tree of their own.
 def test_one_parse_yields_both_verdicts() -> None:
     src = (

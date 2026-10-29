@@ -114,7 +114,7 @@ only shrinks; when the last entry goes, the file and this section go with it.
 ## Cost
 
 The run is whole-tree, so its cost follows the corpus rather than the change: on
-2026-10-29 the 3191 test files (21.3 MB) cost about 14s while the commit under
+2026-10-29 the 3.2k test files (21.3 MB) cost about 14s while the commit under
 judgement touched one file. Two facts about the marker make that cheaper without
 changing the verdict. Each file is parsed once — the findings and the exemptions
 read the same tree — and a file whose text does not contain `# host-ok:` carries
