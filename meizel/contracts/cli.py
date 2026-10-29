@@ -10,10 +10,10 @@ from meizel.checkout import GitRepo, read_roles, toplevel
 from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
-from meizel.contracts.debt_carry import run_debt
+from meizel.contracts.debt_carry import renames_since, run_debt
 from meizel.contracts.explain import explain
+from meizel.contracts.policy import Surface, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
-from meizel.contracts.policy import load_policy, policy_at
 from meizel.contracts.sync import sync_manifests
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.source_evidence import load_report
@@ -142,6 +142,17 @@ def _build_parser() -> argparse.ArgumentParser:
     policy_modes = policy.add_subparsers(dest="policy_mode", required=True)
     policy_diff = policy_modes.add_parser("diff", help="list the entries changed against a git ref")
     policy_diff.add_argument("--against", required=True, metavar="ref")
+    policy_surface = policy_modes.add_parser(
+        "surface",
+        help="report what the checker can still report, against a git ref",
+        description=(
+            "Compare the declarations that decide what the checker reports - meizel.policy.toml and "
+            "every meizel.toml's [roots] and [state] - and print them as one markdown block. It "
+            "lists a change and never fails on one: a narrowing still has to be visible here, "
+            "because adding an allowance has no gate of its own."
+        ),
+    )
+    policy_surface.add_argument("--against", required=True, metavar="ref")
     declared = commands.add_parser("roles", help="the declared top-level packages and their copies")
     modes = declared.add_subparsers(dest="mode", required=True)
     listing = modes.add_parser("list", help="print the top-level directories of the given roles")
@@ -278,6 +289,17 @@ def _run_sync(repo: GitRepo, base: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_surface(repo: GitRepo, against: str) -> int:
+    # meiva:note
+    # The base is a worktree of its own, so both sides are read by the same readers: the policy's
+    # written for a historical tree, and the manifests' as they stand there. A ref whose tree cannot
+    # be checked out is a run that cannot compare, and exits as one.
+    with repo.checkout(against) as base:
+        before = Surface.of(base.universe(), historical=True)
+    print(before.report(Surface.of(repo.universe()), renames_since(repo, against), against=against))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -293,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "debt":
             targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
             return run_debt(repo, targets, args, args.jobs)
+        if args.command == "policy" and args.policy_mode == "surface":
+            return _run_surface(repo, args.against)
         if args.command == "policy":
             universe = repo.universe()
             for line in policy_changes(policy_at(universe, args.against), load_policy(universe)[0]):
