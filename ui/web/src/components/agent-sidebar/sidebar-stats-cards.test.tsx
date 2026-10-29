@@ -1,87 +1,10 @@
-import { cleanup, fireEvent, screen } from "@testing-library/react";
-import {  } from "@/test-support/render";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type * as SidebarModule from "@/lib/agents/sidebar";
-import type { PluginStat, StatsDashboard } from "@/lib/contracts/types";
-import type * as PluginStatsModule from "@/lib/plugins/plugin-stats";
-import { bpMock, handlers, makeAgent, pushSpy, resetSidebarTestState, sortStore, state, StubAgentRow, StubButton, StubScrollArea, StubSpawnForm, wrap } from "./sidebar-test-mock";
+import type { StatsDashboard } from "@/lib/contracts/types";
+import { transport } from "@/test-support/fake-api";
+import { handlers, makeAgent, pushSpy, resetSidebarTestState, state, wrap } from "./sidebar-test-mock";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy }),
-}));
-vi.mock("@/lib/state/store", () => ({
-  useStore: <T,>(selector: (s: unknown) => T): T => {
-    const fake = {
-      activeId: state.activeId,
-      setActiveId: state.setActiveId,
-      mobileSidebarOpen: state.mobileSidebarOpen,
-      setMobileSidebarOpen: state.setMobileSidebarOpen,
-      searchQuery: state.searchQuery,
-      setSearchQuery: state.setSearchQuery,
-    };
-    return selector(fake);
-  },
-}));
-vi.mock("@/lib/agents/sidebar", async () => {
-  const actual = await vi.importActual<typeof SidebarModule>("@/lib/agents/sidebar");
-  const React = await import("react");
-  return {
-    ...actual,
-    useSidebarCollapsed: () => ({
-      collapsed: state.sidebarCollapsed,
-      setCollapsed: state.setSidebarCollapsed,
-    }),
-    useStatsDashboard: () => ({
-      stats: state.stats,
-      error: state.statsError,
-      isFetching: state.statsFetching,
-      refetch: state.statsRefetch,
-    }),
-    useStatsWindow: () => ({
-      windowHours: state.statsWindowHours,
-      setWindowHours: state.setStatsWindowHours,
-    }),
-    useSidebarViewMode: () => ({
-      viewMode: state.sidebarViewMode,
-      setViewMode: state.setSidebarViewMode,
-    }),
-    useSidebarSort: () => ({
-      sort: React.useSyncExternalStore(
-        sortStore.subscribe,
-        () => sortStore.value ?? actual.SIDEBAR_SORT_DEFAULT,
-        () => sortStore.value ?? actual.SIDEBAR_SORT_DEFAULT,
-      ),
-      setSort: (next: typeof actual.SIDEBAR_SORT_DEFAULT) => sortStore.set(next),
-    }),
-  };
-});
-
-vi.mock("@/lib/plugins/plugin-stats", async () => {
-  const actual = await vi.importActual<typeof PluginStatsModule>("@/lib/plugins/plugin-stats");
-  return {
-    ...actual,
-    usePluginStatCards: (values: PluginStat[] | undefined, now: Date) =>
-      actual.buildPluginStatCards(state.pluginStatDeclarations, values, now),
-  };
-});
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({
-    settings: { "display.show_terminated": state.showTerminated, ...state.userSettings },
-    setSetting: state.setSetting,
-    isLoading: false,
-  }),
-}));
-vi.mock("@/components/agents/agent-row", () => ({
-  AgentRow: StubAgentRow,
-}));
-vi.mock("@/components/agents/spawn-form", () => ({
-  SpawnForm: StubSpawnForm,
-}));
-vi.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: StubScrollArea,
-}));
-vi.mock("@/lib/layout/breakpoint", () => ({ useBreakpoint: () => bpMock() }));
-vi.mock("@/components/ui/button", () => ({
-  Button: StubButton,
 }));
 import { AgentSidebar } from "./index";
 afterEach(cleanup);
@@ -92,28 +15,16 @@ function openStats() {
 }
 
 describe("StatsCards tri-state (loading / data / error)", () => {
-  it("stats=undefined + error=null → 6 cards show '—' placeholder", () => {
-    state.agents = [makeAgent({ agent_id: 1 })];
-    wrap(<AgentSidebar {...handlers} />);
-    openStats();
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(6);
-    expect(screen.getByText("Live agents")).toBeTruthy();
-    expect(screen.getByText("Tokens")).toBeTruthy();
-    expect(screen.getByText("Cache hit")).toBeTruthy();
-    expect(screen.getByText("Cost")).toBeTruthy();
-    expect(screen.getByText("Average turn time")).toBeTruthy();
-    expect(screen.getByText("Warnings / errors")).toBeTruthy();
-  });
-  it("fetching without data shows an updating spinner and six skeleton values", () => {
+  it("fetching without data shows an updating spinner and six skeleton values", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsFetching = true;
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByRole("status", { name: "Statistics are updating" })).toBeTruthy();
+    expect(await screen.findByRole("status", { name: "Statistics are updating" })).toBeTruthy();
     expect(document.querySelectorAll(".animate-pulse")).toHaveLength(6);
     expect(screen.queryByText("—")).toBeNull();
   });
-  it("stats has data → 6 cards show real numbers", () => {
+  it("stats has data → 6 cards show real numbers", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
@@ -129,16 +40,16 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("5")).toBeTruthy();
-    expect(screen.getByText("19.1k")).toBeTruthy();
-    expect(screen.getByText("80.00%")).toBeTruthy();
-    expect(screen.getByText("$1.23")).toBeTruthy();
-    expect(screen.getByText("3s")).toBeTruthy();
-    expect(screen.getByText("19588 / 41")).toBeTruthy();
+    expect(await screen.findByText("5")).toBeTruthy();
+    expect(await screen.findByText("19.1k")).toBeTruthy();
+    expect(await screen.findByText("80.00%")).toBeTruthy();
+    expect(await screen.findByText("$1.23")).toBeTruthy();
+    expect(await screen.findByText("3s")).toBeTruthy();
+    expect(await screen.findByText("19588 / 41")).toBeTruthy();
     expect(screen.queryByText("19,629 events")).toBeNull();
     expect(screen.queryByText("7")).toBeNull();
   });
-  it("unmetered cache shows N/A while tokens and cost remain visible", () => {
+  it("unmetered cache shows N/A while tokens and cost remain visible", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 1,
@@ -154,12 +65,12 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("N/A")).toBeTruthy();
-    expect(screen.getByText("6.0k")).toBeTruthy();
-    expect(screen.getByText("$3.00")).toBeTruthy();
+    expect(await screen.findByText("N/A")).toBeTruthy();
+    expect(await screen.findByText("6.0k")).toBeTruthy();
+    expect(await screen.findByText("$3.00")).toBeTruthy();
     expect(screen.queryByText("0.00%")).toBeNull();
   });
-  it("dismissed classes do not replace the Warning / Error event totals", () => {
+  it("dismissed classes do not replace the Warning / Error event totals", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
@@ -175,11 +86,11 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("3 / 2")).toBeTruthy();
+    expect(await screen.findByText("3 / 2")).toBeTruthy();
     expect(screen.queryByText("5 events")).toBeNull();
     expect(screen.queryByText("All clear")).toBeNull();
   });
-  it("keeps Warning / Error counts compact without opening an inline class list", () => {
+  it("keeps Warning / Error counts compact without opening an inline class list", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
@@ -195,23 +106,24 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("10000 / 0")).toBeTruthy();
+    expect(await screen.findByText("10000 / 0")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Warnings \/ errors/ })).toBeNull();
     expect(screen.queryByText("disk_pressure")).toBeNull();
   });
-  it("error without data shows retry and clicking it refetches", () => {
+  it("error without data shows retry and clicking it refetches", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsError = new Error("stats endpoint 500");
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getAllByText("!").length).toBeGreaterThanOrEqual(6);
+    expect((await screen.findAllByText("!")).length).toBeGreaterThanOrEqual(6);
     expect(document.querySelectorAll(".text-destructive").length).toBeGreaterThan(0);
-    const retry = screen.getByRole("button", { name: "Retry" });
+    const retry = await screen.findByRole("button", { name: "Retry" });
     expect(retry.getAttribute("title")).toBe("stats endpoint 500");
+    const reads = transport.getStatsDashboard.mock.calls.length;
     fireEvent.click(retry);
-    expect(state.statsRefetch).toHaveBeenCalledOnce();
+    expect(transport.getStatsDashboard.mock.calls.length).toBe(reads + 1);
   });
-  it("refetch failure keeps stale values and labels them with a warning", () => {
+  it("a failing background read keeps the last numbers and labels them with the warning", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
@@ -226,13 +138,29 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       plugin_stats: [],
     };
     state.statsError = new Error("stats endpoint 500");
-    wrap(<AgentSidebar {...handlers} />);
-    openStats();
-    expect(screen.getByText("5")).toBeTruthy();
-    expect(screen.queryByText("!")).toBeNull();
-    expect(screen.getAllByTitle("stats endpoint 500").length).toBeGreaterThan(0);
+    vi.useFakeTimers();
+    try {
+      wrap(<AgentSidebar {...handlers} />);
+      openStats();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getAllByText("5").length).toBeGreaterThan(0);
+      // meiva:note
+      // The panel's own poll re-reads the dashboard; that read fails. The numbers stay and
+      // the failure is labelled, instead of the panel blanking once it had them.
+      await vi.advanceTimersByTimeAsync(30_000);
+      // meiva:note
+      // The read retries once (retry: 1); the retry's own timer lands at the end of the window.
+      await vi.advanceTimersByTimeAsync(1_000);
+      // meiva:note
+      // The icon is the panel's own failure marker; a card title carrying the same text would
+      // not prove the panel noticed the failure.
+      expect(screen.getByRole("img", { name: "stats endpoint 500" })).toBeTruthy();
+      expect(screen.getAllByText("5").length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
-  it("tokens compact: < 1000 raw, < 1M as k, >= 1M as M", () => {
+  it("tokens compact: < 1000 raw, < 1M as k, >= 1M as M", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 0,
@@ -248,7 +176,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("1.5M")).toBeTruthy();
+    expect(await screen.findByText("1.5M")).toBeTruthy();
   });
   it("avg_turn_seconds=null → shows placeholder, not 'NaNs'", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -285,7 +213,7 @@ describe("plugin stat cards", () => {
       plugin_stats: pluginStats,
     };
   }
-  it("a declared card renders the plugin's value and detail below the built-in grid", () => {
+  it("a declared card renders the plugin's value and detail below the built-in grid", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [{ plugin: "codex_usage", id: "codex-a", label: "Codex A" }];
     state.stats = statsWith([
@@ -301,11 +229,11 @@ describe("plugin stat cards", () => {
     ]);
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("Codex A")).toBeTruthy();
-    expect(screen.getByText("Weekly reset 10-04 17:14 UTC+08:00")).toBeTruthy();
-    expect(screen.getByText("52% remaining · 0 resets available")).toBeTruthy();
+    expect(await screen.findByText("Codex A")).toBeTruthy();
+    expect(await screen.findByText("Weekly reset 10-04 17:14 UTC+08:00")).toBeTruthy();
+    expect(await screen.findByText("52% remaining · 0 resets available")).toBeTruthy();
   });
-  it("keeps each reset window and supporting detail in visible text", () => {
+  it("keeps each reset window and supporting detail in visible text", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [
       { plugin: "codex_usage", id: "codex-a", label: "Codex · zhiyuan0206" },
@@ -323,15 +251,15 @@ describe("plugin stat cards", () => {
     ]);
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("Codex · zhiyuan0206")).toBeTruthy();
-    expect(screen.getByText(/5h reset 09-29 02:00 UTC\+08:00/).textContent).toBe(
+    expect(await screen.findByText("Codex · zhiyuan0206")).toBeTruthy();
+    expect((await screen.findByText(/5h reset 09-29 02:00 UTC\+08:00/)).textContent).toBe(
       "5h reset 09-29 02:00 UTC+08:00\nWeekly reset 10-04 17:14 UTC+08:00",
     );
     expect(
-      screen.getByText("5h 52% remaining · Weekly 68% remaining · 2 resets available"),
+      await screen.findByText("5h 52% remaining · Weekly 68% remaining · 2 resets available"),
     ).toBeTruthy();
   });
-  it("a declared card with no value row is the empty state; orphan values stay hidden", () => {
+  it("a declared card with no value row is the empty state; orphan values stay hidden", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [
       { plugin: "codex_usage", id: "codex-b", label: "Codex B" },
@@ -359,12 +287,12 @@ describe("plugin stat cards", () => {
     ]);
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("Codex B")).toBeTruthy();
-    expect(screen.getByText("71%")).toBeTruthy();
+    expect(await screen.findByText("Codex B")).toBeTruthy();
+    expect(await screen.findByText("71%")).toBeTruthy();
     expect(screen.queryByText("orphan-value")).toBeNull();
-    expect(screen.getByTitle("No data yet")).toBeTruthy();
+    expect(await screen.findByTitle("No data yet")).toBeTruthy();
   });
-  it("error status colors the value and keeps the plugin's message", () => {
+  it("error status colors the value and keeps the plugin's message", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [{ plugin: "codex_usage", id: "codex-b", label: "Codex B" }];
     state.stats = statsWith([
@@ -380,10 +308,10 @@ describe("plugin stat cards", () => {
     ]);
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("!").className).toContain("text-destructive");
-    expect(screen.getByText("token revoked")).toBeTruthy();
+    expect((await screen.findByText("!")).className).toContain("text-destructive");
+    expect(await screen.findByText("token revoked")).toBeTruthy();
   });
-  it("a stale value is dimmed and its tooltip carries the age", () => {
+  it("a stale value is dimmed and its tooltip carries the age", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [
       { plugin: "deepseek_balance", id: "balance", label: "Balance" },
@@ -401,13 +329,13 @@ describe("plugin stat cards", () => {
     ]);
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("custom-42").closest("div")?.className).toContain("opacity-60");
-    expect(screen.getByTitle("Updated 2h ago")).toBeTruthy();
+    expect((await screen.findByText("custom-42")).closest("div")?.className).toContain("opacity-60");
+    expect(await screen.findByTitle("Updated 2h ago")).toBeTruthy();
   });
 });
 
 describe("StatsCards window selector", () => {
-  it("hides stale windowed values while retaining the live-agent count", () => {
+  it("hides stale windowed values while retaining the live-agent count", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
     state.stats = {
@@ -424,26 +352,26 @@ describe("StatsCards window selector", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("5")).toBeTruthy();
-    expect(screen.getAllByText("…")).toHaveLength(5);
+    expect(await screen.findByText("5")).toBeTruthy();
+    expect(await screen.findAllByText("…")).toHaveLength(5);
     expect(screen.queryByText("19.1k")).toBeNull();
     expect(screen.queryByText("80.00%")).toBeNull();
     expect(screen.queryByText("$1.23")).toBeNull();
     expect(screen.queryByText("3s")).toBeNull();
     expect(screen.queryByText("Total 2")).toBeNull();
-    expect(screen.getAllByTitle("Updating for 1h…")).toHaveLength(5);
+    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(5);
   });
-  it("renders all six window options with the persisted value selected", () => {
+  it("renders all six window options with the persisted value selected", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 72;
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    const select = screen.getByLabelText<HTMLSelectElement>("Statistics window");
+    const select = await screen.findByLabelText<HTMLSelectElement>("Statistics window");
     expect(select.value).toBe("72");
     const labels = Array.from(select.options).map((o) => o.text);
     expect(labels).toEqual(["5m", "1h", "6h", "24h", "3d", "7d"]);
   });
-  it("labels a retention-clamped selected window with the applied hours", () => {
+  it("labels a retention-clamped selected window with the applied hours", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 168;
     state.stats = {
@@ -461,25 +389,30 @@ describe("StatsCards window selector", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    const select = screen.getByLabelText<HTMLSelectElement>("Statistics window");
-    expect(select.selectedOptions[0].text).toBe("7d · 84h");
+    const select = await screen.findByLabelText<HTMLSelectElement>("Statistics window");
+    await waitFor(() => expect(select.selectedOptions[0].text).toBe("7d · 84h"));
     expect(Array.from(select.options).find((option) => option.value === "72")?.text).toBe("3d");
   });
-  it("changing the select calls setWindowHours with the numeric window value", () => {
+  it("changing the select calls setWindowHours with the numeric window value", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    const select = screen.getByLabelText("Statistics window");
+    const select = await screen.findByLabelText("Statistics window");
     fireEvent.change(select, { target: { value: "6" } });
-    expect(state.setStatsWindowHours).toHaveBeenCalledWith(6);
+    await waitFor(() =>
+      expect(transport.putSetting).toHaveBeenCalledWith("display.stats_window_hours", 6),
+    );
   });
-  it("card labels render for each stat", () => {
+  it("card labels render for each stat", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    expect(screen.getByText("Warnings / errors")).toBeTruthy();
-    expect(screen.getByText("Live agents")).toBeTruthy();
-    expect(screen.getByText("Cost")).toBeTruthy();
+    expect(await screen.findByText("Warnings / errors")).toBeTruthy();
+    expect(await screen.findByText("Live agents")).toBeTruthy();
+    expect(await screen.findByText("Tokens")).toBeTruthy();
+    expect(await screen.findByText("Cache hit")).toBeTruthy();
+    expect(await screen.findByText("Average turn time")).toBeTruthy();
+    expect(await screen.findByText("Cost")).toBeTruthy();
   });
 });

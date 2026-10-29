@@ -12,10 +12,14 @@ import {
   type RenderOptions,
   type RenderResult,
 } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentType, ReactElement, ReactNode } from "react";
 
 import { BrowserProvider } from "@/lib/browser/browser-provider";
 import { fakeBrowser, type FakeBrowser } from "@/lib/browser/testing";
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 
 import { ApiTestProvider } from "./fake-api";
 
@@ -72,4 +76,62 @@ export function renderWithApi(ui: ReactElement, options?: RenderOptions): Render
     );
   }
   return rtlRender(ui, { ...options, wrapper: Wrapper });
+}
+
+// meiva:note
+// What `renderWithProviders` takes: `browser` is the page the component reads (one fake per
+// render unless the caller shares one); `settings` is what the ["user-settings"] cache holds,
+// defaults merged underneath, and a test that must prove the fetch path leaves it unset and
+// answers `transport.getSettings` instead; `queryClient` lets a test share or inspect the
+// cache, which is fresh per render otherwise; `wallNow` is the clock for a surface that reads
+// one (`useWallNow`).
+export interface ProvidersRenderOptions extends Omit<RenderOptions, "wrapper"> {
+  browser?: FakeBrowser;
+  settings?: Record<string, unknown>;
+  queryClient?: QueryClient;
+  wallNow?: () => number;
+  wrapper?: Wrapper;
+}
+
+// meiva:note
+// The full test door: the same providers the app's composition root mounts -- browser,
+// transport, wall clock and the query cache -- so a surface that reads server data or a
+// preference is rendered with fakes and values instead of a replaced module. The cache is
+// seeded with `settings` (defaults underneath) because the cache is the settings' owner;
+// `putSetting` still goes to the fake transport, so a write is asserted where it happens.
+// `browser` is built once here (a new fake per render would change the provider's identity
+// every render) and returned, so a test can read what the component asked the page to do.
+export function renderWithProviders(
+  ui: ReactElement,
+  {
+    browser = fakeBrowser(),
+    settings,
+    queryClient,
+    wallNow,
+    wrapper,
+    ...options
+  }: ProvidersRenderOptions = {},
+): RenderResult & { browser: FakeBrowser; queryClient: QueryClient } {
+  const qc =
+    queryClient ??
+    new QueryClient({
+      defaultOptions: { queries: { retry: false, retryDelay: 0 }, mutations: { retry: false } },
+    });
+  if (settings !== undefined) {
+    qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...settings });
+  }
+  const Outer = wrapper;
+  function Wrapper({ children }: { children: ReactNode }): ReactElement {
+    const inner =
+      Outer === undefined ? children : <Outer>{children}</Outer>;
+    const cached = <QueryClientProvider client={qc}>{inner}</QueryClientProvider>;
+    return (
+      <BrowserProvider browser={browser}>
+        <ApiTestProvider>
+          {wallNow === undefined ? cached : <WallClockProvider wallNow={wallNow}>{cached}</WallClockProvider>}
+        </ApiTestProvider>
+      </BrowserProvider>
+    );
+  }
+  return { ...rtlRender(ui, { ...options, wrapper: Wrapper }), browser, queryClient: qc };
 }
