@@ -3,7 +3,7 @@
 # narrowing of what the checker still reports, and every comparison against the base stays green
 # while it happens. This module owns the file's format and reader; the declarations a change takes
 # away, and the `Policy-Removal` line that answers them, belong to the same owner for that reason.
-# meiva:link meizel/docs/checker/policy.meiva.okf.md
+# meiva:link meizel/docs/checker/policy/policy.meiva.okf.md
 
 
 from __future__ import annotations

@@ -166,7 +166,7 @@ violations pass, anything new fails, and the debt may only shrink
   file unless the task names the entry. An added entry is a line the reviewer reads in the diff;
   a removed one narrows what every gate still reports, so the PR body says why, one line per
   removal: `Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <what replaces it,
-  or the gap it leaves>` ([the policy file](../meizel/docs/checker/policy.meiva.okf.md)).
+  or the gap it leaves>` ([the policy file](../meizel/docs/checker/policy/policy.meiva.okf.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes

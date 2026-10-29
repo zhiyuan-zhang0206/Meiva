@@ -88,7 +88,7 @@ explicitly targeted. Instead, a test file whose first-party targets are all `str
 ## Policy configuration
 
 Repository-specific additions and container budget thresholds live under `[purity]` in
-[[meizel/docs/checker/policy.meiva.okf.md|meizel.policy.toml]]:
+[[meizel/docs/checker/policy/policy.meiva.okf.md|meizel.policy.toml]]:
 
 ```toml
 [purity]

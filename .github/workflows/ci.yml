@@ -838,8 +838,17 @@ jobs:
         # reviewer. A local run reads the commits; --record names a file to read. Added entries are
         # reported in the summary and never asked about: a widening is what the reviewer reads in the
         # diff, not a declaration to write.
+        #
+        # A batch also tests the batches queued before it (the queue merges each one onto the tree it
+        # tested last), and their changes are not in its body. A removal this batch does not answer
+        # is therefore followed to the commit that took the declaration away, and answered by that
+        # commit's own pull request; nothing else may answer it. The step fetches the batch's whole
+        # history for that, and only when a removal is left to attribute. Unreadable, or a commit no
+        # pull request names, the removal stays unanswered and the run fails naming it (run
+        # 40874861817 rejected #7693 the other way, over a removal #7603 had already declared).
         env:
-          # The token `gh` reads the batch's pull requests with; without it the batch is unjudged.
+          # The token `gh` reads the batch's pull requests with. Without it a batch with a removal
+          # to judge fails naming the record it could not read; with nothing removed it is untouched.
           GH_TOKEN: ${{ github.token }}
         run: |
           # The record is also written out: the steps after this one read the same text, so a
