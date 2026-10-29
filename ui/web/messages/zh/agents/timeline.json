@@ -1,4 +1,5 @@
 {
+  "waitingForModel": "等待模型响应 · {duration}",
   "systemPrompt": "系统提示词",
   "thinking": "思考中",
   "thinkingFor": "思考中 {duration}",
