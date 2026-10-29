@@ -77,15 +77,13 @@ budget is spent, never when the report looks long.
 3. Pre-register the budget: breadth (queries per wave), depth (max iteration
    waves), fetch cap, wall-clock cap. Defaults: breadth 6–10, depth 3,
    ~200 fetches — search and fetch are cheap, so the cap bounds worker drift,
-   not API spend (user ruling 2026-08-09: "fetch/search is cheap", raised from
-   ~60 after the #1108 overrun). **When parallelizing with workers, the fetch
-   cap is a GLOBAL budget: distribute it so the per-worker caps sum exactly to
-   max_fetches** (cap_i = max_fetches // n, +1 to the first max_fetches % n
-   workers) and put each worker's cap in its prompt. Without per-worker caps,
-   N workers each counting independently blow the budget ~N× — the #1108
-   failure mode (60 pre-registered, 100 actual). The audit enforces the global
-   cap afterwards (unique sources ≤ max_fetches, a lower bound on fetch
-   calls).
+   not API spend. **When parallelizing with workers, the fetch cap is a GLOBAL
+   budget: distribute it so the per-worker caps sum exactly to max_fetches**
+   (`cap_i = max_fetches // n`, +1 to the first `max_fetches % n` workers) and
+   put each worker's cap in its prompt; without per-worker caps N workers blow
+   it ~N×. The audit enforces the global cap afterwards (unique sources ≤
+   `max_fetches`). Arithmetic, prompt and the incident behind the rule:
+   `references/workers.md`.
 4. Pre-register the stopping rule — stop when (a) every sub-question has
    evidence, (b) repeated searches yield nothing new (saturation), or
    (c) the budget is spent; whichever comes first.
@@ -115,25 +113,9 @@ exactly the appearance-over-understanding failure mode.
 4. For small tasks (≲ 6 queries total) do it yourself — spawning has real
    overhead (anti-pattern: over-spawning).
 
-Worker prompt template (make it self-contained):
-
-```
-You are a Deep Research worker for sub-question: <sub-question>.
-Full question: <three-part question>. Audience: <Z>. Evidence bar: <bar>.
-Run these queries: <queries>. Prefer primary sources; open pages before
-trusting snippets. One reformulation per query if the first returns nothing.
-Your fetch cap: <cap> meiva.web.fetch calls — COUNT them and stop at the cap;
-sources beyond it go unread, not uncited.
-Never fabricate a learning — if the sub-question is unanswerable, write
-learnings: [] plus a "note" explaining what is missing.
-When done: write {handoff}/learnings-{n}.json and {handoff}/sources-{n}.json
-conforming to the schema in references/research-state.md (source ids are
-integers; every learning's source_ids must exist in your sources file).
-Do NOT message anyone — writing the files IS the handoff. Then terminate.
-```
-
 Why parallel: independent sub-questions share no state, so wall-clock scales
-~1/N and each worker's context stays clean.
+~1/N and each worker's context stays clean. Prompt to copy, including the
+conformance and no-fabrication clauses: `references/workers.md`.
 
 ### Phase 3 — Reflect & iterate (depth-first)
 
@@ -224,23 +206,12 @@ checkpoints. Never block in-turn on the whole research.
 
 ## Anti-patterns
 
-- **Writing the report before verification** — the report is derived from the
-  state; write it last.
-- **Holding findings in conversation context** — compaction loses it; the state
-  file is the single source of truth.
-- **Snippet trust** — a search snippet is not a source; open the page.
-- **Secondary-only citations when the primary is reachable** — else say so.
-- **Padding** — a report that looks complete with unverified claims is the
-  cardinal failure (Mission). List gaps instead.
-- **Workers messaging the orchestrator** — files are the handoff (`meiva-dynamic-workflow`).
-- **Endless iteration** — every wave targets a concrete gap; the pre-registered budget stops it.
-- **Over-spawning** — a sub-question answerable in a few fetches is done by the
-  orchestrator itself.
-- **Causal language on correlational evidence** — the Phase 0 classification
-  governs.
-- **Self-assessment sold as verification** — ladder: formal (strongest) →
-  process-level → rubric review → self-assessment (weakest); the audit is
-  process-level, label claims accordingly.
+The three that cause most of the damage: **padding** (a report that looks
+complete with unverified claims — list gaps instead), **snippet trust** (a
+snippet is not a source; open the page), and **self-assessment sold as
+verification** (the audit is process-level; label claims accordingly). The
+full list, including holding findings in context, endless iteration and
+over-spawning: `references/anti-patterns.md`.
 
 ## Known limitations — state them in the report
 
@@ -255,6 +226,8 @@ checkpoints. Never block in-turn on the whole research.
 
 - `references/research-state.md` — state schema + invariants (read before Phase 0)
 - `references/citation-discipline.md` — citation format, ladder, tags (Phase 4)
+- `references/workers.md` — worker prompt, fetch-budget arithmetic, why the cap is global (Phase 1–2)
+- `references/anti-patterns.md` — the full failure list to check a plan against
 - `references/prior-art.md` — what Gemini / Perplexity / OpenAI / Claude Code
   do, and what we borrow (read once)
 

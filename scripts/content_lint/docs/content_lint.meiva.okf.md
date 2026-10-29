@@ -51,7 +51,7 @@ reaches the built-in, plugin and project skill trees at both the root and
 sub-skill level, reporting a path that is reachable through a linked tree once,
 at its real location.
 
-Every repo-shipped SKILL.md is measured in lines against two repo-wide constants, per file: at or below the transitional floor the lint prints nothing; past the floor and up to the hard ceiling it prints one non-blocking note per file; past the hard ceiling it prints one error per file and exits 1. A path reachable through a linked tree is reported once at its real location, and the constants move only as a deliberate change in the same PR, justified in the commit message.
+Every repo-shipped SKILL.md is measured in lines against one hard ceiling, per file: below it the lint prints nothing, past it the lint prints one error per file and exits 1. No band below the line is reported — a "room left" note invites filling the last lines instead of moving a section into the skill's `references/` — and the message names that repair. A path reachable through a linked tree is reported once at its real location, and the constant moves only as a deliberate change in the same PR, justified in the commit message.
 
 ## CLI contract
 

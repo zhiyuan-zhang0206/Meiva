@@ -14,11 +14,12 @@ permanently. Meiva's file was reduced from 385 to 81 lines (2026-07-14) by
 extracting specialized rules into `docs/conventions/` under progressive
 disclosure; `agents_md_size.py` keeps it from creeping back up.
 
-AGENTS.md is measured in lines against two repo-wide constants: at or below the transitional floor the lint prints nothing and exits 0; past the floor and up to the hard ceiling it prints one non-blocking note and exits 0; past the hard ceiling it prints one error and exits 1. No per-line or per-file exemption exists, and the constants move only as a deliberate change in the same PR, justified in the commit message.
+AGENTS.md is measured in lines against one hard ceiling: below it the lint prints nothing and exits 0, past it the lint prints one error and exits 1. No band below the line is reported and no per-line or per-file exemption exists — a "room left" note would invite filling the last lines instead of moving a section out — and the constant moves only as a deliberate change in the same PR, justified in the commit message.
 
-The transitional zone is the reminder to trim before the wall; the hard ceiling
-fails the commit, so the entry point cannot grow back by accident. The two
-constants are the source of truth and this page does not restate their values,
-so a deliberate bump cannot leave the prose lying.
+The hard ceiling fails the commit, so the entry point cannot grow back by
+accident, and the message says where the overflow belongs: a section that only
+matters while doing one task moves to `docs/conventions/`, which is read on
+demand. The constant is the source of truth and this page does not restate its
+value, so a deliberate bump cannot leave the prose lying.
 
 Parent: [[scripts/lint/docs/lint.meiva.okf.md]].
