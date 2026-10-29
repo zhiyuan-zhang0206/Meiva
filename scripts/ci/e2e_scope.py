@@ -21,6 +21,12 @@ them still runs e2e.
 Standalone and stdlib-only: the classify job runs it without an environment.
 """
 
+# meiva:note
+# The rule widened past the list above: a changed path also qualifies when it is tooling, an
+# application module whose interface the diff leaves unchanged, a locality manifest, or prose
+# under `docs/` that is not an OKF bundle. `docs/conventions/engineering/test-selection.md` is the
+# statement to read; the list above predates it.
+
 from __future__ import annotations
 
 import argparse
@@ -45,6 +51,10 @@ _PACKAGE_UNIT_TEST = re.compile(rf"(?:{'|'.join(PACKAGES)})/(?:[^/]+/)*tests/(?:
 _TOOLING_PYTHON = re.compile(rf"(?:{'|'.join(TOOLING_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
 _APPLICATION_PYTHON = re.compile(rf"(?:{'|'.join(APPLICATION_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
+_MANIFEST_NAME = "meizel.toml"
+_DOCUMENT_SUFFIX = ".md"
+_DOCUMENTS_DIRECTORY = "docs"
+_OKF_DOCUMENT = ".meiva.okf.md"
 
 
 def is_package_unit_test(path: str) -> bool:
@@ -54,6 +64,26 @@ def is_package_unit_test(path: str) -> bool:
 
 def is_tooling_python(path: str) -> bool:
     return _TOOLING_PYTHON.fullmatch(path) is not None
+
+
+# meiva:note
+# A manifest carries the directory's exports, declared edges and recorded debt; no runtime reads
+# it. Selected by file kind rather than by directory, so every `meizel.toml` in the tree counts.
+def is_locality_manifest(path: str) -> bool:
+    return path.rsplit("/", 1)[-1] == _MANIFEST_NAME
+
+
+# meiva:note
+# Prose is a `.md` inside a `docs` directory, and never an OKF bundle file: the gateway rebuilds
+# `GET /api/okf/graph` from the live `.meiva.okf.md` tree on every request, so a bundle edit can
+# break that page. Every other `.md` stays out too - a skill file is read into the model's prompt
+# by the runtime skill loader, so editing one changes what ships.
+def is_documentation(path: str) -> bool:
+    return (
+        path.endswith(_DOCUMENT_SUFFIX)
+        and not path.endswith(_OKF_DOCUMENT)
+        and _DOCUMENTS_DIRECTORY in path.split("/")[:-1]
+    )
 
 
 # Calls that import by name or by path. A literal module name is resolved like an import
@@ -226,6 +256,19 @@ def interface_unchanged_paths(
         )
 
 
+# meiva:note
+# One changed path the e2e suite cannot observe a difference through: a test module, tooling, an
+# application module whose interface the diff leaves unchanged, a locality manifest, or prose.
+def _cannot_change_behavior(path: str, interface_unchanged: frozenset[str]) -> bool:
+    return (
+        is_package_unit_test(path)
+        or is_tooling_python(path)
+        or path in interface_unchanged
+        or is_locality_manifest(path)
+        or is_documentation(path)
+    )
+
+
 def skips_e2e(
     *,
     event: str,
@@ -244,10 +287,7 @@ def skips_e2e(
         and mode == "enforce"
         and decision == "SELECTED"
         and bool(changed)
-        and all(
-            is_package_unit_test(path) or is_tooling_python(path) or path in interface_unchanged
-            for path in changed
-        )
+        and all(_cannot_change_behavior(path, interface_unchanged) for path in changed)
         and reached is not None
         and reached.isdisjoint(changed)
     )
