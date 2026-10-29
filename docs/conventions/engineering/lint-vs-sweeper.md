@@ -4,7 +4,9 @@ A lint belongs in the contribution checks when detection is fast, offline,
 deterministic and effectively free of false positives, and the author can fix
 a violation within the current change. A test belongs in CI when it requires
 an environment or toolchain unavailable to a normal commit hook. Both must
-fail for a real violation rather than report success when nothing ran.
+fail for a real violation rather than report success when nothing ran, and the
+message that fires has its own contract — [the four things a lint message
+carries](../lint-messages.md).
 
 Debt requiring network data, history, semantic interpretation or a broader
 repair belongs in [technical-debt guidance](tech-debt.md), not a mandatory
