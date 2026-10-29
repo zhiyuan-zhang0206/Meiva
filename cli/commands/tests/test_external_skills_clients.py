@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -182,7 +183,9 @@ def test_installed_program_without_home_publishes_and_creates_only_that_home(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    installed_elsewhere = replace(context, host=fake_host(programs={"gemini": "/usr/bin/gemini"}))
+    installed_elsewhere = replace(
+        context, host=fake_host(programs={"gemini": "/usr/bin/gemini"}, uid=os.geteuid())
+    )
 
     bridge.converge_external_agent_skill(installed_elsewhere, host_home=home)
 
@@ -208,13 +211,42 @@ def test_program_only_presence_creates_a_nested_home_with_its_parents(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    agy = replace(context, host=fake_host(programs={"agy": "/usr/bin/agy"}))
+    agy = replace(context, host=fake_host(programs={"agy": "/usr/bin/agy"}, uid=os.geteuid()))
 
     bridge.converge_external_agent_skill(agy, host_home=home)
 
     assert [path.name for path in home.iterdir()] == [".gemini"]
     for skill in PUBLISHED_SKILLS:
         assert (home / ".gemini" / "antigravity-cli" / "skills" / skill / MARKER_NAME).is_file()
+
+
+# meiva:note
+# The private ownership ledger belongs to the converge's own account: `_ensure_ledger_root`
+# compares the directory it makes against `ctx.host.uid`, so a context belonging to another
+# account writes no ledger and publishes no skill (it warns and returns instead).
+def test_a_ledger_root_belongs_to_the_converge_that_makes_it(
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
+) -> None:
+    repo = _repo(tmp_path)
+    home = _home(tmp_path)
+    (home / ".codex").mkdir()
+    context = _ctx(
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
+    foreign = replace(context, host=replace(context.host, uid=os.geteuid() + 1))
+
+    bridge.converge_external_agent_skill(foreign, host_home=home)
+
+    assert _ledger_names(tmp_path) == set()
+    assert not (home / ".codex" / "skills").exists()
 
 
 def test_second_converge_is_byte_and_timestamp_idempotent_for_new_clients(

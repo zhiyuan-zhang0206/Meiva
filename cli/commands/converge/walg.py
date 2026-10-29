@@ -62,6 +62,6 @@ def execute_walg_plan(
             case LoadWalgConfig():
                 walg_config.load_walg_config(path=walg_config_file, home=ctx.meiva_home)
             case PrepareWalgStateDir():
-                ensure_private_dir(walg_state.walg_dir(ctx.meiva_home))
+                ensure_private_dir(walg_state.walg_dir(ctx.meiva_home), euid=ctx.host.uid)
             case _:
                 assert_never(step)
