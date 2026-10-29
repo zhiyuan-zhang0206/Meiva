@@ -272,8 +272,15 @@ def rule_change(repo: GitRepo, ref: str, extra: Collection[str] = ()) -> bool:
 # The baseline this checker would write for the checkout `base`: the commands a rule change runs on
 # it, staged after each write because the checker reads tracked files only.
 def regenerated(base: GitRepo, ref: str, jobs: int | None) -> Baselines:
-    _refuse_unreadable(analyze(base.universe(), jobs=jobs), ref)
+    # meiva:note
+    # The declarations are written over the base's content, so an entry the change *adds* names a file
+    # the base does not have, and the base reads it as a child that is not there (pull request 7625,
+    # batch of 7600 and 7620). Pruning first drops exactly those entries: this baseline is the one this
+    # checker would write for the base, and it would not write an export for a file that does not
+    # exist. The refusal after it still stops a manifest that is malformed rather than merely ahead of
+    # the base's content, which is what it is for.
     prune(base, jobs)
+    _refuse_unreadable(analyze(base.universe(), jobs=jobs), ref)
     prune_debt(base, jobs)
     declare(base, [""], jobs)
     base.stage_all()  # the checker reads tracked files only, and these commands create manifests
