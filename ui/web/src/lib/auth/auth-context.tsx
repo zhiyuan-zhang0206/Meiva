@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useBrowser } from "../browser/browser-provider";
 import { ApiError } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 import {
@@ -46,6 +47,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const client = useApi();
+  const browser = useBrowser();
   const [status, setStatus] = useState<AuthStatus>("loading");
 
   useEffect(() => {
@@ -58,11 +60,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // not reach it) still lands on the login page and the password still works.
   useEffect(() => {
     let cancelled = false;
-    // The redemption code loads only for a URL that carries a ticket, keeping it
-    // out of the first-load bundle of every ordinary visit.
-    const redeemed = window.location.hash.includes("ticket=")
-      ? import("./login-ticket").then((m) => m.redeemTicketFromLocation())
-      : Promise.resolve();
+    // meiva:note
+    // The redemption code loads only for a URL that carries a ticket, keeping it out of the
+    // first-load bundle of every ordinary visit; the address and the rewrite come from the
+    // browser port, so this provider never reads `window`.
+    const location = browser.navigation.location();
+    const redeemed =
+      location?.hash.includes("ticket=")
+        ? import("./login-ticket").then((m) =>
+            m.redeemTicketFromLocation({
+              location,
+              replaceUrl: (url) => browser.navigation.replace(url, browser.navigation.state()),
+            }),
+          )
+        : Promise.resolve();
     redeemed
       .then(() => client.checkAuth())
       .then((res) => {
@@ -74,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, browser]);
 
   const login = useCallback(
     async (username: string, password: string): Promise<LoginResult> => {

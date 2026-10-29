@@ -42,7 +42,7 @@ def mount_facts(
     for path in sorted(universe.files):
         if path.rsplit("/", 1)[-1] != SCOPE_FILE or (only is not None and path not in only):
             continue
-        text = universe.load_text(path)
+        text = universe.repo.load_text(path)
         try:
             document = tomllib.loads(text)
         except tomllib.TOMLDecodeError as error:

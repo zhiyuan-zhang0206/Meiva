@@ -13,7 +13,7 @@ import { runTimelineStats } from "./model/render-stats";
 import { viewportStore, type ViewportStore } from "./viewport/viewport-store";
 import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-canvas-test-mock";
 import type { Selection } from "./model/timeline-model-selection";
-import { renderWithApi as rtlRender } from "@/test-support/render";
+import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();

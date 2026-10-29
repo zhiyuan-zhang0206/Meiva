@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from meizel.allowances import POLICY, Policy, parse
+from meizel.checkout import GitRepo
 from meizel.contracts.sync import prepare_policy_snapshot
-from meizel.graph.universe import GitRepo
 from scripts.structure.imports.facts import UNANCHORED_READ, Fact, FactKind, Unknown, collect
 from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
