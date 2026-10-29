@@ -4,8 +4,5 @@ exports = ["page.tsx"]
 "page.test.tsx" = ["page.tsx"]
 "page.tsx" = ["_schedule_components.tsx"]
 
-[debt.ambient-read]
-"_schedule_components.tsx#clock Date" = 2
-
 [debt.third-party-patch]
 "page.test.tsx#vi.mock next/navigation" = 1

@@ -14,6 +14,7 @@ import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
 import { BOTTOM_BAND_CLASS, BOTTOM_BAND_ROW_CLASS, ICON_SIZE_CLASS } from "@/lib/layout/layout";
 
 import { SidebarFooter } from "./footer";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -30,11 +31,18 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+// meiva:note
+// The footer's stat cards age on the page's clock; the real one keeps this file's strings as they
+// were, since no case asserts a particular age.
 function renderFooter(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
   qc.setQueryData(ALERTS_QUERY_KEY, { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } });
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 afterEach(() => {

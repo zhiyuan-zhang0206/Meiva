@@ -8,6 +8,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, within, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Stubs carry the section element ids (their bodies are covered by each
@@ -34,11 +35,17 @@ beforeEach(() => {
   window.location.hash = "";
 });
 
+// meiva:note
+// The shell's alert section states ages on the page's clock, which the app root mounts.
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 describe("InsightsPage shell", () => {

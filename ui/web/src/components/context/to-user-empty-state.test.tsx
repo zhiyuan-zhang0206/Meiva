@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en";
 import zh from "../../../messages/zh";
 import { ToUserDocumentView } from "./to-user-document";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -34,18 +35,20 @@ function renderEmpty(messages: typeof en, locale: "en" | "zh") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
   return renderWithBrowser(
-    <QueryClientProvider client={qc}>
-      <NextIntlClientProvider locale={locale} messages={{ toUser: messages.toUser }}>
-        <ToUserDocumentView
-          agentId={7}
-          document={{ content: null, version: null, modified_at: null, legacy_html: false, resources: {} }}
-          failure={null}
-          pending={false}
-          refresh={vi.fn()}
-          mobile={false}
-        />
-      </NextIntlClientProvider>
-    </QueryClientProvider>,
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>
+        <NextIntlClientProvider locale={locale} messages={{ toUser: messages.toUser }}>
+          <ToUserDocumentView
+            agentId={7}
+            document={{ content: null, version: null, modified_at: null, legacy_html: false, resources: {} }}
+            failure={null}
+            pending={false}
+            refresh={vi.fn()}
+            mobile={false}
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>
+    </WallClockProvider>,
   );
 }
 

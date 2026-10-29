@@ -7,6 +7,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Highlight as HighlightComponentType } from "prism-react-renderer";
@@ -65,10 +66,15 @@ function wrap(
   ui: React.ReactElement,
   highlighter: LazyChunk<typeof HighlightComponentType> = pendingHighlighter,
 ) {
+  // meiva:note
+  // The row ages its last update on the page's clock; no case asserts an age, so the clock this
+  // mounts is the app's own answer.
   return renderWithBrowser(
-    <QueryClientProvider client={makeQc()}>
-      <PythonCodeHighlighterProvider value={highlighter}>{ui}</PythonCodeHighlighterProvider>
-    </QueryClientProvider>,
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={makeQc()}>
+        <PythonCodeHighlighterProvider value={highlighter}>{ui}</PythonCodeHighlighterProvider>
+      </QueryClientProvider>
+    </WallClockProvider>,
   );
 }
 
@@ -102,7 +108,11 @@ describe("SchedulesPage", () => {
     transport.listSchedules.mockResolvedValue([]);
     const draft = transport.draftSchedule.mockRejectedValue(new Error("response lost"));
     const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
-    renderWithBrowser(<QueryClientProvider client={client}><SchedulesPage /></QueryClientProvider>);
+    renderWithBrowser(
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={client}><SchedulesPage /></QueryClientProvider>
+      </WallClockProvider>,
+    );
     const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
     fireEvent.change(input, { target: { value: "run nightly" } });
     fireEvent.keyDown(input, { key: "Enter" });

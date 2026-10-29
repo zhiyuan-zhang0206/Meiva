@@ -11,9 +11,6 @@ exports = ["agent-row.tsx", "spawn-form.tsx", "window-select.tsx"]
 "spawn-form.tsx" = ["spawn-table.tsx"]
 "window-select.test.tsx" = ["window-select.tsx"]
 
-[debt.ambient-read]
-"agent-row.tsx#clock Date" = 1
-
 [debt.stdlib-patch]
 "agent-row-menu.test.tsx#vi.stubGlobal confirm" = 4
 

@@ -17,9 +17,6 @@ exports = ["fleet-view.tsx"]
 "task-graph.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx", "presentation", "task-graph-chrome.tsx", "task-kanban.tsx"]
 "tests" = ["force-controls.tsx", "graph-view.tsx", "presentation", "task-graph-chrome.tsx", "task-graph.tsx", "task-kanban.tsx"]
 
-[debt.ambient-read]
-"task-graph-chrome.tsx#clock Date" = 3
-
 [debt.first-party-patch]
 "fleet-route-jump.test.tsx#vi.mock ui/web/src/components/fleet/graph-view.tsx" = 1
 "fleet-route-jump.test.tsx#vi.mock ui/web/src/components/fleet/task-graph.tsx" = 1

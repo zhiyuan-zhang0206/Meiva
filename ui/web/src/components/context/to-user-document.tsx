@@ -12,6 +12,7 @@ import type { ToUserDocument } from "@/lib/contracts/types";
 import { readReferences, withReferences } from "@/lib/context/reference-url";
 import { useToUser } from "@/lib/context/use-to-user";
 import { cn } from "@/lib/format/utils";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative } from "@/lib/format/time";
 import { COLUMN_TITLE_BAR_WRAP_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { API_BASE } from "@/lib/transport/api-base";
@@ -72,6 +73,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
   const navigation = useBrowser().navigation;
+  const now = useWallDate();
   const [references, setReferences] = useState<string[]>(() => {
     const where = navigation.location();
     return where === null ? [] : readReferences(new URL(where.href), agentId);
@@ -150,7 +152,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
         <span className="shrink-0 whitespace-nowrap">{inspecting ? tInspector("title") : t("sharedContext")}</span>
         {inspecting ? null : (
           <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
-            {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at, new Date()) })}</span>}
+            {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at, now) })}</span>}
             <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
               <RefreshCw className="size-3.5" />
             </button>

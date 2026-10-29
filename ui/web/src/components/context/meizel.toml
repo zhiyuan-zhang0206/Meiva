@@ -6,9 +6,6 @@ exports = ["shared-context-panel.tsx"]
 "to-user-document.test.tsx" = ["to-user-document.tsx"]
 "to-user-empty-state.test.tsx" = ["to-user-document.tsx"]
 
-[debt.ambient-read]
-"to-user-document.tsx#clock Date" = 1
-
 [debt.first-party-patch]
 "shared-context-panel.test.tsx#vi.mock ui/web/src/components/inspector/inspector-panel.tsx" = 1
 

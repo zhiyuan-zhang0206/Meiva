@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SystemStatus } from "@/lib/contracts/types";
 
 import StatusPage from "./page";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { renderWithApi as render } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -23,11 +24,18 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+// meiva:note
+// The gateway and runner rows age on the page's clock; this file builds its fixtures from the real
+// `Date.now()`, so the clock it mounts is the real one.
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return render(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 const STATUS_OK: SystemStatus = {
