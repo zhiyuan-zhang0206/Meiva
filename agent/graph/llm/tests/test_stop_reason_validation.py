@@ -16,7 +16,6 @@ from agent.graph.llm.tests.llm_support import (
     published_payloads,
 )
 from agent.graph.llm_errors import (
-    LlmLedger,
     LLMStreamCorruptedError,
     LLMStreamError,
     LLMStreamTruncatedError,
@@ -226,7 +225,7 @@ async def test_llm_node_validator_wired(
             event_publisher=publisher,
         )
         with pytest.raises(LLMStreamTruncatedError):
-            await llm_attempt(state, runtime, config, Attempt(1, time.time()), ledger=LlmLedger())
+            await llm_attempt(state, runtime, config, Attempt(1, time.time()))
 
     roles = [json.loads(payload)["role"] for payload in payloads]
     assert "error" not in roles, (

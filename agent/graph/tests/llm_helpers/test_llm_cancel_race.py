@@ -14,7 +14,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
-from agent.graph.llm_errors import LlmLedger
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
 from base.db import create_agent
@@ -85,7 +84,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
+    result = await llm_node(state, runtime, _config(agent_id), rng=_rng())
     await trigger
 
     assert isinstance(result, Command)
@@ -128,7 +127,7 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
+    result = await llm_node(state, runtime, _config(agent_id), rng=_rng())
     await trigger
 
     assert isinstance(result, Command)
@@ -190,7 +189,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
+    result = await llm_node(state, runtime, _config(agent_id), rng=_rng())
     await trigger
 
     assert isinstance(result, Command)
@@ -233,7 +232,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
+    result = await llm_node(state, runtime, _config(agent_id), rng=_rng())
     assert _has_cancelled(await live_events.typed(), agent_id)
 
     assert isinstance(result, Command)
@@ -268,7 +267,7 @@ async def test_llm_node_cancel_event_race_normal_completion(
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
 
     runtime = make_runtime(resources=hosted_resources, llm=fake_llm, database_gate=database_gate)
-    result = await llm_node(state, runtime, _config(7), ledger=LlmLedger(), rng=_rng())
+    result = await llm_node(state, runtime, _config(7), rng=_rng())
 
     assert isinstance(result, Command)
     assert result.update is not None

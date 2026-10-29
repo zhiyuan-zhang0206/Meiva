@@ -11,7 +11,6 @@ BUILTIN_PLUGINS: tuple[str, ...] = (
     "meiva_code",
     "meiva_syntax_fix",
     "meiva_sdk_reminder",
-    "meiva_silent_idle",
     "meiva_memory",
     "meiva_self_evolution",
     "meiva_to_user",

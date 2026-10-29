@@ -6,8 +6,8 @@ exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_
 "tool_calls.py" = "strict"
 
 [uses]
-"__init__.py" = ["_build.py", "claim", "exec", "llm", "llm_errors.py"]
-"_build.py" = ["_init_context.py", "claim", "exec", "hooks", "llm", "llm_errors.py"]
+"__init__.py" = ["_build.py", "claim", "exec", "llm"]
+"_build.py" = ["_init_context.py", "claim", "exec", "hooks", "llm"]
 "_init_context.py" = ["claim", "node_log", "prompt"]
 "claim" = ["_attach_drain.py", "hooks", "interrupt", "llm_errors.py", "node_log", "prompt"]
 "exec" = ["_attach_drain.py", "_attach_merge.py", "agent_traceback.py", "claim", "interrupt", "node_log", "tool_calls.py"]

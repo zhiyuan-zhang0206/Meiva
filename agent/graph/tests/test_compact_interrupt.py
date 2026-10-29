@@ -21,7 +21,6 @@ from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder
 from agent.graph.hooks.tests.scripted_model import HangingSummarizer, ScriptedModel
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
-from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState, CompactState, checkpoint_msgpack_allowlist
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
@@ -119,7 +118,6 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             state,
             runtime,
             {"configurable": {"thread_id": str(tid)}},
-            ledger=LlmLedger(),
             rng=_rng(),
         )
     )
@@ -196,7 +194,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         database_gate=database_gate,
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)
-    compacted = await llm_node(state, runtime, config, ledger=LlmLedger(), rng=_rng())
+    compacted = await llm_node(state, runtime, config, rng=_rng())
     assert compacted.goto == "init_context"
     state = _apply(state, compacted)
     state.context_reset.tail[0].additional_kwargs["meiva_msg_type"] = marker
@@ -229,7 +227,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = _apply(state, resumed)
     assert not auto_compact_will_fire(state, runtime.context.require_agent(), catalog=catalog)
     assert await compact_reminder(state, runtime, config) is None
-    generated = await llm_node(state, runtime, config, ledger=LlmLedger(), rng=_rng())
+    generated = await llm_node(state, runtime, config, rng=_rng())
     assert generated.goto == "after_exec"
     state = _apply(state, generated)
     assert state.messages[-1].content == "resumed ordinary work"

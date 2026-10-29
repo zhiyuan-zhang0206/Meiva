@@ -33,7 +33,7 @@
 # Shape contract: detection treats an unpaired tool_call as a crash artifact,
 # because every live path preserves pairing — exec always writes a ToolMessage,
 # syntax_fix supplies its own ToolMessage when it skips exec, and the llm node's
-# silent-idle branches bypass exec only when tool_calls is empty. A future hook
+# completion branch bypasses exec only when tool_calls is empty. A future hook
 # that intentionally withholds a tool_result would be reinterpreted as a crash
 # and handed a synthetic [interrupted] result — keep the pairing invariant when
 # extending the hook surface.

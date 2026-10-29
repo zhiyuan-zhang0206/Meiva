@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessageChunk
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
-from agent.graph.llm_errors import FatalProviderError, LlmLedger
+from agent.graph.llm_errors import FatalProviderError
 from agent.graph.tests.cancel_fixture import CancelPool, InterruptEvent
 from agent.graph.tests.test_llm_helpers import CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
@@ -75,7 +75,6 @@ async def test_llm_node_closes_circuit_on_success(
             database_gate=database_gate,
         ),
         _LLM_CONFIG,
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 
@@ -117,7 +116,6 @@ async def test_llm_node_cancel_does_not_close_circuit(
             ops_pool=cast(Any, CancelPool(fake_cancel_event)),
         ),
         _LLM_CONFIG,
-        ledger=LlmLedger(),
         rng=_rng(),
     )
     await trigger

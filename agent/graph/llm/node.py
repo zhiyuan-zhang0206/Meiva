@@ -4,9 +4,9 @@ import asyncio
 import random
 import time
 from datetime import datetime
-from typing import Any, Literal, NoReturn, TypeGuard
+from typing import Literal, NoReturn
 
-from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
 from langgraph.runtime import Runtime
@@ -19,7 +19,6 @@ from agent.graph.hooks.compact import auto_compact_for_llm
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
-    LlmLedger,
     LLMRetryBudgetExceededError,
 )
 from agent.graph.node_log import StallConfig, node_lifecycle
@@ -29,11 +28,10 @@ from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
-from base.lm.reasoning import content_blocks
 from base.log import logger
 
 from ._backoff import WAIT_JITTER_SPAN_S, Attempt, RetryPolicy, assess_failure, budget_spent
@@ -120,7 +118,6 @@ async def llm_node(
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
     *,
-    ledger: LlmLedger,
     rng: random.Random,
 ) -> Command[LlmGoto]:
     agent_id = agent_id_from_config(config)
@@ -132,7 +129,7 @@ async def llm_node(
     while True:
         try:
             attempt = Attempt(failed + 1, first_started_at)
-            return await llm_attempt(state, runtime, config, attempt, ledger)
+            return await llm_attempt(state, runtime, config, attempt)
         except GraphBubbleUp:
             raise
         except Exception as exc:
@@ -187,7 +184,6 @@ async def llm_attempt(
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
     attempt: Attempt,
-    ledger: LlmLedger,
 ) -> Command[LlmGoto]:
     turn_start = time.monotonic()
     agent_id = agent_id_from_config(config)
@@ -213,7 +209,7 @@ async def llm_attempt(
                 policy,
                 now=runtime.context.require_clock().now().timestamp(),
             )
-            result = await _llm_node_impl(state, runtime, config, ledger)
+            result = await _llm_node_impl(state, runtime, config)
         except BaseException as exc:
             _note_failed_attempt(exc, attempt, runtime, agent_id, policy)
             logger.opt(exception=True).warning(
@@ -248,130 +244,10 @@ async def llm_attempt(
             return result
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-# meiva:note
-# "This turn already acted" is the message this call follows, not a walk back through history: the llm node runs right after exec, so a tool return appended in this turn is the tail at that moment, and a turn only ends on a message with no tool calls - a tail ToolMessage therefore cannot belong to an earlier turn. Walking back to the last human message would answer a different question (what the conversation ever did) and would let a previous turn's tool work excuse a genuinely stuck one. Only a run the exec envelope records as completed counts: `meiva_exec_status` is the typed outcome of that call, and halting on a failed, timed-out, cancelled or not-run return would report a real failure to the user as a silent completion, so every outcome other than completed keeps the nudge and the cap.
-def _turn_already_acted(messages: list[AnyMessage]) -> bool:
-    if not messages:
-        return False
-    last = messages[-1]
-    if not isinstance(last, ToolMessage):
-        return False
-    return read_meiva_kwargs(last).get("meiva_exec_status") == ExecStatus.COMPLETED
-
-
-def _is_silent_idle(final_msg: AIMessage) -> bool:
-    if final_msg.tool_calls or final_msg.text:
-        return False
-    output_tokens = (final_msg.usage_metadata or {}).get("output_tokens", 0)
-    _content: object = final_msg.content
-    has_thinking_block = _is_object_list(_content) and any(
-        isinstance(b, dict) and b.get("type") == "thinking" for b in content_blocks(_content)
-    )
-    return (
-        has_thinking_block
-        or bool(final_msg.additional_kwargs.get("reasoning_content"))
-        or output_tokens > 0
-    )
-
-
-def _silent_idle_command(
-    final_msg: AIMessage,
-    agent_id: int,
-    model: str,
-    ledger: LlmLedger,
-    *,
-    catalog: ModelCatalog,
-    cap: int,
-    turn_acted: bool,
-) -> Command[LlmGoto] | None:
-    if not _is_silent_idle(final_msg):
-        return None
-    tid = str(agent_id)
-    usage = final_msg.usage_metadata or {}
-    output_tokens = int(usage.get("output_tokens", 0) or 0)
-    budget_tokens = max(output_tokens, 1)
-    cumulative_output_tokens = ledger.silent_idle_output_tokens(tid) + budget_tokens
-    from base.lm.pricing import quote
-
-    priced = quote(model, 0, output_tokens, 0, prices=catalog.prices)
-    estimated_cost_usd = priced.cost_usd if priced is not None else None
-    # meiva:note
-    # A turn that already returned a tool result and then produced reasoning-only output has finished its work and chosen to stop; continuing it only forces the model to manufacture text (which the bridge then delivers to the user). Halting here is the silent end the agent contract asks for, and it costs no further model call. The cap below still guards the other case - a turn that has done nothing at all.
-    if turn_acted:
-        ledger.reset_silent_idle(tid)
-        logger.info(
-            "[{label}] {body}",
-            label="silent-idle",
-            event="silent_idle",
-            agent_id=agent_id,
-            body=(
-                f"reasoning-only output {output_tokens} tokens after a tool return in this turn "
-                "- halting to idle (turn already acted)"
-            ),
-            output_tokens=output_tokens,
-            cumulative_output_tokens=cumulative_output_tokens,
-            estimated_cost_usd=estimated_cost_usd,
-            halted=True,
-        )
-        return Command[LlmGoto](
-            update={"messages": [final_msg], "halted": True},
-            goto=AFTER_EXEC,
-        )
-    if cap > 0 and cumulative_output_tokens >= cap:
-        ledger.reset_silent_idle(tid)
-        logger.warning(
-            "[{label}] {body}",
-            label="silent-idle",
-            event="silent_idle",
-            agent_id=agent_id,
-            body=(
-                f"reasoning-only output reached {cumulative_output_tokens} budget tokens (cap {cap}) — "
-                "halting to idle instead of looping"
-            ),
-            output_tokens=output_tokens,
-            cumulative_output_tokens=cumulative_output_tokens,
-            estimated_cost_usd=estimated_cost_usd,
-            halted=True,
-        )
-        return Command[LlmGoto](
-            update={"messages": [final_msg], "halted": True},
-            goto=AFTER_EXEC,
-        )
-    ledger.record_silent_idle_output_tokens(tid, cumulative_output_tokens)
-    logger.info(
-        "[{label}] {body}",
-        label="silent-idle",
-        event="silent_idle",
-        agent_id=agent_id,
-        body=(
-            f"reasoning-only output {output_tokens} tokens "
-            f"(budget {budget_tokens}; cumulative {cumulative_output_tokens}/{cap or 'inf'}) "
-            "— continue-loop with nudge"
-        ),
-        output_tokens=output_tokens,
-        cumulative_output_tokens=cumulative_output_tokens,
-        estimated_cost_usd=estimated_cost_usd,
-        halted=False,
-    )
-    return Command[LlmGoto](
-        update={"messages": [final_msg], "halted": False},
-        goto=AFTER_EXEC,
-    )
-
-
 async def _llm_node_impl(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
-    ledger: LlmLedger,
 ) -> Command[LlmGoto]:
     ctx = runtime.context
     if ctx.event_publisher is None:
@@ -441,37 +317,8 @@ async def _llm_node_impl(
         catalog=ctx.require_catalog(),
     )
 
-    silent_idle_cmd = _silent_idle_command(
-        final_msg,
-        agent_id,
-        ctx.require_agent().brain.llm_model,
-        ledger,
-        catalog=ctx.require_catalog(),
-        cap=ctx.require_agent().read("lm", "llm_silent_idle_max_output_tokens"),
-        turn_acted=_turn_already_acted(state.messages),
-    )
-    if silent_idle_cmd is not None:
-        raw_update: object = silent_idle_cmd.update
-        silent_update = raw_update if _is_str_any_dict(raw_update) else {}
-        return Command[LlmGoto](
-            update={**silent_update, **cut_update},
-            goto=silent_idle_cmd.goto,
-        )
-
-    ledger.reset_silent_idle(str(agent_id))
-
     if not final_msg.tool_calls:
-        if not text:
-            logger.warning(
-                "[halt] {body}",
-                event="halt",
-                body="no tool_call and EMPTY text — empty turn, user sees no reply",
-                agent_id=agent_id,
-            )
-        else:
-            logger.info(
-                "[halt] {body}", event="halt", body="no tool_call (idle)", agent_id=agent_id
-            )
+        logger.info("[halt] {body}", event="halt", body="no tool_call (idle)", agent_id=agent_id)
         return Command[LlmGoto](
             update={"messages": [final_msg], "halted": True, **cut_update},
             goto=AFTER_EXEC,

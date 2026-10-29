@@ -402,24 +402,6 @@ class LmSettings(EnvSettings):
         },
     )
 
-    llm_silent_idle_max_output_tokens: int = Field(
-        default=2048,
-        alias="MEIVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS",
-        description=(
-            "Cumulative output-token budget ceiling for consecutive silent-idle "
-            "turns (reasoning but no text and no tool_call). A provider-reported "
-            "zero-output silent idle still consumes one budget token, so it cannot "
-            "loop indefinitely. The next silent idle that reaches the ceiling halts "
-            "instead of spending another model call. 0 disables the cost boundary."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     llm_override: str = Field(
         default="",
         alias="MEIVA_LLM_OVERRIDE",
