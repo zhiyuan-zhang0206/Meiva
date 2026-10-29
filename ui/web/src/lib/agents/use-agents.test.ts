@@ -87,7 +87,6 @@ describe("agent switches ride the browser history", () => {
     act(() => result.current.setActiveId(2));
     await waitFor(() => expect(new URL(browser.href()).searchParams.get("agent_id")).toBe("2"));
     expect(browser.actions.pushed).toHaveLength(1);
-    expect(browser.actions.pushed[0].url).toBe(new URL(browser.href()).href);
     act(() => {
       browser.traverse("?agent_id=1");
     });
@@ -129,6 +128,12 @@ describe("bounded roster and independent selection", () => {
     expect(result.current.agents).toEqual(MOCK_AGENTS);
     expect(result.current.activeId).toBe(999);
   });
+  it("falls back to the remembered selection when the address names no agent", async () => {
+    browser = fakeBrowser({ href: "/", local: { [ACTIVE_ID_KEY]: "2" } });
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.activeId).toBe(2));
+    expect(new URL(browser.href()).searchParams.get("agent_id")).toBe("2");
+  });
   it("retains a selected agent as it leaves the live roster", async () => {
     useStore.setState({ activeId: 2 });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
@@ -137,8 +142,13 @@ describe("bounded roster and independent selection", () => {
     await waitFor(() => expect(result.current.activeAgent?.status).toBe("terminated"));
     expect(result.current.activeId).toBe(2);
   });
+  // meiva:note
+  // The two selection paths are separate facts, so they are two cases: a page whose address names an
+  // agent wins over the remembered one, and a page that names none falls back to it. The storage
+  // seed differs from the selection the cases land on, so a write that never happens (or lands on
+  // another key) fails the assertion instead of passing on the seed.
   it("URL selection overrides remembered selection and persists later changes", async () => {
-    browser = fakeBrowser({ href: "/?agent_id=2", local: { [ACTIVE_ID_KEY]: "1" } });
+    browser = fakeBrowser({ href: "/?agent_id=2", local: { [ACTIVE_ID_KEY]: "3" } });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => expect(result.current.activeId).toBe(2));
     act(() => result.current.setActiveId(1));

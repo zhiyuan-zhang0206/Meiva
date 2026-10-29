@@ -63,11 +63,13 @@ function useTerminalTheme(): [TerminalTheme, () => void] {
 
 // meiva:note
 // Resolve "system" against `prefers-color-scheme: dark` in real time. The query is answered by
-// the browser port through `useMediaQuery` (the same hook the breakpoints use), so this page
-// never asks the window itself; the server frame is that hook's documented snapshot (light)
-// instead of the dark value this pane used to hardcode.
+// the browser port through `useMediaQuery` (the same hook the breakpoints use), so this page never
+// asks the window itself. Its server frame is the dark one this pane shipped with: a color scheme
+// is not a width, and the mobile-first `false` would paint a light pane for a dark system until
+// hydration — the `serverMatches` argument is how a caller whose first frame is not the mobile one
+// says so.
 function useResolvedTheme(theme: TerminalTheme): "light" | "dark" {
-  const systemDark = useMediaQuery("(prefers-color-scheme: dark)");
+  const systemDark = useMediaQuery("(prefers-color-scheme: dark)", true);
   if (theme === "light") return "light";
   if (theme === "dark") return "dark";
   return systemDark ? "dark" : "light";

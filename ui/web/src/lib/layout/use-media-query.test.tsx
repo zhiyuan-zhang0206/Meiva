@@ -31,8 +31,8 @@ const QUERY = "(min-width: 768px)";
 
 afterEach(cleanup);
 
-function Probe() {
-  return <span data-testid="value">{String(useMediaQuery(QUERY))}</span>;
+function Probe({ serverMatches }: { serverMatches?: boolean }) {
+  return <span data-testid="value">{String(useMediaQuery(QUERY, serverMatches))}</span>;
 }
 
 describe("useMediaQuery", () => {
@@ -44,6 +44,21 @@ describe("useMediaQuery", () => {
       </BrowserProvider>,
     );
     expect(html).toContain(">false<");
+  });
+
+  // meiva:note
+  // A caller whose first frame is not the mobile one names it: the argument is the server snapshot
+  // only, so the client still reads the real match on its first render.
+  it("answers the snapshot a caller names, and still reads the real match once mounted", () => {
+    const browser = fakeBrowser({ media: { [QUERY]: false } });
+    const html = renderToString(
+      <BrowserProvider browser={browser}>
+        <Probe serverMatches={true} />
+      </BrowserProvider>,
+    );
+    expect(html).toContain(">true<");
+    const { getByTestId } = render(<Probe serverMatches={true} />, { wrapper: page(browser) });
+    expect(getByTestId("value").textContent).toBe("false");
   });
 
   it("reads the live match on the first client render", () => {
