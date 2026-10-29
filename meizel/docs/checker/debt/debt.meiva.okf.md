@@ -81,6 +81,9 @@ optional, and an empty or unknown field is `manifest-debt` rather than dropped â
 must not read as "no owner". A baseline that names nobody stays byte-identical (a bare count), and
 `record` and `prune` keep the metadata while they change the count.
 
+The account never carries what a rule allows: a `[roots]` kind a `[debt.ambient-read]` entry still
+charges for is `legal-read-recorded` â€” `check --changed` sees it too.
+
 `check` says how many entries name no owner, and `debt --unowned` lists them as
 `<manifest>: <code> <key> (<count>)`. That number is a to-do, not a gate: requiring an owner on every
 new entry is a later change, once the recorded baseline has been backfilled.
