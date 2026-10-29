@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from services.backup.walg import probe, state
 from services.backup.walg.tests.support import (
     SECRETS,
     Sandbox,
+    always_pinned,
     archive_current_segment,
     archiving_postgres,
     make_sandbox,
@@ -89,6 +91,8 @@ def _clock() -> Clock:
 # meiva:note
 # The parser's handler is the verb's door: it reads the invocation's own configuration owner (the
 # command runtime's) and hands the verb values, among them the home the runtime names (`home`).
+# `installed` replaces the door's own check on the installed binary -- the sandbox's wal-g is a
+# script, not the pinned build -- and only the verbs that resolve that binary take it.
 def _at_the_door(
     argv: list[str],
     command: CommandRuntime,
@@ -96,11 +100,14 @@ def _at_the_door(
     *,
     walg_config_file: Path | None,
     home: Path,
+    installed: Callable[..., str | None] | None = None,
 ) -> int:
     command.config.set_field("walg_config_file", walg_config_file)
     args = build_parser().parse_args(argv)
     args.runtime = dataclasses.replace(command, home=home)
     args.database_factory = database_factory
+    if installed is not None:
+        args.installed = installed
     return int(args.func(args))
 
 
@@ -175,7 +182,10 @@ def test_status_reports_an_unreadable_state_file(
 def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
     plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], sandbox: Sandbox
 ) -> None:
-    assert walg_cmd.cmd_walg_check(plane, token="e" * 32, home=sandbox.home) == 0
+    assert (
+        walg_cmd.cmd_walg_check(plane, token="e" * 32, home=sandbox.home, installed=always_pinned)
+        == 0
+    )
 
     out = capsys.readouterr().out
     assert [line.split(":")[0] for line in out.splitlines()] == [
@@ -193,7 +203,10 @@ def test_check_exits_non_zero_and_names_the_failing_step(
 ) -> None:
     sandbox.set_mode("nodelete")
 
-    assert walg_cmd.cmd_walg_check(plane, token="f" * 32, home=sandbox.home) == 1
+    assert (
+        walg_cmd.cmd_walg_check(plane, token="f" * 32, home=sandbox.home, installed=always_pinned)
+        == 1
+    )
 
     assert "  ✗ storage: cannot delete" in capsys.readouterr().out
 
@@ -210,6 +223,7 @@ def test_check_at_the_door_names_each_run_by_a_token_it_draws(
             operator_database,
             walg_config_file=sandbox.config_file,
             home=sandbox.home,
+            installed=always_pinned,
         )
 
     puts = [call.split()[3] for call in sandbox.calls() if call.startswith("st put")]
@@ -386,6 +400,7 @@ def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
             user="meiva",
             clock=_clock(),
             home=sandbox.home,
+            installed=always_pinned,
         )
 
     assert code == 0
@@ -421,6 +436,7 @@ def test_restore_rejects_a_bad_target_before_fetching(
         clock=_clock(),
         home=sandbox.home,
         **kwargs,
+        installed=always_pinned,
     )
 
     assert code == 1
@@ -441,6 +457,7 @@ def test_restore_reports_a_failed_fetch_and_exits_non_zero(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        installed=always_pinned,
     )
 
     assert code == 1
@@ -464,6 +481,7 @@ def test_restore_refuses_a_directory_that_holds_something(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        installed=always_pinned,
     )
 
     assert code == 1
@@ -483,6 +501,7 @@ def test_restore_while_wal_g_is_off_says_so(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        installed=always_pinned,
     )
 
     assert code == 1
@@ -578,6 +597,7 @@ def test_restore_refuses_a_key_other_than_the_one_the_handed_home_pinned(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        installed=always_pinned,
     )
 
     assert code == 1

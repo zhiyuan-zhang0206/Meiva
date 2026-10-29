@@ -31,6 +31,7 @@ from services.backup.walg.state import RunRecord
 from services.backup.walg.tests.support import (
     SECRETS,
     Sandbox,
+    always_pinned,
     fixture_text,
     make_sandbox,
     postgres_instance,
@@ -39,6 +40,22 @@ from services.backup.walg.tests.support import (
 
 FULL_4 = "base_0000000100000006000000C0"
 T0 = datetime(2026, 10, 2, 6, 25, 0, tzinfo=UTC)
+
+
+# meiva:note
+# The platform read takes the installed-binary check as an argument: the sandbox's fake wal-g is
+# not the pinned build, so the real check reports it and the stand-in reports none.
+def test_the_platform_reads_the_installed_binary_through_the_checker_it_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+
+    installed = tick.ambient_platform(home=sandbox.home)
+    stubbed = tick.ambient_platform(home=sandbox.home, installed=always_pinned)
+
+    assert installed.binary_problem is not None
+    assert stubbed.binary_problem is None
+
 
 PG_DATA = Path("/pg/data")
 DATABASE = "meiva_main"

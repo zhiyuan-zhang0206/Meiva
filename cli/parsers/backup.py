@@ -10,6 +10,7 @@ def _h_backup_walg_check(args: argparse.Namespace) -> int:
         walg_plane(args.runtime.config),
         token=f"{args.runtime.rng.getrandbits(128):032x}",
         home=args.runtime.home,
+        installed=args.installed,
     )
 
 
@@ -72,7 +73,12 @@ def add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="prove the binary, configuration, key and storage permissions work before "
         "switching WAL archiving on (writes and deletes one small object under the prefix)",
     )
-    walg_check.set_defaults(func=_h_backup_walg_check)
+    # meiva:note
+    # The door names the check the pre-flight runs on the installed binary; the parser is the
+    # composition surface that supplies it, so a caller that parsed this verb can replace it.
+    from base.cluster.dataplane import walg_binary
+
+    walg_check.set_defaults(func=_h_backup_walg_check, installed=walg_binary.installed_problem)
     walg_run = walg_sub.add_parser(
         "run",
         help="run one daily tick: backup, verify the archived WAL chain, apply retention "

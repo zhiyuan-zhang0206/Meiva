@@ -16,6 +16,7 @@ takes that full name. Nothing printed here contains a credential or key value.
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,11 +98,17 @@ def _postgres_facts(
 # Run the checks in order, stopping at the first failure; the last step is the verdict. `token` names
 # the object the storage round trip writes; the caller draws a fresh one per run, so two runs (or a
 # run and a leftover of an earlier one) never address the same object.
-def run_check(*, path: Path | None, token: str, home: Path) -> list[Step]:
+def run_check(
+    *,
+    path: Path | None,
+    token: str,
+    home: Path,
+    installed: Callable[..., str | None] = walg_binary.installed_problem,
+) -> list[Step]:
     return run_check_on(
         path=path,
         token=token,
-        binary_problem=walg_binary.installed_problem(home=home),
+        binary_problem=installed(home=home),
         admin=probe.admin_connection(home=home),
         home=home,
     )
