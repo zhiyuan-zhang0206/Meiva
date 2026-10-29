@@ -484,3 +484,43 @@ def test_a_scoped_run_leaves_the_rest_of_the_record_to_the_whole_tree(tmp_path: 
     )
     assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
     assert _lint.main([], repo_root=root) == 1
+
+
+def test_a_scoped_run_does_not_judge_an_exemption_outside_the_change(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # The scoped run judges the files it was given and nothing else: an unrecorded exemption in
+    # another file is the whole-tree run's finding, and reporting it here would make every commit
+    # pay for the tree it did not touch.
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+    )
+    (root / "tests" / "test_y.py").write_text(_HOST_READ, encoding="utf-8")
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
+    assert capsys.readouterr().err == ""
+    assert _lint.main([], repo_root=root) == 1
+    assert "tests/test_y.py::test_x: unrecorded exemption" in capsys.readouterr().err
+
+
+def test_a_scoped_run_leaves_the_record_count_to_the_whole_tree(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # `allowed` against the number of entries is a property of the record, not of one file: a
+    # scoped run that reported it would redden every commit until someone edited the record.
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+        allowed=5,
+    )
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
+    assert _lint.main([], repo_root=root) == 1
+    assert "allowed says 5, the record lists 1" in capsys.readouterr().err
