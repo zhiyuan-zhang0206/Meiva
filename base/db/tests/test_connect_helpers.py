@@ -30,7 +30,7 @@ from loguru import logger as loguru_logger
 
 from base import db
 from base.config import settings
-from base.db import Database, connections
+from base.db import Database, connections, pooled_session
 from base.db import code_version_gate as gate
 from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 
@@ -254,7 +254,7 @@ def test_the_restore_reads_the_minimum_at_most_every_interval(
     """Two statements per borrow, always; the second is the plain statement ceiling
     except on the borrow that also reads the minimum."""
     conn = _FakeConn(minimum=0)
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
 
     restore(conn, gate=process_gate)
     restore(conn, gate=process_gate)
@@ -262,9 +262,9 @@ def test_the_restore_reads_the_minimum_at_most_every_interval(
     restore(conn, gate=process_gate)
 
     name = (process_gate.application_name(),)
-    budget, _ms = connections.restore_budget_statement()
-    _reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
-    combined = connections.PG_POOLED_RESTORE_WITH_MIN_SQL
+    budget, _ms = pooled_session.restore_budget_statement()
+    _reset, plain = pooled_session.PG_POOLED_BASELINE_RESTORE_SQL
+    combined = pooled_session.PG_POOLED_RESTORE_WITH_MIN_SQL
     assert conn.executed == [
         (budget, ()),
         (combined, name),
@@ -281,7 +281,7 @@ def test_the_restore_refuses_when_the_read_minimum_is_above_this_process(
     _gated_process: list[int],
 ) -> None:
     conn = _FakeConn(minimum=_VERSION + 10)
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
     with pytest.raises(_Exited):
         restore(conn, gate=process_gate)
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
@@ -318,7 +318,7 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
     process_gate: gate.ProcessDbGate, _gated_process: list[int]
 ) -> None:
     conn = _FakeAsyncConn(minimum=0)
-    restore: Any = connections.restore_pooled_session_async
+    restore: Any = pooled_session.restore_pooled_session_async
 
     await restore(conn, gate=process_gate)
     await restore(conn, gate=process_gate)
@@ -326,9 +326,9 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
     await restore(conn, gate=process_gate)
 
     name = (process_gate.application_name(),)
-    budget, _ms = connections.restore_budget_statement()
-    _reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
-    combined = connections.PG_POOLED_RESTORE_WITH_MIN_SQL
+    budget, _ms = pooled_session.restore_budget_statement()
+    _reset, plain = pooled_session.PG_POOLED_BASELINE_RESTORE_SQL
+    combined = pooled_session.PG_POOLED_RESTORE_WITH_MIN_SQL
     assert conn.executed == [
         (budget, ()),
         (combined, name),
@@ -350,12 +350,12 @@ def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPat
         process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
     )
     conn = _FakeConn(minimum=10**9)
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
 
     restore(conn, gate=process_gate)
 
-    budget, _ms = connections.restore_budget_statement()
-    _reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
+    budget, _ms = pooled_session.restore_budget_statement()
+    _reset, plain = pooled_session.PG_POOLED_BASELINE_RESTORE_SQL
     assert conn.executed == [(budget, ()), (plain, ("meiva:cli",))]
 
 
@@ -491,7 +491,7 @@ async def test_the_async_restore_reads_the_stored_minimum(
     _gated_process: list[int],
 ) -> None:
     _set_minimum(_VERSION)
-    restore: Any = connections.restore_pooled_session_async
+    restore: Any = pooled_session.restore_pooled_session_async
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
         await restore(aconn, gate=process_gate)
         cur = await aconn.execute("SHOW statement_timeout")

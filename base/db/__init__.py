@@ -17,9 +17,6 @@ import psycopg
 
 from base.db.config import DbConfig as DbConfig
 from base.db.connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
-from base.db.connections import (
-    PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL,
-)
 from base.db.connections import NoDatabaseAuthorityError as NoDatabaseAuthorityError
 from base.db.connections import PlaceholderDbUrlError as PlaceholderDbUrlError
 from base.db.connections import async_pool as async_pool
@@ -27,6 +24,7 @@ from base.db.connections import connect as connect
 from base.db.connections import connect_url as connect_url
 from base.db.connections import pool as pool
 from base.db.handle import Database as Database
+from base.db.pooled_session import PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL
 
 
 def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
