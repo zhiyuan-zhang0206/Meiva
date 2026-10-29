@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 from collections.abc import Callable
 from pathlib import Path
@@ -48,7 +49,7 @@ def skill_ctx(
         database_factory=operator_database,
         producer=producer,
         helper=refuse_helper,
-        host=fake_host(),
+        host=fake_host(uid=os.geteuid()),
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=SYSTEM_TIMERS,

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -144,6 +145,21 @@ def test_on_validates_pins_the_key_and_makes_the_state_directory(
     state = converge_home / "backups" / "walg"
     assert state.is_dir() and state.stat().st_mode & 0o777 == 0o700
     assert not (tmp_path / "environment-home").exists(), "nothing resolved the environment's home"
+
+
+# meiva:note
+# The state directory's owner is the converge's own account, not this process's: a context whose
+# host belongs elsewhere leaves the directory it just made foreign-owned and the step refuses.
+def test_the_state_directory_belongs_to_the_converge_that_makes_it(
+    ctx: ConvergeCtx, converge_home: Path
+) -> None:
+    on = _walg_ctx(ctx, converge_home)
+    foreign = replace(on, host=replace(on.host, uid=os.geteuid() + 1))
+
+    with pytest.raises(RuntimeError, match="is not owned by the current user"):
+        converge_walg_module.execute_walg_plan(
+            (PrepareWalgStateDir(),), foreign, walg_config_file=_config_file(foreign)
+        )
 
 
 def test_a_bad_configuration_fails_converge_not_postgres(

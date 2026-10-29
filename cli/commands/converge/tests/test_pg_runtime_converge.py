@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import shlex
 import sys
@@ -69,7 +70,7 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
-            host=fake_host(),
+            host=fake_host(uid=os.geteuid()),
             session=UserSession(
                 user_home=installed.parent, login_shell="/bin/zsh", interactive=False
             ),
@@ -115,7 +116,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
-            host=fake_host(),
+            host=fake_host(uid=os.geteuid()),
             session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
             services=frozenset(),
             timers=command_runtime.timers,
@@ -153,7 +154,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 producer=operator_pipeline,
                 machine=ConfiguredMachineIdentity(config),
                 helper=refuse_helper,
-                host=fake_host(),
+                host=fake_host(uid=os.geteuid()),
                 session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
                 services=frozenset(),
                 timers=command_runtime.timers,

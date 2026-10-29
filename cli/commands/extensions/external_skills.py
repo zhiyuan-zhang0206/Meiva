@@ -340,7 +340,7 @@ def _ensure_ledger_root(ctx: ConvergeCtx) -> Path:
         if not stat.S_ISDIR(lstat(path).st_mode):
             raise ClientConflictError("private ownership ledger parent is not a directory")
     root = ctx.meiva_home / "configs" / "external-agent-skills"
-    ensure_private_dir(root)
+    ensure_private_dir(root, euid=ctx.host.uid)
     return root
 
 

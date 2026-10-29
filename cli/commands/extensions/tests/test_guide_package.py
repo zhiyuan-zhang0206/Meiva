@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import shutil
@@ -130,7 +131,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         producer=operator_pipeline,
         machine=command_runtime.machine,
         helper=refuse_helper,
-        host=fake_host(),
+        host=fake_host(uid=os.geteuid()),
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=SYSTEM_TIMERS,
