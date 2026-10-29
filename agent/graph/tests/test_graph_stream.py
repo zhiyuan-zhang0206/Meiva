@@ -25,7 +25,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import LlmLedger, exec_node, llm_node
+from agent.graph import exec_node, llm_node
 from agent.graph.exec.output import overflow_dir
 from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import live_parent_facts
@@ -143,7 +143,6 @@ async def test_llm_node_collects_chunks_into_final_message(
         state,
         _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate),
         config,
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 
@@ -213,7 +212,6 @@ async def test_llm_node_stamps_last_active_at_with_text(
         state,
         runtime,
         {"configurable": {"thread_id": str(agent_id)}},
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 
@@ -275,7 +273,6 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         state,
         runtime,
         {"configurable": {"thread_id": str(agent_id)}},
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 
@@ -349,7 +346,6 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
             database_gate=database_gate,
         ),
         config,
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 
@@ -405,7 +401,6 @@ async def test_llm_node_publishes_reasoning_tokens(
             database_gate=database_gate,
         ),
         config,
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 
@@ -446,7 +441,6 @@ async def test_llm_node_preserves_usage_metadata(
         state,
         _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate),
         config,
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 

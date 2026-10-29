@@ -13,7 +13,6 @@ from langgraph.types import Command
 
 from agent.graph.llm.goto import LlmGoto
 from agent.graph.llm.node import llm_node
-from agent.graph.llm_errors import LlmLedger
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.messages import exec_output_message
 from agent.state import AgentState
@@ -76,7 +75,6 @@ async def _llm_turn(
     messages: list[Any],
     *,
     output_tokens: int,
-    ledger: LlmLedger,
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
 ) -> Command[LlmGoto]:
@@ -91,7 +89,6 @@ async def _llm_turn(
             database_gate=database_gate,
         ),
         CONFIG,
-        ledger=ledger,
         rng=_rng(),
     )
 
@@ -104,96 +101,26 @@ def _halted(result: Command[LlmGoto]) -> Any:
     return update.get("halted")
 
 
-# meiva:note
-# A completed tool run followed by reasoning-only output is a finished turn: the agent did its work
-# and stopped, so the node halts (halted=True) instead of buying the extra call whose only possible
-# output is text manufactured for the nudge. Halting also leaves no cumulative budget behind for
-# the next turn. The record names its agent; every silent_idle event carried a NULL agent_id
-# before #5801.
-async def test_silent_idle_after_this_turns_tool_return_halts_silently(
+@pytest.mark.parametrize("status", list(ExecStatus))
+@pytest.mark.parametrize("next_user_message", [False, True])
+async def test_reasoning_only_completion_halts_for_every_tool_outcome(
     hosted_resources: HostedTurnResources,
     loguru_records: LogRecords,
     database_gate: ProcessDbGate,
+    status: ExecStatus,
+    next_user_message: bool,
 ) -> None:
-    ledger = LlmLedger()
     result = await _llm_turn(
-        _turn_that_ran_a_tool(),
+        _turn_that_ran_a_tool(status, next_user_message=next_user_message),
         output_tokens=618,
-        ledger=ledger,
         database_gate=database_gate,
         hosted_resources=hosted_resources,
     )
 
     assert result.goto == "after_exec"
     assert _halted(result) is True
-    silent_idle = loguru_records.events("silent_idle")
-    assert len(silent_idle) == 1, "exactly one verdict per turn"
-    assert silent_idle[0]["extra"]["halted"] is True
-    assert silent_idle[0]["extra"]["agent_id"] == 7
-    assert "turn already acted" in silent_idle[0]["message"]
-    assert ledger.silent_idle_output_tokens("7") == 0
-
-
-# meiva:note
-# Every exec outcome other than completed keeps the original nudge and cap. The envelope's typed
-# `meiva_exec_status` is the marker, so a failed, timed-out, cancelled, halted or not-run call is
-# never reported to the user as a silently finished turn, and no tool output is inspected as text.
-@pytest.mark.parametrize(
-    "status",
-    [
-        ExecStatus.FAILED,
-        ExecStatus.TIMED_OUT,
-        ExecStatus.CANCELLED,
-        ExecStatus.HALTED,
-        ExecStatus.NOT_RUN,
-        pytest.param(ExecStatus.UNKNOWN, id="restart-repair-interrupted-placeholder"),
-    ],
-)
-async def test_silent_idle_after_a_failed_tool_return_keeps_the_nudge(
-    hosted_resources: HostedTurnResources,
-    loguru_records: LogRecords,
-    database_gate: ProcessDbGate,
-    status: ExecStatus,
-) -> None:
-    ledger = LlmLedger()
-    result = await _llm_turn(
-        _turn_that_ran_a_tool(status),
-        output_tokens=42,
-        ledger=ledger,
-        database_gate=database_gate,
-        hosted_resources=hosted_resources,
-    )
-
-    assert _halted(result) is False
-    silent_idle = loguru_records.events("silent_idle")
-    assert len(silent_idle) == 1
-    assert silent_idle[0]["extra"]["halted"] is False
-    assert "turn already acted" not in silent_idle[0]["message"]
-    assert ledger.silent_idle_output_tokens("7") == 42
-
-
-# meiva:note
-# Only the message this call follows counts, so the same completed tool return sitting earlier in
-# the history under a fresh user message keeps the continue-loop and the cap behind it: a previous
-# turn's work cannot excuse a turn that has done nothing, and the turn's own budget keeps
-# accumulating.
-async def test_a_previous_turns_tool_return_does_not_excuse_a_stuck_turn(
-    hosted_resources: HostedTurnResources,
-    loguru_records: LogRecords,
-    database_gate: ProcessDbGate,
-) -> None:
-    ledger = LlmLedger()
-    result = await _llm_turn(
-        _turn_that_ran_a_tool(next_user_message=True),
-        output_tokens=618,
-        ledger=ledger,
-        database_gate=database_gate,
-        hosted_resources=hosted_resources,
-    )
-
-    assert _halted(result) is False
-    silent_idle = loguru_records.events("silent_idle")
-    assert len(silent_idle) == 1
-    assert silent_idle[0]["extra"]["halted"] is False
-    assert "turn already acted" not in silent_idle[0]["message"]
-    assert ledger.silent_idle_output_tokens("7") == 618
+    assert not loguru_records.events("silent_idle")
+    assert len(loguru_records.events("llm_usage")) == 1
+    halts = loguru_records.events("halt")
+    assert len(halts) == 1
+    assert halts[0]["extra"]["agent_id"] == 7

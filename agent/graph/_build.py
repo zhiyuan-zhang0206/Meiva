@@ -36,7 +36,6 @@ from langgraph.types import Command
 
 from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
-from agent.graph.llm_errors import LlmLedger
 from agent.impersonation import protect_native_hooks
 from agent.nodes import (
     AFTER_EXEC,
@@ -140,9 +139,6 @@ def build_graph(
 
     state_cls = build_agent_state(extensions)
     g = StateGraph(state_cls, context_schema=MeivaContext)
-    # What the llm node remembers per agent between tries and turns belongs to this graph: one
-    # ledger per compiled graph, so two graphs in one process never share failure counts.
-    ledger = LlmLedger()
     process = SubprocessExecProcess(parent, rng)
 
     async def execute(
@@ -153,7 +149,7 @@ def build_graph(
     async def llm(
         state: BaseAgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
     ) -> Command[LlmGoto]:
-        return await llm_node(state, runtime, config, ledger=ledger, rng=rng)
+        return await llm_node(state, runtime, config, rng=rng)
 
     g.add_node(  # type: ignore[arg-type]
         AFTER_INIT,

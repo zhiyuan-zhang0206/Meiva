@@ -38,13 +38,6 @@ class TurnEnd(TypedDict):
     duration_seconds: float
 
 
-class SilentIdle(TypedDict):
-    output_tokens: int
-    cumulative_output_tokens: int
-    estimated_cost_usd: float | None
-    halted: bool
-
-
 class LlmUsageMeteringFailed(TypedDict):
     model: str
     error_type: str
@@ -147,9 +140,6 @@ EVENTS: dict[str, EventSpec] = {
         "compact_boundary_stamp",
         "compact boundary stamp failed (segment anchor not recorded)",
         tier="noise",
-    ),
-    "silent_idle": telemetry_event(
-        "silent_idle", "silent idle cost-boundary verdict", payload=SilentIdle, tier="noise"
     ),
     "llm_retry": telemetry_event(
         "llm_retry", "LLM retry sequence completion", payload=LlmRetry, tier="observation"

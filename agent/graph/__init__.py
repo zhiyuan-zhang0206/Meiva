@@ -23,7 +23,7 @@
 #   - `llm/_cancel.py`     — llm streaming-vs-cancel race (partial turn discard)
 #   - `llm/goto.py`        — the node names the llm node may route to
 #   - `llm/_chunk.py`      — llm chunk assembly + final-message validation
-#   - `llm_errors.py`      — llm stream error taxonomy + failure ledger
+#   - `llm_errors.py`      — llm stream error taxonomy
 #   - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `meiva` SDK overview
 #   - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
 #   - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from .exec.node import exec_node as exec_node
     from .exec.output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
     from .llm.node import llm_node as llm_node
-    from .llm_errors import LlmLedger as LlmLedger
 
 # Eager `from ._build import build_graph` used to run on every `agent.graph`
 # import — pulling the full node set (build/claim/llm/exec and their trees)
@@ -69,7 +68,6 @@ if TYPE_CHECKING:
 # above; at runtime `__getattr__` resolves the names lazily (PEP 562).
 __all__ = [
     "EXEC_CANCEL_NOTE",
-    "LlmLedger",
     "build_graph",
     "claim_node",
     "exec_node",
@@ -109,10 +107,6 @@ def __getattr__(name: str) -> object:
             from .llm.node import llm_node
 
             return llm_node
-        if name == "LlmLedger":
-            from .llm_errors import LlmLedger
-
-            return LlmLedger
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

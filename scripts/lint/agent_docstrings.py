@@ -160,7 +160,6 @@ _PLUGIN_MODULE_DOCSTRING_EXEMPT: frozenset[str] = frozenset(
         "meiva_builtins/plugins/meiva_fleet/plugin.py",
         "meiva_builtins/plugins/meiva_memory/plugin.py",
         "meiva_builtins/plugins/meiva_sdk_reminder/plugin.py",
-        "meiva_builtins/plugins/meiva_silent_idle/plugin.py",
         "meiva_builtins/plugins/meiva_syntax_fix/plugin.py",
     }
 )
