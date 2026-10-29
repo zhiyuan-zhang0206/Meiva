@@ -214,3 +214,31 @@ def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(
         assert not start_serving.is_serving(home)
     finally:
         clear_fixture_gate()
+
+
+# meiva:note
+# The fixture replaces the serving gate for the whole process, so it must answer the call the
+# production readers make -- including the `observe` keyword. With the older one-argument shape
+# the failure lands in whichever test runs next, as "got an unexpected keyword argument
+# 'observe'" (2026-10-30: the merge queue caught it when a lifecycle test and a gateway roster
+# test shared a shard). This pins the passthrough at the seam instead of in a consumer.
+def test_the_injected_fixture_gate_answers_the_callers_observe_keyword(
+    tmp_path: Path, home: Path
+) -> None:
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.lifecycle.tests.serving_entrypoint import (
+        clear_fixture_gate,
+        inject_fixture_gate,
+    )
+
+    gate = tmp_path / "e2e-serving-observe"
+    try:
+        inject_fixture_gate(gate)
+
+        assert not start_serving.is_serving(home, observe=start_serving.observe_root)
+        gate.write_text("ready\n")
+        assert start_serving.is_serving(home, observe=start_serving.observe_root)
+        with start_serving.recovery_permitted(home, observe=start_serving.observe_root) as allowed:
+            assert allowed
+    finally:
+        clear_fixture_gate()
