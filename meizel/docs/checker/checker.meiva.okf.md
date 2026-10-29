@@ -133,8 +133,10 @@ local edges and exports its door.
 
 ## When it fails
 
-The codes the checker reports, each beside the rule it belongs to, are listed in
-[[meizel/docs/diagnostics.meiva.okf.md|the diagnostics]].
+The codes the checker reports - `undeclared-edge`, `not-exported`, `private-module`, the restricted
+Python and patch codes, the 15 purity and container codes, the ambient codes, `unresolved-import`,
+`unlisted-allowance`, the stale and policy codes, `debt-paid` and the manifest codes - sit beside the
+rule each belongs to in [[meizel/docs/diagnostics.meiva.okf.md|the diagnostic codes]].
 
 ## Layout
 
