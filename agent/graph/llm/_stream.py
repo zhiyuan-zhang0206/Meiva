@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
@@ -89,12 +89,30 @@ async def consume_llm(
     catalog: ModelCatalog,
 ) -> tuple[float | None, float | None]:
     """Stream once under owned deadlines; any failure propagates to the node."""
-    return await consume_stream_with_stall_timeout(
-        bound_llm.astream(messages).__aiter__(),  # type: ignore[attr-defined]
-        chunks=chunks,
-        handler=handler,
-        bounds=stream_bounds(agent, catalog),
-    )
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            heartbeat = tasks.create_task(_publish_keepalives(handler))
+            try:
+                return await consume_stream_with_stall_timeout(
+                    bound_llm.astream(messages).__aiter__(),  # type: ignore[attr-defined]
+                    chunks=chunks,
+                    handler=handler,
+                    bounds=stream_bounds(agent, catalog),
+                )
+            finally:
+                heartbeat.cancel()
+    # meiva:note
+    # Keep a single provider failure typed for the node retry classifier; real sibling failures stay grouped.
+    except ExceptionGroup as group:
+        if len(group.exceptions) == 1:
+            raise group.exceptions[0] from None
+        raise
+
+
+async def _publish_keepalives(handler: RedisStreamHandler) -> None:
+    while True:
+        handler.keepalive()
+        await asyncio.sleep(0.5)
 
 
 # meiva:note
@@ -169,16 +187,17 @@ async def stream_llm(
     handler: RedisStreamHandler,
     agent: AgentSlices,
     catalog: ModelCatalog,
+    monotonic: Callable[[], float],
 ) -> None:
     """Bind tools, stream the complete prefix and stamp latency/decode timing.
 
     Keep the existing SystemMessage byte-stable for provider implicit caching.
     Empty streams have no decode window.
     """
-    call_started = time.monotonic()
+    call_started = monotonic()
     runnable = llm.bind_tools([execute_code])
     first_ts, last_ts = await consume_llm(
         runnable, messages, chunks=chunks, handler=handler, agent=agent, catalog=catalog
     )
-    handler.llm_latency_ms = milliseconds_between(call_started, time.monotonic())
+    handler.llm_latency_ms = milliseconds_between(call_started, monotonic())
     handler.llm_decode_ms = decode_window_ms(first_ts, last_ts)

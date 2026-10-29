@@ -37,6 +37,15 @@ function renderWithQuery(ui: React.ReactElement, overrides: Record<string, unkno
 }
 
 describe("CardHeader rich summaries", () => {
+  it("labels an empty model wait without claiming a reasoning summary", () => {
+    const waiting = item("agent_reasoning", { llmWaiting: true, reasoningStartedAt: Date.now() - 3000 });
+    const { container } = renderWithQuery(
+      <CardHeader item={waiting} config={messageCardConfig(waiting)!} expanded={false} onToggle={noop} />,
+    );
+    expect(container.textContent).toContain("Waiting for model");
+    expect(container.textContent).not.toContain("Thinking for");
+  });
+
   it("renders rich summary for agent_reasoning with committed duration", () => {
     const rItem = item("agent_reasoning", {
       payload: "thinking...",
