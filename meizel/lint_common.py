@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import functools
 import os
 import subprocess
-from collections.abc import Iterable
+import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from meizel import is_repo_test_file, is_test_path, restrict, split_only
@@ -12,6 +14,7 @@ from meizel.roles import pytest_test_hosts, select_packages
 
 __all__ = [
     "FRAMEWORK_DIRS",
+    "admission",
     "changed_scope",
     "is_repo_test_file",
     "is_test_path",
@@ -116,21 +119,91 @@ def _resolved_target(argument: str, repo_root: Path) -> Path:
 
 
 # meiva:note
+# One lint run admits the checkout's files once. A lint asks per target, and one run
+# of `time_bomb` asked 21 times: each ask re-read git and re-checked every tracked
+# path, which measured 75 s of a 92 s profiled run for three changed files. The reuse
+# lives strictly inside `admission()`, so a caller outside the scope always reads the
+# tree again and a file created between two runs is never missed — both halves are
+# pinned in meizel/tests/test_lint_common.py. The exit prints one line, so "why slow
+# one day and not the next" is answerable without a profiler.
+class _Admission:
+    def __init__(self) -> None:
+        self.active = False
+        self.files: dict[Path, list[str]] = {}
+        self.files_count = 0
+        self.reads = 0
+        self.reuses = 0
+
+    def _reset(self) -> None:
+        self.active = False
+        self.files.clear()
+        self.files_count = 0
+        self.reads = 0
+        self.reuses = 0
+
+    def __enter__(self) -> _Admission:
+        self._reset()
+        self.active = True
+        return self
+
+    def __exit__(self, kind: object, value: object, traceback: object) -> None:
+        if self.reads:
+            print(
+                "lint admission: "
+                f"{self.files_count} files, {self.reads} read, {self.reuses} reused",
+                file=sys.stderr,
+            )
+        self._reset()
+
+    def stats(self) -> dict[str, int]:
+        return {"files": self.files_count, "reads": self.reads, "reuses": self.reuses}
+
+    def scoped[**P](self, fn: Callable[P, int]) -> Callable[P, int]:
+        @functools.wraps(fn)
+        def run(*args: P.args, **kwargs: P.kwargs) -> int:
+            with self:
+                return fn(*args, **kwargs)
+
+        return run
+
+
+admission = _Admission()
+
+
+# meiva:note
 # Git owns source admission in a checkout: tracked regular files plus new nonignored
 # regular files. Standalone environments are ignored dependencies, not governed source.
 # A non-Git fixture keeps the explicit filesystem behavior of the lint API.
 def _source_files(repo_root: Path) -> list[str] | None:
     if not _exists(repo_root / ".git"):
         return None
-    return sorted(tracked_files(repo_root, include_untracked=True, regular=True))
+    if not admission.active:
+        return sorted(tracked_files(repo_root, include_untracked=True, regular=True))
+    admitted = admission.files.get(repo_root)
+    if admitted is not None:
+        admission.reuses += 1
+        return admitted
+    admitted = sorted(tracked_files(repo_root, include_untracked=True, regular=True))
+    admission.files[repo_root] = admitted
+    admission.reads += 1
+    admission.files_count += len(admitted)
+    return admitted
 
 
+# meiva:note
+# Select a directory's admitted files by name prefix. The admitted entries are
+# repo-relative POSIX names, so `name.startswith(prefix + "/")` is the same set as
+# resolving every name to a Path and asking `is_relative_to` — it measured 234k Path
+# constructions (18 s of a 20 s profiled run) because one lint asked for its targets
+# 21 times.
 def _files_in_target(target: Path, repo_root: Path, admitted: list[str] | None) -> list[str]:
     if _is_file(target):
         return [_rel_or_abs(target, repo_root)]
     if _is_dir(target):
         if admitted is not None and target.is_relative_to(repo_root):
-            return [name for name in admitted if (repo_root / name).is_relative_to(target)]
+            prefix = target.relative_to(repo_root).as_posix().rstrip("/")
+            below = prefix + "/" if prefix else ""
+            return [name for name in admitted if name.startswith(below)]
         return [_rel_or_abs(path, repo_root) for path in target.rglob("*") if _is_file(path)]
     return []
 

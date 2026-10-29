@@ -400,3 +400,60 @@ def test_the_rule_module_refuses_to_start_itself() -> None:
     )
     assert result.returncode != 0
     assert "clock_lattice_cli" in result.stderr
+
+
+# meiva:note
+# A run admits the checkout once, so the two things that could go wrong with that
+# reuse are pinned end to end: a violation created between two runs is reported by
+# the second (the reuse does not outlive the run), and a touch of an unrelated file
+# does not change the verdict (the file set is re-read, not remembered).
+# meiva:link meizel/docs/lint/lint-common-admission.meiva.okf.md
+def _git_run(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)  # noqa: S603
+
+
+def _admitted_root(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    for relative in ("pkg/clean.py", "pkg/family.py", "docs/notes.md"):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("value = 1\n", encoding="utf-8")
+    _git_run(root, "init", "-q")
+    _git_run(root, "add", ".")
+    return root
+
+
+def _run_lint(root: Path) -> int:
+    return _lint.main(
+        [],
+        scan_dirs=("pkg",),
+        repo_root=root,
+        registered_clocks=_TEST_CLOCKS,
+        family_modules=("pkg/family.py",),
+        independent={},
+    )
+
+
+def test_a_violation_created_between_two_runs_is_reported(tmp_path: Path, capsys) -> None:
+    root = _admitted_root(tmp_path)
+    assert _run_lint(root) == 0
+    capsys.readouterr()
+    offender = root / "pkg/bad.py"
+    offender.write_text("_SOME_REAP_GRACE_S = 1.0\n", encoding="utf-8")
+    _git_run(root, "add", "pkg/bad.py")
+    assert _run_lint(root) == 1
+    assert "pkg/bad.py" in capsys.readouterr().err
+
+
+def test_a_touched_unrelated_file_keeps_the_verdict(tmp_path: Path, capsys) -> None:
+    root = _admitted_root(tmp_path)
+    assert _run_lint(root) == 0
+    capsys.readouterr()
+    (root / "docs/notes.md").touch()
+    assert _run_lint(root) == 0
+    violations = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if not line.startswith("lint admission:")
+    ]
+    assert violations == []

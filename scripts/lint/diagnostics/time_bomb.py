@@ -763,19 +763,16 @@ def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
     return errors
 
 
-def _repository_root(repo_root: Path | None) -> Path:
-    return _REPO_ROOT if repo_root is None else repo_root.resolve()
-
-
+@lint_common.admission.scoped
 def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
     """Run the lint, resolve relative targets against repo_root, and emit errors to stderr."""
-    root = _repository_root(repo_root)
+    root = _REPO_ROOT if repo_root is None else repo_root.resolve()
     argv = list(sys.argv[1:] if argv is None else argv)
     argv, only = lint_common.split_only(argv)
     scope = lint_common.changed_scope(only, root)
     if argv:
         paths = [p if p.is_absolute() else root / p for p in (Path(a) for a in argv)]
-        missing = [a for a, p in zip(argv, paths, strict=True) if not p.exists()]
+        missing = lint_common.resolve_targets(argv, root)[1]
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
