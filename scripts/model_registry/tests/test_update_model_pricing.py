@@ -175,14 +175,34 @@ def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
     )
 
 
-def test_deepseek_parser_strips_column_footnote_markers() -> None:
+def test_deepseek_parser_reports_column_annotations_without_reading_them() -> None:
     marked = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
     unmarked = pricing_updater.parse_deepseek_pricing(
-        _DEEPSEEK_TABLE.replace("deepseek-flash (1)", "deepseek-flash")
+        _DEEPSEEK_TABLE.replace("deepseek-v4-pro (2)", "deepseek-v4-pro")
     )
 
+    assert marked.models == unmarked.models
     assert set(marked.models) == {"deepseek-flash", "deepseek-v4-pro"}
-    assert marked == unmarked
+    assert marked.annotations["deepseek-flash"] == pricing_updater.ColumnAnnotation(
+        note="1", version="DeepSeek-V4.1-Flash"
+    )
+    assert marked.annotations["deepseek-v4-pro"] == pricing_updater.ColumnAnnotation(
+        note="2", version="DeepSeek-V4-Pro-0813"
+    )
+    assert unmarked.annotations["deepseek-v4-pro"] == pricing_updater.ColumnAnnotation(
+        note=None, version="DeepSeek-V4-Pro-0813"
+    )
+
+
+def test_deepseek_parser_rejects_a_missing_model_version_row() -> None:
+    html = _DEEPSEEK_TABLE.replace(
+        '<tr><td colspan="3">MODEL VERSION</td><td>DeepSeek-V4.1-Flash</td>'
+        "<td>DeepSeek-V4-Pro-0813</td></tr>",
+        "",
+    )
+
+    with pytest.raises(ValueError, match="MODEL VERSION"):
+        pricing_updater.parse_deepseek_pricing(html)
 
 
 def test_deepseek_parser_rejects_an_empty_column_label() -> None:
