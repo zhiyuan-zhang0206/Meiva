@@ -11,7 +11,14 @@ import argparse
 import sys
 from collections.abc import Collection
 
-from meizel.contracts.debt import EDGE_CODES, PATCH_CODES, DebtTable, file_key, total
+from meizel.contracts.debt import (
+    EDGE_CODES,
+    PATCH_CODES,
+    DebtEntry,
+    DebtTable,
+    file_key,
+    total,
+)
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record, resolve, write_baseline
 from meizel.contracts.debt_report import (
@@ -136,7 +143,7 @@ def _plan(
     lines: list[str] = []
     for owner, table in baselines.items():
         for code, rows in table.items():
-            for key, count in sorted(rows.items()):
+            for key, entry in sorted(rows.items()):
                 target = _relocated(owner, code, key, moved, gone)
                 if target is None and code in _PATCH_CODES:
                     renamed = _retargeted(key, renames)
@@ -145,9 +152,28 @@ def _plan(
                     continue
                 del tables[owner][code][key]
                 landing = tables.setdefault(target[0], {}).setdefault(code, {})
-                landing[target[1]] = landing.get(target[1], 0) + count
-                lines.append(f"{code} {_join(owner, key)} => {_join(*target)} ({count})")
+                lines.append(f"{code} {_join(owner, key)} => {_join(*target)} ({entry.count})")
+                lines.extend(_conflict(code, target, landing.get(target[1]), entry))
+                landing[target[1]] = _merged(landing.get(target[1]), entry)
     return tables, lines
+
+
+# meiva:note
+# Two entries on the key a move lands on: the counts add, and the metadata already at the target wins
+# where it exists, the moved entry filling in where it does not. Paying attention to which owner is
+# kept is the point of the field, so a real disagreement is reported rather than resolved silently.
+def _merged(here: DebtEntry | None, moved: DebtEntry) -> DebtEntry:
+    if here is None:
+        return moved
+    return DebtEntry(here.count + moved.count, here.owner or moved.owner, here.until or moved.until)
+
+
+def _conflict(
+    code: Code, target: tuple[str, str], here: DebtEntry | None, moved: DebtEntry
+) -> list[str]:
+    if here is None or not here.owner or not moved.owner or here.owner == moved.owner:
+        return []
+    return [f"{code} {_join(*target)}: kept owner {here.owner} over {moved.owner}"]
 
 
 def _check_move(
@@ -191,14 +217,15 @@ def _swap(
         if landing is None:
             continue
         rows = tables.get(owner, {}).get(code, {})
-        amount = min(count, after.get((code, *landing), 0), rows.get(key, 0))
-        if amount == 0:
+        entry = rows.get(key)
+        amount = min(count, after.get((code, *landing), 0), entry.count if entry else 0)
+        if amount == 0 or entry is None:
             continue
-        rows[key] -= amount
-        if not rows[key]:
+        rows[key] = DebtEntry(entry.count - amount, entry.owner, entry.until)
+        if not rows[key].count:
             del rows[key]
         row = tables.setdefault(landing[0], {}).setdefault(code, {})
-        row[landing[1]] = row.get(landing[1], 0) + amount
+        row[landing[1]] = _merged(row.get(landing[1]), DebtEntry(amount, entry.owner, entry.until))
         lines.append(f"{code} {_join(owner, key)} => {_join(*landing)} ({amount}, {move.name})")
     return lines
 
@@ -308,10 +335,11 @@ def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
 def run_debt(repo: GitRepo, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
     mode = args.debt_mode
     if mode is None:
-        print(summarize(repo, as_json=args.json))
+        print(summarize(repo, as_json=args.json, unowned_list=args.unowned))
         return 0
-    if args.json:
-        raise MeizelError("--json belongs to the summary: `meizel debt --json`")
+    for flag in ("json", "unowned"):
+        if getattr(args, flag, False):
+            raise MeizelError(f"--{flag} belongs to the summary: `meizel debt --{flag}`")
     if mode == "prune":
         for line in prune_debt(repo, jobs):
             print(line)

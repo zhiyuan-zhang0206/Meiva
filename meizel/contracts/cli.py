@@ -158,6 +158,11 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
         description="Without a subcommand, summarise the baselines in the meizel.toml files.",
     )
     debt.add_argument("--json", action="store_true", help="print the summary as JSON")
+    debt.add_argument(
+        "--unowned",
+        action="store_true",
+        help="list the recorded debts that name no owner, one per line",
+    )
     modes = debt.add_subparsers(dest="debt_mode")
     recording = modes.add_parser(
         "record", help="write the current violations under paths into baselines"

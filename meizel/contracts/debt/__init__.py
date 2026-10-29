@@ -1,26 +1,33 @@
-"""Recorded locality debt: the baseline format, its keys and the `[debt]` text of a manifest.
-
-A baseline lives in the `meizel.toml` of the directory that judges the violation, so debt is as
-local as the rule: an edge violation sits in the lowest common directory of the edge, a
-restricted form in the directory of its file. Entries carry no line numbers, so code that moves
-inside a file leaves the baseline alone.
-
-```toml
-[debt.private-name]
-"test_a.py -> a.py#_helper" = 3
-
-[debt.cycle-edge]
-"b.py -> a.py" = 1
-```
-"""
+# meiva:note
+# Recorded locality debt: the baseline format, its keys and the `[debt]` text of a manifest.
+#
+# A baseline lives in the `meizel.toml` of the directory that judges the violation, so debt is as
+# local as the rule: an edge violation sits in the lowest common directory of the edge, a restricted
+# form in the directory of its file. Entries carry no line numbers, so code that moves inside a file
+# leaves the baseline alone.
+#
+# ```toml
+# [debt.private-name]
+# "test_a.py -> a.py#_helper" = 3
+#
+# [debt.cycle-edge]
+# "b.py -> a.py" = 1
+# ```
 
 from __future__ import annotations
 
 import json
 import re
 from collections.abc import Callable, Mapping
-from typing import TypeGuard
 
+from meizel.contracts.debt.entry import (
+    DebtEntry,
+    count_of,
+    entry_value,
+    is_table,
+    read_entry,
+    unowned,
+)
 from meizel.graph.model import Code
 
 __all__ = [
@@ -35,19 +42,26 @@ __all__ = [
     "PATCH_WHAT",
     "PURITY_CODES",
     "TABLE_KEY",
+    "DebtEntry",
     "DebtTable",
+    "count_of",
+    "entry_value",
     "file_key",
+    "is_table",
     "local_edge",
     "parse_debt",
+    "read_entry",
     "set_debt",
     "source_of",
     "total",
+    "unowned",
 ]
 
 CYCLE_EDGE = Code.CYCLE_EDGE
 EDGE_CODES = frozenset(
     {Code.UNDECLARED_EDGE, Code.NOT_EXPORTED, Code.PRIVATE_MODULE, Code.PRIVATE_NAME, CYCLE_EDGE}
 )
+# meiva:note
 # The codes of a patch: the key of an entry is `file#form target`.
 PATCH_CODES = (
     Code.FIRST_PARTY_PATCH,
@@ -95,9 +109,11 @@ _FILE_CODES = frozenset(
 DEBTABLE = EDGE_CODES | _FILE_CODES
 TABLE_KEY = "debt"
 
-type DebtTable = dict[Code, dict[str, int]]
+
+type DebtTable = dict[Code, dict[str, DebtEntry]]
 
 _NAMED = frozenset({Code.PRIVATE_NAME})
+_ENTRY_FIELDS = ("count", "owner", "until")
 _SEPARATOR = " -> "
 _DEBT_HEADER = re.compile(r"^\s*\[\s*debt\s*(?:\.[^\]]*)?\]\s*(?:#.*)?$")
 _ANY_HEADER = re.compile(r"^\s*\[[^\]]*\]\s*(?:#.*)?$")
@@ -107,19 +123,22 @@ def _within(owner: str, path: str) -> str:
     return path[len(owner) + 1 :] if owner else path
 
 
+# meiva:note
+# `file#what`, relative to the owning directory.
 def file_key(owner: str, path: str, what: str) -> str:
-    """`file#what`, relative to the owning directory."""
     return f"{_within(owner, path)}#{what}"
 
 
+# meiva:note
+# The repository path of the file a debt is about.
 def source_of(owner: str, code: Code, key: str) -> str:
-    """The repository path of the file a debt is about."""
     head = key.split(_SEPARATOR, 1)[0] if code in EDGE_CODES else key.split("#", 1)[0]
     return f"{owner}/{head}" if owner else head
 
 
+# meiva:note
+# The `(from, to)` children of the owner that an edge key projects onto.
 def local_edge(key: str) -> tuple[str, str]:
-    """The `(from, to)` children of the owner that an edge key projects onto."""
     src, _, dst = key.partition("#")[0].partition(_SEPARATOR)
     return src.split("/", 1)[0], dst.split("/", 1)[0]
 
@@ -143,17 +162,10 @@ def _key_problem(code: Code, key: str) -> str | None:
     return None if file and what else f"a {code} debt is written `file#form`"
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_table(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
-
-
+# meiva:note
+# Validate a parsed `[debt]` table; every defect goes to `report`, valid entries are kept.
 def parse_debt(table: object, report: Callable[[str], None]) -> DebtTable:
-    """Validate a parsed `[debt]` table; every defect goes to `report`, valid entries are kept."""
-    if not _is_table(table):
+    if not is_table(table):
         report("[debt] must be a table")
         return {}
     result: DebtTable = {}
@@ -162,7 +174,7 @@ def parse_debt(table: object, report: Callable[[str], None]) -> DebtTable:
         if code is None:
             known = ", ".join(sorted(c.value for c in DEBTABLE))
             report(f"[debt.{name}] is not a code that can be recorded; the codes are {known}")
-        elif not _is_table(rows):
+        elif not is_table(rows):
             report(f"[debt.{name}] must be a table of `key = count`")
         else:
             kept = _valid_entries(code, rows, report)
@@ -173,21 +185,22 @@ def parse_debt(table: object, report: Callable[[str], None]) -> DebtTable:
 
 def _valid_entries(
     code: Code, rows: Mapping[str, object], report: Callable[[str], None]
-) -> dict[str, int]:
-    kept: dict[str, int] = {}
-    for key, count in rows.items():
+) -> dict[str, DebtEntry]:
+    kept: dict[str, DebtEntry] = {}
+    for key, value in rows.items():
+        where = f"[debt.{code}] {key!r}"
         problem = _key_problem(code, key)
         if problem is not None:
-            report(f"[debt.{code}] {key!r}: {problem}")
-        elif not isinstance(count, int) or isinstance(count, bool) or count < 1:
-            report(f"[debt.{code}] {key!r}: the count must be a positive integer")
-        else:
-            kept[key] = count
+            report(f"{where}: {problem}")
+            continue
+        entry = read_entry(value, where, report)
+        if entry is not None:
+            kept[key] = entry
     return kept
 
 
 def total(table: DebtTable) -> int:
-    return sum(count for rows in table.values() for count in rows.values())
+    return sum(entry.count for rows in table.values() for entry in rows.values())
 
 
 # meiva:note
@@ -196,8 +209,8 @@ def _render_debt(table: DebtTable) -> str:
     blocks = [
         f"[debt.{code}]\n"
         + "\n".join(
-            f"{json.dumps(key, ensure_ascii=False)} = {count}"
-            for key, count in sorted(table[code].items())
+            f"{json.dumps(key, ensure_ascii=False)} = {_render_entry(entry)}"
+            for key, entry in sorted(table[code].items())
         )
         for code in sorted(table, key=str)
         if table[code]
@@ -205,8 +218,20 @@ def _render_debt(table: DebtTable) -> str:
     return "\n\n".join(blocks) + "\n" if blocks else ""
 
 
+def _render_entry(entry: DebtEntry) -> str:
+    value = entry_value(entry)
+    if isinstance(value, int):
+        return str(value)
+    fields = ", ".join(
+        f"{key} = {json.dumps(item, ensure_ascii=False) if isinstance(item, str) else item}"
+        for key, item in value.items()
+    )
+    return "{ " + fields + " }"
+
+
+# meiva:note
+# `text` with its `[debt.*]` tables replaced by `table`; everything else is kept as written.
 def set_debt(text: str, table: DebtTable) -> str:
-    """`text` with its `[debt.*]` tables replaced by `table`; everything else is kept as written."""
     kept: list[str] = []
     inside = False
     for line in text.splitlines():

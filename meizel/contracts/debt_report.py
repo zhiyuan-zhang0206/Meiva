@@ -16,8 +16,10 @@ from meizel.contracts.debt import (
     PATCH_CODES,
     TABLE_KEY,
     DebtTable,
+    count_of,
     parse_debt,
     total,
+    unowned,
 )
 from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
@@ -69,7 +71,7 @@ def _by_code(baselines: Baselines) -> Counter[Code]:
     counts: Counter[Code] = Counter()
     for table in baselines.values():
         for code, rows in table.items():
-            counts[code] += sum(rows.values())
+            counts[code] += sum(entry.count for entry in rows.values())
     return counts
 
 
@@ -86,21 +88,35 @@ def _judged_directories(universe: Universe) -> set[str]:
     return judged
 
 
-def _report(universe: Universe) -> dict[str, Any]:
+def _report(universe: Universe, *, unowned_list: bool = False) -> dict[str, Any]:
     baselines = read_baselines(universe)
     tops: dict[str, dict[str, Any]] = {}
     for directory, table in baselines.items():
         top = tops.setdefault(
-            _top(directory), {"total": 0, "by_code": Counter(), "strict_to_be_directories": 0}
+            _top(directory),
+            {
+                "total": 0,
+                "by_code": Counter(),
+                "strict_to_be_directories": 0,
+                "unowned_entries": 0,
+                "unowned": 0,
+            },
         )
         top["total"] += total(table)
         top["strict_to_be_directories"] += 1
+        entries, occurrences = unowned(table)
+        top["unowned_entries"] += entries
+        top["unowned"] += occurrences
         for code, rows in table.items():
-            top["by_code"][code.value] += sum(rows.values())
+            top["by_code"][code.value] += sum(entry.count for entry in rows.values())
     judged = _judged_directories(universe)
+    missing, occurrences = _unowned(baselines)
+    listed = {"unowned_list": _unowned_lines(baselines)} if unowned_list else {}
     return {
+        **listed,
         "basis": "recorded manifest debt only; no source, semantic purity, or test-resource analysis",
         "total": sum(total(t) for t in baselines.values()),
+        "unowned": {"entries": missing, "occurrences": occurrences},
         "by_code": {c.value: n for c, n in sorted(_by_code(baselines).items(), key=str)},
         "by_top_level": {
             name: {**top, "by_code": dict(sorted(top["by_code"].items()))}
@@ -113,13 +129,29 @@ def _report(universe: Universe) -> dict[str, Any]:
     }
 
 
+# meiva:note
+# A count with its noun in the number the count takes: the summary says "1 recorded debt names no
+# owner", not "1 recorded debts name no owner".
+def _counted(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
+
+
 def _text(data: dict[str, Any]) -> str:
     modes = data["directories"]
     lines = [
-        f"meizel debt: {data['total']} recorded locality debts in "
-        f"{modes['strict_to_be']} directories with recorded debt "
-        f"({modes['strict']} directories without recorded debt)",
+        f"meizel debt: {_counted(data['total'], 'recorded locality debt', 'recorded locality debts')}"
+        f" in {_counted(modes['strict_to_be'], 'directory', 'directories')} with recorded debt "
+        f"({_counted(modes['strict'], 'directory', 'directories')} without recorded debt)",
         data["basis"],
+        "",
+        (
+            "every recorded debt names an owner"
+            if not data["unowned"]["entries"]
+            else f"{_counted(data['unowned']['entries'], 'recorded debt', 'recorded debts')} "
+            f"{'names' if data['unowned']['entries'] == 1 else 'name'} no owner "
+            f"({_counted(data['unowned']['occurrences'], 'occurrence', 'occurrences')}); "
+            "`meizel debt --unowned` lists them"
+        ),
         "",
         "by code:",
         *(f"  {code:<20}{count:>8}" for code, count in data["by_code"].items()),
@@ -128,14 +160,43 @@ def _text(data: dict[str, Any]) -> str:
     ]
     ranked = sorted(data["by_top_level"].items(), key=lambda item: (-item[1]["total"], item[0]))
     lines.extend(
-        f"  {name:<20}{top['total']:>8}  in {top['strict_to_be_directories']} directories"
+        f"  {name:<20}{top['total']:>8}  in "
+        f"{_counted(top['strict_to_be_directories'], 'directory', 'directories')}"
         for name, top in ranked
     )
+    listed = data.get("unowned_list")
+    if listed:
+        lines.extend(["", "recorded debts with no owner:", *listed])
     return "\n".join(lines)
 
 
-def summarize(repo: GitRepo, *, as_json: bool) -> str:
-    data = _report(repo.universe())
+# meiva:note
+# How many recorded debts name no owner: the entries a backfill has to reach, and the occurrences
+# they carry. A bare count and an entry without `owner` count the same here.
+def _unowned(baselines: Baselines) -> tuple[int, int]:
+    entries = occurrences = 0
+    for table in baselines.values():
+        missing, counts = unowned(table)
+        entries += missing
+        occurrences += counts
+    return entries, occurrences
+
+
+# meiva:note
+# Every recorded debt that names no owner, one line each: what a backfill pass reads instead of
+# grepping the entries by hand.
+def _unowned_lines(baselines: Baselines) -> list[str]:
+    lines: list[str] = []
+    for directory, table in sorted(baselines.items()):
+        for code, rows in sorted(table.items(), key=lambda item: str(item[0])):
+            for key, entry in sorted(rows.items()):
+                if not entry.owner:
+                    lines.append(f"{manifest_path(directory)}: {code} {key} ({entry.count})")
+    return lines
+
+
+def summarize(repo: GitRepo, *, as_json: bool, unowned_list: bool = False) -> str:
+    data = _report(repo.universe(), unowned_list=unowned_list)
     return json.dumps(data, indent=2, sort_keys=True) if as_json else _text(data)
 
 
@@ -162,7 +223,7 @@ def _totals_in(text: str) -> Counter[str]:
     if _is_table(table):
         for code, rows in table.items():
             if _is_table(rows):
-                counts[code] += sum(n for n in rows.values() if isinstance(n, int))
+                counts[code] += sum(count_of(n) for n in rows.values())
     return counts
 
 
@@ -237,9 +298,8 @@ def _targets(tables: list[dict[str, dict[str, object]]]) -> Targets:
     for table in tables:
         for code, rows in table.items():
             if code in patch_codes:
-                for key, count in rows.items():
-                    if isinstance(count, int):
-                        counts[(code, _target_of(key))] += count
+                for key, value in rows.items():
+                    counts[(code, _target_of(key))] += count_of(value)
     return counts
 
 

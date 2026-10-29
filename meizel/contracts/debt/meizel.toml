@@ -1,0 +1,5 @@
+[uses]
+"__init__.py" = ["entry.py"]
+
+[purity]
+"." = "strict"
