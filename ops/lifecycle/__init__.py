@@ -457,6 +457,7 @@ def restart_blocking(
                 body.config_overlay,
                 models=catalog.models,
                 decision_models=catalog.decision_models,
+                prices=catalog.prices,
                 home=home,
             )
         except InvalidConfigOverlay as exc:

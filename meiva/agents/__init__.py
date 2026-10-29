@@ -578,6 +578,7 @@ def spawn_impl(
             None if installation is None else installation.configs,
             models=catalog.models,
             decision_models=catalog.decision_models,
+            prices=catalog.prices,
             home=process_context.current_context().require_meiva_home(),
         )
     return gateway_client.spawn(

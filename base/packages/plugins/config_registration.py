@@ -1,6 +1,6 @@
 import json
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -227,6 +227,30 @@ def _validate_model_membership(
     return f"value {value!r} is not a registered {kind}; valid {kind}s: {valid_models}"
 
 
+# meiva:note
+# A model without a price can still be spawned and called: the usage path records its tokens and
+# zeroes its cost, so the bill silently undercounts instead of failing. Refuse the overlay at the
+# door — the alternative is discovering the hole from a daily log line, days later.
+# The gate is on the model that will actually run: a withdrawn id declares `unavailable_fallback`
+# and the runtime settles it before calling (one hop, as `resolve_available_model` does), so a
+# withdrawn id is judged by its fallback. Reading it at the same grain as that settle keeps the
+# two from disagreeing.
+def _require_priced(
+    model: object, models: Mapping[str, object], prices: Collection[str] | None
+) -> None:
+    if prices is None or not isinstance(model, str) or model in prices:
+        return
+    fallback = getattr(models.get(model), "unavailable_fallback", None)
+    if isinstance(fallback, str) and fallback in prices:
+        return
+    raise InvalidConfigOverlay(
+        f"overlay key 'llm_model' names {model!r}, which has no price in the pricing catalog; "
+        "its usage would be recorded with cost 0, so the bill would silently undercount. "
+        "Spawn with a priced model, or land the price in the same change that adds the model. "
+        "Where: base/lm/pricing/pricing_catalog_archive.json or the plugin price registry."
+    )
+
+
 def _validate_reasoning_effort_range(value: object) -> str | None:
     from base.lm.effort import EFFORT_VOCAB
 
@@ -348,6 +372,7 @@ def validate_config_overlay(
     *,
     models: Mapping[str, object],
     decision_models: Mapping[str, object] | None = None,
+    prices: Collection[str] | None = None,
     home: Path,
 ) -> None:
     validate_config_overlay_shape(overlay, configs, home=home)
@@ -355,6 +380,7 @@ def validate_config_overlay(
         error = _validate_model_membership(overlay["llm_model"], models)
         if error is not None:
             raise InvalidConfigOverlay(f"overlay key 'llm_model' {error}")
+        _require_priced(overlay["llm_model"], models, prices)
     for field in _DECISION_MODEL_FIELDS:
         if field in overlay:
             if decision_models is None:
