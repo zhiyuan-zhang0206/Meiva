@@ -30,7 +30,7 @@ __all__ = [
 ]
 
 # The closed set of roles; an unknown role is an error, never a new category.
-ROLE_NAMES = ("application", "templates", "examples", "tooling", "tests", "frontend")
+ROLE_NAMES = ("application", "standalone", "templates", "examples", "tooling", "tests", "frontend")
 _ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -64,7 +64,7 @@ from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
 # Scan directories — only OUR code, never .venv / node_modules / vendored trees.
-SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "standalone", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -146,14 +146,8 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
     return violations_in_source(text, str(path))
 
 
-def _iter_py_files(roots: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
+def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
+    return lint_common.python_files(roots, repo_root)
 
 
 def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
@@ -171,7 +165,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
     scope = lint_common.changed_scope(only, root)
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, root)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets, root), scope, root)):
         try:
             rel = path.relative_to(root).as_posix()
         except ValueError:

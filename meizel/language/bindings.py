@@ -6,7 +6,7 @@ import ast
 import builtins
 import types
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 
 from meizel.graph.imports import Scope, collect_scope, dotted_chain
@@ -81,7 +81,16 @@ def module_bindings(universe: Universe, file: str) -> Bindings:
         source = universe.repo.load_text(file)
     except (OSError, ValueError):
         return Bindings(frozenset(), dynamic=True)
-    return _read(source, file)
+    raw = _read(source, file)
+    context = universe.context(file)
+    return replace(
+        raw,
+        reexports=tuple((name, context.canonical_name(origin)) for name, origin in raw.reexports),
+        classes=tuple(
+            replace(fact, bases=tuple(context.canonical_name(base) for base in fact.bases))
+            for fact in raw.classes
+        ),
+    )
 
 
 @cache

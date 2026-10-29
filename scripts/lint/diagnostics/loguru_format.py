@@ -115,7 +115,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
-SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "standalone", "tooling")
 
 _LOGURU_MODULES = frozenset({"base.log", "loguru"})
 _LEVEL_METHODS = frozenset(
@@ -424,7 +424,7 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
 
 def _default_files(root: Path = _REPO_ROOT) -> list[str]:
     roots = lint_common.scan_roots(root, SCAN_DIRS)
-    return sorted(p.relative_to(root).as_posix() for r in roots for p in r.rglob("*.py"))
+    return sorted(p.relative_to(root).as_posix() for p in lint_common.python_files(roots, root))
 
 
 def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:

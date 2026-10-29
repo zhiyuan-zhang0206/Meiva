@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
-from meizel import is_repo_test_file, is_test_path, split_only
+from meizel import is_repo_test_file, is_test_path, restrict, split_only
 from meizel.checkout import tracked_files
 from meizel.graph.model import MeizelError
 from meizel.roles import packages, pytest_test_hosts
@@ -16,6 +16,7 @@ __all__ = [
     "is_repo_test_file",
     "is_test_path",
     "pytest_test_hosts",
+    "python_files",
     "read_utf8_text",
     "resolve_targets",
     "restrict",
@@ -25,10 +26,11 @@ __all__ = [
     "tracked_files",
 ]
 
-# The framework code: every production Python package at the repo root. Lints
+# meiva:note
+# The governed production code, including independently packaged projects. Lints
 # whose scope is "the framework" import this instead of keeping their own copy,
 # so a new or renamed package cannot drift out of one lint's scope unnoticed.
-FRAMEWORK_DIRS = packages("application")
+FRAMEWORK_DIRS = packages("application", "standalone")
 
 
 # meiva:note
@@ -96,13 +98,6 @@ def changed_scope(
     return changed
 
 
-def restrict(paths: Iterable[Path], scope: frozenset[str] | None, repo_root: Path) -> list[Path]:
-    """The enumerated files `scope` judges: all of them, or only the changed ones."""
-    if scope is None:
-        return list(paths)
-    return [path for path in paths if _rel_or_abs(path, repo_root) in scope]
-
-
 def _rel_or_abs(path: Path, repo_root: Path) -> str:
     try:
         return path.relative_to(repo_root).as_posix()
@@ -119,10 +114,22 @@ def _resolved_target(argument: str, repo_root: Path) -> Path:
     return path.resolve()
 
 
-def _files_in_target(target: Path, repo_root: Path) -> list[str]:
+# meiva:note
+# Git owns source admission in a checkout: tracked regular files plus new nonignored
+# regular files. Standalone environments are ignored dependencies, not governed source.
+# A non-Git fixture keeps the explicit filesystem behavior of the lint API.
+def _source_files(repo_root: Path) -> list[str] | None:
+    if not _exists(repo_root / ".git"):
+        return None
+    return sorted(tracked_files(repo_root, include_untracked=True, regular=True))
+
+
+def _files_in_target(target: Path, repo_root: Path, admitted: list[str] | None) -> list[str]:
     if _is_file(target):
         return [_rel_or_abs(target, repo_root)]
     if _is_dir(target):
+        if admitted is not None and target.is_relative_to(repo_root):
+            return [name for name in admitted if (repo_root / name).is_relative_to(target)]
         return [_rel_or_abs(path, repo_root) for path in target.rglob("*") if _is_file(path)]
     return []
 
@@ -133,9 +140,23 @@ def resolve_targets(argv: list[str], repo_root: Path) -> tuple[list[str], list[s
     missing = [a for a, target in zip(argv, targets, strict=True) if not _exists(target)]
     if missing:
         return [], missing
-
-    files = [file for target in targets for file in _files_in_target(target, repo_root)]
+    admitted = _source_files(repo_root)
+    files = [file for target in targets for file in _files_in_target(target, repo_root, admitted)]
     return sorted(set(files)), []
+
+
+# meiva:note
+# Python source below the chosen roots, using the same admission as explicit directory
+# targets. Read Git once for the whole scan; explicit leaf files retain their audit meaning.
+def python_files(roots: Iterable[Path], repo_root: Path) -> list[Path]:
+    admitted = _source_files(repo_root)
+    files = {
+        file
+        for target in roots
+        for file in _files_in_target(target, repo_root, admitted)
+        if file.endswith(".py")
+    }
+    return [repo_root / file for file in sorted(files)]
 
 
 def read_utf8_text(path: Path) -> str | None:

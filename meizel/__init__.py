@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
-__all__ = ["is_repo_test_file", "is_test_path", "split_only"]
+__all__ = ["is_repo_test_file", "is_test_path", "restrict", "split_only"]
 
 _TEST_DIR = re.compile(r"(^|/)tests?/")
 _ONLY_FLAG = "--only"
@@ -33,3 +34,19 @@ def split_only(argv: list[str]) -> tuple[list[str], list[str] | None]:
         return argv, None
     at = argv.index(_ONLY_FLAG)
     return argv[:at], argv[at + 1 :]
+
+
+# meiva:note
+# The enumerated files `scope` judges: all of them, or only the changed ones.
+def restrict(paths: Iterable[Path], scope: frozenset[str] | None, repo_root: Path) -> list[Path]:
+    if scope is None:
+        return list(paths)
+    selected: list[Path] = []
+    for path in paths:
+        try:
+            name = path.relative_to(repo_root).as_posix()
+        except ValueError:
+            name = path.as_posix()
+        if name in scope:
+            selected.append(path)
+    return selected

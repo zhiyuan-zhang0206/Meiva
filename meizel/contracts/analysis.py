@@ -642,7 +642,7 @@ def _type_checking_diagnostics(
 ) -> list[Diagnostic]:
     root = manifests.get("")
     packages = select_packages(
-        root.roles if root else {}, "application", "tooling", "templates", "tests"
+        root.roles if root else {}, "application", "standalone", "tooling", "templates", "tests"
     )
     allowed = policy.reasons("type-checking", "files")
     return [

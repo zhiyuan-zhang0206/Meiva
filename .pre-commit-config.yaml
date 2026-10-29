@@ -118,7 +118,15 @@ repos:
         entry: .venv/bin/python scripts/lint/async_no_sync_blocking.py --only
         language: system
         # A package's own tests/ directory is not scanned by the lint, so it does not trigger it.
-        files: ^((gateway|ops)/(?!(?:.*/)?tests/).*|scripts/lint/async_no_sync_blocking)\.py$
+        files: |-
+          (?x)^(
+            (gateway|ops|
+              # meizel:roles BEGIN regex-names standalone
+              (?!)
+              # meizel:roles END
+            )/(?!(?:.*/)?tests/).*
+            |scripts/lint/async_no_sync_blocking
+          )\.py$
 
       # A test does not set an environment variable that Settings models: Settings is built once, so
       # the change reaches nothing (scripts/lint/no_os_environ.py). Production reads of the
@@ -190,7 +198,7 @@ repos:
         files: |-
           (?x)^(
             (tests|(
-              # meizel:roles BEGIN regex-names application tooling
+              # meizel:roles BEGIN regex-names application standalone tooling
               agent|meiva|meiva_builtins|base|cli|gateway|ops|services|meizel|scripts
               # meizel:roles END
             )(/.*)?/tests)/.*\.py

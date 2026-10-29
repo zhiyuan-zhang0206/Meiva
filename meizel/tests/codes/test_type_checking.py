@@ -9,13 +9,19 @@ from meizel.contracts.cli import GitRepo
 from meizel.graph.model import Code, FactKind, Sources
 from meizel.graph.universe import Universe
 from meizel.language.scan import scan_source
-from meizel.tests.synthetic import RepoFactory, run, seat, write
+from meizel.tests.synthetic import STANDALONE_PROJECT, RepoFactory, run, seat, write
 
 GUARD = "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import decimal\n"
-HOSTS = {f"{d}/__init__.py": "" for d in ("pkg", "tools", "jobs", "tests")}
-ROLES = (
-    '[roles]\napplication = ["pkg"]\ntooling = ["tools"]\ntemplates = ["jobs"]\ntests = ["tests"]\n'
-)
+HOSTS = {
+    **{f"{d}/__init__.py": "" for d in ("pkg", "tools", "jobs", "tests")},
+    "runtimes/embed/pyproject.toml": STANDALONE_PROJECT.replace(
+        "meiva_embedding_service", "embedded"
+    ),
+    "runtimes/embed/uv.lock": "",
+    "runtimes/embed/tests/test_embed.py": "",
+    "runtimes/embed/src/embedded/__init__.py": "",
+}
+ROLES = '[roles]\napplication = ["pkg"]\nstandalone = ["runtimes"]\ntooling = ["tools"]\ntemplates = ["jobs"]\ntests = ["tests"]\n'
 
 
 @pytest.mark.parametrize(
@@ -64,6 +70,7 @@ def test_text_other_objects_and_shadowed_bindings_are_not_guards(
     "path",
     [
         "pkg/a.py",
+        "runtimes/embed/src/embedded/helper.py",
         "tools/a.py",
         "jobs/a.py",
         "tests/helpers.py",

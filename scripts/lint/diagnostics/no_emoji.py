@@ -56,7 +56,7 @@ from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
 # In-scope dirs scanned by default (no argv); `_EXEMPT_PREFIXES` still applies.
-SCAN_DIRS = packages("application", "tooling", "tests")
+SCAN_DIRS = packages("application", "standalone", "tooling", "tests")
 
 # Path prefixes (repo-relative, posix) that are never scanned — deliberate-UX
 # surfaces and prose/content. Checked per file so a pre-commit-passed path under
@@ -171,14 +171,8 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
     return violations
 
 
-def _iter_py_files(roots: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
+def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
+    return lint_common.python_files(roots, repo_root)
 
 
 def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
@@ -196,7 +190,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
     scope = lint_common.changed_scope(only, root)
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, root)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets, root), scope, root)):
         if "__pycache__" in path.parts:
             continue
         try:
