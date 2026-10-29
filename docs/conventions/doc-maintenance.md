@@ -161,17 +161,42 @@ hierarchy instead of long files), and `[[wikilink]]` targets that must resolve.
 Every node sits in a `docs/` layer (`E014`; `.github/` is exempt), and
 the overview-position rule (`E009`) is judged on logical paths, so a directory
 whose nodes all sit in `docs/<sub>/` still has its overview there and no sibling
-`docs/<sub>.meiva.okf.md`. The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that
-script, which is their only source of truth — read them there rather than
-trusting a number quoted in prose. In practice the character cap is the one that
-binds: no node has ever approached the line cap.
+`docs/<sub>.meiva.okf.md`. The two thresholds are `MAX_LINES` / `MAX_CHARS` in that script, which is their
+only source of truth — read them there rather than trusting a number quoted in
+prose. In practice the character cap is the one that binds: no node has ever
+approached the line cap.
 
-A node with less than `WARN_MARGIN` characters of room left reports `W010`, a
-**non-blocking** warning naming its size and remaining room. That is the signal
-to plan your next section as a separate node. It is not an instruction to trim
-this one — the cap was raised in 2026-07 precisely because trimming to fit had
-been deleting documented facts to make room for new ones
-([why](../decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md)).
+### Why 8000 characters
+
+The ceiling is a **structure** rule, not a budget. It holds one node to one
+semantic topic, so each node stays readable on its own and the graph stays
+navigable: a node that no longer fits in 8000 characters has outgrown its topic,
+and the answer is a second node — not a shorter paragraph.
+
+Reaching the line is therefore the signal to split, never a target to fill. Do not
+spend the last few hundred characters: prose compressed to fit has deleted
+documented facts here once already, which is why the cap was raised from 6000 to
+8000 in 2026-07
+([why](../decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md)),
+and there is deliberately no warning band before the line — a "room left" readout
+is what invites that trimming again. The line is crossed once, by the change that
+crosses it, and the author of that change does the work.
+
+Two moves are legitimate, and both keep the text intact:
+
+- **Split a section out** — give it its own node under the directory the message
+  names; the filesystem derives the parent edge.
+- **Move a section to a sibling** — put it beside the current node when it belongs
+  to a different topic than this directory's.
+
+Deleting or compressing prose to get under the line is not a third option. If a
+node genuinely is one topic above 8000 characters, say so in the PR and split it
+at its seam; the ceiling does not choose the seam for you.
+
+The failing message carries the four parts a check owes its author — the measured
+value against the line, why the line exists, the split that author now owns, and
+where the rule is written ([message convention](lint-messages.md)). The line
+ceiling (`MAX_LINES`) reports through the same words.
 
 The ceiling counts **characters of decoded UTF-8** (`len(text)`), not bytes. So
 `wc -c` reads high on any node containing multi-byte glyphs — `→`, `✓`, CJK — and

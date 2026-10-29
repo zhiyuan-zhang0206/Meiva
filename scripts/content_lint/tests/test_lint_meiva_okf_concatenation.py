@@ -1,19 +1,14 @@
-"""`scripts/content_lint/lint_meiva_okf.py` — concatenation defects (rules 12 + 13).
-
-The W010 okf-split campaign replaced sections with "summary sentence +
-[[wikilink]]", and repeatedly dropped the blank line that should have
-followed — the sentence ran straight into the next header or bullet marker on
-the same physical line, so it never renders (e.g. "...write-path]].## Next
-Section" prints as one line, the header lost). Rule 13 catches the sibling
-defect: the same header duplicated instead of the next section's own.
-
-Both rules are commit-blocking (E-level, not W-level): a concatenation is a
-rendering-breaking defect, not a style nit, and the fix is a one-line local
-edit — exactly the graduation-test shape for a lint rather than a sweeper
-class (docs/conventions/engineering/lint-vs-sweeper.md).
-
-Everything is asserted against constructed trees, never the real doc tree.
-"""
+# meiva:note
+# `scripts/content_lint/lint_meiva_okf.py` — concatenation defects (rules 12 + 13). The 2026
+# okf-split campaign replaced sections with "summary sentence + [[wikilink]]" and repeatedly
+# dropped the blank line that should have followed: the sentence ran straight into the next header
+# or bullet marker on the same physical line, so it never renders (e.g. "...write-path]].## Next
+# Section" prints as one line, the header lost). Rule 13 catches the sibling defect, the same
+# header duplicated instead of the next section's own. Both rules are commit-blocking (E-level,
+# not W-level): a concatenation is a rendering-breaking defect, not a style nit, and the fix is a
+# one-line local edit — the graduation-test shape for a lint rather than a sweeper class
+# (docs/conventions/engineering/lint-vs-sweeper.md). Everything here is asserted against
+# constructed trees, never the real doc tree.
 
 from __future__ import annotations
 

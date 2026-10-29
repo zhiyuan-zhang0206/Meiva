@@ -10,6 +10,7 @@ behavior and domain contracts remain in component-local `docs/` and the
 - [Development setup](dev-setup.md) and [testing](testing.md)
 - [Documentation maintenance](doc-maintenance.md) and [SDK docstrings](sdk-docstring-discipline.md)
 - [Technical-debt inspection](engineering/tech-debt.md) and [automated-check boundary](engineering/lint-vs-sweeper.md)
+- [What a failing lint message carries](lint-messages.md)
 - [Defensive patterns](defensive-patterns.md) and [runtime runbook](runbook.md)
 
 Historical choices belong in [decisions](../decisions/README.md), incident analyses

@@ -14,19 +14,28 @@ which text shapes are blocked. The scan, schema and placement rules are
 
 ## Size ceiling
 
-Each node is measured in characters against `MAX_CHARS` with a non-blocking
-headroom band (`WARN_MARGIN` below the ceiling), and in lines against
-`MAX_LINES` — a backstop against a pathological many-short-lines document;
-the character ceiling is the one that binds at this repo's prose density.
-Past a ceiling the lint reports E007 and fails the run; inside the band it
-prints W010 with the size and the room left, before the wall, while a split is
-still cheap to plan. Every message names the remedy — split a section into its
-own node, with the directory that child belongs in. The constants move only as
-a deliberate change in the same PR, justified in the commit message; the raise to
-8000 and the band are recorded in
-[the ceiling decision](../../../docs/decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md).
+Each node is measured in characters against `MAX_CHARS` and in lines against
+`MAX_LINES`, a backstop against a pathological many-short-lines document; the
+character ceiling is the one that binds at this repo's prose density. Past
+either one the lint reports E007 and fails the run.
 
-Each node is measured in characters against a repo-wide hard ceiling with a non-blocking headroom band that reports the size and the room left, and in lines against a line-ceiling backstop; a breach reports E007 and fails the run, the message names the split-out child's directory, and the constants move only as a deliberate change in the same PR, justified in the commit message.
+The ceiling is a structure rule, not a budget: it holds one node to one semantic
+topic, and a node that crosses it has outgrown that topic. There is no warning
+band below the line and no "room left" readout — a headroom counter turns the
+line into a budget to fill and buys compression that deletes facts instead of the
+split the rule asks for. The message carries the four parts a failing check owes
+its author ([lint messages](../../../docs/conventions/lint-messages.md)): the
+measured value against the line, why the line exists, the semantic split the
+author now owns — a section moving to a child node under the directory named in
+the message, or to a sibling — and where the rule is written. They are the
+constants `_SIZE_RULE_WHY` / `_SIZE_RULE_OWNER` / `_SIZE_RULE_SEE`, so the parts
+stay visible as parts.
+
+The constants move only as a deliberate change in the same PR, justified in the
+commit message; the raise to 8000 is recorded in
+[the ceiling decision](../../../docs/decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md),
+and the split rule and its anti-pattern in
+[documentation maintenance](../../../docs/conventions/doc-maintenance.md#why-8000-characters).
 
 ## Wikilink edges
 
@@ -49,7 +58,7 @@ Wikilinks resolve only inside the .meiva.okf.md node graph, through the graph bu
 
 A header or bullet marker glued directly onto the text before it — no blank
 line, no newline between them — renders as part of the previous line instead
-of its own block; this is the defect class the W010 okf-split campaign
+of its own block; this is the defect class the 2026 okf-split campaign
 produced, and the same header line twice in a row is its other shape. Both
 are blocking defects (E012, E013). Detection runs on the raw text so line
 numbers are exact, masks fenced blocks and inline code spans with a

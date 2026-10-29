@@ -40,7 +40,7 @@ A length budget pairs one unit with a hard limit, a soft threshold, or both; 0 d
 A soft threshold equal to the hard limit could never fire — `over` takes
 precedence at the same measurement — so it is rejected as a dead setting
 rather than stored. A site that expresses its warning band as remaining room
-(`WARN_MARGIN`) sets `soft = hard - margin`; the numbers do not move. A site with only a reminder
+sets `soft = hard - margin`; the numbers do not move. A site with only a reminder
 threshold sets `soft` alone — an over-limit verdict cannot occur — and a site
 that never blocks or truncates simply never acts on `over`. The disabled budget
 (`hard=0, soft=0`) reports `ok` with `remaining=None`, so a site whose cap is

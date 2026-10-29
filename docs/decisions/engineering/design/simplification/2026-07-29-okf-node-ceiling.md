@@ -5,6 +5,13 @@ gains a non-blocking headroom warning. The cap had stopped forcing hierarchy and
 started forcing fact deletion; raising it restores the forcing function at a size
 where complying means splitting a topic rather than cutting a sentence.
 
+**Partly superseded (2026-10-29):** the headroom warning (`W010`) is removed.
+The ceiling is now one hard line with no warning band, and its message states the
+semantic split as the crossing author's work — a "room left" readout proved to
+encourage filling the last characters instead of splitting
+([message convention](../../../../conventions/lint-messages.md)). The
+8000-character cap, and the reasoning for it below, stand unchanged.
+
 ## Context
 
 The OKF per-node ceiling was 200 lines / 6000 characters of decoded UTF-8. The
