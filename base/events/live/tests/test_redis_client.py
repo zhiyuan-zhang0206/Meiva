@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import threading
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -20,14 +21,43 @@ from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live import redis_client as mod
 from base.events.live.bus import EventBus, event_bus_config_from_settings
-from base.events.live.redis_client import TransportAwareAsyncConnection
+from base.events.live.redis_client import (
+    AuthRetryAsyncRedis,
+    AuthRetrySyncRedis,
+    TransportAwareAsyncConnection,
+    open_async_redis,
+    open_sync_redis,
+)
 from base.events.live.redis_resilience import AuthRetryPolicy
-from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
+from base.events.live.tests.fakes import async_redis_factory, sync_redis_factory
 from base.events.live.tests.rng import seeded_auth_retry
 from base.host.net.predicates import is_ipv4_literal
 
 _FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
-_bus = EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
+
+
+# meiva:note
+# A bus on the fast retry policy whose client openers the test chooses; the defaults are the real
+# ones, so a caller that names neither measures the production path.
+def _bus_with(
+    *,
+    open_async: Callable[..., AuthRetryAsyncRedis] = open_async_redis,
+    open_sync: Callable[..., AuthRetrySyncRedis] = open_sync_redis,
+    publish_attempt_timeout_s: float | None = None,
+) -> EventBus:
+    config = replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY)
+    if publish_attempt_timeout_s is not None:
+        config = replace(config, publish_attempt_timeout_s=publish_attempt_timeout_s)
+    return EventBus(
+        config,
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
+        open_async_redis=open_async,
+        open_sync_redis=open_sync,
+    )
+
+
+_bus = _bus_with()
 _PUBLISH_BOUND_S = event_bus_config_from_settings().publish_attempt_timeout_s
 
 
@@ -37,11 +67,7 @@ def _fresh_bus() -> None:
     per-loop registry; otherwise a cached client from a previous test would survive into the
     next loop."""
     global _bus  # noqa: PLW0603 — the module's tests share one handle per test
-    _bus = EventBus(
-        replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
-        rng=seeded_rng(),
-        timers=SYSTEM_TIMERS,
-    )
+    _bus = _bus_with()
 
 
 async def test_same_loop_returns_same_instance() -> None:
@@ -130,33 +156,27 @@ class _EventuallySyncPublisher:
 
 
 @pytest.mark.parametrize("error", (AuthenticationError, NoPermissionError))
-async def test_publish_retries_auth_failures_until_it_succeeds(
-    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
-) -> None:
+async def test_publish_retries_auth_failures_until_it_succeeds(error: type[Exception]) -> None:
     publisher = _EventuallyAsyncPublisher(error, failures=2)
-    patch_async_redis(monkeypatch, lambda: publisher)
+    bus = _bus_with(open_async=async_redis_factory(lambda: publisher))
 
-    assert await _bus.publish_best_effort("payload", channel="meiva:events") == 3
+    assert await bus.publish_best_effort("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
 
 
-async def test_publish_auth_retry_stops_when_the_attempts_are_spent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_publish_auth_retry_stops_when_the_attempts_are_spent() -> None:
     publisher = _EventuallyAsyncPublisher(AuthenticationError, failures=100)
-    patch_async_redis(monkeypatch, lambda: publisher)
+    bus = _bus_with(open_async=async_redis_factory(lambda: publisher))
 
-    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
+    assert await bus.publish_best_effort("payload", channel="meiva:events") is None
     assert publisher.attempts == _FAST_RETRY.max_attempts
 
 
-async def test_publish_does_not_retry_connection_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_publish_does_not_retry_connection_errors() -> None:
     publisher = _EventuallyAsyncPublisher(RedisConnectionError, failures=100)
-    patch_async_redis(monkeypatch, lambda: publisher)
+    bus = _bus_with(open_async=async_redis_factory(lambda: publisher))
 
-    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
+    assert await bus.publish_best_effort("payload", channel="meiva:events") is None
     assert publisher.attempts == 1
 
 
@@ -166,9 +186,7 @@ def test_a_publish_bound_that_would_always_time_out_is_refused(bound: float) -> 
         replace(event_bus_config_from_settings(), publish_attempt_timeout_s=bound)
 
 
-async def test_best_effort_publish_bounds_a_half_open_health_check_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_best_effort_publish_bounds_a_half_open_health_check_read() -> None:
     """A reused connection can accept the PUBLISH write and then park forever
     reading its health-check PONG. The best-effort command owns a short attempt
     bound even though the shared socket timeout stays None for pub/sub.
@@ -178,11 +196,8 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     instead of hanging alongside the bug.
     """
     publisher = _HalfOpenHealthCheckPublisher()
-    patch_async_redis(monkeypatch, lambda: publisher)
-    quick = EventBus(
-        replace(event_bus_config_from_settings(), publish_attempt_timeout_s=0.01),
-        rng=seeded_rng(),
-        timers=SYSTEM_TIMERS,
+    quick = _bus_with(
+        open_async=async_redis_factory(lambda: publisher), publish_attempt_timeout_s=0.01
     )
 
     task = asyncio.create_task(quick.publish_best_effort("payload", channel="meiva:events"))
@@ -198,13 +213,11 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     assert publisher.cancelled
 
 
-def test_sync_publish_retries_auth_failures_until_it_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_sync_publish_retries_auth_failures_until_it_succeeds() -> None:
     publisher = _EventuallySyncPublisher(failures=2)
-    patch_sync_redis(monkeypatch, lambda: publisher)
+    bus = _bus_with(open_sync=sync_redis_factory(lambda: publisher))
 
-    assert _bus.publish_best_effort_sync("payload", channel="meiva:events") == 3
+    assert bus.publish_best_effort_sync("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
 
 

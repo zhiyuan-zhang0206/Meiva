@@ -2,15 +2,31 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
+from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.tests.fakes import sync_redis_factory
 from gateway.lgtm.telemetry_staleness import HEARTBEAT_EVENT, TelemetryStaleness
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+
+
+# meiva:note
+# The app's event bus whose sync client comes from `make_client`: the graph cache reads and writes
+# reach the caller's stand-in while every other bus path keeps the client it would have opened.
+def bus_with_sync_redis(make_client: Callable[[], object]) -> EventBus:
+    return EventBus(
+        event_bus_config_from_settings(),
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
+        open_sync_redis=sync_redis_factory(make_client),
+    )
 
 
 # meiva:note

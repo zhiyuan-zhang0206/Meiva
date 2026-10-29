@@ -18,8 +18,8 @@ from loguru import logger
 from base.agents.observation.turn_progress import TurnProgress
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
-from base.events.live.bus import EventBus
-from base.events.live.tests.fakes import patch_async_redis
+from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.tests.fakes import async_redis_factory
 
 from ... import daemon as host_daemon
 from ... import host_beat
@@ -74,7 +74,12 @@ async def _run_beat(host, *, steps: int) -> list[dict[str, object]]:
             cast(host_daemon.AgentHost, host),
             cast(host_daemon.TurnScheduler, _FakeScheduler()),
             "runner-a",
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            EventBus(
+                event_bus_config_from_settings(),
+                rng=seeded_rng(),
+                timers=SYSTEM_TIMERS,
+                open_async_redis=async_redis_factory(_OkRedis),
+            ),
             require_helper_chain=lambda: None,
             read_alert_seconds=lambda: 30.0,
             publish_timeout_s=0.001,
@@ -94,13 +99,10 @@ async def _run_beat(host, *, steps: int) -> list[dict[str, object]]:
     return records
 
 
-async def test_each_failed_beat_is_one_event_and_the_third_one_says_it_ends_the_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_each_failed_beat_is_one_event_and_the_third_one_says_it_ends_the_host() -> None:
     async def always_fails() -> None:
         raise psycopg.OperationalError("connection refused")
 
-    patch_async_redis(monkeypatch, _OkRedis)
     records = await _run_beat(_host(always_fails), steps=3)
 
     failures = _events(records, "host_database_beat_failed")
@@ -112,9 +114,7 @@ async def test_each_failed_beat_is_one_event_and_the_third_one_says_it_ends_the_
     assert failures[0]["limit"] == 3
 
 
-async def test_a_beat_that_recovers_reports_what_it_cleared(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_beat_that_recovers_reports_what_it_cleared() -> None:
     attempts: list[int] = []
 
     async def fails_twice_then_works() -> None:
@@ -122,7 +122,6 @@ async def test_a_beat_that_recovers_reports_what_it_cleared(
         if len(attempts) <= 2:
             raise psycopg.OperationalError("connection refused")
 
-    patch_async_redis(monkeypatch, _OkRedis)
     records = await _run_beat(_host(fails_twice_then_works), steps=2)
     for _ in range(200):
         await asyncio.sleep(0.005)

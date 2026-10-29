@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from base.clock import Timers
@@ -73,9 +74,24 @@ def event_bus_config_from_config(boot: ConfigBoot) -> EventBusConfig:
 class EventBus:
     """One cluster Redis and its events channel, dialed with one `EventBusConfig`."""
 
-    def __init__(self, config: EventBusConfig, *, rng: random.Random, timers: Timers) -> None:
+    # meiva:note
+    # The two client openers are constructor dependencies so a test hands in the client it
+    # needs instead of rewriting this class or the module-level opener. Their defaults are the
+    # module-level openers of `redis_client`, so a composition root that passes neither dials
+    # exactly what it dialed before.
+    def __init__(
+        self,
+        config: EventBusConfig,
+        *,
+        rng: random.Random,
+        timers: Timers,
+        open_async_redis: Callable[..., AuthRetryAsyncRedis] = open_async_redis,
+        open_sync_redis: Callable[..., AuthRetrySyncRedis] = open_sync_redis,
+    ) -> None:
         self._config = config
         self._timers = timers
+        self._open_async_redis = open_async_redis
+        self._open_sync_redis = open_sync_redis
         self._auth_retry = AuthRetry(config.auth_retry_policy, rng=rng, timers=timers)
         self._warn_last: dict[tuple[str, str], float] = {}
         self._clients: dict[asyncio.AbstractEventLoop, AuthRetryAsyncRedis] = {}
@@ -101,7 +117,7 @@ class EventBus:
 
     def open_async_redis(self, *, decode_responses: bool = True) -> AuthRetryAsyncRedis:
         """A new async client for a caller-owned connection lifecycle (pub/sub subscribers)."""
-        return open_async_redis(
+        return self._open_async_redis(
             self._config.redis_url,
             decode_responses=decode_responses,
             auth_retry=self._auth_retry,
@@ -118,7 +134,7 @@ class EventBus:
 
     def sync_redis(self, *, decode_responses: bool = False) -> AuthRetrySyncRedis:
         """A new synchronous client; the caller owns it and closes it."""
-        return open_sync_redis(
+        return self._open_sync_redis(
             self._config.redis_url,
             decode_responses=decode_responses,
             auth_retry=self._auth_retry,

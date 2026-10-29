@@ -15,8 +15,9 @@ from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import redis_channel_prefix
 from base.config import settings
 from base.db import Database, create_agent
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.live.redis_listener import RedisInboundListener
+from base.events.live.tests.fakes import sync_redis_factory
 
 
 async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventBus) -> None:
@@ -40,11 +41,7 @@ async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventB
         r.close()
 
 
-def test_unknown_wake_error_propagates(
-    database: Database, event_bus: EventBus, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.events.live.tests.fakes import patch_sync_redis
-
+def test_unknown_wake_error_propagates(database: Database) -> None:
     bug = AttributeError("wake bug")
 
     class BrokenRedis:
@@ -54,9 +51,14 @@ def test_unknown_wake_error_propagates(
         def close(self) -> None:
             pass
 
-    patch_sync_redis(monkeypatch, BrokenRedis)
+    bus = EventBus(
+        event_bus_config_from_settings(),
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
+        open_sync_redis=sync_redis_factory(BrokenRedis),
+    )
     with pytest.raises(AttributeError) as raised:
-        publish_inbound_wake(database, event_bus, 123, "456")
+        publish_inbound_wake(database, bus, 123, "456")
     assert raised.value is bug
 
 

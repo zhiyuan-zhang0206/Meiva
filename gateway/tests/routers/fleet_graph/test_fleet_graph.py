@@ -22,8 +22,10 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from base.events.live.tests.fakes import patch_sync_redis
 from base.events.reads import audit_rows
+from gateway.tests.routers.fleet_graph.staleness_support import (
+    bus_with_sync_redis,
+)
 from gateway.tests.routers.fleet_graph.staleness_support import (
     fleet_graph_client as gateway_test_client,
 )
@@ -609,10 +611,7 @@ def test_cache_key_separates_params(db_conn: psycopg.Connection) -> None:
     assert windowed[a]["node_score"] == 60.0  # only the fresh increment: 100*0.1 + 50*1.0
 
 
-def test_cache_fail_open_when_redis_down(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cache_fail_open_when_redis_down(db_conn: psycopg.Connection) -> None:
     """A Redis outage (sync_redis raising) degrades to a direct DB query —
     never a 500."""
     source = _seed_agent(db_conn)
@@ -626,11 +625,11 @@ def test_cache_fail_open_when_redis_down(
     )
     _usage(db_conn, source, in_total=100, out_total=50)
 
-    def boom(*args: object, **kwargs: object) -> object:
+    def boom() -> object:
         raise ConnectionError("redis down")
 
-    patch_sync_redis(monkeypatch, boom)
     with gateway_test_client() as client:
+        client.app.state.bus = bus_with_sync_redis(boom)
         response = client.get("/api/fleet/graph")
 
     assert response.status_code == 200
