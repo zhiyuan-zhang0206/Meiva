@@ -7,26 +7,24 @@ import time
 import pytest
 
 from base.clock import SYSTEM_TIMERS
-from base.clock.tests.seeded_rng import seeded_rng
-from base.events.live.bus import EventBus
-from base.events.live.tests.fakes import patch_open_async_redis
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import (
     QueueingPubSub,
-    patch_redis,
+    QueueingRedisOpener,
+    redis_bus,
 )
 from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import ScanScheduler
 
 
 class TestSubscriptionRecovery:
     async def test_db_down_scan_keeps_the_redis_subscription_open(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+        self, loguru_records: LogRecords
     ) -> None:
         pubsub = QueueingPubSub()
-        clients = patch_redis(monkeypatch, pubsub)
+        opener = QueueingRedisOpener(pubsub)
         failures_seen = asyncio.Event()
         scans = 0
 
@@ -38,7 +36,7 @@ class TestSubscriptionRecovery:
             raise RuntimeError("database unavailable")
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            redis_bus(opener),
             ScanScheduler(),
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -54,7 +52,7 @@ class TestSubscriptionRecovery:
             failures = loguru_records.events("host_dispatcher_scan_failed")
             assert all(record["level"].name == "WARNING" for record in failures)
             failure_events = [record["extra"] for record in failures]
-            assert len(clients) == 1
+            assert len(opener.clients) == 1
             assert len(failure_events) >= 3
             assert [event["backoff_s"] for event in failure_events[:3]] == [0.02, 0.04, 0.04]
         finally:
@@ -62,11 +60,9 @@ class TestSubscriptionRecovery:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    async def test_failing_scan_does_not_interrupt_the_pubsub_fast_path(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_failing_scan_does_not_interrupt_the_pubsub_fast_path(self) -> None:
         pubsub = QueueingPubSub()
-        clients = patch_redis(monkeypatch, pubsub)
+        opener = QueueingRedisOpener(pubsub)
         first_failure = asyncio.Event()
         scheduler = ScanScheduler()
 
@@ -75,7 +71,7 @@ class TestSubscriptionRecovery:
             raise RuntimeError("database unavailable")
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            redis_bus(opener),
             scheduler,
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -90,17 +86,15 @@ class TestSubscriptionRecovery:
             await asyncio.wait_for(scheduler.woken_event.wait(), timeout=1.0)
 
             assert scheduler.woken == [23]
-            assert len(clients) == 1
+            assert len(opener.clients) == 1
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    async def test_scan_backoff_recovers_on_the_existing_subscription(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_scan_backoff_recovers_on_the_existing_subscription(self) -> None:
         pubsub = QueueingPubSub()
-        clients = patch_redis(monkeypatch, pubsub)
+        opener = QueueingRedisOpener(pubsub)
         recovered_twice = asyncio.Event()
         scans = 0
         successful_scans = 0
@@ -118,7 +112,7 @@ class TestSubscriptionRecovery:
             return []
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            redis_bus(opener),
             ScanScheduler(),
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -132,15 +126,13 @@ class TestSubscriptionRecovery:
 
             assert scans >= 4
             assert successful_scan_times[1] - successful_scan_times[0] < 0.06
-            assert len(clients) == 1
+            assert len(opener.clients) == 1
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    async def test_half_open_subscription_read_is_bounded_and_reconnected(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_half_open_subscription_read_is_bounded_and_reconnected(self) -> None:
 
         class _HalfOpenPubSub:
             def __init__(self) -> None:
@@ -173,15 +165,14 @@ class TestSubscriptionRecovery:
         clients = iter([first, second])
         second_opened = asyncio.Event()
 
-        def _open(_url: str, **_kw: object) -> _Redis:
+        def _open() -> _Redis:
             client = next(clients)
             if client is second:
                 second_opened.set()
             return client
 
-        patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            redis_bus(_open),
             ScanScheduler(),
             subscription_read_timeout_s=0.01,
             subscription_read_deadline_grace_s=0.01,
@@ -231,18 +222,17 @@ class _ScriptedRedis:
 
 class TestReconnectExhaustion:
     async def test_consecutive_failures_raise_and_log_an_error_event(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+        self, loguru_records: LogRecords
     ) -> None:
         opened = 0
 
-        def _open(_url: str, **_kw: object) -> _ScriptedRedis:
+        def _open() -> _ScriptedRedis:
             nonlocal opened
             opened += 1
             return _ScriptedRedis("fail")
 
-        patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            redis_bus(_open),
             ScanScheduler(),
             reconnect_delay_s=0.0,
             timers=SYSTEM_TIMERS,
@@ -259,23 +249,20 @@ class TestReconnectExhaustion:
         assert exhausted[0]["level"].name == "ERROR"
         assert exhausted[0]["extra"]["failures"] == limit
 
-    async def test_a_completed_read_resets_the_failure_count(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_a_completed_read_resets_the_failure_count(self) -> None:
         limit = dispatcher.MAX_CONSECUTIVE_RECONNECT_FAILURES
         script = ["fail"] * (limit - 1) + ["read_then_drop"] + ["fail"] * (limit - 2) + ["healthy"]
         remaining = iter(script)
         healthy_opened = asyncio.Event()
 
-        def _open(_url: str, **_kw: object) -> _ScriptedRedis:
+        def _open() -> _ScriptedRedis:
             behavior = next(remaining)
             if behavior == "healthy":
                 healthy_opened.set()
             return _ScriptedRedis(behavior)
 
-        patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            redis_bus(_open),
             ScanScheduler(),
             subscription_read_timeout_s=0.005,
             subscription_read_deadline_grace_s=0.05,

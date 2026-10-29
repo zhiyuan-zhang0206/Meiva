@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
-import pytest
-
-from base.events.live.tests.fakes import patch_open_async_redis
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
+from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.tests.fakes import async_redis_factory
 from services.agent_runner.agent_host.dispatcher import (
     TurnScheduler,
 )
@@ -117,13 +118,27 @@ class QueueingRedis:
         self.closed = True
 
 
-def patch_redis(monkeypatch: pytest.MonkeyPatch, pubsub: QueueingPubSub) -> list[QueueingRedis]:
-    clients: list[QueueingRedis] = []
+# meiva:note
+# The bus's async client opener: each open is a new queueing client, and the test keeps every one
+# it handed out so it can assert how many subscriptions the dispatcher opened.
+class QueueingRedisOpener:
+    def __init__(self, pubsub: QueueingPubSub) -> None:
+        self.clients: list[QueueingRedis] = []
+        self._pubsub = pubsub
 
-    def _open(_url: str, **_kw: object) -> QueueingRedis:
-        client = QueueingRedis(pubsub)
-        clients.append(client)
+    def __call__(self) -> QueueingRedis:
+        client = QueueingRedis(self._pubsub)
+        self.clients.append(client)
         return client
 
-    patch_open_async_redis(monkeypatch, _open)
-    return clients
+
+# meiva:note
+# A bus on the live settings whose async client comes from `opener`: the dispatcher's pub/sub
+# reads reach the queueing stand-in, and nothing else of the bus is steered.
+def redis_bus(opener: Callable[[], object]) -> EventBus:
+    return EventBus(
+        event_bus_config_from_settings(),
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
+        open_async_redis=async_redis_factory(opener),
+    )
