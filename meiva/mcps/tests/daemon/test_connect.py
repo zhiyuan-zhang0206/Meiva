@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import socket
 import sys
 import time
@@ -161,10 +162,59 @@ async def test_a_url_server_without_headers_sends_none(
 
 
 # meiva:note
+# The in-process server leaves the process's interrupt handlers to pytest while it serves. uvicorn
+# would otherwise install its own, and sse_starlette's watcher reads the bound server from that
+# handler to learn the process is going down; it then sets one process-global flag that ends every
+# SSE response, which is how a later test's connect got `MCPError(-32000, ...)` under load.
+# meiva:link meiva/mcps/tests/daemon/http_server.py
+async def test_an_in_process_server_leaves_the_process_interrupts_alone(
+    unit_home: Path, config: DaemonConfig
+) -> None:
+    async with http_mcp_server() as remote:
+        write_servers(unit_home, {"remote": {"url": remote.url}})
+        _, stack = await daemon_mod.connect_server("remote", config, {})
+        for interrupt in (signal.SIGTERM, signal.SIGINT):
+            handler = signal.getsignal(interrupt)
+            assert not hasattr(handler, "__self__"), (
+                f"the server kept the process's {interrupt!r} handler ({handler!r}); "
+                "sse_starlette reads it as a shutdown and then ends every later SSE response"
+            )
+        await stack.aclose()
+
+
+# meiva:note
+# A server later in the same process still streams after an earlier one shut down. sse_starlette
+# keeps one process-global shutdown flag and ends an SSE response as soon as it is set, so a server
+# that lets uvicorn keep the process's SIGTERM handler hands that flag the previous server's
+# shutdown — the 2026-10-29 flake, where a connect under load got `MCPError(-32000, ...)`. The pause
+# is one watcher poll (0.5 s): it gives the shutdown the same window a loaded runner gives it.
+# meiva:link meiva/mcps/tests/daemon/http_server.py
+async def test_a_later_server_streams_after_an_earlier_one_in_this_process_shut_down(
+    unit_home: Path, config: DaemonConfig
+) -> None:
+    async with http_mcp_server() as first:
+        write_servers(unit_home, {"remote": {"url": first.url}})
+        _, stack = await daemon_mod.connect_server("remote", config, {})
+        await stack.aclose()
+    await asyncio.sleep(0.6)
+    async with http_mcp_server() as second:
+        write_servers(unit_home, {"remote": {"url": second.url}})
+        session, stack = await daemon_mod.connect_server("remote", config, {})
+        tools = await session.list_tools()
+        await stack.aclose()
+    assert [tool.name for tool in tools.tools] == ["echo"]
+
+
+# meiva:note
 # Start `oauth_connect_child.py` connecting to the server `server` of the home, which is where the
-# child reads the server entries and tokens from.
+# child reads the server entries and tokens from. `timeout_seconds=None` leaves the connect timeout
+# as the configuration names it: the tests that expect a connection pass no bound of their own.
+# meiva:link meiva/mcps/_daemon.py
 async def _start_connect_child(
-    home: Path, server: str, timeout_seconds: float, config_home: Path | None = None
+    home: Path,
+    server: str,
+    timeout_seconds: float | None = None,
+    config_home: Path | None = None,
 ) -> asyncio.subprocess.Process:
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env["MEIVA_HOME"] = str(home)
@@ -176,7 +226,7 @@ async def _start_connect_child(
         str(OAUTH_CHILD),
         str(REPO_ROOT),
         server,
-        str(timeout_seconds),
+        "-" if timeout_seconds is None else str(timeout_seconds),
         *([] if config_home is None else [str(config_home)]),
         env=env,
         stdout=asyncio.subprocess.PIPE,
@@ -202,7 +252,7 @@ async def test_an_oauth_url_server_connects_with_the_token_stored_for_it(unit_ho
     )
     async with http_mcp_server() as remote:
         write_servers(unit_home, {"remote": {"url": remote.url, "oauth": True}})
-        outcome = await _connect_outcome(await _start_connect_child(unit_home, "remote", 15.0))
+        outcome = await _connect_outcome(await _start_connect_child(unit_home, "remote"))
     assert outcome == {"outcome": "connected", "tools": ["echo"], "locks": ["remote"]}
     assert remote.seen_headers
     assert all(
@@ -224,7 +274,7 @@ async def test_an_oauth_connect_reads_the_token_of_the_configurations_home(
     async with http_mcp_server() as remote:
         write_servers(config_home, {"remote": {"url": remote.url, "oauth": True}})
         outcome = await _connect_outcome(
-            await _start_connect_child(unit_home, "remote", 15.0, config_home)
+            await _start_connect_child(unit_home, "remote", None, config_home)
         )
     assert outcome == {"outcome": "connected", "tools": ["echo"], "locks": ["remote"]}
     assert remote.seen_headers
