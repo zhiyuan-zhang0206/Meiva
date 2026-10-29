@@ -59,6 +59,18 @@ describe("SidebarFooter icon row", () => {
     expect(bell.parentElement?.firstElementChild).toBe(bell);
   });
 
+  // meiva:note
+  // The footer keeps the resting band whatever the composer does: the composer's
+  // rule rises with a multi-line draft, and a divider that followed it read as
+  // its own apparatus (user report 2026-10-29).
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  it("keeps the resting band height instead of tracking the composer", () => {
+    renderFooter(<SidebarFooter activeAgentId={7} />);
+    const footer = screen.getByTestId("sidebar-footer");
+    expect(footer.style.minHeight).toBe("");
+    expect(footer.style.getPropertyValue("--composer-band-height")).toBe("");
+  });
+
   it("draws the shared bottom band, not a padding of its own", () => {
     // meiva:note
     // The footer's rule is the bottom rule of the screen: it must be the same
