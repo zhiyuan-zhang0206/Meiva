@@ -717,6 +717,11 @@ jobs:
     timeout-minutes: 25
     needs: [classify]
     if: ${{ needs.classify.result == 'success' }}
+    permissions:
+      contents: read
+      # Reads the pull request(s) a Trunk batch tests: the queue's own body carries no declaration,
+      # and the one that answers its removals is in those pull requests.
+      pull-requests: read
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -835,10 +840,17 @@ jobs:
         #
         #   Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <replacement or gap>
         #
-        # A local run (and the Trunk merge branch, which carries each pull request's landing
-        # message as a commit) reads the commits instead; --record names a file to read. Added
-        # entries are reported in the summary and never asked about: a widening is what the
-        # reviewer reads in the diff, not a declaration to write.
+        # A Trunk batch is the exception: the queue writes the batch's body itself, and its branch
+        # keeps each member's own commit behind a queue merge that this job's shallow checkout never
+        # walks to, so a batch's record is the pull request(s) the batch names and tests, read through
+        # `gh`. A run that cannot read them lists the removals and passes: ejecting a batch over a
+        # record the run never held costs the queue more than an unanswered removal costs its
+        # reviewer. A local run reads the commits; --record names a file to read. Added entries are
+        # reported in the summary and never asked about: a widening is what the reviewer reads in the
+        # diff, not a declaration to write.
+        env:
+          # The token `gh` reads the batch's pull requests with; without it the batch is unjudged.
+          GH_TOKEN: ${{ github.token }}
         run: |
           env -u VIRTUAL_ENV uv run python scripts/lint/policy_removal.py \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-removal=fail \

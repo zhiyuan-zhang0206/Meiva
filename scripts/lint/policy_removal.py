@@ -8,9 +8,12 @@
 #
 #   Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <what replaces it, or the gap it leaves>
 #
-# The record is the pull request's title and body, whose text is the squash message that lands. A run
-# without one reads the commits `--against..HEAD`: a local run, and the Trunk merge branch, which
-# carries each pull request's landing message as a commit. `--record` names a file to read instead.
+# The record is the pull request's title and body, whose text is the squash message that lands. A
+# Trunk batch is the exception: the queue writes that body itself, and its branch keeps each member's
+# own commit behind a queue merge that this job's shallow checkout never walks to, so there the record
+# is the pull request(s) the batch names and tests, read through `gh`; a run that cannot read them
+# lists the removals and passes. A run with no pull request reads the commits `--against..HEAD`, which
+# is what a local run has. `--record` names a file to read instead.
 # An added entry is reported and never asked about: a widening is what the reviewer reads in the
 # diff, not a declaration to write.
 # meiva:link meizel/docs/checker/policy.meiva.okf.md
@@ -20,7 +23,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import subprocess
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 # meiva:note
@@ -41,6 +48,86 @@ from meizel.graph.model import MeizelError  # noqa: E402
 from meizel.graph.universe import GitRepo, toplevel  # noqa: E402
 
 _SEPARATOR = " \u2014 "
+
+# meiva:note
+# `gh` answers in seconds; a read that hangs is a record this run cannot read, never a step that
+# waits out the job's own timeout.
+_GH_TIMEOUT_S = 60
+_NOT_JUDGED = (
+    "a Trunk batch whose own body carries no declaration, and whose pull request(s) could not be "
+    "read in this run: the removals above are left to review and the run passes"
+)
+_MEMBER_SECTION = re.compile(r"## Pull Requests Being Tested(.*?)(?=\n## |\Z)", re.DOTALL)
+_MEMBER_LINK = re.compile(r"\[(\d+)\]\([^)\s]*/pull/\1\)")
+
+# meiva:note
+# Reading one pull request's title and body, by number: the single thing a test replaces, so the
+# queue path is exercised without a network or a token.
+MemberReader = Callable[[int], str | None]
+
+
+# meiva:note
+# The text the declarations are read from, where it came from — both named in the log and the check
+# summary — and whether this run can judge at all. A Trunk batch is the one record that may not: its
+# body is the queue's, and the pull request(s) it names live behind an API this run may not reach.
+# Reporting and passing is the right answer then, because a false red costs the whole batch its place
+# in the merge queue (pull request 7603 was ejected that way three times, about 36 minutes of CI),
+# while an unanswered removal is still in the diff for its reviewer.
+@dataclass(frozen=True)
+class Record:
+    text: str
+    source: str
+    judged: bool = True
+
+
+# meiva:note
+# One pull request's title and body through the `gh` CLI, which reads the token the job was given.
+# Every failure — no `gh`, no token, an answer that is not a pull request — is the same answer, None:
+# a record this run cannot read, which the gate reports instead of guessing at.
+def _gh_text(number: int) -> str | None:
+    try:
+        done = subprocess.run(
+            ["gh", "pr", "view", str(number), "--json", "title,body"],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if done.returncode != 0:
+        return None
+    try:
+        payload: object = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        return None
+    found = _object(payload)
+    return f"{found.get('title') or ''!s}\n\n{found.get('body') or ''!s}"
+
+
+# meiva:note
+# The pull request numbers a batch's body names, out of the section the queue writes for them: that
+# body also links the base commit and the queue page, and a member is a link whose text is its own
+# number, so no other prose in it can pass for one.
+def member_numbers(body: str) -> list[int]:
+    section = _MEMBER_SECTION.search(body)
+    if section is None:
+        return []
+    return [int(match.group(1)) for match in _MEMBER_LINK.finditer(section.group(1))]
+
+
+# meiva:note
+# A batch's record: the title and body of every pull request its body names, read through `gh`. When
+# not one of them can be read the record is empty and does not judge — see `Record`.
+def _batch(request: dict[str, object], read_member: MemberReader) -> Record:
+    numbers = member_numbers(str(request.get("body") or ""))
+    texts = [read_member(number) for number in numbers]
+    named = ", ".join(str(number) for number in numbers) or "none named"
+    source = f"the pull request(s) this batch tests ({named})"
+    readable = [text for text in texts if text is not None]
+    if not readable:
+        return Record("", source, judged=False)
+    return Record("\n\n".join(readable), source)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -74,27 +161,28 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, read_member: MemberReader = _gh_text) -> int:
     args = _parser().parse_args(argv)
     try:
-        return _run(args)
+        return _run(args, read_member)
     except (MeizelError, ValueError) as error:
         print(f"meizel: {error}", file=sys.stderr)
         return 2
 
 
-def _run(args: argparse.Namespace) -> int:
+def _run(args: argparse.Namespace, read_member: MemberReader) -> int:
     repo = GitRepo(toplevel(Path(args.repo)))
     before, after = _policies(repo, args.against)
-    text, source = _record(repo, args.against, args.record, args.event)
-    report = removal_report(before, after, text)
-    print(_log(args.against, source, report))
-    _complain(source, report)
-    summary = _summary(args.against, source, report, args.on_removal)
+    record = _record(repo, args.against, args.record, args.event, read_member)
+    report = removal_report(before, after, record.text)
+    print(_log(args.against, record, report))
+    if not _unjudged(record, report):
+        _complain(record.source, report)
+    summary = _summary(args.against, record, report, args.on_removal)
     if args.summary:
         _append(Path(args.summary), summary)
     print(summary)
-    return _exit_code(report, args.on_removal)
+    return _exit_code(record, report, args.on_removal)
 
 
 # meiva:note
@@ -113,17 +201,23 @@ def _policies(repo: GitRepo, against: str) -> tuple[Policy, Policy]:
 # meiva:note
 # The text the declarations are read from, in the one order this gate promises. A named file wins
 # because a caller asked for it; otherwise a pull request's own title and body are the record,
-# because their text is the squash message that lands; the Trunk merge branch replaces that body
-# with the queue's, so there the commits are the record, and they are what a local run has anyway.
-def _record(repo: GitRepo, against: str, record: str | None, event: str | None) -> tuple[str, str]:
+# because their text is the squash message that lands; a Trunk batch replaces that body with the
+# queue's own, so there the record is the pull request(s) the batch tests; and a run with no pull
+# request reads the commits, which is what a local run has.
+def _record(
+    repo: GitRepo, against: str, record: str | None, event: str | None, read_member: MemberReader
+) -> Record:
     if record:
-        return Path(record).read_text(encoding="utf-8"), f"the file {record}"
+        return Record(Path(record).read_text(encoding="utf-8"), f"the file {record}")
     request = _pull_request(event)
     if request and not _queued(request):
         title = str(request.get("title") or "")
         body = str(request.get("body") or "")
-        return f"{title}\n\n{body}", "the pull request title and body"
-    return repo.run_text("log", "--format=%B", f"{against}..HEAD"), (f"the commits {against}..HEAD")
+        return Record(f"{title}\n\n{body}", "the pull request title and body")
+    if request:
+        return _batch(request, read_member)
+    commits = repo.run_text("log", "--format=%B", f"{against}..HEAD")
+    return Record(commits, f"the commits {against}..HEAD")
 
 
 # meiva:note
@@ -152,13 +246,16 @@ def _queued(request: dict[str, object]) -> bool:
     return isinstance(ref, str) and ref.startswith("trunk-")
 
 
-def _log(against: str, source: str, report: RemovalReport) -> str:
+def _log(against: str, record: Record, report: RemovalReport) -> str:
     lines = [
         f"{POLICY} against {against}: {len(report.removed)} removed, {len(report.added)} added "
-        f"(record: {source})"
+        f"(record: {record.source})"
     ]
     lines.extend(f"- [{item.table}] {item.shown}" for item in report.removed)
     lines.extend(f"+ [{item.table}] {item.shown}" for item in report.added)
+    if _unjudged(record, report):
+        lines.append(f"meizel: not judged: {_NOT_JUDGED}")
+        return "\n".join(lines)
     if report.declared:
         lines.append(f"meizel: {len(report.declared)} `Policy-Removal` line(s) read")
     for line in report.unused:
@@ -194,7 +291,16 @@ def _complain(source: str, report: RemovalReport) -> None:
         print(f"  {line}", file=sys.stderr)
 
 
-def _exit_code(report: RemovalReport, on_removal: str) -> int:
+# meiva:note
+# A run that cannot judge: a record it could not read and a removal that would have been asked
+# about. With nothing removed there is nothing to judge, so a batch that changed nothing stays quiet.
+def _unjudged(record: Record, report: RemovalReport) -> bool:
+    return not record.judged and bool(report.removed)
+
+
+def _exit_code(record: Record, report: RemovalReport, on_removal: str) -> int:
+    if _unjudged(record, report):
+        return 0
     if report.problems:
         return 1
     if not report.unanswered:
@@ -205,16 +311,18 @@ def _exit_code(report: RemovalReport, on_removal: str) -> int:
 # meiva:note
 # The markdown the reviewer sees: the counts first, because a removal and an addition must not read
 # the same at a glance, then the unanswered removals with the exact lines that would answer them.
-def _summary(against: str, source: str, report: RemovalReport, on_removal: str) -> str:
+def _summary(against: str, record: Record, report: RemovalReport, on_removal: str) -> str:
     body = [
         f"### Allowance policy: {len(report.removed)} removed, {len(report.added)} added",
         "",
-        f"Against `{against}`; record: {source}. A removal needs a `Policy-Removal` line in the "
+        f"Against `{against}`; record: {record.source}. A removal needs a `Policy-Removal` line in the "
         f"pull request body; an addition needs nothing. This run: `--on-removal={on_removal}`.",
         "",
     ]
     body.extend(_table(report))
-    if report.unanswered:
+    if _unjudged(record, report):
+        body.extend([f"**Not judged here:** {_NOT_JUDGED}.", ""])
+    elif report.unanswered:
         verdict = "unanswered" if on_removal == "fail" else "unanswered (reported only)"
         body.extend([f"**{len(report.unanswered)} removed declaration(s) {verdict}:**", ""])
         body.extend(f"- `[{item.table}] {item.shown}`" for item in report.unanswered)

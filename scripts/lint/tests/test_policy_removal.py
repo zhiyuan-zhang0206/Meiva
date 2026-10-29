@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -63,8 +64,21 @@ def _commit(root: Path, message: str) -> None:
     )
 
 
-def _run(root: Path, *args: str) -> int:
-    return policy_removal.main(["--repo", str(root), "--against", "HEAD", *args])
+def _no_reader(number: int) -> str | None:
+    raise AssertionError(f"pull request {number} was read outside a queue case")
+
+
+def _unreadable(_number: int) -> str | None:
+    return None
+
+
+# meiva:note
+# The command the workflow runs. The default reader fails the test if it is reached, so no case that
+# is not about the queue can touch `gh`; a queue case passes the answer it wants read.
+def _run(root: Path, *args: str, read_member: policy_removal.MemberReader = _no_reader) -> int:
+    return policy_removal.main(
+        ["--repo", str(root), "--against", "HEAD", *args], read_member=read_member
+    )
 
 
 def _removed(root: Path) -> None:
@@ -149,17 +163,121 @@ def test_a_line_outside_the_record_does_not_answer(tmp_path: Path) -> None:
     assert _run(root, "--on-removal=fail", "--event", str(event)) == 1
 
 
-def test_a_trunk_merge_branch_reads_the_commit_that_lands(tmp_path: Path) -> None:
+# meiva:note
+# A Trunk batch body, as the queue writes it: the base commit and the queue page are links too, and
+# the pull requests the batch tests sit under their own header — the shape the reader must not
+# mistake for prose.
+def _batch_body(*numbers: int) -> str:
+    links = ", ".join(f"[{number}](https://www.github.com/o/r/pull/{number})" for number in numbers)
+    return (
+        "This pull request was created and is being managed by "
+        "[Trunk Merge](https://docs.trunk.io/merge-queue).\n\n"
+        "This pull request is based on the [main branch](https://github.com/o/r/tree/main) at "
+        "[SHA 77c0faf4](https://github.com/o/r/commit/77c0faf4).\n\n"
+        "See more details [here](https://app.trunk.io/o/merge-queue/abc/7603).\n\n"
+        "## Pull Requests Being Tested\n\n\n"
+        f"This pull request is testing the changes from pull requests {links}.\n\n\n"
+        "## Batch Bisection\n\nThis pull request is in a [batch "
+        "bisection](https://docs.trunk.io/merge-queue/batching#bisection).\n"
+    )
+
+
+def _queue(tmp_path: Path, *numbers: int) -> Path:
+    return _event(tmp_path, _batch_body(*numbers), ref="trunk-merge/pr-7603/abc-bisection")
+
+
+def test_a_queue_batch_reads_the_pull_requests_it_tests(tmp_path: Path) -> None:
     root = _repository(tmp_path)
     _removed(root)
-    _commit(root, f"Narrow the policy\n\n{LINE}\n")
-    event = _event(tmp_path, "the queue's own body, which carries no line", ref="trunk-merge/queue")
+    event = _queue(tmp_path, 7603)
+    answers = {7603: f"Narrow the policy\n\n{LINE}\n"}
+    assert _run(root, "--on-removal=fail", "--event", str(event), read_member=answers.get) == 0
+
+
+def test_a_queue_batch_whose_pull_request_has_no_line_fails(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    _removed(root)
+    event = _queue(tmp_path, 7603)
+    answers = {7603: "Narrow the policy\n\nthe queue's own body, carrying no line\n"}
+    assert _run(root, "--on-removal=fail", "--event", str(event), read_member=answers.get) == 1
+
+
+def test_a_queue_batch_answers_from_any_of_its_pull_requests(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    _removed(root)
+    event = _queue(tmp_path, 7603, 7618, 7621)
+    answers = {
+        7603: "one\n\nnothing here\n",
+        7618: f"two\n\n{LINE}\n",
+        7621: "three\n\nnothing here either\n",
+    }
+    assert _run(root, "--on-removal=fail", "--event", str(event), read_member=answers.get) == 0
+
+
+def test_a_queue_batch_that_cannot_read_its_pull_requests_passes_and_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _repository(tmp_path)
+    _removed(root)
+    event = _queue(tmp_path, 7603)
+    summary = tmp_path / "summary.md"
     assert (
-        policy_removal.main(
-            ["--repo", str(root), "--against", "HEAD~1", "--on-removal=fail", "--event", str(event)]
+        _run(
+            root,
+            "--on-removal=fail",
+            "--event",
+            str(event),
+            "--summary",
+            str(summary),
+            read_member=_unreadable,
         )
         == 0
     )
+    out = capsys.readouterr().out
+    assert "1 removed, 0 added" in out
+    assert "not judged" in out
+    written = summary.read_text(encoding="utf-8")
+    assert "**Not judged here:**" in written
+    assert "unanswered" not in written
+
+
+def test_a_queue_batch_with_no_member_section_is_also_unjudged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _repository(tmp_path)
+    _removed(root)
+    event = _event(tmp_path, "the queue's own body, which carries no header", ref="trunk-merge/q")
+    assert _run(root, "--on-removal=fail", "--event", str(event), read_member=_no_reader) == 0
+    assert "not judged" in capsys.readouterr().out
+
+
+def test_a_queue_batch_that_changed_nothing_says_nothing_about_judging(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _repository(tmp_path)
+    event = _queue(tmp_path, 7603)
+    assert _run(root, "--on-removal=fail", "--event", str(event), read_member=_unreadable) == 0
+    assert "not judged" not in capsys.readouterr().out
+
+
+def test_a_batch_of_two_names_both_and_ignores_the_label_beside_them() -> None:
+    body = (
+        "## Pull Requests Being Tested\n\n\n"
+        "This pull request is testing a batch with the changes from pull requests "
+        "[7620](https://www.github.com/o/r/pull/7620) and "
+        "[7600](https://www.github.com/o/r/pull/7600) - "
+        "[batching documentation](https://docs.trunk.io/merge-queue/batching).\n"
+    )
+    assert policy_removal.member_numbers(body) == [7620, 7600]
+
+
+def test_the_member_numbers_are_the_links_under_the_queue_header() -> None:
+    assert policy_removal.member_numbers(_batch_body(7603)) == [7603]
+    assert policy_removal.member_numbers(_batch_body(7603, 7618, 7621)) == [7603, 7618, 7621]
+
+
+def test_a_body_without_the_queue_header_names_no_members() -> None:
+    assert policy_removal.member_numbers("See the change in [7603](https://x/pull/7603).") == []
 
 
 def test_a_local_run_reads_the_branch_commits(tmp_path: Path) -> None:
@@ -195,13 +313,37 @@ def test_a_policy_that_does_not_parse_stops_the_gate(tmp_path: Path) -> None:
     assert _run(root, "--on-removal=fail") == 2
 
 
+# meiva:note
+# One step of the workflow, so a claim about wiring is about the step that runs the gate.
+def _step(workflow: str, name: str) -> str:
+    steps = workflow.split("\n      - ")
+    return next(step for step in steps if step.startswith(f"name: {name}"))
+
+
+# meiva:note
+# One job of the workflow: its text up to the next top-level key.
+def _job(workflow: str, name: str) -> str:
+    body = workflow.split(f"\n  {name}:\n", 1)[1]
+    return re.split(r"\n  [a-z][\w-]*:\n", body, maxsplit=1)[0]
+
+
 def test_the_workflow_runs_the_gate_where_it_fails() -> None:
     workflow = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
-    assert "scripts/lint/policy_removal.py" in workflow
-    assert "--on-removal=fail" in workflow
-    assert '--summary "$GITHUB_STEP_SUMMARY"' in workflow
+    step = _step(workflow, "Allowance policy removals need a declaration")
+    assert "scripts/lint/policy_removal.py" in step
+    assert "--on-removal=fail" in step
+    assert '--summary "$GITHUB_STEP_SUMMARY"' in step
+
+
+def test_the_workflow_lets_the_queue_case_read_its_pull_requests() -> None:
+    workflow = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    step = _step(workflow, "Allowance policy removals need a declaration")
+    assert "GH_TOKEN: ${{ github.token }}" in step
+    assert "pull-requests: read" in _job(workflow, "backend-structure")
 
 
 def test_a_body_that_only_quotes_the_format_fails_a_real_removal(tmp_path: Path) -> None:
