@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from meizel import allowances, lint_common
 
-__all__ = ["FIX", "SECTION", "Scopes", "Sites", "measure"]
+__all__ = ["SECTION", "Scopes", "Sites", "measure", "site_message"]
 
 SECTION = "path_imports"
 
@@ -26,9 +26,23 @@ class Scopes:
         )
 
 
-FIX = (
+_FIX = (
     "move the shared code into a governed package (or the plugin's own "
     "package) and import it normally; keep the script a thin entry point"
+)
+
+# meiva:note
+# The convention that states the rule; the message of this owner points here.
+_DOC = "docs/conventions/python-conventions.md (Rule 6, no path imports under meiva_builtins/)"
+
+# meiva:note
+# What a path import costs: the loaded module has no edge in the import graph, so its identity is
+# whatever path the caller computed and nothing outside this file can follow, list or type it.
+_WHY = (
+    "a module loaded by path is invisible to the import graph — its identity is wherever this call "
+    "found the file, two entry points can load two copies of it, and no tool follows the "
+    "dependency — so whoever loads it here owns that edge resolving the same way at every entry "
+    "point"
 )
 _PATH_MUTATORS = frozenset({"insert", "append", "extend", "remove", "pop", "clear"})
 # Loader callable -> its measured site key.
@@ -39,6 +53,13 @@ _LOADERS = {
     "addsitedir": "site.addsitedir",
 }
 Sites = dict[str, list[int]]
+
+
+# meiva:note
+# The one sentence a path-import site owes its reader: the fact, the repair, why the rule exists,
+# and where it is written. A caller prints it verbatim.
+def site_message(target: str) -> str:
+    return f"imports by file path (`{target}`) — {_FIX}; {_WHY}. See {_DOC}."
 
 
 class _Bindings:
