@@ -424,3 +424,22 @@ def test_probe_transient_when_postgres_unreachable() -> None:
     assert result.fatal is False
     assert result.message is not None
     assert "not reachable" in result.message
+
+
+def test_same_width_spaces_cannot_retrieve_each_others_rows(
+    backend: PGVectorBackend, *, database_gate: ProcessDbGate
+) -> None:
+    ones = np.ones(_DIM, dtype=np.float32)
+    backend.upsert("/old-space.md", 1.0, "old", ones)
+    other = PGVectorBackend(
+        Database.from_settings(gate=database_gate), dim=_DIM, fingerprint="another-space"
+    )
+    other.connect()
+    try:
+        other.upsert("/new-space.md", 2.0, "new", ones)
+        assert [hit.path for hit in backend.search_topk(ones, 10)] == ["/old-space.md"]
+        assert [hit.path for hit in other.search_topk(ones, 10)] == ["/new-space.md"]
+        async_hits = asyncio.run(other.search_topk_async(ones, 10, timeout=3.0))
+        assert [hit.path for hit in async_hits] == ["/new-space.md"]
+    finally:
+        other.close()

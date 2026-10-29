@@ -21,14 +21,14 @@ __all__ = [
 ]
 
 # meiva:note
-# The ceiling is derived from one provider batch's full retry budget: a single legitimate call
+# The ceiling covers the longest legitimate provider or backend call: a single legitimate call
 # can exceed 180s, and several shorter calls can compound. The pass beats before each provider
 # and backend call, including commits and deletes, so calls cannot compound in one gap (default
 # batch budget 606s). A false kill costs a rebuild; later true-wedge detection costs staleness
 # only, since search keeps reading the existing index. The floor is the historic ceiling and
 # preserves the other loop branches' slack; the margin covers executor scheduling, local
 # processing and loop resumption. Commit calls beat separately; NumPy's 300s upsert allowance
-# fits the default 636s.
+# has its own shared budget and must fit even when a local provider has a short call budget.
 LIVENESS_TIMEOUT_FLOOR_S = 180.0
 LIVENESS_SAFETY_MARGIN_S = 30.0
 

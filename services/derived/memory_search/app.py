@@ -22,10 +22,11 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from base import telemetry
+from services.derived.memory_indexer.backends.base import EMBEDDING_SPACE_HEADER, INDEX_API_PREFIX
 from services.derived.memory_search.store import MemoryStore
 
 _log = logging.getLogger("services.derived.memory_search.app")
@@ -99,7 +100,7 @@ async def _stats_flusher(store: MemoryStore, lock: asyncio.Lock) -> None:
 
 
 def _mount_mutations(
-    app: FastAPI, store: MemoryStore, lock: asyncio.Lock, max_batch_rows: int, embedding_dim: int
+    app: APIRouter, store: MemoryStore, lock: asyncio.Lock, max_batch_rows: int, embedding_dim: int
 ) -> None:
     """The four protocol write endpoints (upsert / upsert_batch / delete /
     delete_stale_batch) — extracted so build_app stays a router, not a wall
@@ -215,16 +216,23 @@ def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) ->
         async with lock:
             return {"rows": len(store), "last_save_seconds": store.last_save_seconds}
 
-    _mount_mutations(app, store, lock, max_batch_rows, embedding_dim)
+    async def require_space(request: Request) -> None:
+        try:
+            store.require_space(request.headers.get(EMBEDDING_SPACE_HEADER))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @app.get("/meta")
+    protocol = APIRouter(prefix=INDEX_API_PREFIX, dependencies=[Depends(require_space)])
+    _mount_mutations(protocol, store, lock, max_batch_rows, embedding_dim)
+
+    @protocol.get("/meta")
     async def meta() -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — same shape
         the backend protocol's `all_meta` returns (the reconcile key)."""
         async with lock:
             return store.all_meta()
 
-    @app.post("/search")
+    @protocol.post("/search")
     async def search(body: SearchBody) -> dict[str, list[dict[str, str | int | float]]]:
         vector = np.asarray(body.vector, dtype=np.float32)
         try:
@@ -236,4 +244,5 @@ def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) ->
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"hits": [hit._asdict() for hit in hits]}
 
+    app.include_router(protocol)
     return app

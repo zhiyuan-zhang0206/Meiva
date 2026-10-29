@@ -39,6 +39,7 @@ def memory_search_config(*, config: ConfigBoot) -> MemorySearchConfig:
         memory_search_port=config.view.services.memory_search_port,
         memory_search_max_batch_rows=config.view.services.memory_search_max_batch_rows,
         embedding_name=config.view.services.embedding_backend,
+        embedding_revision=config.view.services.embeddinggemma_revision,
     )
 
 
@@ -57,7 +58,7 @@ def _is_running(config: MemorySearchConfig) -> bool:
 # provider value fails fast instead of serving a half-mismatched search
 # surface. A changed value takes effect on restart.
 async def build_server(config: MemorySearchConfig) -> uvicorn.Server:
-    descriptor = get_descriptor(config.embedding_name)
+    descriptor = get_descriptor(config.embedding_name, revision=config.embedding_revision)
     store = MemoryStore(
         config.memory_search_data_dir / "vectors.npz",
         dim=descriptor.dim,

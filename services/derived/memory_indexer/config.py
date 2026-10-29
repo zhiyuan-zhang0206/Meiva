@@ -6,7 +6,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from base.config import ConfigBoot
+from services.derived.memory_indexer.backends.base import BATCH_COMMIT_TIMEOUT_S
 from services.derived.memory_indexer.embeddings import factory
+from services.derived.memory_indexer.embeddings.embeddinggemma import NAME, EmbeddingGemmaConfig
 from services.derived.memory_indexer.patrol_plan import liveness_ceiling_s
 
 
@@ -56,22 +58,38 @@ class MemoryIndexerInputs:
     api_key: str | None = field(repr=False)
     backend_name: str
     search_uri: str
+    embeddinggemma_config: EmbeddingGemmaConfig | None = None
 
     @classmethod
     def from_boot(cls, boot: ConfigBoot) -> MemoryIndexerInputs:
         services = boot.view.services
         key = boot.view.lm.gemini_api_key
+        name = services.embedding_backend
+        gemma_config = None
+        if name == NAME:
+            gemma_key = services.embeddinggemma_api_key
+            gemma_config = factory.embeddinggemma_config(
+                name,
+                endpoint=services.embeddinggemma_endpoint,
+                model=services.embeddinggemma_model,
+                revision=services.embeddinggemma_revision,
+                api_key=None if gemma_key is None else gemma_key.get_secret_value(),
+            )
         return cls(
             embedding_name=services.embedding_backend,
             embed_timeout_s=services.memory_embed_timeout_seconds,
             api_key=None if key is None else key.get_secret_value(),
             backend_name=services.memory_search_backend,
             search_uri=services.memory_search_uri,
+            embeddinggemma_config=gemma_config,
         )
 
 
 def liveness_timeout_seconds(name: str, *, timeout_seconds: float) -> float:
     """Cover one selected provider batch plus local scheduling and commit slack."""
     return liveness_ceiling_s(
-        factory.worst_case_batch_seconds(name, timeout_seconds=timeout_seconds)
+        max(
+            factory.worst_case_batch_seconds(name, timeout_seconds=timeout_seconds),
+            BATCH_COMMIT_TIMEOUT_S,
+        )
     )

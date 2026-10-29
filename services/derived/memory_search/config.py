@@ -11,3 +11,4 @@ class MemorySearchConfig:
     memory_search_port: int
     memory_search_max_batch_rows: int
     embedding_name: str
+    embedding_revision: str | None = None

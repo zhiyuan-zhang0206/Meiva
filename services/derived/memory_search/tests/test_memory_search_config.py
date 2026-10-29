@@ -18,7 +18,10 @@ from services.derived.memory_search.config import MemorySearchConfig
 
 # meiva:note
 # The slice field whose flat registry name differs from its own.
-_FLAT_NAME = {"embedding_name": "embedding_backend"}
+_FLAT_NAME = {
+    "embedding_name": "embedding_backend",
+    "embedding_revision": "embeddinggemma_revision",
+}
 
 
 # meiva:note
@@ -55,12 +58,13 @@ async def test_storage_boot_serves_the_provider_width_over_a_real_socket(tmp_pat
             assert time.monotonic() < deadline, "the server did not start"
             await asyncio.sleep(0.02)
         async with httpx.AsyncClient(
-            base_url=f"http://127.0.0.1:{config.memory_search_port}"
+            base_url=f"http://127.0.0.1:{config.memory_search_port}",
+            headers={"x-meiva-embedding-space": descriptor.fingerprint},
         ) as client:
             schemas = (await client.get("/openapi.json")).json()["components"]["schemas"]
-            meta = (await client.get("/meta")).json()
+            meta = (await client.get("/v1/meta")).json()
             too_wide = await client.post(
-                "/search", json={"vector": [0.0] * (descriptor.dim + 1), "k": 1}
+                "/v1/search", json={"vector": [0.0] * (descriptor.dim + 1), "k": 1}
             )
     finally:
         server.should_exit = True

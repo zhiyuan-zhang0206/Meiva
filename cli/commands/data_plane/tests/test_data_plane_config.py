@@ -38,10 +38,11 @@ def test_the_mapping_reads_every_field_from_its_own_setting(
         "events_channel": "meiva:mapped:events",
         "memory_search_backend": "numpy",
         "embedding_backend": "gemini",
+        "embedding_revision": "a" * 64,
         "walg_config_file": walg_file,
     }
     for name, value in expected.items():
-        boot.set_field(name, value)
+        boot.set_field("embeddinggemma_revision" if name == "embedding_revision" else name, value)
 
     config = data_plane_config_from_boot(boot)
 

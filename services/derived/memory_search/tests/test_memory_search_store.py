@@ -395,3 +395,14 @@ def test_fingerprint_roundtrips_through_npz(tmp_path: Path) -> None:
     fresh = _store(tmp_path)
     fresh.load()
     assert fresh.all_meta() == {"/a.md": (1.0, "ha", _FP)}
+
+
+def test_same_dimension_different_space_starts_empty(tmp_path: Path) -> None:
+    path = tmp_path / "space-switch.npz"
+    first = MemoryStore(path, dim=8, fingerprint="old-space")
+    first.upsert("/old.md", 1.0, "hash", np.ones(8, dtype=np.float32))
+    first.save()
+    switched = MemoryStore(path, dim=8, fingerprint="new-space")
+    switched.load()
+    assert switched.all_meta() == {}
+    assert switched.search_topk(np.ones(8, dtype=np.float32), 1) == []

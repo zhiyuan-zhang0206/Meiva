@@ -44,7 +44,7 @@ def _arguments(*, b: str = "shadow", allow_write: bool = False) -> ReconcileArgu
 
 
 def _seed(uri: str, rows: dict[str, np.ndarray]) -> None:
-    writer = NumPyBackend(uri=uri)
+    writer = NumPyBackend(fingerprint=FINGERPRINT, uri=uri)
     writer.connect()
     try:
         for path, vector in rows.items():
@@ -91,8 +91,8 @@ def services(tmp_path: Path) -> Iterator[tuple[str, str]]:
 def test_identical_orderings_report_a_clean_summary(services: tuple[str, str]) -> None:
     for uri in services:
         _seed(uri, {"/a.md": _ONES, "/b.md": -_ONES})
-    backend_a = NumPyBackend(uri=services[0], readonly=True)
-    backend_b = NumPyBackend(uri=services[1], readonly=True)
+    backend_a = NumPyBackend(fingerprint=FINGERPRINT, uri=services[0], readonly=True)
+    backend_b = NumPyBackend(fingerprint=FINGERPRINT, uri=services[1], readonly=True)
 
     status, out, err = _run(_arguments(), backend_a, backend_b)
 
@@ -104,8 +104,8 @@ def test_identical_orderings_report_a_clean_summary(services: tuple[str, str]) -
 def test_differing_orderings_are_listed_and_counted(services: tuple[str, str]) -> None:
     _seed(services[0], {"/a.md": _ONES, "/b.md": -_ONES})
     _seed(services[1], {"/a.md": -_ONES, "/b.md": _ONES})
-    backend_a = NumPyBackend(uri=services[0], readonly=True)
-    backend_b = NumPyBackend(uri=services[1], readonly=True)
+    backend_a = NumPyBackend(fingerprint=FINGERPRINT, uri=services[0], readonly=True)
+    backend_b = NumPyBackend(fingerprint=FINGERPRINT, uri=services[1], readonly=True)
 
     status, out, err = _run(_arguments(), backend_a, backend_b)
 
@@ -122,8 +122,8 @@ def test_differing_orderings_are_listed_and_counted(services: tuple[str, str]) -
 def test_different_row_sets_stop_the_comparison(services: tuple[str, str]) -> None:
     _seed(services[0], {"/a.md": _ONES, "/b.md": -_ONES})
     _seed(services[1], {"/a.md": _ONES})
-    backend_a = NumPyBackend(uri=services[0], readonly=True)
-    backend_b = NumPyBackend(uri=services[1], readonly=True)
+    backend_a = NumPyBackend(fingerprint=FINGERPRINT, uri=services[0], readonly=True)
+    backend_b = NumPyBackend(fingerprint=FINGERPRINT, uri=services[1], readonly=True)
 
     status, out, err = _run(_arguments(), backend_a, backend_b)
 
@@ -135,8 +135,10 @@ def test_different_row_sets_stop_the_comparison(services: tuple[str, str]) -> No
 def test_a_read_only_connection_failure_is_reported_without_traceback(
     services: tuple[str, str],
 ) -> None:
-    backend_a = NumPyBackend(uri=services[0], readonly=True)
-    backend_b = NumPyBackend(uri=f"http://127.0.0.1:{free_port()}", readonly=True)
+    backend_a = NumPyBackend(fingerprint=FINGERPRINT, uri=services[0], readonly=True)
+    backend_b = NumPyBackend(
+        fingerprint=FINGERPRINT, uri=f"http://127.0.0.1:{free_port()}", readonly=True
+    )
 
     status, out, err = _run(_arguments(), backend_a, backend_b)
 
@@ -150,8 +152,8 @@ def test_a_read_only_connection_failure_is_reported_without_traceback(
 def test_a_writable_connection_failure_is_reported_without_traceback(
     services: tuple[str, str],
 ) -> None:
-    backend_a = NumPyBackend(uri=f"http://127.0.0.1:{free_port()}")
-    backend_b = NumPyBackend(uri=services[1])
+    backend_a = NumPyBackend(fingerprint=FINGERPRINT, uri=f"http://127.0.0.1:{free_port()}")
+    backend_b = NumPyBackend(fingerprint=FINGERPRINT, uri=services[1])
 
     status, out, err = _run(_arguments(allow_write=True), backend_a, backend_b)
 

@@ -1,19 +1,19 @@
-"""One switch selects the embedding provider.
-
-`get_provider()` is the single entry point: the indexer daemon (document
-batch path) and the gateway search endpoint (async query path) both take
-their provider from here, keyed by the name supplied by the composition root
-(`MEIVA_EMBEDDING_BACKEND`, default `gemini`). Unknown names fail fast — an
-unrecognized value raises ValueError naming the known providers instead of
-silently falling back to Gemini (a typo would otherwise keep the old
-provider while the operator believes the switch happened).
-
-Each call returns a fresh provider holding the service root's catalog; construction does no
-network I/O. Every registry entry pairs its constructor with a document-batch
-retry budget, exposed by `worst_case_batch_seconds()` for daemon liveness.
-`get_descriptor()` exposes dim/fingerprint for storage and health probes without
-constructing a billing-capable provider or loading a catalog.
-"""
+# meiva:note
+# One switch selects the embedding provider.
+#
+# `get_provider()` is the single entry point: the indexer daemon (document
+# batch path) and the gateway search endpoint (async query path) both take
+# their provider from here, keyed by the name supplied by the composition root
+# (`MEIVA_EMBEDDING_BACKEND`, default `gemini`). Unknown names fail fast — an
+# unrecognized value raises ValueError naming the known providers instead of
+# silently falling back to Gemini (a typo would otherwise keep the old
+# provider while the operator believes the switch happened).
+#
+# Each call returns a fresh provider holding the root's captured inputs; construction does no
+# network I/O. Gemini alone uses the model catalog for accounting. Every registry entry pairs its constructor with a document-batch
+# retry budget, exposed by `worst_case_batch_seconds()` for daemon liveness.
+# `get_descriptor()` exposes dim/fingerprint for storage and health probes without
+# constructing a billing-capable provider or loading a catalog.
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import httpx
 
 from base.lm.catalog import ModelCatalog
-from services.derived.memory_indexer.embeddings import gemini
+from services.derived.memory_indexer.embeddings import embeddinggemma, gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 
 
@@ -37,20 +37,52 @@ class EmbeddingDescriptor:
 
 
 _ProviderEntry = tuple[
-    Callable[[ModelCatalog, float, str | None, httpx.AsyncBaseTransport | None], EmbeddingProvider],
+    Callable[
+        [
+            ModelCatalog,
+            float,
+            str | None,
+            httpx.AsyncBaseTransport | None,
+            embeddinggemma.EmbeddingGemmaConfig | None,
+        ],
+        EmbeddingProvider,
+    ],
     Callable[[float], float],
-    EmbeddingDescriptor,
+    Callable[[str | None], EmbeddingDescriptor],
 ]
+
+
+def _require_gemma(
+    config: embeddinggemma.EmbeddingGemmaConfig | None,
+) -> embeddinggemma.EmbeddingGemmaConfig:
+    if config is None:
+        raise ValueError("embeddinggemma requires its endpoint, model and revision configuration")
+    return config
+
+
 PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
-        lambda catalog, timeout_s, api_key, transport=None: gemini.GeminiEmbeddingProvider(
+        lambda catalog, timeout_s, api_key, transport, _config: gemini.GeminiEmbeddingProvider(
             catalog, timeout_s=timeout_s, api_key=api_key, transport=transport
         ),
         gemini.worst_case_batch_seconds,
-        EmbeddingDescriptor(
+        lambda _revision: EmbeddingDescriptor(
             gemini.GeminiEmbeddingProvider.name,
             gemini.GeminiEmbeddingProvider.dim,
             gemini.GeminiEmbeddingProvider.fingerprint,
+        ),
+    ),
+    embeddinggemma.NAME: (
+        lambda _catalog, timeout_s, _api_key, transport, config: (
+            embeddinggemma.EmbeddingGemmaProvider(
+                _require_gemma(config), timeout_s=timeout_s, transport=transport
+            )
+        ),
+        lambda timeout_s: timeout_s,
+        lambda revision: EmbeddingDescriptor(
+            embeddinggemma.NAME,
+            embeddinggemma.DIM,
+            embeddinggemma.fingerprint_for_revision(revision),
         ),
     ),
 }
@@ -74,9 +106,10 @@ def get_provider(
     timeout_s: float,
     api_key: str | None,
     transport: httpx.AsyncBaseTransport | None = None,
+    embeddinggemma_config: embeddinggemma.EmbeddingGemmaConfig | None = None,
 ) -> EmbeddingProvider:
     ctor, _, _ = _provider_entry(name)
-    return ctor(catalog, timeout_s, api_key, transport)
+    return ctor(catalog, timeout_s, api_key, transport, embeddinggemma_config)
 
 
 def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:
@@ -85,7 +118,27 @@ def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:
     return batch_seconds(timeout_seconds)
 
 
-def get_descriptor(name: str) -> EmbeddingDescriptor:
+def get_descriptor(name: str, *, revision: str | None = None) -> EmbeddingDescriptor:
     """Read the configured provider's metadata without constructing a provider."""
     _, _, descriptor = _provider_entry(name)
-    return descriptor
+    return descriptor(revision)
+
+
+def embeddinggemma_config(
+    name: str,
+    *,
+    endpoint: str | None,
+    model: str | None,
+    revision: str | None,
+    api_key: str | None,
+) -> embeddinggemma.EmbeddingGemmaConfig | None:
+    # meiva:note
+    # Validate the selected backend's raw configuration without touching the network.
+    if name != embeddinggemma.NAME:
+        return None
+    if endpoint is None or model is None or revision is None:
+        raise ValueError(
+            "embeddinggemma requires MEIVA_EMBEDDINGGEMMA_ENDPOINT, "
+            "MEIVA_EMBEDDINGGEMMA_MODEL and MEIVA_EMBEDDINGGEMMA_REVISION"
+        )
+    return embeddinggemma.EmbeddingGemmaConfig(endpoint, model, revision, api_key)

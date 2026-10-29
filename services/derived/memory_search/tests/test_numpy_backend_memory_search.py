@@ -14,9 +14,11 @@ from pathlib import Path
 import httpx
 import numpy as np
 import pytest
+from fastapi import FastAPI
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.net.tests.local_http import serve_asgi
 from services.derived.memory_indexer.backends import probe
 from services.derived.memory_indexer.backends.numpy import NumPyBackend
 from services.derived.memory_search.tests.search_service import free_port, serve_memory_search
@@ -40,7 +42,7 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
 
 @pytest.fixture
 def backend(memory_search_uri: str) -> Iterator[NumPyBackend]:
-    b = NumPyBackend(uri=memory_search_uri)
+    b = NumPyBackend(fingerprint=_FP, uri=memory_search_uri)
     b.connect()
     try:
         yield b
@@ -80,7 +82,7 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
         requests.append(request)
         return httpx.Response(200, json={"status": "ok"})
 
-    backend = NumPyBackend(uri="http://memory-search")
+    backend = NumPyBackend(fingerprint=_FP, uri="http://memory-search")
     backend._client = httpx.Client(
         base_url="http://memory-search", transport=httpx.MockTransport(_respond)
     )
@@ -95,12 +97,12 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
         backend.close()
 
     assert len(requests) == 1
-    assert requests[0].url.path == "/upsert_batch"
+    assert requests[0].url.path == "/v1/upsert_batch"
     assert requests[0].extensions["timeout"]["read"] == 300.0
 
 
 def test_readonly_upsert_many_connects_but_refuses_write(memory_search_uri: str) -> None:
-    backend = NumPyBackend(readonly=True, uri=memory_search_uri)
+    backend = NumPyBackend(fingerprint=_FP, readonly=True, uri=memory_search_uri)
     backend.connect()
     try:
         with pytest.raises(RuntimeError, match="read-only"):
@@ -126,7 +128,10 @@ def test_search_topk_async_matches_sync(backend: NumPyBackend) -> None:
 def test_each_backend_dials_the_uri_it_was_given(memory_search_uri: str, tmp_path: Path) -> None:
     ones = np.ones(_DIM, dtype=np.float32)
     with serve_memory_search(tmp_path / "other.npz", dim=_DIM, fingerprint=_FP) as other_uri:
-        shared, other = NumPyBackend(uri=memory_search_uri), NumPyBackend(uri=other_uri)
+        shared, other = (
+            NumPyBackend(fingerprint=_FP, uri=memory_search_uri),
+            NumPyBackend(fingerprint=_FP, uri=other_uri),
+        )
         shared.connect()
         other.connect()
         try:
@@ -143,14 +148,14 @@ def test_each_backend_dials_the_uri_it_was_given(memory_search_uri: str, tmp_pat
 
 
 def test_connect_fails_fast_when_service_down() -> None:
-    backend = NumPyBackend(uri=f"http://127.0.0.1:{free_port()}")
+    backend = NumPyBackend(fingerprint=_FP, uri=f"http://127.0.0.1:{free_port()}")
     with pytest.raises(httpx.ConnectError):
         backend.connect()
     backend.close()  # idempotent no-op
 
 
 def test_requires_connect_before_use() -> None:
-    backend = NumPyBackend(uri="http://memory-search")
+    backend = NumPyBackend(fingerprint=_FP, uri="http://memory-search")
     with pytest.raises(RuntimeError, match="not connected"):
         backend.all_meta()
 
@@ -161,7 +166,34 @@ def test_requires_connect_before_use() -> None:
 def test_probe_numpy_healthy(memory_search_uri: str, *, database_gate: ProcessDbGate) -> None:
     assert (
         probe.probe_backend(
-            "numpy", Database.from_settings(gate=database_gate), uri=memory_search_uri
+            "numpy",
+            Database.from_settings(gate=database_gate),
+            uri=memory_search_uri,
+            fingerprint=_FP,
         ).message
         is None
     )
+
+
+def test_new_client_refuses_legacy_protocol_before_any_write() -> None:
+    legacy = FastAPI()
+    writes: list[str] = []
+
+    @legacy.get("/meta")
+    async def meta() -> dict[str, object]:
+        return {}
+
+    @legacy.post("/upsert")
+    async def upsert() -> dict[str, str]:
+        writes.append("wrong-generation-write")
+        return {"status": "ok"}
+
+    with serve_asgi(legacy) as uri:
+        backend = NumPyBackend(uri=uri, fingerprint=_FP)
+        with pytest.raises(httpx.HTTPStatusError) as caught:
+            backend.connect()
+        assert caught.value.response.status_code == 404
+        with pytest.raises(RuntimeError, match="not connected"):
+            backend.upsert("/wrong.md", 1.0, "h", _vec(0))
+        assert writes == []
+        backend.close()
