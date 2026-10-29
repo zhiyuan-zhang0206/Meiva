@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable
 from typing import cast
 
 import psycopg
@@ -50,7 +51,32 @@ class _FakeScheduler:
     active_agents: frozenset[int] = frozenset()
 
 
-def _host(reaper) -> object:
+def _refused() -> psycopg.OperationalError:
+    return psycopg.OperationalError("connection refused")
+
+
+# meiva:note
+# A beat run has to end where the script says, not where a timer or a cancel lands: the recovery
+# case below went red on 2026-10-29 (shard 8/8) because the test cancelled the loop as soon as it
+# saw the second failure — before the beat that recovers — and then waited for a report no live
+# task could still write. `beat_forever` is a `while True`, so the run is stopped from inside the
+# reap it is awaiting: attempt N + 1 cannot begin before attempt N's reports are on the log
+# stream, so every report a test asserts on has already happened when the run ends.
+class _Reaps:
+    def __init__(self, *outcomes: psycopg.OperationalError | None) -> None:
+        self._outcomes = outcomes
+        self.attempts = 0
+
+    async def __call__(self) -> None:
+        if self.attempts == len(self._outcomes):
+            raise asyncio.CancelledError
+        outcome = self._outcomes[self.attempts]
+        self.attempts += 1
+        if outcome is not None:
+            raise outcome
+
+
+def _host(reaper: Callable[[], Awaitable[None]]) -> object:
     class FakeHost:
         admission = _FakeAdmission()
         turn_progress = TurnProgress()
@@ -65,7 +91,10 @@ def _events(records: list[dict[str, object]], name: str) -> list[dict[str, objec
     return [record for record in records if record.get("event") == name]
 
 
-async def _run_beat(host, *, steps: int) -> list[dict[str, object]]:
+# meiva:note
+# The run ends from inside the reap, not here; the bound is a stall guard, so a change that stops
+# the loop from reaching its reap fails instead of hanging the shard.
+async def _run_beat(host: object) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     sink = logger.add(lambda message: records.append(dict(message.record["extra"])), level="DEBUG")
     task = asyncio.create_task(
@@ -87,54 +116,45 @@ async def _run_beat(host, *, steps: int) -> list[dict[str, object]]:
         )
     )
     try:
-        for _ in range(200):
-            await asyncio.sleep(0.005)
-            if len(_events(records, "host_database_beat_failed")) >= steps:
-                break
-    finally:
-        task.cancel()
         with contextlib.suppress(asyncio.CancelledError, psycopg.OperationalError):
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
+    finally:
         logger.remove(sink)
     return records
 
 
+# meiva:note
+# The third failure raises out of the loop, so no fourth beat runs: `attempts` stays at three and
+# the `will_exit` flag is what ends the host rather than a cancel from the test.
 async def test_each_failed_beat_is_one_event_and_the_third_one_says_it_ends_the_host() -> None:
-    async def always_fails() -> None:
-        raise psycopg.OperationalError("connection refused")
-
-    records = await _run_beat(_host(always_fails), steps=3)
+    reaps = _Reaps(_refused(), _refused(), _refused())
+    records = await _run_beat(_host(reaps))
 
     failures = _events(records, "host_database_beat_failed")
-    assert [record["failures"] for record in failures[:3]] == [1, 2, 3]
-    assert [record["will_exit"] for record in failures[:3]] == [False, False, True]
+    assert [record["failures"] for record in failures] == [1, 2, 3]
+    assert [record["will_exit"] for record in failures] == [False, False, True]
     assert failures[0]["machine"] == "runner-a"
     assert failures[0]["pool"] == "host-reaper"
     assert failures[0]["error"] == "OperationalError"
     assert failures[0]["limit"] == 3
+    assert reaps.attempts == 3
 
 
+# meiva:note
+# The fourth beat is clean too, so a recovery report that repeated after every later clean beat
+# would arrive as a second event instead of passing for one.
 async def test_a_beat_that_recovers_reports_what_it_cleared() -> None:
-    attempts: list[int] = []
-
-    async def fails_twice_then_works() -> None:
-        attempts.append(len(attempts) + 1)
-        if len(attempts) <= 2:
-            raise psycopg.OperationalError("connection refused")
-
-    records = await _run_beat(_host(fails_twice_then_works), steps=2)
-    for _ in range(200):
-        await asyncio.sleep(0.005)
-        if _events(records, "host_database_beat_recovered"):
-            break
+    reaps = _Reaps(_refused(), _refused(), None, None)
+    records = await _run_beat(_host(reaps))
 
     recovered = _events(records, "host_database_beat_recovered")
-    assert recovered and recovered[0]["failures_cleared"] == 2
+    assert [record["failures_cleared"] for record in recovered] == [2]
     assert recovered[0]["machine"] == "runner-a"
     assert [record["failures"] for record in _events(records, "host_database_beat_failed")] == [
         1,
         2,
     ]
+    assert reaps.attempts == 4
 
 
 def test_a_log_line_that_merely_says_the_words_is_not_the_event(
