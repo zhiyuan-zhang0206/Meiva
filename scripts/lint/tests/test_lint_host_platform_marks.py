@@ -461,7 +461,9 @@ def test_a_scoped_run_accepts_a_recorded_exemption(tmp_path: Path) -> None:
     assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
 
 
-def test_a_scoped_run_reports_a_drifted_reason_in_the_change(tmp_path: Path, capsys) -> None:
+def test_a_scoped_run_reports_a_drifted_reason_in_the_change(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = _exempt_repo(tmp_path)
     _exemptions(root, {"tests/test_x.py::test_x": "the subject is the launchd lane"})
     assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 1
