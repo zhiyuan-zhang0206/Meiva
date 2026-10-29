@@ -406,6 +406,7 @@ async def _llm_node_impl(
             handler=handler,
             agent=ctx.require_agent(),
             catalog=ctx.require_catalog(),
+            monotonic=time.monotonic,
         ),
         handler,
     )

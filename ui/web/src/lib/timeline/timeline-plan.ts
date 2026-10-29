@@ -6,6 +6,7 @@ export type OlderSegmentLoadResult = "loaded" | "exhausted" | "unready" | "abort
 export function startsTurn(event: SystemEvent): boolean {
   return (
     event.role === "inbound_arrived" ||
+    event.role === "llm_keepalive" ||
     event.role === "chat_start" ||
     event.role === "code_start" ||
     event.role === "reasoning_start" ||
@@ -28,6 +29,7 @@ export function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolea
 
 export function isStreamingDelta(ev: SystemEvent): boolean {
   return (
+    ev.role === "llm_keepalive" ||
     ev.role === "code_delta" ||
     ev.role === "chat_delta" ||
     ev.role === "reasoning_delta" ||

@@ -2,6 +2,7 @@ exports = ["cancel_fixture.py"]
 
 [uses]
 "test_llm_decode_ms.py" = ["llm_support.py"]
+"test_llm_keepalive.py" = ["llm_support.py"]
 "test_llm_retry.py" = ["llm_support.py"]
 "test_llm_stream_stall.py" = ["llm_support.py"]
 "test_llm_turn_end.py" = ["llm_support.py"]

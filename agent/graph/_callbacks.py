@@ -58,6 +58,7 @@ from base.events.live.projection import (
     CodeDelta,
     CodeStart,
     LLMDone,
+    LLMKeepalive,
     ReasoningDelta,
     ReasoningStart,
 )
@@ -86,6 +87,11 @@ class RedisStreamHandler:
     Events go to `AgentEventPublisher.emit` (non-blocking enqueue), so the
     methods are plain synchronous calls — no Redis await on the stream path.
     """
+
+    def keepalive(self) -> None:
+        self._publisher.emit(
+            LLMKeepalive(agent_id=self._agent_id, msg_idx=self._msg_idx).model_dump_json()
+        )
 
     def __init__(
         self,

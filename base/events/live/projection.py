@@ -315,6 +315,15 @@ class TokenUsage(_Base, BaseModel):
     reasoning_tokens: int = 0
 
 
+# meiva:note
+# Empty, live-view-only model liveness, including requests with no visible reasoning summary.
+# msg_idx locates an ephemeral waiting card; no content, token or reasoning timing is inferred.
+class LLMKeepalive(_Base, BaseModel):
+    role: Literal["llm_keepalive"] = "llm_keepalive"
+    msg_idx: int = Field(ge=0)
+    content: Literal[""] = ""
+
+
 class LLMDone(_Base, BaseModel):
     """LLM streaming completed — published by
     `RedisStreamHandler.finish()`.
@@ -571,6 +580,7 @@ Event = Annotated[
     | ToUserChanged
     | PageClosed
     | TokenUsage
+    | LLMKeepalive
     | LLMDone
     | TimelineSnapshot
     | AgentSpawned
@@ -612,6 +622,7 @@ ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (ToUserChanged, True),
     (PageClosed, True),
     (TokenUsage, False),
+    (LLMKeepalive, False),
     (LLMDone, False),
     (TimelineSnapshot, False),
     (AgentSpawned, True),
