@@ -8,7 +8,3 @@ exports = ["alerts-badge.tsx", "connection-notice.tsx", "notice-question-form.ts
 "open-tasks-notice.test.tsx" = ["open-tasks-notice-dialog.tsx", "open-tasks-notice.tsx"]
 "open-tasks-notice.tsx" = ["open-tasks-notice-dialog.tsx"]
 "toast.test.tsx" = ["toast.tsx"]
-
-[debt.ambient-read]
-"open-notice-detail.tsx#clock Date" = 2
-"open-tasks-notice-dialog.tsx#clock Date" = 1

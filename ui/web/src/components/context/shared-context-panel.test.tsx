@@ -5,6 +5,7 @@ import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { USER_SETTING_DEFAULTS, type NoticeItem } from "@/lib/contracts/types";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { useToUser } from "@/lib/context/use-to-user";
 
 notifyManager.setScheduler((cb) => {
@@ -25,8 +26,15 @@ beforeEach(() => {
 
 let qc: QueryClient;
 
+// meiva:note
+// The panel renders the open-notice detail, which ages its labels against the page's clock; the
+// wrapper mounts the app's own answer so this file keeps deciding nothing about time.
 function PanelWrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  return (
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    </WallClockProvider>
+  );
 }
 
 function renderPanel(ui: ReactElement, options?: RenderOptions) {

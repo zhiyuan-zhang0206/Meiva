@@ -11,6 +11,7 @@ import { newOperationKey } from "@/lib/transport/operation-key";
 import { errMsg } from "@/lib/contracts/errors";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatRelative } from "@/lib/format/time";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { NoticeAnswer, OpenNotice, ResolveNoticeIn } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
@@ -38,6 +39,7 @@ export function OpenNoticeDetail({
 }) {
   const client = useApi();
   const t = useTranslations("noticeDetail");
+  const now = useWallDate();
   const { formatAbsolute } = useTimeFormat();
   const [reply, setReply] = useState("");
   const [structuredAnswer, setStructuredAnswer] = useState<NoticeAnswer | null>(null);
@@ -124,7 +126,7 @@ export function OpenNoticeDetail({
             <>
               <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
               <span className="text-[10px] text-muted-foreground">
-                {formatRelative(notice.created_at, new Date(), { capitalize: true })}, {formatAbsolute(notice.created_at)}
+                {formatRelative(notice.created_at, now, { capitalize: true })}, {formatAbsolute(notice.created_at)}
               </span>
             </>
           ) : null}
@@ -132,7 +134,7 @@ export function OpenNoticeDetail({
             <>
               <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
               <span className="text-[10px] text-muted-foreground">
-                {t("expires", { time: formatRelative(notice.expire_at, new Date()) })}
+                {t("expires", { time: formatRelative(notice.expire_at, now) })}
               </span>
             </>
           ) : null}

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { ComponentProps } from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
@@ -143,9 +144,14 @@ function renderQueue(
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return renderWithBrowser(
-    <QueryClientProvider client={qc}>
-      <InboxQueue agents={agents} {...props} />
-    </QueryClientProvider>,
+    // meiva:note
+    // The queue's rows age against the page's clock; the app's own answer (the system clock) is
+    // what this file hands in, so its `setSystemTime` cases keep deciding the ages.
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>
+        <InboxQueue agents={agents} {...props} />
+      </QueryClientProvider>
+    </WallClockProvider>,
   );
 }
 
