@@ -18,6 +18,9 @@ import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
+# meiva:note
+# The same three-part shape base.py parses (`_RELEASE_TAG`), leading zeros included: a second,
+# stricter rule here would refuse a label that base.py and the record round-trip without complaint.
 _RELEASE_LABEL = re.compile(r"^\d+\.\d+\.\d+$")
 
 

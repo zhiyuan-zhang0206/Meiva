@@ -53,21 +53,29 @@ def test_the_label_is_checked_against_the_target_tree_before_anything_runs() -> 
     label = _step(steps, "Refuse a certificate label the tree does not carry")
 
     assert "scripts/host_ops/release/label.py" in label["run"]
-    assert "--version ${{ inputs.version }}" in label["run"]
+    # meiva:note
+    # Quoted: both are caller-supplied text handed to a shell.
+    assert '--version "${{ inputs.version }}"' in label["run"]
     # meiva:note
     # The target, not this checkout: the input may name another commit.
-    assert "--target ${{ steps.target.outputs.sha }}" in label["run"]
+    assert '--target "${{ steps.target.outputs.sha }}"' in label["run"]
     assert names.index("Refuse a certificate label the tree does not carry") < names.index(
         "Refuse a tree without a certified base"
     )
 
 
-def test_a_leftover_tag_from_a_failed_certify_does_not_block_the_retry() -> None:
+def test_the_publish_step_asks_the_tested_decision_and_quotes_its_inputs() -> None:
     certify = _yaml(_WORKFLOW)["jobs"]["certify"]
     tag = _step(certify["steps"], "Publish the tag the humans read")
 
-    assert "git rev-parse -q --verify" in tag["run"]
-    assert "already points at" in tag["run"]
+    # meiva:note
+    # The three-way decision (no tag / same commit / another commit) lives in tag.py, where both
+    # real-tag cases run against a repository; a shell comparison here would be untestable, and
+    # the one that used to sit here was wrong for annotated tags.
+    assert "scripts/host_ops/release/tag.py" in tag["run"]
+    assert '--version "${{ inputs.version }}"' in tag["run"]
+    assert '--target "${{ needs.precheck.outputs.sha }}"' in tag["run"]
+    assert 'action="$(python3 scripts/host_ops/release/tag.py' in tag["run"]
 
 
 def test_only_a_tree_that_passed_every_leg_is_certified() -> None:

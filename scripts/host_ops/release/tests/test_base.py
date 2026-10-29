@@ -213,6 +213,23 @@ def test_a_repository_that_never_committed_a_record_has_no_history(tmp_path: Pat
     assert release_base.has_release_history(_repository(tmp_path), "release") is False
 
 
+# meiva:note
+# The pathspec has to name the files the reader reads. A README, a .gitkeep or a nested file are
+# not records, and counting any of them closed the bootstrap door on a tree that carries none -
+# the first-release deadlock wearing a different filename.
+def test_a_placeholder_in_the_directory_is_not_a_record(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    (repo / "release").mkdir()
+    (repo / "release" / "README.md").write_text("how records are written\n", encoding="utf-8")
+    (repo / "release" / ".gitkeep").write_text("", encoding="utf-8")
+    (repo / "release" / "sub").mkdir()
+    (repo / "release" / "sub" / "nested.json").write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", "-f", ".")
+    _git(repo, "commit", "-q", "-m", "docs: describe the release directory")
+
+    assert release_base.has_release_history(repo, "release") is False
+
+
 def test_a_committed_record_is_history(tmp_path: Path) -> None:
     repo = _repository(tmp_path)
     (repo / "release").mkdir()
