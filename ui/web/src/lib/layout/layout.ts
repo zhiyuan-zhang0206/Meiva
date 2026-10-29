@@ -26,9 +26,13 @@ export {
   BAR_HEIGHT_CLASS,
   BAR_HEIGHT_PX,
   BAR_MIN_HEIGHT_CLASS,
+  BOTTOM_BAND_CLASS,
+  BOTTOM_BAND_HEIGHT_PX,
+  BOTTOM_BAND_ROW_CLASS,
   COLUMN_TITLE_BAR_CLASS,
   COLUMN_TITLE_BAR_WRAP_CLASS,
 } from "./primitives/bars";
+export { ICON_SIZE_CLASS, ICON_SIZE_PX } from "./primitives/icons";
 export {
   FLEX,
   FLEX_1,

@@ -31,7 +31,15 @@ import {
   type PluginStatCard as PluginStatCardModel,
 } from "@/lib/plugins/plugin-stats";
 import type { StatsDashboard } from "@/lib/contracts/types";
-import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import {
+  BOTTOM_BAND_CLASS,
+  BOTTOM_BAND_HEIGHT_PX,
+  BOTTOM_BAND_ROW_CLASS,
+  FLEX,
+  FLEX_COL,
+  ICON_SIZE_CLASS,
+  MIN_W_0,
+} from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
@@ -308,56 +316,65 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
   const { stats, error: statsError, isFetching, refetch } = useStatsDashboard(windowHours);
 
   return (
-    <div className={cn("items-center justify-between border-t border-border px-2 py-1.5", FLEX)}>
-      {/* Statistics popover — chart icon opens a small panel with the 2×3
-          stats grid + window selector (the old inline stats bar, now
-          icon-triggered). */}
-      <Popover.Root>
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            aria-label={t("statistics")}
-            className="p-1.5 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
-          >
-            <BarChart3 className="size-4" />
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content
-            sideOffset={6}
-            align="start"
-            className={STATS_POPOVER_CLASS}
-          >
-            <StatsCards
-              stats={stats}
-              error={statsError}
-              fetching={isFetching}
-              windowHours={windowHours}
-              onWindowChange={setWindowHours}
-              onRetry={() => { void refetch(); }}
-            />
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
+    // meiva:note
+    // The band primitive, not its own padding: this rule is the bottom rule of
+    // the screen, shared with the composer, so both rules land on the same y by
+    // construction (user ruling 2026-10-29). minHeight follows the composer's
+    // band, published on the root element — this band has no content that grows
+    // with the message input, so without it the rules would part again the
+    // moment the composer grows.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    <div
+      data-testid="sidebar-footer"
+      style={{ minHeight: `var(--composer-band-height, ${BOTTOM_BAND_HEIGHT_PX}px)` }}
+      className={cn(BOTTOM_BAND_CLASS, "justify-end px-2", FLEX, FLEX_COL)}
+    >
+      <div className={cn(BOTTOM_BAND_ROW_CLASS, "items-center justify-between", FLEX)}>
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <button
+              type="button"
+              aria-label={t("statistics")}
+              className="p-1.5 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
+            >
+              <BarChart3 className={ICON_SIZE_CLASS} />
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              sideOffset={6}
+              align="start"
+              className={STATS_POPOVER_CLASS}
+            >
+              <StatsCards
+                stats={stats}
+                error={statsError}
+                fetching={isFetching}
+                windowHours={windowHours}
+                onWindowChange={setWindowHours}
+                onRetry={() => { void refetch(); }}
+              />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
 
-      <div className={cn("items-center gap-0.5", FLEX)}>
-        <AlertsBadge />
-        <SidebarNavButton
-          href={fleetHref(activeAgentId)}
-          onClick={() => router.push(fleetHref(activeAgentId))}
-          label={navT("fleet")}
-        >
-          <Waypoints className="size-4" />
-        </SidebarNavButton>
-        <SidebarNavButton href="/insights" onClick={() => router.push("/insights")} label={navT("insights")}>
-          <Activity className="size-4" />
-        </SidebarNavButton>
-        <SidebarNavButton href="/control" onClick={() => router.push("/control")} label={navT("control")}>
-          <Settings className="size-4" />
-        </SidebarNavButton>
-        {/* Plugin-contributed entries come last, after the console's own;
-            renders nothing when no plugin declares one for the sidebar. */}
-        <PluginNavIcons location="sidebar" />
+        <div className={cn("items-center gap-0.5", FLEX)}>
+          <AlertsBadge />
+          <SidebarNavButton
+            href={fleetHref(activeAgentId)}
+            onClick={() => router.push(fleetHref(activeAgentId))}
+            label={navT("fleet")}
+          >
+            <Waypoints className={ICON_SIZE_CLASS} />
+          </SidebarNavButton>
+          <SidebarNavButton href="/insights" onClick={() => router.push("/insights")} label={navT("insights")}>
+            <Activity className={ICON_SIZE_CLASS} />
+          </SidebarNavButton>
+          <SidebarNavButton href="/control" onClick={() => router.push("/control")} label={navT("control")}>
+            <Settings className={ICON_SIZE_CLASS} />
+          </SidebarNavButton>
+          <PluginNavIcons location="sidebar" />
+        </div>
       </div>
     </div>
   );

@@ -469,7 +469,14 @@ export const TimelineView = memo(function TimelineView({
           aria-live="polite"
           aria-relevant="additions"
           style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-          className={cn("mx-auto w-full px-2 pb-3 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
+          // meiva:note
+          // pb-1.5 is the list's half of the gap above the composer's bottom rule
+          // (user ruling 2026-10-29: the 12+8px the list and the composer used to
+          // add up to became 6+4). It is deliberately smaller than the 12px
+          // between items, so the last row sits closer to the rule than rows sit
+          // to each other and the composer reads as attached to the conversation.
+          // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+          className={cn("mx-auto w-full px-2 pb-1.5 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
         >
           {turnAnnouncement ? (
             <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
