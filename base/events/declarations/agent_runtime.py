@@ -341,7 +341,7 @@ EVENTS: dict[str, EventSpec] = {
         "db pool restore timeout",
         payload=DbPoolRestoreTimeout,
         tier="anomaly",
-        site="base/db/connections.py:restore_pooled_session",
+        site="base/db/pooled_session.py:restore_pooled_session",
     ),
     "checkpoint_write_failed": telemetry_event(
         "checkpoint_write_failed", "checkpoint write failed", tier="anomaly"

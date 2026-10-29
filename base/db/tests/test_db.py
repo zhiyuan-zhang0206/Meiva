@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base import db
 from base.config import get_field, set_field
-from base.db import DbConfig, connections
+from base.db import DbConfig, connections, pooled_session
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
@@ -91,7 +91,7 @@ def test_async_pool_fixes_the_transport_posture(
     )
     check = getattr(pool, "_check")  # noqa: B009
     assert isinstance(check, partial)
-    assert check.func is connections.restore_pooled_session_async
+    assert check.func is pooled_session.restore_pooled_session_async
     assert check.keywords == {"gate": database_gate}
     assert pool.conninfo == "postgresql://u@127.0.0.1:1/x"
     assert pool.min_size == 0
@@ -200,8 +200,8 @@ def test_pool_check_connections_flag(
         configure = getattr(pooled, "_configure")  # noqa: B009
         check = getattr(pooled, "_check")  # noqa: B009
         assert isinstance(configure, partial) and isinstance(check, partial)
-        assert configure.func is connections.restore_pooled_session
-        assert check.func is connections.restore_pooled_session
+        assert configure.func is pooled_session.restore_pooled_session
+        assert check.func is pooled_session.restore_pooled_session
         assert configure.keywords == check.keywords == {"gate": database_gate}
     with db.pool(
         direct=True,

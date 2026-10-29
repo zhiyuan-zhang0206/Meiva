@@ -13,7 +13,7 @@ from loguru import logger
 from psycopg import sql
 
 from base.config import settings
-from base.db import connections
+from base.db import pooled_session
 
 
 # meiva:note
@@ -65,7 +65,7 @@ def events() -> Generator[list[dict[str, Any]]]:
 
 def test_the_restore_carries_its_own_statement_budget() -> None:
     conn = _RecordingConnection()
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
 
     restore(conn, gate=_Gate())
 
@@ -85,7 +85,7 @@ def test_the_restore_carries_its_own_statement_budget() -> None:
 # `budget_seconds` overrides the configured value for that one restore.
 def test_one_restore_can_take_a_different_budget() -> None:
     conn = _RecordingConnection()
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
 
     restore(conn, gate=_Gate(), budget_seconds=2.5)
 
@@ -98,7 +98,7 @@ def test_one_restore_can_take_a_different_budget() -> None:
 def test_a_cancelled_restore_reports_one_event_and_propagates(events: list[dict[str, Any]]) -> None:
     cancelled = psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
     conn = _RecordingConnection(failure=cancelled)
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
 
     with pytest.raises(psycopg.errors.QueryCanceled):
         restore(conn, gate=_Gate())
@@ -124,7 +124,7 @@ def test_a_terminated_restore_reports_one_event_and_propagates(
         "terminating connection due to transaction timeout"
     )
     conn = _RecordingConnection(failure=terminated)
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
 
     with pytest.raises(psycopg.errors.TransactionTimeout):
         restore(conn, gate=_Gate())
@@ -141,7 +141,7 @@ def _restore_in_a_thread(
     conn: psycopg.Connection[Any], gate: _Gate, *, budget_seconds: float
 ) -> tuple[threading.Thread, list[Exception]]:
     failures: list[Exception] = []
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
 
     def drive() -> None:
         try:
@@ -273,7 +273,7 @@ def test_the_hang_guard_sits_above_the_budget() -> None:
 def test_the_transaction_budget_interrupts_a_stalled_commit(db_url: str) -> None:
     marker = _marker_sequence(db_url)
     try:
-        statement, _ms = connections.restore_budget_statement(_BUDGET_S)
+        statement, _ms = pooled_session.restore_budget_statement(_BUDGET_S)
         with psycopg.connect(db_url, prepare_threshold=None) as conn:
             _install_stalled_commit(conn, marker=marker)
             conn.execute(statement, prepare=False)
@@ -291,7 +291,7 @@ def test_the_transaction_budget_interrupts_a_stalled_commit(db_url: str) -> None
         # from the budget (see `_HANG_GUARD_S`) so it follows a change to it.
         assert spent < _HANG_GUARD_S, "guard against a hung test; the verdict is the marker"
 
-        statement, _ms = connections.restore_budget_statement(_SLOW_BUDGET_S)
+        statement, _ms = pooled_session.restore_budget_statement(_SLOW_BUDGET_S)
         with psycopg.connect(db_url, prepare_threshold=None) as conn:
             _install_stalled_commit(conn, marker=marker)
             conn.execute(statement, prepare=False)
@@ -311,7 +311,7 @@ def test_the_transaction_budget_interrupts_a_stalled_commit(db_url: str) -> None
 # transaction. A borrower's later transaction on the same backend — longer than
 # the budget — must commit normally, and the session must read back 0.
 def test_a_normal_transaction_after_a_restore_is_not_terminated(db_url: str) -> None:
-    restore: Any = connections.restore_pooled_session
+    restore: Any = pooled_session.restore_pooled_session
     with psycopg.connect(db_url, prepare_threshold=None) as conn:
         restore(conn, gate=_Gate(), budget_seconds=1.0)
 
@@ -344,10 +344,10 @@ async def test_the_client_deadline_abandons_a_restore_that_is_never_answered(
     events: list[dict[str, Any]],
 ) -> None:
     conn = _SilentAsyncConnection()
-    restore: Any = connections.restore_pooled_session_async
+    restore: Any = pooled_session.restore_pooled_session_async
 
     started = time.monotonic()
-    with pytest.raises(connections.RestoreAbandonedError):
+    with pytest.raises(pooled_session.RestoreAbandonedError):
         await restore(conn, gate=_Gate(), budget_seconds=30.0, client_deadline_seconds=0.2)
     elapsed = time.monotonic() - started
 
@@ -369,10 +369,10 @@ async def test_a_timeout_raised_by_the_restore_keeps_its_own_meaning(
         async def execute(self, statement: str, params: Any = None, **kwargs: Any) -> None:
             raise TimeoutError("something else timed out")
 
-    restore: Any = connections.restore_pooled_session_async
+    restore: Any = pooled_session.restore_pooled_session_async
 
     with pytest.raises(TimeoutError) as caught:
         await restore(_Raising(), gate=_Gate(), budget_seconds=30.0, client_deadline_seconds=5.0)
 
-    assert not isinstance(caught.value, connections.RestoreAbandonedError)
+    assert not isinstance(caught.value, pooled_session.RestoreAbandonedError)
     assert [event for event in events if event.get("event") == "db_pool_restore_timeout"] == []
