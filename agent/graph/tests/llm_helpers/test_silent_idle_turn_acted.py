@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
+from agent.graph.llm.goto import LlmGoto
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.graph.tests.test_llm_helpers import make_runtime
@@ -78,7 +79,7 @@ async def _llm_turn(
     ledger: LlmLedger,
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
-) -> Any:
+) -> Command[LlmGoto]:
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _reasoning_only(output_tokens)
     return await llm_node(
@@ -93,6 +94,14 @@ async def _llm_turn(
         ledger=ledger,
         rng=_rng(),
     )
+
+
+# meiva:note
+# `Command.update` is Optional in strict mode, so the verdict is read through one place: every test
+# asserts the same field of the same shape instead of repeating a cast at each site.
+def _halted(result: Command[LlmGoto]) -> Any:
+    update: dict[str, Any] = result.update or {}
+    return update.get("halted")
 
 
 # meiva:note
@@ -115,9 +124,8 @@ async def test_silent_idle_after_this_turns_tool_return_halts_silently(
         hosted_resources=hosted_resources,
     )
 
-    assert isinstance(result, Command)
     assert result.goto == "after_exec"
-    assert result.update["halted"] is True
+    assert _halted(result) is True
     silent_idle = loguru_records.events("silent_idle")
     assert len(silent_idle) == 1, "exactly one verdict per turn"
     assert silent_idle[0]["extra"]["halted"] is True
@@ -138,7 +146,7 @@ async def test_silent_idle_after_this_turns_tool_return_halts_silently(
         ExecStatus.CANCELLED,
         ExecStatus.HALTED,
         ExecStatus.NOT_RUN,
-        ExecStatus.UNKNOWN,
+        pytest.param(ExecStatus.UNKNOWN, id="restart-repair-interrupted-placeholder"),
     ],
 )
 async def test_silent_idle_after_a_failed_tool_return_keeps_the_nudge(
@@ -156,8 +164,7 @@ async def test_silent_idle_after_a_failed_tool_return_keeps_the_nudge(
         hosted_resources=hosted_resources,
     )
 
-    assert isinstance(result, Command)
-    assert result.update["halted"] is False
+    assert _halted(result) is False
     silent_idle = loguru_records.events("silent_idle")
     assert len(silent_idle) == 1
     assert silent_idle[0]["extra"]["halted"] is False
@@ -184,8 +191,7 @@ async def test_a_previous_turns_tool_return_does_not_excuse_a_stuck_turn(
         hosted_resources=hosted_resources,
     )
 
-    assert isinstance(result, Command)
-    assert result.update["halted"] is False
+    assert _halted(result) is False
     silent_idle = loguru_records.events("silent_idle")
     assert len(silent_idle) == 1
     assert silent_idle[0]["extra"]["halted"] is False
