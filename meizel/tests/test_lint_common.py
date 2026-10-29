@@ -104,7 +104,7 @@ def _git_fixture(root: Path, *files: str) -> None:
 def test_admission_reads_the_checkout_once_per_run(tmp_path: Path) -> None:
     _git_fixture(tmp_path / "repo", "app/one.py", "app/two.py")
     root = tmp_path / "repo"
-    with lint_common.admission():
+    with lint_common.admission:
         first = lint_common.python_files([root / "app"], root)
         second = lint_common.python_files([root / "app/two.py"], root)
         stats = lint_common.admission.stats()
@@ -117,7 +117,7 @@ def test_admission_reads_the_checkout_once_per_run(tmp_path: Path) -> None:
 def test_admission_scope_ends_with_the_run(tmp_path: Path) -> None:
     _git_fixture(tmp_path / "repo", "app/one.py")
     root = tmp_path / "repo"
-    with lint_common.admission():
+    with lint_common.admission:
         assert lint_common.python_files([root / "app"], root) == [root / "app/one.py"]
     (root / "app/created_after_the_run.py").write_text("value = 2\n", encoding="utf-8")
     assert lint_common.python_files([root / "app"], root) == [

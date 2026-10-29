@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import contextlib
 import functools
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from meizel import is_repo_test_file, is_test_path, restrict, split_only
@@ -142,20 +141,19 @@ class _Admission:
         self.reads = 0
         self.reuses = 0
 
-    @contextlib.contextmanager
-    def __call__(self) -> Iterator[None]:
+    def __enter__(self) -> _Admission:
         self._reset()
         self.active = True
-        try:
-            yield
-        finally:
-            if self.reads:
-                print(
-                    "lint admission: "
-                    f"{self.files_count} files, {self.reads} read, {self.reuses} reused",
-                    file=sys.stderr,
-                )
-            self._reset()
+        return self
+
+    def __exit__(self, kind: object, value: object, traceback: object) -> None:
+        if self.reads:
+            print(
+                "lint admission: "
+                f"{self.files_count} files, {self.reads} read, {self.reuses} reused",
+                file=sys.stderr,
+            )
+        self._reset()
 
     def stats(self) -> dict[str, int]:
         return {"files": self.files_count, "reads": self.reads, "reuses": self.reuses}
@@ -163,7 +161,7 @@ class _Admission:
     def scoped[**P](self, fn: Callable[P, int]) -> Callable[P, int]:
         @functools.wraps(fn)
         def run(*args: P.args, **kwargs: P.kwargs) -> int:
-            with self():
+            with self:
                 return fn(*args, **kwargs)
 
         return run
