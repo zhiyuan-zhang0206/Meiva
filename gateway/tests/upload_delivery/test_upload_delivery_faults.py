@@ -25,11 +25,13 @@ from base.agents.upload_delivery.models import (
 )
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import get_field
 from base.config.service_read import ConfigAuthority
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.db.tests.lost_ack import LostAckPool
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
-from base.paths import resolve_meiva_home
+from base.paths import resolve_meiva_home, run_dir
 from gateway.app import cluster_auth_middleware
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.support.db_faults.insert_fault import failing_insert
@@ -218,7 +220,15 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
             host=fake_host(),
             home=resolve_meiva_home(),
             receiver=_receiver_config(client, request.target),
+            agent_host=_agent_host(),
         )
+
+
+# meiva:note
+# The endpoint row a deployed ops daemon hands its dispatch: this unit's agent-host port and pidfile.
+def _agent_host() -> ServiceEndpoint:
+    home = resolve_meiva_home()
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(home)).of("agent_host")
 
 
 def _receiver_config(client: GatewayTestClient, unit: UnitIdentity) -> receiver.ReceiverConfig:
@@ -508,6 +518,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
             receiver=replace(
                 config, access=replace(client.app.state.gateway_access, gateway_url=source_url)
             ),
+            agent_host=_agent_host(),
         )
     assert status == OpStatus.FAILED and result["reason"] == "upload-source-unavailable-v1"
     assert not path.exists()

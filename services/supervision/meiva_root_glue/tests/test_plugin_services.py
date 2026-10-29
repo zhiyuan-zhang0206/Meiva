@@ -25,11 +25,19 @@ import pytest
 import base.packages.plugins.enable_config as pc
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import get_field
+from base.daemon.endpoints import ServiceEndpoints
 from base.host.system.tests.fake_commands import fake_host
 from base.log.tests.log_records import LogRecords
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from services.supervision.roster import composition, service_spec, spec
 from services.supervision.roster import plugin_services as roster_plugins
+
+
+# meiva:note
+# The health-endpoint table the plugin hook is handed: the roster's reader, this test's home.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
 
 
 def test_fleet_plugin_registers_task_maintenance() -> None:
@@ -108,7 +116,9 @@ def test_services_py_without_declare_reports_and_raises(
     (plugin_dir / "services.py").write_text("X = 1  # no services() function\n")
 
     with pytest.raises(roster_plugins.PluginServiceError, match="callable services"):
-        roster_plugins.plugin_services(plugin_dirs={"brokenplugin": plugin_dir}, home=meiva_home())
+        roster_plugins.plugin_services(
+            plugin_dirs={"brokenplugin": plugin_dir}, home=meiva_home(), endpoints=_table()
+        )
 
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
@@ -123,7 +133,7 @@ def test_broken_services_py_reports_and_aborts_roster(
     good_dir.mkdir()
     (good_dir / "services.py").write_text(
         "from services.supervision.roster.service_spec import ServiceSpec\n"
-        "def services(*, home):\n"
+        "def services(*, home, endpoints):\n"
         "    return (ServiceSpec(session='probe-good', cmd='noop',\n"
         "            capabilities=frozenset({'gateway'}), requires_db=False),)\n"
     )
@@ -133,7 +143,9 @@ def test_broken_services_py_reports_and_aborts_roster(
 
     with pytest.raises(RuntimeError, match="services boom"):
         roster_plugins.plugin_services(
-            plugin_dirs={"brokenplugin": bad_dir, "goodplugin": good_dir}, home=meiva_home()
+            plugin_dirs={"brokenplugin": bad_dir, "goodplugin": good_dir},
+            home=meiva_home(),
+            endpoints=_table(),
         )
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
@@ -166,12 +178,14 @@ def test_external_service_healthcheck_loads_without_agent_bootstrap(
         "    value: int = 1\n"
         "def main():\n"
         "    return Sample().value\n"
-        "def services(*, home):\n"
+        "def services(*, home, endpoints):\n"
         "    return (ServiceSpec(session='quota-probe', cmd='noop',\n"
         "            capabilities=frozenset({'agent-runner'}), requires_db=True,\n"
         "            healthcheck_module=__name__),)\n"
     )
-    declared = roster_plugins.plugin_services(plugin_dirs={name: plugin_dir}, home=meiva_home())
+    declared = roster_plugins.plugin_services(
+        plugin_dirs={name: plugin_dir}, home=meiva_home(), endpoints=_table()
+    )
     assert len(declared) == 1
     assert declared[0].healthcheck_module == dotted
     assert importlib.import_module(dotted).main() == 1
@@ -200,9 +214,13 @@ def test_failed_service_import_does_not_publish_partial_module(
 @pytest.mark.parametrize(
     ("body", "error", "match"),
     [
-        ("def services(*, home):\n    return undefined_roster\n", NameError, "undefined_roster"),
         (
-            "def services(*, home):\n    return [1]\n",
+            "def services(*, home, endpoints):\n    return undefined_roster\n",
+            NameError,
+            "undefined_roster",
+        ),
+        (
+            "def services(*, home, endpoints):\n    return [1]\n",
             roster_plugins.PluginServiceError,
             "tuple\\[ServiceSpec",
         ),
@@ -210,12 +228,12 @@ def test_failed_service_import_does_not_publish_partial_module(
         (
             "def services():\n    return ()\n",
             roster_plugins.PluginServiceError,
-            "must accept the keyword home",
+            "must accept the keywords home and endpoints",
         ),
         (
             "from pydantic import BaseModel\n"
             "class Config(BaseModel):\n    enabled: bool\n"
-            "def services(*, home):\n    Config(enabled='not-a-bool')\n    return ()\n",
+            "def services(*, home, endpoints):\n    Config(enabled='not-a-bool')\n    return ()\n",
             ValueError,
             "validation error",
         ),
@@ -245,13 +263,15 @@ def test_the_services_hook_receives_the_home_it_is_asked_for(tmp_path: Path) -> 
     plugin_dir.mkdir()
     (plugin_dir / "services.py").write_text(
         "from pathlib import Path\n"
-        "def services(*, home):\n"
+        "def services(*, home, endpoints):\n"
         "    Path(__file__).with_name('received').write_text(str(home))\n"
         "    return ()\n"
     )
     asked = tmp_path / "asked-home"
 
-    roster_plugins.plugin_services(plugin_dirs={"homeplugin": plugin_dir}, home=asked)
+    roster_plugins.plugin_services(
+        plugin_dirs={"homeplugin": plugin_dir}, home=asked, endpoints=_table()
+    )
 
     assert (plugin_dir / "received").read_text() == str(asked)
     assert asked != meiva_home()
@@ -262,7 +282,7 @@ def test_absent_optional_service_face_does_not_fail_discovery(tmp_path: Path) ->
     plugin_dir.mkdir()
     assert (
         roster_plugins.plugin_services(
-            plugin_dirs={"no_service_face": plugin_dir}, home=meiva_home()
+            plugin_dirs={"no_service_face": plugin_dir}, home=meiva_home(), endpoints=_table()
         )
         == ()
     )
@@ -306,7 +326,7 @@ def test_invalid_face_aborts_manifest_generation_before_any_unit_is_born(
     plugin_dir = tmp_path / "invalid_config"
     plugin_dir.mkdir()
     (plugin_dir / "services.py").write_text(
-        "def services(*, home):\n    raise ValueError('invalid service configuration')\n"
+        "def services(*, home, endpoints):\n    raise ValueError('invalid service configuration')\n"
     )
     with pytest.raises(ValueError, match="invalid service configuration"):
         build_units(

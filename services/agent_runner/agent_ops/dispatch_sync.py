@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.to_user import ToUserReadRequest
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
+from base.daemon.endpoints import ServiceEndpoint
 from base.db import Database
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
@@ -45,6 +46,7 @@ def dispatch_sync(
     host: Host,
     home: Path,
     receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     match kind:
@@ -71,7 +73,12 @@ def dispatch_sync(
             return _upload_arm(payload, pool, receiver=receiver)
         case "status_probe":
             return OpStatus.COMPLETED, cluster.cluster_status_op(
-                db, pool, image=image, local_machine=local_machine, home=home
+                db,
+                pool,
+                image=image,
+                local_machine=local_machine,
+                home=home,
+                agent_host_pidfile=agent_host.pidfile,
             ).model_dump(mode="json")
         case "config_read":
             return OpStatus.COMPLETED, host_config.config_read_op(

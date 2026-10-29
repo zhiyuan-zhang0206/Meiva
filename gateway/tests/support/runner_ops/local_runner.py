@@ -36,14 +36,16 @@ from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import GatewayAccess, MachineIdentityReader
+from base.config import get_field
 from base.config.service_read import ConfigAuthority
+from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home, resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home, run_dir
 from gateway.tests.support.runner_ops.ops_stub import OpsCall, RunnerOps, register_machine
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, in_flight
@@ -148,6 +150,7 @@ async def _serve(
         rng=seeded_rng(),
         home=home,
         receiver=_unreachable_receiver(machine.name(), home),
+        agent_host=ServiceEndpoints.from_fields(get_field, runtime=run_dir(home)).of("agent_host"),
     )
 
     async def recorded(body: bytes) -> tuple[int, bytes, str]:

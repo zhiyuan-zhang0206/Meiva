@@ -23,6 +23,7 @@ from base.deploy.lifecycle.tests.serving_root import observe, observe_unreadable
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import run_dir
 from base.paths.home import resolve_meiva_home
 from base.paths.tests.homes import point_home
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
@@ -42,8 +43,14 @@ def _snapshot(
     *,
     observe: Callable[[Path], RootBirth],
 ) -> cluster_status.ClusterStatus:
+    home = resolve_meiva_home()
     return cluster_status.status_snapshot(
-        database, image=image, local_machine=machine, home=resolve_meiva_home(), observe=observe
+        database,
+        image=image,
+        local_machine=machine,
+        home=home,
+        agent_host_pidfile=run_dir(home) / "agent_host.pid",
+        observe=observe,
     )
 
 
@@ -96,6 +103,7 @@ def test_snapshot_reads_the_serving_gate_of_the_home_it_is_given(
         image=LoadedCommit(source_root=tmp_path, sha=None),
         local_machine=machine_identity,
         home=elsewhere,
+        agent_host_pidfile=run_dir(elsewhere) / "agent_host.pid",
     )
 
     assert (snap.paused, snap.paused_reason) == (True, "startup")

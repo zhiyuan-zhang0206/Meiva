@@ -12,12 +12,12 @@ import pytest
 
 from base.cluster.machine import MachineIdentityReader, MachineRole
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
+from base.config import get_field, settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from base.host.system import probes
 from base.host.system.tests.fake_commands import fake_host
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from base.paths.tests.homes import unit_home as unit_home
 from services.supervision import roster
 from services.supervision.roster import composition, service_spec, spec
@@ -281,12 +281,16 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(tmp_path: Path) ->
     pidfile = tmp_path / "ops.pid"
 
     home = meiva_home()
-    bound = cast("partial[DaemonProbe]", roster.daemon_identity("ops", pidfile, home=home))
+    endpoints = ServiceEndpoints.from_fields(get_field, runtime=run_dir(home))
+    bound = cast(
+        "partial[DaemonProbe]",
+        roster.daemon_identity("ops", pidfile, home=home, endpoints=endpoints),
+    )
 
     assert bound.func is probe_daemon
     name, url = bound.args
     assert name == "ops"
-    assert str(ServiceEndpoints.from_settings().of("ops").health_port) in url
+    assert str(endpoints.of("ops").health_port) in url
     assert bound.keywords == {"pidfile": pidfile, "expected_home": home}
 
 

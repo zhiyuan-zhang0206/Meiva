@@ -39,7 +39,7 @@ from base.packages.plugins.config_registration import (
     read_config_image,
     read_service_config,
 )
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from base.telemetry.process_logging import init_gateway_process
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import routing
@@ -75,8 +75,8 @@ def _new_rng() -> random.Random:
     return random.Random()  # noqa: S311
 
 
-def task_maintenance_endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("task_maintenance")
+def task_maintenance_endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("task_maintenance")
 
 
 _LIVENESS_TIMEOUT_S = 60.0
@@ -609,7 +609,7 @@ def main() -> None:
         home=process_home,
     )
     install_graceful_shutdown("task_maintenance")
-    endpoint = task_maintenance_endpoint()
+    endpoint = task_maintenance_endpoint(boot, runtime=run_dir(process_home))
     try:
         config = read_service_config("meiva_fleet", FleetConfig)
         if config is None:

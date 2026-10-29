@@ -27,7 +27,6 @@ from psycopg_pool import ConnectionPool
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.cluster.machine import MachineIdentityReader
-from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
@@ -182,17 +181,14 @@ def status_snapshot(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     home: Path,
+    agent_host_pidfile: Path,
     observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
 ) -> ClusterStatus:
     machine_name = local_machine.name()
     roles = local_machine.role()
     runner = "agent-runner" in roles
     head_sha = checkout_head_sha(home / "source", environ=process_environment())
-    agent_host_online = (
-        check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
-        if runner
-        else None
-    )
+    agent_host_online = check_pidfile(str(agent_host_pidfile))[0] if runner else None
     supervisor_online = _supervisor_online(home)
     sessions = collect_sessions(
         service_backend=get_backend(timers=SYSTEM_TIMERS, home=home),

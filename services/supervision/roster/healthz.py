@@ -50,9 +50,11 @@ def health_name_of(session: str) -> str:
     return session.replace("-", "_")
 
 
-def healthz_url(name: str) -> str:
-    """The ``/healthz`` URL of daemon ``name`` from this unit's health port."""
-    return f"http://localhost:{ServiceEndpoints.from_settings().of(name).health_port}/healthz"
+# meiva:note
+# The ``/healthz`` URL of daemon ``name``, from the health-port table the root built. The row carries
+# the port, so nothing here reads a setting or a home.
+def healthz_url(name: str, endpoints: ServiceEndpoints) -> str:
+    return f"http://localhost:{endpoints.of(name).health_port}/healthz"
 
 
 # meiva:note
@@ -60,24 +62,28 @@ def healthz_url(name: str) -> str:
 # `probe_gate` and `probe_protocol` are bound to: a health identity check is worth
 # nothing if the value it compares against is the one the probing process happens
 # to run in.
-def daemon_identity(name: str, pidfile: Path, *, home: Path) -> Callable[[], DaemonProbe]:
-    """The ``identity_probe`` for a daemon that serves the standard Meiva ``/healthz``.
+#
+# Also bound: the daemon's name, its `/healthz` URL and the pidfile this unit recorded for it, all
+# three taken from the row of the table the root built. Public because plugin-registered services
+# declare their own specs and must state the same contract without restating the probe
+# (`meiva_builtins/plugins/*/services.py`).
+def daemon_identity(
+    name: str, pidfile: Path, *, home: Path, endpoints: ServiceEndpoints
+) -> Callable[[], DaemonProbe]:
+    return partial(
+        probe_daemon, name, healthz_url(name, endpoints), pidfile=pidfile, expected_home=home
+    )
 
-    Binds ``probe_daemon`` to the three facts that identify one daemon: its
-    ``name``, its ``/healthz`` URL (derived from this unit's health port at
-    call time, like every other probe target on the roster) and the pidfile this
-    unit recorded for it. Public because plugin-registered services declare their
-    own specs and must be able to state the same contract without restating the
-    probe (``meiva_builtins/plugins/*/services.py``).
-    """
-    return partial(probe_daemon, name, healthz_url(name), pidfile=pidfile, expected_home=home)
 
-
+# meiva:note
+# `endpoints` is the health-port table the root built from its own config: this daemon's row there
+# supplies both its `/healthz` URL and its pidfile, so the factory reads no setting and no home.
 def healthz_daemon(
     session: str,
     *,
     module: str,
     home: Path,
+    endpoints: ServiceEndpoints,
     capabilities: frozenset[MachineRole],
     requires_db: bool,
     gate: Callable[[], str | None] | None = None,
@@ -112,15 +118,14 @@ def healthz_daemon(
             f"service {session!r}: health name {name!r} has no port slot "
             f"(known: {sorted(DEFAULT_PORTS)})"
         )
+    endpoint = endpoints.of(name)
     return ServiceSpec(
         session=session,
         cmd=f"{_PYTHON_M} {module}",
         capabilities=capabilities,
         requires_db=requires_db,
-        curl_url=healthz_url(name),
-        identity_probe=daemon_identity(
-            name, ServiceEndpoints.from_settings().of(name).pidfile, home=home
-        ),
+        curl_url=healthz_url(name, endpoints),
+        identity_probe=daemon_identity(name, endpoint.pidfile, home=home, endpoints=endpoints),
         health_name=name,
         gate=gate,
         profile=profile,

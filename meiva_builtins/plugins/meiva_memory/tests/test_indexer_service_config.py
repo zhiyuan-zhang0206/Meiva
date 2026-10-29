@@ -3,12 +3,14 @@ from typing import cast
 
 import pytest
 
+from base.config import get_field
+from base.daemon.endpoints import ServiceEndpoints
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_config_admin import update_all_disk_images
 from base.packages.plugins import enable_config
 from base.packages.plugins.config_registration import disk_image_path
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from meiva_builtins.plugins.meiva_memory import services
 from meiva_builtins.plugins.meiva_memory.default_config import MemoryConfig
 from services.supervision.meiva_root.inputs import InputChangedError, InputSeal
@@ -17,10 +19,16 @@ from services.supervision.roster import plugin_services as roster_plugins
 from services.supervision.roster.service_spec import ServiceSpec
 
 
+# meiva:note
+# The health-endpoint table the plugin hook is handed: this checkout's reader and its home.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+
+
 def _indexer() -> ServiceSpec:
     return next(
         spec
-        for spec in roster_plugins.plugin_services(home=meiva_home())
+        for spec in roster_plugins.plugin_services(home=meiva_home(), endpoints=_table())
         if spec.session == "memory-indexer"
     )
 
@@ -58,9 +66,9 @@ def test_invalid_image_fails_composition_before_a_gate_can_fail_open(
     image.parent.mkdir(parents=True)
     image.write_text(content)
     with pytest.raises(error):
-        services.services(home=unit_home)
+        services.services(home=unit_home, endpoints=_table())
     with pytest.raises(error):
-        roster_plugins.plugin_services(home=unit_home)
+        roster_plugins.plugin_services(home=unit_home, endpoints=_table())
     failed = [r for r in loguru_records if "failed to load" in r["message"]]
     assert [r["message"].split()[2] for r in failed] == ["meiva_memory"]
     assert image.read_text() == content
@@ -88,6 +96,6 @@ def test_first_converge_materializes_and_seals_the_declared_input(unit_home: Pat
     image.write_text('{"indexer_enabled": false}\n')
     with pytest.raises(InputChangedError):
         seal.require_unchanged()
-    disabled = services.services(home=unit_home)[0]
+    disabled = services.services(home=unit_home, endpoints=_table())[0]
     assert disabled.gate is not None
     assert disabled.gate() == "disabled (meiva_memory.indexer_enabled off)"

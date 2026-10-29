@@ -23,9 +23,11 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database, create_agent
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home, run_dir
 from base.sessions.pty.tests.pty_shells import new
 from ops import cluster_status
 from ops.cluster_status import (
@@ -192,12 +194,21 @@ def test_a_runner_reports_its_agents_shells_daemons_and_resources(
     _insert_agents(db_conn, ("runner-a", "running"), ("runner-a", "idling"))
     for name in ("meiva-agent-7-shell-0", "meiva-agent-7-shell-1-watcher", "meiva-agent-9"):
         new(name, unit_home)
-    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile = (
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+        .of("agent_host")
+        .pidfile
+    )
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
 
     status = cluster_status.status_snapshot(
-        database, pool, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
+        database,
+        pool,
+        image=_image(tmp_path),
+        local_machine=machine_identity,
+        home=unit_home,
+        agent_host_pidfile=pidfile,
     )
 
     assert status.machine_name == "runner-a"
@@ -229,12 +240,20 @@ def test_a_gateway_probes_no_agent_host_and_counts_no_agents(
 ) -> None:
     machine_identity.set(name="gateway-a", role=frozenset({"gateway"}))
     _insert_agents(db_conn, ("gateway-a", "running"))
-    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile = (
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+        .of("agent_host")
+        .pidfile
+    )
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
 
     status = cluster_status.status_snapshot(
-        database, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
+        database,
+        image=_image(tmp_path),
+        local_machine=machine_identity,
+        home=unit_home,
+        agent_host_pidfile=pidfile,
     )
 
     assert status.serve_gateway is True
@@ -253,7 +272,11 @@ def test_a_runner_whose_agent_host_left_no_live_pid_reads_offline(
     machine_identity.set(name="runner-a", role=_RUNNER)
 
     status = cluster_status.status_snapshot(
-        database, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
+        database,
+        image=_image(tmp_path),
+        local_machine=machine_identity,
+        home=unit_home,
+        agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
     )
 
     assert status.agent_host_online is False
@@ -271,7 +294,12 @@ def test_a_snapshot_with_an_unreachable_database_still_answers_but_claims_no_rea
     pool.close()
 
     status = cluster_status.status_snapshot(
-        database, pool, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
+        database,
+        pool,
+        image=_image(tmp_path),
+        local_machine=machine_identity,
+        home=unit_home,
+        agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
     )
 
     assert (status.paused, status.paused_reason) == (True, "no_state")

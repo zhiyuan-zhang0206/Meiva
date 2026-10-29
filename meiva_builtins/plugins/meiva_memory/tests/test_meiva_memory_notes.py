@@ -9,13 +9,21 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
+from base.config import get_field
 from base.config.tests.configuration import defaults
+from base.daemon.endpoints import ServiceEndpoints
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
-from base.paths import meiva_home, memory_dir, workspace_dir, workspace_path
+from base.paths import meiva_home, memory_dir, run_dir, workspace_dir, workspace_path
 from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
+
+
+# meiva:note
+# The health-endpoint table a plugin's `services()` hook is handed: this checkout's reader and home.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
 
 
 def _slices(**pins: Any) -> AgentSlices:
@@ -176,7 +184,9 @@ def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
     from meiva_builtins.plugins.meiva_memory.services import services
     from services.supervision.roster import composition
 
-    assert [s.session for s in services(home=meiva_home())] == ["memory-indexer"]
+    assert [s.session for s in services(home=meiva_home(), endpoints=_table())] == [
+        "memory-indexer"
+    ]
     assert "memory-indexer" in [s.session for s in composition.build_services(home=meiva_home())]
     core_source = _Path(composition.__file__).read_text(encoding="utf-8")
     literals = {

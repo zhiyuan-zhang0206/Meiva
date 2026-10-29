@@ -8,10 +8,10 @@ from types import ModuleType
 from typing import cast
 
 from base import paths
-from base.config import ConfigBoot
+from base.config import ConfigBoot, get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon as task_maintenance
 from services.agent_runner.agent_host import daemon as agent_host
 from services.agent_runner.agent_ops import boot as ops_boot
@@ -50,8 +50,14 @@ _DAEMON_MODULES: dict[str, ModuleType] = {
 }
 
 
-def _task_maintenance_pidfile() -> Path:
-    return task_maintenance.task_maintenance_endpoint().pidfile
+# meiva:note
+# The health-endpoint table the roster builds: this checkout's reader and its home.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+
+
+def _task_maintenance_pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return task_maintenance.task_maintenance_endpoint(config, runtime=runtime).pidfile
 
 
 def _standard_daemons() -> list[ServiceSpec]:
@@ -72,10 +78,10 @@ def test_every_standard_daemon_probe_is_scoped_to_its_name_url_and_pidfile() -> 
         assert probe.func is probe_daemon, spec.session
         assert probe.args == (
             name,
-            f"http://localhost:{ServiceEndpoints.from_settings().of(name).health_port}/healthz",
+            f"http://localhost:{_table().of(name).health_port}/healthz",
         ), spec.session
         assert probe.keywords == {
-            "pidfile": ServiceEndpoints.from_settings().of(name).pidfile,
+            "pidfile": _table().of(name).pidfile,
             "expected_home": meiva_home(),
         }, spec.session
 
@@ -92,6 +98,8 @@ def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
             operation = ops_boot.pidfile
         elif module is task_maintenance:
             operation = _task_maintenance_pidfile
+        elif module is agent_host:
+            operation = agent_host.pidfile_path
         else:
             operation = module._pidfile
         parameters = inspect.signature(operation).parameters
@@ -104,6 +112,4 @@ def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
             )
             assert parameters["runtime"].kind is inspect.Parameter.KEYWORD_ONLY, spec.session
             actual = operation(config=process_config, runtime=paths.run_dir(paths.meiva_home()))
-        assert (
-            actual == ServiceEndpoints.from_settings().of(cast("str", spec.health_name)).pidfile
-        ), spec.session
+        assert actual == _table().of(cast("str", spec.health_name)).pidfile, spec.session
