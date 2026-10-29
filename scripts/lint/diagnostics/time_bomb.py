@@ -90,7 +90,7 @@ from scripts.structure.lazy_modules import ModuleMap  # noqa: E402 - standalone 
 
 __all__ = ["main"]
 
-_SCAN_DIRS = packages("application", "tooling")
+_SCAN_DIRS = packages("application", "standalone", "tooling")
 
 # A parameter carrying any of these names is treated as the caller-visible
 # logical clock (a `now`/`at` the caller can pin). `deadline` is deliberately
@@ -447,7 +447,7 @@ def _lint_source(
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
-            for p in sorted(path.rglob("*.py")):
+            for p in lint_common.python_files([path], index.root):
                 rel = _rel_or_abs(index.root, p)
                 if _is_test_path(rel) or (scope is not None and rel not in scope):
                     continue
@@ -512,7 +512,7 @@ def _lint_tests(index: _Index, paths: list[Path], scope: frozenset[str] | None =
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
-            for p in sorted(path.rglob("*.py")):
+            for p in lint_common.python_files([path], index.root):
                 rel = _rel_or_abs(index.root, p)
                 if _is_test_path(rel) and (scope is None or rel in scope):
                     errors.extend(_lint_test_file(index, p, rel))

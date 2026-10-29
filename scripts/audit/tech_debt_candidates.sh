@@ -93,7 +93,7 @@ JSON
 npm_report() { (cd ui/web && npm outdated --json); }
 
 SCAN_ROOTS=(
-  # meizel:roles BEGIN dirs application templates
+  # meizel:roles BEGIN dirs application standalone templates
   agent/
   meiva/
   meiva_builtins/

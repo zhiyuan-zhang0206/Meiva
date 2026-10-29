@@ -30,14 +30,14 @@ class ImportAccess:
     """The scan state of one file and the facts that import access alone produces."""
 
     def __init__(self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool) -> None:
-        self.u = universe
+        self.u = universe.context(path)
         self.path = path
         self.tree = tree
         self.package = path.split("/")[:-1]
         self.walrus = walrus
         self.facts: list[Fact] = []
         self.problems: list[Problem] = []
-        self.scope: Scope = Scope(None)
+        self.scope: Scope = Scope(None, canonicalize=self.u.canonical_name)
         collect_scope(self.scope, tree.body, self.package, walrus=walrus)
         self.imported = set(self.scope.imports)
 

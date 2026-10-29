@@ -23,6 +23,14 @@ from meizel.state.ambient_state.tests.conftest import (
 
 type RepoFactory = Callable[[Mapping[str, str]], Path]
 
+STANDALONE_PROJECT = (
+    '[build-system]\nbuild-backend = "hatchling.build"\n'
+    '[tool.hatch.build.targets.wheel]\npackages = ["src/meiva_embedding_service"]\n'
+    "[project.optional-dependencies]\ncpu = []\n"
+    '[tool.basedpyright]\ntypeCheckingMode = "strict"\ninclude = ["src", "tests"]\n'
+    '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+)
+
 
 # meiva:note
 # The counts a baseline table records, one per key: an entry also carries the owner paying it down and

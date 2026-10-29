@@ -11,7 +11,7 @@ from meizel.roles import packages
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "standalone", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -309,7 +309,7 @@ def _scan(
     root = _root(repo_root)
     errors: list[str] = []
     for path in paths:
-        candidates = sorted(path.rglob("*.py")) or ([path] if path.suffix == ".py" else [])
+        candidates = lint_common.python_files([path], root)
         for p in candidates:
             rel = _rel_path(p, root)
             if any(pat.search(rel) for pat in _TEST_PATTERNS):

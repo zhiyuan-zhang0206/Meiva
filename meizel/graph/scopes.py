@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 __all__ = [
     "Scope",
@@ -19,6 +19,7 @@ class Scope:
     """Import origins and shadowing names of one function, class or module body."""
 
     __slots__ = (
+        "_canonicalize",
         "_closure_override",
         "imports",
         "is_class",
@@ -28,7 +29,14 @@ class Scope:
         "values",
     )
 
-    def __init__(self, parent: Scope | None, *, is_class: bool = False) -> None:
+    def __init__(
+        self,
+        parent: Scope | None,
+        *,
+        is_class: bool = False,
+        canonicalize: Callable[[str], str] | None = None,
+    ) -> None:
+        self._canonicalize = parent._canonicalize if parent else canonicalize
         self._closure_override: Scope | None = None
         self.parent = parent
         self.is_class = is_class
@@ -47,6 +55,7 @@ class Scope:
         return None
 
     def bind_import(self, name: str, origin: str) -> None:
+        origin = self._canonicalize(origin) if self._canonicalize else origin
         known = self.imports.get(name)
         if known is not None and known != origin:
             self.shadowed.add(name)
@@ -74,7 +83,7 @@ class Scope:
 
     def annotation_scope(self, parameters: Iterable[ast.type_param]) -> Scope:
         annotation = Scope(self)
-        closure = Scope(self.closure_parent())
+        closure = Scope(self.closure_parent(), canonicalize=self._canonicalize)
         names: set[str] = set()
         for parameter in parameters:
             if not isinstance(parameter, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):

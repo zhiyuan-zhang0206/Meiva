@@ -15,8 +15,9 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from meizel.graph import project_metadata_paths, standalone_projects
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import EditPlan, Universe
+from meizel.graph.universe import MANIFEST, EditPlan, Universe
 
 __all__ = [
     "GitRepo",
@@ -251,12 +252,18 @@ def toplevel(cwd: Path) -> Path:
 
 def _is_regular(root: Path, rel: str) -> bool:
     full = root / rel
-    return full.is_file() and not full.is_symlink()
+    return full.is_file() and not any(
+        candidate.is_symlink()
+        for candidate in (full, *full.parents)
+        if candidate != root and candidate.is_relative_to(root)
+    )
 
 
 # meiva:note
 # Fixed Git argv and NUL framing preserve tracked names containing whitespace or newlines.
-def tracked_files(repo_root: Path, *, include_untracked: bool = False) -> list[str]:
+def tracked_files(
+    repo_root: Path, *, include_untracked: bool = False, regular: bool = False
+) -> list[str]:
     extra = ("--cached", "--others", "--exclude-standard") if include_untracked else ()
     result = subprocess.run(  # noqa: S603
         ["git", "-C", str(repo_root), "ls-files", "-z", *extra],
@@ -266,9 +273,18 @@ def tracked_files(repo_root: Path, *, include_untracked: bool = False) -> list[s
     )
     if result.returncode != 0:
         raise MeizelError(f"git ls-files failed: {result.stderr.decode(errors='replace').strip()}")
-    return [path.decode() for path in result.stdout.split(b"\0") if path]
+    names = [path.decode() for path in result.stdout.split(b"\0") if path]
+    return [path for path in names if not regular or _is_regular(repo_root, path)]
 
 
-def load_universe(root: Path) -> Universe:
+def load_universe(root: Path, *, include_untracked: bool = False) -> Universe:
     repo = GitRepo(root)
-    return Universe(repo, sorted({path for path in tracked_files(root) if _is_regular(root, path)}))
+    files = sorted(set(tracked_files(root, include_untracked=include_untracked, regular=True)))
+    root_manifest = repo.load_text(MANIFEST) if MANIFEST in files else ""
+    projects = {
+        name: repo.load_text(name)
+        for name in project_metadata_paths(frozenset(files), root_manifest)
+    }
+    return Universe(
+        repo, files, projects=standalone_projects(frozenset(files), root_manifest, projects)
+    )

@@ -20,7 +20,7 @@ the world is read once, in a composition root, and passed down. Meizel makes tha
 recording each point where a file reaches the world and asking its directory manifest whether the
 file is allowed to.
 
-The rule governs the `application`, `templates`, `tooling` and `frontend` roles
+The rule governs the `application`, `standalone`, `templates`, `tooling` and `frontend` roles
 for both Python and TypeScript. Both languages use the same `[state]` and `[roots]`
 manifest entries. TypeScript acquisition uses compiler bindings for imports and
 shadowing; its built-in spellings include `process.env`, `process.cwd()`,
@@ -105,7 +105,7 @@ down from the real root.
 
 ## The rule
 
-`ambient-read` fires for a non-test file of a governed role (`application`, `templates`, `tooling`)
+`ambient-read` fires for a non-test file of a governed role (`application`, `standalone`, `templates`, `tooling`)
 that acquires a kind its manifest entry does not declare. The key is `file#kind target`
 (`daemon.py#clock time.time`) and the owner is the file's directory, so the diagnostic is
 recordable debt like any patch: recorded sites pass, a new one fails, a paid one is `debt-paid`. A

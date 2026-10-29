@@ -51,7 +51,7 @@ sys.path.insert(0, str(_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
-SCAN_DIRS = ("gateway", "ops")
+SCAN_DIRS = ("gateway", "ops", *packages("standalone"))
 
 # Sync library/method surfaces that must not appear un-awaited in an async body.
 LIBRARY_BLOCKING_NAMES = {
@@ -116,7 +116,7 @@ BLOCKING_NAMES = LIBRARY_BLOCKING_NAMES | REPO_BLOCKING_HELPERS
 
 # Where a repo helper may be defined (the non-test source tree; a test's own
 # helper never keeps an entry alive).
-DEFINITION_DIRS = packages("application")
+DEFINITION_DIRS = packages("application", "standalone")
 
 # Module-qualified sync calls (any attribute of these modules).
 _BLOCKING_MODULES = {"shutil", "subprocess", "psutil"}
@@ -200,7 +200,7 @@ def stale_repo_helpers(
     remaining = set(helpers)
     pattern = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*[\[(]", re.MULTILINE)
     for directory in dirs:
-        for path in (root / directory).rglob("*.py"):
+        for path in lint_common.python_files([root / directory], root):
             if "__pycache__" in path.parts or lint_common.is_repo_test_file(path, root):
                 continue
             try:
@@ -226,8 +226,7 @@ def _scanned_files(
         lint_common.restrict(
             (
                 p
-                for d in dirs
-                for p in (root / d).rglob("*.py")
+                for p in lint_common.python_files([root / d for d in dirs], root)
                 if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, root)
             ),
             scope,

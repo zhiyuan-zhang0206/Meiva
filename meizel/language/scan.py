@@ -270,7 +270,10 @@ class Scanner(AmbientAccess):
         base = absolute_base(node, self.package)
         if self.records_ambient and base is not None:
             for alias in node.names:
-                self.ambient.imported(f"{base}.{alias.name}" if base else alias.name, node.lineno)
+                self.ambient.imported(
+                    self.u.canonical_name(f"{base}.{alias.name}" if base else alias.name),
+                    node.lineno,
+                )
 
     def visit_name(self, node: ast.Name) -> None:
         super().visit_name(node)

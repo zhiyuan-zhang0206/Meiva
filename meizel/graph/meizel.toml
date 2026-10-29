@@ -6,6 +6,10 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 "imports.py" = "strict"
 "model.py" = "strict"
 "scopes.py" = "strict"
+"python_layout.py" = "strict"
 
 [uses]
 "imports.py" = ["model.py", "scopes.py", "universe.py"]
+"__init__.py" = ["python_layout.py"]
+"universe.py" = ["python_layout.py"]
+"python_layout.py" = ["model.py"]
