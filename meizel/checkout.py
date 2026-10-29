@@ -272,13 +272,27 @@ def toplevel(cwd: Path) -> Path:
     return Path(result.stdout.strip())
 
 
-def _is_regular(root: Path, rel: str) -> bool:
+# meiva:note
+# A path is regular when it is a file and no component between it and the root is a
+# link: git tracks a path, not how it is reached, so a directory swapped for a link
+# keeps its tracked children listed. The answer for a directory is remembered for
+# one listing — the same parent serves every file below it, and asking the
+# filesystem once per component per file made a 91k-file listing cost ~900k calls.
+def _is_regular(root: Path, rel: str, links: dict[Path, bool]) -> bool:
     full = root / rel
-    return full.is_file() and not any(
-        candidate.is_symlink()
-        for candidate in (full, *full.parents)
-        if candidate != root and candidate.is_relative_to(root)
-    )
+    if not full.is_file():
+        return False
+    for candidate in (full, *full.parents):
+        if candidate == root:
+            break
+        if not candidate.is_relative_to(root):
+            continue
+        linked = links.get(candidate)
+        if linked is None:
+            linked = links[candidate] = candidate.is_symlink()
+        if linked:
+            return False
+    return True
 
 
 # meiva:note
@@ -296,7 +310,10 @@ def tracked_files(
     if result.returncode != 0:
         raise MeizelError(f"git ls-files failed: {result.stderr.decode(errors='replace').strip()}")
     names = [path.decode() for path in result.stdout.split(b"\0") if path]
-    return [path for path in names if not regular or _is_regular(repo_root, path)]
+    if not regular:
+        return names
+    links: dict[Path, bool] = {}
+    return [path for path in names if _is_regular(repo_root, path, links)]
 
 
 def load_universe(root: Path, *, include_untracked: bool = False) -> Universe:

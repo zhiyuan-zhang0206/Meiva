@@ -329,6 +329,7 @@ def _stale_entries(
     )
 
 
+@lint_common.admission.scoped
 def main(
     argv: list[str] | None = None,
     *,

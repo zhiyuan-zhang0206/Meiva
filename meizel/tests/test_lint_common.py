@@ -80,3 +80,55 @@ def test_directory_scan_does_not_follow_a_tracked_parent_replaced_by_a_link(tmp_
     source.parent.rename(tmp_path / "foreign")
     source.parent.symlink_to(tmp_path / "foreign", target_is_directory=True)
     assert lint_common.python_files([root / "app"], root) == []
+
+
+# meiva:note
+# Admission reuse is scoped to one lint run, and the scope is what makes it safe:
+# inside the run the checkout is read once (a lint asks per target and one run asked
+# 21 times), and outside it every read goes back to git, so a file created between
+# two runs is never judged by the previous run's file set. Both halves are pinned
+# here because the fast path and the correct path are the same code.
+# meiva:link meizel/docs/lint/lint-common-admission.meiva.okf.md
+def _git_fixture(root: Path, *files: str) -> None:
+    import subprocess
+
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)  # noqa: S603
+    for relative in files:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)  # noqa: S603
+
+
+def test_admission_reads_the_checkout_once_per_run(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/one.py", "app/two.py")
+    root = tmp_path / "repo"
+    with lint_common.admission:
+        first = lint_common.python_files([root / "app"], root)
+        second = lint_common.python_files([root / "app/two.py"], root)
+        stats = lint_common.admission.stats()
+    assert first == [root / "app/one.py", root / "app/two.py"]
+    assert second == [root / "app/two.py"]
+    assert stats["reads"] == 1, stats
+    assert stats["reuses"] >= 1, stats
+
+
+def test_admission_scope_ends_with_the_run(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/one.py")
+    root = tmp_path / "repo"
+    with lint_common.admission:
+        assert lint_common.python_files([root / "app"], root) == [root / "app/one.py"]
+    (root / "app/created_after_the_run.py").write_text("value = 2\n", encoding="utf-8")
+    assert lint_common.python_files([root / "app"], root) == [
+        root / "app/created_after_the_run.py",
+        root / "app/one.py",
+    ]
+
+
+def test_an_unrelated_touch_keeps_the_admitted_set(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/one.py", "docs/notes.md")
+    root = tmp_path / "repo"
+    before = lint_common.python_files([root / "app"], root)
+    (root / "docs/notes.md").touch()
+    assert lint_common.python_files([root / "app"], root) == before
