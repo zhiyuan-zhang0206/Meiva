@@ -23,6 +23,31 @@ functions, one table per kind of the vocabulary above:
 "base.cluster.machine.ambient.gateway_access_from_settings()" = "reads the gateway credentials from the process settings"
 ```
 
+An entry whose function reads the world only when it is not handed the value is a table instead
+of a reason string:
+
+```toml
+[ambient-readers.pid]
+"base.paths.private_dir.is_foreign_owned()" = { why = "compares with os.geteuid() when no euid is passed", unless = "euid" }
+```
+
+`unless` names one parameter of that function. A call that passes the parameter a value is not an
+acquisition: the caller supplied what the world would have answered, so the reader had nothing to
+read. An explicit `None` is still a read (`is_foreign_owned(current, euid=None)` asks for the
+process's own), and so is a call that leaves the parameter out. The clause is read for one
+parameter of a module-level function: a reader that needs two optional world values is two
+readers. An entry with a clause also resolves the function's own module, so a bare call of it in
+the file that defines it is judged at the call: a `def env_for(host): return git_env(host.environ)`
+beside `git_env` is spared, and the same line written `return git_env()` is counted.
+The clause sees only *whether* an argument was passed, never what it holds: a wrapper that forwards
+its own optional parameter (`euid=euid`, with `euid: int | None = None`) is spared even when the
+value it forwards is `None`, and the read happens anyway. Declare a clause only where every call it
+spares passes a value that is itself required — or make the wrapper take the value and pass it on.
+A clause is opt-in, one entry at a time. An entry without one behaves exactly as before: a bare call
+of that reader in the file that defines it is **not** recorded, so a wrapper beside its caller stays
+silent until its entry declares the clause. Resolving every entry in its own module is a rule change
+of its own, not a side effect of this one.
+
 A key is the fully qualified call (`pkg.module.name()` or `pkg.module.Class.method()`) of the
 module that defines the function, so a function of the same name elsewhere is not the reader. A
 class is listed the same way (`"base.clock.Clock()"` is every place that builds one). A key without
@@ -42,8 +67,9 @@ A reader returns something the world decides (the environment, a home path, the 
 id, the current time, a random value, the process settings or a handle built from them), or is the
 process-wide object that decides it (`SYSTEM_TIMERS`, the `Clock` that wraps it). It is listed when
 it is defined in a root, or is a helper over one in the module that holds it (`base.paths.meiva_home()`
-calls `resolve_meiva_home()` in its own module, a call the scanner does not count, so the helper
-needs an entry of its own), and files that are not roots use it. A function in a file that
+calls `resolve_meiva_home()` in its own module, a call the scanner counts only for an entry that
+declares an `unless` clause, so the helper needs an entry of its own), and files that are not roots
+use it. A function in a file that
 is not a root that merely calls a reader needs no entry: the read is recorded there.
 
 ## What is not followed
