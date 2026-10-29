@@ -61,3 +61,14 @@ def test_certification_writes_the_record_and_the_tag_that_points_at_it() -> None
     assert '"v${{ inputs.version }}"' in tag["run"]
     assert tag["run"].index("git push origin") > tag["run"].index("git tag -a")
     assert "gh pr create" in pull_request["run"]
+
+
+def test_a_red_night_blocks_the_gate_and_a_missing_night_does_not() -> None:
+    precheck = _yaml(_WORKFLOW)["jobs"]["precheck"]
+    nightly = _step(precheck["steps"], "Refuse a commit whose nightly full suite was red")
+    script = nightly["run"]
+
+    assert "refresh-test-durations.yml" in script
+    assert 'failure) echo "::error::' in script
+    assert "exit 1" in script.split("failure)")[1].split(";;")[0]
+    assert "no nightly run for $sha" in script

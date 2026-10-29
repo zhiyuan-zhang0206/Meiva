@@ -12,8 +12,10 @@
 # A tag alone can never create release eligibility: the reader ignores tags entirely.
 #
 # A red nightly verdict (`.github/workflows/refresh-test-durations.yml`) does not fail main's
-# merge ability, but it does block this gate: the wave refuses to certify a tree whose nightly
-# full suite was red.
+# merge ability, but it does block this gate: when a nightly run exists for the certified commit
+# and failed, the wave refuses to certify it. A commit the nightly never ran (the usual case, as
+# it runs once a night on main) is not refused for that reason alone - the gate's own matrix is
+# then the only full-suite evidence, and it is fresher.
 
 name: Release gate
 
@@ -84,6 +86,19 @@ jobs:
           --repo .
           --target ${{ steps.target.outputs.sha }}
           --provenance-dir release
+
+      - name: Refuse a commit whose nightly full suite was red
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${{ steps.target.outputs.sha }}"
+          conclusion="$(gh run list --workflow=refresh-test-durations.yml --commit "$sha" \
+            --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
+          case "$conclusion" in
+            failure) echo "::error::$sha failed the nightly full suite; a red night blocks the release gate"; exit 1 ;;
+            "") echo "no nightly run for $sha - the gate's own matrix is the full-suite evidence" ;;
+            *) echo "nightly full suite for $sha: $conclusion" ;;
+          esac
 
   backend:
     needs: precheck
