@@ -108,12 +108,14 @@ def test_collection_exit_preserved_and_worker_joined(
 
 
 # meiva:note
-# Two facts made the old shape red on a loaded runner (2026-10-29): a dump is taken on the dumper's
-# own schedule, so a churn loop bounded by wall clock only proves the machine scheduled it inside
-# that window; and faulthandler prints at most 100 frames per thread, so `recurse(123)` pushed the
-# thread's outermost `churn` frame past the cap and a dump taken mid-recursion could never contain
-# it (measured: invisible at depth 123, visible at 60 and 20). The loop now waits for a dump before
-# it stops, and the recursion fits the cap, so any dump carries the thread's entry frame.
+# Three facts made the old shape red on a loaded runner (2026-10-29): a dump is taken on the dumper's
+# own schedule, so a loop bounded by wall clock only proves the machine scheduled the dumper inside
+# that window; faulthandler prints at most 100 frames per thread, so `recurse(123)` pushed the
+# thread's outermost `churn` frame past the cap (measured: invisible at 123, visible at 60 and 20);
+# and the dumper's first dump can precede the worker thread's entry, which leaves a file with no
+# churn frame at all. The thread now reaches its innermost recursive frame and stops there before the
+# sampler starts, so every dump taken while the sampler runs carries that whole chain, and the depth
+# fits the cap.
 # meiva:link scripts/ci/collection_tracebacks.py
 def test_frame_churn_finishes_with_complete_tracebacks(
     tmp_path: Path, pytester: pytest.Pytester
@@ -123,25 +125,30 @@ def test_frame_churn_finishes_with_complete_tracebacks(
         pytester,
         "import faulthandler, threading\n"
         "from scripts.ci.collection_tracebacks import periodic_tracebacks\n"
+        "entered = threading.Event()\n"
+        "released = threading.Event()\n"
         "dumped = threading.Event()\n"
-        "stop = threading.Event()\n"
         "def recurse(depth):\n"
         "    a, b, c = 1, 2, 3\n"
         "    if depth:\n"
         "        return recurse(depth - 1)\n"
+        "    entered.set()\n"
+        "    assert released.wait(10), 'the parked frame was never released'\n"
         "    return a + b + c\n"
         "def churn():\n"
-        "    while not stop.is_set():\n"
-        "        assert recurse(20) == 6\n"
+        "    assert recurse(20) == 6\n"
         "def dump(*, file, all_threads):\n"
         "    faulthandler.dump_traceback(file=file, all_threads=all_threads)\n"
         "    dumped.set()\n"
+        "worker = threading.Thread(target=churn, name='churning-worker')\n"
+        "worker.start()\n"
         f"with open({str(output)!r}, 'w') as stacks:\n"
-        "    with periodic_tracebacks(stacks, interval=0.001, dump_traceback=dump):\n"
-        "        worker = threading.Thread(target=churn, name='churning-worker')\n"
-        "        worker.start()\n"
-        "        assert dumped.wait(10), 'no periodic dump was taken while the frames churned'\n"
-        "        stop.set()\n"
+        "    try:\n"
+        "        assert entered.wait(10), 'the churn thread never reached its innermost frame'\n"
+        "        with periodic_tracebacks(stacks, interval=0.001, dump_traceback=dump):\n"
+        "            assert dumped.wait(10), 'no periodic dump was taken'\n"
+        "    finally:\n"
+        "        released.set()\n"
         "        worker.join()\n"
         "assert not any(t.name == 'collection-tracebacks' for t in threading.enumerate())\n",
         timeout=20,
