@@ -337,7 +337,7 @@ def _window_declaration(node: ast.expr, *, context: str) -> WindowDeclaration:
         node,
         "PriceWindow",
         required={"start", "end", "cache_miss", "cache_hit", "output"},
-        optional={"cache_write_5m", "cache_write_1h"},
+        optional={"cache_write_5m", "cache_write_1h", "cache_write_30m"},
         context=context,
     )
     return WindowDeclaration(
@@ -352,7 +352,7 @@ def _tier_declaration(node: ast.expr, *, context: str) -> TierDeclaration:
         node,
         "PriceTier",
         required={"input_tokens_min", "input_tokens_max", "cache_miss", "cache_hit", "output"},
-        optional={"windows", "cache_write_5m", "cache_write_1h"},
+        optional={"windows", "cache_write_5m", "cache_write_1h", "cache_write_30m"},
         context=context,
     )
     window_nodes = (
@@ -425,7 +425,7 @@ def _price_declaration(call: ast.expr, *, context: str) -> tuple[PriceDeclaratio
         call,
         "PriceRates",
         required={"cache_miss", "cache_hit", "output", "source_url", "source_checked_at"},
-        optional={"vendor", "periods", "cache_write_5m", "cache_write_1h"},
+        optional={"vendor", "periods", "cache_write_5m", "cache_write_1h", "cache_write_30m"},
         context=context,
     )
     source_url = _literal(fields["source_url"], str, context=f"{context} source_url")

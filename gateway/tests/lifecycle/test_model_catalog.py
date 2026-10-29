@@ -52,6 +52,12 @@ def test_picker_exposes_served_service_cache_write_rates(
     assert standard is not None and fast is not None
     assert (standard.cache_write_5m, standard.cache_write_1h) == (5, 8)
     assert (fast.cache_write_5m, fast.cache_write_1h) == (10, 16)
+    openai_standard = catalog.models["gpt-6.1-sol"].pricing
+    openai_fast = catalog.models["gpt-6.1-sol-fast"].pricing
+    assert openai_standard is not None and openai_fast is not None
+    assert openai_standard.cache_write_30m == 2.5
+    assert openai_fast.cache_write_30m == 5
+    assert openai_standard.cache_write_5m is None
 
 
 def test_picker_publishes_each_models_harnesses(

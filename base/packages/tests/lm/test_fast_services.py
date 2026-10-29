@@ -148,10 +148,10 @@ def test_fast_prices_use_full_request_long_context_tier(*, model_catalog: ModelC
     now = datetime(2026, 10, 7, 12, tzinfo=UTC)
     assert rates_at(
         "gpt-6.1-sol-fast", at=now, input_tokens=272_000, prices=model_catalog.prices
-    ) == Rates(4, 0.2, 20)
+    ) == Rates(4, 0.2, 20, cache_write_30m=5)
     assert rates_at(
         "gpt-6.1-sol-fast", at=now, input_tokens=272_001, prices=model_catalog.prices
-    ) == Rates(8, 0.4, 30)
+    ) == Rates(8, 0.4, 30, cache_write_30m=10)
     assert rates_at(
         "claude-opus-5-5-fast", at=now, input_tokens=900_000, prices=model_catalog.prices
     ) == Rates(8, 0.4, 40, cache_write_5m=10, cache_write_1h=16)

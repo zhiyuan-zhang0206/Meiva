@@ -13,8 +13,9 @@ FAST_PRICES = {
         cache_miss=20,
         cache_hit=2,
         output=100,
+        cache_write_30m=25.00,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-07",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -27,6 +28,7 @@ FAST_PRICES = {
                         cache_miss="20",
                         cache_hit="2",
                         output="100",
+                        cache_write_30m="25.00",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -34,6 +36,7 @@ FAST_PRICES = {
                         cache_miss="40",
                         cache_hit="4",
                         output="150",
+                        cache_write_30m="50.00",
                     ),
                 ),
             ),
@@ -43,8 +46,9 @@ FAST_PRICES = {
         cache_miss=4,
         cache_hit=0.2,
         output=20,
+        cache_write_30m=5.00,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-07",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -57,6 +61,7 @@ FAST_PRICES = {
                         cache_miss="4",
                         cache_hit="0.2",
                         output="20",
+                        cache_write_30m="5.00",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -64,6 +69,7 @@ FAST_PRICES = {
                         cache_miss="8",
                         cache_hit="0.4",
                         output="30",
+                        cache_write_30m="10.00",
                     ),
                 ),
             ),
@@ -73,8 +79,9 @@ FAST_PRICES = {
         cache_miss=4,
         cache_hit=0.4,
         output=20,
+        cache_write_30m=5.00,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-07",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -87,6 +94,7 @@ FAST_PRICES = {
                         cache_miss="4",
                         cache_hit="0.4",
                         output="20",
+                        cache_write_30m="5.00",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -94,6 +102,7 @@ FAST_PRICES = {
                         cache_miss="8",
                         cache_hit="0.8",
                         output="30",
+                        cache_write_30m="10.00",
                     ),
                 ),
             ),
@@ -103,8 +112,9 @@ FAST_PRICES = {
         cache_miss=0.2,
         cache_hit=0.02,
         output=1,
+        cache_write_30m=0.250,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-07",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -117,6 +127,7 @@ FAST_PRICES = {
                         cache_miss="0.2",
                         cache_hit="0.02",
                         output="1",
+                        cache_write_30m="0.250",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -124,6 +135,7 @@ FAST_PRICES = {
                         cache_miss="0.4",
                         cache_hit="0.04",
                         output="1.5",
+                        cache_write_30m="0.500",
                     ),
                 ),
             ),
@@ -133,8 +145,9 @@ FAST_PRICES = {
         cache_miss=2,
         cache_hit=0.1,
         output=10,
+        cache_write_30m=2.50,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-28",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -147,6 +160,7 @@ FAST_PRICES = {
                         cache_miss="2",
                         cache_hit="0.1",
                         output="10",
+                        cache_write_30m="2.50",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -154,6 +168,7 @@ FAST_PRICES = {
                         cache_miss="4",
                         cache_hit="0.2",
                         output="15",
+                        cache_write_30m="5.00",
                     ),
                 ),
             ),
@@ -163,8 +178,9 @@ FAST_PRICES = {
         cache_miss=8,
         cache_hit=0.8,
         output=40,
+        cache_write_30m=10.00,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-07",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -177,6 +193,7 @@ FAST_PRICES = {
                         cache_miss="8",
                         cache_hit="0.8",
                         output="40",
+                        cache_write_30m="10.00",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -184,6 +201,7 @@ FAST_PRICES = {
                         cache_miss="16",
                         cache_hit="1.6",
                         output="60",
+                        cache_write_30m="20.00",
                     ),
                 ),
             ),
@@ -193,8 +211,9 @@ FAST_PRICES = {
         cache_miss=4,
         cache_hit=0.4,
         output=24,
+        cache_write_30m=5.00,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-07",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -207,6 +226,7 @@ FAST_PRICES = {
                         cache_miss="4",
                         cache_hit="0.4",
                         output="24",
+                        cache_write_30m="5.00",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -214,6 +234,7 @@ FAST_PRICES = {
                         cache_miss="8",
                         cache_hit="0.8",
                         output="36",
+                        cache_write_30m="10.00",
                     ),
                 ),
             ),
@@ -223,8 +244,9 @@ FAST_PRICES = {
         cache_miss=0.4,
         cache_hit=0.04,
         output=2.4,
+        cache_write_30m=0.500,
         source_url="https://developers.openai.com/api/docs/pricing",
-        source_checked_at="2026-10-07",
+        source_checked_at="2026-10-29",
         vendor="openai",
         periods=(
             PricePeriod(
@@ -237,6 +259,7 @@ FAST_PRICES = {
                         cache_miss="0.4",
                         cache_hit="0.04",
                         output="2.4",
+                        cache_write_30m="0.500",
                     ),
                     PriceTier(
                         input_tokens_min=272001,
@@ -244,6 +267,7 @@ FAST_PRICES = {
                         cache_miss="0.8",
                         cache_hit="0.08",
                         output="3.6",
+                        cache_write_30m="1.000",
                     ),
                 ),
             ),

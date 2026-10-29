@@ -96,6 +96,7 @@ def test_get_models_returns_grouped_supported_models() -> None:
         "output": 20.0,
         "cache_write_5m": None,
         "cache_write_1h": None,
+        "cache_write_30m": 5.0,
     }
     from base.config import settings
 
