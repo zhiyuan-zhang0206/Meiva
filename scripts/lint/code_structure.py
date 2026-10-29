@@ -176,6 +176,21 @@ def _renamed_to(name: str, renames: dict[str, str]) -> str | None:
     return renames.get(name.partition("::")[0])
 
 
+# meiva:note
+# Why the guard refuses a moved key that stayed behind, and a rule version that went back: the
+# frozen count is a fact about one file, and a version records the measurement the counts were
+# frozen under. Both are written once here, with the guard that reads them.
+_RENAME_WHY = (
+    "the frozen count belongs to the file, so a key left behind freezes a path nothing measures "
+    "while the sites at the new path go unguarded — whoever moves the file owns carrying it"
+)
+_VERSION_WHY = (
+    "a version records the measurement its counts were frozen under, so going back reads an older "
+    "count with a rule that no longer produces it — a measurement change raises the version and "
+    "keeps every count frozen"
+)
+
+
 def _section_guard(
     kind: str,
     current: dict[str, int],
@@ -192,17 +207,18 @@ def _section_guard(
             errors.append(
                 f"{baseline_shards.shard_path(kind, name)}: {kind} entry {name} was not migrated "
                 f"after its file moved to {moved_to} — move this key to {new_key} in "
-                f"{baseline_shards.shard_path(kind, new_key)} with the same value"
+                f"{baseline_shards.shard_path(kind, new_key)} with the same value; {_RENAME_WHY}"
             )
             continue
         errors.append(
-            f"{baseline_shards.shard_path(kind, name)}: added {kind} entry {name} — baseline is shrink-only"
+            f"{baseline_shards.shard_path(kind, name)}: added {kind} entry {name} — baseline is "
+            f"shrink-only. {baseline_shards.SHRINK_ONLY}"
         )
     for name in sorted(current.keys() & previous.keys()):
         if current[name] > previous[name]:
             errors.append(
                 f"{baseline_shards.shard_path(kind, name)}: raised {kind} entry {name} from {previous[name]} "
-                f"to {current[name]} — baseline is shrink-only"
+                f"to {current[name]} — baseline is shrink-only. {baseline_shards.SHRINK_ONLY}"
             )
     return errors
 
@@ -232,7 +248,7 @@ def _baseline_guard(
         if now < was:
             errors.append(
                 f"{baseline_shards.SHARD_DIR}/{baseline_shards.RULES_FILE}: "
-                f"{kind} rule version went back from {was} to {now}"
+                f"{kind} rule version went back from {was} to {now}; {_VERSION_WHY}"
             )
         errors.extend(
             _section_guard(
