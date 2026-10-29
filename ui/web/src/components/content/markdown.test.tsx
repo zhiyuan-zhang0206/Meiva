@@ -8,7 +8,8 @@ vi.mock("./python-code", () => ({
   ),
 }));
 
-import { resetMarkdownMathForTests, setMarkdownMathImportForTests, type MarkdownMath } from "@/lib/markdown/math";
+import { MarkdownMathProvider } from "@/components/content/markdown-renderer";
+import { createMarkdownMath, type MarkdownMath } from "@/lib/markdown/math";
 import reportedMessage from "./fixtures/reported-message-20261019.json";
 import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
 
@@ -350,16 +351,26 @@ line<br>break <mark>m</mark> <kbd>K</kbd>
 });
 
 describe("math through the lazy KaTeX surface", () => {
-  afterEach(() => {
-    resetMarkdownMathForTests();
-    setMarkdownMathImportForTests(null);
-  });
-
   it("never loads the math chunk for content without $", () => {
     const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
-    setMarkdownMathImportForTests(load);
-    renderWithBrowser(<ChatMarkdown content="no formulas here" />);
+    renderWithBrowser(<ChatMarkdown content="no formulas here" />, {
+      wrapper: ({ children }) => (
+        <MarkdownMathProvider value={createMarkdownMath(load)}>{children}</MarkdownMathProvider>
+      ),
+    });
     expect(load).not.toHaveBeenCalled();
+  });
+
+  it("renders through the injected math source rather than the shipped chunk", async () => {
+    const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
+    const { container } = renderWithBrowser(<ChatMarkdown content={"cost $x$ here"} />, {
+      wrapper: ({ children }) => (
+        <MarkdownMathProvider value={createMarkdownMath(load)}>{children}</MarkdownMathProvider>
+      ),
+    });
+
+    await waitFor(() => expect(load).toHaveBeenCalled());
+    expect(container.querySelector(".katex")).toBeNull();
   });
 
   it("keeps a lone $ written as a symbol out of math", async () => {

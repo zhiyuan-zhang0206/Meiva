@@ -22,28 +22,30 @@ const defaultImport = (): Promise<MarkdownMath> =>
     rehype: [[rehypeKatex.default, { throwOnError: false }]],
   }));
 
-const mathState: {
-  importMath: () => Promise<MarkdownMath>;
-  mathPromise: Promise<MarkdownMath> | null;
-} = {
-  importMath: defaultImport,
-  mathPromise: null,
-};
-
-export function loadMarkdownMath(): Promise<MarkdownMath> {
-  if (mathState.mathPromise !== null) return mathState.mathPromise;
-  const promise = mathState.importMath().catch((error: unknown) => {
-    if (mathState.mathPromise === promise) mathState.mathPromise = null;
-    throw error;
-  });
-  mathState.mathPromise = promise;
-  return promise;
+// meiva:note
+// The math chunk is a value, not module state: one deferred import per source, the first attempt
+// shared by every caller, and a failed attempt dropped so the next caller retries. Production
+// builds the module's own source; a test builds its own around a fake importer instead of reaching
+// for a setter on a shipped module.
+export interface MarkdownMathSource {
+  load: () => Promise<MarkdownMath>;
 }
 
-export function resetMarkdownMathForTests(): void {
-  mathState.mathPromise = null;
+export function createMarkdownMath(
+  importMath: () => Promise<MarkdownMath> = defaultImport,
+): MarkdownMathSource {
+  let pending: Promise<MarkdownMath> | null = null;
+  return {
+    load: () => {
+      if (pending !== null) return pending;
+      const attempt = importMath().catch((error: unknown) => {
+        if (pending === attempt) pending = null;
+        throw error;
+      });
+      pending = attempt;
+      return attempt;
+    },
+  };
 }
 
-export function setMarkdownMathImportForTests(loader: (() => Promise<MarkdownMath>) | null): void {
-  mathState.importMath = loader ?? defaultImport;
-}
+export const defaultMarkdownMath: MarkdownMathSource = createMarkdownMath();
