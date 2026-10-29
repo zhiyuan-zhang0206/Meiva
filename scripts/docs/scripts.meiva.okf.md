@@ -14,6 +14,14 @@ tags:
 
 `scripts/` contains Python and shell engineering tools invoked by developers, git hooks, CI, and the CLI for installation, validation, and release. Purpose subdirectories and their own children each obey the 20-direct-entry structure budget; every nested directory counts as one direct entry in its parent.
 
+## Standalone import bootstrap
+
+A script that runs straight from a checkout puts the repository root on `sys.path` itself before
+importing `meizel` or a first-party package, so those imports follow executable code and carry
+`# noqa: E402`. The reason is the bootstrap, never a circular dependency: the same file has to run
+both as `python scripts/...` and under the checkout's interpreter. A site that a reader needs to
+understand points here with `# meiva:link scripts/docs/scripts.meiva.okf.md`.
+
 ## Script Categories
 
 ### Lint (`lint_*.py` + `check_*.py`)

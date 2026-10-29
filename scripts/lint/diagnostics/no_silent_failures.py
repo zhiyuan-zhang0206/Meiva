@@ -68,12 +68,20 @@ from collections.abc import Iterator
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+# meiva:link scripts/docs/scripts.meiva.okf.md
+from meizel import lint_common  # noqa: E402
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
 
-_SCAN_DIRS = (*packages("application", "standalone", "tooling", "templates"), ".agents")
+ROLES = roles_at(_REPO_ROOT)
+
+_SCAN_DIRS = (
+    *select_packages(ROLES, "application", "standalone", "tooling", "templates"),
+    ".agents",
+)
 
 _BROAD = frozenset({"Exception", "BaseException"})
 _LOUD_LOG_METHODS = frozenset({"warning", "warn", "error", "critical", "exception", "fatal"})

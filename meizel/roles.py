@@ -2,36 +2,48 @@
 # The top-level packages of the repository and the role of each, declared once.
 #
 # The root `meizel.toml` holds a `[roles]` table that maps a role to the top-level
-# directories playing it. This module reads that table; every other place that needs
-# to know which top-level packages exist (a scan scope, a test host list, a packaging
-# list) calls `packages()` instead of keeping a copy, or is generated from the table by
-# `python -m meizel roles write` and kept fresh by `python -m meizel check`.
+# directories playing it. This module only decides what that table means: it parses a
+# table it is given and selects packages from a mapping it is given. Reading the manifest
+# is an effect and belongs to the shell (`meizel.checkout.read_roles`), so a caller that
+# knows the repository hands the parsed mapping down instead of this module reaching for it.
 
 from __future__ import annotations
 
 import tomllib
 from collections.abc import Mapping
-from functools import cache
-from pathlib import Path
 from typing import TypeGuard
 
-from meizel.checkout import GitRepo
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import MANIFEST
 
 __all__ = [
+    "ROLES_MANIFEST_KEY",
     "ROLE_NAMES",
+    "Roles",
     "all_packages",
     "check_table",
-    "packages",
+    "parse_roles",
     "pytest_test_hosts",
-    "roles",
     "select_packages",
 ]
 
 # The closed set of roles; an unknown role is an error, never a new category.
-ROLE_NAMES = ("application", "standalone", "templates", "examples", "tooling", "tests", "frontend")
-_ROOT = Path(__file__).resolve().parents[1]
+ROLE_NAMES = (
+    "application",
+    "standalone",
+    "templates",
+    "examples",
+    "tooling",
+    "tests",
+    "frontend",
+)
+
+# meiva:note
+# The table a root manifest declares its roles in.
+ROLES_MANIFEST_KEY = "roles"
+
+# meiva:note
+# The parsed `[roles]` table: role -> its top-level directories, in declaration order.
+type Roles = Mapping[str, tuple[str, ...]]
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -72,43 +84,37 @@ def check_table(table: object) -> tuple[dict[str, tuple[str, ...]], list[tuple[s
     return found, problems
 
 
-@cache
-def _read(root: Path) -> dict[str, tuple[str, ...]]:
-    path = root / MANIFEST
+# meiva:note
+# The roles a manifest's text declares: its `[roles]` table, checked against the closed set.
+# `label` names the manifest in every message, because the caller read the text somewhere
+# this module cannot see.
+def parse_roles(text: str, *, label: str) -> dict[str, tuple[str, ...]]:
     try:
-        document = tomllib.loads(GitRepo(root).load_text(MANIFEST))
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        raise MeizelError(f"{path}: cannot read the roles: {error}") from error
-    if "roles" not in document:
-        raise MeizelError(f"{path}: has no [roles] table")
-    found, problems = check_table(document["roles"])
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise MeizelError(f"{label}: cannot read the roles: {error}") from error
+    if ROLES_MANIFEST_KEY not in document:
+        raise MeizelError(f"{label}: has no [roles] table")
+    found, problems = check_table(document[ROLES_MANIFEST_KEY])
     if problems:
-        raise MeizelError(f"{path}: invalid [roles]: " + "; ".join(m for _, m in problems))
+        raise MeizelError(
+            f"{label}: invalid [roles]: " + "; ".join(message for _, message in problems)
+        )
     return found
-
-
-def roles(root: Path | None = None) -> Mapping[str, tuple[str, ...]]:
-    """Role -> its top-level directories, in the order the root manifest lists them."""
-    return _read((root or _ROOT).resolve())
-
-
-def packages(*role_names: str, root: Path | None = None) -> tuple[str, ...]:
-    """The top-level directories of the given roles, in the order given, each once."""
-    return select_packages(roles(root), *role_names)
 
 
 # meiva:note
 # Select known roles from validated declarations without rereading their source.
-def select_packages(declared: Mapping[str, tuple[str, ...]], *role_names: str) -> tuple[str, ...]:
+def select_packages(declared: Roles, *role_names: str) -> tuple[str, ...]:
     unknown = [name for name in role_names if name not in ROLE_NAMES]
     if unknown:
         raise MeizelError(f"unknown role(s) {unknown}; the roles are {', '.join(ROLE_NAMES)}")
     return tuple(dict.fromkeys(p for name in role_names for p in declared.get(name, ())))
 
 
-def all_packages(root: Path | None = None) -> tuple[str, ...]:
+def all_packages(declared: Roles) -> tuple[str, ...]:
     """Every declared top-level directory, by role order."""
-    return packages(*ROLE_NAMES, root=root)
+    return select_packages(declared, *ROLE_NAMES)
 
 
 # meiva:note

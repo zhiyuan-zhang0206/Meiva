@@ -1,37 +1,8 @@
-"""Forbid `import meiva` in the modules where graph hooks live.
-
-Run: `.venv/bin/python scripts/lint/plugins/no_meiva_in_hooks.py [path ...]` (defaults to the
-first-party packages; an explicit path that does not exist is an error). Also run by
-pre-commit.
-
-## Why
-
-A graph hook runs in the agent host, a process serving many agents' turns. It operates on
-the graph `state` it was handed and returns an update dict for LangGraph's reducer. The
-`meiva` SDK is what agent code calls inside its exec child: its state slot (`meiva.state`)
-exists only there, and its other state (identity, the exec turn) is per-process. A hook that
-imports `meiva` reaches for SDK state that is not that agent's — or not there at all, which
-is how the meiva_code after_exec hook read `meiva.state` in the host, got nothing, and silently
-injected nothing. Keeping `meiva` out of hook modules makes the mistake impossible to write.
-
-## Rule
-
-A module is a hook module when it is any of:
-
-- under `agent/hooks/`;
-- named `agent_runtime.py` (a plugin's host-side face: its hooks and contributions);
-- a module that defines a class deriving from `Hook` (`class X(Hook)` / `class X(hooks.Hook)`).
-
-No import of `meiva` or `meiva.<anything>` may appear anywhere in it, including inside a
-function or under `TYPE_CHECKING`. State a hook needs comes from its `state` argument
-(`PluginStateHandle.view` / `.delta` for plugin state); an SDK-derived value it needs is
-computed by a helper in a module that is not a hook module. There is no exemption and no
-allowlist. Tests are not scanned.
-
-Known gap: an `importlib.import_module("meiva...")` string or a module a hook module imports
-that itself imports `meiva` is not seen — the rule is about the hook module's own imports.
-Error format `file:line: <detail>`, non-zero exit.
-"""
+# meiva:note
+# Forbid `import meiva` in the modules where graph hooks live: a hook operates on the graph `state`
+# it is handed, and the SDK's state slot exists only in the exec child, so reaching for it reads
+# another agent's turn — or nothing at all.
+# meiva:link scripts/lint/docs/no-meiva-in-hooks.meiva.okf.md
 
 from __future__ import annotations
 
@@ -40,12 +11,12 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+# meiva:link scripts/docs/scripts.meiva.okf.md
+from meizel import lint_common  # noqa: E402
 
-SCAN_DIRS = packages("application", "standalone", "templates", "examples")
 _HOOKS_DIR = "agent/hooks/"
 _FACE_NAME = "agent_runtime.py"
 
@@ -101,7 +72,9 @@ def _scan_file(path: Path, rel: str) -> list[tuple[int, str]]:
     ]
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
+def main(
+    argv: list[str] | None = None, *, scan_dirs: tuple[str, ...], repo_root: Path = _REPO_ROOT
+) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
@@ -111,7 +84,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
             return 1
         files = [repo_root / entry for entry in resolved if entry.endswith(".py")]
     else:
-        roots = lint_common.scan_roots(repo_root, SCAN_DIRS)
+        roots = lint_common.scan_roots(repo_root, scan_dirs)
         files = lint_common.python_files(roots, repo_root)
 
     scope = lint_common.changed_scope(only, repo_root)
@@ -140,4 +113,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(
+        "the entry of this rule is `python scripts/lint/plugins/no_meiva_in_hooks_cli.py`: the rule "
+        "takes its scan directories from the shell that reads the roles"
+    )

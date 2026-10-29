@@ -6,6 +6,7 @@ import textwrap
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state.module import Tree
+from meizel.state.ambient_state.tests.conftest import SCOPE
 
 _BUNDLE_SOURCE = """
     from base.config.wiring import root_bundle
@@ -23,7 +24,7 @@ def _sites(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(source), encoding="utf-8")
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, _tree(root))
+    measured = ambient_state.measure(tree, rel, _tree(root), SCOPE)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 

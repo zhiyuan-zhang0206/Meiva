@@ -200,6 +200,17 @@ def test_remove_entries_handles_multiline_values_and_keeps_other_sections() -> N
     assert out == '[uses]\n"a" = ["y"]\n\n[loads]\n"l.py" = ["d"]\n'
 
 
+# meiva:note
+# A shell declaration is a one-line table, and the dangling-declaration prune drops it like any
+# other keyed entry instead of stopping the comparison that measures the change.
+def test_remove_entries_drops_a_one_line_purity_table() -> None:
+    text = (
+        '[purity]\n"." = "strict"\n"entry.py" = { mode = "none", why = "reads the roles once" }\n'
+    )
+    out = remove_entries(text, {"purity": {"entry.py": {"*"}}})
+    assert out == '[purity]\n"." = "strict"\n'
+
+
 def test_bootstrap_writes_a_mirror_that_passes_check_and_leaves_the_repo_alone(
     make_repo: RepoFactory, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

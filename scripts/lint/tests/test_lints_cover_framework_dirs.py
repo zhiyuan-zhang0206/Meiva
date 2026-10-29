@@ -9,10 +9,11 @@ from pathlib import Path
 import pytest
 
 from meizel import lint_common
-from meizel.owners import clock_lattice
+from meizel.owners import clock_lattice_cli
 from meizel.tests.synthetic import STANDALONE_PROJECT
 from scripts.lint import async_no_sync_blocking, termination_source
 from scripts.lint.diagnostics import logger_add_diagnose, loguru_format, no_emoji, time_bomb
+from scripts.lint.plugins import no_meiva_in_hooks_cli
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -20,7 +21,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 @pytest.mark.parametrize(
     "scan_dirs",
     [
-        clock_lattice.SCAN_DIRS,
+        clock_lattice_cli.SCAN_DIRS,
+        no_meiva_in_hooks_cli.SCAN_DIRS,
         no_emoji.SCAN_DIRS,
         termination_source.SCAN_DIRS,
         logger_add_diagnose.SCAN_DIRS,

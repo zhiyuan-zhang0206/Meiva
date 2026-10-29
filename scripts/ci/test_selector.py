@@ -17,10 +17,11 @@ _SCRIPT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_REPOSITORY_ROOT))
 
-from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry needs repo root first
+from base.deploy.git.repo_change import (  # noqa: E402
     is_doc_path,
 )
-from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402 - standalone script
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402
 from scripts.ci.shard_counts import (  # noqa: E402
     estimate_seconds,
     load_durations,
@@ -99,7 +100,7 @@ _TREE_SCAN_ONLY_PREFIXES = (
 # (`referencing_tests`), so the set of readers is derived, never listed by hand.
 _REFERENCED_ROOTS = (".github", ".agents", ".meiva", ".trunk")
 # Top-level directories whose files belong to a package with an owning `tests/`.
-_PACKAGE_ROOTS = frozenset(all_packages())
+_PACKAGE_ROOTS = frozenset(all_packages(roles_at(_SCRIPT_REPOSITORY_ROOT)))
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")

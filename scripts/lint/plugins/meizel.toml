@@ -1,11 +1,13 @@
-exports = ["no_plugin_wrap.py"]
+exports = ["no_meiva_in_hooks_cli.py", "no_plugin_wrap.py"]
 
 [uses]
-"tests" = ["no_meiva_in_hooks.py", "no_plugin_wrap.py"]
+"no_meiva_in_hooks_cli.py" = ["no_meiva_in_hooks.py"]
+"tests" = ["no_meiva_in_hooks.py", "no_meiva_in_hooks_cli.py", "no_plugin_wrap.py"]
 
 [purity]
 "." = "strict"
 "no_meiva_in_hooks.py" = "strict-to-be"
+"no_meiva_in_hooks_cli.py" = { mode = "none", why = "the command-line entry of the plugin-hook rule: it reads the roles the root manifest declares once and hands the scan directories to the rule, which decides what counts as a hook module and what the finding says" }
 "no_plugin_wrap.py" = "strict-to-be"
 
 [debt.impure-call]

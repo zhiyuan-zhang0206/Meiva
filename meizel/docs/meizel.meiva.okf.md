@@ -23,8 +23,12 @@ once: `[roles]` maps `application`, `standalone`, `templates`, `examples`, `tool
 `frontend` to directories. Every top-level directory that holds Python (hidden
 directories aside) must be listed under exactly one role, and every listed name must
 exist; the manifest parser enforces both, and `[roles]` is accepted in the root manifest
-only. Python code reads the declaration through `meizel.roles` (`packages(*roles)`,
-`roles()`, `all_packages()`); the lists that other files must keep as text (the pytest
+only. The read and the decision are separate modules: `meizel.checkout` reads the table
+(`read_roles(repo)`, `roles_at(root)`) once per process, at the entry that knows the
+repository, and passes the parsed role -> directories mapping down as a value; `meizel.roles`
+decides over that mapping without touching a file (`parse_roles(text, label=)`,
+`select_packages(declared, *roles)`, `all_packages(declared)`, `check_table(table)`,
+`pytest_test_hosts(declared)`). The lists that other files must keep as text (the pytest
 `testpaths`, the pyright `include`, the wheel packages, the coverage source and the
 package alternations of the pre-commit `files` patterns) sit in marked regions that
 `python -m meizel roles write` regenerates. `meizel check`, including `check --changed`,

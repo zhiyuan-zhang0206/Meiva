@@ -474,6 +474,28 @@ def test_stale_export_flags_unused_subpackage_door_and_prune_removes_it(
     assert '"unused.py"' not in (root / "pkg/sub/meizel.toml").read_text(encoding="utf-8")
 
 
+# meiva:note
+# A one-line shell declaration is prunable, so prove both directions on one checkout: `sync --prune`
+# keeps the entry while the file it names exists, and drops it once that file is gone.
+_SHELL_MANIFEST = (
+    '[purity]\n"." = "strict-to-be"\n'
+    '"entry.py" = { mode = "none", why = "the entry reads the world once" }\n'
+)
+
+
+def test_prune_drops_a_shell_declaration_only_once_its_file_is_gone(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {"pkg/__init__.py": "", "pkg/entry.py": "V = 1\n", "pkg/meizel.toml": _SHELL_MANIFEST}
+    )
+    assert run(root, "sync", "--prune") == 0
+    assert (root / "pkg/meizel.toml").read_text(encoding="utf-8") == _SHELL_MANIFEST
+    (root / "pkg/entry.py").unlink()
+    assert run(root, "sync", "--prune") == 0
+    assert '"entry.py"' not in (root / "pkg/meizel.toml").read_text(encoding="utf-8")
+
+
 def test_pass_through_function_flags_trivial_wrappers_and_allows_real_adapters(
     make_repo: RepoFactory,
 ) -> None:

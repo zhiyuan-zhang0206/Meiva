@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Collection
 
 from meizel import allowances, lint_common
-from meizel.roles import packages
 from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state import bundle, scan
 from meizel.state.ambient_state.tree import Tree
@@ -11,7 +11,6 @@ from meizel.state.ambient_state.tree import Tree
 SECTION = "ambient_state"
 # The rule module path used by integration-test repository fixtures.
 LINT = "meizel/state/ambient_state/__init__.py"
-SCOPE = packages("application", "standalone", "templates")
 Sites = dict[str, list[int]]
 
 _STATE_FIX = (
@@ -47,10 +46,10 @@ _FIXES: dict[str, str] = {
 }
 
 
-def in_scope(rel: str) -> bool:
+def in_scope(rel: str, scope: Collection[str]) -> bool:
     """Whether the rule governs this repo-relative path."""
     return (
-        rel.split("/", 1)[0] in SCOPE
+        rel.split("/", 1)[0] in scope
         and not lint_common.is_test_path(rel)
         and not rel.endswith("__main__.py")
         and not any(rx.match(rel) for rx in allow.SKILL_SCRIPT_PATTERNS)
@@ -69,8 +68,8 @@ def _site_key(rel: str, hit: scan.Hit) -> str:
     return f"{rel}::{hit.rule}:{hit.name}"
 
 
-def _hits(tree: ast.Module, rel: str, index: Tree) -> list[scan.Hit]:
-    if not in_scope(rel):
+def _hits(tree: ast.Module, rel: str, index: Tree, scope: Collection[str]) -> list[scan.Hit]:
+    if not in_scope(rel, scope):
         return []
     return [
         *scan.scan(tree, rel, index),
@@ -78,10 +77,10 @@ def _hits(tree: ast.Module, rel: str, index: Tree) -> list[scan.Hit]:
     ]
 
 
-def measure(tree: ast.Module, rel: str, index: Tree) -> Sites:
+def measure(tree: ast.Module, rel: str, index: Tree, scope: Collection[str]) -> Sites:
     """The site keys of one module with the closed lists applied, `path::rule:name -> [line]`."""
     sites: Sites = {}
-    for hit in _hits(tree, rel, index):
+    for hit in _hits(tree, rel, index, scope):
         key = _site_key(rel, hit)
         if key not in allow.ALLOWED and not _is_facade_state(rel, hit):
             sites.setdefault(key, []).append(hit.line)
@@ -94,12 +93,14 @@ def _listed_in(rel: str) -> dict[str, str]:
     return {key: why for key, why in allow.ALLOWED.items() if key.startswith(prefix)}
 
 
-def allowlist_errors(tree: ast.Module, rel: str, index: Tree) -> list[tuple[int, str]]:
+def allowlist_errors(
+    tree: ast.Module, rel: str, index: Tree, scope: Collection[str]
+) -> list[tuple[int, str]]:
     """A listed exemption whose site is no longer reported is stale."""
     listed = _listed_in(rel)
     if not listed and rel not in allow.SINK_FACADES:
         return []
-    hits = _hits(tree, rel, index)
+    hits = _hits(tree, rel, index, scope)
     present = {_site_key(rel, hit) for hit in hits}
     errors = [
         (1, f"stale ambient_state list entry {key} — the site is gone; remove it from {_LIST_FILE}")
@@ -156,9 +157,12 @@ def collect(
     index: Tree,
     sites: dict[str, Sites],
     scanned: set[str],
+    scope: Collection[str],
 ) -> list[str]:
     """Add one module's measured sites to `sites` and mark it scanned; return its stale-list
     errors. The one call the gate makes per governed file."""
-    sites[SECTION].update(measure(tree, rel, index))
+    sites[SECTION].update(measure(tree, rel, index, scope))
     scanned.add(rel)
-    return [f"{rel}:{line}: {message}" for line, message in allowlist_errors(tree, rel, index)]
+    return [
+        f"{rel}:{line}: {message}" for line, message in allowlist_errors(tree, rel, index, scope)
+    ]

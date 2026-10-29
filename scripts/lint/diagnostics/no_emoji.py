@@ -50,13 +50,18 @@ from pathlib import Path
 
 # Project root (this script lives under scripts/)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+# meiva:link scripts/docs/scripts.meiva.okf.md
+from meizel import lint_common  # noqa: E402
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
+
+ROLES = roles_at(_REPO_ROOT)
 
 # In-scope dirs scanned by default (no argv); `_EXEMPT_PREFIXES` still applies.
-SCAN_DIRS = packages("application", "standalone", "tooling", "tests")
+SCAN_DIRS = select_packages(ROLES, "application", "standalone", "tooling", "tests")
 
 # Path prefixes (repo-relative, posix) that are never scanned — deliberate-UX
 # surfaces and prose/content. Checked per file so a pre-commit-passed path under

@@ -57,17 +57,22 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 — standalone script
-from meizel.owners.decisions import DECISIONS  # noqa: E402 — standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+# meiva:link scripts/docs/scripts.meiva.okf.md
+from meizel import lint_common  # noqa: E402
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.owners.decisions import DECISIONS  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
+
+ROLES = roles_at(_REPO_ROOT)
 
 _DIAL = DECISIONS["postgres-dial"]
 
 # The default scope: what Rule 5 does not see. `scripts/` is not a governed
 # package, and a module the decision allows is exempt from Rule 5 as a whole.
-_SCAN_DIRS = packages("tooling")
+_SCAN_DIRS = select_packages(ROLES, "tooling")
 _SCAN_FILES = tuple(sorted(_DIAL.allowed))
 
 # The decision's owner builds the merged kwargs dict every other site routes
