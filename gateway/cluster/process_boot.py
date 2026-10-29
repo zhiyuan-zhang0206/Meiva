@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.deploy.lifecycle import start_serving
 from base.host.system.hostport import Host
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -37,11 +38,17 @@ class GatewayProcess:
         image: LoadedCommit,
         machine: MachineIdentityReader,
         host: Host,
+        observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
     ) -> None:
         self.home = home
         self.config = config
         self.machine = machine
         self.host = host
+        # meiva:note
+        # How this process sees the running root: `observe_root` itself unless the caller names
+        # another. Every reader of the serving gate on a request path takes it from here, so one
+        # process sees one observation.
+        self.observe = observe
         self.image = image
         self.version = CodeVersion(image)
         self.gate = ProcessDbGate(version=self.version.get, process="gateway")

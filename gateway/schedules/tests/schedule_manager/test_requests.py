@@ -21,6 +21,7 @@ from base.clock import SYSTEM_TIMERS
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.tests.serving_root import observe
 from base.paths.tests.homes import unit_home as unit_home
 from gateway.schedules import session_control
 from services.wake.schedule_manager import requests
@@ -40,7 +41,9 @@ def pool(*, database_gate: ProcessDbGate) -> Generator[ConnectionPool]:
 @pytest.fixture
 def backend(serving_root: start_serving.RootBirth, unit_home: Path) -> Backend:
     generation = start_serving.begin_start(unit_home)
-    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime)
+    assert start_serving.mark_serving(
+        unit_home, generation, runtime=serving_root.runtime, observe=observe
+    )
     return Backend()
 
 

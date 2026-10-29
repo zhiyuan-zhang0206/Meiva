@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -181,6 +182,7 @@ def status_snapshot(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     home: Path,
+    observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
 ) -> ClusterStatus:
     machine_name = local_machine.name()
     roles = local_machine.role()
@@ -216,6 +218,6 @@ def status_snapshot(
             supervisor_online=supervisor_online,
             db=db_snapshot,
             resource=resource,
-            serving=start_serving.is_serving(home),
+            serving=start_serving.is_serving(home, observe=observe),
         )
     )

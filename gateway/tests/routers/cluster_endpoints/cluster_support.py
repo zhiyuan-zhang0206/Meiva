@@ -21,6 +21,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.lifecycle.tests.serving_root import observe
 from base.lm.catalog import ModelCatalog
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import RequestPayload, ResponsePayload, ok_response
@@ -51,6 +52,10 @@ def roster_env(
         probe_timeout_s=probe_timeout_s,
         clock=system_clock(),
         rpc=gateway_test_rpc(),
+        # meiva:note
+        # This helper renders rows, not the gate: the observation is the real one, as the
+        # gateway process names it, and no case here marks a root.
+        observe=start_serving.observe_root,
         environ=dict(os.environ),
     )
 
@@ -185,7 +190,9 @@ def seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -
 def serving_gate(serving_root: RootBirth) -> Generator[None]:
     home = resolve_meiva_home()
     generation = start_serving.begin_start(home)
-    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime)
+    assert start_serving.mark_serving(
+        home, generation, runtime=serving_root.runtime, observe=observe
+    )
     try:
         yield
     finally:

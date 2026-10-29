@@ -13,6 +13,7 @@ import services.wake.schedule_manager.manager as sm
 from base.cluster import session_name
 from base.config import settings
 from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.tests.serving_root import observe
 from base.sessions.protocol import SessionBackend
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -103,7 +104,12 @@ def fake_session(
 ) -> tuple[_FakeBackend, list[int]]:
     backend = _FakeBackend()
     generation = start_serving.begin_start(unit_home)
-    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime) is True
+    assert (
+        start_serving.mark_serving(
+            unit_home, generation, runtime=serving_root.runtime, observe=observe
+        )
+        is True
+    )
     return backend, backend.launched
 
 
@@ -240,7 +246,12 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     assert _status(db_conn, sid) == "stopped"
 
     generation = start_serving.begin_start(unit_home)
-    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime) is True
+    assert (
+        start_serving.mark_serving(
+            unit_home, generation, runtime=serving_root.runtime, observe=observe
+        )
+        is True
+    )
     manager.reconcile(now=NOW)
 
     assert launched == [sid]
