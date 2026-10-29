@@ -120,8 +120,14 @@ class Platform:
 
 # meiva:note
 # Resolve the platform from this process's home and settings (the composition root's read).
-def ambient_platform(*, home: Path) -> Platform:
-    binary_problem = walg_binary.installed_problem(home=home)
+#
+# `installed` is the check this read performs on the installed binary -- `walg_binary`'s own unless
+# the caller names another -- so a caller handed a stand-in for the pinned build stays honest about
+# everything else it resolves.
+def ambient_platform(
+    *, home: Path, installed: Callable[..., str | None] = walg_binary.installed_problem
+) -> Platform:
+    binary_problem = installed(home=home)
     try:
         target = pg_target(home=home)
         accepting = postgres_accepts_connections(target)
@@ -403,13 +409,14 @@ def run_tick(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
         return 0
     return run_tick_on(
         report,
-        platform=ambient_platform(home=home),
+        platform=ambient_platform(home=home, installed=installed),
         throwaway=throwaway,
         database_for_url=database_for_url,
         path=path,
@@ -500,13 +507,14 @@ def run_drill_now(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
         return 1
     return run_drill_now_on(
         report,
-        platform=ambient_platform(home=home),
+        platform=ambient_platform(home=home, installed=installed),
         throwaway=throwaway,
         database_for_url=database_for_url,
         path=path,

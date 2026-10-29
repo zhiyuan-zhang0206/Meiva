@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
@@ -109,26 +109,31 @@ def test_async_pool_fixes_the_transport_posture(
     }
 
 
-def _spy_dials(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+# meiva:note
+# The recorder the door dials with, and what it recorded: a test passes `dial=spy`, so the
+# transport posture is asserted on the plan the door builds rather than on a patched psycopg.
+def _spy_dials() -> tuple[list[tuple[str, dict[str, Any]]], Callable[..., Any]]:
     dials: list[tuple[str, dict[str, Any]]] = []
     owner = threading.current_thread()
 
-    def spy(conninfo: str = "", **kwargs: Any) -> object:
+    # meiva:note
+    # `Any`: the recorder returns a stand-in, not psycopg's connection, and the seam's parameter
+    # is typed by the real one.
+    def spy(conninfo: str = "", **kwargs: Any) -> Any:
         if threading.current_thread() is owner:
             dials.append((conninfo, kwargs))
         return object()
 
-    monkeypatch.setattr(psycopg, "connect", spy)
-    return dials
+    return dials, spy
 
 
-def test_connect_url_owns_the_transport_posture(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_connect_url_owns_the_transport_posture() -> None:
     old_sslmode = get_field("db_sslmode")
     set_field("db_sslmode", "require")
     try:
-        dials = _spy_dials(monkeypatch)
+        dials, spy = _spy_dials()
         url = "postgresql://owner@/meiva?host=/tmp/sock&options=-c%20role%3Dmeiva"
-        db.connect_url(url, autocommit=True)
+        db.connect_url(url, autocommit=True, dial=spy)
     finally:
         set_field("db_sslmode", old_sslmode)
     assert dials == [
@@ -144,9 +149,9 @@ def test_connect_url_owns_the_transport_posture(monkeypatch: pytest.MonkeyPatch)
     ]
 
 
-def test_connect_url_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch) -> None:
-    dials = _spy_dials(monkeypatch)
-    db.connect_url("postgresql://u@127.0.0.1:1/x", unbounded=True, connect_timeout=2)
+def test_connect_url_unbounded_keeps_the_keepalives() -> None:
+    dials, spy = _spy_dials()
+    db.connect_url("postgresql://u@127.0.0.1:1/x", unbounded=True, connect_timeout=2, dial=spy)
     assert dials == [
         (
             "postgresql://u@127.0.0.1:1/x",
@@ -160,17 +165,16 @@ def test_connect_url_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPa
     ]
 
 
-def test_connect_unbounded_keeps_the_keepalives(
-    database_gate: ProcessDbGate, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_connect_unbounded_keeps_the_keepalives(database_gate: ProcessDbGate) -> None:
     cfg = _cfg("postgresql://u:p@db.example:5432/x", db_sslmode="")
-    dials = _spy_dials(monkeypatch)
+    dials, spy = _spy_dials()
     db.connect(
         direct=True,
         unbounded=True,
         config=cfg,
         gate=database_gate,
         direct_url=_direct_url_x,
+        dial=spy,
     )
     assert dials == [
         (

@@ -33,10 +33,12 @@ class Database:
         *,
         gate: ProcessDbGate,
         direct_url: DirectUrlResolver | None = None,
+        dial: Callable[..., psycopg.Connection] = psycopg.connect,
     ) -> None:
         self._config = config
         self._gate = gate
         self._direct_url = direct_url
+        self._dial = dial
 
     # meiva:note
     # The composition-root constructor: the config as the live settings hold it now.
@@ -46,8 +48,9 @@ class Database:
         *,
         gate: ProcessDbGate,
         direct_url: DirectUrlResolver | None = None,
+        dial: Callable[..., psycopg.Connection] = psycopg.connect,
     ) -> Database:
-        return cls(db_config_from_settings(), gate=gate, direct_url=direct_url)
+        return cls(db_config_from_settings(), gate=gate, direct_url=direct_url, dial=dial)
 
     # meiva:note
     # `base.db.connect()` on this handle's config.
@@ -61,6 +64,7 @@ class Database:
             config=self._config,
             gate=self._gate,
             direct_url=self._direct_url,
+            dial=self._dial,
         )
 
     def pool(

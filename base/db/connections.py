@@ -514,6 +514,10 @@ def _dial_url(cfg: DbConfig, *, direct: bool, direct_url: DirectUrlResolver | No
 #     NoDatabaseAuthorityError: this home keeps a write-generation ledger and
 #         the resolved db_url is a credential-free endpoint this process was
 #         given no login for (see `guard_db_url`).
+# meiva:note
+# `dial` is the effect this door performs: psycopg's own `connect` unless the caller names
+# another, so every existing caller dials exactly what it dialed before and a test hands in the
+# one it needs.
 def connect(
     *,
     autocommit: bool = False,
@@ -522,6 +526,7 @@ def connect(
     config: DbConfig | None = None,
     gate: ProcessDbGate,
     direct_url: DirectUrlResolver | None = None,
+    dial: Callable[..., psycopg.Connection] = psycopg.connect,
 ) -> psycopg.Connection:
     from base.config.domains.storage.data_plane import sslmode_for_url
 
@@ -531,7 +536,7 @@ def connect(
         refusal=cfg.db_authority_refusal,
     )
     sslmode = sslmode_for_url(url, cfg.db_sslmode)
-    conn = psycopg.connect(
+    conn = dial(
         url,
         autocommit=autocommit,
         prepare_threshold=None,
@@ -587,13 +592,14 @@ def connect_url(
     autocommit: bool = False,
     unbounded: bool = False,
     connect_timeout: int = PG_KEEPALIVE_KWARGS["connect_timeout"],
+    dial: Callable[..., psycopg.Connection] = psycopg.connect,
 ) -> psycopg.Connection:
     _refuse_placeholder(url)
     transport: dict[str, Any] = {
         **_transport_kwargs(url, unbounded=unbounded),
         "connect_timeout": connect_timeout,
     }
-    return psycopg.connect(url, autocommit=autocommit, prepare_threshold=None, **transport)
+    return dial(url, autocommit=autocommit, prepare_threshold=None, **transport)
 
 
 def _transport_kwargs(url: str, *, unbounded: bool) -> dict[str, Any]:
