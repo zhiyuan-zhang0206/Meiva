@@ -40,19 +40,19 @@ pixel: a thread that grew while the reader was away returns to its end, not to
 the row they left. The save asks the follow rule itself (`isAtTail`: inside
 the bottom zone, or only short of it because a chunk outran its pin) rather
 than a distance, so a switch away inside a streaming frame still counts as
-the tail. The scroll-to-bottom button reads the measured distance to
-the bottom rather than the follow flag (a height change with no scroll event
-would otherwise leave it hidden). While the tail read after a switch or a
-reconnect (`loadingNewer`, the composed reconcile) is in flight it rests on
-the same ring the pull-to-load gesture draws — one component, so the two
-cannot drift; it swaps to the arrow on hover or focus, so waiting never
-hides that it is still a button
-(user report 2026-10-19). That ring is not driven by `isFetching`: a settled
-thread's background refetch would spin it for no arrival and could overlap an
-older-history load for two rings at once (user report 2026-10-20); the two loads
+the tail. The scroll-to-bottom button exists only away from the bottom: presence follows
+the measured distance, not the follow flag, so a height change with no scroll
+event still decides it. At the bottom it is not rendered at all, refresh in
+flight or not — a faded button left a hover target whose click did nothing (user
+report 2026-10-30). While the tail read after a switch or a reconnect
+(`loadingNewer`, the composed reconcile) is in flight it rests on the same ring
+the pull-to-load gesture draws — one component, so the two cannot drift; it
+swaps to the arrow on hover or focus, so waiting never hides that it is still a
+button (user report 2026-10-19). That ring is not driven by `isFetching`: a
+settled thread's background refetch would spin it for no arrival and could
+overlap an older-history load for two rings at once (2026-10-20); the two loads
 cannot co-occur, and the pull strip wins if they ever do. How the ring is drawn
-and how it moves — the pull space it scales with and the state it takes when the
-reader asked for less motion — is
+and how it moves is
 [[ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md|The loading ring]]. Its smooth ride requests the stick instead of pinning, so the
 asynchronous ride survives; growth mid-ride pins instantly because the
 controller already follows. An agent switch hides the button in the same

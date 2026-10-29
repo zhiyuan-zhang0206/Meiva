@@ -319,7 +319,11 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(5400);
     resize();
     expect(viewport().scrollTop).toBe(5400);
-    expect(screen.getByTestId("scroll-to-bottom").className).toContain("opacity-0");
+    // meiva:note
+    // A reader at the bottom has nothing to scroll to, so the control is not in
+    // the DOM at all (user report 2026-10-30).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
   it("keeps following a returned bottom follower as the thread grows", () => {
     const { rerender } = renderWithBrowser(tabs(42, "agent-new-tail-growth"));
@@ -385,7 +389,7 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(700);
   });
   it("one loading ring at a time: an older-history load keeps the bottom button quiet", () => {
-    renderWithBrowser(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder />, {
+    renderWithBrowser(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder readerLoadingOlder />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
     // meiva:note
@@ -393,6 +397,7 @@ describe("agent switch reading positions", () => {
     // once on the same screen (user report 2026-10-20). The pull strip owns the
     // ring while older history loads.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     const button = screen.getByTestId("scroll-to-bottom");
     expect(button.getAttribute("aria-busy")).toBe("false");
     expect(button.querySelector(".animate-spin")).toBeNull();
@@ -402,10 +407,15 @@ describe("agent switch reading positions", () => {
     const { rerender } = renderWithBrowser(<TimelineView items={items} threadKey="spinner" loadingNew />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
+    // meiva:note
+    // Presented only away from the bottom: at the bottom there is nothing to
+    // scroll to (user report 2026-10-30).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     const button = screen.getByTestId("scroll-to-bottom");
     const position = viewport().scrollTop;
     expect(button.getAttribute("aria-busy")).toBe("true");
-    expect(button.className).toContain("opacity-100");
+    expect(button.className).not.toContain("opacity-0");
     expect(button.querySelector(".animate-spin")).not.toBeNull();
     expect(screen.getByTestId("latest-loading-ring").className).toContain("group-hover:hidden");
     const restingArrow = screen.getByTestId("scroll-to-bottom-arrow");
@@ -469,14 +479,21 @@ it("captures the departing reading position before the native pull reserve is re
   rerender(tabs(42, "agent-native-reserve"));
   expect(viewport().scrollTop).toBe(700);
 });
-it("rests on the loading ring while new messages arrive and stays clickable", () => {
+// meiva:note
+// The ring still rests here while the newest page is read, and one click both
+// scrolls back and takes the control away — the reader is at the bottom again
+// (user report 2026-10-30: an arrow over a click that did nothing).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+it("rests on the loading ring while new messages arrive, and the click takes it away", () => {
   renderWithBrowser(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
   act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
   const scrollTo = vi.spyOn(viewport(), "scrollTo");
-  fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+  const button = screen.getByRole("button", { name: "Scroll to bottom" });
   expect(screen.getByTestId("latest-loading-ring").className).toContain("group-hover:hidden");
   expect(screen.getByTestId("scroll-to-bottom-arrow").className).toContain("hidden");
+  fireEvent.click(button);
   expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
+  expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
 });
   it("keeps the reader on their row when the viewport width changes", () => {
     useTimelineStore.getState().switchThread(42, items, false);

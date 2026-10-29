@@ -82,7 +82,7 @@ describe("selected timeline ownership", () => {
       initialProps: { id: 1 }, wrapper,
     });
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
     await waitFor(() => expect(timelineReads.some((read) => read.before === "5.0")).toBe(true));
     const pageSignal = timelineReads.find((read) => read.before === "5.0")?.signal;
     rerender({ id: 2 });
@@ -105,7 +105,7 @@ describe("selected timeline ownership", () => {
     ]);
     const { result } = renderHook(() => useTimeline(1, showError), { wrapper });
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
     expect(result.current.loadingOlder).toBe(true);
     await waitFor(() => expect(timelineReads.some((read) => read.before === "5.0")).toBe(true));
     const pageSignal = timelineReads.find((read) => read.before === "5.0")?.signal;
