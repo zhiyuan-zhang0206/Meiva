@@ -38,4 +38,7 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 
 [debt.impure-call]
 "cli.py#Path.resolve" = 2
-"cli.py#meizel.graph.universe.GitRepo" = 1
+"cli.py#meizel.checkout.GitRepo" = 1
+
+[debt.impure-edge]
+"cli.py#meizel/checkout.py" = 1

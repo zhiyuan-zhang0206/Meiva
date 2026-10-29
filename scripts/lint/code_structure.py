@@ -20,6 +20,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 — standalone script
 from meizel.budgets import limits  # noqa: E402 — standalone script
+from meizel.checkout import load_universe  # noqa: E402
 from meizel.contracts.analysis import (  # noqa: E402
     load_manifests,
     load_policy,
@@ -27,7 +28,7 @@ from meizel.contracts.analysis import (  # noqa: E402
     type_checking_violations,
 )
 from meizel.graph.model import MeizelError, Sources  # noqa: E402
-from meizel.graph.universe import Universe, load_universe  # noqa: E402
+from meizel.graph.universe import Universe  # noqa: E402
 from meizel.language import path_imports  # noqa: E402 — standalone script
 from meizel.language.scan import scan_tree  # noqa: E402
 from meizel.owners import decisions  # noqa: E402 — standalone script
@@ -357,7 +358,7 @@ def _check_ast_and_quality(
     ast_files = _ast_rule_files(argv, repo_root)
     ambient_tree = ambient_state.Tree(
         _admitted_files(type_ctx.universe, repo_root, files | ast_files | type_ctx.files),
-        type_ctx.universe.load_text,
+        type_ctx.universe.repo.load_text,
         type_ctx.universe.dirs,
     )
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}

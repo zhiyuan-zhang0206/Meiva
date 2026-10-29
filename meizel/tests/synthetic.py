@@ -13,9 +13,9 @@ from typing import TypeGuard
 import pytest
 
 from meizel.contracts.analysis import POLICY, Analysis, DebtEntry, analyze, render_policy
-from meizel.contracts.cli import main
+from meizel.contracts.cli import GitRepo, main
 from meizel.graph.model import Diagnostic
-from meizel.graph.universe import Universe, load_universe
+from meizel.graph.universe import Universe
 from meizel.owners import decisions
 from meizel.state.ambient_state.tests.conftest import (
     synthetic_ambient_allowlists as synthetic_ambient_allowlists,
@@ -103,7 +103,7 @@ def build_repo(base: Path, files: Mapping[str, str]) -> Path:
 # meiva:note
 # The repository seat the checker reads a synthetic checkout through.
 def seat(root: Path) -> Universe:
-    return load_universe(root)
+    return GitRepo(root).universe()
 
 
 def analysis_of(root: Path) -> Analysis:
