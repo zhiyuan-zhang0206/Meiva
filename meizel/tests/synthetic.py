@@ -12,7 +12,7 @@ from typing import TypeGuard
 
 import pytest
 
-from meizel.contracts.analysis import POLICY, Analysis, analyze, render_policy
+from meizel.contracts.analysis import POLICY, Analysis, DebtEntry, analyze, render_policy
 from meizel.contracts.cli import main
 from meizel.graph.model import Diagnostic
 from meizel.graph.universe import Universe, load_universe
@@ -22,6 +22,13 @@ from meizel.state.ambient_state.tests.conftest import (
 )
 
 type RepoFactory = Callable[[Mapping[str, str]], Path]
+
+
+# meiva:note
+# The counts a baseline table records, one per key: an entry also carries the owner paying it down and
+# the condition it waits for, and a test that judges only the number says so here.
+def counts(table: Mapping[str, DebtEntry]) -> dict[str, int]:
+    return {key: entry.count for key, entry in table.items()}
 
 
 @pytest.fixture(autouse=True)

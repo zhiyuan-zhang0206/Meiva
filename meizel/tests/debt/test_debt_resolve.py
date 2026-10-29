@@ -31,6 +31,15 @@ def entry(key: str, count: int) -> str:
     return f'"{key}" = {count}\n'
 
 
+# meiva:note
+# An entry as a conflict hunk writes it: the count, and the metadata it carries.
+def named(key: str, count: int, owner: str, until: str = "") -> str:
+    fields = f"count = {count}, owner = {owner!r}".replace("'", '"')
+    if until:
+        fields += f", until = {until!r}".replace("'", '"')
+    return f'"{key}" = {{ {fields} }}\n'
+
+
 def recorded_repo(make_repo: RepoFactory) -> Path:
     root = make_repo(BASE)
     assert run(root, "sync", "--declare", ".") in {0, 1}
@@ -115,12 +124,14 @@ def test_a_conflict_outside_the_debt_tables_is_left_for_a_person(
 
 
 def test_a_conflict_that_mixes_a_debt_table_with_another_section_is_refused(
-    make_repo: RepoFactory,
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = recorded_repo(make_repo)
     text = conflict(TABLE + entry(X, 1) + '[purity]\n"a.py" = "strict"\n', "")
     write(root, {"lib/meizel.toml": text})
+    capsys.readouterr()
     assert run(root, "debt", "resolve", "lib/meizel.toml") == 2
+    assert "`[purity]` is not a debt entry" in capsys.readouterr().err
 
 
 def test_a_table_name_that_cannot_be_recorded_is_refused(make_repo: RepoFactory) -> None:
@@ -169,3 +180,56 @@ def test_the_command_lowers_the_resolved_tables_to_what_occurs(
     assert "<<<<<<<" not in (root / "meizel.toml").read_text()
     assert debts(root)["private-module"] == {X: 3, Y: 1}
     assert run(root, "check") == 0
+
+
+# meiva:note
+# Who pays a debt down and what it waits for are part of the entry a merge resolves, not a comment on
+# the count: the side that names them wins, and the surviving count is still the lower one.
+def test_a_resolved_conflict_keeps_the_owner_and_the_condition(make_repo: RepoFactory) -> None:
+    root = recorded_repo(make_repo)
+    conflicted(
+        root,
+        conflict(
+            named(X, 3, "#7139", "waits for the door") + entry(Y, 1), entry(X, 3) + entry(Y, 1)
+        ),
+    )
+    assert run(root, "debt", "resolve", "meizel.toml") == 0
+    assert debts(root)["private-module"] == {
+        X: {"count": 3, "owner": "#7139", "until": "waits for the door"},
+        Y: 1,
+    }
+    assert run(root, "check") == 0
+
+
+# meiva:note
+# Two sides naming different owners disagree about who pays: a count is derived and can be merged, an
+# owner is not, so the resolver refuses instead of picking one.
+def test_two_owners_in_a_conflict_are_refused_rather_than_picked(make_repo: RepoFactory) -> None:
+    root = recorded_repo(make_repo)
+    conflicted(
+        root, conflict(named(X, 3, "#7139") + entry(Y, 1), named(X, 2, "#4242") + entry(Y, 1))
+    )
+    before = (root / "meizel.toml").read_text()
+    assert run(root, "debt", "resolve", "meizel.toml") == 2
+    assert (root / "meizel.toml").read_text() == before
+
+
+# meiva:note
+# The resolver reads the entry with the manifest's own reader, so a field it does not know is refused
+# there too: dropping a misspelt `owner` would read as "no owner", which is the one thing an entry is
+# meant to make visible.
+def test_a_conflicted_entry_with_an_unknown_field_is_refused(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = recorded_repo(make_repo)
+    conflicted(
+        root,
+        conflict(
+            f'"{X}" = {{ count = 3, ownr = "#7139" }}\n' + entry(Y, 1), entry(X, 3) + entry(Y, 1)
+        ),
+    )
+    before = (root / "meizel.toml").read_text()
+    capsys.readouterr()
+    assert run(root, "debt", "resolve", "meizel.toml") == 2
+    assert "ownr" in capsys.readouterr().err
+    assert (root / "meizel.toml").read_text() == before

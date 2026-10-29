@@ -8,7 +8,16 @@ from meizel.contracts.analysis import analyze, diagnose, load_policy
 from meizel.graph.model import Code, Sources
 from meizel.graph.universe import GitRepo, Universe
 from meizel.language.scan import FileScan, scan_source
-from meizel.tests.synthetic import RepoFactory, analysis_of, commit, git, run, seat, write
+from meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    commit,
+    counts,
+    git,
+    run,
+    seat,
+    write,
+)
 
 
 def scan(tmp_path: Path, source: str, path: str = "app.py") -> FileScan:
@@ -180,7 +189,7 @@ def test_same_line_calls_survive_both_diagnostic_consumers_and_ledger(
     assert {d.debt.key for d in full if d.debt is not None} == {"app.py#cast f"}
     assert run(root, "debt", "record", ".") == 0
     write(root, {})
-    assert analysis_of(root).manifests[""].debt[Code.TYPE_CAST] == {"app.py#cast f": 2}
+    assert counts(analysis_of(root).manifests[""].debt[Code.TYPE_CAST]) == {"app.py#cast f": 2}
     assert not analysis_of(root).verdict
     write(root, {"app.py": source.replace("cast(int, b)", "cast(int, b), cast(int, c)")})
     assert [d.code for d in analysis_of(root).verdict] == [Code.TYPE_CAST] * 3
@@ -197,7 +206,7 @@ def test_line_movement_preserves_the_key_and_prune_pays_removed_calls(
     assert not analysis_of(root).verdict
     write(root, {"app.py": source.replace(", cast(int, b)", "")})
     assert run(root, "debt", "prune") == 0
-    assert analysis_of(root).manifests[""].debt[Code.TYPE_CAST] == {"app.py#cast f": 1}
+    assert counts(analysis_of(root).manifests[""].debt[Code.TYPE_CAST]) == {"app.py#cast f": 1}
 
 
 def test_file_move_carries_type_cast_debt(make_repo: RepoFactory) -> None:
@@ -208,7 +217,7 @@ def test_file_move_carries_type_cast_debt(make_repo: RepoFactory) -> None:
     (root / "app.py").rename(root / "moved.py")
     git(root, "add", "-A")
     assert run(root, "debt", "carry") == 0
-    assert analysis_of(root).manifests[""].debt[Code.TYPE_CAST] == {"moved.py#cast f": 1}
+    assert counts(analysis_of(root).manifests[""].debt[Code.TYPE_CAST]) == {"moved.py#cast f": 1}
 
 
 def test_unknown_type_cast_policy_table_is_rejected_with_a_recorded_site(
@@ -386,7 +395,7 @@ def test_strict_purity_keeps_authorized_cast_counts_but_rejects_growth(
     write(root, {})
     found = analysis_of(root)
     assert found.manifests[""].purity_default == "strict"
-    assert found.manifests[""].debt[Code.TYPE_CAST] == {"app.py#cast <module>": 1}
+    assert counts(found.manifests[""].debt[Code.TYPE_CAST]) == {"app.py#cast <module>": 1}
     assert not found.verdict
     write(root, {"app.py": source + "cast(int, other)\n"})
     assert [d.code for d in analysis_of(root).verdict] == [Code.TYPE_CAST] * 2

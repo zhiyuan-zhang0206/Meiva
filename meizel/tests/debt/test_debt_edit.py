@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts.analysis import set_debt
+from meizel.contracts.analysis import DebtEntry, set_debt
 from meizel.graph.model import Code
 from meizel.tests.synthetic import RepoFactory, analysis_of, failures, git, run, write
 
@@ -270,15 +270,15 @@ def test_set_debt_replaces_only_the_debt_block() -> None:
         'exports = ["a.py"]\n\n[uses]\n"a.py" = ["b.py"]\n\n'
         '[debt.private-name]\n"x -> y#_z" = 1\n\n[debt.restricted-python]\n"f.py#exec" = 2\n'
     )
-    assert set_debt(text, {Code.PRIVATE_NAME: {"x -> y#_z": 3}}) == (
+    assert set_debt(text, {Code.PRIVATE_NAME: {"x -> y#_z": DebtEntry(3)}}) == (
         'exports = ["a.py"]\n\n[uses]\n"a.py" = ["b.py"]\n\n[debt.private-name]\n"x -> y#_z" = 3\n'
     )
     assert set_debt(text, {}) == 'exports = ["a.py"]\n\n[uses]\n"a.py" = ["b.py"]\n'
     assert set_debt('[debt.private-name]\n"x -> y#_z" = 1\n', {}) == ""
-    quoted = {Code.RESTRICTED: {'f.py#mock.patch "a.b"': 1}}
-    assert (
-        tomllib.loads(set_debt("", quoted))["debt"]["restricted-python"] == quoted[Code.RESTRICTED]
-    )
+    quoted = {Code.RESTRICTED: {'f.py#mock.patch "a.b"': DebtEntry(1)}}
+    assert tomllib.loads(set_debt("", quoted))["debt"]["restricted-python"] == {
+        'f.py#mock.patch "a.b"': 1
+    }
 
 
 def test_untracked_work_is_not_seen_by_the_baseline_until_staged(make_repo: RepoFactory) -> None:

@@ -9,15 +9,25 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 
-from meizel.contracts.debt import parse_debt, set_debt, source_of, total
+from meizel.contracts.debt import (
+    DebtEntry,
+    entry_value,
+    parse_debt,
+    read_entry,
+    set_debt,
+    source_of,
+    total,
+    unowned,
+)
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic
 
-__all__ = ["Tally", "debts_in", "reconcile", "resolve_debt_conflicts", "tally"]
+__all__ = ["Tally", "account_line", "reconcile", "resolve_debt_conflicts", "tally"]
 
 type Tally = dict[tuple[str, Code, str], list[Diagnostic]]
 
@@ -55,17 +65,17 @@ def _paid(
     for code, rows in sorted(manifest.debt.items(), key=lambda item: str(item[0])):
         if code in _WHOLE_REPO_CODES and not in_scope(""):
             continue
-        for key, recorded in sorted(rows.items()):
+        for key, entry in sorted(rows.items()):
             source = source_of(manifest.directory, code, key)
             remaining = len(groups.get((manifest.directory, code, key), ()))
-            if remaining >= recorded or not in_scope(source):
+            if remaining >= entry.count or not in_scope(source):
                 continue
             found.append(
                 Diagnostic(
                     manifest.path,
                     manifest.debt_line(code, key),
                     Code.DEBT_PAID,
-                    f"{code} debt {key!r}: {recorded} recorded but {remaining} remain",
+                    f"{code} debt {key!r}: {entry.count} recorded but {remaining} remain",
                     ("run `python -m meizel debt prune` to lower the baseline",),
                 )
             )
@@ -86,7 +96,8 @@ def reconcile(
     failing = [d for d in diagnostics if d.debt is None]
     for (owner, code, key), found in groups.items():
         manifest = manifests.get(owner)
-        recorded = manifest.debt.get(code, {}).get(key, 0) if manifest is not None else 0
+        entry = manifest.debt.get(code, {}).get(key) if manifest is not None else None
+        recorded = entry.count if entry is not None else 0
         if len(found) > recorded:
             failing.extend(_excess(found, recorded, owner, manifests))
     for manifest in manifests.values():
@@ -94,16 +105,48 @@ def reconcile(
     return failing
 
 
-def debts_in(manifests: dict[str, Manifest]) -> int:
-    """How many debts are recorded across `manifests`."""
-    return sum(total(m.debt) for m in manifests.values())
+# meiva:note
+# A count with its noun in the number the count takes: a line that says "1 entry names no owner" reads
+# as typed, not assembled.
+def _counted(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
+
+
+# meiva:note
+# The account's notes for the ok line: how many occurrences are recorded and across how many
+# strict-to-be directories, then how many entries name no owner and how much they carry. Either
+# clause disappears when it is zero, so a clean tree's line stays short; the unowned entries are what
+# a backfill has to touch.
+def account_line(manifests: dict[str, Manifest]) -> str:
+    debts = sum(total(m.debt) for m in manifests.values())
+    recorded = sum(1 for m in manifests.values() if m.debt)
+    entries = occurrences = 0
+    for manifest in manifests.values():
+        missing, counts = unowned(manifest.debt)
+        entries += missing
+        occurrences += counts
+    carried = (
+        ""
+        if not debts
+        else f"; {_counted(debts, 'recorded debt', 'recorded debts')} "
+        f"{'remains' if debts == 1 else 'remain'} in "
+        f"{_counted(recorded, 'strict-to-be directory', 'strict-to-be directories')}"
+    )
+    ownerless = (
+        ""
+        if not entries
+        else f"; {_counted(entries, 'entry', 'entries')} "
+        f"({_counted(occurrences, 'occurrence', 'occurrences')}) "
+        f"{'names' if entries == 1 else 'name'} no owner"
+    )
+    return carried + ownerless
 
 
 _DEBT_TABLE = re.compile(r"^\[\s*debt\.([^\]\s]+)\s*\]\s*(?:#.*)?$")
 _ANY_TABLE = re.compile(r"^\s*\[")
-_ENTRY = re.compile(r'^("(?:[^"\\]|\\.)*")\s*=\s*(\d+)\s*(?:#.*)?$')
+_ENTRY = re.compile(r'^("(?:[^"\\]|\\.)*")\s*=\s*(\d+|\{.*\})\s*(?:#.*)?$')
 
-type _Entries = dict[tuple[str, str], int]
+type _Entries = dict[tuple[str, str], DebtEntry]
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +179,11 @@ def _outside(line: str, table: str | None, plain: list[str], outside: _Entries) 
     if table is None:
         plain.append(line)
     elif entry:
-        outside[(table, json.loads(entry.group(1)))] = int(entry.group(2))
+        value, _ = _value(entry.group(2))
+        if value is None:
+            plain.append(line)
+        else:
+            outside[(table, json.loads(entry.group(1)))] = value
     return table
 
 
@@ -180,8 +227,36 @@ def _scan(lines: list[str]) -> _Scan:
 
 
 # meiva:note
-# The `[debt.<code>]` entries one side of a hunk holds, or the line that is something else. The side
-# starts in `table`; a header inside the side moves it.
+# One side's entry as its line writes it, decoded by the same reader the manifest uses, and the reason
+# it is not one when it is not: a bare count or an inline table, and any complaint about it — an
+# unknown field, a count that is not positive — refuses the merge. A misspelt `owner` must not read as
+# "no owner" here either, so the person resolving the conflict is told which field was wrong.
+def _value(raw: str) -> tuple[DebtEntry | None, str]:
+    try:
+        parsed = tomllib.loads(f"v = {raw}")["v"]
+    except tomllib.TOMLDecodeError:
+        return None, "it is not TOML"
+    problems: list[str] = []
+    entry = read_entry(parsed, "", problems.append)
+    return entry, "; ".join(message.removeprefix(": ") for message in problems)
+
+
+# meiva:note
+# What both sides agree one entry is: the lower count, and the metadata either side names — a real
+# disagreement about who owns the debt is a decision, so it is refused rather than picked.
+def _merged_side(mine: DebtEntry, other: DebtEntry) -> DebtEntry | None:
+    for field in ("owner", "until"):
+        left, right = getattr(mine, field), getattr(other, field)
+        if left and right and left != right:
+            return None
+    return DebtEntry(
+        min(mine.count, other.count), mine.owner or other.owner, mine.until or other.until
+    )
+
+
+# meiva:note
+# The `[debt.<code>]` entries one side of a hunk holds, or why a line is not one. The side starts in
+# `table`; a header inside the side moves it.
 def _entries(side: tuple[str, ...], table: str | None) -> tuple[_Entries, str | None]:
     found: _Entries = {}
     for text in side:
@@ -192,11 +267,66 @@ def _entries(side: tuple[str, ...], table: str | None) -> tuple[_Entries, str | 
         entry = _ENTRY.match(line)
         if header:
             table = header.group(1)
-        elif entry and table is not None:
-            found[(table, json.loads(entry.group(1)))] = int(entry.group(2))
-        else:
-            return found, line
+            continue
+        if not entry or table is None:
+            return found, f"`{line}` is not a debt entry"
+        key = (table, json.loads(entry.group(1)))
+        value, problem = _value(entry.group(2))
+        if value is None:
+            return found, f"`{line}` is not a debt entry ({problem})"
+        previous = found.get(key)
+        merged = value if previous is None else _merged_side(previous, value)
+        if merged is None:
+            return found, f"`{line}` names a different owner or condition than the line before it"
+        found[key] = merged
     return found, None
+
+
+# meiva:note
+# Both sides of one hunk as the entries they name, or the first line this command will not decide.
+def _hunk_entries(hunk: _Hunk) -> tuple[_Entries, str | None]:
+    ours, problem = _entries(hunk.ours, hunk.table)
+    theirs, problem_theirs = _entries(hunk.theirs, hunk.table)
+    if problem is not None or problem_theirs is not None:
+        return {}, problem or problem_theirs
+    found: _Entries = {}
+    for key in ours.keys() | theirs.keys():
+        mine, other = ours.get(key), theirs.get(key)
+        if mine is None or other is None:
+            kept = mine if mine is not None else other
+            if kept is not None:
+                found[key] = kept
+            continue
+        joined = _merged_side(mine, other)
+        if joined is None:
+            return {}, f"both sides of `{key[1]}` name a different owner or condition"
+        found[key] = joined
+    return found, None
+
+
+# meiva:note
+# Every hunk merged into the entries the file's `[debt]` tables hold, with the lines to refuse.
+def _merge_hunks(scan: _Scan, where: str) -> tuple[_Entries, list[str]]:
+    merged = dict(scan.outside)
+    problems: list[str] = []
+    for hunk in scan.hunks:
+        entries, problem = _hunk_entries(hunk)
+        if problem is not None:
+            problems.append(f"{where}:{hunk.line}: {problem}; decide it by hand")
+            continue
+        merged.update(entries)
+    return merged, problems
+
+
+# meiva:note
+# The merged entries as the raw `[debt]` table `parse_debt` reads back.
+def _raw_entries(merged: _Entries) -> dict[str, object]:
+    raw: dict[str, object] = {}
+    for (code, key), entry in merged.items():
+        rows = raw.setdefault(code, {})
+        if isinstance(rows, dict):
+            rows[key] = entry_value(entry)
+    return raw
 
 
 # meiva:note
@@ -209,28 +339,11 @@ def resolve_debt_conflicts(text: str, where: str) -> tuple[str, list[str]]:
     scan = _scan(text.splitlines())
     if not scan.hunks:
         return text, []
-    problems: list[str] = []
-    merged = dict(scan.outside)
-    for hunk in scan.hunks:
-        ours, odd = _entries(hunk.ours, hunk.table)
-        theirs, odd_theirs = _entries(hunk.theirs, hunk.table)
-        if odd is not None or odd_theirs is not None:
-            problems.append(
-                f"{where}:{hunk.line}: the conflict is not inside the [debt] tables "
-                f"(`{odd or odd_theirs}`); decide it by hand"
-            )
-            continue
-        for key in ours.keys() | theirs.keys():
-            merged[key] = min(ours.get(key, theirs.get(key, 0)), theirs.get(key, ours.get(key, 0)))
+    merged, problems = _merge_hunks(scan, where)
     if problems:
         return text, problems
-    raw: dict[str, object] = {}
-    for (code, key), count in merged.items():
-        rows = raw.setdefault(code, {})
-        if isinstance(rows, dict):
-            rows[key] = count
     reported: list[str] = []
-    table = parse_debt(raw, reported.append)
+    table = parse_debt(_raw_entries(merged), reported.append)
     if reported:
         return text, [f"{where}: {message}" for message in reported]
     return set_debt("\n".join(scan.plain) + "\n", table), []
