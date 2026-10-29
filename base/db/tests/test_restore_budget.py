@@ -5,10 +5,12 @@ import threading
 import time
 from collections.abc import Generator
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
 from loguru import logger
+from psycopg import sql
 
 from base.config import settings
 from base.db import connections
@@ -200,15 +202,42 @@ def test_the_budget_ends_a_restore_stuck_on_a_locked_table(
 
 
 # meiva:note
+# The marker is a sequence, not a row: `nextval` is not transactional, so it is the one fact that
+# survives a commit the server terminated. The stalled commit sets it only by reaching the end of
+# the trigger — which is exactly what "waited the trigger out" means, asserted without a clock.
+def _marker_sequence(db_url: str) -> str:
+    name = f"restore_budget_marker_{uuid4().hex[:10]}"
+    with psycopg.connect(db_url, prepare_threshold=None) as conn:
+        conn.execute(sql.SQL("CREATE SEQUENCE {}").format(sql.Identifier(name)))
+    return name
+
+
+def _marker_was_set(db_url: str, marker: str) -> bool:
+    with psycopg.connect(db_url, prepare_threshold=None) as conn:
+        row = conn.execute(
+            sql.SQL("SELECT is_called FROM {}").format(sql.Identifier(marker))
+        ).fetchone()
+    return bool(row and row[0])
+
+
+def _drop_marker(db_url: str, marker: str) -> None:
+    with psycopg.connect(db_url, prepare_threshold=None) as conn:
+        conn.execute(sql.SQL("DROP SEQUENCE IF EXISTS {}").format(sql.Identifier(marker)))
+
+
+# meiva:note
 # A deferred constraint trigger that sleeps at COMMIT: the client sees exactly
 # what a stalled WAL flush looks like — `commit()` waiting on the server, with
 # statement_timeout unable to interrupt it (2026-10-19 review, measured 3 s under
-# a 300 ms statement budget).
-def _install_stalled_commit(conn: psycopg.Connection[Any]) -> None:
+# a 300 ms statement budget). Its last act marks `marker`.
+def _install_stalled_commit(conn: psycopg.Connection[Any], *, marker: str) -> None:
     conn.execute("CREATE TEMP TABLE restore_budget_stall (x int)")
     conn.execute(
-        "CREATE OR REPLACE FUNCTION pg_temp.restore_budget_slow() RETURNS trigger "
-        "LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(3); RETURN NULL; END $$"
+        sql.SQL(
+            "CREATE OR REPLACE FUNCTION pg_temp.restore_budget_slow() RETURNS trigger "
+            "LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(3); PERFORM nextval({}); "
+            "RETURN NULL; END $$"
+        ).format(sql.Literal(marker))
     )
     conn.execute(
         "CREATE CONSTRAINT TRIGGER restore_budget_slow AFTER INSERT ON restore_budget_stall "
@@ -218,30 +247,63 @@ def _install_stalled_commit(conn: psycopg.Connection[Any]) -> None:
 
 
 # meiva:note
+# The budget this test hands the restore, the one it hands the second run, and the guard against a
+# hung test. The guard is derived from the budget so it cannot drift away from it, and 4x is the
+# margin: room for a slow machine, still a failure inside a suite timeout.
+_BUDGET_S = 1.0
+_SLOW_BUDGET_S = 600.0
+_HANG_GUARD_S = _BUDGET_S * 4
+
+
+# meiva:note
+# A guard below the budget would let a test that never reaches the cut still pass.
+def test_the_hang_guard_sits_above_the_budget() -> None:
+    assert _HANG_GUARD_S > _BUDGET_S
+
+
+# meiva:note
 # The budget that statement_timeout cannot enforce: with a 1 s budget the stalled
 # COMMIT is terminated (~1.2 s), with a 600 s budget the same commit waits the
 # trigger's 3 s and succeeds. The connection dies on termination — that is what
 # the pool replaces.
+#
+# The judge is the trigger's own marker, not the clock: a commit the budget ended never reaches
+# `nextval`, and the unbudgeted one must. Those two facts say "the stall was cut short at the
+# budget" without measuring how busy the machine was; the numbers below are a hang guard.
 def test_the_transaction_budget_interrupts_a_stalled_commit(db_url: str) -> None:
-    statement, _ms = connections.restore_budget_statement(1.0)
-    with psycopg.connect(db_url, prepare_threshold=None) as conn:
-        _install_stalled_commit(conn)
-        conn.execute(statement, prepare=False)
-        conn.execute("INSERT INTO restore_budget_stall VALUES (1)")
-        started = time.monotonic()
-        with pytest.raises(psycopg.errors.TransactionTimeout):
-            conn.commit()
-        assert time.monotonic() - started < 2.9, "the commit must end at the budget, not at 3 s"
-        assert conn.closed, "transaction_timeout terminates the session"
+    marker = _marker_sequence(db_url)
+    try:
+        statement, _ms = connections.restore_budget_statement(_BUDGET_S)
+        with psycopg.connect(db_url, prepare_threshold=None) as conn:
+            _install_stalled_commit(conn, marker=marker)
+            conn.execute(statement, prepare=False)
+            conn.execute("INSERT INTO restore_budget_stall VALUES (1)")
+            started = time.monotonic()
+            with pytest.raises(psycopg.errors.TransactionTimeout):
+                conn.commit()
+            spent = time.monotonic() - started
+            assert conn.closed, "transaction_timeout terminates the session"
+        assert not _marker_was_set(db_url, marker), (
+            "the budget must end the commit short of the trigger's end"
+        )
+        # meiva:note
+        # Guard against a hung test; the verdict is the marker above, and this bound is derived
+        # from the budget (see `_HANG_GUARD_S`) so it follows a change to it.
+        assert spent < _HANG_GUARD_S, "guard against a hung test; the verdict is the marker"
 
-    statement, _ms = connections.restore_budget_statement(600.0)
-    with psycopg.connect(db_url, prepare_threshold=None) as conn:
-        _install_stalled_commit(conn)
-        conn.execute(statement, prepare=False)
-        conn.execute("INSERT INTO restore_budget_stall VALUES (1)")
-        started = time.monotonic()
-        conn.commit()
-        assert time.monotonic() - started >= 2.5, "without the budget the commit waits the trigger"
+        statement, _ms = connections.restore_budget_statement(_SLOW_BUDGET_S)
+        with psycopg.connect(db_url, prepare_threshold=None) as conn:
+            _install_stalled_commit(conn, marker=marker)
+            conn.execute(statement, prepare=False)
+            conn.execute("INSERT INTO restore_budget_stall VALUES (1)")
+            started = time.monotonic()
+            conn.commit()
+            assert time.monotonic() - started >= 2.5, (
+                "without the budget the commit waits the trigger"
+            )
+        assert _marker_was_set(db_url, marker), "an unbudgeted commit must reach the trigger's end"
+    finally:
+        _drop_marker(db_url, marker)
 
 
 # meiva:note
