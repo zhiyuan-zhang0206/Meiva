@@ -2,7 +2,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { OlderLoadOrigin } from "@/lib/timeline/timeline-plan";
+import type { OlderLoadOrigin } from "@/lib/timeline/use-timeline";
 
 import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));

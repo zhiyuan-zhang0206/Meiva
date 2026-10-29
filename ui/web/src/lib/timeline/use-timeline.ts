@@ -39,6 +39,13 @@ import { useTimelineStore } from "./timeline-store";
 import { useCompactHistoryRetention } from "./use-compact-history-retention";
 
 export type { ConnectionState } from "../contracts/types";
+// meiva:note
+// The paging contract is public through this module and only through it:
+// `lib/timeline/timeline-plan.ts` is the internal planner, so a caller outside
+// the library (components/timeline) names the origin here rather than reaching
+// into the planner.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+export type { OlderLoadOrigin } from "./timeline-plan";
 
 const OLDER_BASE_LIMIT = 50;
 const RETAINED_ITEMS_FALLBACK = 250;

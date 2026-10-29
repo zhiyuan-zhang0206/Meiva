@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
-import type { OlderLoadOrigin } from "@/lib/timeline/timeline-plan";
+import type { OlderLoadOrigin } from "@/lib/timeline/use-timeline";
 import {
   type StickyController,
   createStickyController,
