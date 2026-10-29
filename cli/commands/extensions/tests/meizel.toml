@@ -9,12 +9,3 @@
 "test_skill_supply_chain.py" = ["support"]
 "test_skill_update.py" = ["support"]
 "test_skills_sync.py" = ["support"]
-
-[debt.first-party-patch]
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.materialize_source_snapshot" = 1
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.rename_no_replace" = 4
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.stage_copy" = 2
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.uuid.uuid4" = 1
-
-[debt.unresolved-patch]
-"test_external_skills.py#monkeypatch.setattr module.rename_no_replace" = 1
