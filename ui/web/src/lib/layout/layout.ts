@@ -55,6 +55,15 @@ export const BAR_CLEAR_TOP_PADDING_CLASS = "pt-[52px]";
 // block body wrapper must not become the pinned child header's scrollport).
 export const OVERFLOW_CLIP = "overflow-clip";
 
+// meiva:note
+// The right column's question region is pinned under the reading area, so its
+// height has to stop short of the column or a long question would starve the
+// document (and, on a phone, the reading view itself). 45vh keeps the title bar
+// and a usable reading area on every tier; a question past the cap scrolls
+// inside its own card (user 2026-10-30, who asked for the card at the bottom).
+// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+export const QUESTION_REGION_MAX_HEIGHT_CLASS = "max-h-[45vh]";
+
 // ── The named invariants (I1–I6) ───────────────────────────────────────
 // One entry per invariant; `pages` says which page each applies to. Tests
 // iterate this list so the jsdom layer and the Playwright layer can never

@@ -43,7 +43,7 @@ export function AgentSidebar(props: Props) {
   // column shows, not whether the agent tree is reachable (user 2026-10-20,
   // reversing the earlier mode-hides-the-rail rule). `display.sidebar_collapsed`
   // remains the only thing that collapses it.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   const collapsed = collapsedSetting;
   const { viewMode, setViewMode } = useSidebarViewMode();
   // Show-terminated is a DB-backed user setting (display.show_terminated), the

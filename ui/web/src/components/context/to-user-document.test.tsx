@@ -195,7 +195,7 @@ describe("To user document bar", () => {
     // Inspector is a mode: while it is on, the bar says what the panel is
     // showing and the same button that entered it is the way out (user
     // 2026-10-20), instead of a second close control inside the panel.
-    // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
     show(document("# Status"), { onInspect: vi.fn(), inspecting: true });
     expect(screen.getByText("title")).toBeTruthy();
     expect(screen.queryByText("sharedContext")).toBeNull();
@@ -209,7 +209,7 @@ describe("To user document bar", () => {
     // The bar is the inspector mode's one control surface: the document's own
     // navigation (home, back) and its refresh read the document body the mode
     // hides, so they leave with it (user 2026-10-20).
-    // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
     show(document("# Status", "2026-10-17T06:00:00Z"), {
       onInspect: vi.fn(),
       onCollapse: vi.fn(),
@@ -291,7 +291,7 @@ describe("To user refusals", () => {
   // One test, two classes: a refusal the server called permanent reads differently from
   // one it called temporary, and only the permanent one hands over the file itself — the
   // copy follows the response's code, never the status (user 2026-10-28).
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   it("tells a permanent refusal from one worth retrying, and hands over the file", async () => {
     show(document("[Details](details.md)"), {
       linked: new ApiError(413, "too large", { code: "to_user_document_too_large", retryable: false }),
