@@ -18,7 +18,7 @@ from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
-from base.agents.context import MeivaContext
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
 
@@ -47,7 +47,7 @@ class _SilentIdleContinueHook(Hook):
         self,
         state: AgentState,
         runtime: Runtime[MeivaContext],
-        _config: RunnableConfig,
+        config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:
         if not _tail_is_silent_idle(state.messages):
@@ -60,6 +60,7 @@ class _SilentIdleContinueHook(Hook):
                 "[{label}] {body}",
                 label="silent-idle",
                 event="silent_idle",
+                agent_id=agent_id_from_config(config),
                 body="defer: auto-compact predicted, skipping continue nudge this turn",
             )
             return None
