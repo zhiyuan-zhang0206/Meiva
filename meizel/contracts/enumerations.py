@@ -4,8 +4,8 @@
 # A Python tuple, list or set, or a TOML array, whose strings name every top-level directory
 # of one role (of three or more directories) is a copy of the declaration in the root
 # manifest: a package added to the role would silently miss it. Use
-# `meizel.roles.select_packages(read_roles(repo), role)` or `python -m meizel roles list`, or a
-# generated region, the only exception.
+# `meizel.roles.select_packages(meizel.checkout.read_roles(repo), role)` or
+# `python -m meizel roles list`, or a generated region, the only exception.
 # Partial lists (a deliberate subset of a role) are not copies and are not reported.
 #
 # Tests, documentation and `meizel/` itself are outside the rule: a fixture lists packages on

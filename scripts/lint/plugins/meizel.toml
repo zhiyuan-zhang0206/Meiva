@@ -1,4 +1,4 @@
-exports = ["no_plugin_wrap.py"]
+exports = ["no_meiva_in_hooks_cli.py", "no_plugin_wrap.py"]
 
 [uses]
 "no_meiva_in_hooks_cli.py" = ["no_meiva_in_hooks.py"]

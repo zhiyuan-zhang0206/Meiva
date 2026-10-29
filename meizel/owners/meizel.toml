@@ -2,7 +2,7 @@ exports = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py"]
 
 [uses]
 "clock_lattice_cli.py" = ["clock_lattice.py"]
-"tests" = ["clock_lattice.py", "decisions.py"]
+"tests" = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py"]
 
 [purity]
 "." = "strict"

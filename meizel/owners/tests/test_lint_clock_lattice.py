@@ -18,13 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from meizel.checkout import roles_at
 from meizel.owners import clock_lattice as _lint
-from meizel.roles import select_packages
-
-_SCAN_DIRS = select_packages(
-    roles_at(Path(__file__).resolve().parents[3]), "application", "tooling"
-)
+from meizel.owners.clock_lattice_cli import SCAN_DIRS as _SCAN_DIRS
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
