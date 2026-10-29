@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
+from base.paths import meiva_home
 from base.telemetry import Event, EventPipeline
 from scripts.ci.pull_requests import pr_flow_export as pr_flow
 
@@ -314,9 +315,9 @@ def test_emit_snapshot_skips_the_pipeline_in_dry_run() -> None:
     writer = EventPipeline(writer=emitted.extend)
     snapshot: dict[str, Any] = {"days": {}, "run": {}}
     try:
-        pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer)
+        pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer, home=meiva_home())
         assert emitted == []
-        pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer)
+        pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer, home=meiva_home())
         assert [event.event_name for event in emitted] == ["pr_flow_run"]
         assert all(event.process == pr_flow.PROCESS_NAME for event in emitted)
     finally:

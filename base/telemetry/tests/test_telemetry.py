@@ -76,7 +76,7 @@ def bind_telemetry(database: Database, unit_home: Path) -> Iterator[None]:
         database=lambda: database, machine=machine_identity(), home=unit_home
     )
     try:
-        telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
+        telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
         yield
     finally:
         pipeline.stop(timeout=2)
@@ -206,6 +206,38 @@ def test_cluster_label_falls_back_without_raising(tmp_path: Path) -> None:
         observability.cluster_label(Path("~nonexistent_meiva_user_xyz"))
         == "~nonexistent_meiva_user_xyz"
     )
+
+
+# meiva:note
+# The cluster label is materialized from the home the boot hands in, once per process: clearing
+# the slot and initializing with another home writes that home's label, and the row the process
+# then emits carries it. A label resolved where the row is built would answer for whichever home
+# the emitting process happened to run in.
+def test_the_cluster_label_is_materialized_from_the_home_the_boot_hands_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = tmp_path / ".meiva-other-unit"
+    other.mkdir()
+    bound = emitter.process_state["pipeline"]
+    assert bound is not None
+    monkeypatch.setitem(emitter.process_state, "cluster", None)
+    telemetry.init_telemetry(process="test-proc", pipeline=bound, home=other)
+
+    assert emitter.process_state["cluster"] == observability.cluster_label(other)
+    assert emitter.process_state["cluster"] != observability.cluster_label(meiva_home())
+    telemetry.emit("telemetry", "llm_usage", level="info", agent_id=_AGENT)
+    assert _mirror_last("llm_usage", _AGENT)["cluster"] == observability.cluster_label(other)
+
+
+# meiva:note
+# A process that never materialized a cluster still carries the dimension: the row says
+# `.unknown` rather than borrowing a home from whoever builds it.
+def test_an_uninitialized_process_emits_the_unknown_cluster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(emitter.process_state, "cluster", None)
+    telemetry.emit("telemetry", "llm_usage", level="info", agent_id=_AGENT)
+    assert _mirror_last("llm_usage", _AGENT)["cluster"] == ".unknown"
 
 
 def test_category_for_kind_mapping() -> None:

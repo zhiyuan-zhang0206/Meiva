@@ -112,9 +112,12 @@ def test_21_clean_redis(redis_url):
 
 def test_30_queued_telemetry(db_url, drained_tail, tail_pipeline):
     from base import telemetry
+    from base.paths import meiva_home
     from base.telemetry import event_store
     event_store.set_enabled(enabled=True)
-    telemetry.init_telemetry(pipeline=tail_pipeline, machine_reader=lambda: "resource-tail")
+    telemetry.init_telemetry(
+        home=meiva_home(), pipeline=tail_pipeline, machine_reader=lambda: "resource-tail"
+    )
     telemetry.emit("log", "log", level="error", attributes={"tail": "must-drain"})
     # Do not sync here: the resource owner must drain before revoking access.
 

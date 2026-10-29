@@ -30,7 +30,7 @@ def logging_pipeline(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
     try:
-        telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
+        telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
         yield
     finally:
         pipeline.stop(timeout=2)
@@ -84,10 +84,16 @@ def test_add_event_sink_registers_at_most_once(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
     first = slog.add_event_sink(
-        process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
+        home=meiva_home(),
+        process="test-dup-guard",
+        producer=lambda: pipeline,
+        machine_reader=lambda: "test-host",
     )
     second = slog.add_event_sink(
-        process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
+        home=meiva_home(),
+        process="test-dup-guard",
+        producer=lambda: pipeline,
+        machine_reader=lambda: "test-host",
     )
     assert second == first, "repeat registration must return the live sink id"
 

@@ -15,6 +15,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from base import telemetry
 from base.config import settings
 from base.db import Database
+from base.paths import meiva_home
 from base.telemetry.delivery.defer_plan import CHILD_DEFER_MAX_AGE_DEFAULT_S, ChildDeferPlan
 from base.telemetry.delivery.receipts import Category, Event, Level
 from base.telemetry.otlp import telemetry_otlp
@@ -636,7 +637,7 @@ def bind_telemetry(
         database=lambda: database, machine=machine_identity(), home=tmp_path
     )
     try:
-        telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
+        telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (AGENT,))
             cur.execute(
@@ -676,7 +677,7 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
 
     assert backend._initialize_worker(worker)  # pyright: ignore[reportArgumentType]
     try:
-        assert cluster_label(home) != cluster_label()
+        assert cluster_label(home) != cluster_label(Path("/"))
         assert worker.metrics._sdk_config.resource.attributes["cluster"] == cluster_label(home)
         sdk_logger.warning("Queue full, dropping %s.", "logs")
         day = datetime.now(UTC).strftime("%Y%m%d")

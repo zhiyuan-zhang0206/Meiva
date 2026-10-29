@@ -94,7 +94,10 @@ def event_pipeline(
     )
     try:
         telemetry.init_telemetry(
-            process="test-agent-host", pipeline=pipeline, machine_reader=machine_identity.name
+            home=meiva_home(),
+            process="test-agent-host",
+            pipeline=pipeline,
+            machine_reader=machine_identity.name,
         )
         yield pipeline
     finally:

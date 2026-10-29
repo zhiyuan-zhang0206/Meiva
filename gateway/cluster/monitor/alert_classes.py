@@ -19,7 +19,6 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg.rows import dict_row
 
-from base.telemetry.observability import cluster_label
 from gateway.cluster.monitor.stats_events import set_statement_timeout
 from gateway.cluster.schemas import (
     AlertClassesResponse,
@@ -28,7 +27,7 @@ from gateway.cluster.schemas import (
     AlertClassSamples,
     AlertLevel,
 )
-from gateway.http.config import GatewayConfig, gateway_clock
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_cluster
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from services.upkeep.events_maintenance import resolution
 
@@ -38,11 +37,11 @@ router = APIRouter()
 # meiva:note
 # Every warning/error class over `(start, end]` for the home cluster, most frequent first.
 def read_alert_classes(
-    conn: psycopg.Connection[Any], *, start: datetime, end: datetime
+    conn: psycopg.Connection[Any], *, cluster: str, start: datetime, end: datetime
 ) -> list[AlertClassRow]:
     active = resolution.active_dismissals(conn)
     rows: list[AlertClassRow] = []
-    for found in resolution.alert_classes(conn, start=start, end=end, cluster=cluster_label()):
+    for found in resolution.alert_classes(conn, start=start, end=end, cluster=cluster):
         dismissal = resolution.matching_dismissal(
             resolution.EventClass(
                 category=found.category,
@@ -82,7 +81,12 @@ def get_alert_classes(
     try:
         with request.app.state.db_pool.connection() as conn:
             set_statement_timeout(conn, config.stats_statement_timeout_ms)
-            classes = read_alert_classes(conn, start=now - window_delta(hours), end=now)
+            classes = read_alert_classes(
+                conn,
+                cluster=gateway_cluster(request),
+                start=now - window_delta(hours),
+                end=now,
+            )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="alert classes read timed out; retry") from exc
     return AlertClassesResponse(
@@ -130,7 +134,7 @@ def get_alert_class_samples(
                     event_name,
                     source,
                     process,
-                    cluster_label(),
+                    gateway_cluster(request),
                     now - window_delta(hours),
                     now,
                     config.alert_samples_limit,

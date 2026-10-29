@@ -99,7 +99,10 @@ def run_health_probe(
         print(f"health-probe refused: {options.checkout_refusal}", file=sys.stderr)
         return 2
     telemetry.init_telemetry(
-        process="cli-health-probe", pipeline=producer(), machine_reader=command.machine.name
+        home=command.home,
+        process="cli-health-probe",
+        pipeline=producer(),
+        machine_reader=command.machine.name,
     )
     readings = read_health(options, database_factory=database_factory, command=command)
     unhealthy_checks = 0
