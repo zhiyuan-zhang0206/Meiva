@@ -430,7 +430,7 @@ class RedisInboundListener:
             ch=self._channel,
         )
 
-    async def _consume_one(self, pubsub: _RedisPubSub, timeout: float) -> None:
+    async def _consume_one(self, pubsub: _RedisPubSub, timeout: float) -> bool:
         """Consume one message from pubsub, or return when `timeout` expires.
 
         `pubsub.get_message(timeout=timeout)` returns None on timeout.
@@ -439,20 +439,23 @@ class RedisInboundListener:
         filters most — a stray reconnect subscribe message could still
         arrive.
         """
+        # meiva:note
+        # True means a data message arrived on this agent's channel, False that the budget
+        # expired first — the bool is what lets `wait_one` answer delivery by the fact.
         deadline = self._timers.monotonic() + timeout
         while True:
             remaining = deadline - self._timers.monotonic()
             if remaining <= 0:
-                return
+                return False
             raw_pubsub: Any = pubsub
             msg: Any = await raw_pubsub.get_message(
                 timeout=remaining, ignore_subscribe_messages=True
             )
             if _is_str_dict(msg) and msg.get("type") == "message":
-                return  # Got a real inbound wake-up
+                return True  # Got a real inbound wake-up
             # msg is None (timeout) or a subscribe/unsubscribe confirmation — loop
 
-    async def wait_one(self, timeout: float) -> None:
+    async def wait_one(self, timeout: float) -> bool:
         """Block until a publish arrives on this agent's channel, or `timeout`
         seconds elapse.
 
@@ -474,12 +477,17 @@ class RedisInboundListener:
         incoming data" guard. The lock keeps the pubsub connection
         single-consumer.
         """
+        # meiva:note
+        # Returns True only when a publish was consumed on this agent's channel. False carries
+        # both other meanings: the budget ran out first, or the wake path degraded (ACL denial,
+        # an abandoned open/consume, a lost connection). The caller's SELECT recheck runs on
+        # either answer, so delivery is judged by this bool and never by elapsed time.
         self._check_admission()
         async with self._wait_lock:
             self._check_admission()
-            await self._wait_one_impl(timeout)
+            return await self._wait_one_impl(timeout)
 
-    async def _wait_one_impl(self, timeout: float) -> None:
+    async def _wait_one_impl(self, timeout: float) -> bool:
         """Serialised body of `wait_one` — see it for the return contract.
 
         Bounded by `timeout` total wall-clock; internal retries across
@@ -494,7 +502,7 @@ class RedisInboundListener:
         while True:
             remaining = deadline - self._timers.monotonic()
             if remaining <= 0:
-                return
+                return False
             pubsub, redis = None, None
             generation = self._generation
             try:
@@ -510,7 +518,7 @@ class RedisInboundListener:
                         a=self._agent_id,
                         r=remaining,
                     )
-                    return
+                    return False
                 pubsub = open_task.result()
                 redis = self._redis
                 generation = self._generation
@@ -518,7 +526,7 @@ class RedisInboundListener:
                     continue
                 remaining = deadline - self._timers.monotonic()
                 if remaining <= 0:
-                    return
+                    return False
                 # Consume with bounded budget (see `_CONSUME_ABANDON_GRACE`).
                 consume_task = asyncio.create_task(self._consume_one(pubsub, remaining))
                 self._own_operation(consume_task, _Phase.CONSUME)
@@ -526,15 +534,15 @@ class RedisInboundListener:
                     consume_task, remaining + self._consume_abandon_grace
                 ):
                     await self._abandon_consume(remaining, pubsub, redis, generation)
-                    return
-                consume_task.result()
+                    return False
+                woke = consume_task.result()
                 # Reaching a clean consume (message or timeout, no error) proves
                 # the channel is actually readable — the only reliable recovery
                 # signal, since `subscribe` returns without surfacing a redis-side
                 # NoPermissionError (it lands on the first get_message below).
                 self._clear_subscribe_denied()
                 self._mark_wake_healthy()
-                return
+                return woke
             except aredis.ResponseError as exc:
                 # A command-level rejection — almost always NoPermissionError:
                 # the cluster redis ACL user is not granted this channel. Unlike
@@ -556,7 +564,7 @@ class RedisInboundListener:
                 remaining = deadline - self._timers.monotonic()
                 if remaining > 0:
                     await self._timers.asleep(remaining)
-                return
+                return False
             except (OSError, aredis.ConnectionError, aredis.TimeoutError, TypeError) as exc:
                 # TypeError: a defensive catch for redis-py's
                 # `TypeError: 'NoneType' object is not callable` when a
@@ -578,7 +586,7 @@ class RedisInboundListener:
                         expected_generation=generation,
                     )
                 if remaining <= backoff:
-                    return
+                    return False
                 await self._timers.asleep(backoff)
                 backoff = min(backoff * 2, max(0.5, remaining / 2))
 
