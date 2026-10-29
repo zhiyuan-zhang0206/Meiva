@@ -80,6 +80,16 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "certifying $sha as v${{ inputs.version }}"
 
+      # Before any leg spends a runner-hour and before the certify job can write a tag: the
+      # certificate must name a version the target tree actually carries. It reads the TARGET
+      # commit, not this checkout — the input may name another commit.
+      - name: Refuse a certificate label the tree does not carry
+        run: >
+          python3 scripts/host_ops/release/label.py
+          --repo .
+          --target ${{ steps.target.outputs.sha }}
+          --version ${{ inputs.version }}
+
       # Stdlib only, so the refusal costs seconds and cannot fail on an environment problem.
       # The bootstrap flag is what makes the first release possible at all: the record can only
       # come from the run that certifies it. base.py refuses it the moment release/ has ever been

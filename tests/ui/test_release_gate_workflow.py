@@ -46,6 +46,22 @@ def test_the_precheck_refuses_a_tree_without_a_certified_base() -> None:
     assert "--bootstrap-when-empty" in refusal["run"]
 
 
+def test_the_label_is_checked_against_the_target_tree_before_anything_runs() -> None:
+    precheck = _yaml(_WORKFLOW)["jobs"]["precheck"]
+    steps = precheck["steps"]
+    names = [step.get("name") for step in steps]
+    label = _step(steps, "Refuse a certificate label the tree does not carry")
+
+    assert "scripts/host_ops/release/label.py" in label["run"]
+    assert "--version ${{ inputs.version }}" in label["run"]
+    # meiva:note
+    # The target, not this checkout: the input may name another commit.
+    assert "--target ${{ steps.target.outputs.sha }}" in label["run"]
+    assert names.index("Refuse a certificate label the tree does not carry") < names.index(
+        "Refuse a tree without a certified base"
+    )
+
+
 def test_a_leftover_tag_from_a_failed_certify_does_not_block_the_retry() -> None:
     certify = _yaml(_WORKFLOW)["jobs"]["certify"]
     tag = _step(certify["steps"], "Publish the tag the humans read")
