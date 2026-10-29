@@ -489,7 +489,12 @@ def main(
         print(error)
     if errors:
         print(
-            f"\n{len(errors)} hard violations. See scripts/lint/code_structure.py for the rules.",
+            f"\n{len(errors)} hard violation(s). These rules keep the import graph acyclic and "
+            f"every shared fact owned once, so each violation is a boundary that will be crossed "
+            f"again until the side it is on is fixed: move the code to the side the rule allows, "
+            f"or declare the edge in the meizel.toml of the directory where the two sides meet. "
+            f"Raising the baseline is not the repair. See scripts/lint/docs/lint.meiva.okf.md and "
+            f"docs/conventions/architecture/code-placement-and-purity.md.",
             file=sys.stderr,
         )
         return 1
