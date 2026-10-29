@@ -207,7 +207,7 @@ def test_creates_the_worktree_off_fresh_origin_main_and_bootstraps_in_order(
     assert world.calls() == [
         ("uv sync --frozen", path),
         (f"python {path}/cli/python_install.py --locked --inexact", path),
-        ("npm ci --prefer-offline --no-audit --no-fund", path / "ui/web"),
+        ("npm ci --no-audit --no-fund", path / "ui/web"),
     ]
     assert (path / ".venv").is_dir() and not (path / ".venv").is_symlink()
     assert world.git(path, "status", "--porcelain") == ""

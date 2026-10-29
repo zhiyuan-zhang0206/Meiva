@@ -126,14 +126,13 @@ bootstrap() {
   # `npm ci`, as CI does: it installs exactly what package-lock.json pins and never
   # rewrites it (`npm install` strips optional-dependency entries on a newer npm).
   #
-  # `--prefer-offline` only changes where a package is read from: a warm cache answers
-  # without contacting the registry. It does not change what gets installed - `npm ci`
-  # resolves the whole tree from package-lock.json, so the versions are the locked ones
-  # whether or not the cache answers. Measured on this repository (npm 11, warm cache):
-  # 850 registry requests and 156 MB on a cold cache, 0 requests on a warm one either way,
-  # so the flag buys nothing here and only covers a cache npm would otherwise revalidate.
+  # Measured on this repository (npm 11.12.1, one dedicated cache directory): a cold cache
+  # costs 850 registry requests / 156 MB / 64 s; a warm one costs **0 requests** whether or not
+  # `--prefer-offline` is passed (27.9 s vs 28.4 s). The flag therefore buys nothing here, so it
+  # is not passed - a switch that cannot be measured is worse than none, because the next reader
+  # reads it as "the transfer spike is solved" and stops looking for the cold install that is.
   echo "→ npm ci (frontend) …"
-  (cd "$REPO_ROOT/ui/web" && npm ci --prefer-offline --no-audit --no-fund)
+  (cd "$REPO_ROOT/ui/web" && npm ci --no-audit --no-fund)
 
   echo "→ verifying …"
   { [ -d .venv ] && [ ! -L .venv ]; } || die ".venv must be a real directory inside $REPO_ROOT, never a symlink"
