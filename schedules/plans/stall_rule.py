@@ -56,6 +56,7 @@ class PollPlan:
     log_lines: tuple[str, ...]
     alert: str | None
     advanced: bool
+    new_samples: tuple[StallSample, ...]
 
 
 def parse_stats(lines: Sequence[str]) -> tuple[StallSample, ...]:
@@ -101,10 +102,12 @@ def plan_poll(state: WatchState, fresh: Sequence[StallSample], now: float) -> Po
     log_lines: list[str] = []
     alert: str | None = None
     advanced = False
+    accepted: list[StallSample] = []
     for sample in fresh:
         if seen is not None and sample.stamp <= seen:
             continue
         advanced = True
+        accepted.append(sample)
         seen = sample.stamp
         window = [*window, sample][-_MEMORY:]
         if _stalled(sample):
@@ -118,5 +121,9 @@ def plan_poll(state: WatchState, fresh: Sequence[StallSample], now: float) -> Po
             alerted = False
             log_lines.append(f"recovered: {_describe([sample])}")
     return PollPlan(
-        WatchState(seen, tuple(window), last_alert, alerted), tuple(log_lines), alert, advanced
+        WatchState(seen, tuple(window), last_alert, alerted),
+        tuple(log_lines),
+        alert,
+        advanced,
+        tuple(accepted),
     )

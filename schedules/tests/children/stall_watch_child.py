@@ -14,7 +14,14 @@ from schedules.jobs.stall_watch import StallWatch, run_watch
 
 def main(log: str, state: str) -> None:
     run_watch(
-        StallWatch(Path(log), Path(state), ZoneInfo("UTC"), (), poll_seconds=0.05),
+        StallWatch(
+            Path(log),
+            Path(state),
+            Path(state).with_name("db-write-stall-history.jsonl"),
+            ZoneInfo("UTC"),
+            (),
+            poll_seconds=0.05,
+        ),
         clock=time.time,
     )
 
