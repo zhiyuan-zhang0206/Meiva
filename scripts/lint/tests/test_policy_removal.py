@@ -29,14 +29,27 @@ LINE = (
 
 
 # meiva:note
-# A throwaway repository whose one commit holds the policy the change is compared against.
+# A throwaway repository whose one commit holds the policy the change is compared against. It carries
+# its own Git identity, so a commit and a merge land here exactly as they do on a machine that has
+# one configured globally - a runner has none, and a merge that cannot be made would read as a
+# removal no commit took away.
 def _repository(tmp_path: Path, policy: str = POLICY) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
-    subprocess.run(["git", "init", "--initial-branch=main", "-q", str(root)], check=True)  # noqa: S603
+    _init(root)
     (root / "meizel.policy.toml").write_text(policy, encoding="utf-8")
     _commit(root, "start")
     return root
+
+
+# meiva:note
+# An empty repository under the branch these fixtures name, holding the identity every command below
+# inherits.
+def _init(root: Path) -> None:
+    subprocess.run(["git", "init", "--initial-branch=main", "-q", str(root)], check=True)  # noqa: S603
+    _git(root, "config", "user.name", "t")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "commit.gpgsign", "false")
 
 
 # meiva:note
@@ -45,23 +58,7 @@ def _repository(tmp_path: Path, policy: str = POLICY) -> Path:
 def _commit(root: Path, message: str) -> str:
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)  # noqa: S603
     subprocess.run(  # noqa: S603
-        [
-            "git",
-            "-C",
-            str(root),
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-q",
-            "-m",
-            message,
-        ],
-        check=True,
-        capture_output=True,
+        ["git", "-C", str(root), "commit", "-q", "-m", message], check=True, capture_output=True
     )
     done = subprocess.run(  # noqa: S603
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
@@ -741,7 +738,7 @@ def test_a_policy_the_base_does_not_have_yet_asks_nothing(
 ) -> None:
     root = tmp_path / "repo"
     root.mkdir()
-    subprocess.run(["git", "init", "--initial-branch=main", "-q", str(root)], check=True)  # noqa: S603
+    _init(root)
     (root / "README.md").write_text("start\n", encoding="utf-8")
     base = _commit(root, "start")
     (root / "meizel.policy.toml").write_text(POLICY, encoding="utf-8")
