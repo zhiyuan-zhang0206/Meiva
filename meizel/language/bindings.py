@@ -78,7 +78,7 @@ def module_bindings(universe: Universe, file: str) -> Bindings:
     if file not in universe.files:
         return Bindings(frozenset(), dynamic=True)
     try:
-        source = universe.load_text(file)
+        source = universe.repo.load_text(file)
     except (OSError, ValueError):
         return Bindings(frozenset(), dynamic=True)
     return _read(source, file)

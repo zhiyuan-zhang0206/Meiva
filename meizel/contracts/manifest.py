@@ -589,7 +589,7 @@ def load_manifests(
     diagnostics: list[Diagnostic] = []
     for directory in sorted(universe.manifest_dirs):
         path = manifest_path(directory)
-        text = texts[path] if texts is not None and path in texts else universe.load_text(path)
+        text = texts[path] if texts is not None and path in texts else universe.repo.load_text(path)
         reader = _Reader(universe, directory, text.splitlines())
         try:
             document = tomllib.loads(text)

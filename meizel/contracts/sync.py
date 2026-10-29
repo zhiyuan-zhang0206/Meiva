@@ -14,7 +14,7 @@ from meizel.contracts.declare import declare
 from meizel.contracts.manifest import manifest_path
 from meizel.contracts.manifest_text import ENTRY, HEADER, entry_end, items, unquote
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import EditPlan, GitRepo
+from meizel.graph.universe import Checkout, EditPlan
 
 __all__ = [
     "plan_removals",
@@ -171,12 +171,12 @@ def plan_removals(root: Path, texts: Mapping[str, str], removals: Removals) -> E
     return EditPlan(writes=writes, deletes=tuple(deletes))
 
 
-def _apply(repo: GitRepo, removals: Removals) -> None:
+def _apply(repo: Checkout, removals: Removals) -> None:
     texts = {relative: repo.load_text(relative) for relative in removals}
-    plan_removals(repo.root, texts, removals).apply()
+    repo.apply_plan(plan_removals(repo.root, texts, removals))
 
 
-def prune(repo: GitRepo, jobs: int | None = None) -> list[str]:
+def prune(repo: Checkout, jobs: int | None = None) -> list[str]:
     """Remove stale declarations until none remain; returns a line per removal."""
     changes: list[str] = []
     while True:
@@ -190,7 +190,7 @@ def prune(repo: GitRepo, jobs: int | None = None) -> list[str]:
 
 
 def sync_manifests(
-    repo: GitRepo, targets: list[str] | None, jobs: int | None, *, do_declare: bool
+    repo: Checkout, targets: list[str] | None, jobs: int | None, *, do_declare: bool
 ) -> tuple[list[str], list[str]]:
     lines = list(prune(repo, jobs))
     if not do_declare:
@@ -205,7 +205,7 @@ def sync_manifests(
 # Normalize only a disposable historical checkout. Decode first, so malformed or unknown input
 # fails before any write. Retired metadata remains in the returned Policy for migration and diff;
 # every surviving policy entry and its reason keeps its original text for the current scanner.
-def prepare_policy_snapshot(repo: GitRepo) -> Policy:
+def prepare_policy_snapshot(repo: Checkout) -> Policy:
     try:
         policy = load_snapshot(repo.root)
     except ValueError as error:
