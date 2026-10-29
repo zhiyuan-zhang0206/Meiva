@@ -2915,3 +2915,67 @@ BEGIN
         GRANT USAGE, SELECT ON SEQUENCE notification_events_id_seq TO meiva_runner;
     END IF;
 END $$;
+
+-- ─────────────── signal_state ───────────────
+-- The state of a condition, as opposed to the record of a check. One row per open
+-- episode of `(source, subject, condition)`: a detector that sees the same thing
+-- again touches the open row instead of appending another event, and a reconciler
+-- closes it when the condition stops. `telemetry_events` stays the append-only
+-- evidence; this table only answers "is it still happening". Written through
+-- `base/events/signals` (`open_or_touch` / `resolve`), which exists so the two
+-- writes have one home; nothing else in the code base writes these rows.
+CREATE TABLE IF NOT EXISTS signal_state (
+    id              BIGSERIAL PRIMARY KEY,
+    source          TEXT NOT NULL,
+    subject         TEXT NOT NULL,
+    condition       TEXT NOT NULL,
+    severity        TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'error')),
+    opened_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- The newest report; a resolver judges staleness from here, never from `opened_at`.
+    last_seen       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- How many reports this episode absorbed. The reports themselves are in `telemetry_events`.
+    count           BIGINT NOT NULL DEFAULT 1,
+    -- Event ids without a foreign key: `telemetry_events` is the high-rate append-only
+    -- table, and a key would put its insert behind this one.
+    first_event_id  BIGINT,
+    last_event_id   BIGINT,
+    -- NULL means open. Closing is what makes the next report a new episode, not a touch.
+    resolved_at     TIMESTAMPTZ,
+    resolve_reason  TEXT,
+    evidence_ref    TEXT,
+    -- A human read it. An acknowledgement is not a close: the condition still stands.
+    acked_by        BIGINT,
+    acked_at        TIMESTAMPTZ
+);
+
+COMMENT ON TABLE signal_state IS
+    'One row per open episode of a condition, touched while it persists and closed when it stops. telemetry_events stays the evidence; this table answers whether the condition is still true.';
+
+COMMENT ON COLUMN signal_state.condition IS
+    'Stable name of the condition within (source, subject). Unique among the open rows of that pair, so a repeated report touches this episode instead of adding another.';
+
+COMMENT ON COLUMN signal_state.last_seen IS
+    'The newest report; staleness is judged from here, never from opened_at.';
+
+COMMENT ON COLUMN signal_state.resolved_at IS
+    'NULL means open. A closed row is history: the next report of the same condition opens a new episode.';
+
+COMMENT ON COLUMN signal_state.resolve_reason IS
+    'Why the episode closed. Free text so a condition can name its own reason without a migration; the write path accepts base/events/signals/state.py:ResolveReason.';
+
+COMMENT ON COLUMN signal_state.evidence_ref IS
+    'What convinced the closer: a log line, an event id, a sample.';
+
+COMMENT ON COLUMN signal_state.acked_by IS
+    'Agent id that acknowledged the episode. An acknowledgement is not a close.';
+
+-- One open episode per condition. Partial, because a resolved row must not block the
+-- next episode of the same condition.
+CREATE UNIQUE INDEX IF NOT EXISTS signal_state_open_key_idx
+    ON signal_state (source, subject, condition)
+    WHERE resolved_at IS NULL;
+
+-- The reconciler's scan: the open episodes that have not reported in longest.
+CREATE INDEX IF NOT EXISTS signal_state_open_last_seen_idx
+    ON signal_state (last_seen)
+    WHERE resolved_at IS NULL;
