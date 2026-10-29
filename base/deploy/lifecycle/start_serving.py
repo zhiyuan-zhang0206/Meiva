@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, Self, TypeGuard
@@ -126,13 +126,18 @@ def observe_root(home: Path) -> RootBirth:
     )
 
 
-def born_identity(home: Path) -> ServingState | None:
+# meiva:note
+# `observe` is how this reader sees the running root: `observe_root` itself unless the caller
+# names another, so a test hands in the birth it marks and every other step stays real.
+def born_identity(
+    home: Path, *, observe: Callable[[Path], RootBirth] = observe_root
+) -> ServingState | None:
     """Return only current exact root evidence; missing/unknown never permits."""
     state = _read_state(home)
     if state is None or state.state != "serving" or state.birth is None:
         return None
     try:
-        if state.birth.same_generation(observe_root(home)) and _read_state(home) == state:
+        if state.birth.same_generation(observe(home)) and _read_state(home) == state:
             return state
         return None
     except (OSError, psutil.Error, ValueError, RuntimeError) as exc:
@@ -166,13 +171,19 @@ def begin_start(home: Path) -> str:
     return generation
 
 
-def mark_serving(home: Path, generation: str, *, runtime: LoadedRuntimeIdentity) -> bool:
+def mark_serving(
+    home: Path,
+    generation: str,
+    *,
+    runtime: LoadedRuntimeIdentity,
+    observe: Callable[[Path], RootBirth] = observe_root,
+) -> bool:
     """Publish serving only when ``generation`` still owns the start attempt."""
     with file_lock(_lock_path(home)):
         current = _read_state(home)
         if current is None or current.state != "starting" or current.generation != generation:
             return False
-        birth = observe_root(home)
+        birth = observe(home)
         if birth.runtime != runtime:
             raise RuntimeError("serving root differs from the admitted loaded runtime")
         write_state(
@@ -183,13 +194,15 @@ def mark_serving(home: Path, generation: str, *, runtime: LoadedRuntimeIdentity)
         return True
 
 
-def is_serving(home: Path) -> bool:
+def is_serving(home: Path, *, observe: Callable[[Path], RootBirth] = observe_root) -> bool:
     """Whether a completed current-generation start permits recovery actions."""
-    return born_identity(home) is not None
+    return born_identity(home, observe=observe) is not None
 
 
 @contextmanager
-def recovery_permitted(home: Path) -> Generator[bool]:
+def recovery_permitted(
+    home: Path, *, observe: Callable[[Path], RootBirth] = observe_root
+) -> Generator[bool]:
     """Authorize one recovery action while excluding a new start or stop.
 
     The caller keeps this context through the actual revive or launch. That
@@ -197,7 +210,7 @@ def recovery_permitted(home: Path) -> Generator[bool]:
     to the start generation change, rather than a racy check-then-act pair.
     """
     with file_lock(_lock_path(home)):
-        yield born_identity(home) is not None
+        yield born_identity(home, observe=observe) is not None
 
 
 def clear_serving(home: Path) -> None:

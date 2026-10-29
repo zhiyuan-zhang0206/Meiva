@@ -233,6 +233,7 @@ class RosterEnv:
     probe_timeout_s: float
     clock: Clock
     rpc: RpcClient
+    observe: Callable[[Path], start_serving.RootBirth]
     environ: Mapping[str, str] = field(repr=False)
 
 
@@ -246,6 +247,7 @@ def roster_env(request: Request) -> RosterEnv:
         probe_timeout_s=gateway_config(request).status_probe_timeout_seconds,
         clock=gateway_clock(request),
         rpc=gateway_rpc(request),
+        observe=request.app.state.gateway_process.observe,
         environ=request.app.state.gateway_process.config.process_environment(),
     )
 
@@ -355,7 +357,9 @@ def _local_resource_sample() -> ResourceSample | None:
 # the psutil resource snapshot must not run on the event loop.
 def read_local_facts(env: RosterEnv, *, with_resource: bool) -> LocalFacts:
     return LocalFacts(
-        paused_reason=serving_gate_reason(serving=start_serving.is_serving(env.home)),
+        paused_reason=serving_gate_reason(
+            serving=start_serving.is_serving(env.home, observe=env.observe)
+        ),
         head_sha=checkout_head_sha(env.home / "source", environ=env.environ),
         # meiva:note
         # This gateway process's own frozen commit — not a disk bookmark, so a
@@ -431,7 +435,10 @@ def get_cluster_status(env: RosterEnv, cur: Cursor) -> ClusterPanel:
         current_serve_gateway=("gateway" in role),
         current_serve_agent_runner=("agent-runner" in role),
         current_serve_observability_station=("observability-station" in role),
-        current_paused=serving_gate_reason(serving=start_serving.is_serving(env.home)) is not None,
+        current_paused=serving_gate_reason(
+            serving=start_serving.is_serving(env.home, observe=env.observe)
+        )
+        is not None,
         machines=machines,
     )
 
@@ -453,6 +460,10 @@ def get_system_status(request: Request) -> SystemStatus:
 
 def _compute_system_status(request: Request) -> SystemStatus:
     """One uncached build of the status panel."""
+    # meiva:note
+    # The request's own facts are read once here and travel down as values: both the roster leg
+    # and the degraded panel below render the same observation of this host.
+    env = roster_env(request)
     # Services
     try:
         services = get_services_status(request.app.state.service_endpoints)
@@ -463,7 +474,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
     # Cluster
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cluster = get_cluster_status(roster_env(request), cur)
+            cluster = get_cluster_status(env, cur)
     except Exception:
         _log.exception("GET /api/status: cluster query failed")
         # Fallback: at least surface this host's name/role so the frontend
@@ -477,7 +488,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
                     "observability-station" in request.app.state.machine.role()
                 ),
                 current_paused=serving_gate_reason(
-                    serving=start_serving.is_serving(request.app.state.gateway_process.home)
+                    serving=start_serving.is_serving(env.home, observe=env.observe)
                 )
                 is not None,
                 machines=[],

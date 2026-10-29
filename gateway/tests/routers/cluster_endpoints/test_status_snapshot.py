@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.deploy.git import running_sha
 from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.lifecycle.tests.serving_root import observe, observe_unreadable
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.loaded_commit import LoadedCommit
@@ -33,10 +36,14 @@ from ops import cluster_status
 
 
 def _snapshot(
-    database: Database, machine: MachineIdentityReader, image: LoadedCommit
+    database: Database,
+    machine: MachineIdentityReader,
+    image: LoadedCommit,
+    *,
+    observe: Callable[[Path], RootBirth],
 ) -> cluster_status.ClusterStatus:
     return cluster_status.status_snapshot(
-        database, image=image, local_machine=machine, home=resolve_meiva_home()
+        database, image=image, local_machine=machine, home=resolve_meiva_home(), observe=observe
     )
 
 
@@ -52,15 +59,19 @@ def test_snapshot_reflects_the_serving_gate_and_role(
     image = LoadedCommit(source_root=tmp_path, sha=None)
     # meiva:note
     # unpaused
-    snap = _snapshot(database, machine_identity, image)
+    snap = _snapshot(database, machine_identity, image, observe=observe)
     assert snap.machine_name == "runner-a"
     assert snap.serve_gateway is False
     assert snap.serve_agent_runner is True
     assert snap.paused is False
     # meiva:note
+    # the same marked birth, an observation that cannot answer: paused
+    unreadable = _snapshot(database, machine_identity, image, observe=observe_unreadable)
+    assert (unreadable.paused, unreadable.paused_reason) == (True, "startup")
+    # meiva:note
     # a stop clears the gate
     start_serving.clear_serving(resolve_meiva_home())
-    snap2 = _snapshot(database, machine_identity, image)
+    snap2 = _snapshot(database, machine_identity, image, observe=observe)
     assert snap2.paused is True
     assert snap2.paused_reason == "startup"
 
@@ -102,7 +113,12 @@ def test_snapshot_includes_head_sha(
 ) -> None:
     set_machine_identity(role="agent-runner", name="runner-a")
     head = prod_source_checkout(unit_home)
-    snap = _snapshot(database, machine_identity, LoadedCommit(source_root=unit_home, sha=None))
+    snap = _snapshot(
+        database,
+        machine_identity,
+        LoadedCommit(source_root=unit_home, sha=None),
+        observe=start_serving.observe_root,
+    )
     assert snap.head_sha == head
 
 
@@ -123,7 +139,10 @@ def test_snapshot_includes_running_sha(
     set_machine_identity(role="agent-runner", name="runner-a")
     prod_source_checkout(unit_home)
     snap = _snapshot(
-        database, machine_identity, LoadedCommit(source_root=unit_home / "source", sha=sha)
+        database,
+        machine_identity,
+        LoadedCommit(source_root=unit_home / "source", sha=sha),
+        observe=start_serving.observe_root,
     )
     assert snap.running_sha == sha
 
@@ -153,6 +172,7 @@ def test_snapshot_ignores_the_start_bookmark(
         database,
         machine_identity,
         LoadedCommit(source_root=unit_home / "source", sha="0ld0ld0aaaa"),
+        observe=start_serving.observe_root,
     )
 
     assert snap.running_sha == "0ld0ld0aaaa"
@@ -173,7 +193,12 @@ def test_supervisor_online_when_the_root_answers(
     set_machine_identity(role="agent-runner", name="test-host")
     point_home(monkeypatch, short_tmp)
     with root_supervisor_socket(short_tmp):
-        snap = _snapshot(database, machine_identity, LoadedCommit(source_root=short_tmp, sha=None))
+        snap = _snapshot(
+            database,
+            machine_identity,
+            LoadedCommit(source_root=short_tmp, sha=None),
+            observe=start_serving.observe_root,
+        )
     assert snap.supervisor_online is True
 
 
@@ -187,5 +212,10 @@ def test_supervisor_status_stays_unknown_when_no_root_listens(
     machine_identity: MachineIdentityReader,
 ) -> None:
     set_machine_identity(role="agent-runner", name="test-host")
-    snap = _snapshot(database, machine_identity, LoadedCommit(source_root=unit_home, sha=None))
+    snap = _snapshot(
+        database,
+        machine_identity,
+        LoadedCommit(source_root=unit_home, sha=None),
+        observe=start_serving.observe_root,
+    )
     assert snap.supervisor_online is None

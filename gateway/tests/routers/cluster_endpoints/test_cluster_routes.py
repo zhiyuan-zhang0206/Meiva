@@ -12,10 +12,11 @@ from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machines import register_self
 from base.db import Database
 from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.tests.serving_root import observe, observe_unreadable
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from base.paths.home import resolve_meiva_home
 from gateway.app import openapi_schema
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_process
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
     serving_gate as serving_gate,
 )
@@ -36,10 +37,23 @@ def test_a_pure_gateway_reports_startup_once_a_stop_has_begun(
     set_machine_identity: MachineIdentitySetter,
 ) -> None:
     machine: MachineIdentityReader = set_machine_identity(role="gateway", name="test-mc")
-    with gateway_test_client(machine=machine) as client:
+    # meiva:note
+    # The marked birth is confirmed only through the observation: answered, the machine is
+    # serving; unanswerable, the same marked gate leaves it paused.
+    with (
+        gateway_test_process(machine=machine, observe=observe_unreadable) as unreadable_process,
+        gateway_test_client(process=unreadable_process) as unreadable_client,
+    ):
+        unreadable = unreadable_client.get("/api/cluster/status").json()
+    with (
+        gateway_test_process(machine=machine, observe=observe) as process,
+        gateway_test_client(process=process) as client,
+    ):
         serving = client.get("/api/cluster/status").json()
         start_serving.clear_serving(resolve_meiva_home())
         r = client.get("/api/cluster/status")
+    assert unreadable["paused"] is True
+    assert unreadable["paused_reason"] == "startup"
     assert serving["paused"] is False
     assert serving["paused_reason"] is None
     assert r.status_code == 200
