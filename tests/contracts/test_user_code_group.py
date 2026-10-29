@@ -68,11 +68,20 @@ def _group() -> dict[str, str]:
     return {_distribution_name(item): item for item in groups["user-code"]}
 
 
-def test_the_group_is_installed_by_every_sync() -> None:
-    """`default-groups` is the whole reason an existing venv keeps the libraries."""
+def test_default_groups_install_the_group_beside_dev() -> None:
+    """`default-groups` is the whole reason an existing venv keeps the libraries.
+
+    This is the change's one new risk: drop `user-code` from the default set and every
+    `uv sync` — including the fleet update's `uv sync --frozen` — silently uninstalls
+    pandas, scipy and friends from running agents' `execute_code` environment. The
+    group may only leave this list as part of a change that also accepts that.
+    """
     defaults = _toml("pyproject.toml")["tool"]["uv"]["default-groups"]
 
-    assert "user-code" in defaults
+    assert "user-code" in defaults, (
+        "a `uv sync` installs the default groups only: without `user-code` here, the "
+        "next sync removes the agent toolbox from every existing environment"
+    )
     assert "dev" in defaults, "the default set is 'dev' plus this group, never this group alone"
 
 
