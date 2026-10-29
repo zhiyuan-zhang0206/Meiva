@@ -20,6 +20,9 @@ agent-side `plugin.py` modules. Each attempt uses a fresh builder; zero bindings
 or any loading failure rejects the entire attempt. Corrected configuration can
 be retried by constructing a new catalog.
 
+A vendor SDK imported at `provider.py` top level is paid at every process start, because
+catalog construction imports every enabled provider; keep it inside the function that uses it.
+
 ## Declaration and installation
 
 - A plugin's `provider.py` registers nothing: it exports `contribute()` returning
