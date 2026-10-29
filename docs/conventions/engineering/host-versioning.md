@@ -46,6 +46,12 @@ neither replaces the other.
   reader names that case (`hotfix-not-followed-up`) instead of guessing.
 - **`[project].version`** stays the product version axis, bumped where a release is cut. It is
   not derived from the commit and not a gate input; the certificate lives in `release/`.
+  **The certificate's label must still equal it**: the gate reads the *target commit's*
+  `[project].version` and refuses a label the tree does not carry (`version-mismatch`). That does
+  not make the product version an input to test selection or to the compatibility verdict, and
+  the two axes stay independent: only the label is required to match the tree it names, because
+  a tag and a record that assert a version the artifacts do not report are wrong from the first
+  release onward.
 
 Two axes, two questions: `YYYY.M.D+g<sha>` says *what is running*, `vX.Y.Z` + `release/`
 says *what is released*.
