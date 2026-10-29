@@ -30,17 +30,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import assert_never
 
 from openai import OpenAI, omit
 
 from base.config import settings
+from meiva_builtins.skills.skill_tools import missing
 
 # meiva:note
 # `transcribe_plan` is a sibling in this skill's own scripts/ dir, not an importable
@@ -99,6 +101,10 @@ def resolve_to_audio(source: str, workdir: Path, tools: Tools) -> Path:
         case LocalFile(path=path):
             return path
         case Download(url=url):
+            program = shutil.which(tools.yt_dlp)
+            if program is None:
+                raise missing("audio-transcribe", f"the `{tools.yt_dlp}` program")
+            tools = replace(tools, yt_dlp=program)
             run_command(tools.download(url, str(workdir / "src.%(ext)s")))
             got = workdir / "src.mp3"
             if not got.exists():

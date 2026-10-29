@@ -15,8 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypedDict, TypeGuard
 
-import feedparser
-from feedparser.exceptions import ThingsNobodyCaresAboutButMe
+from meiva_builtins.skills.skill_tools import missing
 
 _RE_TAG = re.compile(r"<[^>]+>")
 _RE_WS = re.compile(r"[ \t]*\n[ \t]*")
@@ -171,6 +170,11 @@ def _is_parse_fn(value: object) -> TypeGuard[Callable[[bytes], dict[str, Any]]]:
 # (``bozo`` is set but the exception is not a benign ``ThingsNobodyCaresAboutButMe`` like
 # ``CharacterEncodingOverride`` — the feed is still valid, just has encoding quirks).
 def parse_feed(data: bytes, feed_url: str) -> Feed:
+    try:
+        import feedparser
+        from feedparser.exceptions import ThingsNobodyCaresAboutButMe
+    except ImportError as exc:
+        raise missing("web-sources", "the `feedparser` library") from exc
     parse_attr = "parse"
     parse: object = getattr(feedparser, parse_attr)
     if not _is_parse_fn(parse):

@@ -2330,13 +2330,12 @@ wheels = [
 name = "meiva"
 version = "1.0.0"
 source = { editable = "." }
-default-groups = ["dev", "user-code"]
+default-groups = ["dev", "skill-tools", "user-code"]
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "croniter" },
     { name = "cryptography" },
     { name = "fastapi" },
-    { name = "feedparser" },
     { name = "google-genai" },
     { name = "httpx", extra = ["socks"] },
     { name = "langchain-anthropic" },
@@ -2366,10 +2365,8 @@ dependencies = [
     { name = "redis" },
     { name = "requests" },
     { name = "traceloop-sdk" },
-    { name = "trafilatura" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
-    { name = "yt-dlp" },
 ]
 
 [package.optional-dependencies]
@@ -2392,6 +2389,56 @@ dev = [
     { name = "pytest-xdist" },
     { name = "radon" },
     { name = "ruff" },
+]
+skill-tools = [
+    { name = "feedparser" },
+    { name = "trafilatura" },
+    { name = "yt-dlp" },
+]
+svc-agent-host = [
+    { name = "anthropic" },
+    { name = "anyio" },
+    { name = "croniter" },
+    { name = "cryptography" },
+    { name = "feedparser" },
+    { name = "google-genai" },
+    { name = "httpcore" },
+    { name = "httpx", extra = ["socks"] },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "loguru" },
+    { name = "markdown-it-py" },
+    { name = "mcp" },
+    { name = "mdit-py-plugins" },
+    { name = "openai" },
+    { name = "opentelemetry-sdk" },
+    { name = "ormsgpack" },
+    { name = "pillow" },
+    { name = "psutil" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "redis" },
+    { name = "traceloop-sdk" },
+    { name = "trafilatura" },
+    { name = "websockets" },
+    { name = "yt-dlp" },
+]
+svc-exec-host = [
+    { name = "cryptography" },
+    { name = "httpcore" },
+    { name = "httpx", extra = ["socks"] },
+    { name = "loguru" },
+    { name = "psutil" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
 ]
 user-code = [
     { name = "aiohttp" },
@@ -2419,7 +2466,6 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.120" },
-    { name = "feedparser", specifier = ">=6.0.12" },
     { name = "google-genai", specifier = ">=2.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28" },
     { name = "langchain-anthropic", specifier = ">=0.3" },
@@ -2449,10 +2495,8 @@ requires-dist = [
     { name = "redis", specifier = ">=7.4.0" },
     { name = "requests", specifier = ">=2.32.0" },
     { name = "traceloop-sdk", specifier = ">=0.61" },
-    { name = "trafilatura", specifier = ">=2.1.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40" },
     { name = "websockets", specifier = ">=15.0.1" },
-    { name = "yt-dlp", specifier = ">=2026.3.17" },
 ]
 provides-extras = ["harness-claude"]
 
@@ -2471,6 +2515,56 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "radon", specifier = "==6.0.1" },
     { name = "ruff", specifier = ">=0.16.7,<0.17" },
+]
+skill-tools = [
+    { name = "feedparser", specifier = ">=6.0.12" },
+    { name = "trafilatura", specifier = ">=2.1.0" },
+    { name = "yt-dlp", specifier = ">=2026.3.17" },
+]
+svc-agent-host = [
+    { name = "anthropic" },
+    { name = "anyio" },
+    { name = "croniter", specifier = ">=6.2.2" },
+    { name = "cryptography", specifier = ">=42.0.0" },
+    { name = "feedparser", specifier = ">=6.0.12" },
+    { name = "google-genai", specifier = ">=2.0" },
+    { name = "httpcore" },
+    { name = "httpx", extras = ["socks"], specifier = ">=0.28" },
+    { name = "langchain-core" },
+    { name = "langgraph", specifier = ">=0.3" },
+    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "markdown-it-py", specifier = ">=4.0" },
+    { name = "mcp", specifier = ">=2.0.0,<3" },
+    { name = "mdit-py-plugins", specifier = ">=0.6" },
+    { name = "openai" },
+    { name = "opentelemetry-sdk", specifier = ">=1.30" },
+    { name = "ormsgpack" },
+    { name = "pillow", specifier = ">=10.4.0" },
+    { name = "psutil", specifier = ">=7.1.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg-pool", specifier = ">=3.2" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "pydantic-settings", specifier = ">=2.13.1" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "redis", specifier = ">=7.4.0" },
+    { name = "traceloop-sdk", specifier = ">=0.61" },
+    { name = "trafilatura", specifier = ">=2.1.0" },
+    { name = "websockets", specifier = ">=15.0.1" },
+    { name = "yt-dlp", specifier = ">=2026.3.17" },
+]
+svc-exec-host = [
+    { name = "cryptography", specifier = ">=42.0.0" },
+    { name = "httpcore" },
+    { name = "httpx", extras = ["socks"], specifier = ">=0.28" },
+    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "psutil", specifier = ">=7.1.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "pydantic-settings", specifier = ">=2.13.1" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
 user-code = [
     { name = "aiohttp", specifier = ">=3.9.0" },
