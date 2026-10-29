@@ -6,6 +6,7 @@
 # stay priced.
 # meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,18 @@ from base.lm.pricing.archive import load_archive
 from base.packages.plugins.config_registration import validate_config_overlay
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
-MODELS = {"priced-model": object(), "unpriced-model": object()}
+
+@dataclass(frozen=True)
+class _Withdrawn:
+    unavailable_fallback: str
+
+
+MODELS = {
+    "priced-model": object(),
+    "unpriced-model": object(),
+    "withdrawn-priced": _Withdrawn(unavailable_fallback="priced-model"),
+    "withdrawn-unpriced": _Withdrawn(unavailable_fallback="unpriced-model"),
+}
 
 
 def _home(tmp_path: Path) -> Path:
@@ -52,6 +64,28 @@ def test_a_caller_that_supplies_no_prices_keeps_the_membership_only_contract(
     # `prices` is opt-in so that callers without a catalog (config-shape checks, child
     # processes) do not grow a second failure mode; the admission paths all pass it.
     validate_config_overlay({"llm_model": "unpriced-model"}, models=MODELS, home=_home(tmp_path))
+
+
+def test_a_withdrawn_model_is_judged_by_the_model_it_settles_to(tmp_path: Path) -> None:
+    # meiva:note
+    # A withdrawn id names `unavailable_fallback`, and the runtime settles it in one hop before
+    # calling it; judging the withdrawn id itself would refuse an overlay the runtime can price.
+    validate_config_overlay(
+        {"llm_model": "withdrawn-priced"},
+        models=MODELS,
+        prices={"priced-model"},
+        home=_home(tmp_path),
+    )
+
+
+def test_a_withdrawn_model_settling_to_an_unpriced_model_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(InvalidConfigOverlay, match="no price in the pricing catalog"):
+        validate_config_overlay(
+            {"llm_model": "withdrawn-unpriced"},
+            models=MODELS,
+            prices={"priced-model"},
+            home=_home(tmp_path),
+        )
 
 
 def test_every_default_model_in_the_repo_is_priced() -> None:
