@@ -174,6 +174,7 @@ export async function resetHomePageTestState() {
   });
   homePageRig = gatewayRig(homePageGateway);
   resetTransport();
+  transport.getReplySuggestion.mockImplementation(() => Promise.resolve(replySuggestions));
   resetStreamHandlers();
   transport.sendMessage.mockResolvedValue(undefined);
   transport.cancel.mockResolvedValue(undefined);
@@ -187,6 +188,7 @@ export async function resetHomePageTestState() {
     uploadFiles: transport.uploadFiles,
     submitUploadedFiles: transport.submitUploadedFiles,
     listPages: transport.listPages,
+    getReplySuggestion: transport.getReplySuggestion,
   };
   vi.clearAllMocks();
   inspectorMockState.shouldThrow = false;

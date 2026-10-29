@@ -9,7 +9,9 @@ import {  } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
-import { ComposerMock, cleanupHomePageTest, homePageGateway, homePageRig, setReplySuggestions, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
+import { transport } from "@/test-support/fake-api";
+import { deferred } from "@/test-support/deferred";
+import { ComposerMock, cleanupHomePageTest, setReplySuggestions, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
     agents: hooksState.agents,
@@ -145,17 +147,29 @@ describe("HomePage reply suggestion", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
+  // meiva:note
+  // The reply is settled by hand: the debounce firing is a counted fact (`toHaveBeenCalled`),
+  // and the answer lands inside `act`. No `waitFor`, so a loaded machine cannot turn this into
+  // a failure, and no longer timeout can hide a regression.
   it("hands the drafted reply to the composer after the quiet period", async () => {
+    const reply = deferred<{ suggestions: string[]; reason: string | null }>();
+    transport.getReplySuggestion.mockImplementation(() => reply.promise);
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
-    await vi.waitFor(() => expect(homePageGateway.requests.filter((request) => request.path.endsWith("/reply-suggestion"))).toHaveLength(1));
-    expect(homePageGateway.requests.find((request) => request.path.endsWith("/reply-suggestion")))
-      .toMatchObject({ method: "POST", path: "/api/agents/5/reply-suggestion" });
-    expect(homePageRig.sent.find((request) => request.url.endsWith("/reply-suggestion"))?.init.signal).toBeInstanceOf(AbortSignal);
-    await vi.waitFor(() => expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.|Not yet."));
+    // meiva:note
+    // The quiet period ended and the request went out for this agent, carrying a signal.
+    expect(transport.getReplySuggestion).toHaveBeenCalledTimes(1);
+    expect(transport.getReplySuggestion.mock.calls[0][0]).toBe(5);
+    expect(transport.getReplySuggestion.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
+    await act(async () => {
+      reply.resolve({ suggestions: ["Yes, go ahead.", "Not yet."], reason: null });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.|Not yet.");
   });
   it("never asks while the agent is running", async () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "running" })];
@@ -163,7 +177,7 @@ describe("HomePage reply suggestion", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(homePageRig.sent.filter((request) => request.url.endsWith("/reply-suggestion"))).toHaveLength(0);
+    expect(transport.getReplySuggestion).not.toHaveBeenCalled();
   });
   it("never asks while the turn signal is active", async () => {
     hooksState.turnActive = true;
@@ -171,7 +185,7 @@ describe("HomePage reply suggestion", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(homePageRig.sent.filter((request) => request.url.endsWith("/reply-suggestion"))).toHaveLength(0);
+    expect(transport.getReplySuggestion).not.toHaveBeenCalled();
   });
   it("never asks when the user turned the setting off", async () => {
     hooksState.settings = { "display.timeline_width_ratio": 0.4, "behavior.replySuggestions": false };
@@ -179,7 +193,7 @@ describe("HomePage reply suggestion", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(homePageRig.sent.filter((request) => request.url.endsWith("/reply-suggestion"))).toHaveLength(0);
+    expect(transport.getReplySuggestion).not.toHaveBeenCalled();
   });
 });
 
