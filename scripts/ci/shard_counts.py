@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import math
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -356,3 +357,63 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# meiva:note
+# The width of the full backend fan-out in ci.yml: its matrix, `--count` and job names.
+FULL_FANOUT_SHARDS = 8
+
+
+# meiva:note
+# Measured pytest node durations, from the file CI restores; an absent timing file has none.
+def load_durations(path: Path) -> dict[str, float]:
+    if not path.is_file():
+        return {}
+    data: object = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise TypeError(f"duration file must contain a JSON object: {path}")
+    durations: dict[str, float] = {}
+    for node_id, seconds in data.items():
+        if (
+            isinstance(node_id, str)
+            and isinstance(seconds, (int, float))
+            and not isinstance(seconds, bool)
+        ):
+            durations[node_id] = float(seconds)
+    return durations
+
+
+# meiva:note
+# Selected files by the reference population's average for the files no run has timed yet.
+# Grouped once: the timing model has an entry for every measured node, so scanning it again per file
+# makes selection needlessly slow.
+def estimate_seconds(
+    test_paths: set[str] | frozenset[str] | tuple[str, ...],
+    durations: dict[str, float],
+    *,
+    reference_paths: set[str] | None = None,
+) -> float:
+    reference = test_paths if reference_paths is None else reference_paths
+    ordered_reference = tuple(sorted(reference))
+    ordered_tests = tuple(sorted(test_paths))
+    reference_set = set(reference)
+    by_file: dict[str, list[float]] = {}
+    for node_id, seconds in durations.items():
+        test_path, separator, _ = node_id.partition("::")
+        if separator and test_path in reference_set:
+            by_file.setdefault(test_path, []).append(seconds)
+    known_entries = [
+        seconds for test_path in ordered_reference for seconds in by_file.get(test_path, ())
+    ]
+    average = sum(known_entries) / len(known_entries) if known_entries else 0.0
+    return sum(
+        sum(by_file[test_path]) if test_path in by_file else average for test_path in ordered_tests
+    )
+
+
+# meiva:note
+# The shards a SELECTED subset runs on: its share of the suite in units of one full shard, by
+# estimated time (by file count without timings), rounded up, at most the fan-out and the files.
+def subset_shard_count(tests: int, estimate: float, full_estimate: float, collectable: int) -> int:
+    share = estimate / full_estimate if full_estimate > 0 else tests / max(collectable, 1)
+    return max(1, min(FULL_FANOUT_SHARDS, tests, math.ceil(round(share * FULL_FANOUT_SHARDS, 6))))

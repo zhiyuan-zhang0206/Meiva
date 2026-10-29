@@ -21,7 +21,7 @@ from typing import Any, cast
 import pytest
 import yaml
 
-from scripts.ci import test_selector
+from scripts.ci import shard_counts
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -271,9 +271,9 @@ def test_subset_matrix_comes_from_classify_and_each_shard_has_the_full_shards_li
     assert "TESTS" not in subset.get("env", {})
 
 
-def test_the_full_fanout_width_is_the_selectors_constant() -> None:
+def test_the_full_fanout_width_is_the_sizing_constant() -> None:
     full = _workflow_jobs()["backend-shard"]
-    width = test_selector.FULL_FANOUT_SHARDS
+    width = shard_counts.FULL_FANOUT_SHARDS
     assert full["strategy"]["matrix"]["group"] == list(range(1, width + 1))
     assert full["name"] == f"backend shard (${{{{ matrix.group }}}}/{width})"
     assert f"--count {width} --plan" in _step(full, "Run pytest shard")["run"]

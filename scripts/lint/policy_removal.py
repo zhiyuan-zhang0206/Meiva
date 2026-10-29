@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -46,6 +45,7 @@ from meizel.allowances import (  # noqa: E402
 )
 from meizel.graph.model import MeizelError  # noqa: E402
 from meizel.graph.universe import GitRepo, toplevel  # noqa: E402
+from scripts.ci.test_impact import member_numbers  # noqa: E402
 
 _SEPARATOR = " \u2014 "
 
@@ -57,8 +57,6 @@ _NOT_JUDGED = (
     "a Trunk batch whose own body carries no declaration, and whose pull request(s) could not be "
     "read in this run: the removals above are left to review and the run passes"
 )
-_MEMBER_SECTION = re.compile(r"## Pull Requests Being Tested(.*?)(?=\n## |\Z)", re.DOTALL)
-_MEMBER_LINK = re.compile(r"\[(\d+)\]\([^)\s]*/pull/\1\)")
 
 # meiva:note
 # Reading one pull request's title and body, by number: the single thing a test replaces, so the
@@ -103,17 +101,6 @@ def _gh_text(number: int) -> str | None:
         return None
     found = _object(payload)
     return f"{found.get('title') or ''!s}\n\n{found.get('body') or ''!s}"
-
-
-# meiva:note
-# The pull request numbers a batch's body names, out of the section the queue writes for them: that
-# body also links the base commit and the queue page, and a member is a link whose text is its own
-# number, so no other prose in it can pass for one.
-def member_numbers(body: str) -> list[int]:
-    section = _MEMBER_SECTION.search(body)
-    if section is None:
-        return []
-    return [int(match.group(1)) for match in _MEMBER_LINK.finditer(section.group(1))]
 
 
 # meiva:note
