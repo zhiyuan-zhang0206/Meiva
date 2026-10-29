@@ -146,6 +146,18 @@ def changes(old: Policy, new: Policy) -> list[str]:
             dict(old.listed.get((rule, section), {})),
             dict(new.listed.get((rule, section), {})),
         )
+    for rule, section in sorted(old.unless.keys() | new.unless.keys()):
+        table(
+            f"{rule}.{section} unless",
+            {
+                name: f"unless {parameter}"
+                for name, parameter in old.unless.get((rule, section), {}).items()
+            },
+            {
+                name: f"unless {parameter}"
+                for name, parameter in new.unless.get((rule, section), {}).items()
+            },
+        )
     for rule, section in sorted(old.named.keys() | new.named.keys()):
         table(
             f"{rule}.{section}",

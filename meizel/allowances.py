@@ -38,13 +38,17 @@ __all__ = [
 POLICY = "meizel.policy.toml"
 CHECKER_TABLES = ("external", "loads", "default-arguments")
 
-REASONS = "reasons"  # a table of `name = "reason"`
-NAMES = "names"  # a list of names
+# meiva:note
+# The shapes a section takes: `reasons` is a table of `name = reason`; `readers` is that table too,
+# or `name = { why, unless }` for an entry whose read a passed parameter spares; `names` is a list.
+REASONS = "reasons"
+READERS = "readers"
+NAMES = "names"
 
 # rule -> section -> shape. A rule listed in `PER_NAME` has one reasons table per name it governs.
 RULES: dict[str, dict[str, str]] = {
     "ambient": {"settings": NAMES, "db": NAMES, "endpoints": NAMES, "bus": NAMES},
-    "ambient-readers": dict.fromkeys((kind.value for kind in AmbientKind), REASONS),
+    "ambient-readers": dict.fromkeys((kind.value for kind in AmbientKind), READERS),
     "ambient-state": {
         "sink-callees": NAMES,
         "sink-callee-suffixes": NAMES,
@@ -136,11 +140,17 @@ class Policy:
     named: dict[tuple[str, str], tuple[str, ...]] = field(
         default_factory=dict[tuple[str, str], tuple[str, ...]]
     )
+    # meiva:note
+    # The `unless` of each entry that carries one, beside `listed` so that a change of the clause
+    # alone shows in `policy diff`; the entry's reason stays in `listed`.
+    unless: dict[tuple[str, str], dict[str, str]] = field(
+        default_factory=dict[tuple[str, str], dict[str, str]]
+    )
     lines: list[str] = field(default_factory=list[str])
 
     def reasons(self, rule: str, section: str) -> dict[str, str]:
         """The `name -> reason` entries of one section; empty when the file has none."""
-        self._known(rule, section, REASONS)
+        self._known(rule, section, REASONS, READERS)
         return dict(self.listed.get((rule, section), {}))
 
     # meiva:note
@@ -166,15 +176,22 @@ class Policy:
         self._known(rule, section, NAMES)
         return self.named.get((rule, section), ())
 
+    # meiva:note
+    # The parameter each entry names, as `entry -> parameter`: the reader did not read the world
+    # when a call hands it this one. The entry's reason stays in `reasons`.
+    def unless_for(self, rule: str, section: str) -> dict[str, str]:
+        self._known(rule, section, READERS)
+        return dict(self.unless.get((rule, section), {}))
+
     @staticmethod
-    def _known(rule: str, section: str, shape: str) -> None:
+    def _known(rule: str, section: str, *shapes: str) -> None:
         wanted = (
             RULES[rule].get(section, REASONS)
             if rule in PER_NAME
             else RULES.get(rule, {}).get(section)
         )
-        if wanted != shape:
-            raise KeyError(f"{POLICY} has no {shape} section [{rule}] {section}")
+        if wanted not in shapes:
+            raise KeyError(f"{POLICY} has no {' or '.join(shapes)} section [{rule}] {section}")
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -206,6 +223,59 @@ def _reasons(table: object, where: str, problems: list[str]) -> dict[str, str]:
     return found
 
 
+# meiva:note
+# An `[ambient-readers.<kind>]` table: `name = reason`, or `name = { why, unless }` where `unless`
+# names the one parameter whose value spares the read. The two halves are kept apart so a reason
+# edit and a clause edit are different lines in `policy diff`.
+def _reader_entries(
+    table: object, where: str, problems: list[str]
+) -> tuple[dict[str, str], dict[str, str]]:
+    if not _is_table(table):
+        problems.append(f"{where} must be a table of `name = reason`")
+        return {}, {}
+    reasons: dict[str, str] = {}
+    unless: dict[str, str] = {}
+    for name, entry in table.items():
+        if isinstance(entry, str):
+            if not entry.strip():
+                problems.append(f"{where} {name!r} needs a non-empty reason string")
+                continue
+            reasons[name] = entry.strip()
+            continue
+        found = _reader_entry(entry, name, where, problems)
+        if found is not None:
+            reason, parameter = found
+            reasons[name] = reason
+            if parameter is not None:
+                unless[name] = parameter
+    return reasons, unless
+
+
+# meiva:note
+# One table-shaped entry: its `why` and its optional `unless`, or None when either is unusable.
+def _reader_entry(
+    entry: object, name: str, where: str, problems: list[str]
+) -> tuple[str, str | None] | None:
+    if not _is_table(entry):
+        problems.append(f"{where} {name!r} needs a reason string or a table with `why`")
+        return None
+    unknown = sorted(set(entry) - {"why", "unless"})
+    why = entry.get("why")
+    parameter = entry.get("unless")
+    if unknown:
+        problems.append(f"{where} {name!r} has unknown keys: {', '.join(unknown)}")
+        return None
+    if not (isinstance(why, str) and why.strip()):
+        problems.append(f"{where} {name!r} needs a non-empty `why`")
+        return None
+    if parameter is None:
+        return why.strip(), None
+    if not (isinstance(parameter, str) and parameter.isidentifier()):
+        problems.append(f"{where} {name!r} needs `unless` to name a parameter")
+        return None
+    return why.strip(), parameter
+
+
 def _names(value: object, where: str, problems: list[str]) -> tuple[str, ...]:
     if not _is_str_list(value) or not all(value):
         problems.append(f"{where} must be a list of non-empty strings")
@@ -213,23 +283,36 @@ def _names(value: object, where: str, problems: list[str]) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _rule(
-    rule: str,
-    table: object,
-    listed: dict[tuple[str, str], dict[str, str]],
-    named: dict[tuple[str, str], tuple[str, ...]],
-    problems: list[str],
-    source: _PolicySource,
-) -> None:
+# meiva:note
+# What one parse fills: the tables of the policy, and the problems that make it unusable.
+@dataclass(frozen=True, slots=True)
+class _Sections:
+    listed: dict[tuple[str, str], dict[str, str]] = field(
+        default_factory=dict[tuple[str, str], dict[str, str]]
+    )
+    named: dict[tuple[str, str], tuple[str, ...]] = field(
+        default_factory=dict[tuple[str, str], tuple[str, ...]]
+    )
+    unless: dict[tuple[str, str], dict[str, str]] = field(
+        default_factory=dict[tuple[str, str], dict[str, str]]
+    )
+    problems: list[str] = field(default_factory=list[str])
+
+
+def _rule(rule: str, table: object, into: _Sections, source: _PolicySource) -> None:
     if not _is_table(table):
-        problems.append(f"[{rule}] must be a table")
+        into.problems.append(f"[{rule}] must be a table")
         return
     sections = _sections(rule, source)
     for section, value in table.items():
         shape = sections.get(section, REASONS) if rule in PER_NAME else sections.get(section)
         where = f"[{rule}] {section}" if shape == NAMES else f"[{rule}.{section}]"
         if shape == REASONS:
-            listed[(rule, section)] = _reasons(value, where, problems)
+            into.listed[(rule, section)] = _reasons(value, where, into.problems)
+        elif shape == READERS:
+            into.listed[(rule, section)], found = _reader_entries(value, where, into.problems)
+            if found:
+                into.unless[(rule, section)] = found
         elif shape == NAMES:
             if (
                 rule == "purity"
@@ -238,12 +321,12 @@ def _rule(
                 and not isinstance(value, bool)
                 and value >= 1
             ):
-                named[(rule, section)] = (str(value),)
+                into.named[(rule, section)] = (str(value),)
             else:
-                named[(rule, section)] = _names(value, where, problems)
+                into.named[(rule, section)] = _names(value, where, into.problems)
         else:
             known = ", ".join(sorted(sections))
-            problems.append(f"[{rule}] has no section {section!r}; the sections are {known}")
+            into.problems.append(f"[{rule}] has no section {section!r}; the sections are {known}")
 
 
 def _checker(
@@ -274,27 +357,26 @@ def _parse(text: str, source: _PolicySource) -> tuple[Policy, list[str]]:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         return Policy(lines=lines), [f"invalid TOML: {error}"]
-    problems: list[str] = []
+    found = _Sections()
     for name in document:
         if name not in CHECKER_TABLES and name not in RULES:
             tables = ", ".join((*CHECKER_TABLES, *RULES))
-            problems.append(f"unknown table {name!r}; the tables are {tables}")
-    external, loads, default_arguments = _checker(document, problems)
-    listed: dict[tuple[str, str], dict[str, str]] = {}
-    named: dict[tuple[str, str], tuple[str, ...]] = {}
+            found.problems.append(f"unknown table {name!r}; the tables are {tables}")
+    external, loads, default_arguments = _checker(document, found.problems)
     for rule in RULES:
         if rule in document:
-            _rule(rule, document[rule], listed, named, problems, source)
+            _rule(rule, document[rule], found, source)
     return (
         Policy(
             external=external,
             loads=loads,
             default_arguments=default_arguments,
-            listed=listed,
-            named=named,
+            listed=found.listed,
+            named=found.named,
+            unless=found.unless,
             lines=lines,
         ),
-        problems,
+        found.problems,
     )
 
 
