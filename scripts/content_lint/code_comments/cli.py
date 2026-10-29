@@ -5,8 +5,8 @@ from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
+from meizel.checkout import load_universe, toplevel
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import load_universe, toplevel
 from scripts.content_lint.code_comments import corpus as corpus_module
 from scripts.content_lint.code_comments.changes import incremental_notes
 from scripts.content_lint.code_comments.check import SOURCE_SUFFIXES, Repository, Result, check

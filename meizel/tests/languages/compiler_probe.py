@@ -3,8 +3,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from meizel.contracts.cli import GitRepo
 from meizel.graph.model import MeizelError, Sources
-from meizel.graph.universe import GitRepo, Universe
+from meizel.graph.universe import Universe
 from meizel.language.scan import scan_source
 
 
