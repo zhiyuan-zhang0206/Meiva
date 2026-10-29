@@ -15,17 +15,21 @@ not `started_at`, which refreshes on every restart; harness (roster's display
 label, em dash until the roster loads) and the model the agent was born on
 (`config_overlay.llm_model`, user 2026-10-21); next heartbeat — the cell
 answers "when does the heartbeat look at this agent again", so an active pause
-renders labelled, `paused until <time>`, with the remaining span under it as the
-cell's sub line (`in 6h 15m`, ticking with the panel's one-second clock) rather
-than as a bare clock time that reads like a scheduled check-in. That holds for a
+renders labelled, `paused · <time>`, on ONE line rather than as a bare clock
+time that reads like a scheduled check-in. The relative span that used to sit
+under the value as the cell's sub line is gone — it read as a second, smaller
+line (user 2026-10-29) — and the time itself follows the reader's
+`display.date_format`: the date-context absolute form by default
+(`Tomorrow 15:21`), or `in 22h`, which counts down with the panel's one-second
+clock, for a relative reader. That holds for a
 running agent too: the pause is the daemon's floor whatever the status is, and
 reading it only while idling hid a day-long pause behind an em dash for as long
 as the agent kept working (user report 2026-10-28). Both projected instants (the
-end of an active pause and the check-in time) render through `formatUpcoming`, so
-the day boundary is part of the value: clock time later today, `Tomorrow 15:21`
-across local midnight, a weekday name two to six days out, a date countdown from
-seven days, and a plain date from a month on. A bare clock time is never shown
-for a future day — `15:21` read at 16:26 looks like a time that already passed
+end of an active pause and the check-in time) render through `formatFuture`, so
+under the default absolute form the day boundary is part of the value: clock
+time later today, `Tomorrow 15:21` across local midnight, a weekday name two to
+six days out, a date countdown from seven days, and a plain date from a month
+on. A bare clock time is never shown for a future day — `15:21` read at 16:26 looks like a time that already passed
 (user report 2026-10-17, in the 12-hour wording then in use). A queued check-in
 renders "pending" (the daemon will not send another while an inbound is pending),
 a running agent with no active pause and no impersonation lease, and any terminated
