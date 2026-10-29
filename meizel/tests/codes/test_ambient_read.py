@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from meizel.contracts.analysis import render_policy
 from meizel.graph.model import Code
-from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, failures, run
+from meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    build_repo,
+    diagnostics,
+    failures,
+    run,
+)
 
 ROOT = '[roles]\napplication = ["app", "cfg"]\ntooling = ["tool"]\ntests = ["tests"]\n'
 POLICY = (
@@ -21,11 +29,13 @@ STATE = {
 }
 
 
-def repo(make_repo: RepoFactory, files: dict[str, str], manifest: str = "") -> Path:
+def repo(
+    make_repo: RepoFactory, files: dict[str, str], manifest: str = "", *, policy: str = POLICY
+) -> Path:
     return make_repo(
         {
             "meizel.toml": ROOT,
-            "meizel.policy.toml": POLICY,
+            "meizel.policy.toml": policy,
             "app/__init__.py": "",
             **STATE,
             "app/meizel.toml": manifest,
@@ -565,3 +575,124 @@ def test_a_literal_seed_or_a_generator_type_reference_does_not_acquire_randomnes
     make_repo: RepoFactory, source: str
 ) -> None:
     assert acquired(make_repo, source) == []
+
+
+# meiva:note
+# A reader whose read a passed parameter spares, and a wrapper over it in the file that defines it.
+
+IDENTITY = "def ensure(path: str, euid: int | None = None) -> str:\n    return path\n"
+WRAPPER = (
+    "def ensure(path: str, euid: int | None = None) -> str:\n"
+    "    return path\n"
+    "\n"
+    "\n"
+    "def wrapper(path: str) -> str:\n"
+    "    return ensure(path)\n"
+)
+
+
+# meiva:note
+# The policy tail that lists `name` as a reader whose read a passed `clause` spares.
+def sparing(name: str, clause: str = "euid") -> str:
+    entry = (
+        f'{{ why = "reads the process identity unless the caller passes it", unless = "{clause}" }}'
+    )
+    return f'\n[ambient-readers.pid]\n"{name}" = {entry}\n'
+
+
+def sparing_repo(make_repo: RepoFactory, files: dict[str, str], name: str, clause: str = "euid"):
+    return repo(
+        make_repo, {"cfg/identity.py": IDENTITY, **files}, policy=POLICY + sparing(name, clause)
+    )
+
+
+@pytest.mark.parametrize(
+    "call",
+    ["ensure('a', euid=0)", "ensure('a', 0)", "ensure('a', euid=os.geteuid())"],
+)
+def test_a_call_that_passes_the_parameter_does_not_acquire(
+    make_repo: RepoFactory, call: str
+) -> None:
+    root = sparing_repo(
+        make_repo,
+        {"app/mod.py": f"import os\n\nfrom cfg.identity import ensure\n\nx = {call}\n"},
+        "cfg.identity.ensure()",
+    )
+    found = {(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient}
+    assert ("pid", "cfg.identity.ensure") not in found
+
+
+def test_a_call_that_does_not_pass_the_parameter_acquires(make_repo: RepoFactory) -> None:
+    root = sparing_repo(
+        make_repo,
+        {"app/mod.py": "from cfg.identity import ensure\n\nx = ensure('a')\n"},
+        "cfg.identity.ensure()",
+    )
+    assert [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
+        ("pid", "cfg.identity.ensure")
+    ]
+
+
+def test_an_explicit_none_is_still_a_read(make_repo: RepoFactory) -> None:
+    root = sparing_repo(
+        make_repo,
+        {"app/mod.py": "from cfg.identity import ensure\n\nx = ensure('a', euid=None)\n"},
+        "cfg.identity.ensure()",
+    )
+    assert [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
+        ("pid", "cfg.identity.ensure")
+    ]
+
+
+def test_a_wrapper_beside_its_caller_acquires_where_it_is_called(make_repo: RepoFactory) -> None:
+    root = sparing_repo(make_repo, {"app/mod.py": WRAPPER}, "app.mod.ensure()")
+    assert [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
+        ("pid", "app.mod.ensure")
+    ]
+
+
+def test_a_wrapper_beside_its_caller_spares_the_read_when_it_passes_the_parameter(
+    make_repo: RepoFactory,
+) -> None:
+    source = WRAPPER.replace("return ensure(path)", "return ensure(path, euid=0)")
+    root = sparing_repo(make_repo, {"app/mod.py": source}, "app.mod.ensure()")
+    assert analysis_of(root).scans["app/mod.py"].ambient == []
+
+
+def test_the_same_file_layer_feeds_the_ambient_rule_alone(tmp_path: Path) -> None:
+    files = {
+        "meizel.toml": ROOT,
+        "meizel.policy.toml": POLICY,
+        "app/__init__.py": "",
+        **STATE,
+        "app/mod.py": WRAPPER,
+    }
+    for name in ("plain", "listed"):
+        (tmp_path / name).mkdir()
+    plain = build_repo(tmp_path / "plain", files)
+    listed = build_repo(
+        tmp_path / "listed", {**files, "meizel.policy.toml": POLICY + sparing("app.mod.ensure()")}
+    )
+    unread = replace(analysis_of(plain).scans["app/mod.py"], ambient=())
+    read = replace(analysis_of(listed).scans["app/mod.py"], ambient=())
+    assert unread == read
+    assert analysis_of(listed).scans["app/mod.py"].ambient != ()
+
+
+def test_a_clause_on_an_entry_that_is_not_a_call_is_a_policy_problem(
+    make_repo: RepoFactory,
+) -> None:
+    root = repo(
+        make_repo, {"app/mod.py": "x = 1\n"}, policy=POLICY + sparing("cfg.identity.ensure")
+    )
+    assert "policy-syntax" in {d.code.value for d in diagnostics(root, "policy-syntax")}
+
+
+def test_a_clause_that_names_no_parameter_is_stale(make_repo: RepoFactory) -> None:
+    root = sparing_repo(
+        make_repo,
+        {"app/mod.py": "from cfg.identity import ensure\n\nx = ensure('a')\n"},
+        "cfg.identity.ensure()",
+        clause="uid",
+    )
+    assert any("names no parameter 'uid'" in d.message for d in diagnostics(root, "stale-reader"))

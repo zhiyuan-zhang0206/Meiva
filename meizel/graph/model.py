@@ -28,6 +28,7 @@ __all__ = [
     "Restricted",
     "Sources",
     "TypeCastSite",
+    "Unless",
     "stdlib_kind",
 ]
 
@@ -273,6 +274,16 @@ class Acquisition:
 
 
 # meiva:note
+# A reader that reads the world only when it is not handed one: the call is an acquisition unless
+# it passes a value for `parameter`, which `position` places among the arguments that can be given
+# by position (None when it is keyword-only).
+@dataclass(frozen=True, slots=True)
+class Unless:
+    parameter: str
+    position: int | None
+
+
+# meiva:note
 # The state a repository keeps itself: dotted name -> kind.
 #
 # `names` acquire the state when imported or read as an attribute of their module; `calls` only
@@ -283,6 +294,7 @@ class Sources:
     names: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
     calls: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
     uses: frozenset[str] = frozenset()
+    unless: dict[str, Unless] = field(default_factory=dict[str, Unless])
 
 
 # meiva:note
