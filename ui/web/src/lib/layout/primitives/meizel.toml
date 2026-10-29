@@ -1,4 +1,4 @@
-exports = ["bars.ts", "flex.ts"]
+exports = ["bars.ts", "flex.ts", "icons.ts"]
 
 [purity]
 "." = "strict"

@@ -27,7 +27,7 @@ import { fleetHref } from "./links";
 import Link from "next/link";
 import { SpawnPopover } from "./spawn-popover";
 import type { DesktopProps, MobileProps, Props } from "./types";
-import { FLEX, FLEX_COL } from "@/lib/layout/layout";
+import { FLEX, FLEX_COL, ICON_SIZE_CLASS } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 export function AgentSidebar(props: Props) {
@@ -212,7 +212,7 @@ function DesktopSidebar(props: DesktopProps) {
             {/* Search in the header (not inline in the body) — opens the
                 floating overlay, #723. */}
             <SidebarIconButton label={t("searchAgents")} onClick={onSearchOpen}>
-              <Search className="size-4" />
+              <Search className={ICON_SIZE_CLASS} />
             </SidebarIconButton>
             {awaitingBadge}
             <SidebarSettingsPopover
@@ -227,7 +227,7 @@ function DesktopSidebar(props: DesktopProps) {
               onClick={onToggleCollapsed}
               testid="sidebar-collapse"
             >
-              <PanelLeft className="size-4" />
+              <PanelLeft className={ICON_SIZE_CLASS} />
             </SidebarIconButton>
           </>
         }
@@ -263,7 +263,7 @@ function MobileSidebar(props: MobileProps) {
           trailing={
             <>
               <SidebarIconButton label={t("searchAgents")} onClick={onSearchOpen}>
-                <Search className="size-4" />
+                <Search className={ICON_SIZE_CLASS} />
               </SidebarIconButton>
               <SidebarSettingsPopover
                 viewMode={viewMode}
@@ -273,7 +273,7 @@ function MobileSidebar(props: MobileProps) {
               />
               <SpawnPopover variant="icon" onSpawn={props.onSpawn} />
               <SidebarIconButton label={t("closeSidebar")} onClick={onMobileClose}>
-                <X className="size-4" />
+                <X className={ICON_SIZE_CLASS} />
               </SidebarIconButton>
             </>
           }
