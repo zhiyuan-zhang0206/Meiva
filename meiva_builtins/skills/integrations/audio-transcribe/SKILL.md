@@ -51,7 +51,8 @@ OpenAI single upload ≤25MB. Process: first use ffmpeg to convert to **mono 16k
 ## Dependencies
 
 - `ffmpeg` (transcoding + segmentation) and `ffprobe` (duration measurement) on PATH.
-- `yt-dlp` (only when source is a URL/video id to extract audio).
+- `yt-dlp` (only when source is a URL/video id to extract audio), from the `skill-tools`
+  dependency group.
 - `OPENAI_API_KEY` in `~/.meiva/.env`, read via `base.config.settings`.
 
 ## What it does NOT do
@@ -64,5 +65,7 @@ OpenAI single upload ≤25MB. Process: first use ffmpeg to convert to **mono 16k
 
 - **`OPENAI_API_KEY not set`**: make sure `~/.meiva/.env` has `OPENAI_API_KEY=...`.
 - **`ffmpeg`/`ffprobe` not found**: `brew install ffmpeg` (both transcoding and duration measurement depend on it).
+- **`yt-dlp` not found**: install the `skill-tools` group (`uv sync --group skill-tools` in a
+  checkout). `MissingSkillToolError` names it.
 - **Proper nouns misspelled** (e.g., Claude→Cloud): common ASR issue, same as YouTube auto-captions; passing a `prompt` with term context can mitigate.
 - **Very long audio is slow/expensive**: serial transcription per slice; each slice is one API call, a 2-hour speech is ~6 slices.

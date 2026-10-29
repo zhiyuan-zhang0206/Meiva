@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-import trafilatura
 from scrape_ladder import Article
+
+from meiva_builtins.skills.skill_tools import missing
 
 
 # meiva:note
@@ -62,6 +63,10 @@ class S1Item(TypedDict):
 # pure index page). `host` is the URL's host, the fallback when the page names none. This is the
 # primitive `rss --full` reuses to pull an entry's full body.
 def extract_article(html: str, url: str, host: str | None) -> Article:
+    try:
+        import trafilatura
+    except ImportError as exc:
+        raise missing("web-sources", "the `trafilatura` library") from exc
     body = trafilatura.extract(
         html, url=url, output_format="markdown", include_links=True, include_images=True
     )

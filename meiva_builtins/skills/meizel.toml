@@ -1,9 +1,11 @@
-exports = ["coordination"]
+exports = ["coordination", "skill_tools.py"]
 
 [uses]
 "coordination" = ["tests"]
+"integrations" = ["skill_tools.py"]
 "platform" = ["tests"]
 "tests" = ["integrations", "practice"]
 
 [purity]
 "__init__.py" = "strict"
+"skill_tools.py" = "strict"
