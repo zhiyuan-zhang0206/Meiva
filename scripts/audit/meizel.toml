@@ -2,11 +2,12 @@ exports = ["analysis", "branch_protection.py"]
 
 [uses]
 "branch_protection.py" = ["analysis"]
+"call_sites.py" = ["analysis"]
 "impact_census.py" = ["analysis"]
 "module_moves.py" = ["analysis"]
 "schema_drift.py" = ["analysis"]
 "sdk_usage.py" = ["sdk_usage_report.py"]
-"tests" = ["analysis", "branch_protection.py", "impact_census.py", "module_moves.py", "sdk_usage.py", "sdk_usage_report.py", "where_used.py"]
+"tests" = ["analysis", "branch_protection.py", "call_sites.py", "impact_census.py", "module_moves.py", "sdk_usage.py", "sdk_usage_report.py", "where_used.py"]
 "where_used.py" = ["analysis"]
 
 [external]
@@ -18,6 +19,7 @@ exports = ["analysis", "branch_protection.py"]
 [purity]
 "." = "strict"
 "branch_protection.py" = { mode = "none", why = "the command line shell: it reads .trunk/trunk.yaml and runs the read-only gh API calls the audit needs (naming the branch as a URL segment), then prints the verdict; which checks the gate must carry and how a GitHub payload differs from it are in analysis/protection.py" }
+"call_sites.py" = { mode = "none", why = "the command line shell: it walks and reads the Python sources of the checkout the operator names and prints the findings; what a spec means, which argument supplies a parameter and how a report reads are in analysis/calls.py" }
 "impact_census.py" = { mode = "none", why = "the command line shell: it builds the impact graph and the timing model of the checkout the operator names through the CI test-selection loaders, and prints the numbers; which source files every test reaches, which inputs nothing bounds and which tests pull them in are in analysis/reach.py" }
 "module_moves.py" = { mode = "none", why = "the command line shell: it reads the tracked text of the checkout the operator names (skipping frozen history, itself, symlinked contents and binaries), imports the new module to see which names it carries, and prints the findings; which lines still name the old path and which names a caller uses are in analysis/moves.py" }
 "schema_drift.py" = { mode = "none", why = "the command line shell: it reads db/schema.sql and the allowlist the operator names, opens the read-only Postgres connection (falling back to the deployment settings when --dsn is omitted) and writes the report; parsing the DDL, comparing it with the live columns and classifying what is left over are in analysis/schema.py" }
