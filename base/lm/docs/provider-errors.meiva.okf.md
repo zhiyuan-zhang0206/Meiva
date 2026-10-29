@@ -26,6 +26,13 @@ Only an official model wrapper can supply metadata from its direct typed SDK
 cause. For example, Google's generic non-`ModelError` HTTP 408 wrapper remains
 unknown at the application layer; the SDK's internal retry policy is unchanged.
 
+OpenAI can admit an HTTP stream and then send an error frame. Its SDK raises
+plain `APIError` without an HTTP status for that frame. The captured
+`service_unavailable_error` overload and `server_error` types are transient
+within the existing retry budget. Only a real OpenAI SDK exception grants this
+authority; unknown types, message text and unrelated wrappers do not. A supplied
+HTTP status and official `ModelError` classification retain precedence.
+
 Raw HTTPX network and timeout errors are normalized only around the direct model
 invoke or iterator await. A transport error from an output callback or another
 service is unknown to the node's retry policy. Explicit stream stalls and the
