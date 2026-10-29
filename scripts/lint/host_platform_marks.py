@@ -14,7 +14,7 @@ import json
 import sys
 import tokenize
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TypeGuard
 
@@ -251,15 +251,29 @@ def job_names(root: Path) -> frozenset[str]:
     return frozenset(name.strip("\"'") for name in names if name.strip())
 
 
+_Parse = Callable[[str], ast.Module]
+
+
 # meiva:note
 # Both verdicts come from one parse: the findings and the exemptions read the same tree,
-# and a whole-tree run parses every test file it walks (2026-10-29: 3191 files, 21.3 MB).
-def judge_source(text: str) -> tuple[list[tuple[int, str, str]], list[tuple[str, str]]]:
+# and a whole-tree run parses every test file it walks (2026-10-29: 3192 files, 21.4 MB).
+# The parser is a parameter so a test can count the parses instead of patching `ast`
+# (`docs/conventions/python-conventions.md`: a test takes what it needs to control).
+# The exemption pass keeps its own guard: a source that parses can still fail to lex, and
+# that used to cost the exemptions alone, not the findings.
+def judge_source(
+    text: str, *, parse: _Parse = ast.parse
+) -> tuple[list[tuple[int, str, str]], list[tuple[str, str]]]:
     try:
-        tree = ast.parse(text)
-        return _findings_in_tree(tree, text), _exemptions_in_tree(tree, text)
+        tree = parse(text)
     except SyntaxError:
         return [], []
+    findings = _findings_in_tree(tree, text)
+    try:
+        exemptions = _exemptions_in_tree(tree, text)
+    except SyntaxError:
+        return findings, []
+    return findings, exemptions
 
 
 def _test_files(targets: list[Path]) -> Iterator[Path]:
