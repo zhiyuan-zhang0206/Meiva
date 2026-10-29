@@ -20,6 +20,32 @@ tasks #2915 / #3267).
   When neither exists the caller surfaces "unknown" — never a guessed number a
   gate would trust.
 
+## Release eligibility: `vX.Y.Z` carries the gate
+
+The host version above answers "which tree is this machine running". A **release version**
+answers a different question: "did this tree pass the release gate". The two never mix, and
+neither replaces the other.
+
+- **`vX.Y.Z` ⟺ the commit passed the release gate.** The machine-readable proof is
+  `release/<version>.json` — gated sha, gate run, verdict — and that record is the authority.
+  An annotated tag `vX.Y.Z` is a human marker for the same fact; **a tag alone never creates
+  release eligibility**, so a hand-made tag cannot certify anything.
+- **Only a strict three-part version is a release.** The historical milestone tags
+  (`v0.2-eval-driven`, `v0.3-control-plane`, ...) are narrative markers for where a line of
+  work ended. They are not releases, and nothing reads them as one.
+- **Deployment precondition.** A release wave may only deploy a commit that descends from (or
+  is) a certified commit: `git merge-base --is-ancestor <certified> <target>`.
+  `scripts/host_ops/release/base.py` is that check; the deployment precheck calls it and
+  refuses a wave whose base is missing.
+- **Hotfix channel.** Stop-the-bleed work may reach production before the gate ran, but such a
+  commit is **not a usable base** until a gate run is recorded on it within 24 hours. The
+  reader names that case (`hotfix-not-followed-up`) instead of guessing.
+- **`[project].version`** stays the product version axis, bumped where a release is cut. It is
+  not derived from the commit and not a gate input; the certificate lives in `release/`.
+
+Two axes, two questions: `YYYY.M.D+g<sha>` says *what is running*, `vX.Y.Z` + `release/`
+says *what is released*.
+
 ## What packages declare
 
 `meiva-plugin.json` (spec: [`plugin-spec-v2.md`](../extensions/plugin-spec-v2.md)) carries the

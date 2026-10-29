@@ -479,3 +479,17 @@ Also 2026-10-24: the selector stopped counting the root conftest's import closur
 test (it already treated the root conftest, its plugins and `tests/fixtures/` as global), and
 the harness import contract above took over the signal that a production change broke the
 harness's imports.
+
+### Where the full suite runs
+
+Three places run the whole population, each for a different question:
+
+| Where | When | What it answers |
+|---|---|---|
+| Trunk merge queue | every landed batch | may this combined tree land |
+| `.github/workflows/refresh-test-durations.yml` (nightly, main) | daily | was main green last night — the `verdict` job reads junit only, so a retried measurement cannot wash a first-attempt failure green |
+| `.github/workflows/release-gate.yml` | when a release wave is launched | may this tree be called `vX.Y.Z` |
+
+The nightly run is the honest answer to "is main broken", and a red night blocks the release
+gate. It does **not** stop main from accepting merges: a nightly flake must not become a
+cluster-wide stop. The release gate is where a red night becomes blocking.
