@@ -188,7 +188,7 @@ See [AGENTS.md](../../AGENTS.md) for the worktree and PR workflow.
 
 `[dependency-groups].user-code` in `pyproject.toml` holds the libraries agent code may
 import from `execute_code` (pandas, scipy, matplotlib, openpyxl ...). No module of this
-repository imports one — `tests/ci/test_user_code_group.py` re-derives that on every
+repository imports one — `tests/contracts/test_user_code_group.py` re-derives that on every
 run, so code that starts importing a member fails the suite instead of quietly widening
 the group — and `[tool.uv] default-groups` installs the group on every `uv sync`. A
 worktree, CI and a fleet update therefore keep exactly the environment they had before

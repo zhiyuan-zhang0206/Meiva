@@ -169,7 +169,7 @@ dev = [
 # code can build without it:
 #     uv sync --no-group user-code
 #     uv export --no-group user-code
-# No first-party module imports any member (tests/ci/test_user_code_group.py
+# No first-party module imports any member (tests/contracts/test_user_code_group.py
 # re-derives that on every run); removing or adding one changes the measured
 # install face, so update that test with the group.
 user-code = [
