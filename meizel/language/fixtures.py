@@ -80,14 +80,14 @@ def is_test_file(path: str) -> bool:
                     ".test.tsx",
                     ".spec.ts",
                     ".spec.tsx",
-                    "-mock.ts",
-                    "-mock.tsx",
+                    "-test-mock.ts",
+                    "-test-mock.tsx",
                     ".test.mts",
                     ".test.cts",
                     ".spec.mts",
                     ".spec.cts",
-                    "-mock.mts",
-                    "-mock.cts",
+                    "-test-mock.mts",
+                    "-test-mock.cts",
                 )
             )
             or "tests" in parts[:-1]
