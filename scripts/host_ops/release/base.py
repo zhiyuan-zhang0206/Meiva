@@ -69,13 +69,19 @@ def load_records(directory: Path) -> list[ReleaseRecord]:
 
 # meiva:note
 # A hotfix that reached production before its gate ran is not a usable base until a follow-up gate run is recorded on it; is_ancestor answers git's merge-base --is-ancestor semantic and arrives as a callable so the decision runs with no repository.
+# meiva:note
+# The bootstrap is the one time a tree may be certified without a predecessor: before release/ has ever been committed, the record can only come from the run that certifies it, so demanding one first locks the first release out for good (2026-10-29: the user's first gate run died on exactly that). It is the caller's decision, and the caller may only reach it from HISTORY — a directory that is empty because a record was deleted must not reopen the door.
 def verify_release_base(
     target_sha: str,
     records: Iterable[ReleaseRecord],
     is_ancestor: Callable[[str, str], bool],
+    *,
+    bootstrap_allowed: bool = False,
 ) -> Verdict:
     records = list(records)
     if not records:
+        if bootstrap_allowed:
+            return Verdict(ok=True, reason="bootstrap-no-release-history")
         return Verdict(ok=False, reason="no-provenance")
 
     usable: list[ReleaseRecord] = []
@@ -109,6 +115,13 @@ def _git(repository: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+# meiva:note
+# "Has release/ ever been committed here" is a history question, not a working-tree one: an empty directory answers true both before the first release and after someone deletes a record, and only one of those may bootstrap.
+def _has_release_history(repository: Path, directory: str) -> bool:
+    result = _git(repository, "log", "--all", "--format=%H", "--", f"{directory}/")
+    return bool(result.stdout.strip())
+
+
 def _resolved_sha(repository: Path, revision: str) -> str | None:
     result = _git(repository, "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}")
     if result.returncode != 0:
@@ -126,6 +139,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="directory below the repository holding release/<version>.json",
     )
+    parser.add_argument(
+        "--bootstrap-when-empty",
+        action="store_true",
+        help=(
+            "certify a tree with no release record, for a repository that never committed "
+            "release/ at all; refused as soon as any record has ever existed"
+        ),
+    )
     arguments = parser.parse_args(argv)
 
     target_sha = _resolved_sha(arguments.repo, arguments.target)
@@ -133,12 +154,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"ok": False, "reason": "unknown-target", "target": arguments.target}))
         return 1
     records = load_records(arguments.repo / arguments.provenance_dir)
+    bootstrap_allowed = arguments.bootstrap_when_empty and not _has_release_history(
+        arguments.repo, str(arguments.provenance_dir)
+    )
     verdict = verify_release_base(
         target_sha,
         records,
         lambda base, commit: (
             _git(arguments.repo, "merge-base", "--is-ancestor", base, commit).returncode == 0
         ),
+        bootstrap_allowed=bootstrap_allowed,
     )
     print(
         json.dumps(

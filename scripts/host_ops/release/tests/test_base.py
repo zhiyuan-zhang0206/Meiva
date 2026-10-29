@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -63,6 +64,45 @@ def test_no_provenance_at_all_refuses() -> None:
 
     assert not verdict.ok
     assert verdict.reason == "no-provenance"
+
+
+# meiva:note
+# The bootstrap exists because the record can only come from the run that certifies it: without it the first release is locked out for good (2026-10-29, the first real gate run). It stays a one-shot — allowed only by the caller, and never by an empty directory.
+def test_an_empty_release_history_may_bootstrap_the_first_release() -> None:
+    verdict = release_base.verify_release_base(
+        "deployed",
+        [],
+        _ancestor_of({}),
+        bootstrap_allowed=True,
+    )
+
+    assert verdict.ok
+    assert verdict.reason == "bootstrap-no-release-history"
+    assert verdict.base is None
+
+
+def test_the_bootstrap_needs_the_caller_to_allow_it() -> None:
+    verdict = release_base.verify_release_base(
+        "deployed",
+        [],
+        _ancestor_of({}),
+        bootstrap_allowed=False,
+    )
+
+    assert not verdict.ok
+    assert verdict.reason == "no-provenance"
+
+
+def test_a_record_that_is_not_an_ancestor_still_refuses_beside_the_bootstrap() -> None:
+    verdict = release_base.verify_release_base(
+        "side-branch",
+        [_record()],
+        _ancestor_of({"side-branch": {"base"}}),
+        bootstrap_allowed=True,
+    )
+
+    assert not verdict.ok
+    assert verdict.reason == "no-gated-ancestor"
 
 
 def test_a_commit_that_does_not_descend_from_any_gated_tree_refuses() -> None:
@@ -147,3 +187,50 @@ def test_loading_reads_every_record(tmp_path: Path) -> None:
     records = release_base.load_records(tmp_path)
 
     assert [record.version for record in records] == ["1.2.3"]
+
+
+# meiva:note
+# The door is history, not the working tree: a record that was committed and later deleted must not turn the bootstrap back on, or "delete the file" becomes a way to certify any tree. These three cases are that rule, run against a real repository.
+def _git(repo: Path, *arguments: str) -> None:
+    subprocess.run(  # noqa: S603
+        ("git", "-C", str(repo), *arguments), check=True, capture_output=True
+    )
+
+
+def _repository(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.invalid")
+    _git(repo, "config", "user.name", "test")
+    (repo / "README.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    return repo
+
+
+def test_a_repository_that_never_committed_a_record_has_no_history(tmp_path: Path) -> None:
+    assert release_base._has_release_history(_repository(tmp_path), "release") is False
+
+
+def test_a_committed_record_is_history(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    (repo / "release").mkdir()
+    (repo / "release" / "1.0.0.json").write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "release: v1.0.0")
+
+    assert release_base._has_release_history(repo, "release") is True
+
+
+def test_a_deleted_record_is_still_history(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    (repo / "release").mkdir()
+    (repo / "release" / "1.0.0.json").write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "release: v1.0.0")
+    _git(repo, "rm", "-q", "release/1.0.0.json")
+    _git(repo, "commit", "-q", "-m", "chore: drop the record")
+
+    assert not (repo / "release").exists() or not list((repo / "release").iterdir())
+    assert release_base._has_release_history(repo, "release") is True
