@@ -37,12 +37,33 @@ one code path with two callers.
   logical restore drill's check: required tables, counts, a real agent conversation read back
   through the production checkpoint reader), then `pg_current_wal_lsn()` must be at or beyond
   the target.
-- **Scratch space**: `select_throwaway_base(required, override=throwaway.override)`, where
-  the CLI root supplies one frozen `ThrowawayConfig` through the tick and drill, and
-  `required` is the backup's
-  uncompressed size plus the WAL since it started plus `max_wal_size`: no multiplier. The copy
-  is removed after native scratch-Postgres shutdown; a failed stop preserves
-  its data directory and reports the error. No process-family disappearance proof is made.
+- **Scratch space**: `select_throwaway_base(required + HOST_FLOOR_BYTES,
+  override=throwaway.override)`, where the CLI root supplies one frozen `ThrowawayConfig`
+  through the tick and drill. `required` is the cluster the copy rebuilds — `sum(pg_database_size)`
+  read from the source, times `SPACE_FACTOR` (1.2, catalogs and filesystem overhead) — plus one
+  `max_wal_size` for the replay. It is deliberately **not** the backup record's
+  `uncompressed_size`: a delta backup reports its own bytes (2.0 GiB on 2026-10-30) while the
+  directory it rebuilds is the whole cluster (42.5 GiB), and the drill that trusted the record
+  asked for 26 GiB, wrote 44 GiB and left the host at 13 GiB of 915.
+  The WAL archived since the backup is not added: Postgres removes restored segments as it
+  passes them (1.2-1.4 GiB in `pg_wal` while 24 GiB replayed).
+- **The host floor**: a drill may start only when the space it needs still leaves
+  `HOST_FLOOR_BYTES` (24 GiB) free — production shares the filesystem. Short of that it is
+  refused **before anything is written**: `DrillRefusedError` carries "needs X / holds Y / short
+  by Z", the tick logs `drill: REFUSED`, the record keeps `last_refused_at` /
+  `last_refused_reason` (kept across later successes), and the probe's `DRILL_FAILED` fires on
+  it. A refusal is not a failure of the backup and not a silent skip.
+- **The copy is removed, and leftovers too**: `finally: shutil.rmtree(scratch)` covers success,
+  failure and an exception. It does **not** cover SIGTERM/SIGKILL or a reboot — `finally` never
+  runs — so each drill first sweeps every `meiva-walg-drill-*` directory under the chosen base
+  (the run lock admits one drill at a time) and reports `scratch: removed … leftovers`; the
+  removal itself is reported as `scratch: removed <name>`. Evidence on 2026-10-30: the drill
+  that finished ok freed 44 GiB (`/var/tmp/meiva-walg-drill-*` gone, 13 → 56 GiB free).
+- **What the green asserts**: the schema exists, the counts are non-zero, one conversation reads
+  back, and the target LSN was reached. It does **not** assert that every serialized class in
+  the data is readable by this build — a checkpoint class outside
+  `STATIC_CHECKPOINT_MSGPACK_TYPES` degrades silently (the serializer returns the raw payload
+  and logs one warning). A type census is tracked as task #5849 (P3).
 - **Schedule and record** (`drill.py`, `tick.py`, `state.py`): due when a backup exists and
   none succeeded for a week minus one tick period (the drill can only run at a tick, so a
   full-week test would slip to eight days). The record (`finished_at`, `ok`, `backup`,

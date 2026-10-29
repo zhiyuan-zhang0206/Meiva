@@ -123,6 +123,11 @@ class DrillRecord:
     seconds: float
     detail: str
     last_ok_at: datetime | None
+    # meiva:note
+    # A refusal is not a failure of the backup, and a later success must not erase it: "we last
+    # refused at T because the host had no room" is the fact that explains a gap in the history.
+    last_refused_at: datetime | None = None
+    last_refused_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +212,8 @@ def _retention(r: dict[str, Any]) -> RetentionRecord:
 
 def _drill(r: dict[str, Any]) -> DrillRecord:
     target_lsn, last_ok_at = r["target_lsn"], r["last_ok_at"]
+    last_refused_at = r.get("last_refused_at")
+    last_refused_reason = r.get("last_refused_reason")
     ok = r["ok"]
     if not isinstance(ok, bool):
         raise StateError(f"drill ok is {ok!r}, not a boolean")
@@ -218,6 +225,8 @@ def _drill(r: dict[str, Any]) -> DrillRecord:
         seconds=float(r["seconds"]),
         detail=str(r["detail"]),
         last_ok_at=None if last_ok_at is None else _parse(last_ok_at),
+        last_refused_at=None if last_refused_at is None else _parse(last_refused_at),
+        last_refused_reason=None if last_refused_reason is None else str(last_refused_reason),
     )
 
 

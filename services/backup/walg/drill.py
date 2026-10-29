@@ -1,34 +1,40 @@
-"""The weekly recovery drill: prove the newest backup and the WAL behind it restore, and read.
+# meiva:note
+# The weekly recovery drill: prove the newest backup and the WAL behind it restore, and read.
+#
+# Run by the daily tick, before that day's backup, once a week (and by hand through
+# `meiva backup walg drill`). It restores what a lost host would need right now, the newest
+# backup, with the same code as a real restore (`restore.py`), into a scratch directory,
+# and checks three things:
+#
+# - **The chain is continuous.** The recovery target is the *start* LSN of the newest WAL
+#   segment that is already archived (`pg_stat_archiver.last_archived_wal`), not its end:
+#   Postgres stops at the first record at or beyond the target, and the first record after
+#   a segment's end is in a segment that is not archived yet and would never be read. A
+#   missing or unreadable segment anywhere between the backup and that point ends recovery
+#   in Postgres' own FATAL, so a drill that promotes proves every segment in between is
+#   present, decrypts and replays. Without a newer segment than the backup's end there is
+#   nothing to prove, and the drill recovers to the end of the archive instead; the record
+#   says so (`target_lsn` is None).
+# - **The data is readable.** The promoted database goes through the same check the logical
+#   restore drill uses (`verify_restored_database`): the required tables, row counts and a
+#   real agent conversation read back through the production checkpoint reader.
+# - **The target was reached** (`pg_current_wal_lsn()` on the promoted instance).
+#
+# The scratch copy lives on `select_throwaway_base(required_bytes)`, where `required_bytes`
+# is the size of the cluster that will be reconstructed -- read from the source, not from the
+# backup record: a delta backup's `uncompressed_size` is the delta's own bytes (2 GiB on
+# 2026-10-30) while the directory it rebuilds is the whole database (42 GiB), and the drill that
+# trusted the record asked for 26 GiB, wrote 44 GiB and left the host at 13 GiB. It is removed in
+# every outcome this process survives, and the next drill sweeps what a killed one left behind.
+#
+# A drill never raises and never stops the backup that follows it: the outcome is a
+# `DrillRecord` for the state file, whose failure the health probe reports.
+# meiva:link services/backup/walg/docs/walg-restore.meiva.okf.md
 
-Run by the daily tick, before that day's backup, once a week (and by hand through
-`meiva backup walg drill`). It restores what a lost host would need right now, the newest
-backup, with the same code as a real restore (`restore.py`), into a scratch directory,
-and checks three things:
-
-- **The chain is continuous.** The recovery target is the *start* LSN of the newest WAL
-  segment that is already archived (`pg_stat_archiver.last_archived_wal`), not its end:
-  Postgres stops at the first record at or beyond the target, and the first record after
-  a segment's end is in a segment that is not archived yet and would never be read. A
-  missing or unreadable segment anywhere between the backup and that point ends recovery
-  in Postgres' own FATAL, so a drill that promotes proves every segment in between is
-  present, decrypts and replays. Without a newer segment than the backup's end there is
-  nothing to prove, and the drill recovers to the end of the archive instead; the record
-  says so (`target_lsn` is None).
-- **The data is readable.** The promoted database goes through the same check the logical
-  restore drill uses (`verify_restored_database`): the required tables, row counts and a
-  real agent conversation read back through the production checkpoint reader.
-- **The target was reached** (`pg_current_wal_lsn()` on the promoted instance).
-
-The scratch copy lives on `select_throwaway_base(required_bytes)`, where `required_bytes`
-is the backup's uncompressed size, the WAL archived since it started (read from the source)
-and `max_wal_size`: all known quantities, no multiplier. It is removed in every outcome.
-
-A drill never raises and never stops the backup that follows it: the outcome is a
-`DrillRecord` for the state file, whose failure the health probe reports.
-"""
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import tempfile
@@ -43,7 +49,13 @@ from urllib.parse import urlsplit
 import psycopg
 
 from base.cluster.dataplane import pg_admin
-from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, select_throwaway_base
+from base.cluster.dataplane.pg_throwaway_base import (
+    InsufficientThrowawaySpaceError,
+    ThrowawayConfig,
+    format_bytes,
+    free_bytes,
+    select_throwaway_base,
+)
 from base.db import Database, connect_url
 from base.log import logger
 from services.backup.walg.backups import Backup
@@ -64,9 +76,29 @@ Report = Callable[[str], None]
 _CONNECT_TIMEOUT_S = 5
 DETAIL_CHARS = 1000
 
+_SCRATCH_PREFIX = "meiva-walg-drill-"
+
+# meiva:note
+# The two numbers that decide whether a drill may start at all. The factor covers catalogs and
+# filesystem overhead over the summed database sizes (2026-10-30: 43 GiB on disk for 42.5 GiB
+# summed) and the drift between reading the source and writing the copy. The floor is what the
+# host must still have when the copy exists: production shares this filesystem, and a drill that
+# took the last 13 GiB put it at 99% -- a checkpoint burst away from stalling the cluster.
+SPACE_FACTOR = 1.2
+HOST_FLOOR_BYTES = 24 << 30
+
 # `<timeline><log><segment>` in hex, optionally followed by `.partial` or `.<offset>.backup`.
 _SEGMENT_FILE = re.compile(r"[0-9A-F]{8}([0-9A-F]{8})([0-9A-F]{8})(?:\..+)?")
 _LSN_SPLIT = 1 << 32
+
+
+# meiva:note
+# A refusal is not a broken backup: the drill never ran, so nothing about the chain was proven
+# either way. Its own type keeps "we last refused at T" apart from "the last drill failed", which
+# is what an operator reading the state file needs to tell a full disk from a bad backup.
+class DrillRefusedError(RestoreError):
+    pass
+
 
 _EXPECTED_FAILURES = (
     RestoreError,
@@ -116,10 +148,10 @@ class SourceFacts:
     last_archived_wal: str | None
     segment_bytes: int
     max_wal_size_bytes: int
-    wal_since_backup_bytes: int
+    data_bytes: int
 
 
-def read_source_facts(target: PgTarget, backup: Backup) -> SourceFacts:
+def read_source_facts(target: PgTarget) -> SourceFacts:
     with pg_admin.connect(
         target.admin_url,
         expected_data_dir=target.data_dir,
@@ -129,8 +161,7 @@ def read_source_facts(target: PgTarget, backup: Backup) -> SourceFacts:
         row = conn.execute(
             "SELECT last_archived_wal, pg_size_bytes(current_setting('wal_segment_size')), "
             "pg_size_bytes(current_setting('max_wal_size')), "
-            "pg_wal_lsn_diff(pg_current_wal_lsn(), %s::pg_lsn) FROM pg_stat_archiver",
-            (format_lsn(backup.start_lsn),),
+            "(SELECT sum(pg_database_size(datname)) FROM pg_database) FROM pg_stat_archiver"
         ).fetchone()
     if row is None:
         raise RuntimeError("Postgres returned no archiver state")
@@ -138,13 +169,42 @@ def read_source_facts(target: PgTarget, backup: Backup) -> SourceFacts:
         last_archived_wal=None if row[0] is None else str(row[0]),
         segment_bytes=int(row[1]),
         max_wal_size_bytes=int(row[2]),
-        wal_since_backup_bytes=max(int(row[3]), 0),
+        data_bytes=max(int(row[3] or 0), 0),
     )
 
 
-def required_bytes(backup: Backup, facts: SourceFacts) -> int:
-    """Room the scratch copy needs: the backup, the WAL since it started, one `max_wal_size`."""
-    return backup.uncompressed_bytes + facts.wal_since_backup_bytes + facts.max_wal_size_bytes
+# meiva:note
+# Room the scratch copy needs: the cluster it rebuilds, with headroom, plus one `max_wal_size`.
+# The data size comes from the source, never from the backup record alone: a delta backup records
+# the delta's own bytes (2.0 GiB on 2026-10-30) while the directory it rebuilds is the whole
+# cluster (42.5 GiB). The `max()` keeps a full backup that is larger than the source's current
+# contents from under-reading. The WAL replay is not added: Postgres removes restored segments as
+# it passes them (measured 2026-10-30, 1.2-1.4 GiB in `pg_wal` while 24 GiB of WAL was replayed),
+# so `max_wal_size` is the bound.
+def required_bytes(backup: Backup, facts: SourceFacts, *, factor: float = SPACE_FACTOR) -> int:
+    data = max(facts.data_bytes, backup.uncompressed_bytes)
+    return math.ceil(data * factor) + facts.max_wal_size_bytes
+
+
+# meiva:note
+# The arithmetic of the refusal, kept apart from the reading of the disk so it can be checked
+# without one: a drill may start only when it still leaves `floor` behind for the host.
+def room_shortfall(required: int, floor: int, available: int) -> int:
+    return max(required + floor - available, 0)
+
+
+# meiva:note
+# What a killed drill leaves behind. `finally` does not run when the process is signalled or the
+# host reboots, so a 44 GiB copy stays on the filesystem it had already filled. The next drill
+# removes it before writing its own: the run lock admits one drill at a time, so any scratch
+# directory under the base at this point belongs to a dead one.
+def sweep_stale_scratch(base: Path) -> int:
+    removed = 0
+    for stale in sorted(base.glob(f"{_SCRATCH_PREFIX}*")):
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
+            removed += 1
+    return removed
 
 
 def target_lsn(backup: Backup, facts: SourceFacts) -> int | None:
@@ -194,14 +254,35 @@ def _restore_and_verify(
     database_for_url: Callable[[str], Database],
     socket_root: Path,
     home: Path,
+    space_factor: float = SPACE_FACTOR,
+    host_floor_bytes: int = HOST_FLOOR_BYTES,
 ) -> str:
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
-    base = select_throwaway_base(required_bytes(backup, facts), override=throwaway.override)
+    required = required_bytes(backup, facts, factor=space_factor)
+    try:
+        base = select_throwaway_base(required + host_floor_bytes, override=throwaway.override)
+    except InsufficientThrowawaySpaceError as exc:
+        raise DrillRefusedError(f"drill refused, nothing written: {exc}") from exc
+    available = free_bytes(base)
+    shortfall = room_shortfall(required, host_floor_bytes, available)
+    if shortfall:
+        raise DrillRefusedError(
+            f"drill refused, nothing written: {base} holds {format_bytes(available)}, and the"
+            f" drill needs {format_bytes(required)} for the scratch copy plus"
+            f" {format_bytes(host_floor_bytes)} kept free for the host — short by"
+            f" {format_bytes(shortfall)}"
+        )
+    leftover = sweep_stale_scratch(base)
+    if leftover:
+        report(
+            f"scratch: removed {leftover} leftover drill "
+            f"{'directory' if leftover == 1 else 'directories'} on {base}"
+        )
     report(
         f"drill: restoring {backup.name} on {base} to "
         f"{'LSN ' + format_lsn(reached) if reached is not None else 'the end of the archive'}"
     )
-    scratch = Path(tempfile.mkdtemp(prefix="meiva-walg-drill-", dir=base))
+    scratch = Path(tempfile.mkdtemp(prefix=_SCRATCH_PREFIX, dir=base))
     try:
         with restored_instance(
             scratch / "data",
@@ -219,6 +300,7 @@ def _restore_and_verify(
             )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+        report(f"scratch: removed {scratch.name}")
     return summary
 
 
@@ -242,6 +324,7 @@ def drill_record(
     outcome: tuple[bool, str],
     seconds: float,
     finished: datetime,
+    refused: str | None = None,
 ) -> DrillRecord:
     ok, detail = outcome
     return DrillRecord(
@@ -252,6 +335,16 @@ def drill_record(
         seconds=round(seconds, 1),
         detail=detail[:DETAIL_CHARS],
         last_ok_at=finished if ok else (None if previous is None else previous.last_ok_at),
+        last_refused_at=(
+            finished
+            if refused is not None
+            else (None if previous is None else previous.last_refused_at)
+        ),
+        last_refused_reason=(
+            refused
+            if refused is not None
+            else (None if previous is None else previous.last_refused_reason)
+        ),
     )
 
 
@@ -266,12 +359,15 @@ def run_drill(
     database_for_url: Callable[[str], Database],
     socket_root: Path = SOCKET_ROOT,
     home: Path,
+    space_factor: float = SPACE_FACTOR,
+    host_floor_bytes: int = HOST_FLOOR_BYTES,
 ) -> DrillRecord:
     """Run one drill against `backup`; every failure becomes a record with `ok=False`."""
     started = time.monotonic()
     reached: int | None = None
+    refused: str | None = None
     try:
-        facts = read_source_facts(target, backup)
+        facts = read_source_facts(target)
         reached = target_lsn(backup, facts)
         outcome = (
             True,
@@ -286,8 +382,13 @@ def run_drill(
                 database_for_url=database_for_url,
                 socket_root=socket_root,
                 home=home,
+                space_factor=space_factor,
+                host_floor_bytes=host_floor_bytes,
             ),
         )
+    except DrillRefusedError as exc:
+        refused = str(exc)
+        outcome = (False, refused)
     except _EXPECTED_FAILURES as exc:
         outcome = (False, failure_text(exc))
     except Exception as exc:  # any other failure is still the drill's, never a crash of the tick
@@ -300,4 +401,5 @@ def run_drill(
         outcome=outcome,
         seconds=time.monotonic() - started,
         finished=datetime.now(UTC),
+        refused=refused,
     )
