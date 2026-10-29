@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
@@ -8,6 +9,8 @@ import { RunTimelineRows } from "./run-timeline-rows";
 import type { UnitHeights } from "./canvas/run-timeline-paint";
 import { LINK_KINDS } from "./model/links/resolve";
 import { ALL_ROWS } from "./model/timeline-nav-rows";
+import { runTimelineStats } from "./model/render-stats";
+import { viewportStore, type ViewportStore } from "./viewport/viewport-store";
 import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-canvas-test-mock";
 import type { Selection } from "./model/timeline-model-selection";
 import { renderWithApi as rtlRender } from "@/test-support/render";
@@ -72,13 +75,18 @@ const ENTRIES = (data: Partial<RunTimelineResponse>) => [
   { id: 42, status: "loaded" as const, data: { nodes: [], units: [], ...data } as RunTimelineResponse },
 ];
 
-function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, heights: UnitHeights = "equal") {
+function renderRows(
+  data: Partial<RunTimelineResponse>,
+  selection: Selection | null = null,
+  heights: UnitHeights = "equal",
+  store: ViewportStore = viewportStore(BASE),
+) {
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
       entries={ENTRIES(data)}
       base={BASE}
-      view={BASE}
+      store={store}
       onView={vi.fn()}
       selection={selection === null ? null : { agent: 42, selection }}
       onSelect={(picked) => void onSelect(picked.selection)}
@@ -161,6 +169,25 @@ describe("RunTimelineRows canvas rows", () => {
     expect(fills("level-2")[0].color).not.toContain("50%");
   });
 
+});
+
+describe("RunTimelineRows viewport", () => {
+  it("repaints the rows for a new viewport without rendering the row tree again", async () => {
+    const store = viewportStore(BASE);
+    renderRows({ nodes: [node("a", 0, 500)], units: [unit("text", 0, 0, 500)] }, null, "equal", store);
+    await paintFrame();
+    // meiva:note
+    // Let anything a previous test left queued land before the counters below are read: they are shared.
+    // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+    await act(() => new Promise((resolve) => setTimeout(resolve, 120)));
+    await paintFrame();
+    const before = { ...runTimelineStats };
+    act(() => store.set({ from: BASE.from + 100, to: BASE.to - 100 }));
+    await paintFrame();
+    expect(runTimelineStats.renders).toBe(before.renders);
+    expect(runTimelineStats.draws).toBeGreaterThan(before.draws);
+    expect(runTimelineStats.relayouts).toBeGreaterThan(before.relayouts);
+  });
 });
 
 describe("RunTimelineRows narrow items", () => {

@@ -12,9 +12,11 @@ import { bucketOf, clusterToMax, type Arrow, type Cluster } from "../model/links
 import { curveOf, curvePoint, endTangent, type Curve } from "../model/links/geometry";
 import { hitLink } from "../model/links/selection";
 import { LINK_COLORS, type ResolvedLink } from "../model/links/resolve";
+import { countDraw, countLinksMs } from "../model/render-stats";
 import { resolveColor } from "./resolve-color";
 import type { AxisMap } from "../model/timeline-model-axis";
-import type { Viewport } from "../model/timeline-model-viewport";
+import type { ViewportStore } from "../viewport/viewport-store";
+import { useViewport } from "../viewport/use-viewport";
 
 const ROW_TESTID = { units: "run-timeline-row-units", user: "run-timeline-row-user", other: "run-timeline-row-other" } as const;
 const HEAD_PX = 7;
@@ -96,7 +98,7 @@ export function LinksCanvas({
   selectedKeys,
   hoverKeys,
   axis,
-  view,
+  store,
   maxArrows,
   geometryKey,
   hitRef,
@@ -107,11 +109,12 @@ export function LinksCanvas({
   selectedKeys: ReadonlySet<string>;
   hoverKeys: ReadonlySet<string>;
   axis: AxisMap;
-  view: Viewport;
+  store: ViewportStore;
   maxArrows: number;
   geometryKey: string;
   hitRef: RefObject<LinkHit>;
 }) {
+  const view = useViewport(store);
   const canvas = useRef<HTMLCanvasElement>(null);
   const cache = useRef<{ signature: string; clusters: Cluster[] } | null>(null);
   const painted = useRef<Painted | null>(null);
@@ -144,6 +147,8 @@ export function LinksCanvas({
       if (el.width !== pixelW) el.width = pixelW;
       if (el.height !== pixelH) el.height = pixelH;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      countDraw();
+      const started = performance.now();
       ctx.clearRect(0, 0, rect.width, rect.height);
       const shown = axis.viewU(view);
       const span = Math.max(shown.to - shown.from, 1e-9);
@@ -283,6 +288,7 @@ export function LinksCanvas({
         hovered: hoverKeys,
         geometry: geometryKey,
       };
+      countLinksMs(performance.now() - started);
       hitRef.current = (clientX, clientY) => {
         const now = el.getBoundingClientRect();
         const key = hitLink(curves, clientX - now.left, clientY - now.top, LINK_HIT_PX);
