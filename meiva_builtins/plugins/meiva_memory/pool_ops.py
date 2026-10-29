@@ -144,8 +144,22 @@ def _note_lines(pool: Path, dir_rel: str, mds: list[str]) -> list[str]:
 def write_directory_index(pool: Path, dir_rel: str, all_files: list[str]) -> str:
     root = pool
     dpath = root / dir_rel if dir_rel else root
+    prefix = dir_rel + "/" if dir_rel else ""
     entries = sorted(p.name for p in dpath.iterdir())
-    dirs = [e for e in entries if (dpath / e).is_dir() and not e.startswith(".")]
+    # meiva:note
+    # A subdirectory appears only when it holds at least one note anywhere below it. A working
+    # tree carries directories git cannot store -- `__pycache__` left by importing this module,
+    # an editor scratch dir -- and listing one as "0 notes" made a single pool produce different
+    # indexes on different machines; the git-tree generator derives its subdirectories from the
+    # files, so that was the only place the two disagreed. The count on the line uses the same
+    # prefix rule.
+    dirs = [
+        e
+        for e in entries
+        if (dpath / e).is_dir()
+        and not e.startswith(".")
+        and any(f.startswith(prefix + e + "/") for f in all_files)
+    ]
     mds = [e for e in entries if e.endswith(".md") and e not in RESERVED]
 
     title = "(root)" if not dir_rel else dir_rel + "/"
