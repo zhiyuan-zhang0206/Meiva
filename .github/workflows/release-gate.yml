@@ -6,9 +6,10 @@
 #
 # Two products on success:
 #   - the annotated tag `vX.Y.Z`, pointing at the certified commit (the human marker);
-#   - `release/<version>.json`, the machine-readable proof the deployment precheck reads
+#   - `release/<version>.json`, the machine-readable proof this gate reads on every later run
 #     (`scripts/host_ops/release/base.py`), opened as a pull request because every change to
-#     main goes through one.
+#     main goes through one. The deployment precheck does not read it yet: nothing in
+#     cli/fleet_update consults the verdict, so a wave is not refused for a missing base.
 # A tag alone can never create release eligibility: the reader ignores tags entirely.
 #
 # A red nightly verdict (`.github/workflows/refresh-test-durations.yml`) does not fail main's
@@ -302,6 +303,7 @@ jobs:
           - version: \`v${{ inputs.version }}\`
           - reason: ${{ inputs.reason }}
 
-          Merging this pull request makes the certification visible to the deployment precheck
-          (\`scripts/host_ops/release/base.py\` reads \`release/<version>.json\`). The tag
-          already exists and carries the same run link."
+          Merging this pull request makes the certification the base every later gate run must
+          descend from (\`scripts/host_ops/release/base.py\` reads \`release/<version>.json\`).
+          The deployment precheck does not consult it yet, so a wave is not refused for a missing
+          base today. The tag already exists and carries the same run link."
