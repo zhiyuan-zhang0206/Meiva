@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import stat
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,19 +35,17 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 # meiva:note
 # Run one converge of the operator skill.
 #
-# The tests below that patch the bridge (`rename_no_replace`, `stage_copy`,
-# `materialize_source_snapshot`, `uuid4`) reproduce an intruder acting INSIDE one converge, between
-# a check and the effect it guards: a state built before the converge cannot, because the converge
-# re-checks everything at its start. The crash and cleanup scenarios that a built state can
-# reproduce use `killed_converge` instead. These patches go when the filesystem calls of the
-# transaction are an injected port in `base`.
+# The tests below that need an intruder acting INSIDE one converge, between a check and the effect
+# it guards, hand the bridge the one effect they steer (`materialize`, `rename`, `uuid4`) and leave
+# the other two at the function the bridge would call anyway: a state built before the converge
+# cannot reproduce those races, because the converge re-checks everything at its start. The crash
+# and cleanup scenarios that a built state can reproduce use `killed_converge` instead.
 def _converge(ctx: Any, *, host_home: Path | None = None) -> None:
     bridge.converge_external_agent_skill(ctx, host_home=host_home, skill_names=(SKILL,))
 
 
 def test_source_change_after_snapshot_does_not_mix_generations(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -57,19 +56,17 @@ def test_source_change_after_snapshot_does_not_mix_generations(
     client = client_home(tmp_path)
     second_client = client.parent / ".claude"
     second_client.mkdir()
-    original_stage = bridge.stage_copy
+    original_materialize = bridge.materialize_source_snapshot
     changed = False
 
-    def change_source_then_stage(*args: Any, **kwargs: Any) -> Path:
+    def change_source_then_materialize(snapshot: Any, destination: Path) -> None:
         nonlocal changed
         if not changed:
             changed = True
             (source / "SKILL.md").write_text("operator v2\n")
-        return original_stage(*args, **kwargs)
+        original_materialize(snapshot, destination)
 
-    monkeypatch.setattr(bridge, "stage_copy", change_source_then_stage)
-
-    _converge(
+    bridge.converge_external_agent_skill(
         skill_ctx(
             repo,
             tmp_path,
@@ -78,6 +75,8 @@ def test_source_change_after_snapshot_does_not_mix_generations(
             command_config_machine=command_config_machine,
         ),
         host_home=client.parent,
+        skill_names=(SKILL,),
+        materialize=change_source_then_materialize,
     )
 
     assert (source / "SKILL.md").read_text() == "operator v2\n"
@@ -126,7 +125,6 @@ def test_windows_reparse_attribute_is_rejected() -> None:
 
 def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
@@ -146,39 +144,24 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_stage = bridge.stage_copy
+    original_materialize = bridge.materialize_source_snapshot
 
-    def edit_after_check(
-        snapshot: Any,
-        source_manifest: list[dict[str, Any]],
-        skills_root: Path,
-        ledger_path: Path,
-        ledger: dict[str, Any],
-        source_digest: str,
-        *,
-        skill_name: str = SKILL,
-    ) -> Path:
-        staged = original_stage(
-            snapshot,
-            source_manifest,
-            skills_root,
-            ledger_path,
-            ledger,
-            source_digest,
-        )
+    def edit_target_after_the_copy(snapshot: Any, destination: Path) -> None:
+        original_materialize(snapshot, destination)
         (target / "SKILL.md").write_text("late user edit\n")
-        return staged
 
-    monkeypatch.setattr(bridge, "stage_copy", edit_after_check)
-
-    _converge(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(
+        context,
+        host_home=client.parent,
+        skill_names=(SKILL,),
+        materialize=edit_target_after_the_copy,
+    )
     assert (target / "SKILL.md").read_text() == "late user edit\n"
     assert "conflict" in capsys.readouterr().err
 
 
 def test_target_appearing_after_claim_is_not_replaced(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
@@ -208,9 +191,9 @@ def test_target_appearing_after_claim_is_not_replaced(
             destination.symlink_to(outside, target_is_directory=True)
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "rename_no_replace", insert_target_then_rename)
-
-    _converge(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(
+        context, host_home=client.parent, skill_names=(SKILL,), rename=insert_target_then_rename
+    )
     assert target.is_symlink()
     assert (outside / "SKILL.md").read_text() == "late user target\n"
     assert "conflict" in capsys.readouterr().err
@@ -218,7 +201,6 @@ def test_target_appearing_after_claim_is_not_replaced(
 
 def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -249,9 +231,9 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
             (destination / "user.txt").write_text("not Meiva owned\n")
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "rename_no_replace", collide_with_claim)
-
-    _converge(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(
+        context, host_home=client.parent, skill_names=(SKILL,), rename=collide_with_claim
+    )
     assert collision is not None
     assert (collision / "user.txt").read_text() == "not Meiva owned\n"
     assert (target / "SKILL.md").read_text() == "operator v1\n"
@@ -263,7 +245,6 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
 
 def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -296,9 +277,9 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
         if source_path == target and ".meiva-previous-" in destination.name:
             (destination / ".meiva-managed.json").unlink()
 
-    monkeypatch.setattr(bridge, "rename_no_replace", collide_with_restore)
-
-    _converge(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(
+        context, host_home=client.parent, skill_names=(SKILL,), rename=collide_with_restore
+    )
     assert late_target
     assert (target / "user.txt").read_text() == "late user target\n"
     ledger = read_ledger(context)
@@ -309,7 +290,6 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
 
 def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -342,9 +322,12 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
             (destination / "user.txt").write_text("late user target\n")
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "rename_no_replace", fail_activation_then_collide_with_restore)
-
-    _converge(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(
+        context,
+        host_home=client.parent,
+        skill_names=(SKILL,),
+        rename=fail_activation_then_collide_with_restore,
+    )
     assert late_target
     assert (target / "user.txt").read_text() == "late user target\n"
     ledger = read_ledger(context)
@@ -355,7 +338,6 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
 
 def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -379,15 +361,63 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     sibling = target.parent / f".{SKILL}.meiva-stage-{generation_id}"
     sibling.mkdir()
     (sibling / "user.txt").write_text("not Meiva owned\n")
-    monkeypatch.setattr(bridge.uuid, "uuid4", lambda: SimpleNamespace(hex=generation_id))
 
-    _converge(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(
+        context,
+        host_home=client.parent,
+        skill_names=(SKILL,),
+        uuid4=lambda: uuid.UUID(generation_id),
+    )
     assert (sibling / "user.txt").read_text() == "not Meiva owned\n"
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     ledger = read_ledger(context)
     assert ledger["installed"] == installed_before
     assert ledger["transaction"]["stage_state"] == "publishing"
     assert ledger["garbage"] == []
+
+
+# meiva:note
+# The generation id names the transaction's stage and previous paths, so it comes from the source
+# the caller names: two converges handed the same id record that same id, and a test can name the
+# paths one publication used instead of observing whatever the clock minted.
+def test_the_injected_generation_id_is_the_one_every_converge_records(
+    tmp_path: Path,
+    operator_database: OperatorDatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
+) -> None:
+    repo = tmp_path / "repo"
+    source = skill_source(repo)
+    client = client_home(tmp_path)
+    context = skill_ctx(
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
+    generation_id = "c" * 32
+
+    bridge.converge_external_agent_skill(
+        context,
+        host_home=client.parent,
+        skill_names=(SKILL,),
+        uuid4=lambda: uuid.UUID(generation_id),
+    )
+    assert read_ledger(context)["installed"]["generation_id"] == generation_id
+
+    (source / "SKILL.md").write_text("operator v2\n")
+    bridge.converge_external_agent_skill(
+        context,
+        host_home=client.parent,
+        skill_names=(SKILL,),
+        uuid4=lambda: uuid.UUID(generation_id),
+    )
+
+    assert read_ledger(context)["installed"]["generation_id"] == generation_id
+    assert (target_path(client, tmp_path) / "SKILL.md").read_text() == "operator v2\n"
+    assert list((client / "skills").glob(f".{SKILL}.meiva-*")) == []
 
 
 # meiva:note
@@ -672,7 +702,6 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
 
 def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -700,8 +729,12 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
             raise PermissionError("copy interrupted")
         original_materialize(snapshot, destination)
 
-    monkeypatch.setattr(bridge, "materialize_source_snapshot", fail_after_one_entry)
-    _converge(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(
+        context,
+        host_home=client.parent,
+        skill_names=(SKILL,),
+        materialize=fail_after_one_entry,
+    )
 
     _converge(context, host_home=client.parent)
     _converge(context, host_home=client.parent)
