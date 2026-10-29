@@ -40,7 +40,7 @@ from meizel.contracts.debt_symbol import (
 from meizel.contracts.manifest import load_manifests
 from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
-from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
+from meizel.graph.universe import MANIFEST, Checkout, Universe, parent_of
 
 __all__ = ["carry", "run_debt"]
 
@@ -51,12 +51,12 @@ def _join(owner: str, path: str) -> str:
     return f"{owner}/{path}" if owner else path
 
 
-def default_base(repo: GitRepo) -> str:
+def default_base(repo: Checkout) -> str:
     """The branch point with origin/main, or HEAD when there is no origin/main."""
     return repo.default_base()
 
 
-def renames_since(repo: GitRepo, base: str) -> dict[str, str]:
+def renames_since(repo: Checkout, base: str) -> dict[str, str]:
     """`old -> new` for the files git detects as renamed between `base` and the working tree."""
     if base.startswith("-"):
         raise MeizelError(f"{base}: not a git ref")
@@ -178,14 +178,14 @@ def _conflict(
 
 
 def _check_move(
-    repo: GitRepo, base: str, universe: Universe, move: SymbolMove
+    repo: Checkout, base: str, universe: Universe, move: SymbolMove
 ) -> tuple[bytes, bytes]:
     """The old file at the base and the new file now, after checking that this is a move."""
     if move.new not in universe.files:
         raise MeizelError(
             f"{move.new} is not a file of the repository (missing, or ignored by git)"
         )
-    before, after = repo.show_bytes(base, move.old), universe.load_bytes(move.new)
+    before, after = repo.show_bytes(base, move.old), universe.repo.load_bytes(move.new)
     if repo.has_file(move.old) and defines(
         universe, move.old, repo.load_bytes(move.old), move.name
     ):
@@ -232,7 +232,7 @@ def _swap(
 
 
 def _move_symbols(
-    repo: GitRepo,
+    repo: Checkout,
     base: str,
     universe: Universe,
     tables: dict[str, DebtTable],
@@ -257,7 +257,7 @@ def _move_symbols(
 # was renamed, not a file. `move_symbols` (`OLD_FILE::NAME=NEW_FILE`) rekeys the entries of a function
 # or class that moved from one file to another, which git cannot see as a rename.
 def carry(
-    repo: GitRepo,
+    repo: Checkout,
     base: str | None = None,
     rename_targets: list[str] | None = None,
     move_symbols: list[str] | None = None,
@@ -285,7 +285,7 @@ def carry(
 
 # meiva:note
 # The two measures' inputs, named: each rule file, manifest declaration and policy entry it edits.
-def _measured(repo: GitRepo, ref: str, extra: Collection[str]) -> list[str]:
+def _measured(repo: Checkout, ref: str, extra: Collection[str]) -> list[str]:
     return [
         "meizel: what this change edits in the measurement:",
         *(f"  {line}" for line in measurement_lines(repo, ref, extra)),
@@ -296,7 +296,7 @@ def _measured(repo: GitRepo, ref: str, extra: Collection[str]) -> list[str]:
 # The `Symbol-Move` lines the change declared, read from the record the caller passed. A missing file
 # is no declaration at all; a declaration is not proof of anything by itself — `rule_diff` re-checks
 # each one against the diff before it retargets an import.
-def _declared_symbols(repo: GitRepo, path: str | None) -> list[SymbolMove]:
+def _declared_symbols(repo: Checkout, path: str | None) -> list[SymbolMove]:
     if not path:
         return []
     # meiva:note
@@ -306,7 +306,7 @@ def _declared_symbols(repo: GitRepo, path: str | None) -> list[SymbolMove]:
     return parse_symbol_move_lines(repo.load_text(path))
 
 
-def _run_diff(repo: GitRepo, ref: str, on_growth: str, args: argparse.Namespace) -> int:
+def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     symbols = _declared_symbols(repo, args.symbol_moves_file)
     rules_changed = rule_change(repo, ref, args.waive_if_changed) or bool(symbols)
     if rules_changed:
@@ -333,7 +333,7 @@ def _run_diff(repo: GitRepo, ref: str, on_growth: str, args: argparse.Namespace)
     return 1 if on_growth == "fail" else 0
 
 
-def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
+def _run_record(repo: Checkout, targets: list[str], jobs: int | None) -> int:
     written, created, unrecordable = record(repo, targets, jobs)
     for path in written:
         print(f"meizel: wrote {path}")
@@ -353,7 +353,7 @@ def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
 # meiva:note
 # What `debt carry` says: the entries it moved, each manifest the move had to create, and — when
 # nothing moved — that no rename had recorded debt at all.
-def _run_carry(repo: GitRepo, args: argparse.Namespace) -> int:
+def _run_carry(repo: Checkout, args: argparse.Namespace) -> int:
     lines, created = carry(repo, args.base, args.rename_target, args.move_symbol)
     for line in lines:
         print(f"meizel: carried {line}")
@@ -366,7 +366,7 @@ def _run_carry(repo: GitRepo, args: argparse.Namespace) -> int:
     return 0
 
 
-def run_debt(repo: GitRepo, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
+def run_debt(repo: Checkout, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
     mode = args.debt_mode
     if mode is None:
         print(summarize(repo, as_json=args.json, unowned_list=args.unowned))
