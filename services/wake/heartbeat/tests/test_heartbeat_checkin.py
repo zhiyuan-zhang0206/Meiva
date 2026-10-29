@@ -46,28 +46,23 @@ _WAKE_HANG_GUARD_S = _WAKE_BUDGET_S * 3
 _SUBSCRIBED_POLL_S = 0.05
 
 
-def _subscriber_count(bus: EventBus, channel: str) -> int:
-    # meiva:note
-    # How many clients Redis reports subscribed to this channel right now. redis-py types
-    # `pubsub_numsub` and its reply as partially unknown, so the ignore is narrow on purpose;
-    # the call itself is fully typed.
-    probe = bus.sync_redis()
-    try:
-        return int(probe.pubsub_numsub(channel)[0][1])  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    finally:
-        probe.close()
-
-
 async def _await_subscribed(bus: EventBus, channel: str) -> None:
     # meiva:note
     # Block until Redis reports a subscriber on this channel: pub/sub drops a publish that
     # lands with no subscriber, so the check-in waits for that fact instead of a fixed sleep.
-    # The deadline bounds a failure; it is not the assertion.
-    deadline = time.monotonic() + _WAKE_BUDGET_S
-    while _subscriber_count(bus, channel) < 1:
-        if time.monotonic() > deadline:
-            raise AssertionError(f"no subscriber appeared on {channel} in {_WAKE_BUDGET_S}s")
-        await asyncio.sleep(_SUBSCRIBED_POLL_S)
+    # One probe client serves every poll — a client per poll would open hundreds of
+    # connections if the wait ran long. redis-py types `pubsub_numsub` and its reply as
+    # partially unknown, so the ignore is narrow. The deadline bounds a failure; it is not
+    # the assertion.
+    probe = bus.sync_redis()
+    try:
+        deadline = time.monotonic() + _WAKE_BUDGET_S
+        while int(probe.pubsub_numsub(channel)[0][1]) < 1:  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            if time.monotonic() > deadline:
+                raise AssertionError(f"no subscriber appeared on {channel} in {_WAKE_BUDGET_S}s")
+            await asyncio.sleep(_SUBSCRIBED_POLL_S)
+    finally:
+        probe.close()
 
 
 @pytest.fixture

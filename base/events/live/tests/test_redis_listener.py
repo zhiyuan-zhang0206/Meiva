@@ -136,6 +136,17 @@ class TestRedisInboundListener:
         finally:
             await listener.close()
 
+    async def test_wait_one_answers_false_when_nothing_publishes(self) -> None:
+        # meiva:note
+        # The contract has two halves: True when a publish arrives, False when the budget
+        # expires first. Without this case a listener that always answered True would pass
+        # every other test in the suite — the False branch is what makes the bool falsifiable.
+        listener = _listener(settings.data_plane.redis_url, agent_id=9994)
+        try:
+            assert await listener.wait_one(timeout=0.2) is False
+        finally:
+            await listener.close()
+
     async def test_wait_one_ignores_other_agent(self) -> None:
         """Agent only receives messages from its own channel."""
         listener = _listener(settings.data_plane.redis_url, agent_id=9996)
