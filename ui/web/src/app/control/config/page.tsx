@@ -51,6 +51,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { DeferredMount } from "@/components/app/deferred-mount";
+import type { BrowserStorage } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
 
 import { errMsg } from "@/lib/contracts/errors";
@@ -99,19 +100,20 @@ function applyDelta(
 }
 
 function hydrateCollapsedGroups(
+  storage: BrowserStorage,
   apply: (state: { groups: Set<string>; hydrated: boolean }) => void,
 ) {
   let groups = new Set<string>();
-  try {
-    const stored = localStorage.getItem(COLLAPSED_GROUPS_STORAGE_KEY);
-    if (stored != null) {
-      const parsed: unknown = JSON.parse(stored);
+  const stored = storage.read(COLLAPSED_GROUPS_STORAGE_KEY);
+  if (stored.state === "found") {
+    try {
+      const parsed: unknown = JSON.parse(stored.value);
       if (Array.isArray(parsed)) {
         groups = new Set(parsed.filter((id): id is string => typeof id === "string"));
       }
+    } catch {
+      groups = new Set();
     }
-  } catch {
-    groups = new Set();
   }
   apply({ groups, hydrated: true });
 }
@@ -119,7 +121,8 @@ function hydrateCollapsedGroups(
 export default function ConfigPage() {
   const client = useApi();
   const t = useTranslations("config");
-  const view = useBrowser().view;
+  const browser = useBrowser();
+  const view = browser.view;
   const qc = useQueryClient();
   const visible = useSectionVisible();
   const [selection, setSelection] = useState<MachineSelection>(null);
@@ -130,20 +133,16 @@ export default function ConfigPage() {
   }>({ groups: new Set(), hydrated: false });
 
   useEffect(() => {
-    hydrateCollapsedGroups(setCollapsedState);
-  }, []);
+    hydrateCollapsedGroups(browser.local, setCollapsedState);
+  }, [browser.local]);
 
   useEffect(() => {
     if (!collapsedState.hydrated) return;
-    try {
-      localStorage.setItem(
-        COLLAPSED_GROUPS_STORAGE_KEY,
-        JSON.stringify([...collapsedState.groups]),
-      );
-    } catch {
-      return;
-    }
-  }, [collapsedState]);
+    // meiva:note
+    // The port answers `unavailable` for a browser that refuses storage; the selection then
+    // simply stops being remembered for the next visit, which is what the catch used to do.
+    browser.local.write(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify([...collapsedState.groups]));
+  }, [browser.local, collapsedState]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: configQueryKey(selection),

@@ -6,6 +6,8 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BrowserProvider } from "../browser/browser-provider";
+import { fakeBrowser, type FakeBrowser } from "../browser/testing";
 import type { Api } from "../transport/api";
 import { cacheOnlyApi } from "../transport/tests/api/api-provider";
 import { ApiProvider } from "../transport/transport-context";
@@ -45,22 +47,32 @@ const MESSAGES = {
     launchFailedCreated: "Agent #{id} was created, but launch failed. Select it to retry.",
   },
 };
+// meiva:note
+// Each test hands the hook a page of its own: the address it was opened at and the two storage
+// areas the port answers from, so a deep link, a remembered selection and a history traversal
+// are values the test sets instead of a global it arranges. The history assertions read the
+// same page's record: one push per switch, and a traversal rewrites the entry it restores.
+let browser: FakeBrowser;
 function wrapper({ children }: { children: React.ReactNode }) {
-  return React.createElement(NextIntlClientProvider, {
-    locale: "en",
-    messages: MESSAGES,
-    children: React.createElement(
-      ApiProvider,
-      { api },
-      React.createElement(QueryClientProvider, { client: _qc }, children),
-    ),
-  });
+  return React.createElement(
+    BrowserProvider,
+    { browser },
+    React.createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages: MESSAGES,
+      children: React.createElement(
+        ApiProvider,
+        { api },
+        React.createElement(QueryClientProvider, { client: _qc }, children),
+      ),
+    }),
+  );
 }
 function setUrlSearch(search: string) {
-  const url = new URL(window.location.href); url.search = search; window.history.replaceState(null, "", url);
+  browser = fakeBrowser({ href: `/${search}`, local: {} });
 }
 beforeEach(() => {
-  vi.clearAllMocks(); localStorage.clear(); setUrlSearch("");
+  vi.clearAllMocks(); setUrlSearch("");
   useStore.setState({ activeId: null, toast: null, openTasksNotice: null });
   _qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   vi.mocked(api.getAgentRoster).mockResolvedValue({ agents: MOCK_AGENTS, ancestors: [] });
@@ -72,16 +84,14 @@ describe("agent switches ride the browser history", () => {
   it("pushes one entry per switch and restores the earlier agent on a traversal", async () => {
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => expect(result.current.activeId).toBe(1));
-    const entries = window.history.length;
     act(() => result.current.setActiveId(2));
-    await waitFor(() => expect(new URL(window.location.href).searchParams.get("agent_id")).toBe("2"));
-    expect(window.history.length).toBe(entries + 1);
+    await waitFor(() => expect(new URL(browser.href()).searchParams.get("agent_id")).toBe("2"));
+    expect(browser.actions.pushed).toHaveLength(1);
     act(() => {
-      window.history.replaceState(null, "", "?agent_id=1");
-      window.dispatchEvent(new PopStateEvent("popstate"));
+      browser.traverse("?agent_id=1");
     });
     await waitFor(() => expect(result.current.activeId).toBe(1));
-    expect(window.history.length).toBe(entries + 1);
+    expect(browser.actions.pushed).toHaveLength(1);
   });
 });
 
@@ -118,6 +128,12 @@ describe("bounded roster and independent selection", () => {
     expect(result.current.agents).toEqual(MOCK_AGENTS);
     expect(result.current.activeId).toBe(999);
   });
+  it("falls back to the remembered selection when the address names no agent", async () => {
+    browser = fakeBrowser({ href: "/", local: { [ACTIVE_ID_KEY]: "2" } });
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.activeId).toBe(2));
+    expect(new URL(browser.href()).searchParams.get("agent_id")).toBe("2");
+  });
   it("retains a selected agent as it leaves the live roster", async () => {
     useStore.setState({ activeId: 2 });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
@@ -126,13 +142,18 @@ describe("bounded roster and independent selection", () => {
     await waitFor(() => expect(result.current.activeAgent?.status).toBe("terminated"));
     expect(result.current.activeId).toBe(2);
   });
+  // meiva:note
+  // The two selection paths are separate facts, so they are two cases: a page whose address names an
+  // agent wins over the remembered one, and a page that names none falls back to it. The storage
+  // seed differs from the selection the cases land on, so a write that never happens (or lands on
+  // another key) fails the assertion instead of passing on the seed.
   it("URL selection overrides remembered selection and persists later changes", async () => {
-    localStorage.setItem(ACTIVE_ID_KEY, "1"); setUrlSearch("?agent_id=2");
+    browser = fakeBrowser({ href: "/?agent_id=2", local: { [ACTIVE_ID_KEY]: "3" } });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => expect(result.current.activeId).toBe(2));
     act(() => result.current.setActiveId(1));
-    await waitFor(() => expect(localStorage.getItem(ACTIVE_ID_KEY)).toBe("1"));
-    expect(new URL(window.location.href).searchParams.get("agent_id")).toBe("1");
+    await waitFor(() => expect(browser.localValues.get(ACTIVE_ID_KEY)).toBe("1"));
+    expect(new URL(browser.href()).searchParams.get("agent_id")).toBe("1");
   });
   it("cancels obsolete historical detail and retains only the current detail cache", async () => {
     let oldSignal: AbortSignal | undefined;

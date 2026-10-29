@@ -104,7 +104,11 @@ export function pageWrapper(browser: FakeBrowser) {
 
 export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
   const live = typeof window === "undefined" ? null : window;
-  let href = options.href ?? live?.location.href ?? "http://fake.local/";
+  // meiva:note
+  // A caller may write the page it wants as a path (`/#ticket=x`); it is resolved against the
+  // page the test runs on, so `pageLocation` always receives an absolute address.
+  const base = live?.location.href ?? "http://fake.local/";
+  let href = options.href === undefined ? base : new URL(options.href, base).href;
   let historyState: unknown = null;
   let refused = false;
   let acceptsClipboard = true;

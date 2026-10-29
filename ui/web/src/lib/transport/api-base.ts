@@ -1,6 +1,7 @@
 // API base resolution runs once per module graph (once on the server and once
 // in the browser). Keeping it outside api.ts lets telemetry use the same base
 // without creating an api.ts ↔ telemetry.ts import cycle.
+import { browser } from "../browser/system-browser";
 import { gatewayBaseForPage } from "./gateway-origin";
 
 export type TransportTelemetryElement = "api-timing" | "sse-transport";
@@ -30,11 +31,18 @@ export function trackTransport(
   telemetrySink.track?.(element, opts);
 }
 
+// meiva:note
+// The page this module graph runs in comes from the browser port's composition root
+// (`system-browser.ts`): the address is read there, once, and this module receives it — `null`
+// on the server, where there is no page. A caller that wants another page base calls
+// `gatewayBaseForPage` with its own URL.
+const page = browser.navigation.location();
+
 export const API_BASE = gatewayBaseForPage(
   {
     apiBase: process.env.NEXT_PUBLIC_API_BASE,
     browserOrigin: process.env.NEXT_PUBLIC_BROWSER_ORIGIN,
     gatewayPort: process.env.NEXT_PUBLIC_GATEWAY_PORT,
   },
-  typeof window === "undefined" ? null : new URL(window.location.href),
+  page === null ? null : new URL(page.href),
 );

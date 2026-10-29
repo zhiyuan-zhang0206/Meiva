@@ -15,7 +15,7 @@ import type { NavData, NavItem } from "../model/timeline-nav-rows";
 import type { AxisMap } from "../model/timeline-model-axis";
 import type { ViewportStore } from "../viewport/viewport-store";
 import { countDraw, countPaintMs } from "../model/render-stats";
-import { resolveColor } from "./resolve-color";
+import { useColorResolver } from "./resolve-color";
 import type { PaintCtx } from "./run-timeline-paint";
 
 export function TrackCanvas({
@@ -45,6 +45,7 @@ export function TrackCanvas({
   onHit: (item: NavItem | null) => void;
   onChoose: (item: NavItem) => void;
 }) {
+  const resolve = useColorResolver();
   const canvas = useRef<HTMLCanvasElement>(null);
   const layout = useRef<RowLayout | null>(null);
   const index = useRef<HitIndex | null>(null);
@@ -87,7 +88,7 @@ export function TrackCanvas({
       latest.current.paint(
         {
           ctx,
-          resolve: resolveColor,
+          resolve,
           width,
           height,
           dpr,
@@ -111,7 +112,7 @@ export function TrackCanvas({
       unsubscribe();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [store, data, axis, rows, row, width, height]);
+  }, [store, data, axis, rows, row, width, height, resolve]);
   // meiva:note
   // A render that changed what the row would draw (a new selection, a new highlight) asks for a frame of its
   // own: the viewport did not move, but the picture it draws did.
