@@ -114,7 +114,7 @@ def test_every_importer_reads_the_defining_module_once(tmp_path: pathlib.Path) -
     tree, reads = _counting_tree(tmp_path)
     for rel in importers:
         source = (tmp_path / rel).read_text(encoding="utf-8")
-        assert ambient_state.measure(ast.parse(source), rel, tree) == {
+        assert ambient_state.measure(ast.parse(source), rel, tree, SCOPE) == {
             f"{rel}::bundle-leak:GatewayWiring": [4]
         }
     assert reads["gateway/wiring.py"] == 1
