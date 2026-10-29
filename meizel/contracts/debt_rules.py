@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import tomllib
 from collections import Counter
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import TypeGuard
 
@@ -35,12 +35,13 @@ from meizel.contracts.debt import TABLE_KEY, set_debt, total
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
 from meizel.contracts.debt_report import Baselines, manifest_texts_at, read_baselines
+from meizel.contracts.debt_symbol import SymbolMove, defines, retarget_imports
 from meizel.contracts.declare import declare
 from meizel.contracts.policy import POLICY, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import prepare_policy_snapshot, prune
 from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import MANIFEST, EditPlan, GitRepo
+from meizel.graph.universe import MANIFEST, EditPlan, GitRepo, Universe
 from meizel.language.scan import invalidate_policy_caches
 
 __all__ = ["RuleDiff", "declarations_changed", "rule_change", "rule_diff"]
@@ -85,13 +86,21 @@ class RuleDiff:
     """The two measures for one change, per code, and the keys that make the content measure fail."""
 
     def __init__(
-        self, base: Counter[str], regenerated: Baselines, tree: Baselines, ref: str
+        self,
+        base: Counter[str],
+        regenerated: Baselines,
+        tree: Baselines,
+        ref: str,
+        rewritten: Sequence[str] = (),
+        ignored: Sequence[str] = (),
     ) -> None:
         self.ref = ref
         self.base = base
         self.found = _totals(regenerated)
         self.tree = _totals(tree)
         self.excess = _excess(tree, regenerated)
+        self.rewritten = tuple(rewritten)
+        self.ignored = tuple(ignored)
 
     @property
     def content_grew(self) -> bool:
@@ -119,14 +128,19 @@ class RuleDiff:
             f"{sum(self.tree.values()):>8}{rules:>+8}{content:>+9}"
         )
         out.append(f"meizel: rules {rules:+d} / content {content:+d} against {self.ref[:12]}")
+        out.extend(self.rewritten)
         return out
 
     def explanation(self) -> list[str]:
         if not self.excess:
-            return [f"meizel: no content growth against {self.ref}: the rules account for the rest"]
+            return [
+                *self.ignored,
+                f"meizel: no content growth against {self.ref}: the rules account for the rest",
+            ]
         shown = self.excess[:_DEBT_ROWS]
         more = len(self.excess) - len(shown)
         return [
+            *self.ignored,
             f"meizel: the change records debt the rules do not find in {self.ref[:12]}'s content:",
             *(
                 f"  {where}: {key} ({code}) {have} recorded, {want} found"
@@ -356,9 +370,79 @@ def _apply_declarations(repo: GitRepo, base: GitRepo) -> None:
 
 
 # meiva:note
+# The declared symbol moves, applied to the base's own content: each import that names a moved symbol
+# at its old home is pointed at the new one, so the change's device measures the same site at the same
+# count instead of missing it. Only a declared move applies, only when the change really made it — the
+# old file no longer defines the name and the new one does, and the diff touches both — and every
+# rewrite is named in the report: a gate that quietly repaired the tree it measures could not be
+# audited, and 2026-10-29's two queue failures were exactly a gate that never said which tree it read.
+def _move_applies(repo: GitRepo, head: Universe, ref: str, move: SymbolMove) -> bool:
+    touched = set(_changed_under(repo, ref, [move.old, move.new]))
+    if not {move.old, move.new} <= touched:
+        return False
+    if not (
+        repo.has_file(move.new) and defines(head, move.new, repo.load_bytes(move.new), move.name)
+    ):
+        return False
+    return not (
+        repo.has_file(move.old) and defines(head, move.old, repo.load_bytes(move.old), move.name)
+    )
+
+
+def _retarget_one(base: GitRepo, move: SymbolMove) -> list[str]:
+    lines: list[str] = []
+    for relative in sorted(base.universe().files):
+        if not relative.endswith(".py") or move.name not in base.load_text(relative):
+            continue
+        updated, rewrites = retarget_imports(relative, base.load_text(relative), move)
+        if not rewrites:
+            continue
+        EditPlan(writes={base.root / relative: updated}).apply()
+        lines.extend(
+            f"base import rewritten: {relative}:{number} {old}.{move.name} -> {new}.{move.name} "
+            "(Symbol-Move, declared in the pull request body)"
+            for number, old, new in rewrites
+        )
+    return lines
+
+
+def _apply_symbol_moves(
+    repo: GitRepo, ref: str, base: GitRepo, moves: Sequence[SymbolMove]
+) -> tuple[list[str], list[str]]:
+    if not moves:
+        return [], []
+    head = repo.universe()
+    rewritten: list[str] = []
+    ignored: list[str] = []
+    for move in moves:
+        if not _move_applies(repo, head, ref, move):
+            ignored.append(
+                f"meizel: warning: `Symbol-Move: {move.old}::{move.name} -> {move.new}` does not "
+                "describe this change (the name stays in its old file, the new file does not define "
+                "it, or the diff does not touch both); ignored"
+            )
+            continue
+        lines = _retarget_one(base, move)
+        if not lines:
+            ignored.append(
+                f"meizel: warning: `Symbol-Move: {move.old}::{move.name} -> {move.new}` matches no "
+                "import the base points at the old home; nothing to retarget"
+            )
+        rewritten.extend(lines)
+    if rewritten:
+        base.stage_all()
+    return rewritten, ignored
+
+
+# meiva:note
 # Compare the tree `repo` reads with `ref`, given the per-code debt the base records.
 def rule_diff(
-    repo: GitRepo, ref: str, base: Counter[str], moved: Mapping[str, str], jobs: int | None = None
+    repo: GitRepo,
+    ref: str,
+    base: Counter[str],
+    moved: Mapping[str, str],
+    jobs: int | None = None,
+    symbols: Sequence[SymbolMove] = (),
 ) -> RuleDiff:
     with repo.checkout(ref) as checkout:
         prepare_policy_snapshot(checkout)
@@ -369,8 +453,9 @@ def rule_diff(
         _apply_renames(checkout, moved)
         _sync_rule_files(repo, ref, checkout)
         _apply_declarations(repo, checkout)
+        rewritten, ignored = _apply_symbol_moves(repo, ref, checkout, symbols)
         invalidate_policy_caches()
         checkout.stage_all()
         found = regenerated(checkout, ref, jobs)
     tree = repo.universe()
-    return RuleDiff(base, found, read_baselines(tree), ref)
+    return RuleDiff(base, found, read_baselines(tree), ref, rewritten, ignored)
