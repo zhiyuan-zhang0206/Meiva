@@ -90,3 +90,19 @@ def test_retired_path_import_field_cannot_allow_a_site(
     _write(_repo, f"{baseline_shards.SHARD_DIR}/legacy.json", json.dumps({"path_imports": frozen}))
     assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "unknown section 'path_imports'" in capsys.readouterr().err
+
+
+# meiva:note
+# The per-rule line says what is wrong and how to fix it; the summary says why the rules exist as a
+# family and where they are written. Asserted on fragments, not sentences.
+def test_the_summary_names_the_reason_and_the_owner_document(
+    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(_repo, _SKILL, _HACK)
+
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
+    err = capsys.readouterr().err.lower()
+
+    assert "acyclic" in err
+    assert "raising the baseline is not the repair" in err
+    assert "scripts/lint/docs/lint.meiva.okf.md" in err
