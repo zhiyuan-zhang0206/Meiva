@@ -241,7 +241,7 @@ def test_a_service_face_keeps_the_project_requirement_it_repeats() -> None:
 
 def _exported(face: str) -> set[str]:
     # meiva:note
-    # host-ok: the backend-static-tests job installs uv through .github/actions/uv-sync
+    # host-ok: backend-static-tests provides uv; the subject IS uv's --only-group, so a fake host would answer for it
     # What an image built from this face installs: uv resolves the group's closure, extras
     # included, and prints it as `name==version` lines.
     uv = shutil.which("uv")
