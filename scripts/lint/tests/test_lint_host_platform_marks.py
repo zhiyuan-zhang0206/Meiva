@@ -436,3 +436,91 @@ def test_the_whole_tree_path_parses_a_file_once() -> None:
     body = inspect.getsource(_lint.judge_source)
     assert "ast.parse(" not in body
     assert body.count("parse(text)") == 1
+
+
+def test_a_scoped_run_reports_an_unrecorded_exemption(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # `--only` is the pre-commit path: an exemption written in the file under review is this
+    # change's, so an unrecorded one fails there instead of costing a whole CI round.
+    root = _exempt_repo(tmp_path)
+    _exemptions(root, {})
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 1
+    assert "tests/test_x.py::test_x: unrecorded exemption" in capsys.readouterr().err
+
+
+def test_a_scoped_run_accepts_a_recorded_exemption(tmp_path: Path) -> None:
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+    )
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
+
+
+def test_a_scoped_run_reports_a_drifted_reason_in_the_change(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _exempt_repo(tmp_path)
+    _exemptions(root, {"tests/test_x.py::test_x": "the subject is the launchd lane"})
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 1
+    assert "the record's reason differs from the comment" in capsys.readouterr().err
+
+
+def test_a_scoped_run_leaves_the_rest_of_the_record_to_the_whole_tree(tmp_path: Path) -> None:
+    # meiva:note
+    # A record entry whose site another change removed cannot be seen from one file, so the
+    # scoped run stays quiet about it; the whole-tree run keeps reporting it.
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)",
+            "tests/gone.py::test_gone": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)",
+        },
+    )
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
+    assert _lint.main([], repo_root=root) == 1
+
+
+def test_a_scoped_run_does_not_judge_an_exemption_outside_the_change(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # The scoped run judges the files it was given and nothing else: an unrecorded exemption in
+    # another file is the whole-tree run's finding, and reporting it here would make every commit
+    # pay for the tree it did not touch.
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+    )
+    (root / "tests" / "test_y.py").write_text(_HOST_READ, encoding="utf-8")
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
+    assert capsys.readouterr().err == ""
+    assert _lint.main([], repo_root=root) == 1
+    assert "tests/test_y.py::test_x: unrecorded exemption" in capsys.readouterr().err
+
+
+def test_a_scoped_run_leaves_the_record_count_to_the_whole_tree(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # `allowed` against the number of entries is a property of the record, not of one file: a
+    # scoped run that reported it would redden every commit until someone edited the record.
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+        allowed=5,
+    )
+    assert _lint.main(["--only", "tests/test_x.py"], repo_root=root) == 0
+    assert _lint.main([], repo_root=root) == 1
+    assert "allowed says 5, the record lists 1" in capsys.readouterr().err
