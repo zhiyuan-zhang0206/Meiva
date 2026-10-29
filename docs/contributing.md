@@ -140,7 +140,10 @@ violations pass, anything new fails, and the debt may only shrink
   pass the dependency in as an explicit parameter
   ([patching](../meizel/docs/checker/patching.meiva.okf.md)). When a symbol is renamed, `debt carry
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
-  `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. `debt sites --code <patch code>
+  `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. A change that moves a top-level function
+  or class between files also declares the move in its pull request body, one line per move
+  (`Symbol-Move: <old file>::<name> -> <new file> — <why>`), so `debt diff` measures the same site
+  once instead of twice; see [the debt diff](../meizel/docs/checker/debt/diff.meiva.okf.md). `debt sites --code <patch code>
   --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
   --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
 - Only a composition root reads the world. A file that takes `settings`, the environment, the

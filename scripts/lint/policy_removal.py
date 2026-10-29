@@ -158,6 +158,14 @@ def _parser() -> argparse.ArgumentParser:
         metavar="path",
         help="append the markdown report to this file (the CI job summary)",
     )
+    parser.add_argument(
+        "--record-out",
+        metavar="path",
+        help=(
+            "write the record itself to this file, so the steps after this one read the same text: "
+            "`debt diff --symbol-moves-file` takes its `Symbol-Move` lines from here"
+        ),
+    )
     return parser
 
 
@@ -178,6 +186,8 @@ def _run(args: argparse.Namespace, read_member: MemberReader) -> int:
     print(_log(args.against, record, report))
     if not _unjudged(record, report):
         _complain(record.source, report)
+    if args.record_out and record.judged:
+        Path(args.record_out).write_text(record.text, encoding="utf-8")
     summary = _summary(args.against, record, report, args.on_removal)
     if args.summary:
         _append(Path(args.summary), summary)
