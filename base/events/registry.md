@@ -388,6 +388,7 @@ same origin as persistent events but uses an independent schema.
 | `inbound_committed` | — |
 | `label_updated` | ✓ |
 | `llm_done` | — |
+| `llm_keepalive` | — |
 | `notice_posted` | ✓ |
 | `notice_resolved` | ✓ |
 | `notification` | ✓ |

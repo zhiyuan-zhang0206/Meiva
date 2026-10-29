@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 
 import pytest
@@ -62,6 +63,7 @@ async def test_stream_llm_stamps_latency_and_decode_window(model_catalog: ModelC
         handler=handler,
         agent=AgentSlices.resolve(default_reader=defaults()),
         catalog=model_catalog,
+        monotonic=time.monotonic,
     )
 
     assert handler.llm_decode_ms is not None and handler.llm_latency_ms is not None
@@ -87,6 +89,7 @@ async def test_stream_preserves_prefix_and_does_not_recover_cache_403(
             handler=StubHandler(),
             agent=AgentSlices.resolve(default_reader=defaults()),
             catalog=model_catalog,
+            monotonic=time.monotonic,
         )
 
     assert caught.value is failure
@@ -106,6 +109,7 @@ async def test_stream_binds_the_agent_tool_and_sends_the_complete_prefix(
         handler=StubHandler(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         catalog=model_catalog,
+        monotonic=time.monotonic,
     )
 
     assert chunks[0].content == f"{(execute_code.name,)}: stable head | conversation"

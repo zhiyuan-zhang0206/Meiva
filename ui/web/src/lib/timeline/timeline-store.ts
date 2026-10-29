@@ -321,7 +321,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         return {};
       }
       const cleaned = s.items.filter(
-        (it) => !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
+        (it) => !it.llmWaiting && !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       );
       const items = hasLiveClock
         ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(cleaned, nowMs), nowMs), nowMs)
