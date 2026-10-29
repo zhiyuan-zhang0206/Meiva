@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
@@ -25,7 +26,14 @@ from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import EditPlan, GitRepo
 
-__all__ = ["plan_baseline_write", "prune", "record", "resolve", "write_baseline"]
+__all__ = [
+    "created_notice",
+    "plan_baseline_write",
+    "prune",
+    "record",
+    "resolve",
+    "write_baseline",
+]
 
 
 def _within(path: str, targets: list[str]) -> bool:
@@ -81,6 +89,20 @@ def plan_baseline_write(
 
 def _manifest_text(repo: GitRepo, owner: str) -> str:
     return repo.load_text(manifest_path(owner), default="")
+
+
+# meiva:note
+# What a command says after writing manifests that were not there: the author has to stage them,
+# because `check` reads tracked files only. `record` and `carry` both create them, so both say it
+# here rather than each in its own words.
+def created_notice(created: Sequence[str]) -> str | None:
+    if not created:
+        return None
+    return (
+        f"meizel: {len(created)} {'manifest' if len(created) == 1 else 'manifests'} created; "
+        f"stage {'it' if len(created) == 1 else 'them'} with git add, "
+        "because check reads tracked files only"
+    )
 
 
 def write_baseline(repo: GitRepo, owner: str, table: DebtTable) -> str | None:

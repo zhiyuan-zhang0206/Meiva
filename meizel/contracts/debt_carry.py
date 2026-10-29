@@ -19,8 +19,8 @@ from meizel.contracts.debt import (
     file_key,
     total,
 )
+from meizel.contracts.debt_edit import created_notice, record, resolve, write_baseline
 from meizel.contracts.debt_edit import prune as prune_debt
-from meizel.contracts.debt_edit import record, resolve, write_baseline
 from meizel.contracts.debt_report import (
     by_target,
     diff,
@@ -249,19 +249,19 @@ def _move_symbols(
     return lines
 
 
+# meiva:note
+# Move entries to where their renamed files, renamed patch targets or moved symbols now are: a line per
+# entry moved, and the manifests the move had to create — a debt that lands in a directory with none
+# cannot be recorded anywhere else, so each of those files is named in the report. `rename_targets`
+# (`OLD=NEW`) rewrites the target of a patch entry in the same source file, one for one: a symbol that
+# was renamed, not a file. `move_symbols` (`OLD_FILE::NAME=NEW_FILE`) rekeys the entries of a function
+# or class that moved from one file to another, which git cannot see as a rename.
 def carry(
     repo: GitRepo,
     base: str | None = None,
     rename_targets: list[str] | None = None,
     move_symbols: list[str] | None = None,
-) -> list[str]:
-    """Move entries to where their renamed files, renamed patch targets or moved symbols now are.
-
-    Returns a line per entry moved. `rename_targets` (`OLD=NEW`) rewrites the target of a patch
-    entry in the same source file, one for one: a symbol that was renamed, not a file.
-    `move_symbols` (`OLD_FILE::NAME=NEW_FILE`) rekeys the entries of a function or class that
-    moved from one file to another, which git cannot see as a rename.
-    """
+) -> tuple[list[str], list[str]]:
     base = base or default_base(repo)
     moved = renames_since(repo, base)
     universe = repo.universe()
@@ -274,10 +274,13 @@ def carry(
     after = sum(total(t) for t in tables.values())
     if after != before:
         raise MeizelError(f"carrying would change the recorded total ({before} -> {after})")
+    created: list[str] = []
     for owner in sorted(tables):
         if tables[owner] != baselines.get(owner, {}):
-            write_baseline(repo, owner, {c: r for c, r in tables[owner].items() if r})
-    return lines
+            path = write_baseline(repo, owner, {c: r for c, r in tables[owner].items() if r})
+            if path is not None and owner not in universe.manifest_dirs:
+                created.append(path)
+    return lines, created
 
 
 # meiva:note
@@ -334,11 +337,8 @@ def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
     written, created, unrecordable = record(repo, targets, jobs)
     for path in written:
         print(f"meizel: wrote {path}")
-    if created:
-        print(
-            f"meizel: {len(created)} manifests created; stage them with git add, "
-            "because check reads tracked files only"
-        )
+    if notice := created_notice(created):
+        print(notice)
     for diagnostic in unrecordable:
         print(diagnostic.render())
     if unrecordable:
@@ -347,6 +347,22 @@ def _run_record(repo: GitRepo, targets: list[str], jobs: int | None) -> int:
             f"meizel: {len(unrecordable)} violations cannot be recorded [{codes}]", file=sys.stderr
         )
         return 1
+    return 0
+
+
+# meiva:note
+# What `debt carry` says: the entries it moved, each manifest the move had to create, and — when
+# nothing moved — that no rename had recorded debt at all.
+def _run_carry(repo: GitRepo, args: argparse.Namespace) -> int:
+    lines, created = carry(repo, args.base, args.rename_target, args.move_symbol)
+    for line in lines:
+        print(f"meizel: carried {line}")
+    for path in created:
+        print(f"meizel: created {path}")
+    if notice := created_notice(created):
+        print(notice)
+    if not lines:
+        print("meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt")
     return 0
 
 
@@ -377,12 +393,5 @@ def run_debt(repo: GitRepo, targets: list[str], args: argparse.Namespace, jobs: 
     if mode == "diff":
         return _run_diff(repo, args.against, args.on_growth, args)
     if mode == "carry":
-        lines = carry(repo, args.base, args.rename_target, args.move_symbol)
-        for line in lines:
-            print(f"meizel: carried {line}")
-        if not lines:
-            print(
-                "meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt"
-            )
-        return 0
+        return _run_carry(repo, args)
     return _run_record(repo, targets, jobs)

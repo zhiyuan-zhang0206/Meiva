@@ -78,16 +78,108 @@ def test_a_moved_target_rewrites_the_key_of_the_file_that_uses_it(make_repo: Rep
     assert failures(root) == set()
 
 
-def test_file_scoped_debt_moves_with_the_file(make_repo: RepoFactory) -> None:
+# meiva:note
+# A file-scoped debt belongs to its own directory, so a move into a directory without a manifest
+# creates that manifest. The command says so: recording it in an ancestor instead would be dead on
+# arrival, because `check` looks the entry up under the file's own directory and would call it paid.
+def test_file_scoped_debt_moves_with_the_file_and_creates_the_manifest_it_needs(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
     files = {
         "old/test_p.py": "from lib import mod\n\n\ndef test_a(monkeypatch):\n    monkeypatch.setattr(mod, 'x', 1)\n",
         "old/meizel.toml": '[debt.restricted-python]\n"test_p.py#exec of source text" = 1\n',
     }
     root = moved_repo(make_repo, files)
     git(root, "mv", "old/test_p.py", "new/test_p.py")
+    capsys.readouterr()
     assert carry(root) == 0
+    out = capsys.readouterr().out
+    assert (
+        "meizel: 1 manifest created; stage it with git add, because check reads tracked files only"
+        in out.splitlines()
+    )
+    assert "carried meizel:" not in out
     assert debt_of(root, "old") == {}
     assert debt_of(root, "new") == {"restricted-python": {"test_p.py#exec of source text": 1}}
+
+
+# meiva:note
+# The notice is about a manifest this command had to create: a move that lands in a directory that
+# already has one says nothing extra.
+def test_a_move_into_a_directory_with_a_manifest_reports_no_creation(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = moved_repo(make_repo)
+    (root / "lib/tests").mkdir()
+    git(root, "mv", "old/test_x.py", "lib/tests/test_x.py")
+    write(
+        root,
+        {
+            "lib/tests/__init__.py": "",
+            "lib/meizel.toml": 'exports = ["mod.py"]\n\n[uses]\n"tests" = ["mod.py"]\n',
+        },
+    )
+    capsys.readouterr()
+    assert carry(root) == 0
+    out = capsys.readouterr().out
+    assert "manifest created" not in out
+    assert "manifests created" not in out
+
+
+# meiva:note
+# The mirror of the test above with a file-scoped code: the same kind of move into a directory whose
+# manifest already exists creates nothing, so neither a path line nor a notice appears, and the entry
+# still lands in that directory rather than staying behind.
+def test_a_file_scoped_move_into_a_directory_with_a_manifest_creates_nothing(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    files = {
+        "old/test_p.py": "def test_a():\n    exec('x = 1')\n",
+        "old/meizel.toml": '[debt.restricted-python]\n"test_p.py#exec of source text" = 1\n',
+    }
+    root = moved_repo(make_repo, files)
+    git(root, "mv", "old/test_p.py", "lib/test_p.py")
+    capsys.readouterr()
+    assert carry(root) == 0
+    out = capsys.readouterr().out
+    assert "meizel: created " not in out
+    assert debt_of(root, "old") == {}
+    assert debt_of(root, "lib") == {"restricted-python": {"test_p.py#exec of source text": 1}}
+    assert failures(root) == set()
+
+
+# meiva:note
+# One notice for the whole run, and its number is the count of path lines just printed: a move that
+# creates two manifests says `them`, not `it`.
+def test_two_created_manifests_are_one_plural_notice(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    files = {
+        "old/test_p.py": "def test_a():\n    exec('x = 1')\n",
+        "old/test_r.py": "def test_b():\n    exec('y = 2')\n",
+        "old/meizel.toml": (
+            "[debt.restricted-python]\n"
+            '"test_p.py#exec of source text" = 1\n'
+            '"test_r.py#exec of source text" = 1\n'
+        ),
+    }
+    root = moved_repo(make_repo, files)
+    write(root, {"new1/__init__.py": "", "new2/__init__.py": ""})
+    git(root, "mv", "old/test_p.py", "new1/test_p.py")
+    git(root, "mv", "old/test_r.py", "new2/test_r.py")
+    capsys.readouterr()
+    assert carry(root) == 0
+    out = capsys.readouterr().out.splitlines()
+    created = [line for line in out if line.startswith("meizel: created ")]
+    assert created == ["meizel: created new1/meizel.toml", "meizel: created new2/meizel.toml"]
+    assert (
+        "meizel: 2 manifests created; stage them with git add, "
+        "because check reads tracked files only"
+    ) in out
+    assert out.index(created[-1]) < out.index(
+        "meizel: 2 manifests created; stage them with git add, because check reads tracked files only"
+    )
+    assert failures(root) == set()
 
 
 def test_a_directory_move_keeps_relative_entries_and_remaps_outside_ones(
