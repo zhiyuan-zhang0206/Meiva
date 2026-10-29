@@ -14,3 +14,7 @@ class PageServerConfig:
     page_server_poll_interval_seconds: float
     # The dead-show-page scan runs once per heartbeat interval.
     heartbeat_interval_seconds: float
+    # meiva:note
+    # How long the reconcile loop may keep failing against the database before the process
+    # exits for its supervisor; a transient stall is reported and retried instead.
+    page_server_db_failure_exit_seconds: float
