@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import type { OpenTasksHint } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
@@ -29,6 +30,7 @@ export interface OpenTasksNoticeDialogProps {
 export function OpenTasksNoticeDialog({ notice, onClose }: OpenTasksNoticeDialogProps) {
   const t = useTranslations("openTasksNotice");
   const tTask = useTranslations("fleet.task");
+  const now = useWallDate();
   // Every open task the terminate hint carries is in_progress (the wire field
   // is the single-value literal) — no per-row status branch.
   const statusLabel = tTask("status.inProgress");
@@ -50,7 +52,7 @@ export function OpenTasksNoticeDialog({ notice, onClose }: OpenTasksNoticeDialog
               <span className="shrink-0">{`#${task.id} |`}</span>
               <span className={cn("truncate", MIN_W_0)}>{task.title}</span>
               <span className="shrink-0">
-                {`| ${statusLabel} | ${formatRelativeTime(task.updated_at, new Date())}`}
+                {`| ${statusLabel} | ${formatRelativeTime(task.updated_at, now)}`}
               </span>
             </li>
           ))}

@@ -1,4 +1,4 @@
-exports = ["use-now.ts"]
+exports = ["use-now.ts", "use-wall-date.ts"]
 
 [uses]
 "use-now.test.tsx" = ["use-now.ts"]
