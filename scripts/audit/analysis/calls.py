@@ -3,9 +3,12 @@
 # means what, and whether one call's argument list can carry that parameter.
 #
 # A required parameter added to a shared callable breaks every caller that does not pass it, and the
-# break hides in two places: a scoped type-check never sees the callers outside the trees it was
-# given (`scripts/tests`, `tests/e2e`, a plugin's own tree), and a call that hands the value over
-# positionally never appears in a search for `parameter=`. This reads the calls instead of the text.
+# break hides in three places: a scoped type-check never sees the callers outside the trees it was
+# given (`scripts/tests`, `tests/e2e`, a plugin's own tree); a call that hands the value over
+# positionally never appears in a search for `parameter=`; and a caller written inside a string
+# literal — a `pytester` fixture that writes a test module and runs it — is not a call node at all,
+# so an AST walk passes it. This reads the calls, including the source a test writes into a string,
+# instead of the text.
 #
 # `judge_calls` takes the texts the shell read and returns one finding per call that cannot supply
 # the parameter, plus how many calls it judged at all: a count of zero under a spec that names a real
@@ -16,16 +19,34 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 # meiva:note
 # The four answers one call can give. `keyword` and `position` name the ways the parameter arrives;
-# `unproven` is an expanded argument list, which proves nothing either way and is never a failure.
+# `unproven` is an argument list or a call form this judge cannot read, which proves nothing either
+# way and is never a failure.
 KEYWORD = "keyword"
 POSITION = "position"
 UNPROVEN = "unproven"
 MISSING = "missing"
+
+# meiva:note
+# Where a finding was found, when the call was not ordinary module-level source.
+EMBEDDED = "inside a string literal"
+NAMED_BY_STRING = "named by a string"
+
+# meiva:note
+# The calls that reach a function by name, so the parameter can never be seen at the call site. A
+# mention of the name in one of these is recorded as unproven rather than passed over.
+_STRING_NAME_CALLS = frozenset({"getattr", "setattr", "patch", "delattr"})
+
+# meiva:note
+# What a string literal has to contain before it is read as a module a test writes and runs: a
+# definition or an import at the start of a line. A sentence that mentions a call has neither, which
+# is what keeps documentation and error messages out of the report.
+_CODE_MARKERS = ("\ndef ", "\nclass ", "\nasync def ", "\nimport ", "\nfrom ", "\n@pytest")
+_CODE_PREFIXES = ("def ", "class ", "async def ", "import ", "from ", "pytest_plugins")
 
 
 # meiva:note
@@ -47,13 +68,15 @@ class CallSpec:
 
 
 # meiva:note
-# One judged call: where it is, and how it stands to the parameter.
+# One judged call: where it is, how it stands to the parameter, and whether it was ordinary source or
+# a form this judge had to read another way.
 @dataclass(frozen=True)
 class CallSiteFinding:
     path: str
     line: int
     spec: CallSpec
     verdict: str
+    where: str = ""
 
 
 # meiva:note
@@ -96,7 +119,7 @@ def _called_name(call: ast.Call) -> str:
 
 
 # meiva:note
-# Whether the file can reach `module`: it defines a top-level name the module path ends with, or it
+# Whether the source can reach `module`: it defines a top-level name the module path ends with, or it
 # imports the module or one of its members. This is the only narrowing the judge does, and a spec
 # without a module skips it.
 def _mentions(tree: ast.Module, module: str) -> bool:
@@ -137,31 +160,123 @@ def _verdict(call: ast.Call, spec: CallSpec) -> str:
 
 
 # meiva:note
+# A parse that fails is not an error here: a generated or half-written source has no call site to
+# judge, and refusing the whole run over one file helps nobody.
+def _parse(text: str) -> ast.Module | None:
+    try:
+        return ast.parse(text)
+    except SyntaxError:
+        return None
+
+
+# meiva:note
+# Whether a string literal is a module a test writes out and runs rather than prose. The marker has
+# to start a line, so `see init_telemetry()` in a sentence stays out of the report.
+def _looks_like_code(text: str) -> bool:
+    if "\n" not in text:
+        return False
+    if text.startswith(_CODE_PREFIXES):
+        return True
+    padded = "\n" + text
+    return any(marker in padded for marker in _CODE_MARKERS)
+
+
+# meiva:note
+# Every module written into a string in this source, as (the line the literal starts on, its text).
+def _embedded_sources(tree: ast.Module) -> Iterator[tuple[int, str]]:
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and _looks_like_code(node.value)
+        ):
+            yield node.lineno, node.value
+
+
+# meiva:note
+# The units one file is judged as: the file itself, then each module it writes into a string. The
+# offset is what turns a line inside that module back into a line of the file a reader can open.
+def _units(text: str) -> Iterator[tuple[int, str, ast.Module | None, str]]:
+    tree = _parse(text)
+    yield 0, text, tree, ""
+    if tree is None:
+        return
+    for lineno, inner in _embedded_sources(tree):
+        yield lineno - 1, inner, _parse(inner), EMBEDDED
+
+
+# meiva:note
+# The calls whose name arrives as a string (`getattr(module, "build")`): the argument list at the
+# call site says nothing about the parameter, so each mention is recorded as unproven.
+def _named_by_string(tree: ast.Module, spec: CallSpec) -> Iterator[int]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _called_name(node) not in _STRING_NAME_CALLS:
+            continue
+        if any(
+            isinstance(argument, ast.Constant) and argument.value == spec.function
+            for argument in node.args
+        ):
+            yield node.lineno
+
+
+# meiva:note
 # Every call in the given sources that cannot supply the parameter, in source order, plus the number
-# of calls judged. A source that does not parse is skipped: a file that cannot be read as Python has
-# no call site to judge, and refusing the whole run over one generated file helps nobody.
+# of calls judged.
 def judge_calls(
     files: Iterable[tuple[str, str]], specs: list[CallSpec]
 ) -> tuple[list[CallSiteFinding], int]:
     findings: list[CallSiteFinding] = []
     judged = 0
     for path, text in files:
-        try:
-            tree = ast.parse(text)
-        except SyntaxError:
-            continue
-        for spec in specs:
-            if spec.module is not None and not _mentions(tree, spec.module):
+        for offset, unit_text, tree, where in _units(text):
+            if tree is None:
+                findings.extend(_unreadable(path, offset, unit_text, specs, where))
                 continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call) or _called_name(node) != spec.function:
+            for spec in specs:
+                if spec.module is not None and not _mentions(tree, spec.module):
                     continue
-                judged += 1
-                found = _verdict(node, spec)
-                if found in (MISSING, UNPROVEN):
-                    findings.append(CallSiteFinding(path, node.lineno, spec, found))
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call) or _called_name(node) != spec.function:
+                        continue
+                    judged += 1
+                    found = _verdict(node, spec)
+                    if found in (MISSING, UNPROVEN):
+                        findings.append(
+                            CallSiteFinding(path, offset + node.lineno, spec, found, where)
+                        )
+        findings.extend(_string_named(path, text, specs))
     findings.sort(key=lambda finding: (finding.path, finding.line, finding.spec.render()))
     return findings, judged
+
+
+# meiva:note
+# A string that looks like a module but does not parse still names the call it was meant to make, so
+# it is reported as unproven at the line the literal starts on. Silence here is what let a broken
+# `pytester` fixture pass as "no call sites".
+def _unreadable(
+    path: str, offset: int, text: str, specs: list[CallSpec], where: str
+) -> list[CallSiteFinding]:
+    if not where:
+        return []
+    return [
+        CallSiteFinding(path, offset + 1, spec, UNPROVEN, where)
+        for spec in specs
+        if f"{spec.function}(" in text
+    ]
+
+
+# meiva:note
+# The string-named calls of one file, narrowed the same way the ordinary walk is.
+def _string_named(path: str, text: str, specs: list[CallSpec]) -> list[CallSiteFinding]:
+    tree = _parse(text)
+    if tree is None:
+        return []
+    return [
+        CallSiteFinding(path, line, spec, UNPROVEN, NAMED_BY_STRING)
+        for spec in specs
+        if spec.module is None or _mentions(tree, spec.module)
+        for line in _named_by_string(tree, spec)
+    ]
 
 
 # meiva:note
@@ -172,6 +287,7 @@ def render_call_sites(findings: list[CallSiteFinding], judged: int) -> str:
         f"{finding.path}:{finding.line}: {finding.spec.function}() "
         f"{'cannot supply' if finding.verdict == MISSING else 'cannot prove'} "
         f"required {finding.spec.parameter!r} [{finding.spec.render()}]"
+        + (f" ({finding.where})" if finding.where else "")
         for finding in findings
     ]
     missing = sum(1 for finding in findings if finding.verdict == MISSING)
@@ -192,6 +308,7 @@ def call_site_payload(findings: list[CallSiteFinding], judged: int) -> dict[str,
                 "function": finding.spec.function,
                 "parameter": finding.spec.parameter,
                 "verdict": finding.verdict,
+                "where": finding.where,
             }
             for finding in findings
         ],

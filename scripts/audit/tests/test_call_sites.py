@@ -13,7 +13,9 @@ import pytest
 
 from scripts.audit import call_sites as _shell
 from scripts.audit.analysis.calls import (
+    EMBEDDED,
     MISSING,
+    NAMED_BY_STRING,
     UNPROVEN,
     judge_calls,
     parse_call_spec,
@@ -105,6 +107,69 @@ def test_a_source_that_does_not_parse_is_skipped() -> None:
     )
 
 
+def _judge_full(
+    *files: tuple[str, str], specs: str = "build:home"
+) -> list[tuple[str, int, str, str]]:
+    findings, _ = judge_calls(files, [parse_call_spec(specs)])
+    return [(finding.path, finding.line, finding.verdict, finding.where) for finding in findings]
+
+
+# meiva:note
+# The regression for the shape that reached the merge queue: a `pytester` fixture writes a test
+# module into a triple-quoted string and runs it as a subprocess, so the call inside is a string
+# constant and no AST walk of the fixture file ever sees a call node. The finding is reported at the
+# line of the literal, which is the line a reader can open.
+def test_a_call_written_inside_a_pytester_string_is_judged() -> None:
+    source = (
+        "def test_x(pytester):\n"
+        "    pytester.makepyfile(\n"
+        '        """\n'
+        "import telemetry\n"
+        "\n"
+        "def test_inner():\n"
+        "    telemetry.init_telemetry(pipeline=None)\n"
+        '"""\n'
+        "    )\n"
+    )
+    assert _judge_full(
+        ("tests/fixtures/ops/pytester_fixture.py", source), specs="init_telemetry:home"
+    ) == [("tests/fixtures/ops/pytester_fixture.py", 7, MISSING, EMBEDDED)]
+
+
+# meiva:note
+# A string that looks like a module but does not parse still names the call it was meant to make, so
+# it is unproven rather than silent: silence is what let the queue's fixture pass as "no call sites".
+def test_an_embedded_source_that_does_not_parse_is_unproven() -> None:
+    source = 'def test_x(pytester):\n    pytester.makepyfile(\n        """\ndef test_inner(:\n    build(\n"""\n    )\n'
+    assert _judge_full(("caller/broken_fixture.py", source)) == [
+        ("caller/broken_fixture.py", 3, UNPROVEN, EMBEDDED)
+    ]
+
+
+# meiva:note
+# The other side of reading strings: prose that names a call is not a call site. Only a literal that
+# starts a definition or an import at the beginning of a line is read as a module.
+def test_a_prose_string_that_mentions_a_call_is_not_a_finding() -> None:
+    source = (
+        "def go():\n"
+        '    """Call build() once the module is ready.\n'
+        "\n"
+        "    The pipeline is built by hand here.\n"
+        '    """\n'
+    )
+    assert _judge_full(("caller/prose.py", source)) == []
+
+
+# meiva:note
+# `getattr(module, "build")(...)` names the function in a string, so the argument list at that line
+# says nothing about the parameter. It is recorded as unproven rather than passed over.
+def test_a_call_reached_through_getattr_is_unproven() -> None:
+    source = 'def go(module):\n    getattr(module, "build")(pipeline=None)\n'
+    assert _judge_full(("caller/dynamic.py", source)) == [
+        ("caller/dynamic.py", 2, UNPROVEN, NAMED_BY_STRING)
+    ]
+
+
 @pytest.mark.parametrize(
     ("text", "module", "function", "parameter", "position"),
     [
@@ -180,6 +245,7 @@ def test_json_output_carries_the_counts_and_the_verdicts(
             "function": "build",
             "parameter": "home",
             "verdict": MISSING,
+            "where": "",
         }
     ]
 

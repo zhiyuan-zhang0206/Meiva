@@ -52,6 +52,22 @@ python scripts/audit/call_sites.py --spec '[MODULE:]FUNCTION:PARAMETER[:POSITION
 | `unproven` | the argument list is expanded (`*args` / `**kwargs`), so it proves nothing either way |
 | `missing` | the call cannot carry the parameter |
 
+## Calls written inside a string
+
+A `pytester` fixture writes a whole test module into a triple-quoted string and runs it
+in a subprocess. The call inside is a string constant, not a call node, so a walk of
+the fixture file passes it — which is how a required parameter reached the merge queue
+green on a run that had reported "missing: 0". A literal that starts a definition or an
+import at the beginning of a line is therefore read as a module: its calls are judged the
+same way and reported at the line the literal starts on, marked
+`(inside a string literal)`. Prose that merely mentions a call has none of those markers
+and stays out. One that looks like a module but does not parse is `unproven`, not
+silent.
+
+`getattr(module, "function")(...)` names the function in a string, so the argument list
+at that line says nothing about the parameter; every such mention is `unproven`, marked
+`(named by a string)`.
+
 The summary line is part of the contract:
 `call sites checked: N; missing: M; unproven: U`. A `checked` of zero under a spec
 that names a real function means the `MODULE` narrowing hid the call sites — fix
@@ -74,8 +90,8 @@ number nobody paid attention to is worse than a report.
 
 ## What it cannot see
 
-- A call through a variable or `getattr` has no name to follow; neither does
-  `factory()(...)`.
+- A call through a variable, or `factory()(...)`, has no name to follow. A string-named
+  call is reported as unproven rather than followed.
 - It does not read the callee's signature, so a spec that omits `POSITION` reports
   a legitimately positional call as `missing`; add the position.
 - One spec covers one parameter. A signature that gained two needs two specs.
