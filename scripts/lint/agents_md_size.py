@@ -13,7 +13,6 @@ from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # meiva:link scripts/lint/docs/agents-md-size.meiva.okf.md
-_TRANSITIONAL_FLOOR = 200
 _HARD_CEILING = 245
 
 
@@ -25,27 +24,21 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
         return 1
 
     verdict = evaluate(
-        agents_md.read_text(encoding="utf-8"),
-        LengthBudget(Unit.LINES, hard=_HARD_CEILING, soft=_TRANSITIONAL_FLOOR),
+        agents_md.read_text(encoding="utf-8"), LengthBudget(Unit.LINES, hard=_HARD_CEILING)
     )
     n_lines = verdict.measured
 
     if verdict.level is Level.OVER:
         print(
-            f"AGENTS.md:{n_lines}: error: {n_lines} lines exceeds the "
-            f"{_HARD_CEILING}-line hard ceiling — trim or move content to "
-            f"docs/conventions/. If the ceiling genuinely needs to move, bump "
-            f"_HARD_CEILING in scripts/lint/agents_md_size.py in the same PR "
-            f"and justify it in the commit message.",
+            f"AGENTS.md:{n_lines}: error: {n_lines} lines exceeds the {_HARD_CEILING}-line "
+            f"ceiling. AGENTS.md is the first file every agent reads, so it carries the rules that "
+            f"change how they work and links to the rest; detail that matters only while doing one "
+            f"task belongs in docs/conventions/, where it is read on demand. Move that section out. "
+            f"If the ceiling genuinely needs to move, bump _HARD_CEILING in "
+            f"scripts/lint/agents_md_size.py in the same PR and justify it in the commit message. "
+            f"See scripts/lint/docs/agents-md-size.meiva.okf.md.",
         )
         return 1
-    if verdict.level is Level.SOFT:
-        print(
-            f"AGENTS.md:{n_lines}: note: {n_lines} lines is in the "
-            f"{_TRANSITIONAL_FLOOR}-{_HARD_CEILING} transitional zone — "
-            f"consider trimming before it hits the {_HARD_CEILING}-line "
-            f"hard ceiling.",
-        )
     return 0
 
 

@@ -369,11 +369,10 @@ repos:
         types: []
         require_serial: true
 
-      # AGENTS.md line-count ceiling (constants in the script; hard + a
-      # transitional note zone below it). Prevents progressive bloat —
-      # specialized rules go in docs/conventions/.
+      # AGENTS.md line-count ceiling (one hard line, constant in the script). Prevents
+      # progressive bloat — specialized rules go in docs/conventions/.
       - id: lint-agents-md-size
-        name: lint AGENTS.md size (100-line ceiling)
+        name: lint AGENTS.md size (245-line ceiling)
         entry: .venv/bin/python scripts/lint/agents_md_size.py
         language: system
         files: AGENTS.md
@@ -407,7 +406,7 @@ repos:
         pass_filenames: false
 
       # SKILL.md line-count ceiling to prevent progressive bloat.
-      # Hard ceiling 300 lines; transitional zone 250-300.
+      # Hard ceiling 300 lines; one hard line, no band below it.
       - id: lint-skill-md-size
         name: lint SKILL.md size (line-count ceiling)
         entry: .venv/bin/python scripts/content_lint/lint_skill_md_size.py
