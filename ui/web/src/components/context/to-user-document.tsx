@@ -2,9 +2,10 @@
 
 import { ArrowLeft, House, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { BrowserNavigation } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
@@ -57,7 +58,7 @@ function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
 // reference entry is marked, so the panel's own Back calls history.back() for it instead of
 // rewriting a deep link that has no in-app entry to return to.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate }: {
+export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, viewportRef, children }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failure: unknown;
@@ -69,6 +70,8 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   onInspect?: () => void;
   onCollapse?: () => void;
   onNavigate?: () => void;
+  viewportRef?: React.RefObject<HTMLDivElement | null>;
+  children?: ReactNode;
 }) {
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
@@ -126,8 +129,10 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   const rawQuery = new URLSearchParams(references.map((reference) => ["reference", reference]));
   const rawUrl = `${API_BASE}/api/agents/${agentId}/to-user/resource?${rawQuery}`;
   // meiva:note
-  // The caller owns the question and Inspector as siblings of this document,
-  // so navigating its keyed body cannot discard an unfinished answer.
+  // The caller owns the question and Inspector; the question arrives as this
+  // section's leading slot inside the reading area, so navigating the keyed
+  // document body cannot discard an unfinished answer, and the column's title
+  // bar above that area stays put while the area scrolls.
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   // meiva:note
   // The inspector toggle changes nothing on hover: on a 14px icon the
@@ -137,7 +142,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   // meiva:link ui/web/src/components/context/to-user-document.tsx
   const inspectorToggleClass = cn("rounded p-1", inspecting && "bg-foreground/20 text-foreground");
   return mobile && inspecting ? null : (
-    <section className={cn(FLEX, MIN_H_0, "shrink-0", FLEX_COL)} aria-label={t("sharedContext")}>
+    <section className={cn(FLEX, MIN_H_0, FLEX_COL, bodyHidden ? "shrink-0" : FLEX_1)} aria-label={t("sharedContext")}>
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         {inspecting ? null : (
           <>
@@ -186,45 +191,48 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
           ) : null}
         </div>
       </div>
-      {bodyHidden ? null : (
-        <>
-          {failed && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
-          {!content ? (
-            <div className={cn("items-center justify-center px-8 text-center text-sm text-muted-foreground", FLEX, FLEX_1)}>
-              {loading ? t("loading") : refusal ? (
-                <div data-testid="document-failure" className="space-y-1">
-                  <p>{t(refusal.text)}</p>
-                  {refusal.raw && references.length > 0 ? (
-                    <a className="underline hover:text-foreground" href={rawUrl} target="_blank" rel="noopener noreferrer">{t("openRaw")}</a>
-                  ) : null}
-                </div>
-              ) : current?.legacy_html ? t("legacyHtml") : t("empty")}
-            </div>
-          ) : (
-        <div key={references.join("/")} data-testid="document-content" className="px-5 py-3 text-[13px] leading-relaxed [&>.chat-md>:first-child]:mt-0">
-          <ChatMarkdown content={content} resolveUrl={(href) => {
-            const resource = resources.get(href);
-            return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
-          }} components={{
-            img: ({ src, alt }) => (
-              typeof src === "string"
-                ? <ZoomableImage src={src} alt={alt ?? ""} />
-                : null
-            ),
-            a: ({ href, children }) => {
-              const resource = href ? byUrl.get(href) : undefined;
-              const external = !href?.startsWith("#");
-              return <a href={href} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined} onClick={(event) => {
-                if (!resource?.markdown || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-                event.preventDefault();
-                show([...references, resource.id], "push");
-              }}>{children}</a>;
-            },
-          }} />
-        </div>
-      )}
-        </>
-      )}
+      <ScrollArea data-testid="shared-document" hidden={bodyHidden} viewportRef={viewportRef} className={cn(MIN_H_0, FLEX_1)}>
+        {children}
+        {bodyHidden ? null : (
+          <>
+            {failed && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
+            {!content ? (
+              <div className={cn("items-center justify-center px-8 text-center text-sm text-muted-foreground", FLEX, FLEX_1)}>
+                {loading ? t("loading") : refusal ? (
+                  <div data-testid="document-failure" className="space-y-1">
+                    <p>{t(refusal.text)}</p>
+                    {refusal.raw && references.length > 0 ? (
+                      <a className="underline hover:text-foreground" href={rawUrl} target="_blank" rel="noopener noreferrer">{t("openRaw")}</a>
+                    ) : null}
+                  </div>
+                ) : current?.legacy_html ? t("legacyHtml") : t("empty")}
+              </div>
+            ) : (
+              <div key={references.join("/")} data-testid="document-content" className="px-5 py-3 text-[13px] leading-relaxed [&>.chat-md>:first-child]:mt-0">
+                <ChatMarkdown content={content} resolveUrl={(href) => {
+                  const resource = resources.get(href);
+                  return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
+                }} components={{
+                  img: ({ src, alt }) => (
+                    typeof src === "string"
+                      ? <ZoomableImage src={src} alt={alt ?? ""} />
+                      : null
+                  ),
+                  a: ({ href, children }) => {
+                    const resource = href ? byUrl.get(href) : undefined;
+                    const external = !href?.startsWith("#");
+                    return <a href={href} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined} onClick={(event) => {
+                      if (!resource?.markdown || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                      event.preventDefault();
+                      show([...references, resource.id], "push");
+                    }}>{children}</a>;
+                  },
+                }} />
+              </div>
+            )}
+          </>
+        )}
+      </ScrollArea>
     </section>
   );
 }

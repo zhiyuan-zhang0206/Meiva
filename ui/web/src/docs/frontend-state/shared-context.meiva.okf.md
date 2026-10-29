@@ -26,10 +26,10 @@ Neither the question area nor the document body has a nested scrollbar; long
 choices, comments and document content remain in one continuous reading flow.
 Question controls use the timeline's 13px body size and compact row spacing.
 Touch inputs retain their 16px baseline; a narrow desktop column still uses 13px.
-The question and document are sibling sections. The question comes first;
-the Shared context title and document toolbar belong only to the document below
-it, on both desktop and narrow screens. There is no separate notice bar, queue
-counter or collapse control. Document padding supplies the initial spacing;
+The document bar is the right column's title bar, outside the reading viewport
+in both modes: only the reading area scrolls, never the bar (user 2026-10-29).
+The question is that area's first block, above the document body. There is no
+separate notice bar, queue counter or collapse control. Document padding supplies the initial spacing;
 the first Markdown block adds no top margin. Plain numbered choice rows avoid a card around every option.
 A persistent comment input and the shared send button match the chat composer;
 the selection and comment form one explicit submission. Dismiss is a small outlined
@@ -47,16 +47,16 @@ bar keeps just the controls the mode uses: its name, the pressed magnifier and t
 column's collapse; the document's home, back and refresh read the body the mode
 hides, so they leave with it. The question stays mounted but hidden in Inspector mode, preserving reply drafts
 and leaving the full body height for Inspector. Returning restores the shared
-document reading position. In Inspector mode, the outer scrollbar appears only
-on overflow, keeping Inspector's scrollbar reachable. Below the
+document reading position. The panel itself never scrolls: Inspector keeps its
+own scrollbar under the same bar. Below the
 desktop breakpoint the shared context opens as a full-screen reading view from
 the header's To user action — available whenever an agent is selected. Its top
 bar pairs Back to messages with the Inspector mode toggle on the right. The
 toggle stays in that bar when active and becomes the exit. In narrow Inspector
 mode, the document bar disappears entirely and Inspector starts directly below
 the top bar. The document component stays mounted to retain reference navigation.
-The narrow document toolbar contains only document controls, so the document's title never appears
-to encompass the question or the panel's mode switch.
+The narrow document toolbar carries the document's own controls; the
+mode switch stays in the top bar beside Back.
 
 `["to-user", agentId]` owns the root document snapshot. Linked Markdown uses
 that query-key prefix followed by its reference chain. The home-machine ops
