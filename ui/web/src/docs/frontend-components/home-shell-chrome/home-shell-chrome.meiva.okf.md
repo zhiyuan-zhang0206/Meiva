@@ -17,8 +17,10 @@ than as one page-wide divider. The right panel's document bar (the "Updated …"
 strip) is such a bar, not a section header — it takes the wrapping variant
 (`COLUMN_TITLE_BAR_WRAP_CLASS`: the same 44px as a minimum, allowed to grow only
 when its content cannot fit one line), so at desktop widths its rule ends on the
-same line as its neighbours. The notice header above it takes the fixed variant
-for the same reason. Both variants are `relative`: the rule is the bar's own
+same line as its neighbours. A bar stays at its column's top while the column's
+content scrolls beneath it: the right panel's bar sits above its reading area
+rather than inside it, so a scroll never carries it away (user report
+2026-10-29). Both variants are `relative`: the rule is the bar's own
 `after` element, painted against the bar and not against the section around it.
 
 Every home column title bar is BAR_HEIGHT_PX tall and paints BAR_DIVIDER_CLASS's inset rule, so the Agent Tree, Timeline and right-panel dividers sit on one line; the right panel's document bar takes the wrapping variant (44px minimum, growing only when its content cannot fit one line) and its notice header takes the fixed variant — neither draws a border on its section.

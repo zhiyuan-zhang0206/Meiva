@@ -164,10 +164,14 @@ it("hides the mounted question in Inspector mode and restores its reading positi
   expect(draft.value).toBe("Keep this answer");
 });
 
+function readingArea(): HTMLDivElement {
+  return screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
+}
+
 it("starts a new agent or referenced document at the top of the shared reading area", () => {
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
   const { rerender, browser } = renderPanel(<SharedContextPanel {...props} />);
-  const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
+  const body = readingArea();
   body.scrollTop = 420;
   act(() => {
     browser.traverse(`http://fake.local/?agent_id=7&reference=${"a".repeat(64)}`);
@@ -175,20 +179,53 @@ it("starts a new agent or referenced document at the top of the shared reading a
   expect(body.scrollTop).toBe(0);
   body.scrollTop = 500;
   rerender(<SharedContextPanel {...props} agentId={8} />);
-  expect(screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!).toBe(body);
-  expect(body.scrollTop).toBe(0);
+  // meiva:note
+  // The document is keyed by agent, so switching agents rebuilds the reading
+  // area: it starts at the top instead of carrying the previous agent's offset.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  expect(readingArea().scrollTop).toBe(0);
 });
 
-it.each([false, true])("keeps the question before and outside the document section, even without content (mobile=%s)", (mobile) => {
+function follows(first: Element, second: Element): boolean {
+  return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+it.each([false, true])("orders the title bar, the question and the document body in that order, even without content (mobile=%s)", (mobile) => {
+  // meiva:note
+  // The bar is the right column's title bar, so it heads the column and the
+  // question is the first block of the reading area below it rather than a
+  // section above the bar (user report 2026-10-29: pinning the bar and keeping
+  // it below the question cannot both hold).
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   renderPanelView({ notices: [notice()], mobile });
   const bar = screen.getByTestId("document-bar");
   const question = screen.getByRole("region", { name: "notification" });
   const document = screen.getByText("empty");
-  expect(question.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByRole("region", { name: "sharedContext" }).contains(question)).toBe(false);
+  expect(follows(bar, question)).toBe(true);
+  expect(follows(question, document)).toBe(true);
   expect(screen.getAllByText("sharedContext")).toHaveLength(1);
-  expect(question.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.queryByTestId("notice-bar")).toBeNull();
+});
+
+it.each([false, true])("pins the title bar outside the reading viewport, so a scroll moves only the content (inspector=%s)", async (inspector) => {
+  // meiva:note
+  // The bar belongs to the column, not to the reading area: both modes keep it
+  // out of the scrolling element, so a scroll never carries it away — Shared
+  // Context scrolls the question and document below it exactly as Inspector
+  // scrolls its own body (user report 2026-10-29).
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  snapshot.inspectorOpen = inspector;
+  renderPanelView({ notices: [notice()] });
+  if (inspector) expect(await screen.findByTestId("inspector-view")).toBeTruthy();
+  const bar = screen.getByTestId("document-bar");
+  const readingArea = screen.getByTestId("shared-document");
+  const viewport = readingArea.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
+  expect(viewport.contains(bar)).toBe(false);
+  expect(follows(bar, readingArea)).toBe(true);
+  if (!inspector) {
+    expect(viewport.contains(screen.getByRole("region", { name: "notification" }))).toBe(true);
+    expect(viewport.contains(screen.getByText("empty"))).toBe(true);
+  }
 });
 
 it("closes the reading view from the mobile header", () => {
@@ -205,7 +242,7 @@ it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   const toggle = screen.getByRole("button", { name: "openInspector" });
   expect(toggle.parentElement).toBe(back.parentElement);
   expect(screen.queryByRole("button", { name: "Inspect" })).toBeNull();
-  const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
+  const body = readingArea();
   body.scrollTop = 180;
   fireEvent.click(toggle);
   snapshot.inspectorOpen = true;
@@ -214,9 +251,12 @@ it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   expect(exit).toBe(toggle);
   expect(exit.getAttribute("aria-pressed")).toBe("true");
   expect(exit.parentElement).toBe(back.parentElement);
-  body.scrollTop = 0;
   fireEvent.click(exit);
   snapshot.inspectorOpen = false;
   rerender(<SharedContextPanel {...props} />);
-  expect(body.scrollTop).toBe(180);
+  // meiva:note
+  // Narrow Inspector replaces the whole document section, so leaving it rebuilds
+  // the reading area; the position comes back from the panel's own record.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  expect(readingArea().scrollTop).toBe(180);
 });
