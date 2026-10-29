@@ -107,6 +107,7 @@ def test_allowlist_entry_is_stale_once_the_module_stops_bypassing() -> None:
         owners=frozenset({"base/owner.py"}),
         find=lambda _tree, _roots: [],
         fix="use the owner",
+        why="one owner keeps the posture",
         allowed={"gateway/legacy.py": "historical exemption"},
     )
 
@@ -119,6 +120,7 @@ def test_allowlist_entry_is_stale_once_the_module_stops_bypassing() -> None:
     assert lineno == 1
     assert "stale fake-decision allowlist entry" in message
     assert "remove it from [single-owner.<decision>] in meizel.policy.toml" in message
+    assert "an exemption that outlives its reason is a permission nobody re-checks" in message
 
 
 def test_allowlist_entry_is_not_stale_while_it_still_bypasses() -> None:
@@ -126,6 +128,7 @@ def test_allowlist_entry_is_not_stale_while_it_still_bypasses() -> None:
         owners=frozenset({"base/owner.py"}),
         find=lambda _tree, _roots: [3],
         fix="use the owner",
+        why="one owner keeps the posture",
         allowed={"gateway/legacy.py": "historical exemption"},
     )
 
@@ -139,7 +142,11 @@ def test_allowlist_entry_is_not_stale_while_it_still_bypasses() -> None:
 
 def test_allowlist_errors_ignore_modules_outside_the_allowed_map() -> None:
     decision = decisions.Decision(
-        owners=frozenset(), find=lambda _tree, _roots: [], fix="use the owner", allowed={}
+        owners=frozenset(),
+        find=lambda _tree, _roots: [],
+        fix="use the owner",
+        why="one owner keeps the posture",
+        allowed={},
     )
 
     assert (
@@ -155,6 +162,7 @@ def test_missing_allowlist_errors_flags_a_deleted_allowed_path(tmp_path: pathlib
         owners=frozenset(),
         find=lambda _tree, _roots: [],
         fix="use the owner",
+        why="one owner keeps the posture",
         allowed={"gateway/gone.py": "historical exemption"},
     )
 
@@ -171,6 +179,7 @@ def test_missing_allowlist_errors_is_clean_for_an_existing_path(tmp_path: pathli
         owners=frozenset(),
         find=lambda _tree, _roots: [],
         fix="use the owner",
+        why="one owner keeps the posture",
         allowed={"gateway/present.py": "historical exemption"},
     )
 
@@ -190,6 +199,7 @@ def test_missing_allowlist_errors_counts_an_undecodable_file_as_present(
         owners=frozenset(),
         find=lambda _tree, _roots: [],
         fix="use the owner",
+        why="one owner keeps the posture",
         allowed={"gateway/binary.py": "historical exemption"},
     )
 
@@ -197,3 +207,24 @@ def test_missing_allowlist_errors_counts_an_undecodable_file_as_present(
         decisions.missing_allowlist_errors(tmp_path, decisions_map={"fake-decision": decision})
         == []
     )
+
+
+# meiva:note
+# A bypass message is the rule's whole handover: the fact and the repair (asserted above), why the
+# decision has one owner, what the site that dials here now owns, and where the rule is written.
+# Asserted on fragments, so the wording stays free to change.
+def test_a_bypass_message_carries_the_reason_the_owner_and_the_rule_document() -> None:
+    message = decisions.site_message("postgres-dial")
+
+    assert message.startswith(
+        "bypasses the single owner of `postgres-dial` — dial through the owning module"
+    )
+    assert "second transport posture" in message
+    assert "whoever dials here now owns that posture" in message
+    assert "docs/conventions/python-conventions.md" in message
+
+
+def test_every_decision_carries_a_reason() -> None:
+    assert decisions.DECISIONS
+    for name, decision in decisions.DECISIONS.items():
+        assert decision.why.strip(), name

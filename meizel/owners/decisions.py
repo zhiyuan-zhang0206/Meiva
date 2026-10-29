@@ -20,6 +20,7 @@ __all__ = [
     "allowlist_errors",
     "missing_allowlist_errors",
     "owner_bypasses",
+    "site_message",
 ]
 
 Sites = dict[str, list[int]]
@@ -109,6 +110,9 @@ def _postgres_dials(tree: ast.Module, roots: tuple[str, ...]) -> list[int]:
     return sorted(call.lineno for call in calls if bindings.is_dial(call))
 
 
+# meiva:note
+# `why` is why the decision has one owner at all and what a site that decides it again takes on.
+# The message prints it after the repair, so a bypass teaches instead of only forbidding.
 @dataclass(frozen=True)
 class Decision:
     """A design decision with exactly one owning module; other sites are bypasses."""
@@ -116,12 +120,27 @@ class Decision:
     owners: frozenset[str]
     find: Callable[[ast.Module, tuple[str, ...]], list[int]]
     fix: str
+    why: str
     # path -> one-line reason the site genuinely cannot go through the owner; the entries are
     # listed in meizel.policy.toml under [single-owner.<decision>].
     allowed: dict[str, str] = field(default_factory=dict[str, str])
 
 
 _POSTGRES_DIAL_OWNERS = frozenset(_POLICY.names("single-owner", "postgres-dial-owners"))
+
+# meiva:note
+# The convention that states the rule; every message of this owner points here.
+_DOC = "docs/conventions/python-conventions.md (Rule 5, single decision owners)"
+
+# meiva:note
+# What a second Postgres dial costs: the owner's posture is not a helper call, it is the process's
+# way of talking to Postgres, so a dial elsewhere gives the process a second one, and the site that
+# builds it keeps it working. Written once here rather than at each reporting site.
+_POSTGRES_DIAL_WHY = (
+    "one module decides how this process talks to Postgres, so a dial built here opens a second "
+    "transport posture that prepares statements, keeps sockets alive and scrubs pooled sessions "
+    "by its own rules, and whoever dials here now owns that posture for this site"
+)
 
 DECISIONS: dict[str, Decision] = {
     "postgres-dial": Decision(
@@ -132,9 +151,19 @@ DECISIONS: dict[str, Decision] = {
             "which owns the transport posture (prepare_threshold=None, keepalives, "
             "statement ceiling or unbounded, sslmode, pooled-session scrub)"
         ),
+        why=_POSTGRES_DIAL_WHY,
         allowed=_POLICY.reasons("single-owner", "postgres-dial"),
     ),
 }
+
+
+# meiva:note
+# The one sentence a bypassed decision owes its reader: what the site did, the repair, why the
+# decision has a single owner, and where the rule is written. A caller prints it verbatim, so the
+# same why is never written twice.
+def site_message(target: str) -> str:
+    decision = DECISIONS[target]
+    return f"bypasses the single owner of `{target}` — {decision.fix}; {decision.why}. See {_DOC}."
 
 
 def owner_bypasses(tree: ast.Module, rel_path: str, roots: tuple[str, ...]) -> Sites:
@@ -158,13 +187,17 @@ def allowlist_errors(
     """A listed exemption whose module no longer bypasses the owner is stale."""
     active = DECISIONS if decisions_map is None else decisions_map
     return [
-        (1, f"stale {name} allowlist entry — the module no longer bypasses the owner; {_UNLIST}")
+        (
+            1,
+            f"stale {name} allowlist entry — the module no longer bypasses the owner; {_UNLIST}. {_STALE_WHY}",
+        )
         for name, decision in active.items()
         if rel_path in decision.allowed and not decision.find(tree, roots)
     ]
 
 
 _UNLIST = f"remove it from [single-owner.<decision>] in {allowances.POLICY}"
+_STALE_WHY = "an exemption that outlives its reason is a permission nobody re-checks"
 
 
 def missing_allowlist_errors(
@@ -175,7 +208,7 @@ def missing_allowlist_errors(
     """A listed exemption for a module that no longer exists is stale too."""
     active = DECISIONS if decisions_map is None else decisions_map
     return [
-        f"{path}:1: stale {name} allowlist entry — the module no longer exists; {_UNLIST}"
+        f"{path}:1: stale {name} allowlist entry — the module no longer exists; {_UNLIST}. {_STALE_WHY}"
         for name, decision in active.items()
         for path in sorted(decision.allowed)
         if not (repo_root / path).is_file()
