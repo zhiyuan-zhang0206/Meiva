@@ -50,8 +50,16 @@ def walg_throwaway(config: ConfigBoot, *, home: Path) -> ThrowawayConfig:
 
 # meiva:note
 # Run the pre-flight steps; the exit code is non-zero when any step failed.
-def cmd_walg_check(plane: DataPlaneConfig, *, token: str, home: Path) -> int:
-    steps = check.run_check(path=plane.walg_config_file, token=token, home=home)
+def cmd_walg_check(
+    plane: DataPlaneConfig,
+    *,
+    token: str,
+    home: Path,
+    installed: Callable[..., str | None] = walg_binary.installed_problem,
+) -> int:
+    steps = check.run_check(
+        path=plane.walg_config_file, token=token, home=home, installed=installed
+    )
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
@@ -123,12 +131,13 @@ def cmd_walg_restore(
     user: str | None = None,
     clock: Clock,
     home: Path,
+    installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     path = plane.walg_config_file
     if path is None:
         print("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
-    binary_problem = walg_binary.installed_problem(home=home)
+    binary_problem = installed(home=home)
     if binary_problem is not None:
         print(f"restore failed: {binary_problem} (meiva converge installs it)", file=sys.stderr)
         return 1
