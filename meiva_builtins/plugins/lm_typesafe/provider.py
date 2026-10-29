@@ -1,22 +1,12 @@
-"""TypeSafe provider plugin for Meiva: the Jev decision model.
-
-Jev answers typed questions about a text ``state`` with probabilities and generates no text, so
-this plugin contributes a decision provider only. The wire shape follows the TypeSafe HTTP API
-reference (https://docs.typesafe.ai/api): ``POST /v1/systemone`` with ``state``, ``model`` and
-``questions`` keyed by id; the answers come back under the same ids. The official SDK is not
-used; the model id is pinned to a versioned release, never a ``jev-latest`` alias.
-"""
+# meiva:link meiva_builtins/plugins/lm_typesafe/docs/systemone/systemone.meiva.okf.md
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeGuard
+
+from pydantic import BaseModel
 
 from base.lm.provider_api import (
-    FALSE,
-    TRUE,
-    Choice,
-    Decision,
     DecisionBinding,
     DecisionBuildContext,
     DecisionModelSpec,
@@ -25,12 +15,13 @@ from base.lm.provider_api import (
     DecisionResult,
     PriceRates,
     Question,
-    Score,
-    YesNo,
     post_json,
 )
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
+
+from . import systemone
+from .local_provider import local_contribution
 
 _ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 _MODEL = "jev-1.13.0"
@@ -47,125 +38,21 @@ class JevBinding:
         payload = {
             "state": state,
             "model": self._ctx.model,
-            "questions": {qid: _wire_question(q) for qid, q in questions.items()},
+            "questions": {qid: systemone.wire_question(q) for qid, q in questions.items()},
         }
         body = await post_json(self._ctx, url=_ENDPOINT, api_key=self._api_key, payload=payload)
-        tokens = _input_tokens(body)
+        tokens = systemone.input_tokens(body)
+        answered = body.get("model")
+        if answered != _MODEL:
+            logger.warning(
+                "Jev answered with model {answered!r}, not the pinned {pinned!r}",
+                answered=answered,
+                pinned=_MODEL,
+            )
         try:
-            return DecisionResult(_parse_answers(body, questions), tokens)
+            return DecisionResult(systemone.parse_answers(body, questions), tokens)
         except DecisionResponseError as exc:
             raise DecisionResponseError(str(exc), input_tokens=tokens) from exc
-
-
-def _wire_question(question: Question) -> dict[str, Any]:
-    match question:
-        case YesNo():
-            return {
-                "type": "noul",
-                "instructions": question.question,
-                "criteria": {"true": question.true_if, "false": question.false_if},
-            }
-        case Choice():
-            return {
-                "type": "choice",
-                "instructions": question.question,
-                "criteria": dict(question.options),
-            }
-        case Score():
-            return {
-                "type": "score",
-                "instructions": question.question,
-                "criteria": [
-                    f"{label}: {description}"
-                    for label, description in zip(question.scale, question.rubric, strict=True)
-                ],
-            }
-
-
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def _object(value: object, what: str) -> dict[str, Any]:
-    if not _is_str_dict(value):
-        raise DecisionResponseError(f"Jev response: {what} is not an object")
-    return value
-
-
-def _input_tokens(body: Mapping[str, Any]) -> int:
-    usage = body.get("usage")
-    tokens = usage.get("input_tokens") if _is_str_dict(usage) else None
-    if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
-        raise DecisionResponseError("Jev response carries no valid usage.input_tokens")
-    return tokens
-
-
-def _number(value: object, what: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise DecisionResponseError(f"Jev response: {what} is not a number: {value!r}")
-    return float(value)
-
-
-def _parse_answers(
-    body: Mapping[str, Any], questions: Mapping[str, Question]
-) -> dict[str, Decision]:
-    answered = body.get("model")
-    if answered != _MODEL:
-        logger.warning(
-            "Jev answered with model {answered!r}, not the pinned {pinned!r}",
-            answered=answered,
-            pinned=_MODEL,
-        )
-    answers = _object(body.get("answers"), "answers")
-    decisions: dict[str, Decision] = {}
-    for qid, answer in answers.items():
-        question = questions.get(qid)
-        if question is None:
-            raise DecisionResponseError(f"Jev answered unknown question {qid!r}")
-        decisions[qid] = _parse_answer(qid, question, _object(answer, f"answer {qid!r}"))
-    return decisions
-
-
-def _parse_answer(qid: str, question: Question, answer: Mapping[str, Any]) -> Decision:
-    expected = {YesNo: "noul", Choice: "choice", Score: "score"}[type(question)]
-    if answer.get("type") != expected:
-        raise DecisionResponseError(
-            f"Jev answer {qid!r} has type {answer.get('type')!r}, expected {expected!r}"
-        )
-    if isinstance(question, YesNo):
-        p_true = _number(answer.get("noul"), f"{qid}.noul")
-        return Decision(
-            top=TRUE if p_true >= 0.5 else FALSE,
-            probabilities={TRUE: p_true, FALSE: 1.0 - p_true},
-        )
-    raw = _object(answer.get("probabilities"), f"{qid}.probabilities")
-    confidence = _number(answer.get("confidence"), f"{qid}.confidence")
-    if isinstance(question, Choice):
-        top = answer.get("choice")
-        if not isinstance(top, str):
-            raise DecisionResponseError(f"Jev answer {qid!r} carries no choice")
-        probabilities = {str(k): _number(v, f"{qid}.probabilities[{k}]") for k, v in raw.items()}
-        return Decision(top=top, probabilities=probabilities, confidence=confidence)
-    # Score: probabilities are keyed by the 0-based level number as a string.
-    by_label: dict[str, float] = {}
-    for key, value in raw.items():
-        try:
-            label = question.scale[int(key)]
-        except (ValueError, IndexError) as exc:
-            raise DecisionResponseError(
-                f"Jev answer {qid!r} has level key {key!r} outside the {len(question.scale)} levels"
-            ) from exc
-        by_label[label] = _number(value, f"{qid}.probabilities[{key}]")
-    return Decision(
-        top=max(by_label, key=lambda label: by_label[label]),
-        probabilities=by_label,
-        confidence=confidence,
-        score=_number(answer.get("score"), f"{qid}.score"),
-    )
 
 
 def build(ctx: DecisionBuildContext) -> DecisionBinding:
@@ -196,5 +83,5 @@ PROVIDER = DecisionProviderContribution(
 )
 
 
-def contribute() -> PluginContributions:
-    return PluginContributions(decision_providers=(PROVIDER,))
+def configure(config: BaseModel) -> PluginContributions:
+    return PluginContributions(decision_providers=(PROVIDER, local_contribution(config)))

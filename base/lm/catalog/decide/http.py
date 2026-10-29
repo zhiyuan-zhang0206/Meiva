@@ -1,9 +1,4 @@
-"""The HTTP step shared by decision providers: one authenticated JSON POST, no retries.
-
-Retrying is the caller's decision (``decide()`` is a pre-flight check or a gate, and a caller
-that wants a second attempt can call it again), so a transport failure or a non-success status
-surfaces as ``DecisionRequestError`` after exactly one request.
-"""
+# meiva:link base/lm/docs/decision-models.meiva.okf.md
 
 from __future__ import annotations
 
@@ -20,18 +15,22 @@ from base.lm.catalog.decide.types import (
 
 
 # meiva:note
-# POST ``payload`` as JSON with a bearer key; return the decoded JSON object.
+# POST once; omit authentication when the provider has no configured credential.
 async def post_json(
-    ctx: DecisionBuildContext, *, url: str, api_key: str, payload: Mapping[str, object]
+    ctx: DecisionBuildContext, *, url: str, api_key: str | None, payload: Mapping[str, object]
 ) -> dict[str, object]:
-    import httpx  # deferred: the provider contract loads on the exec-child boot path
+    # meiva:note
+    # The lightweight provider contract loads on the exec-child boot path.
+    import httpx
 
     raw_transport: Any = ctx.transport
     transport: httpx.AsyncBaseTransport | None = raw_transport
     try:
         async with httpx.AsyncClient(transport=transport, timeout=ctx.timeout) as client:
             response = await client.post(
-                url, json=payload, headers={"Authorization": f"Bearer {api_key}"}
+                url,
+                json=payload,
+                headers={"Authorization": f"Bearer {api_key}"} if api_key is not None else {},
             )
     except httpx.HTTPError as exc:
         raise transport_failure(ctx.model, url, exc) from exc

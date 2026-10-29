@@ -1,21 +1,11 @@
-from typing import cast
-
-
-def _pin_fleet_cluster_config() -> None:
-    import json
+def _pin_cluster_config() -> None:
     import os
 
     from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
-    from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
+    from base.packages.plugins.config_registration import plugin_bootstrap_config
+    from base.paths import meiva_home
 
-    fleet = FleetConfig()
-    projection = {
-        name: getattr(fleet, name)
-        for name, info in FleetConfig.model_fields.items()
-        if cast("dict[str, object]", info.json_schema_extra).get("scope")
-        in {"cluster-pinned", "cluster-default"}
-    }
-    os.environ[PLUGIN_CLUSTER_CONFIG_ENV] = json.dumps({"meiva_fleet": projection})
+    os.environ[PLUGIN_CLUSTER_CONFIG_ENV] = plugin_bootstrap_config(home=meiva_home())
 
 
 def launched_imports_share_boot() -> None:
@@ -25,7 +15,7 @@ def launched_imports_share_boot() -> None:
 
     os.environ["MEIVA_AGENT_ID"] = "7123"
     os.environ["MEIVA_TIMEZONE"] = "UTC"
-    _pin_fleet_cluster_config()
+    _pin_cluster_config()
     import meiva
     from base.agents.context import MeivaContext
     from base.agents.context.clients import ClientSet

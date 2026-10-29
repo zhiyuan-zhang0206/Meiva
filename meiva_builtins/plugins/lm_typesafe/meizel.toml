@@ -1,2 +1,10 @@
 [purity]
 "plugin.py" = "strict"
+"default_config.py" = "strict"
+"systemone.py" = "strict"
+
+[uses]
+"local_binding.py" = ["default_config.py", "systemone.py"]
+"local_provider.py" = ["default_config.py", "local_binding.py"]
+"provider.py" = ["local_provider.py", "systemone.py"]
+"tests" = ["default_config.py", "local_provider.py"]

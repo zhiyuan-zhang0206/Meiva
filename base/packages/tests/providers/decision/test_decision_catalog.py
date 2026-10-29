@@ -219,6 +219,7 @@ def test_repo_catalog_registers_both_decision_providers() -> None:
     assert {p.key_env for p in catalog.decision_providers.values()} == {
         "TYPESAFE_API_KEY",
         "OPENAI_API_KEY",
+        "LOCAL_DECISION_API_KEY",
     }
     assert catalog.decision_models["jev-1.13.0"].context_window == 32_000
     assert catalog.decision_models["jev-1.13.0"].request_limit == 64_000

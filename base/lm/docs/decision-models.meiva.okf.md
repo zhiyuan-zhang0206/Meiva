@@ -24,7 +24,7 @@ primitive from chat models, not a kind of chat model.
   for them. `validate_model_config` and `build_chat_model` reject a decision id with an
   explicit error; `decide()` rejects a chat id the same way.
 - A plugin declares them in `PluginContributions.decision_providers`, a tuple of
-  `DecisionProviderContribution(prefix, display_name, key_env, build, models, pricing)`,
+  `DecisionProviderContribution(prefix, display_name, key_env, build, models, pricing, requires_key=True)`,
   beside (not inside) `providers`. The same `CatalogBuilder` installs both
   (`install` for chat, `install_decision` for decision). A plugin may contribute both,
   as `lm_openai` does.
@@ -55,7 +55,8 @@ primitive from chat models, not a kind of chat model.
 - `DecisionBinding` is the provider-facing protocol: `async decide(state, questions) ->
   DecisionResult(decisions, input_tokens)`. The token count is the provider's billed input,
   used for the usage row. `build(ctx)` receives `DecisionBuildContext(model, spec, timeout,
-  keys, transport)`; `decide(..., keys=...)` first requires the provider's key in `keys` and raises
+  keys, transport)`; `decide(..., keys=...)` first requires the provider's key in `keys` when
+  `requires_key` is true (the default), and raises
   `DecisionKeyMissingError` (from the `RuntimeError`) so callers can catch it without catching every
   `RuntimeError`.
 
@@ -82,7 +83,7 @@ own that, because they know which part of a document matters.
 ## Fail-fast rules
 
 Before any request: an unknown id (`UnknownDecisionModelError`), malformed inputs
-(`ValueError`/`TypeError`), a missing key (`DecisionKeyMissingError`, wrapping the `ProviderKeys.require` message and
+(`ValueError`/`TypeError`), a missing required key (`DecisionKeyMissingError`, wrapping the `ProviderKeys.require` message and
 raised `from` its `RuntimeError`), and an
 estimated input above `context_window` or `max_request_tokens`
 (`DecisionInputTooLargeError`). The estimate (`estimate_tokens`) counts four ASCII
@@ -105,6 +106,9 @@ proves invalid after it was billed still writes its row (`DecisionResponseError.
 Failures before the provider answers write nothing.
 
 ## Providers
+
+Optional registered local HTTP services and their capacity/identity boundaries:
+[[meiva_builtins/plugins/lm_typesafe/docs/systemone/systemone.meiva.okf.md]].
 
 | Plugin | Decision id | Wire model | Endpoint | Key | Window | Price (per 1M input) |
 |---|---|---|---|---|---|---|

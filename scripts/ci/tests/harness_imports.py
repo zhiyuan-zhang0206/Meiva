@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from base import cluster
+from base import cluster, config
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -19,12 +19,13 @@ from base.events.live.redis_listener import RedisInboundListener
 from base.host import proc
 from base.host.env import port_lease
 from base.host.env.port_table import FIXED_PORTS
-from base.host.env.registry import health_port_env_aliases
+from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, health_port_env_aliases
 from base.host.proc import run_bounded
 from base.log.tests.stdlib_logging import stdlib_logging_isolated
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import Platform, raise_fd_limit
+from base.packages.plugins.config_registration import plugin_bootstrap_config
 from base.paths import meiva_home
 from scripts.structure.imports.fixture_scopes import (
     SCOPE_FILE,
@@ -35,6 +36,7 @@ from scripts.structure.imports.fixture_scopes import (
 
 __all__ = [
     "FIXED_PORTS",
+    "PLUGIN_CLUSTER_CONFIG_ENV",
     "SCOPE_FILE",
     "SYSTEM_TIMERS",
     "ClusterDirectUrl",
@@ -51,6 +53,7 @@ __all__ = [
     "ThrowawayConfig",
     "assert_test_db_url",
     "cluster",
+    "config",
     "configured_base",
     "containers",
     "discover_scopes",
@@ -58,6 +61,7 @@ __all__ = [
     "health_port_env_aliases",
     "meiva_home",
     "modules_by_path",
+    "plugin_bootstrap_config",
     "port_lease",
     "postgres",
     "proc",

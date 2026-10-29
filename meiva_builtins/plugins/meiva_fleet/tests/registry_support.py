@@ -71,6 +71,7 @@ def _deliver_cluster_config(environment: pytest.MonkeyPatch, config: object) -> 
 
     from base.config import schema_extra
     from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+    from base.packages.plugins.config_registration import plugin_bootstrap_config
     from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
     assert isinstance(config, FleetConfig)
@@ -80,4 +81,6 @@ def _deliver_cluster_config(environment: pytest.MonkeyPatch, config: object) -> 
         if schema_extra(FleetConfig.model_fields[name]).get("scope")
         in {"cluster-pinned", "cluster-default"}
     }
-    environment.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": values}))
+    packet = json.loads(plugin_bootstrap_config(home=meiva_home()))
+    packet["meiva_fleet"] = values
+    environment.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps(packet))

@@ -14,8 +14,6 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home
 
-build_model_catalog(home=meiva_home())
-
 _MODEL = "deepseek-flash"
 _TINY_FRACTION = 1e-6
 _NOW = datetime(2026, 10, 1, tzinfo=UTC)
