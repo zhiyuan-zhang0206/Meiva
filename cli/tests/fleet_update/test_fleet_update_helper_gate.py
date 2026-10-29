@@ -61,11 +61,11 @@ def test_a_host_with_no_helper_is_no_blind_spot(
 
 def test_the_tracked_table_is_keyed_by_ssh_alias() -> None:
     # meiva:note
-    # The gate looks each host up by the alias the window names (`mba`), never by the machine
-    # name that host boots into (`macbook-air`): a table keyed by the other name tells every
-    # window that the host has no baseline, so the two names must not drift apart again.
+    # The gate looks each host up by the SSH alias the window names. The laptop is reached
+    # through either `mba` or `macbook-air`; both names pin the same observed certificate.
     table = json.loads((repo_root() / "deploy" / "fleet" / "helper-identities.json").read_text())
-    assert set(table) == {"mba", "macmini", "company-air", "company-mini"}
+    assert set(table) == {"mba", "macbook-air", "macmini", "company-air", "company-mini"}
+    assert table["macbook-air"] == table["mba"] == "d24e362f915c423df88a30e2b9e046835f645690"
 
 
 def test_a_helper_signed_by_another_certificate_refuses(
