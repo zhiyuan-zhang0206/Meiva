@@ -1,0 +1,7 @@
+exports = ["index.py", "judgment.py", "sources.py"]
+
+[uses]
+"entry.py" = ["index.py", "judgment.py"]
+"index.py" = ["sources.py"]
+"judgment.py" = ["index.py", "sources.py"]
+"__init__.py" = ["entry.py"]
