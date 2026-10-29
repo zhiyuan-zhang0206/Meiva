@@ -64,6 +64,9 @@ does not cancel that work; cancelling the leader settles all followers without
 replacing the snapshot. A failed refresh preserves the prior snapshot and is
 reported to the caller. A name no machine carries answers 404, and a machine
 without an agent-runner answers 503. Unchecked never means not installed.
+The route contract declares refresh retry-safe: repeating it only inspects CLI
+availability and replaces the snapshot; it does not launch or authenticate a
+session. The browser still makes one request per explicit refresh.
 
 Each row carries the probe's `status` and `reason` unchanged, plus `launchable`,
 which the gateway composes from two facts: a launcher for that harness exists in
