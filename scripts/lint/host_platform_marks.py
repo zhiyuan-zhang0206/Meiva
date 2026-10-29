@@ -39,7 +39,9 @@ EXEMPTION = "# host-ok:"
 # The top-level directories a grounding path can start with: the packages of this
 # repository, read from the role the manifests own, plus the two trees that are not
 # packages. A reason that points at one of them tells the next reader where to look.
-_REPO_TOPS = frozenset({*packages("application"), *packages("tooling"), "docs", "tests", "future"})
+_REPO_TOPS = frozenset(
+    {*packages("application", "standalone"), *packages("tooling"), "docs", "tests", "future"}
+)
 
 # meiva:note
 # `Host.system()` and `Platform.current()` build the host of this process; `sys.platform`,
@@ -254,18 +256,13 @@ def _exemptions_of(path: Path) -> list[tuple[str, str]]:
         return []
 
 
-def _test_files(targets: list[Path]) -> Iterator[Path]:
-    for target in targets:
-        if target.is_file():
-            if target.suffix == ".py":
-                yield target
-        elif target.is_dir():
-            yield from target.rglob("*.py")
+def _test_files(targets: list[Path], root: Path) -> Iterator[Path]:
+    yield from lint_common.python_files(targets, root)
 
 
 def _default_targets(root: Path) -> list[Path]:
     hosts = lint_common.pytest_test_hosts((root / "pyproject.toml").read_text(encoding="utf-8"))
-    return [root / host for host in hosts if (root / host).is_dir()]
+    return [root / host for host in (*hosts, *packages("standalone")) if (root / host).is_dir()]
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -307,7 +304,7 @@ def _judge(
     judged: dict[str, list[tuple[int, str, str]]] = {}
     exemptions: dict[str, list[str]] = {}
     scanned: set[str] = set()
-    for path in sorted(lint_common.restrict(_test_files(targets), None, root)):
+    for path in sorted(lint_common.restrict(_test_files(targets, root), None, root)):
         try:
             rel = path.relative_to(root).as_posix()
         except ValueError:

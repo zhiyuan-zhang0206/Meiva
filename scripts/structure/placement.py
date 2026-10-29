@@ -42,7 +42,7 @@ __all__ = [
 ]
 
 # First-party Python code participates in placement, including runnable templates.
-CODE_TOPS = packages("application", "tooling", "templates", "examples")
+CODE_TOPS = packages("application", "standalone", "tooling", "templates", "examples")
 _ARTIFACT_TOPS = (
     "db",
     "deploy",

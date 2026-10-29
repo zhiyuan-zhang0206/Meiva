@@ -34,7 +34,9 @@ _POLICY = allowances.load(_REPO_ROOT)
 _TEST_ONLY_DIRS = _POLICY.names("no-os-environ", "test-only-dirs")
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
-_SCAN_TARGETS = plan.scan_targets(packages("application"), packages("tooling"), _TEST_ONLY_DIRS)
+_SCAN_TARGETS = plan.scan_targets(
+    packages("application", "standalone"), packages("tooling"), _TEST_ONLY_DIRS
+)
 
 _PROVIDER_KEY_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "provider-key-vars"))
 
@@ -59,8 +61,7 @@ def _files_to_scan(
         return lint_paths.python_paths(root, resolved)
     default = [
         path
-        for name in _SCAN_TARGETS
-        for path in (root / name).rglob("*.py")
+        for path in lint_common.python_files([root / name for name in _SCAN_TARGETS], root)
         if plan.in_default_scope(path, root, test_only_dirs=_TEST_ONLY_DIRS)
     ]
     return lint_common.restrict(default, scope, root)

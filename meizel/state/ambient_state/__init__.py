@@ -11,7 +11,7 @@ from meizel.state.ambient_state.tree import Tree
 SECTION = "ambient_state"
 # The rule module path used by integration-test repository fixtures.
 LINT = "meizel/state/ambient_state/__init__.py"
-SCOPE = packages("application", "templates")
+SCOPE = packages("application", "standalone", "templates")
 Sites = dict[str, list[int]]
 
 _STATE_FIX = (

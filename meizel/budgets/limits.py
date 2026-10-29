@@ -11,7 +11,7 @@ from pathlib import Path
 
 from meizel.budgets import budget_plans, directory_budget
 from meizel.checkout import GitRepo
-from meizel.lint_common import read_utf8_text
+from meizel.lint_common import python_files, read_utf8_text
 
 __all__ = ["budget_files", "check"]
 
@@ -23,29 +23,18 @@ __all__ = ["budget_files", "check"]
 def budget_files(
     targets: list[Path], repo_root: Path, structure_dirs: tuple[str, ...]
 ) -> set[Path]:
-    files: set[Path] = set()
-    visited: set[Path] = set()
-
-    def visit(directory: Path) -> None:
-        if directory in visited:
-            return
-        visited.add(directory)
-        for entry in directory_budget.entries(directory):
-            if entry.is_dir():
-                visit(entry)
-            elif entry.is_file() and budget_plans.is_python_file(entry.name):
-                files.add(entry)
-
-    for target in targets:
-        for scope in (repo_root / name for name in structure_dirs):
-            selected = directory_budget.selected_under(target, scope, repo_root)
-            if selected is None:
-                continue
-            if selected.is_dir():
-                visit(selected)
-            elif selected.is_file() and budget_plans.is_python_file(selected.name):
-                files.add(selected)
-    return files
+    selected = [
+        chosen
+        for target in targets
+        for scope in (repo_root / name for name in structure_dirs)
+        if (chosen := directory_budget.selected_under(target, scope, repo_root)) is not None
+    ]
+    return {
+        path
+        for path in python_files(selected, repo_root)
+        if budget_plans.judged_path(path, repo_root, repo_root) is not None
+        and not path.is_symlink()
+    }
 
 
 # meiva:note

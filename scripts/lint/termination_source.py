@@ -76,7 +76,7 @@ from meizel.roles import packages  # noqa: E402 - standalone script
 # Every tree that could reach agents_meta is covered, not just the ones that write it
 # today — `meiva_builtins` currently only READS the table, and this is
 # what keeps a future write there from being the one site nobody was checking.
-SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "standalone", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -280,14 +280,8 @@ def _is_test_file(rel_path: str) -> bool:
     return any(p.search(rel_path) for p in _TEST_PATTERNS)
 
 
-def _iter_py_files(roots: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
+def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
+    return lint_common.python_files(roots, repo_root)
 
 
 def main(
@@ -313,7 +307,7 @@ def main(
     sources = _termination_source_values() if legal_sources is None else legal_sources
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, repo_root)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets, repo_root), scope, repo_root)):
         rel = (
             path.relative_to(repo_root).as_posix()
             if path.is_relative_to(repo_root)

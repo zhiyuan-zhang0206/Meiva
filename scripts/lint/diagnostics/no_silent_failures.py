@@ -73,7 +73,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
-_SCAN_DIRS = (*packages("application", "tooling", "templates"), ".agents")
+_SCAN_DIRS = (*packages("application", "standalone", "tooling", "templates"), ".agents")
 
 _BROAD = frozenset({"Exception", "BaseException"})
 _LOUD_LOG_METHODS = frozenset({"warning", "warn", "error", "critical", "exception", "fatal"})
@@ -237,8 +237,7 @@ def _default_files() -> list[str]:
     roots = lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
     return sorted(
         rel
-        for root in roots
-        for path in root.rglob("*.py")
+        for path in lint_common.python_files(roots, _REPO_ROOT)
         if not is_test_file(rel := path.relative_to(_REPO_ROOT).as_posix())
     )
 

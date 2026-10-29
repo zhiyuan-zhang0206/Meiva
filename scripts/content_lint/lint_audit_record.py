@@ -181,14 +181,8 @@ def census(paths: list[Path]) -> list[str]:
     return found
 
 
-def _py_files(roots: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
+def _py_files(roots: list[Path], repo_root: Path) -> list[Path]:
+    return lint_common.python_files(roots, repo_root)
 
 
 def _explicit_targets(argv: list[str]) -> list[Path] | None:
@@ -208,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     targets = explicit or lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
     scope = lint_common.changed_scope(only, _REPO_ROOT)
-    found = census(lint_common.restrict(_py_files(targets), scope, _REPO_ROOT))
+    found = census(lint_common.restrict(_py_files(targets, _REPO_ROOT), scope, _REPO_ROOT))
     for line in found:
         print(line)
     if found:

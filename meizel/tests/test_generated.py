@@ -175,3 +175,15 @@ def test_the_roles_command_lists_checks_and_writes(
     assert main(["--repo", str(root), "roles", "check"]) == 0
     assert run(root, "check") == 0
     assert main(["--repo", str(root), "roles", "list", "mystery"]) == 2
+
+
+def test_empty_standalone_regex_never_matches_a_path(make_repo: RepoFactory) -> None:
+    root = repo(
+        make_repo,
+        {
+            "empty.yaml": "files: |-\n  (\n    # meizel:roles BEGIN regex-names standalone\n    # meizel:roles END\n  )\n"
+        },
+    )
+    generated.write(seat(root).repo)
+    assert "    (?!)\n" in (root / "empty.yaml").read_text()
+    assert findings(root) == []

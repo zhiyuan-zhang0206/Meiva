@@ -10,6 +10,5 @@ exports = ["no_plugin_wrap.py"]
 
 [debt.impure-call]
 "no_meiva_in_hooks.py#Path.resolve" = 1
-"no_meiva_in_hooks.py#Path.rglob" = 1
 "no_plugin_wrap.py#Path.resolve" = 2
 "no_plugin_wrap.py#Path.rglob" = 1

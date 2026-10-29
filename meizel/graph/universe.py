@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from meizel.graph.python_layout import StandaloneProject
+
 __all__ = [
     "MANIFEST",
     "SOURCE_EXTENSIONS",
@@ -107,7 +109,14 @@ class Universe:
         {"__init__.py", "index.ts", "index.tsx", "index.mts", "index.cts"}
     )
 
-    def __init__(self, repo: Checkout, tracked: list[str]) -> None:
+    def __init__(
+        self,
+        repo: Checkout,
+        tracked: list[str],
+        *,
+        projects: tuple[StandaloneProject, ...] = (),
+        project: str | None = None,
+    ) -> None:
         self.repo = repo
         self.root = repo.root
         self.files: frozenset[str] = frozenset(tracked)
@@ -133,7 +142,13 @@ class Universe:
         self.roots: frozenset[str] = frozenset(
             name.removesuffix(".py") for name in self.children.get("", ())
         )
+        self.standalone_projects = projects
+        self._project = project
+        active = next((item for item in projects if item.directory == project), None)
+        self._python_aliases = dict(active.packages) if active is not None else {}
+        self.roots = self.roots | frozenset(self._python_aliases)
         self._modules: dict[str, Module | None] = {}
+        self._project_views: dict[str | None, Universe] = {project: self}
 
     @staticmethod
     def _add_chain(children: dict[str, set[str]], path: str) -> None:
@@ -148,11 +163,41 @@ class Universe:
             if depth < len(parts) - 1:
                 children.setdefault("/".join(parts[: depth + 1]), set())
 
+    def context(self, origin: str) -> Universe:
+        owner = next(
+            (
+                item.directory
+                for item in self.standalone_projects
+                if origin == item.directory or origin.startswith(item.directory + "/")
+            ),
+            None,
+        )
+        if owner not in self._project_views:
+            view = Universe(
+                self.repo, sorted(self.files), projects=self.standalone_projects, project=owner
+            )
+            view._project_views = self._project_views
+            self._project_views[owner] = view
+        return self._project_views[owner]
+
+    def context_for_module(self, dotted: str) -> Universe:
+        head = dotted.split(".", 1)[0]
+        for project in self.standalone_projects:
+            if any(name == head for name, _ in project.packages):
+                return self.context(project.directory)
+        return self.context("")
+
+    def canonical_name(self, dotted: str) -> str:
+        head, separator, tail = dotted.partition(".")
+        physical = self._python_aliases.get(head)
+        return physical.replace("/", ".") + separator + tail if physical else dotted
+
+    # meiva:note
+    # Resolve root imports and explicit standalone wheel names to physical source.
     def resolve_module(self, dotted: str) -> Module | None:
-        """Resolve a dotted name against the checkout, as `pythonpath = ["."]` would."""
         if dotted in self._modules:
             return self._modules[dotted]
-        path = dotted.replace(".", "/")
+        path = self.canonical_name(dotted).replace(".", "/")
         found: Module | None = None
         if f"{path}.py" in self.files:
             found = Module(f"{path}.py", f"{path}.py")

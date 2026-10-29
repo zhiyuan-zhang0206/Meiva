@@ -19,7 +19,7 @@ application package. `scripts/` may import `meizel`; `meizel` never imports
 ## Top-level packages and their roles
 
 The root `meizel.toml` declares which top-level directories exist and what each is,
-once: `[roles]` maps `application`, `templates`, `examples`, `tooling`, `tests` and
+once: `[roles]` maps `application`, `standalone`, `templates`, `examples`, `tooling`, `tests` and
 `frontend` to directories. Every top-level directory that holds Python (hidden
 directories aside) must be listed under exactly one role, and every listed name must
 exist; the manifest parser enforces both, and `[roles]` is accepted in the root manifest
@@ -32,6 +32,10 @@ checks all those regions and other Python or TOML literals that list every packa
 a role of three or more. These global `manifest-roles` diagnostics cannot be recorded
 as debt. `roles check` remains a focused command using the same rule owner; it has no
 separate hook. A new package is declared in one place or the check says where.
+
+`standalone` holds independently installed production Python. Its
+[[meizel/docs/standalone.meiva.okf.md|project ownership, imports and independent checks]]
+keep production governance separate from the root distribution environment.
 
 ## Contents
 
@@ -91,7 +95,7 @@ script.
 
 `type-checking` is a hard diagnostic, not recordable debt or a purity mode. The Python scanner
 records direct guards resolved to `typing.TYPE_CHECKING` while retaining all facts inside both
-branches. Analysis applies the checked root manifest's application/tooling/templates/tests roles
+branches. Analysis applies the checked root manifest's application/standalone/tooling/templates/tests roles
 and that root's `[type-checking.files]` policy. Helpers and root/package conftest entries are
 covered; direct `test_*.py` modules, examples and frontend helpers are not newly governed.
 Boolean formulas, negated guards and dynamic lookups are outside this direct-guard rule.

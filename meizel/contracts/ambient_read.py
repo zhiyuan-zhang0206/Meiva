@@ -43,7 +43,7 @@ _CALL_MARK = "()"
 _READERS = "ambient-readers"
 # meiva:note
 # The roles whose source code is governed: what ships, the runnable templates and the tooling.
-_GOVERNED_ROLES = ("application", "templates", "tooling", "frontend")
+_GOVERNED_ROLES = ("application", "standalone", "templates", "tooling", "frontend")
 _WHAT = {
     AmbientKind.SETTINGS: "the process configuration",
     AmbientKind.DB: "a database handle built from the live settings",
@@ -232,7 +232,7 @@ def _spared(universe: Universe, policy: Policy) -> dict[str, Unless]:
             target = name.removesuffix(_CALL_MARK)
             resolved = _unless(universe, target, parameter)
             if isinstance(resolved, Unless):
-                found[target] = resolved
+                found[universe.context_for_module(target).canonical_name(target)] = resolved
     return found
 
 
@@ -273,12 +273,13 @@ def reader_problems(policy: Policy) -> list[Diagnostic]:
 # The module that defines a dotted reader: its dotted name, its file and the member path below it
 # (`name` or `Class.method`). The longest prefix that names a tracked module wins.
 def _locate(universe: Universe, target: str) -> tuple[str, str, tuple[str, ...]] | None:
+    context = universe.context_for_module(target)
     parts = target.split(".")
     for end in range(len(parts) - 1, 0, -1):
         dotted = ".".join(parts[:end])
-        module = universe.resolve_module(dotted)
+        module = context.resolve_module(dotted)
         if module is not None and module.file is not None:
-            return dotted, module.file, tuple(parts[end:])
+            return context.canonical_name(dotted), module.file, tuple(parts[end:])
     return None
 
 
@@ -386,7 +387,7 @@ def _imports(universe: Universe, path: str) -> dict[str, str]:
         tree = ast.parse(text, filename=path)
     except (SyntaxError, ValueError):
         return {}
-    scope = Scope(None)
+    scope = Scope(None, canonicalize=universe.context(path).canonical_name)
     collect_scope(scope, tree.body, path.split("/")[:-1], walrus=":=" in text)
     return scope.imports
 

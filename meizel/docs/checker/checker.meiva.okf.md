@@ -27,7 +27,7 @@ python -m meizel debt [--json] | record <paths...> | prune | carry | diff --agai
 python -m meizel explain <path>
 python -m meizel sync [--prune] [--declare [paths...]]
 python -m meizel bootstrap --out <dir>
-python -m meizel roles list <role>... | check | write
+python -m meizel roles list <role>... | projects | check | write
 ```
 
 `--repo <root>` selects another checkout; `--jobs N` sets parser processes. Exit codes: 0 clean, 1 violations, 2 the tool failed.
@@ -51,7 +51,7 @@ python -m meizel roles list <role>... | check | write
 - `import` and `from ... import` at any nesting level. Relative imports resolve
   against the importing file's directory. `from pkg import name` targets the
   submodule `name` when `pkg/name.py` or `pkg/name/` exists, otherwise
-  `pkg/__init__.py` with `name` recorded as a used name. Resolution follows
+  `pkg/__init__.py` with `name` recorded as a used name. Root imports follow
   `pythonpath = ["."]`: a dotted name maps to a tracked path; directories
   without `__init__.py` are namespace packages.
 - Attribute use on an imported module (`mod.name`, `pkg.sub.name`), through any

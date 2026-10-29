@@ -102,7 +102,7 @@ def _git(*args: str) -> bytes:
 
 def _roles() -> Roles:
     return Roles(
-        production=frozenset(packages("application", "templates")),
+        production=frozenset(packages("application", "standalone", "templates")),
         tests=frozenset(packages("tests")),
         first_party=frozenset(all_packages()),
     )

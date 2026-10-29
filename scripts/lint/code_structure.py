@@ -46,7 +46,7 @@ _MEASURED_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SE
 # AST rules track the application packages; budgets also cover tooling/tests.
 _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
-_STRUCTURE_DIRS = packages("application", "tests", "tooling")
+_STRUCTURE_DIRS = packages("application", "standalone", "tests", "tooling")
 
 
 def _scan_file(tree: ast.Module, rel_path: str) -> list[tuple[int, str]]:
@@ -63,14 +63,8 @@ def _in_scan_scope(rel_path: str) -> bool:
     return any(rel_path == d or rel_path.startswith(f"{d}/") for d in _SCAN_DIRS)
 
 
-def _iter_py_files(roots: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
+def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
+    return lint_common.python_files(roots, repo_root)
 
 
 def _parse_baseline(
@@ -249,7 +243,7 @@ def _baseline_guard(
 def _ast_rule_files(argv: list[str], repo_root: Path) -> set[Path]:
     # Preserve the AST rules' original resolved-target scope, including aliases.
     targets = [Path(a).resolve() for a in argv] if argv else [repo_root / d for d in _AST_DIRS]
-    return set(_iter_py_files(targets))
+    return set(_iter_py_files(targets, repo_root))
 
 
 def _collect_locality(
@@ -298,7 +292,12 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
         ]
     root_manifest = manifests.get("")
     type_packages = select_packages(
-        root_manifest.roles if root_manifest else {}, "application", "tooling", "templates", "tests"
+        root_manifest.roles if root_manifest else {},
+        "application",
+        "standalone",
+        "tooling",
+        "templates",
+        "tests",
     )
     roots = (
         [Path(arg).resolve() for arg in argv]
@@ -311,7 +310,7 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
             Sources(),
             frozenset(policy.reasons("type-checking", "files")),
             type_packages,
-            set(_iter_py_files(roots)),
+            set(_iter_py_files(roots, repo_root)),
             path_imports.Scopes.of(policy),
         ),
         [],
