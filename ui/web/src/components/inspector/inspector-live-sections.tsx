@@ -233,17 +233,16 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
   const now = useNow(1_000, useWallNow());
-  const { formatAbsolute, formatUpcoming } = useTimeFormat();
+  const { formatAbsolute, formatFuture } = useTimeFormat();
   const next = nextHeartbeatCell(
     heartbeat,
     {
       pending: t("pending"),
       due: t("due"),
-      pausedUntil: (time) => t("pausedUntil", { time }),
-      remaining: (span) => t("pausedRemaining", { remaining: span }),
+      paused: (time) => t("paused", { time }),
     },
     now,
-    formatUpcoming,
+    formatFuture,
   );
   const lastPause = heartbeat.last_pause;
   const impersonated = inspect.status !== "terminated" && rosterRow?.status === "impersonated";
@@ -257,7 +256,7 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
           label={t("metricBirth")}
           value={`${formatRelative(spawned_at, now, { capitalize: true })}, ${formatAbsolute(spawned_at)}`}
         />
-        <Metric label={t("metricNextHeartbeat")} value={next.value} sub={next.sub} />
+        <Metric label={t("metricNextHeartbeat")} value={next.value} />
         <Metric
           label={t("metricLastPause")}
           value={
@@ -280,31 +279,28 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 
 // meiva:note
 // The next-heartbeat cell answers "when does the heartbeat look at this agent again", so an
-// active pause is labelled as one instead of printing a bare clock time that reads like a
-// scheduled check-in; the remaining span sits under it as the cell's sub line, so the reader
-// needs no arithmetic on the clock time. The pause is the daemon's floor whatever the agent's
-// status is — it stays the answer while the agent is busy (user report 2026-10-28). A pause
-// that ran out between the last read and this tick keeps the cell's "due" wording instead of
-// counting down at zero.
+// active pause still says so instead of printing a bare time that reads like a scheduled
+// check-in — but on one line: the relative span that used to sit under the value read as a
+// second, smaller line, so the value itself now follows the reader's `display.date_format`
+// ("Tomorrow 15:21" or "in 22h"), absolute by default (user 2026-10-29). The pause is the
+// daemon's floor whatever the agent's status is — it stays the answer while the agent is busy
+// (user report 2026-10-28). A pause that ran out between the last read and this tick keeps the
+// cell's "due" wording instead of counting down at zero.
 // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md
 function nextHeartbeatCell(
   hb: HeartbeatInfo,
   labels: {
     pending: string;
     due: string;
-    pausedUntil: (time: string) => string;
-    remaining: (span: string) => string;
+    paused: (time: string) => string;
   },
   now: Date,
-  formatUpcoming: (iso: string, now: Date) => string,
-): { value: string; sub?: string } {
+  formatFuture: (iso: string, now: Date) => string,
+): { value: string } {
   if (hb.paused_until) {
     const until = new Date(hb.paused_until).getTime();
     if (until <= now.getTime()) return { value: labels.due };
-    return {
-      value: labels.pausedUntil(formatUpcoming(hb.paused_until, now)),
-      sub: labels.remaining(formatInterval(Math.round((until - now.getTime()) / 1000))),
-    };
+    return { value: labels.paused(formatFuture(hb.paused_until, now)) };
   }
   if (hb.heartbeat_pending) return { value: labels.pending };
   if (hb.next_at) {
@@ -312,7 +308,7 @@ function nextHeartbeatCell(
       value:
         new Date(hb.next_at).getTime() <= now.getTime()
           ? labels.due
-          : formatUpcoming(hb.next_at, now),
+          : formatFuture(hb.next_at, now),
     };
   }
   return { value: "—" };

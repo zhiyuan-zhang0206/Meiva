@@ -6,6 +6,8 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { beforeEach, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AgentRow } from "./agent-row";
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 import { renderWithApi as rtlRender } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
@@ -120,12 +122,16 @@ function guides(container: HTMLElement) {
 
 // meiva:note
 // The row's relative timestamp comes from the page's clock: two instants, two strings. The row also
-// ticks once a minute on its own; a fixed clock keeps both reads on the same instant here.
+// ticks once a minute on its own; a fixed clock keeps both reads on the same instant here. The
+// relative wording is the reader's `display.date_format` choice, seeded explicitly here because the
+// default became `absolute` on 2026-10-29 (the Inspector's paused heartbeat needs a day context).
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 describe("AgentRow timestamp source", () => {
-  it("ages the timestamp against the clock the page hands in", () => {
+  it("ages the timestamp against the clock the page hands in when the reader chose relative", () => {
     const activeAt = "2026-05-07T00:00:00Z";
     const at = (ms: number) => {
       const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, "display.date_format": "relative" });
       return rtlRender(
         <WallClockProvider wallNow={() => ms}>
           <QueryClientProvider client={qc}>
