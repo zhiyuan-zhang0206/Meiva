@@ -26,6 +26,12 @@ class Tree:
             for depth in range(1, len(parts))
         }
         self.modules: dict[str, object] = {}
+        # meiva:note
+        # The `@root_bundle` class names a module defines, answered once per tree. Many importers
+        # name the same module, and reading it once per importer made a whole-tree run parse the
+        # same file a thousand times (2026-10-29); the answer is a property of the tree, not of
+        # the importer that asked first.
+        self.bundle_names: dict[str, frozenset[str]] = {}
 
     def has_file(self, rel: str) -> bool:
         return rel in self.files
