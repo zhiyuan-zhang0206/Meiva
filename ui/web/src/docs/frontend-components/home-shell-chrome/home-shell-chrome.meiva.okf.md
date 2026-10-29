@@ -32,7 +32,7 @@ the column itself. The bar no longer appends the harness display name (also 2026
 which harness runs the agent is state the reader checks when inspecting it, not a
 label read on every glance, so it reads in the Inspector's Liveness section beside the
 model
-([[ui/web/src/docs/frontend-state/shared-context.meiva.okf.md|shared context]]).
+([[ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md|shared context]]).
 
 ## The bottom band
 

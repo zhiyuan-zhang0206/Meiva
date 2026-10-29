@@ -3,11 +3,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ScanSearch } from "lucide-react";
 import dynamic from "next/dynamic";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef } from "react";
 
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { ToUserDocumentView } from "./to-user-document";
 import type { NoticeItem } from "@/lib/contracts/types";
@@ -20,7 +21,7 @@ const Inspector = dynamic(() => import("@/components/inspector/inspector-panel")
   loading: () => <InspectorPanelSkeleton />,
 });
 
-// meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
 export function SharedContextPanel({ agentId, document, notices, noticesFailed, mobile, onClose, onCollapse }: {
   agentId: number;
   document: ReturnType<typeof useToUser>;
@@ -49,9 +50,14 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   }, [inspecting]);
   const notice = notices.at(0);
   // meiva:note
-  // Inspector replaces the body; its toggle stays in the desktop document bar
-  // or narrow top bar so the active mode always has an exit.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // The column reads top to bottom as title bar, reading area, question: the
+  // question is the column's own bottom region, pinned under the one scrolling
+  // area rather than travelling inside it, and it stays there in Inspector mode
+  // (user report 2026-10-30 — a pending question must not disappear with the
+  // body it used to sit in). Inspector replaces the reading area above it; its
+  // toggle stays in the desktop document bar or narrow top bar so the active
+  // mode always has an exit.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   return (
     <aside className={cn("relative w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("title")}>
       {mobile && <header className={cn("h-11 shrink-0 items-center justify-between border-b px-3 text-xs", FLEX)}>
@@ -83,16 +89,21 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
         onInspect={mobile ? undefined : toggleInspection}
         onCollapse={onCollapse}
         viewportRef={documentScroll}
-      >
-        {noticesFailed && <p hidden={inspecting} role="status" className="px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
-        {notice && <section hidden={inspecting} className="shrink-0 border-b border-border/60 px-5 py-3" aria-label={t("notification")}>
-          <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
-        </section>}
-      </ToUserDocumentView>
+      />
       {inspecting && (
         <div data-testid="shared-inspector" className={cn(MIN_H_0, FLEX_1, FLEX)}>
           <Inspector agentId={agentId} embedded />
         </div>
+      )}
+      {noticesFailed && <p role="status" className="shrink-0 border-t border-border/60 px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
+      {notice && (
+        <section data-testid="notice-region" className="shrink-0 border-t border-border/60" aria-label={t("notification")}>
+          <ScrollArea type="auto" className={QUESTION_REGION_MAX_HEIGHT_CLASS}>
+            <div className="px-5 py-3">
+              <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
+            </div>
+          </ScrollArea>
+        </section>
       )}
     </aside>
   );
