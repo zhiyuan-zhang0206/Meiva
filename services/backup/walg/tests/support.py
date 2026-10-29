@@ -28,7 +28,7 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster import postgres as native_postgres
-from base.cluster.dataplane import pg_admin, walg_binary
+from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.host.env import port_lease
 from base.paths.tests.homes import point_home
@@ -118,8 +118,8 @@ def valid_config(key_file: Path, **overrides: Any) -> dict[str, Any]:
 
 # meiva:note
 # The stand-in for `walg_binary.installed_problem` while the fake wal-g is installed: no problem,
-# whichever home is asked about.
-def _always_pinned(*, home: Path) -> None:
+# whichever home is asked about. A test passes it to the entry point that resolves the platform.
+def always_pinned(*, home: Path) -> None:
     del home
 
 
@@ -140,9 +140,6 @@ def make_sandbox(
     binary.chmod(0o755)
 
     point_home(monkeypatch, tmp_path / "environment-home")
-    # meiva:note
-    # The fake is not the pinned build; everything else (path, argv, config) is real.
-    monkeypatch.setattr(walg_binary, "installed_problem", _always_pinned)
     sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)
     sandbox.write_config(valid_config(key_file))
     if enabled:
