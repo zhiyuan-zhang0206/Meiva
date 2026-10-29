@@ -568,13 +568,14 @@ async def test_without_reset_streaming_duplicates_content(live_events: LiveEvent
     pub = live_events.publisher
     h = RedisStreamHandler(pub, 42, MSG_IDX, turn_progress=TurnProgress())
     _process(h, _text_chunk("Hello"))
-    await live_events.payloads()
-    _process(h, _text_chunk("Hello"))  # no reset — the old retry behavior
     _flush(h)
-    events = await live_events.payloads()
-    # no ChatStart (already started); both "Hello"s coalesce into ONE delta —
-    # the duplicated content is still visible (frontend sees "HelloHello")
-    assert all("chat_start" not in e for e in events)
-    deltas = [e for e in events if "chat_delta" in e]
-    assert len(deltas) == 1
-    assert '"HelloHello"' in deltas[0]
+    first_events = await live_events.typed()
+    assert first_events == [
+        ChatStart(agent_id=42, item_id=TEXT_ID),
+        ChatDelta(agent_id=42, item_id=TEXT_ID, content="Hello"),
+    ]
+    _process(h, _text_chunk("Hello"))
+    _flush(h)
+    assert await live_events.typed() == [
+        ChatDelta(agent_id=42, item_id=TEXT_ID, content="Hello"),
+    ]

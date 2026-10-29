@@ -151,6 +151,7 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
             name,
             healthz_url(name),
             pidfile=ServiceEndpoints.from_settings().of(name).pidfile,
+            expected_home=meiva_home(),
         ),
         profile=row.profile,
         no_profile_marker=row.no_profile_marker,

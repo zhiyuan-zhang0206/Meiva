@@ -4,10 +4,11 @@ import ast
 from pathlib import Path
 
 from base.config.service_read import ConfigAuthority
-from meizel.roles import packages
+from meizel.checkout import roles_at
+from meizel.roles import select_packages
 
 _REPO = Path(__file__).resolve().parents[2]
-_ROOTS = packages("application", "templates")
+_ROOTS = select_packages(roles_at(_REPO), "application", "templates")
 
 _INGEST = {"base/telemetry/alerts/__init__.py", "gateway/alerts/router.py"}
 _WRITERS = {"upsert_alert"}

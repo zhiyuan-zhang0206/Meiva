@@ -46,12 +46,17 @@ from collections.abc import Set as AbstractSet
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
+
 sys.path.insert(0, str(_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+# meiva:link scripts/docs/scripts.meiva.okf.md
+from meizel import lint_common  # noqa: E402
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
 
-SCAN_DIRS = ("gateway", "ops", *packages("standalone"))
+ROLES = roles_at(_ROOT)
+
+SCAN_DIRS = ("gateway", "ops", *select_packages(ROLES, "standalone"))
 
 # Sync library/method surfaces that must not appear un-awaited in an async body.
 LIBRARY_BLOCKING_NAMES = {
@@ -116,7 +121,7 @@ BLOCKING_NAMES = LIBRARY_BLOCKING_NAMES | REPO_BLOCKING_HELPERS
 
 # Where a repo helper may be defined (the non-test source tree; a test's own
 # helper never keeps an entry alive).
-DEFINITION_DIRS = packages("application", "standalone")
+DEFINITION_DIRS = select_packages(ROLES, "application", "standalone")
 
 # Module-qualified sync calls (any attribute of these modules).
 _BLOCKING_MODULES = {"shutil", "subprocess", "psutil"}

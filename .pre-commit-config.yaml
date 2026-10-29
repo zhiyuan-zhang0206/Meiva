@@ -335,10 +335,11 @@ repos:
 
       # Hook modules (agent/hooks/, agent_runtime.py faces, any module defining a `Hook`
       # subclass) may not import `meiva`: hooks run in the agent host and operate on the graph
-      # state they are handed. No exemption; see scripts/lint/plugins/no_meiva_in_hooks.py.
+      # state they are handed. No exemption; the entry reads the roles, the rule decides; see
+      # scripts/lint/docs/no-meiva-in-hooks.meiva.okf.md.
       - id: lint-no-meiva-in-hooks
         name: lint hook modules (no `import meiva`)
-        entry: .venv/bin/python scripts/lint/plugins/no_meiva_in_hooks.py --only
+        entry: .venv/bin/python scripts/lint/plugins/no_meiva_in_hooks_cli.py --only
         language: system
         types: [python]
 
@@ -514,7 +515,7 @@ repos:
       - id: lint-clock-lattice
         name: lint clock lattice (lattice-vocabulary clocks only in the family modules)
         language: system
-        entry: .venv/bin/python -m meizel.owners.clock_lattice --only
+        entry: .venv/bin/python -m meizel.owners.clock_lattice_cli --only
         files: ^(meizel\.policy\.toml|.*\.py)$
 
       # A test that exactly asserts a value derived from a repo fixed-instant

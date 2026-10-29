@@ -71,7 +71,11 @@ def _daemon_probe(spec: ServiceSpec) -> partial[DaemonProbe]:
 
 def test_the_factory_derives_command_url_probe_and_health_name() -> None:
     spec = healthz_daemon(
-        "delivery-watchdog", module="services.x.daemon", capabilities=_GATEWAY, requires_db=True
+        "delivery-watchdog",
+        home=meiva_home(),
+        module="services.x.daemon",
+        capabilities=_GATEWAY,
+        requires_db=True,
     )
 
     assert spec.session == "delivery-watchdog"
@@ -85,7 +89,8 @@ def test_the_factory_derives_command_url_probe_and_health_name() -> None:
     assert probe.func.__name__ == "probe_daemon"
     assert probe.args == ("delivery_watchdog", spec.curl_url)
     assert probe.keywords == {
-        "pidfile": ServiceEndpoints.from_settings().of("delivery_watchdog").pidfile
+        "pidfile": ServiceEndpoints.from_settings().of("delivery_watchdog").pidfile,
+        "expected_home": meiva_home(),
     }
 
 
@@ -95,6 +100,7 @@ def test_the_factory_passes_the_optional_declarations_through() -> None:
 
     spec = healthz_daemon(
         "labeler",
+        home=meiva_home(),
         module="services.derived.labeler.daemon",
         capabilities=_GATEWAY,
         requires_db=False,
@@ -117,7 +123,9 @@ def test_the_url_follows_the_endpoint_table_resolved_when_the_roster_is_built(
 
     pin_endpoints(monkeypatch, port=_fake_health_port)
     assert healthz_url("im_bridge") == "http://localhost:18111/healthz"
-    spec = healthz_daemon("im-bridge", module="a.b", capabilities=_GATEWAY, requires_db=True)
+    spec = healthz_daemon(
+        "im-bridge", home=meiva_home(), module="a.b", capabilities=_GATEWAY, requires_db=True
+    )
     assert spec.curl_url == "http://localhost:18111/healthz"
 
 
@@ -134,12 +142,16 @@ def test_a_session_that_is_not_lowercase_kebab_is_refused(session: str) -> None:
 )
 def test_a_module_that_is_not_a_dotted_path_is_refused(module: str) -> None:
     with pytest.raises(ValueError, match="dotted module path"):
-        healthz_daemon("heartbeat", module=module, capabilities=_GATEWAY, requires_db=True)
+        healthz_daemon(
+            "heartbeat", home=meiva_home(), module=module, capabilities=_GATEWAY, requires_db=True
+        )
 
 
 def test_a_service_without_a_port_slot_is_refused_by_name() -> None:
     with pytest.raises(ValueError, match="no port slot") as raised:
-        healthz_daemon("not-a-daemon", module="a.b", capabilities=_GATEWAY, requires_db=True)
+        healthz_daemon(
+            "not-a-daemon", home=meiva_home(), module="a.b", capabilities=_GATEWAY, requires_db=True
+        )
     assert "not_a_daemon" in str(raised.value)
 
 

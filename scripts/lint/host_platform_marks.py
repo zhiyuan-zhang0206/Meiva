@@ -19,10 +19,14 @@ from pathlib import Path
 from typing import TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402
-from meizel.roles import packages  # noqa: E402
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
+
+ROLES = roles_at(_REPO_ROOT)
 
 BASELINE = "scripts/lint/baseline/host_platform_marks.json"
 
@@ -40,7 +44,13 @@ EXEMPTION = "# host-ok:"
 # repository, read from the role the manifests own, plus the two trees that are not
 # packages. A reason that points at one of them tells the next reader where to look.
 _REPO_TOPS = frozenset(
-    {*packages("application", "standalone"), *packages("tooling"), "docs", "tests", "future"}
+    {
+        *select_packages(ROLES, "application", "standalone"),
+        *select_packages(ROLES, "tooling"),
+        "docs",
+        "tests",
+        "future",
+    }
 )
 
 # meiva:note
@@ -284,7 +294,11 @@ def _test_files(targets: list[Path], root: Path) -> Iterator[Path]:
 
 def _default_targets(root: Path) -> list[Path]:
     hosts = lint_common.pytest_test_hosts((root / "pyproject.toml").read_text(encoding="utf-8"))
-    return [root / host for host in (*hosts, *packages("standalone")) if (root / host).is_dir()]
+    return [
+        root / host
+        for host in (*hosts, *select_packages(ROLES, "standalone"))
+        if (root / host).is_dir()
+    ]
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:

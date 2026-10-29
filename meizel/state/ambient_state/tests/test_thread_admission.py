@@ -7,6 +7,7 @@ import pytest
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state.module import Tree
+from meizel.state.ambient_state.tests.conftest import SCOPE
 
 SOURCE = """
 import threading
@@ -60,7 +61,7 @@ class Owner:
 
 
 def sites(source: str, root: Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/worker.py", _tree(root))
+    return ambient_state.measure(ast.parse(source), "base/worker.py", _tree(root), SCOPE)
 
 
 def test_deferred_constructor_has_a_single_locked_admission(tmp_path: Path) -> None:

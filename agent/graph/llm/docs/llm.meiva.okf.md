@@ -60,3 +60,5 @@ is a sink, so these assertions do not prove event delivery or live provider spee
 - State type hint uses `from __future__ import annotations` + module attribute references to avoid capturing `BaseAgentState` alias and losing plugin dynamic fields
 - The node retries trusted 429/transport/server failures under the per-model attempt cap and total wall-clock budget, with bounded backoff. Provider SDK construction keeps its existing finite retries. `llm_retry` records the final node retry duration. No retry re-enters the graph or repeats code execution.
 - Turn records, the failed-try protocol and per-turn persistence: [[turn-records.meiva.okf.md]].
+
+- SSE-only model liveness: [[waiting.meiva.okf.md]].

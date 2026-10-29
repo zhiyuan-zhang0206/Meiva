@@ -4,14 +4,14 @@ exports = ["allowances.py", "budgets", "checkout.py", "contracts", "graph", "lan
 "__main__.py" = ["contracts"]
 "allowances.py" = ["checkout.py", "graph"]
 "budgets" = ["checkout.py", "lint_common.py"]
-"checkout.py" = ["graph"]
+"checkout.py" = ["graph", "roles.py"]
 "contracts" = ["allowances.py", "checkout.py", "graph", "language", "lint_common.py", "roles.py", "source_evidence"]
 "language" = ["allowances.py", "checkout.py", "graph", "lint_common.py"]
 "lint_common.py" = ["__init__.py", "checkout.py", "graph", "roles.py"]
-"owners" = ["allowances.py", "lint_common.py", "roles.py"]
-"roles.py" = ["checkout.py", "graph"]
+"owners" = ["allowances.py", "checkout.py", "lint_common.py", "roles.py"]
+"roles.py" = ["graph"]
 "source_evidence" = ["graph", "lint_common.py"]
-"state" = ["allowances.py", "lint_common.py", "roles.py"]
+"state" = ["allowances.py", "checkout.py", "lint_common.py", "roles.py"]
 "tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
 
 [purity]
@@ -20,7 +20,7 @@ exports = ["allowances.py", "budgets", "checkout.py", "contracts", "graph", "lan
 "__init__.py" = "strict"
 "__main__.py" = "strict"
 "allowances.py" = "strict-to-be"
-"roles.py" = "strict-to-be"
+"roles.py" = "strict"
 
 [debt.impure-call]
 "allowances.py#meizel.checkout.GitRepo" = 1
@@ -31,10 +31,7 @@ exports = ["allowances.py", "budgets", "checkout.py", "contracts", "graph", "lan
 "lint_common.py#Path.rglob" = 1
 "lint_common.py#import subprocess" = 1
 "lint_common.py#os.path.lexists" = 1
-"roles.py#Path.resolve" = 2
-"roles.py#meizel.checkout.GitRepo" = 1
 
 [debt.impure-edge]
 "allowances.py#meizel/checkout.py" = 1
 "lint_common.py#meizel/checkout.py" = 1
-"roles.py#meizel/checkout.py" = 1

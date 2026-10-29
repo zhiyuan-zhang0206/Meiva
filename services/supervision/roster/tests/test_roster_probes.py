@@ -49,7 +49,9 @@ def test_gateway_roster_probe_checks_the_answering_units_home(
 async def test_plugin_roster_probe_accepts_its_real_health_daemon(unit_home: Path) -> None:
     original_port = get_field("task_maintenance_health_port")
     pidfile = unit_home / "run" / "task_maintenance.pid"
-    server = await start_health_server("task_maintenance", port=0, image=unknown_image())
+    server = await start_health_server(
+        "task_maintenance", home=meiva_home(), port=0, image=unknown_image()
+    )
     try:
         port = server.sockets[0].getsockname()[1]
         set_field("task_maintenance_health_port", port)

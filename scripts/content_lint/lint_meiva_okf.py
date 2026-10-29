@@ -29,12 +29,21 @@ FORBIDDEN_KEYS = {"cluster", "layer", "process", "owner", "views", "parent"}
 # meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 MAX_LINES = 200
 MAX_CHARS = 8000
-WARN_MARGIN = 800
-_SPLIT_HINT = (
-    "Split a section into its own node under '{stem}/' (the filesystem derives "
-    "the parent edge; the docs/ layer stands for its package directory, so here "
-    "that is '{home}') — see docs/conventions/doc-maintenance.md."
+# meiva:note
+# One message shape for both size ceilings, carrying the four parts every failing lint message
+# carries (docs/conventions/lint-messages.md): the measured value against the line, why the line
+# exists, the work the author now owns, and where the rule is written down. Constants rather than
+# inline f-string prose so the four parts stay visible as parts.
+_SIZE_RULE_WHY = (
+    "One node holds one semantic topic, which keeps each node readable on its own "
+    "and the graph navigable: this line marks a node that outgrew its topic — it is "
+    "not a budget to fill."
 )
+_SIZE_RULE_OWNER = (
+    "You own the semantic split — move a whole section into its own node under "
+    "'{home}' or into a sibling node; do not trim or compress prose to fit."
+)
+_SIZE_RULE_SEE = "See docs/conventions/doc-maintenance.md#why-8000-characters."
 # meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 _LAYER_EXEMPT = (".github/",)
 _CODE_SUFFIXES = frozenset({".py", ".pyi", ".ts", ".tsx"})
@@ -394,10 +403,16 @@ def _size_errors(path_str: str, filepath: Path, text: str, rel_path: str) -> lis
     errors: list[LintError] = []
     line_verdict = evaluate(text, LengthBudget(Unit.LINES, hard=MAX_LINES))
     line_count = line_verdict.measured
-    verdict = evaluate(text, LengthBudget(Unit.CHARS, hard=MAX_CHARS, soft=MAX_CHARS - WARN_MARGIN))
+    verdict = evaluate(text, LengthBudget(Unit.CHARS, hard=MAX_CHARS))
     char_count = verdict.measured
     stem = filepath.name[: -len(".meiva.okf.md")]
-    hint = _SPLIT_HINT.format(stem=stem, home=_split_home(rel_path, stem))
+    hint = " ".join(
+        (
+            _SIZE_RULE_WHY,
+            _SIZE_RULE_OWNER.format(home=_split_home(rel_path, stem)),
+            _SIZE_RULE_SEE,
+        )
+    )
     if line_verdict.level is Level.OVER:
         errors.append(
             LintError(
@@ -414,17 +429,6 @@ def _size_errors(path_str: str, filepath: Path, text: str, rel_path: str) -> lis
                 1,
                 "E007",
                 f"File too large: {char_count} chars (max {MAX_CHARS}). {hint}",
-            )
-        )
-    elif verdict.level is Level.SOFT:
-        errors.append(
-            LintError(
-                path_str,
-                1,
-                "W010",
-                f"Approaching the size ceiling: {char_count} chars, "
-                f"{verdict.remaining} left of {MAX_CHARS}. Plan the next "
-                f"section as its own node rather than trimming this one. {hint}",
             )
         )
     return errors

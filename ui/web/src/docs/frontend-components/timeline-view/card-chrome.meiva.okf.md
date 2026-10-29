@@ -92,3 +92,12 @@ tests = ["ui/web/src/components/timeline/view/timeline-copy-and-boundaries.test.
 ```
 
 Parent: [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]].
+
+### Waiting for model output
+
+An empty `llm_keepalive` creates a transient, visible waiting card for its
+message position when no real block exists. It uses the reasoning card's live
+clock presentation with a distinct "Waiting for model" label and empty body;
+it is not a reasoning summary or a counted reasoning block. Repeated heartbeats
+keep the same item reference and never append text. Real content, terminal
+events and committed snapshots remove the waiting card.

@@ -535,6 +535,7 @@ async def run(
     health = await start_health_server(
         "memory_indexer",
         endpoint.health_port,
+        home=meiva_home(),
         liveness=liveness,
         extra=status.health_fields,
         image=image,
