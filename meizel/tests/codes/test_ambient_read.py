@@ -470,6 +470,84 @@ def test_a_root_kind_the_file_no_longer_acquires_is_stale(make_repo: RepoFactory
     assert [(d.path, "settings" in d.message) for d in stale] == [("app/meizel.toml", True)]
 
 
+ROOT_AND_DEBT = (
+    '[roots]\n"mod.py" = { kinds = ["environ"], why = "reads the environment" }\n'
+    '\n[debt.ambient-read]\n"mod.py#environ os.environ" = 1\n'
+)
+
+
+# meiva:note
+# `[roots]` and `[debt.ambient-read]` are the same declaration read twice: one read cannot be licensed
+# to a file and paid for by it. The conflict is between two keys of one manifest, so it needs no
+# source analysis.
+def test_a_root_that_also_pays_for_its_read_is_a_conflict(make_repo: RepoFactory) -> None:
+    root = repo(make_repo, {"app/mod.py": "import os\n\nx = os.environ['A']\n"}, ROOT_AND_DEBT)
+    assert ("legal-read-recorded", "app/meizel.toml") in failures(root)
+
+
+# meiva:note
+# `debt-paid` needs a whole run to know a read is gone; this conflict does not, so `check --changed`
+# reports it as well — the depth a pre-commit hook runs at.
+def test_the_conflict_is_reported_in_a_changed_run_too(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repo(make_repo, {"app/mod.py": "import os\n\nx = os.environ['A']\n"}, ROOT_AND_DEBT)
+    capsys.readouterr()
+    assert run(root, "check", "--changed", "app/mod.py") == 1
+    assert "legal-read-recorded" in capsys.readouterr().err
+
+
+# meiva:note
+# Only the kind the root declares is legal: a root that pays for a *different* read is exactly what
+# the account is for, and the conflict check must not swallow it.
+def test_a_root_paying_for_another_kind_is_no_conflict(make_repo: RepoFactory) -> None:
+    manifest = (
+        '[roots]\n"mod.py" = { kinds = ["environ"], why = "reads the environment" }\n'
+        '\n[debt.ambient-read]\n"mod.py#clock time.time" = 1\n'
+    )
+    source = "import os\nimport time\n\nx = os.environ['A']\ny = time.time()\n"
+    root = repo(make_repo, {"app/mod.py": source}, manifest)
+    assert "legal-read-recorded" not in {pair[0] for pair in failures(root)}
+    assert "ambient-read" not in {pair[0] for pair in failures(root)}
+
+
+# meiva:note
+# The counter-proof partner: the same root with no entry pays nothing and says nothing.
+def test_a_root_without_an_entry_is_no_conflict(make_repo: RepoFactory) -> None:
+    manifest = ROOT_AND_DEBT.split("\n\n[debt.ambient-read]", maxsplit=1)[0] + "\n"
+    root = repo(make_repo, {"app/mod.py": "import os\n\nx = os.environ['A']\n"}, manifest)
+    assert "legal-read-recorded" not in {pair[0] for pair in failures(root)}
+
+
+# meiva:note
+# The account cannot carry this conflict: `legal-read-recorded` is not a debt code, so `record` refuses
+# it, says so, exits 1, and leaves the manifest byte for byte as it was.
+def test_the_conflict_cannot_be_recorded_as_debt(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repo(make_repo, {"app/mod.py": "import os\n\nx = os.environ['A']\n"}, ROOT_AND_DEBT)
+    before = (root / "app/meizel.toml").read_bytes()
+    capsys.readouterr()
+    assert run(root, "debt", "record", "app") == 1
+    captured = capsys.readouterr()
+    assert "cannot be recorded [legal-read-recorded]" in captured.err
+    assert (root / "app/meizel.toml").read_bytes() == before
+
+
+# meiva:note
+# A root that licenses two kinds pays for neither of the reads it licenses: only the kind an entry
+# names is a conflict, so the prefix must carry the kind and not stop at `name#`.
+def test_only_the_kind_an_entry_names_is_a_conflict(make_repo: RepoFactory) -> None:
+    manifest = (
+        '[roots]\n"mod.py" = { kinds = ["environ", "clock"], why = "reads the world" }\n'
+        '\n[debt.ambient-read]\n"mod.py#environ os.environ" = 1\n'
+    )
+    source = "import os\nimport time\n\nx = os.environ['A']\ny = time.time()\n"
+    root = repo(make_repo, {"app/mod.py": source}, manifest)
+    found = [d for d in failures(root) if d[0] == "legal-read-recorded"]
+    assert found == [("legal-read-recorded", "app/meizel.toml")]
+
+
 @pytest.mark.parametrize(
     ("manifest", "recordable"),
     [("", True), ('[purity]\n"mod.py" = "strict"\n', False)],
