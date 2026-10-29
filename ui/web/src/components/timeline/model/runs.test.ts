@@ -51,6 +51,12 @@ describe("inboundKind", () => {
 });
 
 describe("classifyItem", () => {
+  it("keeps a model wait visible with collapsed details without counting reasoning", () => {
+    const waiting = item("agent_reasoning", null, "5.0", { llmWaiting: true });
+    expect(classifyItem(waiting)).toBe("primary");
+    expect(summarizeTurn([waiting]).thinking).toBe(0);
+  });
+
   it("agent_chat and human inbound are primary", () => {
     expect(classifyItem(item("agent_chat"))).toBe("primary");
     expect(classifyItem(item("inbound_chat", "user"))).toBe("primary");

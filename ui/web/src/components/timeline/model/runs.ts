@@ -76,6 +76,7 @@ export function inboundKind(source: string | null): "human" | "agent" | "externa
 export type ItemClass = "primary" | "secondary" | "bare";
 
 export function classifyItem(item: BackendTimelineItem): ItemClass {
+  if (item.llmWaiting) return "primary";
   switch (item.kind) {
     case "agent_chat":
       return "primary";
@@ -212,6 +213,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   let systemNotes = 0;
   const sdkCounts = new Map<string, number>();
   for (const it of items) {
+    if (it.llmWaiting) continue;
     if (it.kind === "agent_reasoning") {
       thinking += 1;
       thinkingMs += itemOwnMs(it);
