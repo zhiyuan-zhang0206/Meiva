@@ -32,13 +32,14 @@ from services.derived.memory_indexer.backends.base import MemorySearchBackend
 def _numpy_backend(
     database: Database, dim: int, fingerprint: str, *, uri: str, readonly: bool
 ) -> MemorySearchBackend:
-    """NumPyBackend is a thin HTTP client — the vector space lives in the
-    memory_search service process, so database/dim/fingerprint are accepted for the
-    uniform factory signature only and deliberately not used."""
+    # meiva:note
+    # NumPyBackend is a thin HTTP client — the vector space lives in the
+    # memory_search service process, so database/dim are accepted for the
+    # uniform factory signature only. The fingerprint guards every HTTP operation.
     from services.derived.memory_indexer.backends.numpy import NumPyBackend
 
-    del database, dim, fingerprint
-    return NumPyBackend(uri=uri, readonly=readonly)
+    del database, dim
+    return NumPyBackend(uri=uri, fingerprint=fingerprint, readonly=readonly)
 
 
 def _pgvector_backend(

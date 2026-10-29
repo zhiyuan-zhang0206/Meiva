@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import httpx
 
 from base.db import Database
+from services.derived.memory_indexer.backends.base import EMBEDDING_SPACE_HEADER, INDEX_API_PREFIX
 
 _PROBE_TIMEOUT_S = 3.0
 
@@ -42,13 +43,19 @@ class ProbeResult:
     fatal: bool = False
 
 
-def _probe_numpy(database: Database, uri: str) -> ProbeResult:
+def _probe_numpy(database: Database, uri: str, fingerprint: str | None) -> ProbeResult:
     """The memory_search service must answer a real GET /meta at the
     configured URI. Not reachable = transient (the session may still be
     booting) — same retry semantics as the Postgres probe."""
     del database  # the uniform probe signature; this backend has no database
+    if fingerprint is None:
+        raise ValueError("numpy preflight requires the configured embedding fingerprint")
     try:
-        resp = httpx.get(f"{uri}/meta", timeout=_PROBE_TIMEOUT_S)
+        resp = httpx.get(
+            f"{uri}{INDEX_API_PREFIX}/meta",
+            headers={EMBEDDING_SPACE_HEADER: fingerprint},
+            timeout=_PROBE_TIMEOUT_S,
+        )
         resp.raise_for_status()
         return ProbeResult(message=None)
     except Exception as exc:
@@ -63,7 +70,7 @@ def _probe_numpy(database: Database, uri: str) -> ProbeResult:
         )
 
 
-def _probe_pgvector(database: Database, uri: str) -> ProbeResult:
+def _probe_pgvector(database: Database, uri: str, fingerprint: str | None) -> ProbeResult:
     """The cluster Postgres must carry the pgvector extension binaries.
 
     Missing extension = permanent (fatal): no amount of retrying installs
@@ -82,7 +89,9 @@ def _probe_pgvector(database: Database, uri: str) -> ProbeResult:
     while the pgvector probe's bound comes from the DB layer by design, and a
     probe-specific `connect_timeout` knob on `connect()` was deliberately not
     added for a 2s difference in a one-shot boot check."""
-    del uri  # This backend has no HTTP endpoint.
+    # meiva:note
+    # This checks extension availability, not index content.
+    del uri, fingerprint
     import psycopg
 
     try:
@@ -125,13 +134,15 @@ def _probe_pgvector(database: Database, uri: str) -> ProbeResult:
         )
 
 
-PROBES: dict[str, Callable[[Database, str], ProbeResult]] = {
+PROBES: dict[str, Callable[[Database, str, str | None], ProbeResult]] = {
     "numpy": _probe_numpy,
     "pgvector": _probe_pgvector,
 }
 
 
-def probe_backend(name: str, database: Database, *, uri: str) -> ProbeResult:
+def probe_backend(
+    name: str, database: Database, *, uri: str, fingerprint: str | None = None
+) -> ProbeResult:
     """The preflight verdict for backend `name`.
 
     Unknown names are a fatal verdict too (with the fix): an unrecognized
@@ -146,4 +157,4 @@ def probe_backend(name: str, database: Database, *, uri: str) -> ProbeResult:
             ),
             fatal=True,
         )
-    return probe(database, uri)
+    return probe(database, uri, fingerprint)

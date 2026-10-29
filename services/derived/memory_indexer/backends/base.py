@@ -28,6 +28,10 @@ from typing import NamedTuple, Protocol
 
 import numpy as np
 
+EMBEDDING_SPACE_HEADER = "x-meiva-embedding-space"
+INDEX_API_PREFIX = "/v1"
+BATCH_COMMIT_TIMEOUT_S = 300.0
+
 KIND_DESC = "desc"
 """kind value for the frontmatter-description row of a file."""
 KIND_BODY = "body"

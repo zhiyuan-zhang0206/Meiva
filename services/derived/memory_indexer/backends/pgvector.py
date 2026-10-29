@@ -108,6 +108,7 @@ _ALL_META_SQL = "SELECT path, mtime, content_hash, embedder FROM memory_embeddin
 _SEARCH_SQL = """
 SELECT path, kind, chunk_idx, (vector <=> %s::vector) AS distance
 FROM memory_embeddings
+WHERE embedder = %s
 ORDER BY distance
 LIMIT %s
 """
@@ -422,7 +423,7 @@ class PGVectorBackend:
         with self._conn(timeout=timeout) as conn:
             rows = conn.execute(
                 _SEARCH_SQL,
-                (_vector_text(query_vector), max(_RAW_SEARCH_LIMIT, k)),
+                (_vector_text(query_vector), self._fingerprint, max(_RAW_SEARCH_LIMIT, k)),
             ).fetchall()
         best: dict[str, tuple[float, str, int]] = {}
         for path, kind, chunk_idx, distance in rows:
