@@ -215,6 +215,7 @@ async def lifespan(
         config = process.config
         app.state.process_image = process.image
         telemetry.init_telemetry(
+            home=process.home,
             process="gateway",
             pipeline=process.event_pipeline(),
             machine_reader=process.machine.name,

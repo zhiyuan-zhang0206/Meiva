@@ -175,7 +175,10 @@ def fork_events(
     )
     try:
         telemetry.init_telemetry(
-            process="fork-tests", pipeline=pipeline, machine_reader=machine_identity.name
+            home=meiva_home(),
+            process="fork-tests",
+            pipeline=pipeline,
+            machine_reader=machine_identity.name,
         )
         yield pipeline
     finally:

@@ -20,6 +20,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.env.health_ports import health_port
+from base.telemetry.observability import cluster_label
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 from ops.cluster.rpc import RpcClient
 from services.derived.memory_indexer.embeddings import factory as embedding_factory
@@ -456,6 +457,14 @@ def gateway_config(request: Request) -> GatewayConfig:
 # app root builds it once beside the config, so a handler asks for time instead of creating a clock.
 def gateway_clock(request: Request) -> Clock:
     return request.app.state.clock
+
+
+# meiva:note
+# This unit's cluster label, which every telemetry row the gateway reads is scoped by. The app
+# root resolves it once from the home its boot handed in (`GatewayProcess.home`) and publishes
+# both; a handler asks for the label instead of resolving a home of its own.
+def gateway_cluster(request: Request) -> str:
+    return cluster_label(request.app.state.gateway_process.home)
 
 
 # meiva:note

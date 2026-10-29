@@ -29,6 +29,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva.sdk_surface.installation import Installation
 from meiva.sdk_surface.tests.installation_holder import held_installation
@@ -47,7 +48,7 @@ def event_pipeline(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
     try:
-        telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)
+        telemetry.init_telemetry(home=meiva_home(), process="test-sdk-operation", pipeline=pipeline)
         yield pipeline
     finally:
         pipeline.stop(timeout=2)

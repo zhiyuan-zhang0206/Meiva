@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from base import telemetry
 from base.log import logger
+from base.paths import meiva_home
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
 
@@ -34,7 +35,10 @@ def owned_writer() -> None:
     pipeline = telemetry.EventPipeline(writer=written.extend)
     try:
         telemetry.init_telemetry(
-            process="owned-process", pipeline=pipeline, machine_reader=lambda: "owned-machine"
+            home=meiva_home(),
+            process="owned-process",
+            pipeline=pipeline,
+            machine_reader=lambda: "owned-machine",
         )
         assert len(set(threading.enumerate()) - prior) == 1
         telemetry.emit("log", "log", attributes={"owned": True})
@@ -58,9 +62,9 @@ def replace_live_owner() -> None:
     first = telemetry.EventPipeline(writer=lambda _batch: None)
     second = telemetry.EventPipeline(writer=lambda _batch: None)
     try:
-        telemetry.init_telemetry(process="original-owner", pipeline=first)
+        telemetry.init_telemetry(home=meiva_home(), process="original-owner", pipeline=first)
         try:
-            telemetry.init_telemetry(process="replacement", pipeline=second)
+            telemetry.init_telemetry(home=meiva_home(), process="replacement", pipeline=second)
         except RuntimeError as exc:
             assert "another event pipeline" in str(exc)
         else:
@@ -110,11 +114,11 @@ def reuse_joined_owner() -> None:
     first = telemetry.EventPipeline(writer=lambda _batch: None)
     second = telemetry.EventPipeline(writer=lambda _batch: None)
     try:
-        telemetry.init_telemetry(process="first", pipeline=first)
+        telemetry.init_telemetry(home=meiva_home(), process="first", pipeline=first)
         assert not first.stopped
         assert first.stop(timeout=1).status is telemetry.DrainStatus.COMPLETED
         assert first.stopped
-        telemetry.init_telemetry(process="second", pipeline=second)
+        telemetry.init_telemetry(home=meiva_home(), process="second", pipeline=second)
         assert telemetry.process_name() == "second"
         assert telemetry.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
     finally:
@@ -130,7 +134,7 @@ def collect_failed_owner() -> None:
 
     first = telemetry.EventPipeline(writer=fail, batch_size=1)
     second = telemetry.EventPipeline(writer=lambda _batch: None)
-    telemetry.init_telemetry(process="first", pipeline=first)
+    telemetry.init_telemetry(home=meiva_home(), process="first", pipeline=first)
     telemetry.emit("log", "log")
     try:
         first.stop(timeout=1)
@@ -138,7 +142,7 @@ def collect_failed_owner() -> None:
         assert caught is error
     assert first.stopped
     try:
-        telemetry.init_telemetry(process="second", pipeline=second)
+        telemetry.init_telemetry(home=meiva_home(), process="second", pipeline=second)
     except ValueError as caught:
         assert caught is error
     else:

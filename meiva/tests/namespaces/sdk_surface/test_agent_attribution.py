@@ -9,6 +9,7 @@ import pytest
 import meiva
 from base import telemetry
 from base.agents.context.identity import AgentIdentity
+from base.paths import meiva_home
 from meiva.sdk_surface import process_context
 
 
@@ -20,7 +21,10 @@ def restore_process_binding() -> Generator[telemetry.EventPipeline, None, None]:
         yield pipeline
     finally:
         telemetry.init_telemetry(
-            process=previous.process, agent_id=previous.agent_id, pipeline=pipeline
+            home=meiva_home(),
+            process=previous.process,
+            agent_id=previous.agent_id,
+            pipeline=pipeline,
         )
         pipeline.stop(timeout=2)
 
@@ -29,7 +33,9 @@ def restore_process_binding() -> Generator[telemetry.EventPipeline, None, None]:
 async def test_concurrent_events_keep_explicit_or_process_identity(
     restore_process_binding: telemetry.EventPipeline,
 ) -> None:
-    telemetry.init_telemetry(process="agent_host", agent_id=None, pipeline=restore_process_binding)
+    telemetry.init_telemetry(
+        home=meiva_home(), process="agent_host", agent_id=None, pipeline=restore_process_binding
+    )
     process_context.bind_context(replace(meiva.context, identity=AgentIdentity(99, True)))
 
     async def record(agent_id: int):
@@ -52,6 +58,8 @@ async def test_concurrent_events_keep_explicit_or_process_identity(
 def test_exec_process_identity_is_retained(
     restore_process_binding: telemetry.EventPipeline,
 ) -> None:
-    telemetry.init_telemetry(process="agent-exec", agent_id=7, pipeline=restore_process_binding)
+    telemetry.init_telemetry(
+        home=meiva_home(), process="agent-exec", agent_id=7, pipeline=restore_process_binding
+    )
     process_context.bind_context(replace(meiva.context, identity=AgentIdentity(42, True)))
     assert telemetry.prepare_event("log", "log").agent_id == 7
