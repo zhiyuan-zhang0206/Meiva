@@ -5,6 +5,7 @@ import { AgentArchive } from "./archive";
 import type { InnerProps } from "./types";
 import type { AgentRow } from "@/lib/contracts/types";
 import { renderWithApi as render } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
@@ -49,7 +50,13 @@ const row = (id: number): AgentRow => ({
 let client: QueryClient;
 beforeEach(() => { vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); });
 afterEach(() => { cleanup(); client.clear(); });
-function mount() { return render(<QueryClientProvider client={client}><AgentArchive props={props} /></QueryClientProvider>); }
+function mount() {
+  return render(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={client}><AgentArchive props={props} /></QueryClientProvider>
+    </WallClockProvider>,
+  );
+}
 
 describe("bounded agent archive", () => {
   it("keeps one page, releases the previous page, and opens an ID directly", async () => {

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerMock, cleanupHomePageTest, gatewayWrapper, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 vi.mock("@/lib/agents/use-agents", () => ({
@@ -155,9 +156,11 @@ describe("sidebar app-entry reset", () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     const view = renderWithBrowser(
-      <QueryClientProvider client={queryClient}>
-        <HomePage />
-      </QueryClientProvider>,
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={queryClient}>
+          <HomePage />
+        </QueryClientProvider>
+      </WallClockProvider>,
       { wrapper: gatewayWrapper },
     );
     expect(hooksState.setSetting).not.toHaveBeenCalled();
@@ -166,9 +169,11 @@ describe("sidebar app-entry reset", () => {
       "display.sidebar_collapsed": true,
     };
     view.rerender(
-      <QueryClientProvider client={queryClient}>
-        <HomePage />
-      </QueryClientProvider>,
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={queryClient}>
+          <HomePage />
+        </QueryClientProvider>
+      </WallClockProvider>,
     );
     expect(hooksState.setSetting).not.toHaveBeenCalled();
   });

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import AlertsSection from "@/components/ops/alerts-section";
 import { API_BASE } from "@/lib/transport/api";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
 import { USER_SETTING_DEFAULTS, type AlertsResponse } from "@/lib/contracts/types";
 import { ALERTS_SECTION_QUERY_KEY } from "@/lib/notifications/use-alerts";
@@ -43,15 +44,25 @@ const ROW = {
   updated_at: "2026-08-12T20:00:00Z",
 };
 
-function wrap(ui: React.ReactElement, snapshot: AlertsResponse) {
+// meiva:note
+// The page's clock is an input like the cache: the section states an unresolved alert's age
+// against it, so a test that asserts an age states the instant, and the rest get the real clock.
+function wrap(
+  ui: React.ReactElement,
+  snapshot: AlertsResponse,
+  wallNow: () => number = () => Date.now(),
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   });
   qc.setQueryData(ALERTS_SECTION_QUERY_KEY, snapshot);
   qc.setQueryData(SETTINGS_QUERY_KEY, USER_SETTING_DEFAULTS);
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
-    wrapper: apiWrapper(cacheOnlyApi()),
-  });
+  return render(
+    <WallClockProvider wallNow={wallNow}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+    { wrapper: apiWrapper(cacheOnlyApi()) },
+  );
 }
 
 describe("AlertsSection", () => {
@@ -93,6 +104,19 @@ describe("AlertsSection", () => {
     expect(resolvedSeverity.className).toContain("bg-muted");
     expect(resolvedSeverity.className).toContain("text-muted-foreground");
     expect(resolvedSeverity.className).not.toContain("bg-orange-500");
+  });
+
+  it("measures an unresolved alert's age on the clock the page hands in", async () => {
+    // meiva:note
+    // A stated instant, not this machine's: the row's duration is elapsed time, so the value is
+    // what proves the section read the page's clock instead of the global one.
+    wrap(
+      <AlertsSection />,
+      response({ alerts: [ROW], meta: { window: "24h", total: 1, unresolved_count: 1 } }),
+      () => Date.parse("2026-08-12T20:45:00Z"),
+    );
+    await waitFor(() => screen.getByTestId("alert-row-7"));
+    expect(within(screen.getByTestId("alert-row-7")).getByText("45m")).toBeTruthy();
   });
 
   it("shows the empty state when there are no alerts", async () => {

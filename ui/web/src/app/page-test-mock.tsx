@@ -13,7 +13,7 @@ import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { fakeStreamHub, resetStreamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
 import { AuthProvider } from "@/lib/auth/auth-context";
-import { ApiProvider, StreamHubProvider } from "@/lib/transport/transport-context";
+import { ApiProvider, StreamHubProvider, WallClockProvider } from "@/lib/transport/transport-context";
 
 export const hooksState = {
   isLarge: true,
@@ -154,13 +154,19 @@ export async function cleanupHomePageTest(): Promise<void> {
   await homePageGateway.close();
 }
 
+// meiva:note
+// The home surface renders the shared-context column, which ages its document on the page's clock;
+// the real one keeps these asserts as they were.
 export function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
-    wrapper: gatewayWrapper,
-  });
+  return renderWithBrowser(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+    { wrapper: gatewayWrapper },
+  );
 }
 
 export async function resetHomePageTestState() {

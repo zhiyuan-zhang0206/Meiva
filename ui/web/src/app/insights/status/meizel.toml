@@ -2,6 +2,3 @@ exports = ["page.tsx"]
 
 [uses]
 "page.test.tsx" = ["page.tsx"]
-
-[debt.ambient-read]
-"page.tsx#clock Date" = 3

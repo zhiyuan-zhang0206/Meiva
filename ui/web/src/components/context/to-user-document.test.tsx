@@ -6,6 +6,7 @@ import type { FakeBrowser } from "@/lib/browser/testing";
 import { fakeBrowser } from "@/lib/browser/testing";
 import type { ToUserDocument } from "@/lib/contracts/types";
 import { ApiError } from "@/lib/transport/api";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 import { preloadChatMarkdown } from "@/components/content/markdown";
@@ -45,21 +46,26 @@ function show(
   } else {
     transport.getToUser.mockImplementation(() => new Promise(() => undefined));
   }
+  // meiva:note
+  // The status bar ages the document on the page's clock; the real one keeps these asserts (the
+  // presence of the "updated" label) as they were.
   return renderWithBrowser(
-    <QueryClientProvider client={qc}>
-      <ToUserDocumentView
-        agentId={7}
-        document={value}
-        failure={null}
-        pending={false}
-        refresh={vi.fn()}
-        mobile={mobile}
-        inspecting={inspecting}
-        onInspect={onInspect}
-        onCollapse={onCollapse}
-        onNavigate={onNavigate}
-      />
-    </QueryClientProvider>,
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>
+        <ToUserDocumentView
+          agentId={7}
+          document={value}
+          failure={null}
+          pending={false}
+          refresh={vi.fn()}
+          mobile={mobile}
+          inspecting={inspecting}
+          onInspect={onInspect}
+          onCollapse={onCollapse}
+          onNavigate={onNavigate}
+        />
+      </QueryClientProvider>
+    </WallClockProvider>,
     { browser },
   );
 }

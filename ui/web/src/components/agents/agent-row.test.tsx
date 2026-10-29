@@ -8,6 +8,7 @@ import { beforeEach, afterEach, beforeAll, describe, expect, it, vi } from "vite
 import { AgentRow } from "./agent-row";
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 import { renderWithApi as rtlRender } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
@@ -46,11 +47,18 @@ beforeAll(() => {
 // worse — real prod settings would leak into the merged settings map and
 // green-wash assertions that depend on the defaults. Tests that need
 // non-default status / settings seed the query cache directly.
+// meiva:note
+// The row ages its timestamp against the page's clock; the app's own answer keeps this file's
+// relative-time strings the ones it already asserts.
 function render(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 // Render with the user-settings cache pre-seeded — for testing opt-in
@@ -61,7 +69,11 @@ function renderWithSettings(ui: React.ReactElement, settings: Record<string, unk
     defaultOptions: { queries: { retry: false } },
   });
   qc.setQueryData(["user-settings"], settings);
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowType {
@@ -105,6 +117,32 @@ const baseProps = {
 function guides(container: HTMLElement) {
   return Array.from(container.querySelectorAll('[data-testid="tree-guide"]'));
 }
+
+// meiva:note
+// The row's relative timestamp comes from the page's clock: two instants, two strings. The row also
+// ticks once a minute on its own; a fixed clock keeps both reads on the same instant here.
+describe("AgentRow timestamp source", () => {
+  it("ages the timestamp against the clock the page hands in", () => {
+    const activeAt = "2026-05-07T00:00:00Z";
+    const at = (ms: number) => {
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return rtlRender(
+        <WallClockProvider wallNow={() => ms}>
+          <QueryClientProvider client={qc}>
+            <AgentRow
+              {...baseProps}
+              agent={ag(1, { last_active_at: activeAt })}
+              depth={0}
+              ancestorsIsLast={[]}
+            />
+          </QueryClientProvider>
+        </WallClockProvider>,
+      ).container.textContent;
+    };
+    expect(at(Date.parse("2026-05-07T03:00:00Z"))).not.toBe(at(Date.parse("2026-05-07T09:00:00Z")));
+    expect(at(Date.parse("2026-05-07T03:00:00Z"))).toContain("3h");
+  });
+});
 
 describe("AgentRow tree-guide rendering", () => {
   it("shows a launch failure on the roster row even with status dots disabled", () => {
@@ -282,9 +320,11 @@ describe("AgentRow machine badge (removed, task #3904)", () => {
       cluster: { machines: [{ name: "m1" }, { name: "m2" }] },
     });
     const { queryByText } = rtlRender(
-      <QueryClientProvider client={qc}>
-        <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />
-      </QueryClientProvider>,
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={qc}>
+          <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />
+        </QueryClientProvider>
+      </WallClockProvider>,
     );
     expect(queryByText("test-machine")).toBeNull();
   });
