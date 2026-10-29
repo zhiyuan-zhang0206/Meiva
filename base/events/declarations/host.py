@@ -13,6 +13,32 @@ class HostDispatcherScanFailed(TypedDict):
     backoff_s: float
 
 
+# meiva:note
+# `host_database_beat_failed` payload — agent-host `beat_forever`. One event per failed database
+# beat: the beat reaps crash corpses and renews host ownership, so a failing beat is the host's
+# first warning that the database is unreachable, long before the third failure ends the process.
+# `will_exit` marks the failure that raises, which is what the 2026-10-18 crash wave was.
+# meiva:link agent/docs/loop.meiva.okf.md
+class HostDatabaseBeatFailed(TypedDict):
+    machine: str
+    pool: str
+    failures: int
+    limit: int
+    will_exit: bool
+    error: str
+
+
+# meiva:note
+# `host_database_beat_recovered` payload — the beat's retry result, emitted when a beat that had
+# failed succeeds again, so an incident review pairs the failures with the recovery instead of
+# reading the gap in the log as silence.
+# meiva:link agent/docs/loop.meiva.okf.md
+class HostDatabaseBeatRecovered(TypedDict):
+    machine: str
+    pool: str
+    failures_cleared: int
+
+
 class ImpersonationTerminalNoticeFailed(TypedDict):
     """`impersonation_terminal_notice_failed` payload — agent/impersonation.py.
 
@@ -307,6 +333,23 @@ EVENTS: dict[str, EventSpec] = {
         "the beat's corpse reap pass failed — retried on the next beat; leases "
         "of healthy rows are unaffected (renewal runs first)",
         tier="anomaly",
+    ),
+    "host_database_beat_failed": telemetry_event(
+        "host_database_beat_failed",
+        "the agent host's database beat failed — the reaper leg timed out or the pool "
+        "was unreachable; carries the consecutive failure count, the limit and whether "
+        "this failure ends the host. One event per failure, and only from the beat: a "
+        "log line that merely mentions the words is not this event",
+        payload=HostDatabaseBeatFailed,
+        tier="anomaly",
+    ),
+    "host_database_beat_recovered": telemetry_event(
+        "host_database_beat_recovered",
+        "the agent host's database beat succeeded again after failing; carries how many "
+        "consecutive failures it cleared, so the retry result is on the record and not "
+        "only implied by the absence of further failures",
+        payload=HostDatabaseBeatRecovered,
+        tier="noise",
     ),
     "corpse_reaper_publish_failed": telemetry_event(
         "corpse_reaper_publish_failed",
