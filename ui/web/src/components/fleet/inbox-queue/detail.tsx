@@ -8,6 +8,7 @@ import { ChatMarkdown } from "@/components/content/markdown";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { NoticeQuestionSummary } from "@/components/notifications/notice-question-form";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { dropOpenNotices } from "@/lib/notifications/use-notices";
 import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
 
@@ -114,6 +115,7 @@ export function ResolvedDetail({
   agentStatus: PublicAgentStatus | null;
 }) {
   const t = useTranslations("fleet.inboxPanel");
+  const now = useWallDate();
   const label =
     notice.resolution === "dismissed"
       ? t("dismissed")
@@ -152,7 +154,7 @@ export function ResolvedDetail({
         <div className="mt-4 border-t border-border pt-3">
           <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
             {label}
-            {notice.resolved_at ? ` · ${formatRelativeTime(notice.resolved_at, new Date())}` : ""}
+            {notice.resolved_at ? ` · ${formatRelativeTime(notice.resolved_at, now)}` : ""}
           </div>
           {notice.question ? (
             <div className="mt-3"><NoticeQuestionSummary question={notice.question} answer={notice.answer} /></div>

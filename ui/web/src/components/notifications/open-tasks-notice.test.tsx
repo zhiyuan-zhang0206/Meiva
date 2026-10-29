@@ -2,12 +2,13 @@
 // notice (task #3374): store-slot gating, row rendering (count / #id | title |
 // status | age / more line), dismissal, and the zh catalog copy.
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import zh from "../../../messages/zh";
 import { MIN_W_0 } from "@/lib/layout/layout";
 import { useStore } from "@/lib/state/store";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { OpenTasksHint } from "@/lib/contracts/types";
 import { OpenTasksNoticeDialog } from "./open-tasks-notice-dialog";
 import { OpenTasksNoticeHost } from "./open-tasks-notice";
@@ -27,6 +28,13 @@ beforeEach(() => {
 // Rows are flex segments (id / title / tail): visual spacing comes from the
 // flex gap, so normalize pipes before comparing against the receipt shape.
 const rowText = (row: HTMLElement) => row.textContent.replace(/\s*\|\s*/g, " | ").trim();
+
+// meiva:note
+// These surfaces read the page's clock now, and this file's `render` is the app's tree with one
+// provider: the suite's own clock is what they see, so the relative ages below keep their meaning.
+function render(ui: React.ReactElement) {
+  return rtlRender(<WallClockProvider wallNow={() => Date.now()}>{ui}</WallClockProvider>);
+}
 
 function makeHint(overrides: Partial<OpenTasksHint> = {}): OpenTasksHint {
   return {
@@ -70,6 +78,20 @@ describe("OpenTasksNoticeHost", () => {
 });
 
 describe("OpenTasksNoticeDialog", () => {
+  it("ages a row against the clock the page hands in", () => {
+    const now = Date.parse("2026-06-14T12:00:00Z");
+    const hint = makeHint({
+      count: 1,
+      tasks: [{ ...makeHint().tasks[0], updated_at: "2026-06-14T10:00:00Z" }],
+    });
+    rtlRender(
+      <WallClockProvider wallNow={() => now}>
+        <OpenTasksNoticeDialog notice={hint} onClose={() => undefined} />
+      </WallClockProvider>,
+    );
+    expect(rowText(screen.getByText(/Ship the hint/).closest("li") as HTMLElement)).toContain("2h ago");
+  });
+
   it("renders the count title and each row as #id | title | status | age", () => {
     render(<OpenTasksNoticeDialog notice={makeHint()} onClose={() => undefined} />);
     expect(screen.getByText("This agent still has 2 open tasks")).toBeTruthy();

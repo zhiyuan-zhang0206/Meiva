@@ -12,6 +12,7 @@ import { pressEnter } from "@/test-support/enter-key";
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import { USER_SETTING_DEFAULTS, type OpenNotice } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -25,10 +26,19 @@ const { resolveNotice } = vi.hoisted(() => ({
     vi.fn<(agentId: number, noticeId: number, body: unknown, key?: string) => Promise<{ status: string }>>(),
 }));
 
-function renderNotice(ui: React.ReactElement) {
+// meiva:note
+// The wall clock the page hands in: a fixed instant, so a relative label is a fact of this file
+// rather than of the day the suite runs, and two instants can be compared in one case.
+const NOW = Date.parse("2026-06-14T12:30:00Z");
+
+function renderNotice(ui: React.ReactElement, now: number = NOW) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS });
-  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(
+    <WallClockProvider wallNow={() => now}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
@@ -60,7 +70,7 @@ function field(): HTMLTextAreaElement {
 
 describe("OpenNoticeDetail — timestamp", () => {
   const createdAt = "2026-06-14T12:00:00Z";
-  const timestamp = `${formatRelative(createdAt, new Date())}, ${formatAbsolute(createdAt)}`;
+  const timestamp = `${formatRelative(createdAt, new Date(NOW))}, ${formatAbsolute(createdAt)}`;
 
   it("hides the created time by default", () => {
     renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} />);
@@ -83,7 +93,28 @@ describe("OpenNoticeDetail — timestamp", () => {
   it("shows expiry time when expire_at is present", () => {
     const expireAt = "2026-06-15T12:00:00Z";
     renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ expire_at: expireAt })} />);
-    expect(screen.getByText(new RegExp(formatRelative(expireAt, new Date())))).toBeTruthy();
+    expect(screen.getByText(new RegExp(formatRelative(expireAt, new Date(NOW))))).toBeTruthy();
+  });
+
+  // meiva:note
+  // The label follows the clock the page hands in: the same notice read at two instants says two
+  // different things, so a component that goes back to reading the global clock fails here.
+  it("draws the created time against the page's clock, not the runner's", () => {
+    const later = NOW + 3 * 60 * 60 * 1000;
+    const label = (now: number) => {
+      const view = renderNotice(
+        <OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} showTimestamp />,
+        now,
+      );
+      const text = view.getByText(new RegExp(formatRelative(createdAt, new Date(now)))).textContent;
+      cleanup();
+      return text;
+    };
+    const atOpen = label(NOW);
+    const threeHoursLater = label(later);
+    expect(atOpen).toContain(formatRelative(createdAt, new Date(NOW)));
+    expect(threeHoursLater).toContain(formatRelative(createdAt, new Date(later)));
+    expect(threeHoursLater).not.toBe(atOpen);
   });
 });
 

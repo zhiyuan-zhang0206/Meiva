@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -138,7 +139,14 @@ afterEach(() => {
 function wrap(ui: ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
-  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(
+    // meiva:note
+    // The queue's rows age against the page's clock; the app's own answer keeps this file's
+    // relative labels meaning what they said before.
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 function noticeItem(over: Partial<NoticeItem> & { id: number }): NoticeItem {

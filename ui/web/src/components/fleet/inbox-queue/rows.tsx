@@ -7,6 +7,7 @@ import { STATUS_DOT } from "@/components/agents/agent-row";
 import { ChatMarkdown } from "@/components/content/markdown";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import type { PublicAgentStatus, OpenNotice, PageRow } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
@@ -102,6 +103,7 @@ export function NoticeListRow({
   anchorHighlighted?: boolean;
 }) {
   const t = useTranslations("fleet.inboxPanel");
+  const now = useWallDate();
   return (
     <li
       data-testid="inbox-row"
@@ -145,7 +147,7 @@ export function NoticeListRow({
             >
               {t("decision")}
             </span>
-            {createdAt && <span>{formatRelativeTime(createdAt, new Date())}</span>}
+            {createdAt && <span>{formatRelativeTime(createdAt, now)}</span>}
             {blocking && <span className="text-destructive">{t("blocking")}</span>}
           </span>
         </span>
@@ -170,13 +172,14 @@ export function AgentContextHeader({
   agentPage?: PageRow;
   createdAt?: string;
 }) {
+  const now = useWallDate();
   return (
     <div className="mb-3">
       <div className={cn("items-center gap-2", FLEX)}>
         <AgentStatusDot status={agentStatus} />
         <span className={cn("truncate text-xs text-muted-foreground", MIN_W_0)}>
           {agentLabel}
-          {createdAt ? ` · ${formatRelativeTime(createdAt, new Date())}` : ""}
+          {createdAt ? ` · ${formatRelativeTime(createdAt, now)}` : ""}
         </span>
         {agentPage && (
           <AgentPageLink page={agentPage} showLabel className={cn("ml-auto text-[10px]", MIN_W_0)} />
