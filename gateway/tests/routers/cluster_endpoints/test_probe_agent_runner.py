@@ -73,7 +73,8 @@ async def test_a_missing_registered_url_is_offline_without_a_dial(
 
 # meiva:note
 # Retry is inside one roster deadline: a blackholed first attempt is cancelled at the
-# configured budget rather than getting a second full timeout window.
+# configured budget rather than getting a second full timeout window. Configuration
+# construction is test setup, outside the measured probe interval.
 @pytest.mark.asyncio
 async def test_a_blackhole_stays_inside_the_single_total_budget(
     db_conn: psycopg.Connection,
@@ -90,12 +91,11 @@ async def test_a_blackhole_stays_inside_the_single_total_budget(
         return completed({})
 
     with runner_ops(db_conn, "runner-a", {"status_probe": never_answers}) as runner:
+        env = roster_env(database, machine_identity, home=tmp_path, probe_timeout_s=0.05)
+        target = _row(runner.url)
         started = time.monotonic()
         try:
-            row = await status_router.probe_agent_runner(
-                roster_env(database, machine_identity, home=tmp_path, probe_timeout_s=0.05),
-                _row(runner.url),
-            )
+            row = await status_router.probe_agent_runner(env, target)
         finally:
             release.set()
         elapsed = time.monotonic() - started
