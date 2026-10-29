@@ -543,10 +543,20 @@ def main(
             problems.append(f"{rel}:{lineno}: {message}")
 
     unique = sorted(set(problems))
-    for problem in unique:
-        print(problem)
-    print(f"\n{len(unique)} dangling reference(s) across {len(doc_list)} docs", file=sys.stderr)
-    return 1 if unique else 0
+    if unique:
+        for problem in unique:
+            print(problem)
+        print(
+            f"\n{len(unique)} dangling reference(s) across {len(doc_list)} docs. A doc that names "
+            f"a flag, a file or a node that no longer exists sends its reader to a dead end — and "
+            f"a reader who copies an executable instruction runs the dead invocation. Point each "
+            f"reference at what exists now or drop it; a frozen record belongs under "
+            f"docs/decisions/ or docs/postmortems/, which this check exempts on purpose. "
+            f"See docs/conventions/doc-maintenance.md.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

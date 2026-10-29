@@ -177,3 +177,18 @@ def test_unknown_only_target_is_rejected_before_explicit_scan(repo: Path) -> Non
     _write(repo, "docs/clean.md", "clean\n")
     with pytest.raises(SystemExit, match=r"not found: typo\.txt"):
         gate.main(["docs/clean.md", "--only", "typo.txt"], repo_root=repo)
+
+
+# meiva:note
+# The block under the facts states why a public repository may not carry a private overlay address
+# and where the rule is written. Asserted on fragments, not sentences.
+def test_the_failure_block_carries_the_reason(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    literal = _cgnat_ip(64, "0.9")
+    _write(repo, "tests/fixture.py", f"url = 'http://{literal}/'\n")
+    assert gate.main(["tests/fixture.py"], repo_root=repo) == 1
+    err = capsys.readouterr().err.lower()
+
+    assert "public" in err
+    assert "topology" in err

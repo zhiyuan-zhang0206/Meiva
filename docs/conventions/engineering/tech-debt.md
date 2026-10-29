@@ -29,7 +29,7 @@ add protection.
 | inline-marker | No universal prohibition on TODO/FIXME/XXX/HACK | Verify the unfinished behavior and its consequence |
 | dead-code | No zero-false-positive framework-wide dead-code gate | Prove a candidate has no runtime consumers |
 | boundary | Import layering and structure lints guard declared boundaries | Identify overlapping responsibilities or missing owners |
-| skill-desc | `lint_skill_descriptions.py` enforces 80 units | Tighten descriptions in the 50–80 unit soft zone |
+| skill-desc | `lint_skill_descriptions.py` enforces one hard line: 80 units | List the longest descriptions by measured length — facts only, no band below the line and no "should shorten" |
 | docstring-budget | `agent_docstrings.py` enforces its deterministic rules | Justify rare errors, narration and soft length budgets |
 | stalecopy | Reference lints detect broken targets, not copied stale facts | Compare copied prose with changes to its original |
 | rebase-bypassed hooks | `check-merge-conflict`, repeated by structural CI | No separate debt scan for already-enforced markers |
@@ -92,8 +92,12 @@ resolve the ledger item.
 ### Skill descriptions and SDK docstrings
 
 Use the existing scanners' scope and measurements, not a second file list.
-`base/packages/text_budget.py` owns the unit metric (`count_words`); `lint_skill_descriptions.py` owns `_skill_entries` and the description gates; description
-trimming must preserve capability and trigger information. For SDK docstrings,
+`base/packages/text_budget.py` owns the unit metric (`count_words`); `lint_skill_descriptions.py` owns `_skill_entries` and the description gate. That gate is
+one hard line at 80 units, and there is no band below it: an inspection lists the
+longest descriptions by measured length as facts, without a threshold and without
+a recommendation to shorten. A description over the line fails, and its repair is
+moving the detail into the skill body — compressing the description to fit is the
+thing the ceiling exists to prevent. For SDK docstrings,
 use the surface discovery and visibility helpers in `agent_docstrings.py`.
 Read [SDK docstring discipline](../sdk-docstring-discipline.md). Function docstrings
 over 12 lines, module docstrings over 2 lines and `Raises:` sections invite
