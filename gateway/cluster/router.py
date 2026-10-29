@@ -25,7 +25,11 @@ from gateway.cluster.admin_events_plan import (
     AdminEventsFilters,
     plan_admin_events,
 )
-from gateway.cluster.harness_probe import HarnessProbeCache, probe_harnesses
+from gateway.cluster.harness_probe import (
+    HarnessProbeCache,
+    probe_harnesses,
+    require_harness_target,
+)
 from gateway.cluster.harness_rows import availability_rows
 from gateway.cluster.ops_dispatch import dispatch_op
 from gateway.cluster.roster import snapshots
@@ -276,32 +280,47 @@ async def get_cluster_machines(
 
 
 # meiva:note
-# The spawn form reads this before offering a harness: `status` says whether that
+# The spawn form reads the last explicit check: `status` says whether that
 # machine has the CLI installed and signed in, `launchable` whether this build can
 # start a session on it at all. Both are reported, so an installed-but-unstartable
 # harness still appears — with the reason — instead of vanishing. A machine whose
 # runner predates this op, or a name no machine carries, is an error here, and the
 # form then shows the choice as unknown rather than as available.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/availability.meiva.okf.md
 @router.get(
     "/api/cluster/machines/{name}/harnesses",
     response_model=list[HarnessAvailability],
-    description="What one machine can run, one row per harness, cached 30 seconds.",
+    description="Read the last explicit harness check. Empty until refreshed; never probes a runner.",
 )
 async def get_machine_harnesses(name: str, request: Request) -> list[HarnessAvailability]:
     cache: HarnessProbeCache = request.app.state.harness_cache
     cached = cache.get(name)
     if cached is not None:
         return cached
-    probed = await probe_harnesses(
-        name,
-        db=request.app.state.db,
-        local_machine=request.app.state.machine,
-        rpc=gateway_rpc(request),
+    await require_harness_target(
+        name, db=request.app.state.db, local_machine=request.app.state.machine
     )
-    rows = availability_rows(probed, LAUNCHABLE_HARNESSES)
-    cache.store(name, rows)
-    return rows
+    return []
+
+
+@router.post(
+    "/api/cluster/machines/{name}/harnesses/refresh",
+    response_model=list[HarnessAvailability],
+    description="Explicitly check one runner's harness installations and login state, replacing its snapshot on success.",
+)
+async def refresh_machine_harnesses(name: str, request: Request) -> list[HarnessAvailability]:
+    cache: HarnessProbeCache = request.app.state.harness_cache
+
+    async def probe() -> list[HarnessAvailability]:
+        probed = await probe_harnesses(
+            name,
+            db=request.app.state.db,
+            local_machine=request.app.state.machine,
+            rpc=gateway_rpc(request),
+        )
+        return availability_rows(probed, LAUNCHABLE_HARNESSES)
+
+    return await cache.refresh(name, probe)
 
 
 class MachineStagingRequest(BaseModel):

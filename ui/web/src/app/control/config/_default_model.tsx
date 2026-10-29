@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { errMsg } from "@/lib/contracts/errors";
-import { groupedModels, isSuperseded, providerLabel } from "@/lib/contracts/models";
+import { groupedModels, isSuperseded, modelLabel, providerLabel } from "@/lib/contracts/models";
 import { useStore } from "@/lib/state/store";
 
 import { useSectionVisible } from "../visibility";
@@ -89,13 +89,13 @@ export function DefaultModelPanel({ id }: { id: string }) {
             )}
 
             {stored !== "" && !groups.some(([, ids]) => ids.includes(stored)) && (
-              <option value={stored}>{stored}</option>
+              <option value={stored}>{modelLabel(stored)}</option>
             )}
             {groups.map(([provider, ids]) => (
               <optgroup key={provider} label={providerLabel(provider)}>
                 {ids.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {modelLabel(m)}
                   </option>
                 ))}
               </optgroup>

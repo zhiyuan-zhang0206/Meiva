@@ -13,7 +13,6 @@ import { useApi } from "@/lib/transport/transport-context";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { errMsg } from "@/lib/contracts/errors";
 import { useSidebarCollapsed, useSidebarViewMode } from "@/lib/agents/sidebar";
-import { useWarmHarnessAvailability } from "@/lib/harness/use-harness-availability";
 import { useStore } from "@/lib/state/store";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 
@@ -47,12 +46,6 @@ export function AgentSidebar(props: Props) {
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   const collapsed = collapsedSetting;
   const { viewMode, setViewMode } = useSidebarViewMode();
-  // meiva:note
-  // One harness probe per page load, taken here so the spawn picker opens on an
-  // answer instead of starting the probe the user then waits for (user
-  // 2026-10-21). The picker's own hooks read the same cache entries.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-  useWarmHarnessAvailability();
   // Show-terminated is a DB-backed user setting (display.show_terminated), the
   // single source of truth shared with the Display settings page — toggling
   // either place updates the same ["user-settings"] cache, so they stay in

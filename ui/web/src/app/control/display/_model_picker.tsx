@@ -14,7 +14,7 @@
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md
 
 import { Switch } from "@/components/ui/switch";
-import { providerLabel } from "@/lib/contracts/models";
+import { modelLabel, providerLabel } from "@/lib/contracts/models";
 import type { ModelsResponse } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
@@ -83,7 +83,7 @@ export function ModelPickerSection({
                 return (
                   <li key={modelName} className={cn(MODEL_ROW, FLEX)}>
                     <div className={cn(MIN_W_0, FLEX_1)}>
-                      <div className="truncate text-[13px]">{modelName}</div>
+                      <div className="truncate text-[13px]" title={modelName}>{modelLabel(modelName)}</div>
                       {price ? (
                         <div className="text-[11px] tabular-nums text-muted-foreground">
                           ${price.input.toFixed(2)} / ${price.cache_read.toFixed(2)} / $
@@ -95,7 +95,7 @@ export function ModelPickerSection({
                       checked={!hidden}
                       disabled={providerOff}
                       onCheckedChange={(on) => onToggleModel(modelName, on)}
-                      aria-label={modelName}
+                      aria-label={modelLabel(modelName)}
                     />
                   </li>
                 );

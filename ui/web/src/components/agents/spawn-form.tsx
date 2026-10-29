@@ -10,13 +10,13 @@
 // `onSpawn(undefined)` — the backend would read it as "spawn here" and reject it.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
-import { useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { useIsMutating, useQuery } from "@tanstack/react-query";
+import { Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
-import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
+import { useHarnessAvailabilityByMachine, useRefreshHarnessAvailability } from "@/lib/harness/use-harness-availability";
 import { SpawnStack, SpawnTable, type SpawnMachine } from "./spawn-table";
 import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
@@ -74,6 +74,8 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     staleTime: Infinity,
   });
   const modelsData = modelsQuery.error ? undefined : modelsQuery.data;
+  const refresh = useRefreshHarnessAvailability();
+  const refreshing = useIsMutating({ mutationKey: ["harness-refresh"] }) > 0;
   const { settings, setSetting } = useUserSettings();
   // meiva:note
   // What the form shows is the LAST SPAWN, not the last click (user 2026-10-20):
@@ -253,10 +255,6 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     onDone();
   }
 
-  if (modelsQuery.error) {
-    return <div role="status" className="px-3 py-2 text-xs text-muted-foreground">{t("modelsUnavailable")}</div>;
-  }
-
   if (spawnable.length === 0) {
     const reason = eligible.length === 1
       ? eligible[0].agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")
@@ -265,7 +263,12 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   }
 
   const target = machines.find((row) => row.name === selectedMachine);
-  const spawnReason = target?.reason ?? (harnessBlocked ? t("harnessStatus.unavailable") : undefined);
+  const spawnReason = target?.reason ?? (harnessBlocked
+    ? t("harnessStatus.unavailable")
+    : modelsQuery.error ? t("modelsUnavailable") : undefined);
+  const refreshNotice = refresh.isError && refresh.variables === selectedMachine
+    ? t("refreshFailed")
+    : !harnessByMachine.get(selectedMachine ?? "")?.length ? t("refreshNeeded") : undefined;
   // meiva:note
   // Rates are the decision only when the harness meters them. A subscription
   // harness pays nothing per token, so the price column stays empty there
@@ -305,6 +308,30 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     </button>
   );
 
+  const refreshButton = (className?: string) => (
+    <button
+      type="button"
+      disabled={refreshing || selectedMachine === undefined || target?.reason !== undefined}
+      onClick={() => {
+        if (selectedMachine !== undefined) {
+          refresh.mutate(selectedMachine, { onSettled: () => { void modelsQuery.refetch(); } });
+        }
+      }}
+      className={cn(
+        "items-center justify-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-xs hover:bg-sidebar-accent disabled:opacity-50",
+        FLEX, className,
+      )}
+    >
+      <RefreshCw className={cn("size-3.5 shrink-0", refreshing && "animate-spin")} />
+      <span>{refreshing ? t("refreshing") : t("refresh")}</span>
+    </button>
+  );
+
+  const notice = refreshNotice === undefined ? null : (
+    <p role={refresh.isError && refresh.variables === selectedMachine ? "alert" : "status"}
+      className="text-xs text-muted-foreground">{refreshNotice}</p>
+  );
+
   if (layout === "stack") {
     return (
       // meiva:note
@@ -319,7 +346,11 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
             {spawnReason}
           </p>
         )}
-        <div className="border-t border-border p-2">{spawnButton("w-full min-h-11 text-sm")}</div>
+        <div className={cn("gap-2 border-t border-border p-2", FLEX, FLEX_COL)}>
+          {notice}
+          {refreshButton("w-full min-h-11 text-sm")}
+          {spawnButton("w-full min-h-11 text-sm")}
+        </div>
       </div>
     );
   }
@@ -335,7 +366,9 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
       <div className={cn(MIN_W_0, FLEX_1)}>
         <SpawnTable {...pickerProps} />
       </div>
-      <div className={cn("w-[5.5rem] shrink-0 justify-end border-l border-border p-2", FLEX, FLEX_COL)}>
+      <div className={cn("w-[7rem] shrink-0 justify-end gap-2 border-l border-border p-2", FLEX, FLEX_COL)}>
+        {notice}
+        {refreshButton("w-full")}
         {spawnButton("w-full")}
       </div>
     </div>

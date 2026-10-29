@@ -80,6 +80,15 @@ describe("server error surfacing", () => {
     await expect(api().getHarnessAvailability("local")).resolves.toEqual([]);
   });
 
+  it("uses an explicit POST to refresh one machine and surfaces probe failures", async () => {
+    answer = () => ({ kind: "json", body: [] });
+    await expect(api().refreshHarnessAvailability("runner with spaces")).resolves.toEqual([]);
+    expect(requests()).toHaveLength(1);
+    expect(requests()[0]).toMatchObject({ method: "POST", path: "/api/cluster/machines/runner%20with%20spaces/harnesses/refresh" });
+    answer = () => ({ kind: "text", status: 503, body: "runner offline" });
+    await expect(api().refreshHarnessAvailability("runner")).rejects.toThrow(/503/);
+  });
+
   it("preserves a committed id and state from a launch-failure response", async () => {
     answer = () => ({
       kind: "json",
