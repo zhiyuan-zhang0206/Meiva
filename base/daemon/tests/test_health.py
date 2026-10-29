@@ -15,12 +15,15 @@ from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.tests._health_helpers import find_free_port, http_get
 from base.daemon.tests.health_support import token_digest, unknown_image
 from base.host.env.health_ports import DEFAULT_PORTS, health_port
+from base.paths import meiva_home
 
 
 @pytest.mark.asyncio
 async def test_healthz_returns_200_with_json_body() -> None:
     port = find_free_port()
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         status, body = await http_get(port, "/healthz")
         assert status == 200
@@ -119,7 +122,7 @@ async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> No
     dispatch.fail("dispatch exceeded hard deadline")
     trim.beat()
     server = await health.start_health_server(
-        "events_maintenance", port=port, liveness=group, image=unknown_image()
+        "events_maintenance", home=meiva_home(), port=port, liveness=group, image=unknown_image()
     )
     try:
         status, body = await http_get(port, "/healthz")
@@ -137,7 +140,7 @@ async def test_healthz_503_when_liveness_stale() -> None:
     port = find_free_port()
     stale = health.Liveness(timeout_s=-1.0)
     server = await health.start_health_server(
-        "agent_host", port=port, liveness=stale, image=unknown_image()
+        "agent_host", home=meiva_home(), port=port, liveness=stale, image=unknown_image()
     )
     try:
         status, body = await http_get(port, "/healthz")
@@ -157,7 +160,7 @@ async def test_healthz_200_when_liveness_fresh() -> None:
     port = find_free_port()
     fresh = health.Liveness(timeout_s=1e9)
     server = await health.start_health_server(
-        "agent_host", port=port, liveness=fresh, image=unknown_image()
+        "agent_host", home=meiva_home(), port=port, liveness=fresh, image=unknown_image()
     )
     try:
         status, body = await http_get(port, "/healthz")
@@ -172,6 +175,7 @@ async def test_healthz_component_failure_surfaces_the_component_reason() -> None
     port = find_free_port()
     server = await health.start_health_server(
         "agent_host",
+        home=meiva_home(),
         port=port,
         components=[component("worker", DEGRADED, detail="job stuck")],
         image=unknown_image(),
@@ -199,6 +203,7 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
     port = find_free_port()
     server = await health.start_health_server(
         "agent_host",
+        home=meiva_home(),
         port=port,
         components=components,
         extra=lambda: {"saturation": calls},
@@ -217,7 +222,9 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
 @pytest.mark.asyncio
 async def test_unknown_path_returns_404() -> None:
     port = find_free_port()
-    server = await health.start_health_server("labeler", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "labeler", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         status, _ = await http_get(port, "/garbage")
         assert status == 404
@@ -252,6 +259,7 @@ async def test_extra_route_requires_auth_when_token_set() -> None:
     port = find_free_port()
     server = await health.start_health_server(
         "ops",
+        home=meiva_home(),
         port=port,
         extra_routes={("POST", "/ops"): _ok_route},
         auth_digests=frozenset({token_digest("s3cret")}),
@@ -274,6 +282,7 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
     port = find_free_port()
     server = await health.start_health_server(
         "ops",
+        home=meiva_home(),
         port=port,
         extra_routes={("POST", "/ops"): _ok_route},
         auth_digests=frozenset({token_digest("s3cret")}),
@@ -291,6 +300,7 @@ async def test_extra_route_open_when_no_auth_token() -> None:
     port = find_free_port()
     server = await health.start_health_server(
         "memory_indexer",
+        home=meiva_home(),
         port=port,
         extra_routes={("POST", "/ops"): _ok_route},
         image=unknown_image(),
@@ -305,7 +315,9 @@ async def test_extra_route_open_when_no_auth_token() -> None:
 @pytest.mark.asyncio
 async def test_stop_idempotent() -> None:
     port = find_free_port()
-    server = await health.start_health_server("labeler", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "labeler", home=meiva_home(), port=port, image=unknown_image()
+    )
     await health.stop_health_server(server)
     await health.stop_health_server(server)
 

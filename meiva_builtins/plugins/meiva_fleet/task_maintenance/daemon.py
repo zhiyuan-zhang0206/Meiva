@@ -560,7 +560,11 @@ async def run(
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     try:
         health = await start_health_server(
-            "task_maintenance", endpoint.health_port, liveness=liveness, image=image
+            "task_maintenance",
+            endpoint.health_port,
+            home=meiva_home(),
+            liveness=liveness,
+            image=image,
         )
         _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
         try:

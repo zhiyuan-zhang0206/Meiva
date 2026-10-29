@@ -15,7 +15,9 @@ port, health response, route map and authentication token. It never resolves
 configuration, creates a home, writes a PID or registers a unit.
 
 Normal daemons retain their existing health wrapper: configuration-derived
-port, resolved home, process identity and aggregated liveness payload. Unknown
+port, the home its process entry hands in, process identity and aggregated
+liveness payload. The wrapper resolves no home of its own, and the probes that
+check an answering daemon's home take the one they expect as an argument. Unknown
 routes return 404; configured bearer authentication precedes explicit route
 execution; unauthenticated health responses contain no secrets. Parsing and
 body limits remain shared rather than independently reimplemented.

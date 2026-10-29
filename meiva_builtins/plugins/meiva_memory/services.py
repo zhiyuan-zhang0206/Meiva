@@ -55,6 +55,7 @@ def services(*, home: Path) -> tuple[ServiceSpec, ...]:
     return (
         healthz_daemon(
             "memory-indexer",
+            home=home,
             module="services.derived.memory_indexer.daemon",
             capabilities=_GATEWAY,
             # The pool is a markdown checkout on disk and the default index backends
