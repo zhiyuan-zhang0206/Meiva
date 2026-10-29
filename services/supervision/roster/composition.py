@@ -147,7 +147,7 @@ def build_services(
             # Gateway reload can fork a serving worker whose pid differs from the recorded
             # pidfile. Bind readiness to the answering home's HTTP identity instead.
             curl_url=gateway_health_url,
-            identity_probe=partial(gateway_probe_at, gateway_health_url),
+            identity_probe=partial(gateway_probe_at, gateway_health_url, home=home),
             healthcheck_module="services.supervision.healthchecks.gateway",
             # meiva:note
             # Uvicorn drains requests before lifespan cleanup. Root's stop window must
@@ -156,12 +156,14 @@ def build_services(
         ),
         healthz_daemon(
             "im-bridge",
+            home=home,
             module="services.entrypoints.im_bridge.daemon",
             capabilities=GATEWAY,
             requires_db=True,
         ),
         healthz_daemon(
             "labeler",
+            home=home,
             module="services.derived.labeler.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -172,6 +174,7 @@ def build_services(
         ),
         healthz_daemon(
             "heartbeat",
+            home=home,
             module="services.wake.heartbeat.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -181,6 +184,7 @@ def build_services(
         # its service gate honors MEIVA_DELIVERY_WATCHDOG_ENABLED.
         healthz_daemon(
             "delivery-watchdog",
+            home=home,
             module="services.wake.delivery_watchdog.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -190,6 +194,7 @@ def build_services(
         # Gating this unit would let checkpoint_blobs grow without bound.
         healthz_daemon(
             "events-maintenance",
+            home=home,
             module="services.upkeep.events_maintenance.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -199,6 +204,7 @@ def build_services(
         # each runner must not independently reap the same cluster records.
         healthz_daemon(
             "ttl-reaper",
+            home=home,
             module="services.upkeep.ttl_reaper.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -208,6 +214,7 @@ def build_services(
         # checkout. The daemon refuses to run from another checkout.
         healthz_daemon(
             "schedule-manager",
+            home=home,
             module="services.wake.schedule_manager.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -264,6 +271,7 @@ def build_services(
         ),
         healthz_daemon(
             "pg-backup",
+            home=home,
             module="services.backup.scheduler.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -288,12 +296,14 @@ def build_services(
         # that host; the database, rather than a process census, is its desired state.
         healthz_daemon(
             "page-server",
+            home=home,
             module="services.agent_runner.page_server.daemon",
             capabilities=AGENT_RUNNER,
             requires_db=True,
         ),
         healthz_daemon(
             "agent-host",
+            home=home,
             module="services.agent_runner.agent_host.daemon",
             capabilities=AGENT_RUNNER,
             # meiva:note
@@ -315,6 +325,7 @@ def build_services(
         ),
         healthz_daemon(
             "ops",
+            home=home,
             module="services.agent_runner.agent_ops.daemon",
             capabilities=AGENT_RUNNER,
             requires_db=True,

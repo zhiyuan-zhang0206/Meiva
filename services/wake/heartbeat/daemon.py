@@ -615,7 +615,7 @@ async def run(
     liveness = LivenessGroup(timers=clock)
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
-        "heartbeat", endpoint.health_port, liveness=liveness, image=image
+        "heartbeat", endpoint.health_port, home=meiva_home(), liveness=liveness, image=image
     )
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 

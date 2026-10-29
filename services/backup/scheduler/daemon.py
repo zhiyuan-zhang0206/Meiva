@@ -223,6 +223,7 @@ async def run(
     health = await start_health_server(
         "pg_backup",
         endpoint.health_port,
+        home=meiva_home(),
         components=lambda: backup_components(
             state, wall_time=time.time(), monotonic=time.monotonic()
         ),

@@ -599,6 +599,7 @@ async def run(
             open_health=start_health_server(
                 "agent_host",
                 endpoint.health_port,
+                home=home,
                 image=process_context.loaded_code_image(),
                 liveness=liveness,
                 extra_routes={

@@ -43,6 +43,7 @@ async def _probe(name: str, port: int, pidfile: Path) -> health.DaemonProbe:
         name,
         probe_url(port),
         pidfile=pidfile,
+        expected_home=meiva_home(),
     )
 
 
@@ -50,10 +51,53 @@ async def _probe(name: str, port: int, pidfile: Path) -> health.DaemonProbe:
 async def test_healthz_body_carries_home(tmp_path: Path) -> None:
     """`home` is in the payload at all — the field the cross-cluster check reads."""
     port = find_free_port()
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         _status, body = await http_get(port, "/healthz")
         assert json.loads(body)["home"] == str(meiva_home())
+    finally:
+        await health.stop_health_server(server)
+
+
+# meiva:note
+# Both sides of the identity check take their home from the caller. A health
+# surface that resolved its own home would answer for the process it happens to
+# run in; the daemon below is served `another`, the first probe is told `another`,
+# and the same server is a foreign unit's daemon once the probe is told this
+# process's own home.
+@pytest.mark.asyncio
+async def test_the_home_is_what_the_caller_says_not_the_one_this_process_runs_in(
+    tmp_path: Path,
+) -> None:
+    another = tmp_path / "another-unit-home"
+    port = find_free_port()
+    pidfile = tmp_path / "agent_host.pid"
+    pidfile.write_text(str(os.getpid()))
+    server = await health.start_health_server(
+        "agent_host", port=port, home=another, image=unknown_image()
+    )
+    try:
+        _status, body = await http_get(port, "/healthz")
+        assert json.loads(body)["home"] == str(another) != str(meiva_home())
+        ours = await asyncio.to_thread(
+            health.probe_daemon,
+            "agent_host",
+            probe_url(port),
+            pidfile=pidfile,
+            expected_home=another,
+        )
+        assert ours.alive is True
+        theirs = await asyncio.to_thread(
+            health.probe_daemon,
+            "agent_host",
+            probe_url(port),
+            pidfile=pidfile,
+            expected_home=meiva_home(),
+        )
+        assert theirs.verdict is health.ProbeVerdict.PORT_TAKEN
+        assert f"home={str(another)!r} != {str(meiva_home())!r}" in theirs.detail
     finally:
         await health.stop_health_server(server)
 
@@ -63,7 +107,9 @@ async def test_healthz_body_carries_the_daemons_own_commit(tmp_path: Path) -> No
     sha = commit_source(tmp_path, "loaded image")
     image = loaded_commit.LoadedCommit.capture(tmp_path)
     port = find_free_port()
-    server = await health.start_health_server("agent_host", port=port, image=image)
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=image
+    )
     try:
         _status, body = await http_get(port, "/healthz")
         assert json.loads(body)["sha"] == sha
@@ -82,7 +128,9 @@ async def test_healthz_reports_an_unfrozen_process_as_unknown() -> None:
     a null reads as "this process cannot vouch for its code"."""
     image = unknown_image()
     port = find_free_port()
-    server = await health.start_health_server("agent_host", port=port, image=image)
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=image
+    )
     try:
         _status, body = await http_get(port, "/healthz")
         assert json.loads(body)["sha"] is None
@@ -103,7 +151,9 @@ async def test_healthz_retains_explicit_loaded_image_after_source_changes(
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("agent_host", port=port, image=image)
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=image
+    )
     try:
         for _ in range(2):
             status, body = await http_get(port, "/healthz")
@@ -133,7 +183,9 @@ async def test_probe_reports_the_commit_without_judging_it(tmp_path: Path) -> No
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("agent_host", port=port, image=image)
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=image
+    )
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.alive is True, probe.detail
@@ -148,7 +200,9 @@ async def test_probe_alive_when_name_home_and_pid_all_match(tmp_path: Path) -> N
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.alive is True, probe.detail
@@ -168,7 +222,9 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid() + 1))  # our daemon's pid, not the responder's
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is health.ProbeVerdict.DOWN
@@ -187,7 +243,9 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
 async def test_a_missing_pidfile_names_the_process_listening_on_the_port(tmp_path: Path) -> None:
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is health.ProbeVerdict.DOWN
@@ -201,7 +259,9 @@ async def test_a_missing_pidfile_names_the_process_listening_on_the_port(tmp_pat
 async def test_an_unavailable_listener_lookup_leaves_the_detail_usable(tmp_path: Path) -> None:
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=unknown_image()
+    )
 
     def no_discovery(_url: str) -> str:
         return "unknown"
@@ -212,6 +272,7 @@ async def test_an_unavailable_listener_lookup_leaves_the_detail_usable(tmp_path:
             "agent_host",
             probe_url(port),
             pidfile=pidfile,
+            expected_home=meiva_home(),
             listener_lookup=no_discovery,
         )
         assert probe.verdict is health.ProbeVerdict.DOWN
@@ -225,7 +286,7 @@ def test_probe_rejects_daemon_from_another_home(tmp_path: Path) -> None:
     pidfile.write_text(str(os.getpid()))
     payload = {"name": "agent_host", "pid": os.getpid(), "home": str(tmp_path / "other-home")}
     with wire_response(json_response(payload)) as url:
-        probe = health.probe_daemon("agent_host", url, pidfile=pidfile)
+        probe = health.probe_daemon("agent_host", url, expected_home=meiva_home(), pidfile=pidfile)
     assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
     assert probe.terminal is True
     assert "home=" in probe.detail
@@ -240,7 +301,9 @@ async def test_probe_rejects_a_different_daemon_kind(tmp_path: Path) -> None:
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("labeler", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "labeler", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
@@ -258,7 +321,9 @@ async def test_probe_rejects_200_when_no_pidfile_exists(tmp_path: Path) -> None:
     DOWN rather than terminal: name and home matched first, so the answerer is a
     stray of this same cluster, which the respawn's kill-session clears."""
     port = find_free_port()
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    server = await health.start_health_server(
+        "agent_host", home=meiva_home(), port=port, image=unknown_image()
+    )
     try:
         probe = await _probe("agent_host", port, tmp_path / "absent.pid")
         assert probe.verdict is health.ProbeVerdict.DOWN
@@ -295,7 +360,11 @@ def test_probe_dead_when_nothing_listens(tmp_path: Path) -> None:
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     probe = health.probe_daemon(
-        "agent_host", probe_url(find_free_port()), pidfile=pidfile, timeout_s=1.0
+        "agent_host",
+        probe_url(find_free_port()),
+        expected_home=meiva_home(),
+        pidfile=pidfile,
+        timeout_s=1.0,
     )
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False, "a free port is the respawnable case"
@@ -313,7 +382,7 @@ async def test_probe_dead_when_liveness_is_stale(tmp_path: Path) -> None:
     pidfile.write_text(str(os.getpid()))
     stale = health.Liveness(timeout_s=-1.0)
     server = await health.start_health_server(
-        "agent_host", port=port, liveness=stale, image=unknown_image()
+        "agent_host", home=meiva_home(), port=port, liveness=stale, image=unknown_image()
     )
     try:
         probe = await _probe("agent_host", port, pidfile)
@@ -330,6 +399,7 @@ async def test_probe_includes_degraded_component_reasons(tmp_path: Path) -> None
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server(
         "agent_host",
+        home=meiva_home(),
         port=port,
         components=[component("ops", DEGRADED, detail="update-lock held 7200s")],
         image=unknown_image(),
@@ -374,7 +444,7 @@ def test_probe_daemon_survives_an_http_exception(
         wire_response(b"garbage on the wire\r\n") as url,
         caplog.at_level(logging.ERROR, logger="base.daemon.health"),
     ):
-        probe = health.probe_daemon("agent_host", url, pidfile=pidfile)
+        probe = health.probe_daemon("agent_host", url, expected_home=meiva_home(), pidfile=pidfile)
     assert probe.alive is False
     assert "BadStatusLine" in probe.detail
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
@@ -385,14 +455,16 @@ def test_probe_daemon_survives_a_pidfile_oserror(tmp_path: Path) -> None:
     pidfile.mkdir()
     payload = {"name": "agent_host", "home": str(meiva_home()), "pid": os.getpid()}
     with wire_response(json_response(payload)) as url:
-        probe = health.probe_daemon("agent_host", url, pidfile=pidfile)
+        probe = health.probe_daemon("agent_host", url, expected_home=meiva_home(), pidfile=pidfile)
     assert probe.alive is False
     assert "IsADirectoryError" in probe.detail
 
 
 def test_probe_daemon_verdict_is_down_never_up_on_failure(tmp_path: Path) -> None:
     with wire_response(b"garbage on the wire\r\n") as url:
-        probe = health.probe_daemon("labeler", url, pidfile=tmp_path / "x.pid")
+        probe = health.probe_daemon(
+            "labeler", url, expected_home=meiva_home(), pidfile=tmp_path / "x.pid"
+        )
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False
 
@@ -402,7 +474,7 @@ def test_probe_daemon_passes_through_a_normal_verdict(tmp_path: Path) -> None:
     pidfile.write_text("42")
     payload = {"name": "ops", "home": str(meiva_home()), "pid": 42}
     with wire_response(json_response(payload)) as url:
-        probe = health.probe_daemon("ops", url, pidfile=pidfile)
+        probe = health.probe_daemon("ops", url, expected_home=meiva_home(), pidfile=pidfile)
     assert probe.alive is True
     assert probe.detail == "pid 42"
 
@@ -421,20 +493,20 @@ def test_probe_daemon_passes_through_a_normal_verdict(tmp_path: Path) -> None:
 
 def test_probe_home_alive_when_home_matches() -> None:
     with wire_response(json_response({"status": "ok", "home": str(meiva_home())})) as url:
-        probe = health.probe_home(url)
+        probe = health.probe_home(url, expected_home=meiva_home())
     assert probe.verdict is health.ProbeVerdict.ALIVE
 
 
 def test_probe_home_alive_on_a_payload_carrying_name() -> None:
     payload = {"status": "ok", "name": "gateway", "home": str(meiva_home())}
     with wire_response(json_response(payload)) as url:
-        probe = health.probe_home(url)
+        probe = health.probe_home(url, expected_home=meiva_home())
     assert probe.verdict is health.ProbeVerdict.ALIVE
 
 
 def test_probe_home_rejects_another_units_home() -> None:
     with wire_response(json_response({"home": "/home/meiva/.meiva"})) as url:
-        probe = health.probe_home(url)
+        probe = health.probe_home(url, expected_home=meiva_home())
     assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
     assert "/home/meiva/.meiva" in probe.detail
     assert "another unit's daemon holds this port" in probe.detail
@@ -442,31 +514,31 @@ def test_probe_home_rejects_another_units_home() -> None:
 
 def test_probe_home_rejects_a_body_with_no_identity() -> None:
     with wire_response(json_response({"status": "ok"})) as url:
-        assert health.probe_home(url).alive is False
+        assert health.probe_home(url, expected_home=meiva_home()).alive is False
 
 
 def test_probe_home_unreachable_is_down_not_terminal() -> None:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
-        probe = health.probe_home(probe_url(listener.getsockname()[1]))
+        probe = health.probe_home(probe_url(listener.getsockname()[1]), expected_home=meiva_home())
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False
 
 
 def test_probe_home_always_returns_a_verdict() -> None:
     with wire_response(b"garbage on the wire\r\n") as url:
-        probe = health.probe_home(url)
+        probe = health.probe_home(url, expected_home=meiva_home())
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert "BadStatusLine" in probe.detail
 
 
 def test_probe_fails_closed_on_any_unexpected_exception() -> None:
     with wire_response(b"garbage on the wire\r\n") as url:
-        assert health.probe_home(url).alive is False
+        assert health.probe_home(url, expected_home=meiva_home()).alive is False
 
 
 def test_probe_passes_through_a_normal_verdict() -> None:
     with wire_response(json_response({"home": str(meiva_home())})) as url:
-        probe = health.probe_home(url)
+        probe = health.probe_home(url, expected_home=meiva_home())
     assert probe.alive is True
     assert probe.detail == f"home {meiva_home()}"

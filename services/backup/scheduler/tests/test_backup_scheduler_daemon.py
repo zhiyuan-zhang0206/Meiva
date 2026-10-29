@@ -17,6 +17,7 @@ from base.daemon import health, health_schema
 from base.daemon.tests.health_support import unknown_image
 from base.host.env import port_lease
 from base.native_process.os_platform import file_lock
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.backup.layout import BackupTree
@@ -144,6 +145,7 @@ async def test_healthz_returns_503_for_an_overdue_backup() -> None:
     port = _find_free_port()
     server = await health.start_health_server(
         "pg_backup",
+        home=meiva_home(),
         port=port,
         components=lambda: daemon.backup_components(
             state, wall_time=0.0, monotonic=daemon.BACKUP_STALE_AFTER_S + 1.0

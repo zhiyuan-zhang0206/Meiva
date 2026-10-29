@@ -410,6 +410,7 @@ async def run(
     health = await start_health_server(
         "events_maintenance",
         endpoint.health_port,
+        home=meiva_home(),
         liveness=liveness,
         components=lambda: loop_components(liveness, timeouts, now=clock.now().timestamp()),
         image=image,

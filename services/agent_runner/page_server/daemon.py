@@ -518,6 +518,7 @@ async def run(
     health = await start_health_server(
         "page_server",
         resources.endpoint(process_config, runtime=runtime).health_port,
+        home=meiva_home(),
         liveness=liveness,
         image=image,
     )

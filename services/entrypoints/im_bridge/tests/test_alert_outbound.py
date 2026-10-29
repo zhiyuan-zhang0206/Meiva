@@ -10,6 +10,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.paths import meiva_home
 from base.telemetry.alerts import upsert_alert
 from base.telemetry.alerts.native import load_native_group, native_sent_count, stamp_native_sent
 from base.telemetry.alerts.shadow import AlertShadowBatch
@@ -347,6 +348,7 @@ async def test_actual_daemon_rpc_auth_and_new_path_does_not_claim_legacy_success
     server = await start_health_server(
         "im_bridge",
         0,
+        home=meiva_home(),
         extra_routes={("POST", "/send/alert-outbound"): service.handle},
         auth_digests=frozenset({sha256(b"mock-api-token").hexdigest()}),
         image=unknown_image(),
