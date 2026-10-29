@@ -9,6 +9,7 @@ import { resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { TaskGraph } from "../task-graph";
 import { renderWithApi as render } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
@@ -17,8 +18,13 @@ beforeEach(() => {
 
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+// meiva:note
+// The hover card ages its rows on the page's clock; the real one keeps these geometry assertions
+// as they were.
 const wrapGraph = (ui: ReactElement) => (
-  <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  <WallClockProvider wallNow={() => Date.now()}>
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  </WallClockProvider>
 );
 
 vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));

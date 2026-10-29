@@ -14,6 +14,7 @@ import { STATUS_FILL, TASK_LEGEND_ENTRIES } from "../presentation/task-palette";
 import { TASK_FORCE_KEY } from "../task-graph-chrome";
 import { TaskGraph } from "../task-graph";
 import { renderWithApi as render } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
@@ -28,10 +29,13 @@ beforeEach(() => {
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 // meiva:note
 // Lower-case helper (not a component): the hover tests need the Query client the
-// card's one-row read runs in; the rest never mount the card.
+// card's one-row read runs in and the page's clock it ages its rows on; the rest
+// never mount the card.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 const wrapGraph = (ui: ReactElement) => (
-  <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  <WallClockProvider wallNow={() => Date.now()}>
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  </WallClockProvider>
 );
 
 vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));

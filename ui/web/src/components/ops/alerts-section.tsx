@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDuration } from "@/lib/format/item-summary";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
 import type { Alert, AlertSeverity, AlertStatus } from "@/lib/contracts/types";
@@ -46,12 +47,15 @@ const STATE_TEXT: Record<AlertStatus, string> = {
   resolved: "text-muted-foreground",
 };
 
+// meiva:note
 // The API stores starts_at/ends_at — duration is derived, not a column:
 // elapsed while still unresolved (ends_at null), total once resolved. Clamped
-// at zero so a clock skew can never render a negative duration.
-function alertDurationMs(a: Alert): number {
+// at zero so a clock skew can never render a negative duration. The open end is
+// the caller's wall clock in epoch milliseconds: an unresolved row states its
+// elapsed time on the page's clock, not the global one.
+function alertDurationMs(a: Alert, nowMs: number): number {
   const start = new Date(a.starts_at).getTime();
-  const end = a.ends_at ? new Date(a.ends_at).getTime() : Date.now();
+  const end = a.ends_at ? new Date(a.ends_at).getTime() : nowMs;
   return Math.max(0, end - start);
 }
 
@@ -62,6 +66,8 @@ function summaryOf(a: Alert): string {
 export default function AlertsSection() {
   const t = useTranslations("alerts");
   const { formatAbsolute } = useTimeFormat();
+  const now = useWallDate();
+  const nowMs = now.getTime();
   const { data, isLoading, error } = useAlertsSection();
 
   const alerts = data?.alerts ?? [];
@@ -141,11 +147,11 @@ export default function AlertsSection() {
                 </TableCell>
                 <TableCell className="hidden lg:table-cell">
                   <span className="tabular-nums" title={formatAbsolute(a.starts_at)}>
-                    {formatRelativeTime(a.starts_at, new Date())}
+                    {formatRelativeTime(a.starts_at, now)}
                   </span>
                 </TableCell>
                 <TableCell className="hidden tabular-nums text-muted-foreground lg:table-cell">
-                  {formatDuration(alertDurationMs(a))}
+                  {formatDuration(alertDurationMs(a, nowMs))}
                 </TableCell>
                 <TableCell>
                   <span className={cn("inline-flex items-center gap-1.5 text-xs", STATE_TEXT[a.status])}>

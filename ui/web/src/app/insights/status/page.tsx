@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative } from "@/lib/format/time";
 import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/contracts/types";
 import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
@@ -200,7 +201,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
 function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: string }) {
   const t = useTranslations("insights.status");
   const health = healthVerdict(m);
-  const now = new Date();
+  const now = useWallDate();
   const upSince = m.online
     ? formatRelative(m.up_since_at, now)
     : m.stopped_at != null
@@ -250,6 +251,7 @@ function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: 
 // Every agent-runner service as one table: host / status / agents / up since.
 function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
   const t = useTranslations("insights.status");
+  const now = useWallDate();
   return (
     <div className="rounded-md border border-border" data-testid="agent-runners-card">
       <div className="border-b border-border px-3 py-2">
@@ -281,9 +283,9 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
               <TableCell className="tabular-nums">{m.agent_count}</TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 {m.online
-                  ? formatRelative(m.up_since_at, new Date())
+                  ? formatRelative(m.up_since_at, now)
                   : m.stopped_at != null
-                    ? t("stoppedAt", { time: formatRelative(m.stopped_at, new Date()) })
+                    ? t("stoppedAt", { time: formatRelative(m.stopped_at, now) })
                     : "—"}
               </TableCell>
             </TableRow>

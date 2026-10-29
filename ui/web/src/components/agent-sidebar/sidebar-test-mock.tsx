@@ -32,7 +32,7 @@ import { resetTransport, transport } from "@/test-support/fake-api";
 // meiva:note
 // The instant the page reports as "now". Fixed, so a surface that formats a duration against
 // the clock renders the same text on every run.
-const SCENARIO_NOW = Date.parse("2026-05-20T00:00:00Z");
+export const SCENARIO_NOW = Date.parse("2026-05-20T00:00:00Z");
 
 // meiva:note
 // The queries the breakpoint hook asks, spelled from the one place their widths are defined, so

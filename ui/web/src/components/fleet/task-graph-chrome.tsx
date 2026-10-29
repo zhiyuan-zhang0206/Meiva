@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { WindowSelect, type WindowOption } from "@/components/agents/window-select";
 import { ChatMarkdown } from "@/components/content/markdown";
 import type { TaskSummaryRow } from "@/lib/contracts/types";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative, formatUptime } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
@@ -39,6 +40,7 @@ export function TaskHoverCard({
 }) {
   const client = useApi();
   const t = useTranslations("fleet.task");
+  const now = useWallDate();
   // meiva:note
   // The list carries no text columns; the card fetches the one row it shows and
   // renders its description/result once it lands. A failed read says so in one
@@ -95,14 +97,14 @@ export function TaskHoverCard({
         <MetaRow label={t("meta.createdBy")}>{creator}</MetaRow>
         <MetaRow label={t("meta.parent")}>{parentTitle ?? "—"}</MetaRow>
         <MetaRow label={t("meta.reminder")}>{reminder}</MetaRow>
-        <MetaRow label={t("meta.created")}>{formatRelative(task.created_at, new Date(), { capitalize: true })}</MetaRow>
-        <MetaRow label={t("meta.updated")}>{formatRelative(task.updated_at, new Date(), { capitalize: true })}</MetaRow>
+        <MetaRow label={t("meta.created")}>{formatRelative(task.created_at, now, { capitalize: true })}</MetaRow>
+        <MetaRow label={t("meta.updated")}>{formatRelative(task.updated_at, now, { capitalize: true })}</MetaRow>
       </div>
 
       {task.reminder_count > 0 || task.last_reminded_at != null ? (
         <p className="mt-1.5 text-[10px] text-muted-foreground/70">
           {t("reminders", { count: task.reminder_count })}
-          {task.last_reminded_at != null ? ` · ${t("lastReminder", { time: formatRelative(task.last_reminded_at, new Date()) })}` : ""}
+          {task.last_reminded_at != null ? ` · ${t("lastReminder", { time: formatRelative(task.last_reminded_at, now) })}` : ""}
         </p>
       ) : null}
 

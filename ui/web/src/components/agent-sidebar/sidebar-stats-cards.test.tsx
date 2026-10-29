@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StatsDashboard } from "@/lib/contracts/types";
 import { transport } from "@/test-support/fake-api";
-import { handlers, makeAgent, pushSpy, resetSidebarTestState, state, wrap } from "./sidebar-test-mock";
+import { handlers, makeAgent, pushSpy, resetSidebarTestState, SCENARIO_NOW, state, wrap } from "./sidebar-test-mock";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy }),
 }));
@@ -323,7 +323,7 @@ describe("plugin stat cards", () => {
         value: "custom-42",
         detail: null,
         status: "ok",
-        updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(SCENARIO_NOW - 2 * 60 * 60 * 1000).toISOString(),
         updated_by: null,
       },
     ]);

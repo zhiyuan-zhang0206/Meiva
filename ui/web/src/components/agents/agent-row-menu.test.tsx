@@ -6,6 +6,7 @@ import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 
 import { AgentRow } from "./agent-row";
 import { renderWithApi as rtlRender } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
@@ -32,7 +33,11 @@ function render(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 function renderWithSettings(ui: React.ReactElement, settings: Record<string, unknown>) {
@@ -40,7 +45,11 @@ function renderWithSettings(ui: React.ReactElement, settings: Record<string, unk
     defaultOptions: { queries: { retry: false } },
   });
   qc.setQueryData(["user-settings"], settings);
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    </WallClockProvider>,
+  );
 }
 
 function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowType {

@@ -43,6 +43,7 @@ import {
 import { cn } from "@/lib/format/utils";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
+import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { markNavIntent } from "@/lib/telemetry/nav-timing";
 
 import { fleetHref } from "./links";
@@ -70,7 +71,8 @@ export function StatsCards({
   onRetry: () => void;
 }) {
   const t = useTranslations("sidebar");
-  const pluginCards = usePluginStatCards(stats?.plugin_stats, new Date());
+  const now = useWallDate();
+  const pluginCards = usePluginStatCards(stats?.plugin_stats, now);
   const errMsg = error ? formatErrMsg(error) : null;
   const failedWithoutData = errMsg !== null && stats === undefined;
   const firstLoad = stats === undefined && error === null && fetching;
@@ -262,7 +264,8 @@ export function StatsCards({
 // the age itself rides the tooltip.
 function PluginStatCard({ card }: { card: PluginStatCardModel }) {
   const t = useTranslations("sidebar");
-  const age = card.updatedAt !== null ? formatRelativeTime(card.updatedAt, new Date()) : null;
+  const now = useWallDate();
+  const age = card.updatedAt !== null ? formatRelativeTime(card.updatedAt, now) : null;
   const title =
     card.value === null
       ? t("pluginStatNoData")

@@ -11,9 +11,6 @@
 "sidebar-tree-and-search.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
 "spawn-popover.tsx" = ["icon-button.tsx"]
 
-[debt.ambient-read]
-"footer.tsx#clock Date" = 2
-
 [debt.third-party-patch]
 "agent-sidebar.test.tsx#vi.mock next/navigation" = 1
 "archive.test.tsx#vi.mock next-intl" = 1

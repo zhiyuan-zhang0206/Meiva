@@ -6,6 +6,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen } from "@testing-library/react";
 import {  } from "@/test-support/render";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
@@ -209,7 +210,11 @@ describe("HomePage top-level render", () => {
     expect(hooksState.retryTimeline).toHaveBeenCalledOnce();
     hooksState.timelineError = null;
     hooksState.timelineItems = [{ item_id: "0.1", kind: "agent_chat", payload: "read restored" }];
-    view.rerender(<QueryClientProvider client={new QueryClient()}><HomePage /></QueryClientProvider>);
+    view.rerender(
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={new QueryClient()}><HomePage /></QueryClientProvider>
+      </WallClockProvider>,
+    );
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
   });
@@ -427,9 +432,11 @@ describe("HomePage top-level render", () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     rerender(
-      <QueryClientProvider client={qc}>
-        <HomePage />
-      </QueryClientProvider>,
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={qc}>
+          <HomePage />
+        </QueryClientProvider>
+      </WallClockProvider>,
     );
     await screen.findByTestId("inspector-panel");
     // Same mounted instance — no `key=` remount on the agent switch.
@@ -443,9 +450,10 @@ describe("HomePage top-level render", () => {
       "display.inspector_open": true,
     };
     inspectorMockState.shouldThrow = true;
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
-      /* silence error logs in test */
-    });
+    // meiva:note
+    // The boundary logs the error it catches; this test asserts the fallback and its reset, not
+    // the console.
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     wrap(<HomePage />);
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     expect(screen.getByText("Simulated inspector render crash")).toBeTruthy();
@@ -460,9 +468,10 @@ describe("HomePage top-level render", () => {
       "display.inspector_open": true,
     };
     inspectorMockState.shouldThrow = true;
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
-      /* silence error logs in test */
-    });
+    // meiva:note
+    // The boundary logs the error it catches; this test asserts the fallback and its reset, not
+    // the console.
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { rerender } = wrap(<HomePage />);
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     inspectorMockState.shouldThrow = false;
@@ -471,9 +480,11 @@ describe("HomePage top-level render", () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     rerender(
-      <QueryClientProvider client={qc}>
-        <HomePage />
-      </QueryClientProvider>,
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={qc}>
+          <HomePage />
+        </QueryClientProvider>
+      </WallClockProvider>,
     );
     expect(await screen.findByTestId("inspector-panel")).toBeTruthy();
     expect(screen.queryByText("Something went wrong")).toBeNull();
