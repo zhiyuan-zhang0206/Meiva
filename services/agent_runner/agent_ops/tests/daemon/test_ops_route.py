@@ -8,6 +8,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from typing import Literal
 from uuid import UUID
 
 import psycopg
@@ -136,24 +137,55 @@ async def test_requests_stay_counted_until_their_operation_finishes(ops: Ops) ->
     assert executions("counted", env_path=ops.authority.env_path) == 2
 
 
+class _CapCounter(asyncio.Semaphore):
+    # meiva:note
+    # A real semaphore that also says how many acquirers are parked on it. `route_raw` takes the
+    # semaphore as an argument, so the test hands in the object that carries the fact instead of
+    # inferring it from a nap: a request that reaches the cap is parked, one that finds a slot is
+    # not, and either way the count is the cap's own accounting.
+    def __init__(self, slots: int) -> None:
+        super().__init__(slots)
+        self.parked = 0
+
+    async def acquire(self) -> Literal[True]:
+        if not self.locked():
+            return await super().acquire()
+        self.parked += 1
+        try:
+            return await super().acquire()
+        finally:
+            self.parked -= 1
+
+
 @pytest.mark.parametrize(("cap", "unrelated_runs"), [(1, False), (2, True)])
 async def test_the_semaphore_caps_how_many_requests_dispatch_at_once(
     ops: Ops, cap: int, unrelated_runs: bool
 ) -> None:
     stuck = {"kind": "config_write", "payload": config_write(f"cap-{cap}")}
     unrelated: dict[str, object] = {"kind": "config_read", "payload": {}}
-    semaphore = asyncio.Semaphore(cap)
+    semaphore = _CapCounter(cap)
 
     with held_env_lock():
         first = asyncio.create_task(ops.route_raw(_encode(stuck), semaphore))
         await _until(lambda: "config_write" in ops.active_ops)
         second = asyncio.create_task(ops.route_raw(_encode(unrelated), semaphore))
-        await asyncio.sleep(0.3)
-
-        assert second.done() is unrelated_runs
+        # meiva:note
+        # Both requests are counted before the cap, so the read is admitted while it waits.
+        # Which case holds is then the cap's own accounting: a free slot finishes the read
+        # without parking, a spent cap parks it here instead of letting it dispatch.
+        await _until(lambda: len(ops.requests) == 2)
+        if unrelated_runs:
+            await _until(second.done)
+            assert semaphore.parked == 0
+        else:
+            await _until(lambda: semaphore.parked == 1)
+            assert not second.done()
+            assert "config_read" not in ops.active_ops
         assert not first.done()
 
     await asyncio.gather(first, second)
+    assert semaphore.parked == 0, "a parked request must resume and give its slot back"
+    assert ops.requests == set()
 
 
 # meiva:note
