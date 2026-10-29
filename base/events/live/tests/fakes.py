@@ -1,32 +1,28 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import cast
 
-import pytest
-
-from base.events.live import bus as bus_module
-from base.events.live.bus import EventBus
+from base.events.live.redis_client import AuthRetryAsyncRedis, AuthRetrySyncRedis
 
 
-def patch_async_redis(monkeypatch: pytest.MonkeyPatch, client: Callable[[], Any]) -> None:
+# meiva:note
+# `EventBus` takes the client openers it dials with, so a test hands in the client it needs
+# instead of rewriting the class or the module-level opener. The cast states the contract a fake
+# narrows deliberately: it answers the commands the code under test calls, not the whole redis-py
+# client. The opener ignores the URL, the decode flag and the retry policy the bus passes,
+# because the client is already built.
+def async_redis_factory(make_client: Callable[[], object]) -> Callable[..., AuthRetryAsyncRedis]:
+    def open_async_redis(*_args: object, **_kwargs: object) -> AuthRetryAsyncRedis:
+        return cast(AuthRetryAsyncRedis, make_client())
 
-    def async_redis(_bus: EventBus) -> Any:
-        return client()
-
-    monkeypatch.setattr(EventBus, "async_redis", async_redis)
+    return open_async_redis
 
 
-def patch_open_async_redis(
-    monkeypatch: pytest.MonkeyPatch, open_client: Callable[..., Any]
-) -> None:
-    monkeypatch.setattr(bus_module, "open_async_redis", open_client)
+# meiva:note
+# The sync counterpart of `async_redis_factory`: one client per call, as `sync_redis()` opens.
+def sync_redis_factory(make_client: Callable[[], object]) -> Callable[..., AuthRetrySyncRedis]:
+    def open_sync_redis(*_args: object, **_kwargs: object) -> AuthRetrySyncRedis:
+        return cast(AuthRetrySyncRedis, make_client())
 
-
-def patch_sync_redis(monkeypatch: pytest.MonkeyPatch, client: Callable[[], Any]) -> None:
-
-    def sync_redis(_bus: EventBus, *, decode_responses: bool = False) -> Any:
-        del decode_responses
-        return client()
-
-    monkeypatch.setattr(EventBus, "sync_redis", sync_redis)
+    return open_sync_redis

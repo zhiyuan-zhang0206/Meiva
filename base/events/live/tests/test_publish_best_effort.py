@@ -7,6 +7,7 @@ the calling owner; a committed DB row remains committed when its hint fails.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -19,15 +20,36 @@ from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.redis_client import (
+    AuthRetryAsyncRedis,
+    AuthRetrySyncRedis,
+    open_async_redis,
+    open_sync_redis,
+)
 from base.events.live.redis_resilience import AuthRetryPolicy, should_warn_publish_failure
-from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
+from base.events.live.tests.fakes import async_redis_factory, sync_redis_factory
 
 _FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
-_bus = EventBus(
-    replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
-    rng=seeded_rng(),
-    timers=SYSTEM_TIMERS,
-)
+
+
+# meiva:note
+# A bus on the fast retry policy whose client openers the test chooses; the defaults are the real
+# ones, so a caller that names neither measures the production path.
+def _bus_with(
+    *,
+    open_async: Callable[..., AuthRetryAsyncRedis] = open_async_redis,
+    open_sync: Callable[..., AuthRetrySyncRedis] = open_sync_redis,
+) -> EventBus:
+    return EventBus(
+        replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
+        open_async_redis=open_async,
+        open_sync_redis=open_sync,
+    )
+
+
+_bus = _bus_with()
 
 
 @pytest.fixture(autouse=True)
@@ -38,11 +60,7 @@ def _skip_acl_backoff_waits() -> None:
     own warning classification after retries have been exhausted.
     """
     global _bus  # noqa: PLW0603 — a bus built from the settings the session has by now
-    _bus = EventBus(
-        replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
-        rng=seeded_rng(),
-        timers=SYSTEM_TIMERS,
-    )
+    _bus = _bus_with()
 
 
 class _BoomSyncClient:
@@ -77,12 +95,13 @@ class TestPublishBestEffortSync:
 
     def test_never_raises_and_debug_logs_on_transient(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
         """A transient failure (redis down) is swallowed → None, logged at DEBUG."""
-        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
-        result = _bus.publish_best_effort_sync("{}", channel="meiva:x", context="unit")
+        bus = _bus_with(
+            open_sync=sync_redis_factory(lambda: _BoomSyncClient(RedisConnectionError("down")))
+        )
+        result = bus.publish_best_effort_sync("{}", channel="meiva:x", context="unit")
         assert result is None
         hits = [
             r for r in loguru_records if "skipped" in r["message"] and "meiva:x" in r["message"]
@@ -90,20 +109,23 @@ class TestPublishBestEffortSync:
         assert hits, "expected a best-effort DEBUG skip line"
         assert all(r["level"].no < 30 for r in hits), "transient failure must be DEBUG, not WARNING"  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    def test_non_transport_failure_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(AttributeError("bug")))
+    def test_non_transport_failure_propagates(self) -> None:
+        bus = _bus_with(
+            open_sync=sync_redis_factory(lambda: _BoomSyncClient(AttributeError("bug")))
+        )
         with pytest.raises(AttributeError, match="bug"):
-            _bus.publish_best_effort_sync("{}", channel="meiva:bug", context="unit")
+            bus.publish_best_effort_sync("{}", channel="meiva:bug", context="unit")
 
     def test_never_raises_and_warns_on_noperm(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
         """A ResponseError (redis NOPERM — ACL misconfig) is swallowed → None, but
         logged at WARNING because it silently disables live updates fleet-wide."""
-        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
-        result = _bus.publish_best_effort_sync("{}", channel="meiva:noperm-sync", context="unit")
+        bus = _bus_with(
+            open_sync=sync_redis_factory(lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
+        )
+        result = bus.publish_best_effort_sync("{}", channel="meiva:noperm-sync", context="unit")
         assert result is None
         assert any(
             "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -112,16 +134,17 @@ class TestPublishBestEffortSync:
 
     def test_noperm_warning_is_rate_limited(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
         """A persistent NOPERM outage warns once per channel then drops repeats to
         DEBUG — one event funnels the whole fleet through here, so the WARNING must
         not flood."""
-        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
+        bus = _bus_with(
+            open_sync=sync_redis_factory(lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
+        )
         channel = "meiva:noperm-throttle"
         for _ in range(4):
-            assert _bus.publish_best_effort_sync("{}", channel=channel, context="unit") is None
+            assert bus.publish_best_effort_sync("{}", channel=channel, context="unit") is None
         warnings = [
             r
             for r in loguru_records
@@ -140,11 +163,12 @@ class TestPublishBestEffortAsync:
 
     async def test_never_raises_and_debug_logs_on_transient(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
-        patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(RedisConnectionError("down")))
-        result = await _bus.publish_best_effort("{}", channel="meiva:x", context="unit")
+        bus = _bus_with(
+            open_async=async_redis_factory(lambda: _BoomAsyncClient(RedisConnectionError("down")))
+        )
+        result = await bus.publish_best_effort("{}", channel="meiva:x", context="unit")
         assert result is None
         assert any("skipped" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
             "expected a best-effort DEBUG skip line"
@@ -152,11 +176,12 @@ class TestPublishBestEffortAsync:
 
     async def test_never_raises_and_warns_on_noperm(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
-        patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(NoPermissionError("NOPERM")))
-        result = await _bus.publish_best_effort("{}", channel="meiva:noperm-async", context="unit")
+        bus = _bus_with(
+            open_async=async_redis_factory(lambda: _BoomAsyncClient(NoPermissionError("NOPERM")))
+        )
+        result = await bus.publish_best_effort("{}", channel="meiva:noperm-async", context="unit")
         assert result is None
         assert any(
             "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -192,21 +217,17 @@ def test_zero_receivers_distinguished_from_failure(event_bus: EventBus) -> None:
 
 
 async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_buses(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """Each bus shares sync/async warning cadence, while a new owner reports afresh."""
     failure = ResponseError("NOPERM")
-    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(failure))
-    patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(failure))
-    first = EventBus(
-        replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
-        rng=seeded_rng(),
-        timers=SYSTEM_TIMERS,
+    first = _bus_with(
+        open_async=async_redis_factory(lambda: _BoomAsyncClient(failure)),
+        open_sync=sync_redis_factory(lambda: _BoomSyncClient(failure)),
     )
-    second = EventBus(
-        replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
-        rng=seeded_rng(),
-        timers=SYSTEM_TIMERS,
+    second = _bus_with(
+        open_async=async_redis_factory(lambda: _BoomAsyncClient(failure)),
+        open_sync=sync_redis_factory(lambda: _BoomSyncClient(failure)),
     )
     channel = "meiva:owner-cadence"
 
@@ -237,18 +258,16 @@ async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_b
 
 
 @pytest.mark.parametrize("failure", [AttributeError("bug"), DataError("invalid input")])
-async def test_unknown_publish_and_client_open_errors_propagate(
-    monkeypatch: pytest.MonkeyPatch, failure: Exception
-) -> None:
-    patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(failure))
+async def test_unknown_publish_and_client_open_errors_propagate(failure: Exception) -> None:
+    async_bus = _bus_with(open_async=async_redis_factory(lambda: _BoomAsyncClient(failure)))
     with pytest.raises(type(failure)) as raised:
-        await _bus.publish_best_effort("{}")
+        await async_bus.publish_best_effort("{}")
     assert raised.value is failure
 
     def open_sync() -> Any:
         raise failure
 
-    patch_sync_redis(monkeypatch, open_sync)
+    sync_bus = _bus_with(open_sync=sync_redis_factory(open_sync))
     with pytest.raises(type(failure)) as raised:
-        _bus.publish_best_effort_sync("{}")
+        sync_bus.publish_best_effort_sync("{}")
     assert raised.value is failure

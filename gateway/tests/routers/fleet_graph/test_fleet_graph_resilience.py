@@ -1,14 +1,15 @@
 """Regression tests for fleet-graph read failures and the Redis poll cache."""
 
 import psycopg
-import pytest
 from psycopg import errors as pg_errors
 
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
-from base.events.live.tests.fakes import patch_sync_redis
 from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.schemas import FleetGraphNode, FleetGraphResponse
-from gateway.tests.routers.fleet_graph.staleness_support import fleet_graph_client
+from gateway.tests.routers.fleet_graph.staleness_support import (
+    bus_with_sync_redis,
+    fleet_graph_client,
+)
 
 
 class _FakeRedis:
@@ -32,16 +33,6 @@ class _FakeRedis:
         self.writes.append((key, value, ex))
 
 
-class _RedisFactory:
-    """Callable replacement for the route's Redis context-manager factory."""
-
-    def __init__(self, redis: _FakeRedis) -> None:
-        self._redis = redis
-
-    def __call__(self, **_kwargs: object) -> _FakeRedis:
-        return self._redis
-
-
 def _seed_agent(db_conn: psycopg.Connection) -> int:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
@@ -56,17 +47,15 @@ def _seed_agent(db_conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def test_success_writes_only_the_short_poll_cache(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_success_writes_only_the_short_poll_cache(db_conn: psycopg.Connection) -> None:
     """A full graph refresh writes the 60-second poll cache and nothing longer-lived."""
     _seed_agent(db_conn)
     redis = _FakeRedis()
 
     import gateway.routers.fleet.fleet_graph as fg
 
-    patch_sync_redis(monkeypatch, _RedisFactory(redis))
     with fleet_graph_client() as client:
+        client.app.state.bus = bus_with_sync_redis(lambda: redis)
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200
@@ -75,7 +64,7 @@ def test_success_writes_only_the_short_poll_cache(
 
 
 def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """A heartbeat outage marks telemetry degradation without discarding the graph."""
     _seed_agent(db_conn)
@@ -83,13 +72,12 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
 
     import gateway.routers.fleet.fleet_graph as fg
 
-    patch_sync_redis(monkeypatch, _RedisFactory(redis))
-
     # The capture is bound inside the app's lifespan: the gateway binds its own pipeline on start.
     with (
         fleet_graph_client(heartbeat=False) as client,
         capturing_events() as emitted_events,
     ):
+        client.app.state.bus = bus_with_sync_redis(lambda: redis)
         resp = client.get("/api/fleet/graph")
         stale = emitted_events.attributes("telemetry_read_stale")
 
@@ -103,7 +91,7 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
 
 
 def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """A canceled PG read fails the request even when Redis still holds an old
     long-lived entry for the same parameters, and writes nothing."""
@@ -128,7 +116,6 @@ def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
 
     key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     redis.values[f"fleet_graph:last_good:{key}"] = leftover.model_dump_json()
-    patch_sync_redis(monkeypatch, _RedisFactory(redis))
 
     class _CanceledPool:
         def connection(self) -> object:
@@ -138,6 +125,7 @@ def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
             pass
 
     with fleet_graph_client(raise_server_exceptions=False) as client:
+        client.app.state.bus = bus_with_sync_redis(lambda: redis)
         client.app.state.db_pool = _CanceledPool()
         resp = client.get("/api/fleet/graph")
 

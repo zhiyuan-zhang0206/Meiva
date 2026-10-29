@@ -4,12 +4,10 @@ import asyncio
 import contextlib
 from typing import Any
 
-import pytest
-
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
-from base.events.live.bus import EventBus
-from base.events.live.tests.fakes import patch_open_async_redis
+from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.tests.fakes import async_redis_factory
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 
 
@@ -33,7 +31,6 @@ class _IdleScheduler:
 
 
 async def test_reconnect_logs_warning_without_a_traceback(
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
 
@@ -54,12 +51,16 @@ async def test_reconnect_logs_warning_without_a_traceback(
         async def aclose(self) -> None:
             return None
 
-    def _open(_url: str, **_kw: object) -> _Redis:
+    def _open() -> _Redis:
         return _Redis()
 
-    patch_open_async_redis(monkeypatch, _open)
     disp = InboundWakeDispatcher(
-        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+        EventBus(
+            event_bus_config_from_settings(),
+            rng=seeded_rng(),
+            timers=SYSTEM_TIMERS,
+            open_async_redis=async_redis_factory(_open),
+        ),
         _IdleScheduler(),
         subscription_read_timeout_s=0.01,
         subscription_read_deadline_grace_s=0.01,
