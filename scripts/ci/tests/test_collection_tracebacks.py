@@ -116,7 +116,9 @@ def test_collection_exit_preserved_and_worker_joined(
 # churn frame at all. So the test takes its evidence in two gated steps instead of one sample: the
 # thread parks in its innermost frame and a dump is awaited there (the deep chain must be complete),
 # then the frames resume and a second dump is awaited (a moving stack must still be safe to read).
-# Both waits are facts the test observes, not windows it hopes the scheduler honors.
+# Both waits are facts the test observes, not windows it hopes the scheduler honors. The resumed
+# phase asserts the entry frame only — `churn` is on the thread's stack for as long as its loop runs,
+# while a frame inside the recursion needs sampling luck.
 # meiva:link scripts/ci/collection_tracebacks.py
 def test_frame_churn_finishes_with_complete_tracebacks(
     tmp_path: Path, pytester: pytest.Pytester
@@ -144,8 +146,14 @@ def test_frame_churn_finishes_with_complete_tracebacks(
         "    while not stop.is_set():\n"
         "        assert recurse(20) == 6\n"
         "def dump(*, file, all_threads):\n"
+        "    if released.is_set():\n"
+        "        file.write('churn phase\\n')\n"
+        "        file.flush()\n"
+        "        faulthandler.dump_traceback(file=file, all_threads=all_threads)\n"
+        "        moving_dump.set()\n"
+        "        return\n"
         "    faulthandler.dump_traceback(file=file, all_threads=all_threads)\n"
-        "    (moving_dump if released.is_set() else parked_dump).set()\n"
+        "    parked_dump.set()\n"
         "worker = threading.Thread(target=churn, name='churning-worker')\n"
         "worker.start()\n"
         f"with open({str(output)!r}, 'w') as stacks:\n"
@@ -166,14 +174,14 @@ def test_frame_churn_finishes_with_complete_tracebacks(
     trace = output.read_text()
     assert "Periodic traceback" in trace
     assert 'File "' in trace and ", line " in trace
-    dumps = trace.split("Periodic traceback")
-    assert len(dumps) > 2, "expected a dump before and after the frames resumed"
+    phases = trace.split("churn phase", 1)
+    assert len(phases) == 2, "no dump was taken after the frames resumed"
+    dumps = phases[0].split("Periodic traceback")
+    assert len(dumps) > 1, "no dump was taken while the frame was parked"
     assert "in recurse" in dumps[1] and "in churn" in dumps[1], (
         "the first dump did not show the parked recursion"
     )
-    assert any("in churn" in dump for dump in dumps[2:]), (
-        "no dump was taken after the frames resumed"
-    )
+    assert "in churn" in phases[1], "the dump after the frames resumed lost the churn entry frame"
 
 
 @pytest.mark.parametrize(
