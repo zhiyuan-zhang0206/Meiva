@@ -280,9 +280,11 @@ jobs:
           overwrite: true
 
       # The e2e jobs are the integration net for product behavior; a change that only edits
-      # unit tests inside packages cannot change it. The rule is fixed in scripts/ci/e2e_scope.py
-      # (enforced SELECTED subset, every changed path a package-internal test .py, never on a
-      # Trunk queue branch); an empty output (a selector failure, a non-PR event) keeps e2e.
+      # package-internal unit tests, tooling, a locality manifest (`meizel.toml`) or documentation
+      # prose (a `.md` with a `docs` path segment, never an OKF bundle) cannot change it. The rule
+      # is fixed in scripts/ci/e2e_scope.py (enforced SELECTED subset, every changed path one of
+      # those kinds, never on a Trunk queue branch); an empty output (a selector failure, a non-PR
+      # event) keeps e2e.
       - name: Decide whether e2e can be skipped
         id: e2e
         if: ${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}
@@ -2102,7 +2104,8 @@ jobs:
     timeout-minutes: 30
     needs: [classify]
     # e2e is the integration net: it runs whenever EITHER side changed, except for a change that
-    # only edits package unit tests (`skip_e2e`, scripts/ci/e2e_scope.py).
+    # edits nothing a browser can observe (`skip_e2e`, scripts/ci/e2e_scope.py: package unit tests,
+    # tooling, an unchanged application interface, a locality manifest, prose under docs/).
     if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     strategy:
       fail-fast: false
