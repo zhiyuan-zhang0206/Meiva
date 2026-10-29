@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -122,12 +123,17 @@ class FakeCommands:
         return _result(command, reply, capture_output=capture_output, popen_kwargs=popen_kwargs)
 
 
+# meiva:note
+# `uid` is None by default and read from this process at the call: the account a test's
+# files belong to is a fact about the machine running the test, so a canned id would make
+# the host agree with them only where that id happens to be the runner's (#7529, #7648).
+# A test that means a specific account passes it.
 def fake_host(
     commands: CommandRunner | None = None,
     *,
     platform: Platform = LINUX_X86,
     programs: Mapping[str, str] | None = None,
-    uid: int = 1000,
+    uid: int | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Host:
     found = dict(programs or {})
@@ -135,6 +141,6 @@ def fake_host(
         run=commands if commands is not None else FakeCommands(),
         which=found.get,
         platform=platform,
-        uid=uid,
+        uid=os.geteuid() if uid is None else uid,
         environ={} if environ is None else environ,
     )
