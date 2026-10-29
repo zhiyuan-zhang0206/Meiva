@@ -17,7 +17,6 @@
 "meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix_part2.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "meiva_builtins/tests/test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
-"base/agents/sdk/tests/test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
 "base/lm/factory.py" = "imports the module named by MEIVA_LLM_OVERRIDE"
 "base/packages/dashboard_supply.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "base/packages/plugin_providers.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
