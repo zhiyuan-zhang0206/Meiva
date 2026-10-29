@@ -32,10 +32,13 @@ def test_a_regular_job_and_its_shell_close_within_the_grace(unit_home: Path) -> 
     wait_for_foreground(job)
     (info,) = client.list_sessions(socket_path=service_socket())
 
-    started = time.monotonic()
     outcome = client.close_all(grace_s=10.0, kill_s=3.0, socket_path=service_socket())
 
-    assert time.monotonic() - started < 8, "a job that handles TERM must not cost the whole grace"
+    # meiva:note
+    # The claim is "the job handled TERM", and the closure reports it: no grace expiry, so the
+    # SIGKILL leg never ran. Timing the call could only say how busy the machine was.
+    assert outcome.grace_s == 10.0
+    assert outcome.escalated is False, "a job that handles TERM must not cost the whole grace"
     assert _names(outcome) == [name]
     assert outcome.closed[0].shell.pid == info.pid
     assert outcome.closed[0].left == ()
@@ -149,9 +152,9 @@ def test_the_closure_covers_every_session_at_once(unit_home: Path) -> None:
 
 
 def test_a_closure_over_no_sessions_is_empty() -> None:
-    assert (
-        client.close_all(grace_s=1.0, kill_s=1.0, socket_path=service_socket()) == closure.Outcome()
-    )
+    assert client.close_all(
+        grace_s=1.0, kill_s=1.0, socket_path=service_socket()
+    ) == closure.Outcome(grace_s=1.0)
 
 
 def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:

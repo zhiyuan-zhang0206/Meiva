@@ -59,13 +59,25 @@ class Survivor:
 
 # meiva:note
 # Closed busy shell sessions and known survivors; no descendant-clearance proof.
+#
+# `grace_s` is the grace the closure was asked for and `escalated` says the grace expired with
+# live processes, so the SIGKILL leg ran. Both are what happened, reported rather than decided:
+# a caller that must judge "did the grace bound this, or did it cost a deadline" reads them
+# instead of timing the call.
 @dataclass(frozen=True)
 class Outcome:
+    # meiva:note
+    # `grace_s` carries no default: an outcome always knows the grace it ran with, and the clock
+    # lattice owns grace literals, not this report.
+    grace_s: float
     closed: tuple[ClosedSession, ...] = ()
     survivors: tuple[Survivor, ...] = ()
+    escalated: bool = False
 
     def to_wire(self) -> dict[str, Any]:
         return {
+            "grace_s": self.grace_s,
+            "escalated": self.escalated,
             "closed": [
                 {
                     "name": closed.name,
@@ -87,6 +99,8 @@ class Outcome:
     @classmethod
     def from_wire(cls, data: dict[str, Any]) -> Outcome:
         return cls(
+            grace_s=float(data.get("grace_s", 0.0)),
+            escalated=bool(data.get("escalated", False)),
             closed=tuple(
                 ClosedSession(
                     item["name"],
@@ -170,6 +184,7 @@ def close_sessions(
         timers=timers,
     )
     remaining = process_groups.wait(known, grace_s, timers=timers)
+    escalated = bool(remaining)
     if remaining:
         process_groups.signal(
             remaining,
@@ -193,4 +208,9 @@ def close_sessions(
         )
         if target.members and not process_groups.live(target.shell):
             closed.append(ClosedSession(target.name, target.shell, _named(left)))
-    return Outcome(tuple(closed), tuple(survivors))
+    return Outcome(
+        grace_s,
+        closed=tuple(closed),
+        survivors=tuple(survivors),
+        escalated=escalated,
+    )

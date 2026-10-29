@@ -123,21 +123,23 @@ def sweep(
 ) -> closure.Outcome:
     recorded = read(path)
     targets = [target for target in recorded if _has_live_process(target)]
-    outcome = closure.Outcome()
     if targets:
         logger.warning(
             "pty sweep: closing {count} session(s) a previous service left running: {names}",
             count=len(targets),
             names=sorted(target.name for target in targets),
         )
-        outcome = closure.close_sessions(
-            targets,
-            grace_s=SWEEP_HANGUP_WAIT_S,
-            kill_s=SWEEP_KILL_S,
-            process_control=process_control,
-            own_pid=own_pid,
-            timers=timers,
-        )
+    # meiva:note
+    # One call either way: a sweep over nothing still reports the grace it asked for rather than
+    # an outcome with no budget in it, and `close_sessions` over no targets waits on nothing.
+    outcome = closure.close_sessions(
+        targets,
+        grace_s=SWEEP_HANGUP_WAIT_S,
+        kill_s=SWEEP_KILL_S,
+        process_control=process_control,
+        own_pid=own_pid,
+        timers=timers,
+    )
     write(path, (target for target in recorded if _alive(target.shell)))
     return _with_ended_busy(outcome, recorded)
 
@@ -150,7 +152,12 @@ def _with_ended_busy(outcome: closure.Outcome, recorded: list[closure.Target]) -
         for target in recorded
         if target.name not in reported and _was_busy(target) and not _alive(target.shell)
     )
-    return closure.Outcome(outcome.closed + ended, outcome.survivors)
+    return closure.Outcome(
+        outcome.grace_s,
+        closed=outcome.closed + ended,
+        survivors=outcome.survivors,
+        escalated=outcome.escalated,
+    )
 
 
 def _was_busy(target: closure.Target) -> bool:

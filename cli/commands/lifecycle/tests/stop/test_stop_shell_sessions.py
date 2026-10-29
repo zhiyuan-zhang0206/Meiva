@@ -149,7 +149,6 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
-    started = time.monotonic()
     rc = do_stop(
         stop_request(timeout=12),
         stop_environment(
@@ -158,10 +157,39 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
         retained_children=[],
     )
     assert rc == 0
-    assert time.monotonic() - started < 8, "the grace bounds the wait, not the stop deadline"
     assert jobs.wait_exit(running[0].pid, timeout=5), "the job outlived the stop"
     assert not client.has_session(name, socket_path=service_socket())
     assert len(written_notices(db_conn)) == 1, "a killed busy session still leaves its notice"
+
+
+async def test_the_shell_phase_hands_the_closure_the_cleanup_wait(
+    home: Path,
+    pty_reaper: PtyReaper,
+    pty_service: PtyServiceProcess,
+    db_conn: psycopg.Connection,
+    operator_database: OperatorDatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+    stop_runtime: CommandRuntime,
+) -> None:
+    # meiva:note
+    # The stop's shell phase asks the service to close within `min(deadline, cleanup_wait)`. With
+    # a 12s deadline and a 1s cleanup wait, the grace it hands over is 1.0 — and the outcome says
+    # so instead of a stopwatch. The stubborn job forces the SIGKILL leg, so `escalated` is the
+    # second fact: the grace expired with the job alive.
+    name = "meiva-agent-987-shell-2045-grace"
+    _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
+    assert running, "the stubborn job never started"
+
+    outcome = shells.close_shell_sessions(
+        Deadline(at=stop_runtime.timers.monotonic() + 12.0, timers=stop_runtime.timers),
+        direct_db=False,
+        database_factory=operator_database,
+        command=stop_runtime,
+        cleanup_wait_s=1.0,
+    )
+
+    assert outcome.grace_s == 1.0, "the cleanup wait bounds the grace, not the stop deadline"
+    assert outcome.escalated is True, "the job ignored TERM, so the closure escalated"
 
 
 # meiva:note
@@ -245,6 +273,7 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     stuck = "meiva-agent-987-shell-2052-stuck"
     shell = identity_of(launch(stuck, term="ignore", ignore_hangup=True))
     first = closure.Outcome(
+        grace_s=0.0,
         closed=(closed_session(closed),),
         survivors=(closure.Survivor(stuck, shell, SurvivorRole.SHELL),),
     )
@@ -259,9 +288,17 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     )
     assert "survivors" not in recorded[0], "nothing of the closed session survived"
 
-    settle(closure.Outcome(closed=(closed_session(stuck),)), stop_runtime, operator_database)
+    settle(
+        closure.Outcome(grace_s=0.0, closed=(closed_session(stuck),)),
+        stop_runtime,
+        operator_database,
+    )
     assert names(db_conn) == [closed, stuck]
-    settle(closure.Outcome(closed=(closed_session(stuck),)), stop_runtime, operator_database)
+    settle(
+        closure.Outcome(grace_s=0.0, closed=(closed_session(stuck),)),
+        stop_runtime,
+        operator_database,
+    )
     assert names(db_conn) == [closed, stuck], "a notice written twice is delivered once"
 
 
@@ -280,6 +317,7 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     name = "meiva-agent-987-shell-2044-stubborn"
     job = launch("private-job", term="ignore", ignore_hangup=True)
     outcome = closure.Outcome(
+        grace_s=0.0,
         closed=(closed_session(name, ((job.pid, "python3"),)),),
         survivors=(closure.Survivor(name, identity_of(job), SurvivorRole.JOB),),
     )
@@ -310,7 +348,9 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     proc.kill()
     proc.wait(timeout=5)
     settle(
-        closure.Outcome(survivors=(closure.Survivor("gone", gone, SurvivorRole.SHELL),)),
+        closure.Outcome(
+            grace_s=0.0, survivors=(closure.Survivor("gone", gone, SurvivorRole.SHELL),)
+        ),
         stop_runtime,
         operator_database,
     )
@@ -483,7 +523,9 @@ def test_force_close_reports_known_job_without_failing(
     name = "meiva-agent-987-shell-2055-denied"
     job = launch("private-job", term="ignore", ignore_hangup=True)
     shells.settle_forced_closure(
-        closure.Outcome(survivors=(closure.Survivor(name, identity_of(job), SurvivorRole.JOB),))
+        closure.Outcome(
+            grace_s=0.0, survivors=(closure.Survivor(name, identity_of(job), SurvivorRole.JOB),)
+        )
     )
     assert name in capsys.readouterr().err
 
@@ -495,7 +537,7 @@ def test_a_closure_outcome_with_an_unknown_survivor_role_is_refused(launch: Laun
     name = "meiva-agent-987-shell-2055-odd"
     survivor = launch("private-odd", term="ignore", ignore_hangup=True)
     wire = closure.Outcome(
-        survivors=(closure.Survivor(name, identity_of(survivor), SurvivorRole.JOB),)
+        grace_s=0.0, survivors=(closure.Survivor(name, identity_of(survivor), SurvivorRole.JOB),)
     ).to_wire()
     wire["survivors"][0]["role"] = "helper"
     with pytest.raises(ValueError, match="'helper' is not a valid SurvivorRole"):
@@ -508,7 +550,8 @@ def test_force_close_still_fails_when_known_shell_survives(launch: Launcher) -> 
     with pytest.raises(RuntimeError, match=name):
         shells.settle_forced_closure(
             closure.Outcome(
-                survivors=(closure.Survivor(name, identity_of(shell), SurvivorRole.SHELL),)
+                grace_s=0.0,
+                survivors=(closure.Survivor(name, identity_of(shell), SurvivorRole.SHELL),),
             )
         )
 

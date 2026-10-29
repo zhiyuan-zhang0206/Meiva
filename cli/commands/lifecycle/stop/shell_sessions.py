@@ -275,7 +275,7 @@ def close_shell_sessions(
     database_factory: DatabaseFactory,
     command: CommandRuntime,
     cleanup_wait_s: float,
-) -> None:
+) -> closure.Outcome:
     grace_s = closure_grace_s(deadline.left() or 0.0, cleanup_wait_s)
     outcome, reason = run_closure(
         command.home,
@@ -292,6 +292,7 @@ def close_shell_sessions(
         database_factory=database_factory,
         command=command,
     )
+    return outcome
 
 
 # meiva:note

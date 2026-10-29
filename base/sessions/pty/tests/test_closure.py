@@ -65,7 +65,7 @@ def test_idle_shell_closes_without_claiming_all_descendants_gone(
             own_pid=OWN_PID,
             timers=SYSTEM_TIMERS,
         )
-    assert outcome == closure.Outcome()
+    assert outcome == closure.Outcome(grace_s=0.2)
     assert not target.shell.live()
 
 
@@ -82,7 +82,7 @@ def test_unknown_independent_process_is_left_to_operations(
         own_pid=OWN_PID,
         timers=SYSTEM_TIMERS,
     )
-    assert outcome == closure.Outcome()
+    assert outcome == closure.Outcome(grace_s=0.2)
     assert bystander.shell.live()
 
 
@@ -93,17 +93,14 @@ def test_stale_birth_is_never_signalled(leaders: list[subprocess.Popen[bytes]]) 
         target.shell.birth - 1,
         None if target.shell.starttime is None else target.shell.starttime - 1,
     )
-    assert (
-        closure.close_sessions(
-            [closure.Target(target.name, stale)],
-            grace_s=0,
-            kill_s=0,
-            process_control=SYSTEM_PROCESS_CONTROL,
-            own_pid=OWN_PID,
-            timers=SYSTEM_TIMERS,
-        )
-        == closure.Outcome()
-    )
+    assert closure.close_sessions(
+        [closure.Target(target.name, stale)],
+        grace_s=0,
+        kill_s=0,
+        process_control=SYSTEM_PROCESS_CONTROL,
+        own_pid=OWN_PID,
+        timers=SYSTEM_TIMERS,
+    ) == closure.Outcome(grace_s=0.0)
     assert target.shell.live()
 
 
@@ -173,8 +170,10 @@ def test_wire_outcome_round_trips_known_survivors() -> None:
     shell = OwnedProcess(4242, 12.5, 987654)
     job = OwnedProcess(4243, 12.75, None)
     outcome = closure.Outcome(
-        (closure.ClosedSession("meiva-agent-1-shell-1-wire", shell, ((4243, "sleep"),)),),
-        (closure.Survivor("meiva-agent-1-shell-1-wire", job, SurvivorRole.JOB),),
+        0.5,
+        closed=(closure.ClosedSession("meiva-agent-1-shell-1-wire", shell, ((4243, "sleep"),)),),
+        survivors=(closure.Survivor("meiva-agent-1-shell-1-wire", job, SurvivorRole.JOB),),
+        escalated=True,
     )
     assert closure.Outcome.from_wire(outcome.to_wire()) == outcome
 
@@ -208,7 +207,7 @@ def test_known_group_force_kill_covers_inheriting_child(
             own_pid=OWN_PID,
             timers=SYSTEM_TIMERS,
         )
-        assert outcome == closure.Outcome()
+        assert outcome == closure.Outcome(grace_s=0.05, escalated=True)
         assert Signalled("killpg", shell.pid, signal.SIGKILL) in control.signals
         assert all(sent.signum != signal.SIGSTOP for sent in control.signals)
         assert process_groups.wait([child], 1, timers=SYSTEM_TIMERS) == ()
