@@ -25,7 +25,10 @@ redelivered. Dangling tool calls are repaired with an `unknown` execution status
 
 Cancellation reaches the owned task. Known resource cleanup has a finite wait;
 unresolved work retains its identity fence and requires process shutdown.
-A host that fails database ownership renewal on three consecutive beats exits.
+A host that fails database ownership renewal on three consecutive beats exits. Each failed
+beat is a `host_database_beat_failed` event carrying the consecutive count and whether that
+failure ends the host; a beat that succeeds after failing reports `host_database_beat_recovered`
+with what it cleared, so the retry result is on the record rather than implied by silence.
 Crash reaping records termination and diagnostics without producing a recovery
 chat. Watchdog force/resurrect and persistent terminated-owner retries are absent.
 
