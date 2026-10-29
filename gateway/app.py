@@ -613,6 +613,10 @@ def create_app(
     return app
 
 
+class UnpricedDefaultModelError(RuntimeError):
+    pass
+
+
 # meiva:note
 # The app's configuration as this process root builds it: the account home is read here, once; the
 # memory directory is derived from the Meiva home the entry resolved and hands in; and the entropy
@@ -629,6 +633,25 @@ def process_config(config: ConfigBoot, *, home: Path) -> GatewayConfig:
     )
 
 
+# meiva:note
+# The cluster default model is named by config, not by a spawn request, so a missing price there
+# has no overlay to refuse. Fail the catalog instead of the process: model routes refuse with a
+# repair message while gateway management stays available, and nobody is promised a priced bill
+# the catalog cannot price.
+def catalog_with_priced_default(
+    *, build: Callable[[], ModelCatalog], default_model: str
+) -> ModelCatalog:
+    catalog = build()
+    if default_model not in catalog.prices:
+        raise UnpricedDefaultModelError(
+            f"cluster default model {default_model!r} has no price in the pricing catalog; "
+            "usage for it would be recorded with cost 0, so the bill would silently undercount. "
+            "Land the price in base/lm/pricing/pricing_catalog_archive.json (or the plugin price "
+            "registry), or point the config at a priced model, then restart the gateway."
+        )
+    return catalog
+
+
 def create_app_from_environment() -> FastAPI:
 
     config = ConfigBoot()
@@ -642,11 +665,18 @@ def create_app_from_environment() -> FastAPI:
         machine=ConfiguredMachineIdentity(config),
         host=Host.system(environ=config.process_environment()),
     )
+    gateway_config_value = process_config(process.config, home=home)
     return create_app(
-        process_config(process.config, home=home),
+        gateway_config_value,
         process=process,
         process_ownership="owned",
-        catalog=load_model_catalog(partial(build_model_catalog, home=home)),
+        catalog=load_model_catalog(
+            partial(
+                catalog_with_priced_default,
+                build=partial(build_model_catalog, home=home),
+                default_model=gateway_config_value.models.llm_model,
+            )
+        ),
     )
 
 

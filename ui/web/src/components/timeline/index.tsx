@@ -93,6 +93,14 @@ export const TimelineView = memo(function TimelineView({
     [compactBuffer, bufferedItems, currentItems, canonicalItems],
   );
 
+  // meiva:note
+  // Load-bearing although this ref is never read: the `<div>` it is attached to
+  // below is what the log's bottom padding applies above. Without that element
+  // the last row overflows the log by exactly that padding and the gap above the
+  // composer's rule silently falls to the composer's share alone (measured
+  // 10px → 4px at 1440x900 with it removed). Delete it only together with a
+  // replacement that keeps the padding.
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
   const endRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
@@ -492,7 +500,7 @@ export const TimelineView = memo(function TimelineView({
           // between items, so the last row sits closer to the rule than rows sit
           // to each other and the composer reads as attached to the conversation.
           // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
-          className={cn("mx-auto w-full px-2 pb-1.5 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
+          className={cn("mx-auto w-full px-2 pb-1 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
         >
           {turnAnnouncement ? (
             <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">

@@ -82,6 +82,7 @@ def restart_overlay(
         configs,
         models=catalog.models,
         decision_models=catalog.decision_models,
+        prices=catalog.prices,
         home=home,
     )
     stored = dict(config_overlay)

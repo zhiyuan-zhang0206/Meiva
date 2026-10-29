@@ -6,8 +6,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from google.genai.types import MediaResolution
     from langchain_core.language_models.chat_models import BaseChatModel
-from google.genai.types import MediaResolution
+
 from loguru import logger
 
 from base.api_contracts.agent_contract import Harness
@@ -56,6 +57,14 @@ def _thinking_level(ctx: BuildContext, *, thinking_disabled: bool) -> str | None
 
 
 def _media_resolution(setting: str | None) -> MediaResolution | None:
+    # meiva:note
+    # `google.genai` costs ~300ms to import and the enum is only needed when a media resolution is
+    # configured, so it loads here rather than with this module. Every exec child imports this
+    # provider (the model catalog is built at boot) and never calls a model, so a module-level
+    # import put that cost on each `execute_code` call. See
+    # `docs/conventions/import-layering.md` and the exec-startup audit on #5831.
+    from google.genai.types import MediaResolution
+
     if setting is None:
         return None
     resolutions = {

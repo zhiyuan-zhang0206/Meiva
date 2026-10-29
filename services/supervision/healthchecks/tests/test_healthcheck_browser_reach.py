@@ -6,7 +6,6 @@ from collections.abc import Generator
 from http import HTTPStatus
 from typing import Any
 
-import pytest
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
@@ -24,6 +23,7 @@ class _CdpStub:
         self._loop = asyncio.new_event_loop()
         self._ready = threading.Event()
         self._stop: asyncio.Future[None] | None = None
+        self._release: asyncio.Event | None = None
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
@@ -31,6 +31,8 @@ class _CdpStub:
         self._ready.wait(timeout=5)
 
     def close(self) -> None:
+        if self._release is not None:
+            self._loop.call_soon_threadsafe(self._release.set)
         if self._stop is not None and not self._stop.done():
             self._loop.call_soon_threadsafe(self._stop.set_result, None)
         self._thread.join(timeout=5)
@@ -72,7 +74,7 @@ class _CdpStub:
             msg = json.loads(raw)
             self.page_messages.append(msg)
             if self.fetch_outcome == "timeout":
-                await asyncio.sleep(2.0)
+                await self._release.wait() if self._release is not None else asyncio.sleep(0)
                 return
             await ws.send(
                 json.dumps({"id": msg["id"], "result": {"result": {"value": self.fetch_outcome}}})
@@ -83,6 +85,7 @@ class _CdpStub:
 
         async def _main() -> None:
             self._stop = self._loop.create_future()
+            self._release = asyncio.Event()
             async with serve(
                 self._handle_ws,
                 "127.0.0.1",
@@ -107,15 +110,13 @@ def _cdp_stub(*, fetch_outcome: str = "ok", hidden_supported: bool = True) -> Ge
         stub.close()
 
 
-@pytest.mark.parametrize(
-    "fetch_outcome,expected",
-    [("ok", "ok"), ("error:TypeError", "error"), ("timeout", "timeout")],
-)
-def test_canary_uses_hidden_shared_context_and_closes_after_fetch(
-    fetch_outcome: str, expected: str
-) -> None:
-    with _cdp_stub(fetch_outcome=fetch_outcome) as stub:
-        assert hc.canary(stub.port, "https://example.invalid/health", 0.4).outcome == expected
+# meiva:note
+# The canary makes two separate claims, so two separate tests carry them. This one is the protocol
+# shape: one hidden target in the shared context, one fetch expression, and the target closed in
+# finally. It reads no clock, so a loaded runner cannot turn it into a different verdict.
+def test_canary_opens_a_hidden_target_in_the_shared_context_and_closes_it() -> None:
+    with _cdp_stub(fetch_outcome="ok") as stub:
+        assert hc.canary(stub.port, "https://example.invalid/health", 5.0).outcome == "ok"
 
         create, close = stub.browser_messages
         assert create["method"] == "Target.createTarget"
@@ -127,6 +128,30 @@ def test_canary_uses_hidden_shared_context_and_closes_after_fetch(
         (evaluate,) = stub.page_messages
         assert evaluate["method"] == "Runtime.evaluate"
         assert 'fetch("https://example.invalid/health"' in evaluate["params"]["expression"]
+
+
+# meiva:note
+# A rejected fetch is its own classification: the page answers `error:TypeError`, and the canary says
+# `error` - never reachability, never a skip.
+def test_canary_reports_a_rejected_fetch_as_error() -> None:
+    with _cdp_stub(fetch_outcome="error:TypeError") as stub:
+        result = hc.canary(stub.port, "https://example.invalid/health", 5.0)
+    assert result.outcome == "error"
+    assert "error:TypeError" in result.detail
+
+
+# meiva:note
+# The timeout classification on its own: the page never settles, so the round must end as `timeout`.
+# The budget is deliberately generous because the connection steps spend from the same deadline: a
+# budget tight enough to race them (0.4s on a loaded runner) raises `TimeoutError` before the fetch
+# is even asked, and the canary reports `skip` - no verdict - instead of `timeout`. This test judges
+# the classification, never the elapsed time; the stub answers only when the test closes it, so the
+# page cannot settle first.
+def test_canary_reports_timeout_when_the_page_never_settles() -> None:
+    with _cdp_stub(fetch_outcome="timeout") as stub:
+        result = hc.canary(stub.port, "https://example.invalid/health", 5.0)
+    assert result.outcome == "timeout"
+    assert "did not settle" in result.detail
 
 
 def test_canary_rejected_hidden_target_never_falls_back_to_visible_tab() -> None:
