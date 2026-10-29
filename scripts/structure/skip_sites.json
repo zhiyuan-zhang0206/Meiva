@@ -131,6 +131,9 @@
   "tests/components/services/test_meiva_root_custody_contract.py": [
     "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
   ],
+  "tests/contracts/test_skill_tools_group.py": [
+    "skip('uv is not on PATH; the export face is exercised where a build runs')"
+  ],
   "tests/e2e/visual/test_layout_invariants.py": [
     "skip('the inspector scroll matrix requires deterministic stubbed sections')"
   ],
