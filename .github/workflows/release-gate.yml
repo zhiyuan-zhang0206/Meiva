@@ -6,9 +6,10 @@
 #
 # Two products on success:
 #   - the annotated tag `vX.Y.Z`, pointing at the certified commit (the human marker);
-#   - `release/<version>.json`, the machine-readable proof the deployment precheck reads
+#   - `release/<version>.json`, the machine-readable proof this gate reads on every later run
 #     (`scripts/host_ops/release/base.py`), opened as a pull request because every change to
-#     main goes through one.
+#     main goes through one. The deployment precheck does not read it yet: nothing in
+#     cli/fleet_update consults the verdict, so a wave is not refused for a missing base.
 # A tag alone can never create release eligibility: the reader ignores tags entirely.
 #
 # A red nightly verdict (`.github/workflows/refresh-test-durations.yml`) does not fail main's
@@ -80,12 +81,16 @@ jobs:
           echo "certifying $sha as v${{ inputs.version }}"
 
       # Stdlib only, so the refusal costs seconds and cannot fail on an environment problem.
+      # The bootstrap flag is what makes the first release possible at all: the record can only
+      # come from the run that certifies it. base.py refuses it the moment release/ has ever been
+      # committed, so the flag cannot reopen a door a deleted record closed.
       - name: Refuse a tree without a certified base
         run: >
           python3 scripts/host_ops/release/base.py
           --repo .
           --target ${{ steps.target.outputs.sha }}
           --provenance-dir release
+          --bootstrap-when-empty
 
       - name: Refuse a commit whose nightly full suite was red
         env:
@@ -260,11 +265,23 @@ jobs:
         run: |
           git config user.name "meiva release gate"
           git config user.email "release-gate@meiva.invalid"
-          git tag -a "v${{ inputs.version }}" "${{ needs.precheck.outputs.sha }}" -m "v${{ inputs.version }} certified by the release gate
+          # A failed certify step leaves its tag behind, and a re-dispatch would then die on
+          # "tag already exists" instead of completing the record. Re-publishing the same tag on
+          # the same commit is a no-op; a tag pointing somewhere else is a real refusal.
+          existing="$(git rev-parse -q --verify "refs/tags/v${{ inputs.version }}" || true)"
+          if [ -n "$existing" ]; then
+            if [ "$existing" != "${{ needs.precheck.outputs.sha }}" ]; then
+              echo "::error::tag v${{ inputs.version }} already points at $existing, not the certified commit ${{ needs.precheck.outputs.sha }}"
+              exit 1
+            fi
+            echo "tag v${{ inputs.version }} already marks the certified commit; nothing to publish"
+          else
+            git tag -a "v${{ inputs.version }}" "${{ needs.precheck.outputs.sha }}" -m "v${{ inputs.version }} certified by the release gate
 
           run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           reason: ${{ inputs.reason }}"
-          git push origin "v${{ inputs.version }}"
+            git push origin "v${{ inputs.version }}"
+          fi
 
       - name: Open the pull request that lands the record
         env:
@@ -286,6 +303,7 @@ jobs:
           - version: \`v${{ inputs.version }}\`
           - reason: ${{ inputs.reason }}
 
-          Merging this pull request makes the certification visible to the deployment precheck
-          (\`scripts/host_ops/release/base.py\` reads \`release/<version>.json\`). The tag
-          already exists and carries the same run link."
+          Merging this pull request makes the certification the base every later gate run must
+          descend from (\`scripts/host_ops/release/base.py\` reads \`release/<version>.json\`).
+          The deployment precheck does not consult it yet, so a wave is not refused for a missing
+          base today. The tag already exists and carries the same run link."

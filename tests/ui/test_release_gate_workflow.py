@@ -41,6 +41,17 @@ def test_the_precheck_refuses_a_tree_without_a_certified_base() -> None:
     refusal = _step(precheck["steps"], "Refuse a tree without a certified base")
 
     assert "scripts/host_ops/release/base.py" in refusal["run"]
+    # meiva:note
+    # The first release can only bootstrap here; base.py holds the history condition that closes the door again, so the flag is wiring, not the decision.
+    assert "--bootstrap-when-empty" in refusal["run"]
+
+
+def test_a_leftover_tag_from_a_failed_certify_does_not_block_the_retry() -> None:
+    certify = _yaml(_WORKFLOW)["jobs"]["certify"]
+    tag = _step(certify["steps"], "Publish the tag the humans read")
+
+    assert "git rev-parse -q --verify" in tag["run"]
+    assert "already points at" in tag["run"]
 
 
 def test_only_a_tree_that_passed_every_leg_is_certified() -> None:
