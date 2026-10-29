@@ -11,7 +11,7 @@ import json
 import re
 import tomllib
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 
 from meizel.contracts.debt import (
@@ -79,6 +79,37 @@ def _paid(
                     ("run `python -m meizel debt prune` to lower the baseline",),
                 )
             )
+    return found
+
+
+# meiva:note
+# A read the manifest itself calls legal, recorded as debt: `[roots] name = {kinds = [kind]}` and a
+# `[debt.ambient-read]` entry `name#kind target` in the same directory. The two are the same
+# declaration read twice, so this needs no source analysis and `check --changed` reports it too —
+# unlike `debt-paid`, which is an accounting note about a whole run.
+def legal_read_recorded(manifests: Mapping[str, Manifest]) -> list[Diagnostic]:
+    found: list[Diagnostic] = []
+    for _, manifest in sorted(manifests.items()):
+        rows = manifest.debt.get(Code.AMBIENT_READ, {})
+        for name, root in sorted(manifest.roots.items()):
+            for kind in sorted(root.kinds):
+                prefix = f"{name}#{kind.value} "
+                found.extend(
+                    Diagnostic(
+                        manifest.path,
+                        manifest.debt_line(Code.AMBIENT_READ, key),
+                        Code.LEGAL_READ_RECORDED,
+                        f"[roots] {name!r} declares `{kind.value}`, and {key!r} records that read "
+                        "as debt",
+                        (
+                            "delete the entry: one read cannot be licensed by [roots] and paid for "
+                            "as debt at once; `debt prune` drops it, and a full check calls it paid "
+                            "until then",
+                        ),
+                    )
+                    for key in sorted(rows)
+                    if key.startswith(prefix)
+                )
     return found
 
 

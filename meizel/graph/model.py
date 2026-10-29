@@ -81,6 +81,7 @@ class Code(StrEnum):
     ANY_COLLABORATOR = "any-collaborator"
     TYPE_CHECKING = "type-checking"
     AMBIENT_READ = "ambient-read"
+    LEGAL_READ_RECORDED = "legal-read-recorded"
     FAKE_ENTROPY = "fake-entropy"
     STALE_ROOT = "stale-root"
     STALE_READER = "stale-reader"

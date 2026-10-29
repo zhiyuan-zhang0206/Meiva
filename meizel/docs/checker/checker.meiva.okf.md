@@ -128,19 +128,20 @@ Plugin and schedule-script discovery is `[external]`, not `[loads]`.
 `exports` (list), `[uses]` ([[meizel/docs/checker/narrowing.meiva.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
 (sites in [[meizel/docs/checker/policy.meiva.okf.md|the policy file]]), `[state]` and `[roots]`
 ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) and `[debt.<code>]`. Names are
-direct children; `meizel.toml` does not count toward the directory budget. A directory without
-a manifest has no local edges and exports its door.
+direct children; `meizel.toml` is outside the directory budget. A directory without one has no
+local edges and exports its door.
 
 ## When it fails
 
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
 `cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.meiva.okf.md|patching]]),
 the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
-`ambient-read`, `stale-root`, `stale-reader`, `stale-approval`, `fake-entropy` ([[meizel/docs/checker/fake-entropy.meiva.okf.md|fake entropy]]),
+`ambient-read`, `legal-read-recorded`, `stale-root`, `stale-reader`, `stale-approval`,
+`fake-entropy` ([[meizel/docs/checker/fake-entropy.meiva.okf.md|fake entropy]]),
 `unresolved-import`, `unlisted-allowance`,
 `stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
 (`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,
-stale-edge, debt, roles). An edge that would close a cycle says so; the way out is a public door or injection.
+stale-edge, debt, roles). An edge that closes a cycle says so; the way out is a public door or injection.
 
 ## Layout
 

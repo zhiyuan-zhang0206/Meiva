@@ -28,7 +28,7 @@ from meizel.contracts.debt import (
     set_debt,
 )
 from meizel.contracts.enumerations import check as check_roles
-from meizel.contracts.ledger import account_line, reconcile
+from meizel.contracts.ledger import account_line, legal_read_recorded, reconcile
 from meizel.contracts.manifest import Manifest, effective_purity, load_manifests, manifest_path
 from meizel.contracts.policy import POLICY, Policy, load_policy, render_policy
 from meizel.contracts.policy import check as check_policy
@@ -723,6 +723,7 @@ def analyze(
     diagnostics.extend(policy_problems)
     diagnostics.extend(check_policy(manifests, policy))
     diagnostics.extend(reader_problems(policy))
+    diagnostics.extend(legal_read_recorded(manifests))
     diagnostics.extend(_approval_problems(policy))
     root_manifest = manifests.get("")
     diagnostics.extend(check_roles(universe, root_manifest.roles if root_manifest else {}))
