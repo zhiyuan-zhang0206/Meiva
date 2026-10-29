@@ -332,9 +332,14 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     expect(screen.getByTestId("scroll-viewport").className).toContain("overscroll-y-contain");
   });
-  it("Scroll-to-bottom arrow button always in DOM (visibility controlled by opacity)", () => {
+  // meiva:note
+  // The control is absent while the reader is at the bottom — the former rule
+  // kept it in the DOM and faded, which left a hover target over a click that
+  // did nothing (user report 2026-10-30).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  it("Scroll-to-bottom control is absent while the reader is at the bottom", () => {
     render(<TimelineView items={[]} />);
-    expect(screen.getByLabelText("Scroll to bottom")).toBeTruthy();
+    expect(screen.queryByLabelText("Scroll to bottom")).toBeNull();
   });
 });
 

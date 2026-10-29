@@ -135,11 +135,19 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
 }
 
 // meiva:note
-// Scroll-to-bottom button: visible whenever the viewport is measured away from
+// Scroll-to-bottom button: present whenever the viewport is measured away from
 // the bottom, and clicking it smooth-scrolls back. While a refresh is in flight
 // it rests as the same ring the pull-to-load gesture uses; hovering (or
 // focusing it from the keyboard) swaps in the arrow, because a ring alone does
 // not read as something to click (user report 2026-10-19).
+
+// meiva:note
+// At the bottom the control is not rendered at all: nothing is left to scroll
+// to, so a faded-but-present button only produced a hover target that turned
+// into an arrow over a click that did nothing (user report 2026-10-30). A
+// refresh in flight does not override that — a ring over the same dead click is
+// the same problem. `atBottom` is the measured distance to the bottom, so
+// content appended above re-decides it.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
 export function ScrollToBottomButton({
   atBottom,
@@ -151,6 +159,7 @@ export function ScrollToBottomButton({
   onClick: () => void;
 }) {
   const t = useTranslations("timeline");
+  if (atBottom) return null;
   return (
     <button
       type="button"
@@ -169,10 +178,7 @@ export function ScrollToBottomButton({
         "group items-center justify-center",
         "text-muted-foreground hover:text-foreground",
         "transition-all duration-300 ease-out",
-        atBottom && !refreshing
-          ? "opacity-0 translate-y-2 pointer-events-none scale-75"
-          : "opacity-100 translate-y-0 pointer-events-auto scale-100",
-          FLEX
+        FLEX
       )}
     >
       {refreshing ? (
