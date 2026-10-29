@@ -36,7 +36,7 @@ from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_
 from base.api_contracts.agent_contract import MeivaAgentError
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.transport_encryption import verify_transport_encryption_declaration
@@ -480,12 +480,12 @@ async def ops_route(
 # meiva:note
 # What the upload receiver needs from its environment, read once by `main()`: this machine and home
 # as the unit identity, the OS user's home (where `Downloads/MeivaAgent-N` lives), the gateway
-# access and the per-agent quota.
-def _receiver_config(config: ConfigBoot, *, machine: str, home: Path) -> ReceiverConfig:
+# access `main()` built from this boot, and the per-agent quota.
+def receiver_config(*, machine: str, home: Path, access: GatewayAccess) -> ReceiverConfig:
     return ReceiverConfig(
         unit=UnitIdentity(machine=machine, home=str(home.resolve())),
         user_home=Path.home(),
-        access=gateway_access_from_boot(config),
+        access=access,
         quota_bytes=MAX_AGENT_UPLOAD_BYTES,
         quota_files=MAX_AGENT_UPLOAD_FILES,
     )
@@ -501,6 +501,7 @@ async def serve_ops_daemon(
     rng: random.Random,
     home: Path,
     receiver: ReceiverConfig,
+    access: GatewayAccess,
 ) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
@@ -543,7 +544,7 @@ async def serve_ops_daemon(
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
 
     try:
-        acceptance = boot.ops_acceptance(home=home, access=gateway_access_from_boot(config))
+        acceptance = boot.ops_acceptance(home=home, access=access)
         bind_host = boot.ops_bind_host(machine=local_machine)
         if bind_host != "127.0.0.1":
             verify_transport_encryption_declaration(
@@ -667,6 +668,11 @@ def main(*, argv: list[str] | None = None) -> None:
         )
         install_graceful_shutdown("ops")
         runner = asyncio.Runner()
+        # meiva:note
+        # One gateway access per process, built from this boot and handed to both readers that
+        # need it: the upload receiver and the bearer set `/ops` admits. Building it twice read
+        # the home's `.env` twice for one answer.
+        access = gateway_access_from_boot(config)
         try:
             runner.run(
                 serve_ops_daemon(
@@ -677,7 +683,8 @@ def main(*, argv: list[str] | None = None) -> None:
                     host=Host.system(environ=config.process_environment()),
                     rng=_new_rng(),
                     home=home,
-                    receiver=_receiver_config(config, machine=machine.name(), home=home),
+                    receiver=receiver_config(machine=machine.name(), home=home, access=access),
+                    access=access,
                 )
             )
         except KeyboardInterrupt as interrupted:
