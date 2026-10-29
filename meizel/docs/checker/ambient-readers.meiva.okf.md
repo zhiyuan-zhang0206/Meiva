@@ -27,8 +27,8 @@ An entry whose function reads the world only when it is not handed the value is 
 of a reason string:
 
 ```toml
-[ambient-readers.pid]
-"base.paths.private_dir.is_foreign_owned()" = { why = "compares with os.geteuid() when no euid is passed", unless = "euid" }
+[ambient-readers.environ]
+"base.host.git.gitenv.git_env()" = { why = "copies the live os.environ when no mapping is passed", unless = "environ" }
 ```
 
 `unless` names one parameter of that function. A call that passes the parameter a value is not an
