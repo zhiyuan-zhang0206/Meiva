@@ -384,18 +384,27 @@ def work_block_items() -> Sequence[Mapping[str, object]]:
 
 
 # meiva:note
+# The default conversation as the one `timeline_snapshot` event both stream
+# drivers send: the timer-fed fake starts from it, and a scripted suite seeds the
+# page with it before emitting its own turn.
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+def timeline_snapshot(items: Sequence[Mapping[str, object]] | None = None) -> dict[str, object]:
+    snapshot_items = _timeline_items() if items is None else items
+    return {
+        "role": "timeline_snapshot",
+        "agent_id": 1,
+        "msg_count": len(snapshot_items),
+        "items": list(snapshot_items),
+    }
+
+
+# meiva:note
 # The pre-app EventSource fake for one snapshot: `items` replaces the default
 # conversation, and a caller that supplies its own rows gets no streamed delta —
 # the delta appends to an item id only the default conversation has.
 # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
 def _fake_sse_js(items: Sequence[Mapping[str, object]] | None = None) -> str:
-    snapshot_items = _timeline_items() if items is None else items
-    snapshot = {
-        "role": "timeline_snapshot",
-        "agent_id": 1,
-        "msg_count": len(snapshot_items),
-        "items": snapshot_items,
-    }
+    snapshot = timeline_snapshot(items)
     delta = (
         {"role": "chat_delta", "agent_id": 1, "item_id": "1.33", "content": "streaming tail"}
         if items is None
@@ -407,6 +416,66 @@ def _fake_sse_js(items: Sequence[Mapping[str, object]] | None = None) -> str:
 
 
 _FAKE_SSE_JS = _fake_sse_js()
+
+
+# meiva:note
+# A driver-fed stream: every event a suite measures arrives from Python through
+# `window.__meivaSse.emit`, so "after N chunks" is a fact about the events fed,
+# never about a timer or a real turn's pacing. `open_page(..., scripted_sse=True)`
+# swaps the timer-fed fake above for this one; the page then shows exactly what
+# the suite emits, in the order emitted.
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+_SCRIPTED_SSE_JS = """
+(() => {
+  const CLOSED = 2;
+  const streams = [];
+  const systemStreams = () => streams.filter((s) => s.url.includes("/api/system/all"));
+  class ScriptedEventSource {
+    static CONNECTING = 0; static OPEN = 1; static CLOSED = 2;
+    constructor(url) {
+      this.url = url; this.readyState = ScriptedEventSource.OPEN;
+      this.onopen = null; this.onmessage = null; this.onerror = null;
+      this._listeners = {};
+      streams.push(this);
+      setTimeout(() => { if (this.onopen) this.onopen({}); }, 0);
+    }
+    addEventListener(type, handler) {
+      (this._listeners[type] = this._listeners[type] || []).push(handler);
+    }
+    removeEventListener(type, handler) {
+      const list = this._listeners[type];
+      if (list) this._listeners[type] = list.filter((h) => h !== handler);
+    }
+    close() { this.readyState = CLOSED; }
+  }
+  const deliver = (stream, event) => {
+    const message = { data: JSON.stringify(event) };
+    let delivered = 0;
+    if (stream.onmessage) { stream.onmessage(message); delivered += 1; }
+    for (const handler of stream._listeners["message"] || []) { handler(message); delivered += 1; }
+    return delivered;
+  };
+  window.EventSource = ScriptedEventSource;
+  window.__meivaSse = {
+    // Ready once the app holds a live stream and bound its handler: an event
+    // emitted earlier is dropped by the app rather than observed, which would
+    // make a later measurement an assertion about nothing.
+    ready: () => systemStreams().some((s) => s.readyState !== CLOSED && !!s.onmessage),
+    // Returns how many handlers took each event; a suite asserts 1 per event, so
+    // a fake that silently stopped reaching the app fails instead of passing on
+    // unchanged geometry.
+    emit: (events) => {
+      const batch = Array.isArray(events) ? events : [events];
+      let delivered = 0;
+      for (const stream of systemStreams()) {
+        if (stream.readyState === CLOSED) continue;
+        for (const event of batch) delivered += deliver(stream, event);
+      }
+      return delivered;
+    },
+  };
+})();
+"""
 
 
 def new_context(browser: Browser, width: int) -> BrowserContext:
@@ -429,6 +498,7 @@ def open_page(
     stub_api: bool,
     reconnect_sse: bool = True,
     open_inspector: bool = False,
+    scripted_sse: bool = False,
     extra_init_script: str | None = None,
     timeline_items: Sequence[Mapping[str, object]] | None = None,
     settings: Sequence[Mapping[str, object]] | None = None,
@@ -442,7 +512,16 @@ def open_page(
     page = ctx.new_page()
     # The fake EventSource is ALWAYS injected (timeline invariants need the
     # stream even against a deployed bundle; the fleet page ignores it).
-    fake_sse = _fake_sse_js(timeline_items) if timeline_items is not None else _FAKE_SSE_JS
+    # meiva:note
+    # `scripted_sse` hands the stream to the suite instead of the timer: the page
+    # then renders only the events the suite emits, so a geometry measurement is
+    # reproducible from the recorded event list alone.
+    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+    fake_sse = (
+        _SCRIPTED_SSE_JS
+        if scripted_sse
+        else (_fake_sse_js(timeline_items) if timeline_items is not None else _FAKE_SSE_JS)
+    )
     page.add_init_script(fake_sse.replace("__RECONNECT__", json.dumps(reconnect_sse)))
     if extra_init_script is not None:
         # Suites that need another pre-app hook (e.g. the mobile-keyboard

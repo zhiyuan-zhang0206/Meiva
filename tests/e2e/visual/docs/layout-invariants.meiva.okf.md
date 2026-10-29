@@ -58,11 +58,15 @@ Suite entry points and CI integration: [[tests/docs/tests.meiva.okf.md]].
 `test_shell_icon_size_is_uniform` measure the strip every home column ends with.
 Both columns are bottom-anchored, so the sidebar footer's rule and the composer's
 rule can only be one line if both bands are composed the same way — the code
-shares `BOTTOM_BAND_CLASS` / `BOTTOM_BAND_ROW_CLASS` with the composer, and the
-composer publishes its content-sized height as `--composer-band-height` so the
-footer follows a growing draft. The engine test therefore re-measures the pair
-after filling a 10-line draft: a rule that parts as soon as the reader types
-would be a regression the resting-state assertion cannot see.
+shares `BOTTOM_BAND_CLASS` / `BOTTOM_BAND_ROW_CLASS` with the composer. They are
+one line at rest and only at rest: the composer's band is content-sized and its
+rule rises with a multi-line draft, while the footer keeps the resting band and
+follows no other column's geometry. The composer published its height as
+`--composer-band-height` and the footer took it as a `min-height` for a day — a
+divider that tracked the composer's line read as an apparatus of its own (user
+report 2026-10-29). The engine test therefore re-measures the pair after filling
+a 10-line draft: a rule that parts as soon as the reader types would be a
+regression the resting-state assertion cannot see.
 
 Tolerance is 1 CSS px, stated at every assertion. Both rules live in one CSS px
 space, but a panel's width is a percentage of the viewport (230.234px at 1440), so
@@ -71,9 +75,32 @@ column; one CSS px is still the smallest separation two *distinct* painted lines
 can have, so the 16px drift this rule replaced fails while device rounding passes.
 
 The gap above the rule is one measurement made of two halves — the timeline
-column's `pb-1.5` and the composer's `pt-1`, 10px together — asserted at 390, 768
+column's `pb-1` and the composer's `pt-0.5`, 6px together — asserted at 390, 768
 and 1440 because neither class is breakpoint-dependent; a breakpoint that grows
 its own padding would fail here instead of drifting silently.
+
+## A streaming turn leaves the bottom rule still (task #5837)
+
+`test_a_streaming_turn_leaves_the_bottom_rule_still` and
+`test_a_grown_composer_holds_the_sidebar_rule_while_the_turn_streams` drive the
+turn themselves: `open_page(..., scripted_sse=True)` installs a driver-fed
+EventSource, and the suite emits `timeline_snapshot`, then `chat_start` plus 24
+`chat_delta` chunks through `window.__meivaSse.emit`, asserting each event
+reached exactly one handler. "After 24 chunks" is therefore a fact about the
+events fed — no sleep, no animation-frame count, and no waiting on a real turn.
+Two cases; only the second can fail:
+
+- Both rules are measured at rest and after the chunks: the 0.5 s `llm_keepalive`
+  beats re-render this surface twice a second, and the floor must not move.
+- A 10-line draft has already grown the composer band, and the sidebar rule must
+  hold its resting y through the draft and through every chunk while the band
+  keeps the grown height. This is the reverse control for the 2026-10-29
+  coupling: restore `min-height: var(--composer-band-height)` on the sidebar
+  footer and this case fails, the footer 198px from its resting y (843 → 645 at
+  1440×900), while the other cases stay green.
+
+Neither case discriminates a stream-only change in the band's own height: the
+stream makes none (the stop control is the same 57px band).
 
 Icon size: every SVG inside the four control rows (the header bar, the sidebar's
 title row, the sidebar footer, the composer's band) is `ICON_SIZE_CLASS` (16px).

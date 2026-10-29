@@ -19,6 +19,7 @@ from tests.e2e.visual.stubbed_home import (
     OVERRIDE_BASE_URL,
     new_context,
     open_page,
+    timeline_snapshot,
     wait_layout_settled,
 )
 
@@ -609,6 +610,147 @@ def test_bottom_rule_gap_is_halved(
             f"gap between the last row and the composer's rule is {gap:.2f}px at {width}px, "
             f"expected {BOTTOM_RULE_GAP_PX}px +-1 (the timeline's pb-1 plus the composer's "
             "pt-0.5; a row's own height is fractional, hence the 1px tolerance)"
+        )
+    finally:
+        ctx.close()
+
+
+# meiva:note
+# A streaming turn re-renders this surface at the turn's own pace — the 0.5 s
+# `llm_keepalive` beats make that rate a property of the protocol. The bottom rule
+# is the floor of the screen: chunks arriving must not move it. The stream here is
+# driven from Python (`scripted_sse`), so "after 24 chunks" is a fact about the
+# events fed rather than about a sleep, and the assertion is a distance in pixels
+# rather than a frame count.
+#
+# The second case is the one that can fail: a draft grows the composer band, and a
+# sidebar rule that follows the composer (the coupling the 2026-10-29 report
+# removed) jumps with it. Restoring `min-height: var(--composer-band-height)` on
+# the footer turns that case red; with the coupling gone the footer holds the
+# resting band through the draft and through every chunk.
+#
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+STREAM_VIEWPORTS = [(1024, 900), (1440, 900)]
+STREAM_CHUNKS = 24
+DRAFT_LINES = 10
+BOTTOM_RULE_BOX_JS = """() => {
+  const box = (selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { y: rect.y, height: rect.height };
+  };
+  return { band: box('[data-testid="composer-band"]'), footer: box('[data-testid="sidebar-footer"]') };
+}"""
+
+
+class BottomRuleBox(TypedDict):
+    y: float
+    height: float
+
+
+def _measure_bottom_rule(page: Page) -> dict[str, BottomRuleBox]:
+    boxes = page.evaluate(BOTTOM_RULE_BOX_JS)
+    assert boxes["band"] is not None and boxes["footer"] is not None, (
+        "the bottom rule is not on screen, so nothing was measured"
+    )
+    return cast("dict[str, BottomRuleBox]", boxes)
+
+
+# meiva:note
+# The API is stubbed even against an overridden bundle: this suite owns the
+# conversation through the scripted stream, and a live backend would answer with
+# a different one. The page is not measured until the stream reports a bound
+# handler and the seeded snapshot is on screen, so a dropped event fails loudly
+# instead of leaving the geometry an assertion about nothing.
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+def _open_scripted_stream(
+    playwright_browser: Browser, width: int, height: int, base_url: str
+) -> tuple[BrowserContext, Page]:
+    ctx = playwright_browser.new_context(viewport={"width": width, "height": height})
+    page = open_page(ctx, base_url, "/", stub_api=True, scripted_sse=True)
+    page.wait_for_function("() => window.__meivaSse && window.__meivaSse.ready()", timeout=15_000)
+    delivered = page.evaluate("event => window.__meivaSse.emit(event)", timeline_snapshot())
+    assert delivered == 1, f"the snapshot reached {delivered} handlers, not 1"
+    expect(page.locator('[data-testid="timeline-surface"]')).to_contain_text(
+        "Follow-up message 32", timeout=15_000
+    )
+    return ctx, page
+
+
+def _stream_a_turn(page: Page) -> None:
+    started = page.evaluate(
+        "event => window.__meivaSse.emit(event)",
+        {"role": "chat_start", "agent_id": 1, "item_id": "1.34", "content": "turn start"},
+    )
+    chunks = [
+        {"role": "chat_delta", "agent_id": 1, "item_id": "1.34", "content": f"chunk {i} "}
+        for i in range(STREAM_CHUNKS)
+    ]
+    delivered = page.evaluate("events => window.__meivaSse.emit(events)", chunks)
+    assert started == 1 and delivered == STREAM_CHUNKS, (
+        f"the stream took {started} start event(s) and {delivered} of {STREAM_CHUNKS} chunks — "
+        "the app is not reading this stream, so the geometry below proves nothing"
+    )
+    expect(page.locator('[data-testid="timeline-surface"]')).to_contain_text(
+        f"chunk {STREAM_CHUNKS - 1} ", timeout=15_000
+    )
+
+
+@pytest.mark.parametrize("width,height", STREAM_VIEWPORTS)
+def test_a_streaming_turn_leaves_the_bottom_rule_still(
+    width: int, height: int, playwright_browser: Browser, frontend_target: str
+) -> None:
+    ctx, page = _open_scripted_stream(playwright_browser, width, height, frontend_target)
+    try:
+        before = _measure_bottom_rule(page)
+        _stream_a_turn(page)
+        after = _measure_bottom_rule(page)
+        for key in ("band", "footer"):
+            assert abs(after[key]["y"] - before[key]["y"]) <= 1, (
+                f"the {key} rule moved {after[key]['y'] - before[key]['y']:.2f}px while "
+                f"{STREAM_CHUNKS} chunks arrived at {width}px"
+            )
+            assert abs(after[key]["height"] - before[key]["height"]) <= 1, (
+                f"the {key} band's height changed by {after[key]['height'] - before[key]['height']:.2f}px "
+                f"while {STREAM_CHUNKS} chunks arrived at {width}px"
+            )
+    finally:
+        ctx.close()
+
+
+@pytest.mark.parametrize("width,height", STREAM_VIEWPORTS)
+def test_a_grown_composer_holds_the_sidebar_rule_while_the_turn_streams(
+    width: int, height: int, playwright_browser: Browser, frontend_target: str
+) -> None:
+    ctx, page = _open_scripted_stream(playwright_browser, width, height, frontend_target)
+    try:
+        resting = _measure_bottom_rule(page)
+        page.locator('[data-testid="composer-input"]').fill("draft line\n" * DRAFT_LINES)
+        page.wait_for_function(
+            "() => document.querySelector('[data-testid=\"composer-band\"]')"
+            ".getBoundingClientRect().height > 60",
+            timeout=5_000,
+        )
+        grown = _measure_bottom_rule(page)
+        assert grown["band"]["height"] > resting["band"]["height"] + 20, (
+            "the draft did not grow the composer band, so the grown-state check proves nothing"
+        )
+        assert abs(grown["footer"]["y"] - resting["footer"]["y"]) <= 1, (
+            f"the sidebar's rule followed the composer's: it was y={resting['footer']['y']:.2f} at "
+            f"rest and y={grown['footer']['y']:.2f} under a grown composer, while the band rose to "
+            f"y={grown['band']['y']:.2f}"
+        )
+        _stream_a_turn(page)
+        after = _measure_bottom_rule(page)
+        assert abs(after["band"]["y"] - grown["band"]["y"]) <= 1
+        assert abs(after["band"]["height"] - grown["band"]["height"]) <= 1, (
+            f"the composer band collapsed from {grown['band']['height']:.2f}px to "
+            f"{after['band']['height']:.2f}px while the turn streamed"
+        )
+        assert abs(after["footer"]["y"] - resting["footer"]["y"]) <= 1, (
+            f"the sidebar's rule moved {after['footer']['y'] - resting['footer']['y']:.2f}px while "
+            f"the turn streamed under a grown composer at {width}px"
         )
     finally:
         ctx.close()
