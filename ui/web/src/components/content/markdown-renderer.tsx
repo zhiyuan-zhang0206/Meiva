@@ -3,7 +3,7 @@
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -16,10 +16,32 @@ import type { Plugin, PluggableList } from "unified";
 import { CopyButton } from "@/components/content/copy-button";
 import { PythonCode } from "@/components/content/python-code";
 import { MIN_W_0 } from "@/lib/layout/layout";
-import { loadMarkdownMath, type MarkdownMath } from "@/lib/markdown/math";
+import { defaultMarkdownMath, type MarkdownMath, type MarkdownMathSource } from "@/lib/markdown/math";
 import remarkAutolinkDelimiter from "@/lib/markdown/remark-autolink-delimiter";
 import remarkCjkLinkBoundary from "@/lib/markdown/remark-cjk-link-boundary";
 import { cn } from "@/lib/format/utils";
+
+// meiva:note
+// The math chunk arrives as a value: production wires nothing and every surface reads the module's
+// own source, while a test wraps its tree in `MarkdownMathProvider` with a source built from a fake
+// importer — the same shape the code chunk uses, and the reason no shipped module exports a test-only
+// setter for it.
+// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
+const MarkdownMathContext = createContext<MarkdownMathSource>(defaultMarkdownMath);
+
+export function MarkdownMathProvider({
+  value,
+  children,
+}: {
+  value: MarkdownMathSource;
+  children: ReactNode;
+}) {
+  return <MarkdownMathContext.Provider value={value}>{children}</MarkdownMathContext.Provider>;
+}
+
+export function useMarkdownMath(): MarkdownMathSource {
+  return useContext(MarkdownMathContext);
+}
 
 const urlTransform = (url: string): string => {
   return /^(https?:|mailto:|#)/i.test(url) ? url : "about:blank";
@@ -141,11 +163,12 @@ export interface ChatMarkdownProps {
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
 export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content, components: overrides, resolveUrl, inline = false }: ChatMarkdownProps) {
   const [math, setMath] = useState<MarkdownMath | null>(null);
+  const mathSource = useMarkdownMath();
   const needsMath = content.includes("$");
   useEffect(() => {
     if (!needsMath || math !== null) return;
     let active = true;
-    void loadMarkdownMath().then(
+    void mathSource.load().then(
       (loaded) => {
         if (active) setMath(loaded);
       },
@@ -154,7 +177,7 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content
     return () => {
       active = false;
     };
-  }, [needsMath, math]);
+  }, [needsMath, math, mathSource]);
 
   const Wrapper = inline ? "span" : "div";
   return (
