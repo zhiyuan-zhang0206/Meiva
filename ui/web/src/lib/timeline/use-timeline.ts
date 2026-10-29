@@ -7,7 +7,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useApi, useWallNow } from "../transport/transport-context";
 import { useAgentReconcile } from "../agents/agent-reconcile";
@@ -32,6 +32,7 @@ import {
   hasUnsettledClock,
   isStreamingDelta,
   startsTurn,
+  type OlderLoadOrigin,
   type OlderSegmentLoadResult,
 } from "./timeline-plan";
 import { useTimelineStore } from "./timeline-store";
@@ -90,10 +91,18 @@ export interface UseTimelineResult {
   hasMoreOlder: boolean;
   /** An older-window fetch is in flight (scroll-up). */
   loadingOlder: boolean;
-  /** Fetch the previous window of older items and prepend them. The
-   *   timeline calls this when the user scrolls near the top. No-op when
-   *   already loading or no older items remain. */
-  loadOlder: () => void;
+  // meiva:note
+  // The reader's own older-page read — the loading strip above the messages
+  // presents this, never `loadingOlder`. That flag is the concurrency guard
+  // four callers hold, and two of them read history nobody pulled for.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  readerLoadingOlder: boolean;
+  // meiva:note
+  // Fetch the previous window of older items and prepend them, recording who
+  // asked: only a `reader` origin presents the loading strip. No-op when
+  // already loading or no older items remain.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  loadOlder: (origin: OlderLoadOrigin) => void;
   retainedItemsMax: number;
 }
 
@@ -109,6 +118,16 @@ export function useTimeline(
   const { isVisible } = useAgentReadRepair("timeline", agentId);
   const { requestReconcile, abortReconcile, isReconciling } = useAgentReconcile(agentId);
   const olderRequest = useRef<AbortController | null>(null);
+  // meiva:note
+  // Whether the older-page read now in flight is the reader's own. Recorded
+  // where the request begins, because that is the only place that knows: every
+  // automatic fill and the reader's gesture arrive through the same call. The
+  // strip presents this, never the bare in-flight flag — keying it on the flag
+  // showed a ring for the cold fill and for compact-history retention, and each
+  // such load mounted a fresh ring, so the animation restarted instead of
+  // turning (user report 2026-10-29).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md
+  const [readerOrigin, setReaderOrigin] = useState(false);
   const timelineQuery = useQuery({
     queryKey: ["timeline", agentId] as const,
     queryFn: ({ signal }) => {
@@ -351,7 +370,7 @@ export function useTimeline(
   // the backend doesn't know are skipped).
   // A completed page with has_more=false is terminal. A false store flag
   // before the post-compact GET settles is only unready, never exhaustion.
-  const loadOlderSegment = useCallback(async (): Promise<OlderSegmentLoadResult> => {
+  const loadOlderSegment = useCallback(async (origin: OlderLoadOrigin): Promise<OlderSegmentLoadResult> => {
     if (agentId == null || !isVisible) return "aborted";
     const st = useTimelineStore.getState();
     if (st.activeThreadId !== agentId) return "aborted";
@@ -364,6 +383,7 @@ export function useTimeline(
     const limit = computeOlderPageLimit(olderBaseLimit, st.olderFetchCount);
     const controller = new AbortController();
     olderRequest.current = controller;
+    setReaderOrigin(origin === "reader");
     beginLoadOlder();
     try {
       const page = await api.getTimeline(agentId, { before: oldest.item_id, limit, signal: controller.signal });
@@ -389,9 +409,10 @@ export function useTimeline(
       return "failed";
     }
   }, [api, agentId, isVisible, beginLoadOlder, prependOlder, showError, olderBaseLimit]);
-  const loadOlder = useCallback(() => {
-    void loadOlderSegment();
-  }, [loadOlderSegment]);
+  const loadOlder = useCallback(
+    (origin: OlderLoadOrigin) => { void loadOlderSegment(origin); },
+    [loadOlderSegment],
+  );
   const { refetch } = timelineQuery;
   const retryTimeline = useCallback(() => {
     void refetch();
@@ -445,6 +466,7 @@ export function useTimeline(
     retryTimeline,
     hasMoreOlder: selected ? hasMoreOlder : retained?.hasMoreOlder ?? timelineQuery.data?.has_more ?? false,
     loadingOlder: selected && loadingOlder,
+    readerLoadingOlder: selected && loadingOlder && readerOrigin,
     loadOlder,
     retainedItemsMax,
   };

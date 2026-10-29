@@ -385,7 +385,7 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(700);
   });
   it("one loading ring at a time: an older-history load keeps the bottom button quiet", () => {
-    renderWithBrowser(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder />, {
+    renderWithBrowser(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder readerLoadingOlder />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
     // meiva:note

@@ -30,3 +30,12 @@ spin any more, it's a static animation").
 A reader who asked for `prefers-reduced-motion: reduce` gets the same ring
 breathing (opacity only, `animate-pulse`) instead of a frozen frame: a still ring
 reads as a stuck loader, not a busy one.
+
+The ring is mounted for one reader request and stays that same element until the
+request lands: a re-render reuses the `<svg>`, and a CSS animation restarts only
+when its element is created or its animation name changes, so the spin runs on
+rather than starting over. What the strip must not be keyed on is the store's
+in-flight flag — the cold fill and compact-history retention hold that flag too,
+and each of those loads mounted a ring of its own (user report 2026-10-29). Which
+read presents the strip is
+[[ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md|Timeline history paging]].

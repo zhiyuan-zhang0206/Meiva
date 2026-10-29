@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
+import type { OlderLoadOrigin } from "@/lib/timeline/timeline-plan";
 import {
   type StickyController,
   createStickyController,
@@ -43,8 +44,16 @@ interface Props {
   turnActive?: boolean;
 
   hasMoreOlder?: boolean;
+  // meiva:note
+  // An older page in flight is not a display state. `loadingOlder` is the
+  // concurrency guard that the pull gesture, the keyboard control, the cold
+  // first-viewport fill and compact-history retention all hold;
+  // `readerLoadingOlder` says the reader asked for it, and only that presents
+  // the loading strip above the messages.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
   loadingOlder?: boolean;
-  onLoadOlder?: () => void;
+  readerLoadingOlder?: boolean;
+  onLoadOlder?: (origin: OlderLoadOrigin) => void;
   retainedItemsMax?: number;
 
   loading?: boolean;
@@ -61,6 +70,7 @@ export const TimelineView = memo(function TimelineView({
   turnActive = false,
   hasMoreOlder = false,
   loadingOlder = false,
+  readerLoadingOlder = false,
   onLoadOlder,
   retainedItemsMax = 250,
   loading = false,
@@ -109,7 +119,7 @@ export const TimelineView = memo(function TimelineView({
 
   const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
 
-  const loadOlderRef = useRef<(() => void) | undefined>(onLoadOlder);
+  const loadOlderRef = useRef<((origin: OlderLoadOrigin) => void) | undefined>(onLoadOlder);
   const hasMoreOlderRef = useRef(hasMoreOlder);
   const loadingOlderRef = useRef(loadingOlder);
   const itemsRef = useRef(items);
@@ -281,14 +291,20 @@ export const TimelineView = memo(function TimelineView({
     }
   }, [loadingOlder]);
 
-  const loadOneOlderPage = useCallback(() => {
+  const loadOneOlderPage = useCallback((origin: OlderLoadOrigin) => {
     const viewport = viewportRef.current;
     if (!viewport || !hasMoreOlderRef.current || loadingOlderRef.current) return false;
     if (!loadOlderRef.current || pendingAnchorRef.current !== null) return false;
     captureAnchor();
-    loadOlderRef.current();
+    loadOlderRef.current(origin);
     return true;
   }, [captureAnchor, pendingAnchorRef]);
+  // meiva:note
+  // The pull gesture and the keyboard control are the reader's only two
+  // requests for an older page; every other backward read here is an automatic
+  // fill and stays unpresented.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  const pullOlderPage = useCallback(() => loadOneOlderPage("reader"), [loadOneOlderPage]);
 
   const canPullOlder = useCallback(() =>
     hasMoreOlderRef.current && !loadingOlderRef.current && !!loadOlderRef.current && pendingAnchorRef.current === null,
@@ -299,7 +315,7 @@ export const TimelineView = memo(function TimelineView({
     isActive: historyPullActive, finishLoad: finishHistoryPull, onScroll: pullScroll, onScrollEnd: pullScrollEnd,
     onWheel: pullWheel, onTouchStart: pullTouchStart, onTouchMove: pullTouchMove,
     onTouchEnd: pullTouchEnd, onTouchCancel: cancelPullTouch,
-  } = useOlderHistoryPull(threadKey, historySpaceRef, contentRef, canPullOlder, loadOneOlderPage, closeColdFill);
+  } = useOlderHistoryPull(threadKey, historySpaceRef, contentRef, canPullOlder, pullOlderPage, closeColdFill);
 
   const maybeColdFill = useCallback(() => {
     const fill = coldFillRef.current;
@@ -310,7 +326,7 @@ export const TimelineView = memo(function TimelineView({
       return;
     }
     if (fill.inFlight) return;
-    if (loadOneOlderPage()) {
+    if (loadOneOlderPage("background")) {
       fill.inFlight = true;
       fill.pages += 1;
     }
@@ -453,8 +469,8 @@ export const TimelineView = memo(function TimelineView({
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-      <LoadOlderSpinner loadingOlder={loadingOlder} pullProgress={olderPullProgress} pullOffset={olderPullOffset} returning={olderPullReturning} />
-      {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={loadOneOlderPage} /> : null}
+      <LoadOlderSpinner loadingOlder={readerLoadingOlder} pullProgress={olderPullProgress} pullOffset={olderPullOffset} returning={olderPullReturning} />
+      {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={pullOlderPage} /> : null}
       <ColdLoadSpinner show={loading && items.length === 0} />
       <ConnectionNotice />
       <ScrollArea

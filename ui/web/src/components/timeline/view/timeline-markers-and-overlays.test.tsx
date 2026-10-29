@@ -396,9 +396,9 @@ describe("load-older circle (revealed above the messages)", () => {
     expect(overlay?.className).not.toContain("opacity-100");
     expect(overlay?.getAttribute("aria-hidden")).toBe("true");
   });
-  it("loadingOlder=true → spinner visible (opacity-100), stays mounted at the top, exposed to assistive tech", () => {
+  it("readerLoadingOlder=true → spinner visible (opacity-100), stays mounted at the top, exposed to assistive tech", () => {
     render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder readerLoadingOlder />,
     );
     const label = screen.getByText(/Loading earlier messages/);
     const overlay = label.closest("div");
@@ -436,21 +436,22 @@ describe("load-older circle (revealed above the messages)", () => {
       screen.getByText(/Loading earlier messages/).closest("div")?.className,
     ).toContain("pointer-events-none");
     rerender(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder readerLoadingOlder />,
     );
     expect(
       screen.getByText(/Loading earlier messages/).closest("div")?.className,
     ).toContain("pointer-events-none");
   });
-  it("re-render with loadingOlder flipping true→false does not remount the overlay (same node, opacity only)", () => {
+  it("re-render with the load flipping true→false does not remount the overlay (same node, opacity only)", () => {
     const { rerender } = render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder readerLoadingOlder />,
     );
     const nodeWhileLoading = screen.getByText(/Loading earlier messages/).closest("div");
     rerender(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x" })]}
         loadingOlder={false}
+        readerLoadingOlder={false}
       />,
     );
     const nodeAfterLoad = screen.getByText(/Loading earlier messages/).closest("div");

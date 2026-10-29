@@ -50,7 +50,13 @@ function LoadingRing({ arc = 0.72, scale = 1, testId, className }: {
 // The circle sits inside the revealed native scroll space and scales with it.
 // No visible instructions compete with the conversation; the label remains
 // accessible.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:note
+// `loadingOlder` is the reader's own older-page request, not the store's
+// in-flight flag: the cold first-viewport fill and compact-history retention
+// page backwards on their own, and presenting them lit this strip for history
+// nobody pulled for (user report 2026-10-29). The strip keeps one ring element
+// for the whole request, so its spin never restarts mid-load.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md
 export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 0, returning = false }: {
   loadingOlder: boolean; pullProgress?: number; pullOffset?: number; returning?: boolean;
 }) {

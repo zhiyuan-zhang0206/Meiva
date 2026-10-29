@@ -13,6 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import {
   normalizeCompactHistorySessions,
+  type OlderLoadOrigin,
   type OlderSegmentLoadResult,
 } from "./timeline-plan";
 import { useTimelineStore } from "./timeline-store";
@@ -27,8 +28,12 @@ export function useCompactHistoryRetention(options: {
   agentId: number | null;
   /** Hidden views suspend history reads; visibility resumes the same intent. */
   isVisible: boolean;
-  /** Scroll-up fetch; reports whether a completed page has more history. */
-  loadOlderSegment: () => Promise<OlderSegmentLoadResult>;
+  // meiva:note
+  // Older-page fetch; reports whether a completed page has more history.
+  // Retention asks for it as a `background` origin, so the page it restores
+  // above a compact never presents the loading strip.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  loadOlderSegment: (origin: OlderLoadOrigin) => Promise<OlderSegmentLoadResult>;
   hasMoreOlder: boolean;
   loadingOlder: boolean;
   /** Current item count — window growth re-invokes a blocked attempt. */
@@ -94,7 +99,7 @@ export function useCompactHistoryRetention(options: {
       try {
         while (ownerRef.current === owner && retentionRef.current === pending) {
           if (useTimelineStore.getState().activeThreadId !== agentId) return;
-          const result = await loadOlderSegment();
+          const result = await loadOlderSegment("background");
           if (ownerRef.current !== owner || retentionRef.current !== pending) return;
           const current = pending;
           if (result === "aborted") return;
