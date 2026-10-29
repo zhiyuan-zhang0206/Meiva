@@ -42,7 +42,7 @@ _EPSILON = 1e-9
 # ``usage_kind`` and ``source`` label the one ``llm_usage`` row this call writes (output
 # tokens are always 0). Raises, without sending anything, for an unknown model id, invalid
 # questions or an estimated input above the model's limits; raises ``DecisionKeyMissingError``
-# when ``keys`` lacks the provider's API key; raises ``DecisionRequestError`` /
+# when ``keys`` lacks a required provider API key; raises ``DecisionRequestError`` /
 # ``DecisionResponseError`` when the provider fails or returns a distribution that is
 # incomplete, has unknown outcomes or does not sum to 1.
 async def decide(
@@ -65,7 +65,8 @@ async def decide(
     if provider is None:
         raise UnknownDecisionModelError(f"no decision provider owns the prefix of {model!r}")
     try:
-        keys.require(provider.key_env)
+        if provider.requires_key:
+            keys.require(provider.key_env)
     except RuntimeError as exc:
         raise DecisionKeyMissingError(str(exc)) from exc
     binding = provider.build(

@@ -1,0 +1,4 @@
+[uses]
+"bootstrap_child.py" = ["test_local_decision.py"]
+"catalog_child.py" = ["test_local_decision.py"]
+"test_catalog_loading.py" = ["bootstrap_child.py", "catalog_child.py", "test_local_decision.py"]

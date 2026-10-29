@@ -161,7 +161,8 @@ class ProviderContribution:
 # collisions against chat prefixes of other plugins as well as other decision prefixes; a
 # plugin may contribute both a chat provider and a decision provider under the same vendor
 # prefix. ``build(ctx)`` is a pure function of ``ctx`` that raises immediately when the key
-# named by ``key_env`` is missing (``ctx.keys.require``).
+# named by ``key_env`` is missing (``ctx.keys.require``), unless ``requires_key=False``
+# declares an optional credential while retaining its secret-delivery channel.
 @dataclass(frozen=True)
 class DecisionProviderContribution:
     prefix: str
@@ -170,3 +171,4 @@ class DecisionProviderContribution:
     build: Callable[[DecisionBuildContext], DecisionBinding]
     models: Mapping[str, DecisionModelSpec]
     pricing: Mapping[str, PriceRates]
+    requires_key: bool = True

@@ -107,3 +107,22 @@ propagate with their original object and traceback; no partial catalog is
 published. A failed provider module is removed from `sys.modules` before rethrow.
 
 Regression assertions: [test contracts](../../packages/tests/lm/docs/contracts.meiva.okf.md#provider-key-channel).
+
+## Configured declarations
+
+A provider face may expose `configure(config)` **instead of** `contribute()`.
+The catalog owner reads that plugin's `default_config.py` schema, loads its
+image from the exact `build_model_catalog(home=...)` home through the existing
+cluster-policy composition, then injects the resolved config. Declaring both
+entry points, omitting the schema, a bad image, or returning anything other than
+`PluginContributions` rejects that catalog attempt. Existing zero-argument
+provider declarations keep their original path and compatibility.
+
+A configured declaration freezes its inputs into its bindings and model/price
+rows. It must not reread the process environment, Settings or mutable caller
+config during inference. A later catalog build may observe a changed image;
+previous catalogs retain their own snapshot. This seam is additive because
+config belongs to the catalog's selected home; making a plugin discover an
+ambient home would break independent catalogs. The configured TypeSafe face keeps Jev and local SystemOne services under one
+wire owner; other static rosters retain their zero-argument entry points. The choice is recorded in
+[the declaration decision](../../../docs/decisions/extensions/plugins/2026-10-29-configured-provider-declarations.md).

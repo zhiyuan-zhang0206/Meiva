@@ -29,8 +29,6 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 
-build_model_catalog(home=meiva_home())
-
 
 def test_validate_passes_on_end_turn() -> None:
     msg = AIMessage(

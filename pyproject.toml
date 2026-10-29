@@ -1296,6 +1296,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/lm_typesafe/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_code/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

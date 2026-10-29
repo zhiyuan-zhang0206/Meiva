@@ -158,3 +158,25 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
         ).hostname
         == "10.0.0.3"
     )
+
+
+@pytest.mark.parametrize("credential", [None, "", "local-real-credential"])
+def test_optional_local_decision_key_uses_the_catalog_secret_delivery_channel(
+    plugin_env: Path, bootstrap_authority: ConfigAuthority, credential: str | None
+) -> None:
+    contents = "" if credential is None else f"LOCAL_DECISION_API_KEY={credential}\n"
+    _write_bootstrap_env(plugin_env, contents)
+    catalog = build_model_catalog(home=meiva_home())
+    payload = bootstrap_authority.bootstrap_config_values(
+        provider_key_envs=catalog.key_envs,
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
+    )
+    assert "LOCAL_DECISION_API_KEY" in catalog.key_envs
+    if credential is None:
+        assert "LOCAL_DECISION_API_KEY" not in payload
+    else:
+        assert payload["LOCAL_DECISION_API_KEY"] == credential
+    from base.lm.catalog.provider_keys import ProviderKeys
+
+    delivered = ProviderKeys.read(catalog.key_envs, environ=payload, env_file={})
+    assert delivered.present("LOCAL_DECISION_API_KEY") is bool(credential)
