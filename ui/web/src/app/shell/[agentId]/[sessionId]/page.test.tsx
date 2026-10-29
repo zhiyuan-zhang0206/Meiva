@@ -15,7 +15,8 @@ import { USER_SETTING_DEFAULTS, type ShellCapture } from "@/lib/contracts/types"
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetMockSettings } from "@/test-support/user-settings-mock";
-import { renderWithApi as rtlRender } from "@/test-support/render";
+import { fakeBrowser, type FakeBrowser } from "@/test-support/browser";
+import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
@@ -62,7 +63,7 @@ afterEach(() => {
   storedSettings = {};
 });
 
-function render() {
+function render(browser?: FakeBrowser) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -73,6 +74,7 @@ function render() {
         <ShellMonitorPage />
       </WallClockProvider>
     </QueryClientProvider>,
+    { browser },
   );
 }
 
@@ -328,6 +330,18 @@ describe("ShellMonitorPage", () => {
 });
 
 describe("ShellMonitorPage terminal theme", () => {
+  // meiva:note
+  // "system" is one value the page hands in: the port answers the media query, so two pages with
+  // two answers paint two panes, and nothing stubs a global.
+  it("resolves the system theme from the page's media answer", () => {
+    getAgentShell.mockResolvedValue(shellData());
+    const dark = render(fakeBrowser({ media: { "(prefers-color-scheme: dark)": true } }));
+    expect(dark.getByTestId("shell-pane").className).toContain("bg-black");
+    cleanup();
+    render(fakeBrowser({ media: { "(prefers-color-scheme: dark)": false } }));
+    expect(screen.getByTestId("shell-pane").className).toContain("bg-gray-100");
+  });
+
   it("renders the theme toggle button with system icon by default", () => {
     getAgentShell.mockResolvedValue(shellData());
     render();

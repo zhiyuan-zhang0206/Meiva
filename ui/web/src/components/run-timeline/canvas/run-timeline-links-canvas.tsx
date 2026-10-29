@@ -13,7 +13,7 @@ import { curveOf, curvePoint, endTangent, type Curve } from "../model/links/geom
 import { hitLink } from "../model/links/selection";
 import { LINK_COLORS, type ResolvedLink } from "../model/links/resolve";
 import { countDraw, countLinksMs } from "../model/render-stats";
-import { resolveColor } from "./resolve-color";
+import { useColorResolver } from "./resolve-color";
 import type { AxisMap } from "../model/timeline-model-axis";
 import type { ViewportStore } from "../viewport/viewport-store";
 import { useViewport } from "../viewport/use-viewport";
@@ -115,6 +115,7 @@ export function LinksCanvas({
   hitRef: RefObject<LinkHit>;
 }) {
   const view = useViewport(store);
+  const resolve = useColorResolver();
   const canvas = useRef<HTMLCanvasElement>(null);
   const cache = useRef<{ signature: string; clusters: Cluster[] } | null>(null);
   const painted = useRef<Painted | null>(null);
@@ -196,7 +197,7 @@ export function LinksCanvas({
         const keys = members.get(key) ?? [];
         return keys.some((k) => selectedKeys.has(k)) ? 2 : keys.some((k) => hoverKeys.has(k)) ? 1 : 0;
       };
-      const strokeOf = (kind: ResolvedLink["kind"]) => resolveColor(LINK_COLORS[kind]);
+      const strokeOf = (kind: ResolvedLink["kind"]) => resolve(LINK_COLORS[kind]);
       const widthOf = (label: string): number => {
         const known = badgeWidths.current.get(label);
         if (known !== undefined) return known;
