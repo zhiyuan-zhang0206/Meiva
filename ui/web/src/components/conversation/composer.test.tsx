@@ -272,17 +272,26 @@ describe("Composer button mode dispatch", () => {
     expect(root.className).not.toContain("max-w-[45rem]");
     expect(root.style.maxWidth).toBe("min(40vw, 1280px)");
   });
-  it("half the gap above the rule, unchanged textarea height", () => {
+  it("the tightened gap above the rule, unchanged textarea height", () => {
     // meiva:note
-    // User ruling 2026-10-29: the message list and the composer used to add up
-    // to a 20px gap above the composer's rule; each side keeps half of it now.
-    // The list's half is the timeline's pb-1.5; this half is the root's pt-1.
+    // The 2026-10-29 ruling split a 20px gap into 6px for the list (its pb-1.5)
+    // and 4px here (pt-1); the user then read that line as too airy, so the two
+    // shares are 4px (the timeline's pb-1) and 2px (this root's pt-0.5).
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
     renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const root = screen.getByTestId("composer");
-    expect(root.className).toContain("pt-1");
-    expect(root.className).not.toContain("pt-2");
+    expect(root.className.split(" ")).toContain("pt-0.5");
+    expect(root.className.split(" ")).not.toContain("pt-1");
     expect(screen.getByTestId("composer-input").className).toContain("min-h-9");
+  });
+  // meiva:note
+  // The band grows upward with the draft, and that is the whole story: the
+  // composer publishes nothing another column could follow (user report
+  // 2026-10-29 — the sidebar's divider tracked this one for a day).
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  it("publishes no band geometry for another column to track", () => {
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
+    expect(document.documentElement.style.getPropertyValue("--composer-band-height")).toBe("");
   });
   it("draws the shared bottom band: the rule the sidebar footer also draws", () => {
     // meiva:note

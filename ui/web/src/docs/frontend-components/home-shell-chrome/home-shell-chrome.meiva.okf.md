@@ -46,16 +46,20 @@ bands are bottom-anchored, so equal band heights are what make the rules equal;
 a column may not compose its own padding for this row.
 
 The composer's band is content-sized: a multi-line draft, the context-meter row
-or an upload hint grow it upward. It therefore publishes its measured height as
-`--composer-band-height` on the document root, and the sidebar footer takes that
-as its minimum height — otherwise the two rules would part the moment the reader
-types a second line. The fallback is `BOTTOM_BAND_HEIGHT_PX` (the resting band),
-so a column mounted without a composer (the fleet page) keeps the same rule.
+or an upload hint grows it upward, so its rule rises with them. The sidebar
+footer keeps the resting band (`BOTTOM_BAND_HEIGHT_PX`) and follows no other
+column's geometry: the two rules are one line at rest, and only at rest (user
+report 2026-10-29 replaced the day the footer tracked the composer's published
+height).
 
-Above the rule, the gap between the last message row and the line is split half
-by the list (`pb-1.5`) and half by the composer (`pt-1`): the 20px the two used
-to add up to became 10px (same ruling, measured 20.5px → 10.5px at 1440×900).
-The list's half is deliberately smaller than the 12px between rows.
+Above the rule, the gap between the last message row and the line is split
+between the list (`pb-1`, 4px) and the composer (`pt-0.5`, 2px) — 6px in all.
+The 2026-10-29 ruling set it at 10px (`pb-1.5` + `pt-1`, down from 20.5px); the
+user read that line as too airy the same day. The list's share reaches the rule
+only through the log's trailing `<div>`: without it the last row overflows the
+log by exactly that padding and the gap drops to the composer's share alone
+(measured 10px → 4px at 1440×900), so the element stays although its ref is
+never read.
 
 ## Icon size
 
