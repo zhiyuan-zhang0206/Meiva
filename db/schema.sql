@@ -1722,6 +1722,7 @@ BEGIN
             accepted_generation,accepted_owner,activated_at,ended_at,
             plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,
             relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,
+            relay_generation,relay_degraded_reason,relay_degraded_at,
             handoff_document,handoff_path,handoff_applied_at,
             next_entry,event_delivery_pending_reason,start_message
         ) ON agent_impersonations TO meiva_runner;
