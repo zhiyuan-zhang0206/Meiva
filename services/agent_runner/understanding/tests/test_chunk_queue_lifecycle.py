@@ -28,6 +28,7 @@ from base.clock.tests.fakes import system_clock
 from base.lm.catalog import ModelCatalog
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from services.agent_runner.understanding import chunk_consumer as loop
+from services.agent_runner.understanding.tests.chunk_faults import ChunkSeams as ChunkSeams
 from services.agent_runner.understanding.tests.chunk_faults import chunk_result, run_rounds
 from services.agent_runner.understanding.tests.chunk_faults import chunk_seams as chunk_seams
 from services.agent_runner.understanding.tests.chunk_faults import (
@@ -69,7 +70,7 @@ async def test_a_released_job_waits_its_spacing_from_the_release_not_from_the_cl
 
 
 async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: dict
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: ChunkSeams
 ) -> None:
     # meiva:note
     # A manual close and the producers' next size cut (or a replay after a restart) can cover
@@ -82,13 +83,13 @@ async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
             " schema_version) VALUES (5, 1, 0, 0, 'k', 'old', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     # meiva:note
     # m0 was already covered
-    assert [m.id for m in chunk_seams["described"][0].messages] == ["m1"]
+    assert [m.id for m in chunk_seams.state["described"][0].messages] == ["m1"]
     assert await written_nodes(aops_pool) == [(5, 1, 0, 0, "old"), (5, 1, 1, 1, "what happened")]
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 2), end_msg_id="m0")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     status = (await job_statuses(aops_pool))[-1]
     assert status[0] == "skipped" and "already described" in status[2]
 
@@ -96,7 +97,7 @@ async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
 async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dropped(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    chunk_seams: dict,
+    chunk_seams: ChunkSeams,
     emitted_events: EmittedEvents,
 ) -> None:
     # meiva:note
@@ -109,8 +110,8 @@ async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dro
             " schema_version) VALUES (5, 1, 1, 1, 'k', 'mid', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    assert [m.id for m in chunk_seams["described"][0].messages] == ["m0"]
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
+    assert [m.id for m in chunk_seams.state["described"][0].messages] == ["m0"]
     assert {r[2:4] for r in await written_nodes(aops_pool)} == {(0, 0), (1, 1)}
     [(name, attrs)] = [(event.event_name, event.attributes) for event in emitted_events]
     assert attrs is not None
@@ -121,7 +122,7 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
     chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    chunk_seams: dict,
+    chunk_seams: ChunkSeams,
     emitted_events: EmittedEvents,
 ) -> None:
     # meiva:note
@@ -135,7 +136,7 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
         release.wait(10)
         return chunk_result(located, timeline_inputs=chunk_timestamps)
 
-    chunk_seams["answer"] = hang
+    chunk_seams.state["answer"] = hang
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     consumer = loop.Consumer(
         aops_pool,
@@ -144,6 +145,8 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
         clock=CLOCK,
         **lm_wiring(model_catalog),
         config=consumer_config(),
+        describe=chunk_seams.describe,
+        load_segments=chunk_seams.load_segments,
     )
     task = asyncio.create_task(consumer.run_until_idle())
     try:
@@ -195,14 +198,17 @@ async def test_the_give_up_clock_starts_at_the_first_wait_and_a_queued_job_has_n
 
 
 async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    emitted_events: EmittedEvents,
+    chunk_seams: ChunkSeams,
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
     async with aops_pool.connection() as conn:
         await conn.execute(
             "UPDATE understanding_chunk_jobs SET waiting_since = now() - interval '7 hours'"
         )
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     [(status, _, error)] = await job_statuses(aops_pool)
     assert status == "failed" and "gave up" in error
 
@@ -210,14 +216,14 @@ async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
 async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_reports_the_rest(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    chunk_seams: dict,
+    chunk_seams: ChunkSeams,
     emitted_events: EmittedEvents,
 ) -> None:
     # meiva:note
     # The boundary snapshot of segment 0 holds fewer messages than the closing chunk's end (the
     # checkpoint of the segment's last super-step was still in flight at compaction). The part the
     # snapshot holds is described and written; the missing request indices are in the event.
-    chunk_seams["closing_segment"] = 0
+    chunk_seams.state["closing_segment"] = 0
     await enqueue_chunk(
         aops_pool,
         5,
@@ -226,10 +232,10 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
         end_msg_id="m8",
         boundary_checkpoint_id="cp-1",
     )
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     [(status, _, error)] = await job_statuses(aops_pool)
     assert (status, error) == ("done", None)
-    assert [m.id for m in chunk_seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
+    assert [m.id for m in chunk_seams.state["described"][0].messages] == ["m0", "m1", "m2", "m3"]
     assert len(await written_nodes(aops_pool)) == 1
     [(name, attrs)] = [(event.event_name, event.attributes) for event in emitted_events]
     assert attrs is not None and name == "understanding_chunk_gap"
