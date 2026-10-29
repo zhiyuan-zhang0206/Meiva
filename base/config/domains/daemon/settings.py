@@ -174,6 +174,28 @@ class DaemonSettings(
         },
     )
 
+    page_server_db_failure_exit_seconds: float = Field(
+        default=300.0,
+        alias="MEIVA_PAGE_SERVER_DB_FAILURE_EXIT_SECONDS",
+        description=(
+            "How long the page server may keep failing its reconcile rounds against an "
+            "unreachable or stalled database before the process exits for its supervisor "
+            "(seconds). A transient stall must not kill the daemon that owns every page "
+            "session on the machine, so the round is logged, reported on /healthz and retried; "
+            "a sustained outage is a different fact, and a restart is the honest signal for it. "
+            "Why 300: it must outlast every bound below it — a 30 s pool acquire plus a 60 s "
+            "statement timeout — so one slow operation can never trip it, while five minutes of "
+            "consecutive failures cannot be called a blip."
+        ),
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     page_default_ttl_seconds: float = Field(
         default=86400.0,
         alias="MEIVA_PAGE_DEFAULT_TTL_SECONDS",

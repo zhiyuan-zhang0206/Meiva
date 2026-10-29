@@ -32,6 +32,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.config.domains.daemon.settings import DaemonSettings
+from base.daemon import health_schema
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -92,6 +93,7 @@ def page_server_config(*, daemon_settings: DaemonSettings | None = None) -> Page
     return PageServerConfig(
         page_server_poll_interval_seconds=source.page_server_poll_interval_seconds,
         heartbeat_interval_seconds=source.heartbeat_interval_seconds,
+        page_server_db_failure_exit_seconds=source.page_server_db_failure_exit_seconds,
     )
 
 
@@ -459,6 +461,21 @@ def reconcile_once(
     reconcile_rows(pool, managed, open_rows(pool, host), host, bus, backend, home)
 
 
+class DatabaseOutageError(RuntimeError):
+    pass
+
+
+# meiva:note
+# A failed reconcile round is not one fact but two. `psycopg.OperationalError` (and with it
+# `psycopg_pool.PoolTimeout`) says the database could not be reached for this round — a fact about
+# the database, not about this process, and one the next round can recover from, so the round is
+# reported and retried. `psycopg.ProgrammingError` is code<->DB drift that no retry heals, and
+# anything else is this process's own fault; both keep ending the loop, because a supervisor
+# restart is the only thing that can clear them.
+#
+# The retry is bounded by `page_server_db_failure_exit_seconds`: a stall that outlives every
+# bound the database layer enforces is a sustained outage, and the restart then carries real
+# information instead of hiding it. The exit path is the same one every other loop exit uses.
 async def reconcile_loop(
     pool: ConnectionPool,
     liveness: LoopProgress,
@@ -472,6 +489,7 @@ async def reconcile_loop(
     host = local_machine.host()
     managed: dict[PageKey, ServerHandle] = {}
     backend = get_shell_backend(home=home)
+    outage_since: float | None = None
     _log.info(
         "[page-server] daemon started, machine=%s, host=%s",
         local_machine.name(),
@@ -490,9 +508,56 @@ async def reconcile_loop(
                 exc_info=True,
             )
             raise
+        except psycopg.OperationalError as exc:
+            now = time.monotonic()
+            outage_since = now if outage_since is None else outage_since
+            liveness.mark_error(f"{type(exc).__name__}: {exc}")
+            down_for = now - outage_since
+            _log.warning(
+                "[page-server] reconcile round skipped: database unavailable for %.0fs "
+                "across %d consecutive round(s)",
+                down_for,
+                liveness.consecutive_failures,
+                exc_info=exc,
+            )
+            if down_for >= config.page_server_db_failure_exit_seconds:
+                _log.critical(
+                    "[page-server] database unreachable for %.0fs across %d consecutive "
+                    "round(s) — exiting for supervisor recovery",
+                    down_for,
+                    liveness.consecutive_failures,
+                )
+                raise DatabaseOutageError(
+                    f"database unreachable for {down_for:.0f}s across "
+                    f"{liveness.consecutive_failures} consecutive rounds"
+                ) from exc
         except Exception:
             _log.exception("[page-server] poll iteration failed")
             raise
+        else:
+            outage_since = None
+            liveness.mark_success()
+
+
+# meiva:note
+# What `/healthz` says about these loops. Every loop reports `ok` here even while its rounds are
+# failing against the database: a supervisor restart cannot repair an unreachable database, so
+# degrading the status would only turn a database stall into a restart storm (the guardrail the
+# backup scheduler already follows for a failed dump). The failure is not hidden — it travels in
+# the component record the operator reads: consecutive failed rounds, the last error with its
+# exception class, and when the loop last completed a round. Liveness still flips the whole
+# response to 503 when a loop stops beating, which is what a restart can actually fix.
+def health_components(liveness: LivenessGroup) -> list[dict[str, object]]:
+    return [
+        health_schema.component(
+            name,
+            health_schema.OK,
+            progress=f"{progress.consecutive_failures} consecutive failed round(s)",
+            last_error=progress.last_error_message(),
+            detail=f"last completed round at {progress.last_success_at()}",
+        )
+        for name, progress in liveness.progresses().items()
+    ]
 
 
 async def run(
@@ -520,6 +585,7 @@ async def run(
         resources.endpoint(process_config, runtime=runtime).health_port,
         home=meiva_home(),
         liveness=liveness,
+        components=lambda: health_components(liveness),
         image=image,
     )
     db = database()
