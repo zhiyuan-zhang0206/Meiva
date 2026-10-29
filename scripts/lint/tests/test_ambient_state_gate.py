@@ -187,6 +187,7 @@ def test_a_fixed_site_left_in_the_baseline_fails_as_stale_until_it_is_lowered(
     output = capsys.readouterr().out
     assert "stale ambient_state entry base/boot.py::import-time-call:atexit.register" in output
     assert "frozen at 2 but the code has 1 — lower it to 1" in output
+    assert "must match the code and may only shrink" in output
 
     _write(_repo, "base/boot.py", "VALUE = 1\n")
     assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
@@ -225,6 +226,8 @@ def test_the_baseline_cannot_gain_a_key_against_the_base_revision(
     output = capsys.readouterr().out
     assert "added ambient_state entry base/state.py::ambient-container:_REGISTRY" in output
     assert "baseline is shrink-only" in output
+    assert "exceptions this repository accepted" in output
+    assert "scripts/structure/baseline/README.md" in output
 
 
 def test_the_baseline_cannot_raise_a_count_against_the_base_revision(

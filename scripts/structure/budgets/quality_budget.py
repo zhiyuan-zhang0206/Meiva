@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from radon.visitors import Class, Function
@@ -123,24 +124,62 @@ def measure_quality(
     }
 
 
+# meiva:note
+# The document that states the ceilings; every message of this owner points here.
+_DOC = "docs/conventions/python-conventions.md (function quality budgets)"
+
+
+# meiva:note
+# One quality ceiling: what it counts, why it exists, and the repair a violation asks for. The
+# message prints all four, so a new ceiling cannot be added without saying why it exists.
+@dataclass(frozen=True)
+class _Ceiling:
+    kind: str
+    ceiling: int
+    why: str
+    fix: str
+
+
+# meiva:note
+# Why each ceiling exists, in its own words: the number is not a style preference but the point
+# where a function stops being checkable by reading, and the author who hits it now owns the split.
+# Written once per kind here rather than at the reporting site.
+_CEILINGS = (
+    _Ceiling(
+        kind="complexity",
+        ceiling=COMPLEXITY_HARD - 1,
+        why=(
+            "every branch is one more path someone has to read and one more case a test has to "
+            "cover, so past this many the function cannot be checked by reading it and the path "
+            "nobody exercises is where the defect lands — whoever splits it owns that split"
+        ),
+        fix=(
+            "separate pure decisions from I/O orchestration, replace flag or mode cascades "
+            "with explicit data or focused domain helpers, and keep each function one step"
+        ),
+    ),
+    _Ceiling(
+        kind="nesting",
+        ceiling=NESTING_CEILING,
+        why=(
+            "depth is what a reader has to hold at once: every level re-enters a scope and hides "
+            "which guards already ran, so a body this deep cannot be checked one screen at a time "
+            "— whoever flattens it owns the structure it becomes"
+        ),
+        fix=(
+            "use guard clauses and early returns, extract inner loops or branch bodies into "
+            "domain helpers, and separate transformations from resource and error handling"
+        ),
+    ),
+)
+
+
 def quality_errors(measurements: dict[str, dict[str, int]]) -> list[str]:
     """Every hard violation fails; no rename or frozen value grants an allowance."""
     return [
-        f"{key}: {kind} {value}: over the {ceiling} ceiling — {guidance}"
-        for kind, ceiling, guidance in (
-            (
-                "complexity",
-                COMPLEXITY_HARD - 1,
-                "separate pure decisions from I/O orchestration, replace flag or mode cascades "
-                "with explicit data or focused domain helpers, and keep each function one step",
-            ),
-            (
-                "nesting",
-                NESTING_CEILING,
-                "use guard clauses and early returns, extract inner loops or branch bodies into "
-                "domain helpers, and separate transformations from resource and error handling",
-            ),
-        )
-        for key, value in measurements[kind].items()
-        if value > ceiling
+        f"{key}: {ceiling.kind} {value}: over the {ceiling.ceiling} ceiling — {ceiling.fix}; "
+        f"{ceiling.why}. See {_DOC}."
+        for ceiling in _CEILINGS
+        for key, value in measurements[ceiling.kind].items()
+        if value > ceiling.ceiling
     ]
