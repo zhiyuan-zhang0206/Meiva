@@ -68,6 +68,7 @@ class MeivaUsage(TypedDict, total=False):
     cache_read: int
     cache_write_5m: int
     cache_write_1h: int
+    cache_write_30m: int
     reasoning: int
     cost_usd: float
     price_miss: float
@@ -75,6 +76,7 @@ class MeivaUsage(TypedDict, total=False):
     price_out: float
     price_write_5m: float
     price_write_1h: float
+    price_write_30m: float
     unpriced: int
 
 

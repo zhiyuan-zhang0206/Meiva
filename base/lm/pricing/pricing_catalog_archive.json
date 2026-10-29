@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-28-gpt-6.1-terra",
+  "catalog_version": "2026-10-29-openai-default-cache-writes",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -690,7 +690,7 @@
     "gpt-5.6-sol": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
-      "source_checked_at": "2026-09-06",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -702,7 +702,8 @@
               "rates": {
                 "input": "4.0",
                 "cache_read": "0.4",
-                "output": "20.0"
+                "output": "20.0",
+                "cache_write_30m": "5.000"
               },
               "utc_daily_overrides": []
             },
@@ -712,7 +713,8 @@
               "rates": {
                 "input": "8.0",
                 "cache_read": "0.8",
-                "output": "30.0"
+                "output": "30.0",
+                "cache_write_30m": "10.000"
               },
               "utc_daily_overrides": []
             }
@@ -723,7 +725,7 @@
     "gpt-6-sol": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-6-sol",
-      "source_checked_at": "2026-09-25",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -735,7 +737,8 @@
               "rates": {
                 "input": "2.0",
                 "cache_read": "0.20",
-                "output": "10.0"
+                "output": "10.0",
+                "cache_write_30m": "2.500"
               },
               "utc_daily_overrides": []
             },
@@ -745,7 +748,8 @@
               "rates": {
                 "input": "4.0",
                 "cache_read": "0.40",
-                "output": "15.0"
+                "output": "15.0",
+                "cache_write_30m": "5.000"
               },
               "utc_daily_overrides": []
             }
@@ -756,7 +760,7 @@
     "gpt-6.1-sol": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
-      "source_checked_at": "2026-09-30",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -768,7 +772,8 @@
               "rates": {
                 "input": "2.0",
                 "cache_read": "0.10",
-                "output": "10.0"
+                "output": "10.0",
+                "cache_write_30m": "2.500"
               },
               "utc_daily_overrides": []
             },
@@ -778,7 +783,8 @@
               "rates": {
                 "input": "4.0",
                 "cache_read": "0.20",
-                "output": "15.0"
+                "output": "15.0",
+                "cache_write_30m": "5.000"
               },
               "utc_daily_overrides": []
             }
@@ -789,7 +795,7 @@
     "gpt-6.1-terra": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-6.1-terra",
-      "source_checked_at": "2026-10-28",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -801,7 +807,8 @@
               "rates": {
                 "input": "1.0",
                 "cache_read": "0.05",
-                "output": "5.0"
+                "output": "5.0",
+                "cache_write_30m": "1.250"
               },
               "utc_daily_overrides": []
             },
@@ -811,7 +818,8 @@
               "rates": {
                 "input": "2.0",
                 "cache_read": "0.10",
-                "output": "7.5"
+                "output": "7.5",
+                "cache_write_30m": "2.500"
               },
               "utc_daily_overrides": []
             }
@@ -822,7 +830,7 @@
     "gpt-5.6-terra": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
-      "source_checked_at": "2026-07-30",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -834,7 +842,8 @@
               "rates": {
                 "input": "2.0",
                 "cache_read": "0.20",
-                "output": "12.0"
+                "output": "12.0",
+                "cache_write_30m": "2.500"
               },
               "utc_daily_overrides": []
             },
@@ -844,7 +853,8 @@
               "rates": {
                 "input": "4.0",
                 "cache_read": "0.40",
-                "output": "18.0"
+                "output": "18.0",
+                "cache_write_30m": "5.000"
               },
               "utc_daily_overrides": []
             }
@@ -855,7 +865,7 @@
     "gpt-6-astra": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
-      "source_checked_at": "2026-09-06",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -867,7 +877,8 @@
               "rates": {
                 "input": "10.0",
                 "cache_read": "1.0",
-                "output": "50.0"
+                "output": "50.0",
+                "cache_write_30m": "12.500"
               },
               "utc_daily_overrides": []
             },
@@ -877,7 +888,8 @@
               "rates": {
                 "input": "20.0",
                 "cache_read": "2.0",
-                "output": "75.0"
+                "output": "75.0",
+                "cache_write_30m": "25.000"
               },
               "utc_daily_overrides": []
             }
@@ -888,7 +900,7 @@
     "gpt-5.6-luna": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
-      "source_checked_at": "2026-07-30",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -900,7 +912,8 @@
               "rates": {
                 "input": "0.20",
                 "cache_read": "0.02",
-                "output": "1.20"
+                "output": "1.20",
+                "cache_write_30m": "0.2500"
               },
               "utc_daily_overrides": []
             },
@@ -910,7 +923,8 @@
               "rates": {
                 "input": "0.40",
                 "cache_read": "0.04",
-                "output": "1.80"
+                "output": "1.80",
+                "cache_write_30m": "0.5000"
               },
               "utc_daily_overrides": []
             }
@@ -921,7 +935,7 @@
     "gpt-6-luna": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-6-luna",
-      "source_checked_at": "2026-09-25",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -933,7 +947,8 @@
               "rates": {
                 "input": "0.10",
                 "cache_read": "0.01",
-                "output": "0.50"
+                "output": "0.50",
+                "cache_write_30m": "0.1250"
               },
               "utc_daily_overrides": []
             },
@@ -943,7 +958,8 @@
               "rates": {
                 "input": "0.20",
                 "cache_read": "0.02",
-                "output": "0.75"
+                "output": "0.75",
+                "cache_write_30m": "0.2500"
               },
               "utc_daily_overrides": []
             }
@@ -1294,7 +1310,7 @@
     "gpt-6-astra-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1306,7 +1322,8 @@
               "rates": {
                 "input": "20",
                 "cache_read": "2",
-                "output": "100"
+                "output": "100",
+                "cache_write_30m": "25.00"
               },
               "utc_daily_overrides": []
             },
@@ -1316,7 +1333,8 @@
               "rates": {
                 "input": "40",
                 "cache_read": "4",
-                "output": "150"
+                "output": "150",
+                "cache_write_30m": "50.00"
               },
               "utc_daily_overrides": []
             }
@@ -1327,7 +1345,7 @@
     "gpt-6.1-sol-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1339,7 +1357,8 @@
               "rates": {
                 "input": "4",
                 "cache_read": "0.2",
-                "output": "20"
+                "output": "20",
+                "cache_write_30m": "5.00"
               },
               "utc_daily_overrides": []
             },
@@ -1349,7 +1368,8 @@
               "rates": {
                 "input": "8",
                 "cache_read": "0.4",
-                "output": "30"
+                "output": "30",
+                "cache_write_30m": "10.00"
               },
               "utc_daily_overrides": []
             }
@@ -1360,7 +1380,7 @@
     "gpt-6.1-terra-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-28",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1372,7 +1392,8 @@
               "rates": {
                 "input": "2",
                 "cache_read": "0.1",
-                "output": "10"
+                "output": "10",
+                "cache_write_30m": "2.50"
               },
               "utc_daily_overrides": []
             },
@@ -1382,7 +1403,8 @@
               "rates": {
                 "input": "4",
                 "cache_read": "0.2",
-                "output": "15"
+                "output": "15",
+                "cache_write_30m": "5.00"
               },
               "utc_daily_overrides": []
             }
@@ -1393,7 +1415,7 @@
     "gpt-6-sol-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1405,7 +1427,8 @@
               "rates": {
                 "input": "4",
                 "cache_read": "0.4",
-                "output": "20"
+                "output": "20",
+                "cache_write_30m": "5.00"
               },
               "utc_daily_overrides": []
             },
@@ -1415,7 +1438,8 @@
               "rates": {
                 "input": "8",
                 "cache_read": "0.8",
-                "output": "30"
+                "output": "30",
+                "cache_write_30m": "10.00"
               },
               "utc_daily_overrides": []
             }
@@ -1426,7 +1450,7 @@
     "gpt-6-luna-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1438,7 +1462,8 @@
               "rates": {
                 "input": "0.2",
                 "cache_read": "0.02",
-                "output": "1"
+                "output": "1",
+                "cache_write_30m": "0.250"
               },
               "utc_daily_overrides": []
             },
@@ -1448,7 +1473,8 @@
               "rates": {
                 "input": "0.4",
                 "cache_read": "0.04",
-                "output": "1.5"
+                "output": "1.5",
+                "cache_write_30m": "0.500"
               },
               "utc_daily_overrides": []
             }
@@ -1459,7 +1485,7 @@
     "gpt-5.6-sol-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1471,7 +1497,8 @@
               "rates": {
                 "input": "8",
                 "cache_read": "0.8",
-                "output": "40"
+                "output": "40",
+                "cache_write_30m": "10.00"
               },
               "utc_daily_overrides": []
             },
@@ -1481,7 +1508,8 @@
               "rates": {
                 "input": "16",
                 "cache_read": "1.6",
-                "output": "60"
+                "output": "60",
+                "cache_write_30m": "20.00"
               },
               "utc_daily_overrides": []
             }
@@ -1492,7 +1520,7 @@
     "gpt-5.6-terra-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1504,7 +1532,8 @@
               "rates": {
                 "input": "4",
                 "cache_read": "0.4",
-                "output": "24"
+                "output": "24",
+                "cache_write_30m": "5.00"
               },
               "utc_daily_overrides": []
             },
@@ -1514,7 +1543,8 @@
               "rates": {
                 "input": "8",
                 "cache_read": "0.8",
-                "output": "36"
+                "output": "36",
+                "cache_write_30m": "10.00"
               },
               "utc_daily_overrides": []
             }
@@ -1525,7 +1555,7 @@
     "gpt-5.6-luna-fast": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "source_checked_at": "2026-10-07",
+      "source_checked_at": "2026-10-29",
       "periods": [
         {
           "effective_from": null,
@@ -1537,7 +1567,8 @@
               "rates": {
                 "input": "0.4",
                 "cache_read": "0.04",
-                "output": "2.4"
+                "output": "2.4",
+                "cache_write_30m": "0.500"
               },
               "utc_daily_overrides": []
             },
@@ -1547,7 +1578,8 @@
               "rates": {
                 "input": "0.8",
                 "cache_read": "0.08",
-                "output": "3.6"
+                "output": "3.6",
+                "cache_write_30m": "1.000"
               },
               "utc_daily_overrides": []
             }

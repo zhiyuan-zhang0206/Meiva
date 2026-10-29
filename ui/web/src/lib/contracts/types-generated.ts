@@ -3218,6 +3218,7 @@ export interface components {
             output: number;
             cache_write_5m?: number | null;
             cache_write_1h?: number | null;
+            cache_write_30m?: number | null;
         };
         ModelsResponse: {
             providers: {

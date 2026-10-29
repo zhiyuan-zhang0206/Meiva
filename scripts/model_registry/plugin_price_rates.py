@@ -16,6 +16,7 @@ class FlatRates(NamedTuple):
     output: Decimal
     cache_write_5m: Decimal | None = None
     cache_write_1h: Decimal | None = None
+    cache_write_30m: Decimal | None = None
 
 
 def _decimal_node(node: ast.expr, *, context: str) -> Decimal:
@@ -55,7 +56,7 @@ def rates_from_nodes(fields: dict[str, ast.expr], *, context: str) -> FlatRates:
         output=_decimal_node(fields["output"], context=f"{context} output"),
         **{
             key: _optional_decimal_node(fields.get(key), context=f"{context} {key}")
-            for key in ("cache_write_5m", "cache_write_1h")
+            for key in ("cache_write_5m", "cache_write_1h", "cache_write_30m")
         },
     )
 
@@ -97,7 +98,7 @@ def archive_rates(raw: object, *, context: str) -> FlatRates:
             key: _archive_decimal(raw[key], context=f"{context} {key}")
             if raw.get(key) is not None
             else None
-            for key in ("cache_write_5m", "cache_write_1h")
+            for key in ("cache_write_5m", "cache_write_1h", "cache_write_30m")
         },
     )
 
@@ -106,6 +107,6 @@ def cache_write_lines(rates: FlatRates, indent: str, *, quoted: bool = True) -> 
     """Render only the cache-write rates declared by the reviewed archive."""
     return [
         f"{indent}{key}={json.dumps(str(value)) if quoted else str(value)},"
-        for key in ("cache_write_5m", "cache_write_1h")
+        for key in ("cache_write_5m", "cache_write_1h", "cache_write_30m")
         if (value := getattr(rates, key)) is not None
     ]

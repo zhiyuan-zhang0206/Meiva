@@ -28,6 +28,7 @@ class CacheTokens:
     read: int = 0
     write_5m: int = 0
     write_1h: int = 0
+    write_30m: int = 0
 
 
 # meiva:note
@@ -40,6 +41,7 @@ class PriceWindow(NamedTuple):
     output: str | Decimal
     cache_write_5m: str | Decimal | None = None
     cache_write_1h: str | Decimal | None = None
+    cache_write_30m: str | Decimal | None = None
 
 
 # meiva:note
@@ -53,6 +55,7 @@ class PriceTier(NamedTuple):
     windows: tuple[PriceWindow, ...] = ()
     cache_write_5m: str | Decimal | None = None
     cache_write_1h: str | Decimal | None = None
+    cache_write_30m: str | Decimal | None = None
 
 
 # meiva:note
@@ -76,6 +79,7 @@ class PriceRates:
     periods: tuple[PricePeriod, ...] = ()
     cache_write_5m: float | None = field(default=None, kw_only=True)
     cache_write_1h: float | None = field(default=None, kw_only=True)
+    cache_write_30m: float | None = field(default=None, kw_only=True)
 
 
 # meiva:note
@@ -87,6 +91,7 @@ class Rates:
     output: float
     cache_write_5m: float | None = field(default=None, kw_only=True)
     cache_write_1h: float | None = field(default=None, kw_only=True)
+    cache_write_30m: float | None = field(default=None, kw_only=True)
 
     def as_tuple(self) -> tuple[float, float, float]:
         return (self.cache_miss, self.cache_hit, self.output)
@@ -209,7 +214,7 @@ def _clock(value: str) -> time:
 def _rates(raw: dict[str, Any]) -> Rates:
     writes = {
         key: float(raw[key]) if raw.get(key) is not None else None
-        for key in ("cache_write_5m", "cache_write_1h")
+        for key in ("cache_write_5m", "cache_write_1h", "cache_write_30m")
     }
     values = Rates(float(raw["input"]), float(raw["cache_read"]), float(raw["output"]), **writes)
     if any(

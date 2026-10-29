@@ -16,6 +16,7 @@ class LlmUsage(TypedDict):
     cache_read: NotRequired[int]
     cache_write_5m: NotRequired[int]
     cache_write_1h: NotRequired[int]
+    cache_write_30m: NotRequired[int]
     reasoning: int
     latency_ms: float | None
     decode_ms: float | None
@@ -25,6 +26,7 @@ class LlmUsage(TypedDict):
     price_out: float | None
     price_write_5m: NotRequired[float]
     price_write_1h: NotRequired[float]
+    price_write_30m: NotRequired[float]
     unpriced: int | None
     usage_kind: str
     attribution: str
