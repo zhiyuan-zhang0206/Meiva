@@ -11,6 +11,7 @@ from pathlib import Path
 import psycopg
 
 from meizel import lint_common
+from meizel.checkout import apply_plan
 from meizel.graph.universe import EditPlan
 from scripts.audit.analysis import allowlist_entries, compare, live_columns, schema_columns
 
@@ -68,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     drift = compare(schema, live).allowed_only(allowlist_entries(_allow_text(args.allow)))
     print(drift.render(declared))
     if args.json is not None:
-        EditPlan(writes={args.json: json.dumps(drift.to_json(declared), indent=2)}).apply()
+        apply_plan(EditPlan(writes={args.json: json.dumps(drift.to_json(declared), indent=2)}))
     return int(drift.is_dirty())
 
 

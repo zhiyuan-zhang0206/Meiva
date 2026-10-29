@@ -16,8 +16,8 @@ from functools import cache
 from pathlib import Path
 from typing import TypeGuard, assert_never
 
+from meizel.checkout import GitRepo
 from meizel.graph.model import AmbientKind
-from meizel.graph.universe import GitRepo
 
 __all__ = [
     "POLICY",

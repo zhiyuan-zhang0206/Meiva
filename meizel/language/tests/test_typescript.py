@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from meizel.allowances import parse
+from meizel.checkout import GitRepo
 from meizel.graph.model import Code, FactKind
-from meizel.graph.universe import GitRepo, Universe
+from meizel.graph.universe import Universe
 from meizel.language.typescript import scan_typescript, typescript_files
 
 

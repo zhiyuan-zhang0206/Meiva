@@ -1,27 +1,29 @@
-exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state", "tests"]
+exports = ["allowances.py", "budgets", "checkout.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state", "tests"]
 
 [uses]
 "__main__.py" = ["contracts"]
-"allowances.py" = ["graph"]
-"budgets" = ["graph", "lint_common.py"]
-"contracts" = ["allowances.py", "graph", "language", "lint_common.py", "roles.py", "source_evidence"]
-"language" = ["allowances.py", "graph", "lint_common.py"]
-"lint_common.py" = ["__init__.py", "graph", "roles.py"]
+"allowances.py" = ["checkout.py", "graph"]
+"budgets" = ["checkout.py", "lint_common.py"]
+"checkout.py" = ["graph"]
+"contracts" = ["allowances.py", "checkout.py", "graph", "language", "lint_common.py", "roles.py", "source_evidence"]
+"language" = ["allowances.py", "checkout.py", "graph", "lint_common.py"]
+"lint_common.py" = ["__init__.py", "checkout.py", "graph", "roles.py"]
 "owners" = ["allowances.py", "lint_common.py", "roles.py"]
-"roles.py" = ["graph"]
+"roles.py" = ["checkout.py", "graph"]
 "source_evidence" = ["graph", "lint_common.py"]
 "state" = ["allowances.py", "lint_common.py", "roles.py"]
 "tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
 
 [purity]
 "." = "strict-to-be"
+"checkout.py" = { mode = "none", why = "the shell of the checkout: it runs git for a universe (ls-files, grep, merge-base, show), reads and writes the files a plan names, stages them, and removes the temporary checkout a comparison runs in; what a checkout contains, whether a name is a module, and which writes a command decided on are decided by graph/universe.py and the contracts modules that build an EditPlan" }
 "__init__.py" = "strict"
 "__main__.py" = "strict"
 "allowances.py" = "strict-to-be"
 "roles.py" = "strict-to-be"
 
 [debt.impure-call]
-"allowances.py#meizel.graph.universe.GitRepo" = 1
+"allowances.py#meizel.checkout.GitRepo" = 1
 "lint_common.py#Path.is_dir" = 1
 "lint_common.py#Path.is_file" = 1
 "lint_common.py#Path.read_bytes" = 1
@@ -30,4 +32,9 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "lint_common.py#import subprocess" = 1
 "lint_common.py#os.path.lexists" = 1
 "roles.py#Path.resolve" = 2
-"roles.py#meizel.graph.universe.GitRepo" = 1
+"roles.py#meizel.checkout.GitRepo" = 1
+
+[debt.impure-edge]
+"allowances.py#meizel/checkout.py" = 1
+"lint_common.py#meizel/checkout.py" = 1
+"roles.py#meizel/checkout.py" = 1
