@@ -1,20 +1,17 @@
-"""The `user-code` group is what agent code may import; the application never does.
-
-`execute_code` code runs in this environment, so the libraries an agent reaches for
-(pandas, scipy, matplotlib ...) are installed by default. None of them belongs to the
-application's own import graph, so they live in the `user-code` dependency group
-instead of `[project.dependencies]`: `[tool.uv] default-groups` makes every `uv sync`
-- a developer worktree, CI, a fleet update - install the same set as before, while a
-deployment that runs no agent code leaves the group out with `--no-group user-code`
-(or `uv export --no-group user-code`) and the runtime image face shrinks by 25
-distributions.
-
-These tests make that claim checkable instead of documentary. The group is a promise:
-every member is declared below with the module name it imports as, no shipped or test
-module imports one, and no member is also a runtime dependency. A new member, or a
-module that starts importing one, fails here.
-"""
-
+# meiva:note
+# The `user-code` group is what agent code may import; the application never does.
+#
+# `execute_code` code runs in this environment, so the libraries an agent reaches for
+# (pandas, scipy, matplotlib ...) are installed by default. None of them belongs to the
+# application's own import graph, so they live in a `user-code` dependency group instead
+# of `[project.dependencies]`. `[tool.uv] default-groups` makes every `uv sync` - a
+# developer worktree, CI, a fleet update - install the same set as before, while a
+# deployment that runs no agent code leaves the group out with `--no-group user-code`.
+#
+# The group is a promise, and these tests keep it checkable: every member declares the
+# module name agent code imports, no shipped or test module imports one, no member is a
+# runtime dependency, and the group stays a default group.
+# meiva:link docs/conventions/dev-setup.md
 from __future__ import annotations
 
 import ast
@@ -32,6 +29,7 @@ _SKIP_DIRS = frozenset(
     {".git", ".venv", ".worktrees", "node_modules", "__pycache__", ".cache", ".trunk"}
 )
 
+# meiva:note
 # Distribution -> the module the group exists for. `execute_code` code imports the
 # module, so this is the name an import scan has to match.
 _USER_CODE_MODULES = {
@@ -59,7 +57,8 @@ def _toml(relative: str) -> dict[str, Any]:
 
 
 def _distribution_name(requirement: str) -> str:
-    """`psycopg[binary]>=3.2` -> `psycopg`: the name a group entry is compared by."""
+    # meiva:note
+    # `psycopg[binary]>=3.2` -> `psycopg`: the name a group entry is compared by.
     return re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].strip().lower()
 
 
@@ -69,13 +68,10 @@ def _group() -> dict[str, str]:
 
 
 def test_default_groups_install_the_group_beside_dev() -> None:
-    """`default-groups` is the whole reason an existing venv keeps the libraries.
-
-    This is the change's one new risk: drop `user-code` from the default set and every
-    `uv sync` — including the fleet update's `uv sync --frozen` — silently uninstalls
-    pandas, scipy and friends from running agents' `execute_code` environment. The
-    group may only leave this list as part of a change that also accepts that.
-    """
+    # meiva:note
+    # This is the change's one new risk: drop `user-code` from the default set and every
+    # `uv sync` - including the fleet update's `uv sync --frozen` - silently uninstalls the
+    # toolbox from running agents' `execute_code` environment.
     defaults = _toml("pyproject.toml")["tool"]["uv"]["default-groups"]
 
     assert "user-code" in defaults, (
@@ -86,7 +82,6 @@ def test_default_groups_install_the_group_beside_dev() -> None:
 
 
 def test_every_group_member_declares_its_import_name() -> None:
-    """A new member has to say how agent code imports it, so the scan below covers it."""
     declared = set(_group())
 
     assert declared == set(_USER_CODE_MODULES), (
@@ -115,10 +110,8 @@ def _read(path: Path) -> str | None:
 
 
 def _python_files() -> list[Path]:
-    """Every `.py` in the checkout, with the directories that only hold copies pruned.
-
-    `rglob` would descend into each sibling worktree under `.worktrees/`.
-    """
+    # meiva:note
+    # `rglob` would descend into each sibling worktree under `.worktrees/`.
     paths: list[Path] = []
     for directory, dirnames, filenames in os.walk(_REPO_ROOT):
         dirnames[:] = [name for name in dirnames if name not in _SKIP_DIRS]
@@ -137,11 +130,9 @@ def _absolute_imports(tree: ast.AST) -> list[tuple[str, int]]:
 
 
 def _group_imports(path: Path, wanted: tuple[str, ...]) -> list[tuple[str, int]]:
-    """`(group module, line)` for each wanted module this file imports.
-
-    The text probe keeps ~5k files out of the parser; the AST then decides, so a
-    comment or a string that names the module is not a violation.
-    """
+    # meiva:note
+    # The text probe keeps ~5k files out of the parser; the AST then decides, so a comment
+    # or a string that names the module is not a violation.
     source = _read(path)
     if source is None or not any(module in source for module in wanted):
         return []
@@ -159,7 +150,6 @@ def _group_imports(path: Path, wanted: tuple[str, ...]) -> list[tuple[str, int]]
 
 @cache
 def _import_sites() -> dict[str, list[str]]:
-    """Every first-party import of a group module, as `{module: ["path:line", ...]}`."""
     wanted = tuple(sorted(set(_USER_CODE_MODULES.values())))
     sites: dict[str, list[str]] = {module: [] for module in wanted}
     for path in _python_files():
@@ -170,7 +160,6 @@ def _import_sites() -> dict[str, list[str]]:
 
 @pytest.mark.parametrize(("distribution", "module"), sorted(_USER_CODE_MODULES.items()))
 def test_no_module_imports_a_group_member(distribution: str, module: str) -> None:
-    """The group's whole justification: nothing we ship or test imports it."""
     importers = _import_sites()[module]
 
     assert not importers, (
