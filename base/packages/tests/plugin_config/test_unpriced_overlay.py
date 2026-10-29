@@ -88,6 +88,19 @@ def test_a_withdrawn_model_settling_to_an_unpriced_model_is_refused(tmp_path: Pa
         )
 
 
+def test_a_model_the_catalog_does_not_know_is_still_refused(tmp_path: Path) -> None:
+    # meiva:note
+    # The boundary this file draws: a known-but-withdrawn id reaches the fallback path, an id the
+    # catalog never heard of does not. Membership is the first gate and it still fires.
+    with pytest.raises(InvalidConfigOverlay, match="not a registered model"):
+        validate_config_overlay(
+            {"llm_model": "never-heard-of-it"},
+            models=MODELS,
+            prices={"priced-model"},
+            home=_home(tmp_path),
+        )
+
+
 def test_every_default_model_in_the_repo_is_priced() -> None:
     # meiva:note
     # The cluster default, the labeler and the hierarchy model are named by config, not by a
