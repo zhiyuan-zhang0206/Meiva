@@ -220,7 +220,18 @@ reach the run in the event payload — no token, no network. The batch's
 `changed.txt` is already the union of its members, so the ordinary rules measure
 it once; what a subset cannot vouch for is the completeness of that union, and a
 batch whose member list is missing keeps the full suite rather than selecting
-from a list it cannot check. A batch that spans the frontend and the backend
+from a list it cannot check. A batch whose body names members but whose changed list is empty keeps
+the full suite as well (`queue-members-no-changes`): the two contradict each other, and the cheap
+forks are the only ones this selector can take on its own.
+
+The **completeness** of that changed list is the pipeline's guarantee, not the selector's: the
+classify job diffs the batch tree against its merge base, so the list is every path the batch
+changes. The selector never re-derives a member's own diff — that would mean one GitHub read and one
+more permission per member, which is what #5756 deliberately avoided — so a body that names members
+whose changes are absent from the list is a shape the pipeline cannot produce, and the selector does
+not pretend to detect it.
+
+A batch that spans the frontend and the backend
 keeps the full suite too: the two sides meet in a contract — a route, a payload,
 a generated type — that no owner rule crosses, so a subset built from each side
 alone can miss the test that reads both.

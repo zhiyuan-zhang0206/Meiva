@@ -462,10 +462,8 @@ def _owner_tests(changed: dict[str, PathClass], checkout: Checkout, impact: Impa
 
 
 # meiva:note
-# A batch that changes a frontend path and a backend one runs everything. The two sides meet in a
-# contract — a route, a payload, a generated type — that no owner rule crosses, so a subset built
-# from each side separately can miss the test that reads both. `infra` is backend here; only
-# documentation joins neither side.
+# A batch that changes a frontend and a backend path runs everything: the sides meet in a contract no
+# owner rule crosses. `infra` is backend here; only documentation joins neither side.
 def _batch_domains(classes: dict[str, PathClass]) -> str | None:
     kinds = set(classes.values())
     if PathClass.FRONTEND not in kinds:
@@ -482,6 +480,12 @@ def _batch_domains(classes: dict[str, PathClass]) -> str | None:
         "a batch that changes both a frontend path and a backend one keeps the full suite: "
         f"frontend {frontend[0]} and backend {backend[0]}"
     )
+
+
+def _batch_full_reason(members: tuple[int, ...] | None, changed: tuple[str, ...]) -> str | None:
+    if not members:
+        return "queue-members-unknown"
+    return None if changed else "queue-members-no-changes"
 
 
 # meiva:note
@@ -508,15 +512,14 @@ def select_tests(
     if event != "pull_request":
         return _result("FULL", "non-pr-event", full_estimate=full_estimate)
     # meiva:note
-    # A Trunk batch changes what the union of its members changes: the job's `changed.txt` is already
-    # that union, so the ordinary rules can measure it. What they cannot see is whether the list is
-    # complete, and that is the one thing this run has to be told: the queue writes the member list
-    # into the synthetic pull request's body, and a batch whose list cannot be read keeps the full
-    # suite rather than selecting from a union it cannot vouch for.
+    # A batch changes what the union of its members changes, and `changed.txt` is already that union,
+    # so the ordinary rules can measure it; a batch whose member list cannot be read keeps everything.
     # meiva:link docs/conventions/engineering/test-selection.md
     on_queue = head_ref.startswith(_QUEUE_PREFIXES)
-    if on_queue and not members:
-        return _result("FULL", "queue-members-unknown", full_estimate=full_estimate)
+    if on_queue:
+        unanswered = _batch_full_reason(members, changed)
+        if unanswered is not None:
+            return _result("FULL", unanswered, full_estimate=full_estimate)
     if all(
         _is_documentation_path(path, checkout.hosts) for path in changed
     ) and not documentation_runtime_tests(list(changed), repo_root=repo_root, base_ref=base_ref):
