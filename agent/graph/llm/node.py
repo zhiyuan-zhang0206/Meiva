@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from typing import Any, Literal, NoReturn, TypeGuard
 
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
 from langgraph.runtime import Runtime
@@ -256,6 +256,15 @@ def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict)
 
 
+# meiva:note
+# "This turn already acted" is the message this call follows, not a walk back through history: the llm node runs immediately after the exec node, so a tool return appended in this turn is the tail at that moment, and a turn only ends on a message with no tool calls - a tail ToolMessage can therefore never belong to an earlier turn. Walking back to the last human message would answer a different question (what the conversation ever did) and would let a previous turn's tool work excuse a genuinely stuck one. A failed tool still returns a ToolMessage (LangChain's typed `status="error"`), so the rule keys on the message type alone: the turn acted, whether or not the work succeeded.
+def _turn_already_acted(messages: list[AnyMessage]) -> bool:
+    if not messages:
+        return False
+    last = messages[-1]
+    return isinstance(last, ToolMessage)
+
+
 def _is_silent_idle(final_msg: AIMessage) -> bool:
     if final_msg.tool_calls or final_msg.text:
         return False
@@ -279,6 +288,7 @@ def _silent_idle_command(
     *,
     catalog: ModelCatalog,
     cap: int,
+    turn_acted: bool,
 ) -> Command[LlmGoto] | None:
     if not _is_silent_idle(final_msg):
         return None
@@ -291,12 +301,35 @@ def _silent_idle_command(
 
     priced = quote(model, 0, output_tokens, 0, prices=catalog.prices)
     estimated_cost_usd = priced.cost_usd if priced is not None else None
+    # meiva:note
+    # A turn that already returned a tool result and then produced reasoning-only output has finished its work and chosen to stop; continuing it only forces the model to manufacture text (which the bridge then delivers to the user). Halting here is the silent end the agent contract asks for, and it costs no further model call. The cap below still guards the other case - a turn that has done nothing at all.
+    if turn_acted:
+        ledger.reset_silent_idle(tid)
+        logger.info(
+            "[{label}] {body}",
+            label="silent-idle",
+            event="silent_idle",
+            agent_id=agent_id,
+            body=(
+                f"reasoning-only output {output_tokens} tokens after a tool return in this turn "
+                "- halting to idle (turn already acted)"
+            ),
+            output_tokens=output_tokens,
+            cumulative_output_tokens=cumulative_output_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            halted=True,
+        )
+        return Command[LlmGoto](
+            update={"messages": [final_msg], "halted": True},
+            goto=AFTER_EXEC,
+        )
     if cap > 0 and cumulative_output_tokens >= cap:
         ledger.reset_silent_idle(tid)
         logger.warning(
             "[{label}] {body}",
             label="silent-idle",
             event="silent_idle",
+            agent_id=agent_id,
             body=(
                 f"reasoning-only output reached {cumulative_output_tokens} budget tokens (cap {cap}) — "
                 "halting to idle instead of looping"
@@ -315,6 +348,7 @@ def _silent_idle_command(
         "[{label}] {body}",
         label="silent-idle",
         event="silent_idle",
+        agent_id=agent_id,
         body=(
             f"reasoning-only output {output_tokens} tokens "
             f"(budget {budget_tokens}; cumulative {cumulative_output_tokens}/{cap or 'inf'}) "
@@ -411,6 +445,7 @@ async def _llm_node_impl(
         ledger,
         catalog=ctx.require_catalog(),
         cap=ctx.require_agent().read("lm", "llm_silent_idle_max_output_tokens"),
+        turn_acted=_turn_already_acted(state.messages),
     )
     if silent_idle_cmd is not None:
         raw_update: object = silent_idle_cmd.update
