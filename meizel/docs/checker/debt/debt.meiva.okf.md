@@ -103,20 +103,10 @@ new entry is a later change, once the recorded baseline has been backfilled.
   derived, so both sides' entries are kept, the lower count wins where both changed, and `prune` follows.
   Two sides that name different owners are refused: who pays a debt down is not derived, so a person
   decides it. A conflict outside the debt tables is refused too; nothing is written.
-- `debt carry [--base ref]` follows a move. A baseline names files, so a
-  `git mv` leaves the old entries paid and the new place unrecorded. For the
-  files git detects as renamed since the branch point with `origin/main`
-  (default; the move must be staged, and a heavily rewritten file may not be
-  detected), it relocates entries whose source or target was renamed, to the
-  owner and key they now have. It only relocates: counts merge, the total never
-  changes, and a new violation in the moved file stays an error. Run it, then
-  `debt prune`. `--rename-target OLD=NEW` rewrites a patch target that was
-  renamed. `--move-symbol OLD_FILE::NAME=NEW_FILE` follows a top-level function
-  or class that moved to another file, which git cannot see as a rename. It
-  scans the symbol's lines in the old file at the base and in the new file, and
-  rekeys one for one at most what the symbol cost before, costs now and has
-  recorded, so what it gained on the way stays an error. The old file must no
-  longer define the name.
+- `debt carry [--base ref]` follows a rename: it relocates the recorded entries of a moved file,
+  patch target or symbol to the owner and key they now have, never adding one, and writes the
+  manifest a moved debt needs. See
+  [[meizel/docs/checker/debt/carry.meiva.okf.md|carrying recorded debt to a moved file]].
 - `debt sites --code <patch code> [--target-prefix P]... [--json] [paths...]`
   lists where the source holds each patch of a code: file, line, form and
   target, sorted by target. A prefix is dotted (`lib.mod` holds `lib.mod.f`, not
