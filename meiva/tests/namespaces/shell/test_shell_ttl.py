@@ -32,7 +32,7 @@ def event_pipeline(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
     try:
-        telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)
+        telemetry.init_telemetry(home=meiva_home(), process="test-sdk-operation", pipeline=pipeline)
         yield pipeline
     finally:
         pipeline.stop(timeout=2)

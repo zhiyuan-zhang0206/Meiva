@@ -609,12 +609,12 @@ def build_snapshot(
     }
 
 
-def emit_snapshot(snapshot: dict[str, Any], *, pipeline: EventPipeline) -> None:
+def emit_snapshot(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Path) -> None:
     """Emit absolute states after all repositories succeed, using the exporter
     process dimension for both standalone and scheduled invocation."""
     from base import telemetry
 
-    telemetry.init_telemetry(process=PROCESS_NAME, pipeline=pipeline)
+    telemetry.init_telemetry(home=home, process=PROCESS_NAME, pipeline=pipeline)
     pipeline.warmup_exports()
     for repo, payload in snapshot["repositories"].items():
         for day, fields in sorted(payload["days"].items()):
@@ -696,7 +696,7 @@ def main(
             else owned_event_pipeline(PROCESS_NAME, image=image, home=home)
         )
         with lifetime as pipeline:
-            emit_snapshot(snapshot, pipeline=pipeline)
+            emit_snapshot(snapshot, pipeline=pipeline, home=home)
     if args.dry_run or args.print_snapshot:
         print(json.dumps(snapshot, indent=1, sort_keys=True))
     else:

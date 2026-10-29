@@ -46,7 +46,9 @@ event_store.set_enabled(enabled=False)
 def dispatch(args: argparse.Namespace) -> int:
     try:
         if sys.argv[1] != "empty":
-            telemetry.init_telemetry(process="cli-health-probe", pipeline=args.producer())
+            telemetry.init_telemetry(
+                home=resolve_meiva_home(), process="cli-health-probe", pipeline=args.producer()
+            )
             telemetry.emit("telemetry", "health_probe_ran", attributes={"unhealthy_checks": 0})
             time.sleep(HOLD_S)
         if sys.argv[1] == "exception":

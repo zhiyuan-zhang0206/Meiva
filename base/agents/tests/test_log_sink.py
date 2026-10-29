@@ -48,7 +48,7 @@ def sink_logger(database: Database, machine_identity: MachineIdentityReader):
     def producer() -> telemetry.EventPipeline:
         return pipeline
 
-    add_event_sink(producer=producer, machine_reader=machine_identity.name)
+    add_event_sink(home=meiva_home(), producer=producer, machine_reader=machine_identity.name)
     _global_logger.remove()
     sink_id = _global_logger.add(
         partial(event_sink, producer=producer), level="INFO", enqueue=False, catch=False
