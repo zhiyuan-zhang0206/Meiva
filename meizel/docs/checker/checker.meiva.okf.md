@@ -126,7 +126,7 @@ Plugin and schedule-script discovery is `[external]`, not `[loads]`.
 
 `meizel.toml` keys are `purity` / `[purity]` ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
 `exports` (list), `[uses]` ([[meizel/docs/checker/narrowing.meiva.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
-(sites in [[meizel/docs/checker/policy.meiva.okf.md|the policy file]]), `[state]` and `[roots]`
+(sites in [[meizel/docs/checker/policy/policy.meiva.okf.md|the policy file]]), `[state]` and `[roots]`
 ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) and `[debt.<code>]`. Names are
 direct children; `meizel.toml` is outside the directory budget. A directory without one has no
 local edges and exports its door.

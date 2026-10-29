@@ -45,7 +45,7 @@ not a repair and must not look like one.
   (tests, the state rules, `allowances.py`) is content and is measured as the reference left it. A
   manifest that is malformed rather than merely ahead of the ref's content stops the comparison.
   Historical snapshots keep the unreadable gate.
-  See [[meizel/docs/checker/policy.meiva.okf.md|historical policy comparisons]].
+  See [[meizel/docs/checker/policy/policy.meiva.okf.md|historical policy comparisons]].
 - Deleting a whole `[uses]` or `[exports]` entry is **not** a rule change: the reference's replay
   declares the legal edges it finds again, so the debt it uncovers is recorded as **content** growth.
   Adding an entry, or narrowing one, is the direction that splits.
