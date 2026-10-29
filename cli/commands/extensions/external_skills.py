@@ -10,6 +10,7 @@ from __future__ import annotations
 import stat
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -139,10 +140,9 @@ def _cleanup_garbage(
     label: str,
     *,
     skill_name: str = SKILL_NAME,
+    rename: Callable[[Path, Path], None] = rename_no_replace,
 ) -> None:
-    cleanup_garbage_impl(
-        ledger_path, ledger, skills_root, label, rename_no_replace, skill_name=skill_name
-    )
+    cleanup_garbage_impl(ledger_path, ledger, skills_root, label, rename, skill_name=skill_name)
 
 
 def stage_copy(
@@ -154,8 +154,11 @@ def stage_copy(
     source_digest: str,
     *,
     skill_name: str = SKILL_NAME,
+    materialize: Callable[[SourceSnapshot, Path], None] = materialize_source_snapshot,
+    rename: Callable[[Path, Path], None] = rename_no_replace,
+    uuid4: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> Path:
-    generation_id = uuid.uuid4().hex
+    generation_id = uuid4().hex
     marker = ownership_marker(
         ledger["installation_id"], generation_id, source_digest, skill_name=skill_name
     )
@@ -173,13 +176,13 @@ def stage_copy(
     prepared = _prepared_stage_path(ledger_path, generation_id)
     prepared.mkdir(mode=0o700)
     write_new(prepared / _MARKER_NAME, marker, 0o600)
-    materialize_source_snapshot(snapshot, prepared)
+    materialize(snapshot, prepared)
     if tree_manifest(prepared) != expected_manifest:
         raise SourceIntegrityError("operator skill source copy did not verify")
     transaction["stage_state"] = "publishing"
     write_ledger(ledger_path, ledger)
     stage = transaction_path(skills_root, "stage", generation_id, skill_name=skill_name)
-    rename_no_replace(prepared, stage)
+    rename(prepared, stage)
     transaction["stage_state"] = "published"
     write_ledger(ledger_path, ledger)
     return stage
@@ -228,6 +231,8 @@ def _restore_claimed_previous(
     transaction: dict[str, Any],
     previous: Path,
     target: Path,
+    *,
+    rename: Callable[[Path, Path], None] = rename_no_replace,
 ) -> None:
     """Restore a claimed target without replacing a late user destination."""
     if transaction["claim_state"] != "claimed":
@@ -243,7 +248,7 @@ def _restore_claimed_previous(
         )
         _require_digest(target, old["digest"], "restored managed target was modified")
     else:
-        rename_no_replace(previous, target)
+        rename(previous, target)
     transaction["claim_state"] = "idle"
     write_ledger(ledger_path, ledger)
 
@@ -277,6 +282,8 @@ def _activate(
     ledger: dict[str, Any],
     skills_root: Path,
     target: Path,
+    *,
+    rename: Callable[[Path, Path], None] = rename_no_replace,
 ) -> str:
     transaction: dict[str, Any] = ledger["transaction"]
     generation_id = transaction["generation_id"]
@@ -297,7 +304,7 @@ def _activate(
         transaction["claim_state"] = "claiming"
         write_ledger(ledger_path, ledger)
         try:
-            rename_no_replace(target, previous)
+            rename(target, previous)
             transaction["claim_state"] = "claimed"
             write_ledger(ledger_path, ledger)
             verify_marker(
@@ -307,14 +314,16 @@ def _activate(
                 previous, old["digest"], "managed target changed before it could be claimed"
             )
         except (OSError, ClientConflictError):
-            _restore_claimed_previous(ledger_path, ledger, transaction, previous, target)
+            _restore_claimed_previous(
+                ledger_path, ledger, transaction, previous, target, rename=rename
+            )
             raise
     if exists(target):
         raise ClientConflictError("a target appeared after the managed copy was claimed")
     try:
-        rename_no_replace(stage, target)
+        rename(stage, target)
     except OSError:
-        _restore_claimed_previous(ledger_path, ledger, transaction, previous, target)
+        _restore_claimed_previous(ledger_path, ledger, transaction, previous, target, rename=rename)
         raise
     verify_marker(target, ledger["installation_id"], generation_id, skill_name=target.name)
     if tree_digest(target) != transaction["expected_digest"]:
@@ -415,11 +424,16 @@ def _converge_locked(
     ledger_path: Path,
     *,
     skill_name: str = SKILL_NAME,
+    materialize: Callable[[SourceSnapshot, Path], None] = materialize_source_snapshot,
+    rename: Callable[[Path, Path], None] = rename_no_replace,
+    uuid4: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> None:
     skills_root = _skills_root_of(client_home, client)
     target = skills_root / skill_name
     ledger = _ledger_for(ledger_path, client.key, target)
-    _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
+    _cleanup_garbage(
+        ledger_path, ledger, skills_root, client.label, skill_name=skill_name, rename=rename
+    )
     if ledger["transaction"] is not None:
         # An earlier converge was cut off mid-publication. Nothing here finishes
         # or rolls it back: the claimed/staged paths belong to that run, so the
@@ -442,21 +456,30 @@ def _converge_locked(
             ledger,
             source_digest,
             skill_name=skill_name,
+            materialize=materialize,
+            rename=rename,
+            uuid4=uuid4,
         )
     except (OSError, SourceIntegrityError):
         if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=skill_name):
-            _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
+            _cleanup_garbage(
+                ledger_path, ledger, skills_root, client.label, skill_name=skill_name, rename=rename
+            )
         raise
     try:
-        action = _activate(ledger_path, ledger, skills_root, target)
+        action = _activate(ledger_path, ledger, skills_root, target, rename=rename)
     except (OSError, ClientConflictError):
         if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=skill_name):
-            _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
+            _cleanup_garbage(
+                ledger_path, ledger, skills_root, client.label, skill_name=skill_name, rename=rename
+            )
         raise
     print(
         f"  · {client.label} external operator skill {action}: {client.skills_subpath}/{skill_name}"
     )
-    _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
+    _cleanup_garbage(
+        ledger_path, ledger, skills_root, client.label, skill_name=skill_name, rename=rename
+    )
 
 
 # meiva:note
@@ -492,12 +515,21 @@ def _installed_programs(host: Host) -> frozenset[str]:
 # Legacy standalone targets and their ledgers remain untouched: each client and
 # skill owns a separate ledger and the step never adopts or overwrites them.
 # meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
+# meiva:note
+# The publication's three effects are keyword arguments with today's function as the default, so a
+# caller that names none performs exactly the operation it performed before, and a test that needs
+# an intruder inside one converge hands in its own: `materialize` writes the captured source
+# generation, `rename` is every no-replace move of the transaction, and `uuid4` mints the
+# generation id that names its stage and previous paths.
 def converge_external_agent_skill(
     ctx: ConvergeCtx,
     *,
     host_home: Path | None = None,
     skill_names: tuple[str, ...] = SKILL_NAMES,
     lock_timeout_s: float = _LOCK_TIMEOUT_S,
+    materialize: Callable[[SourceSnapshot, Path], None] = materialize_source_snapshot,
+    rename: Callable[[Path, Path], None] = rename_no_replace,
+    uuid4: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> None:
     home = ctx.session.user_home if host_home is None else host_home
     try:
@@ -536,6 +568,9 @@ def converge_external_agent_skill(
                         home / client.home_dir,
                         ledger_path,
                         skill_name=skill_name,
+                        materialize=materialize,
+                        rename=rename,
+                        uuid4=uuid4,
                     )
             except ClientConflictError as exc:
                 _warn(client.label, str(exc))

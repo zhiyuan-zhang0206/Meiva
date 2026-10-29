@@ -379,7 +379,6 @@ def test_user_modified_managed_copy_is_preserved_and_reported(
 def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     home: Path,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -420,9 +419,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
             raise OSError("injected activation failure")
         original_rename(path, destination)
 
-    monkeypatch.setattr(module, "rename_no_replace", fail_staged_activation)
-
-    _converge(
+    module.converge_external_agent_skill(
         _ctx(
             repo,
             home,
@@ -431,6 +428,8 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
             command_config_machine=command_config_machine,
         ),
         host_home=home,
+        skill_names=(SKILL_NAME,),
+        rename=fail_staged_activation,
     )
 
     assert _tree_snapshot(target) == before
