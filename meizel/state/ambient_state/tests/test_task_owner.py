@@ -10,6 +10,7 @@ import pytest
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state.module import Tree
+from meizel.state.ambient_state.tests.conftest import SCOPE
 
 SOURCE = """
 import asyncio
@@ -89,7 +90,7 @@ class Service:
 
 
 def _sites(source: str, root: Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/service.py", _tree(root))
+    return ambient_state.measure(ast.parse(source), "base/service.py", _tree(root), SCOPE)
 
 
 def test_visible_task_owner_wiring_is_supported(tmp_path: Path) -> None:

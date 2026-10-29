@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from meizel import roles
@@ -53,26 +55,42 @@ def test_roles_belong_in_the_root_manifest_only(make_repo: RepoFactory) -> None:
 
 
 def test_the_api_reads_roles_in_declared_order(make_repo: RepoFactory) -> None:
-    root = make_repo({**ROOT, "meizel.toml": GOOD})
-    assert dict(roles.roles(root)) == {"application": ("a", "b"), "tests": ("t",)}
-    assert roles.packages("tests", "application", root=root) == ("t", "a", "b")
-    assert roles.packages("tooling", root=root) == ()
-    assert roles.all_packages(root) == ("a", "b", "t")
+    declared = roles.parse_roles(GOOD, label="meizel.toml")
+    assert dict(declared) == {"application": ("a", "b"), "tests": ("t",)}
+    assert roles.select_packages(declared, "tests", "application") == ("t", "a", "b")
+    assert roles.select_packages(declared, "tooling") == ()
+    assert roles.all_packages(declared) == ("a", "b", "t")
 
 
 def test_the_api_refuses_an_unknown_role(make_repo: RepoFactory) -> None:
-    root = make_repo({**ROOT, "meizel.toml": GOOD})
     with pytest.raises(MeizelError, match="unknown role"):
-        roles.packages("mystery", root=root)
+        roles.select_packages(roles.parse_roles(GOOD, label="meizel.toml"), "mystery")
+
+
+def test_the_model_reads_no_file_of_its_own() -> None:
+    # meiva:note
+    # The model decides; the shell reads. A `GitRepo`, a `Path` or a manifest constant here would put
+    # the read back inside the module that is supposed to receive the answer.
+    source = Path(roles.__file__).read_text(encoding="utf-8")
+    for name in ("GitRepo", "roles_at", "read_text", "Path(", "tomllib.load("):
+        assert name not in source, name
 
 
 @pytest.mark.parametrize("manifest", ["[uses]\n", "[roles]\nmystery = []\n", "not toml ["])
 def test_the_api_fails_fast_on_an_invalid_declaration(
     make_repo: RepoFactory, manifest: str
 ) -> None:
-    root = make_repo({**ROOT, "meizel.toml": manifest})
     with pytest.raises(MeizelError):
-        roles.roles(root)
+        roles.parse_roles(manifest, label="meizel.toml")
+
+
+# meiva:note
+# The roles a repository declares, parsed from its root manifest's text: the decision is the
+# model's, the read is the test's own.
+def declared(root: Path) -> dict[str, tuple[str, ...]]:
+    return roles.parse_roles(
+        (root / "meizel.toml").read_text(encoding="utf-8"), label="meizel.toml"
+    )
 
 
 def standalone_files() -> dict[str, str]:
@@ -89,9 +107,9 @@ def standalone_files() -> dict[str, str]:
 
 def test_standalone_is_a_distinct_closed_role(make_repo: RepoFactory) -> None:
     root = make_repo(standalone_files())
-    assert roles.packages("standalone", root=root) == ("runtimes",)
-    assert roles.packages("application", root=root) == ()
-    assert roles.all_packages(root) == ("runtimes",)
+    assert roles.select_packages(declared(root), "standalone") == ("runtimes",)
+    assert roles.select_packages(declared(root), "application") == ()
+    assert roles.all_packages(declared(root)) == ("runtimes",)
     assert diagnostics(root, "manifest-roles") == []
 
 

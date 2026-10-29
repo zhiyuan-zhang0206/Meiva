@@ -29,11 +29,12 @@ from pathlib import Path
 
 import pytest
 
-from meizel.roles import packages
+from meizel.checkout import roles_at
+from meizel.roles import select_packages
 
 _REPO = Path(__file__).resolve().parents[2]
 
-_APPLICATION_PACKAGES = frozenset(packages("application", "templates"))
+_APPLICATION_PACKAGES = frozenset(select_packages(roles_at(_REPO), "application", "templates"))
 _SCRATCH_PROVIDER = "base.host.env.boot_actions"
 
 # A hook script that reaches application code and still needs no scratch home.

@@ -11,12 +11,20 @@ its neighbours.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
+from meizel.checkout import roles_at
 from meizel.owners import clock_lattice as _lint
+from meizel.roles import select_packages
+
+_SCAN_DIRS = select_packages(
+    roles_at(Path(__file__).resolve().parents[3]), "application", "tooling"
+)
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
@@ -133,10 +141,20 @@ def test_explicit_missing_target_is_an_error(
     """A typo'd explicit path must fail the gate, not die in a bare traceback."""
     good = _write(scan_tmp, "ok.py", "value = 1\n")
     missing = tmp_path / "typo.py"
-    assert _lint.main([str(missing)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
+    assert (
+        _lint.main(
+            [str(missing)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
+        )
+        == 1
+    )
     assert str(missing) in capsys.readouterr().err
     assert (
-        _lint.main([str(good), str(missing)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS)
+        _lint.main(
+            [str(good), str(missing)],
+            scan_dirs=_SCAN_DIRS,
+            repo_root=scan_tmp,
+            registered_clocks=_TEST_CLOCKS,
+        )
         == 1
     )
 
@@ -148,7 +166,12 @@ def test_directory_with_dangling_symlink_member_is_skipped(scan_tmp: Path) -> No
     pkg.mkdir()
     (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (pkg / "dangling.py").symlink_to(pkg / "missing.py")
-    assert _lint.main([str(pkg)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 0
+    assert (
+        _lint.main(
+            [str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
+        )
+        == 0
+    )
 
 
 def test_explicit_outside_repo_and_relative_targets_are_scanned(
@@ -163,11 +186,21 @@ def test_explicit_outside_repo_and_relative_targets_are_scanned(
     outside = tmp_path_factory.mktemp("outside")
     bad = outside / "bad.py"
     bad.write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
-    assert _lint.main([str(bad)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
+    assert (
+        _lint.main(
+            [str(bad)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
+        )
+        == 1
+    )
     prev_cwd = Path.cwd()
     try:
         os.chdir(outside)
-        assert _lint.main(["bad.py"], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
+        assert (
+            _lint.main(
+                ["bad.py"], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
+            )
+            == 1
+        )
     finally:
         os.chdir(prev_cwd)
     assert "bad.py" in capsys.readouterr().err
@@ -183,9 +216,19 @@ def test_directory_with_non_utf8_member_is_skipped(
     pkg.mkdir()
     (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (pkg / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
-    assert _lint.main([str(pkg)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 0
+    assert (
+        _lint.main(
+            [str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
+        )
+        == 0
+    )
     (pkg / "viol.py").write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
-    assert _lint.main([str(pkg)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
+    assert (
+        _lint.main(
+            [str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
+        )
+        == 1
+    )
     assert "_MY_STALL_TIMEOUT_S" in capsys.readouterr().err
 
 
@@ -234,11 +277,12 @@ def test_full_scan_fails_on_a_stale_family_module(
     scan_tmp: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Only the argument-free full scan (pre-commit, CI) judges the allowlists."""
-    for scan_dir in _lint.SCAN_DIRS:
+    for scan_dir in _SCAN_DIRS:
         (scan_tmp / scan_dir).mkdir(parents=True, exist_ok=True)
     assert (
         _lint.main(
             [],
+            scan_dirs=_SCAN_DIRS,
             repo_root=scan_tmp,
             registered_clocks=_TEST_CLOCKS,
             family_modules=("base/retired_timing.py",),
@@ -251,6 +295,7 @@ def test_full_scan_fails_on_a_stale_family_module(
     assert (
         _lint.main(
             [str(ok)],
+            scan_dirs=_SCAN_DIRS,
             repo_root=scan_tmp,
             registered_clocks=_TEST_CLOCKS,
             family_modules=("base/retired_timing.py",),
@@ -345,3 +390,18 @@ def test_a_family_module_that_is_not_utf8_still_exists(scan_tmp: Path) -> None:
         {}, repo_root=scan_tmp, family_modules=("base/binary.py", "base/gone.py")
     )
     assert errs == ["base/gone.py: stale FAMILY_MODULES entry — the file no longer exists"]
+
+
+# meiva:note
+# The rule takes its scan directories from the shell, so the module itself must not report a pass
+# when something still starts it: a stale local hook or script would read green from an empty run.
+def test_the_rule_module_refuses_to_start_itself() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "meizel.owners.clock_lattice"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=Path(__file__).resolve().parents[3],
+    )
+    assert result.returncode != 0
+    assert "clock_lattice_cli" in result.stderr

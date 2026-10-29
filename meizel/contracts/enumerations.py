@@ -4,7 +4,8 @@
 # A Python tuple, list or set, or a TOML array, whose strings name every top-level directory
 # of one role (of three or more directories) is a copy of the declaration in the root
 # manifest: a package added to the role would silently miss it. Use
-# `meizel.roles.packages(role)`, or a generated region, the only exception.
+# `meizel.roles.select_packages(read_roles(repo), role)` or `python -m meizel roles list`, or a
+# generated region, the only exception.
 # Partial lists (a deliberate subset of a role) are not copies and are not reported.
 #
 # Tests, documentation and `meizel/` itself are outside the rule: a fixture lists packages on
@@ -36,6 +37,7 @@ from typing import TypeGuard
 from meizel import roles as role_api
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import Checkout, EditPlan, Universe
+from meizel.roles import Roles
 
 __all__ = ["check", "parse_regions", "plan_writes", "regions", "run_roles", "write"]
 
@@ -165,8 +167,7 @@ def plan_writes(
 
 # meiva:note
 # Regenerate every region; returns one line per file rewritten.
-def write(repo: Checkout) -> list[str]:
-    declared = role_api.roles(repo.root)
+def write(repo: Checkout, declared: Roles) -> list[str]:
     universe = repo.universe()
     texts = _candidate_texts(universe)
     by_path: dict[str, list[Region]] = {}
@@ -206,7 +207,7 @@ def _covered(strings: Iterable[str], declared: Mapping[str, tuple[str, ...]]) ->
 def _message(role: str) -> str:
     return (
         f"lists every top-level package of role {role!r}; read it with "
-        f"`meizel.roles.packages({role!r})` or generate it (see meizel/contracts/enumerations.py)"
+        f"`python -m meizel roles list {role}` or generate it (see meizel/contracts/enumerations.py)"
     )
 
 
@@ -317,21 +318,20 @@ def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[D
     return sorted(found, key=lambda d: (d.path, d.line, d.message))
 
 
-def run_roles(repo: Checkout, mode: str, role_names: tuple[str, ...] = ()) -> int:
+def run_roles(repo: Checkout, declared: Roles, mode: str, role_names: tuple[str, ...] = ()) -> int:
     if mode == "list":
-        for name in role_api.packages(*role_names, root=repo.root):
+        for name in role_api.select_packages(declared, *role_names):
             print(name)
         return 0
     if mode == "projects":
-        role_api.roles(repo.root)
         for project in repo.universe().standalone_projects:
             print(project.directory)
         return 0
     if mode == "write":
-        for path in write(repo):
+        for path in write(repo, declared):
             print(f"meizel: regenerated {path}")
         return 0
-    problems = check(repo.universe(), role_api.roles(repo.root))
+    problems = check(repo.universe(), declared)
     for problem in problems:
         print(problem.render())
     if problems:

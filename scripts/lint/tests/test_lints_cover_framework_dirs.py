@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from meizel import lint_common
-from meizel.owners import clock_lattice
+from meizel.checkout import roles_at
+from meizel.roles import select_packages
 from meizel.tests.synthetic import STANDALONE_PROJECT
 from scripts.lint import async_no_sync_blocking, termination_source
 from scripts.lint.diagnostics import logger_add_diagnose, loguru_format, no_emoji, time_bomb
@@ -20,7 +21,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 @pytest.mark.parametrize(
     "scan_dirs",
     [
-        clock_lattice.SCAN_DIRS,
+        select_packages(roles_at(_REPO_ROOT), "application", "tooling"),
         no_emoji.SCAN_DIRS,
         termination_source.SCAN_DIRS,
         logger_add_diagnose.SCAN_DIRS,

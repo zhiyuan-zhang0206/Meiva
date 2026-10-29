@@ -62,21 +62,26 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 sys.path.insert(0, str(_REPO_ROOT))
 
+# meiva:link scripts/docs/scripts.meiva.okf.md
 from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 
 if __name__ == "__main__":
     enter_scratch_home()
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+from meizel import lint_common  # noqa: E402
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
+
+ROLES = roles_at(_REPO_ROOT)
 
 # Only OUR non-test code. Tests deliberately write unstamped corpses as fixtures.
 # Every tree that could reach agents_meta is covered, not just the ones that write it
 # today — `meiva_builtins` currently only READS the table, and this is
 # what keeps a future write there from being the one site nobody was checking.
-SCAN_DIRS = packages("application", "standalone", "tooling")
+SCAN_DIRS = select_packages(ROLES, "application", "standalone", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),

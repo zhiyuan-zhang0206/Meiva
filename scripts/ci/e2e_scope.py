@@ -40,12 +40,15 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
-from meizel.roles import packages  # noqa: E402 - standalone script
+from meizel.checkout import roles_at  # noqa: E402
+from meizel.roles import select_packages  # noqa: E402
+
+ROLES = roles_at(_REPOSITORY_ROOT)
 
 # The packages that carry their own `tests` directories: the application packages and the
 # repository's own tooling (not `tests`, `ui`, the schedule templates or the demos).
-APPLICATION_PACKAGES = packages("application")
-TOOLING_PACKAGES = packages("tooling")
+APPLICATION_PACKAGES = select_packages(ROLES, "application")
+TOOLING_PACKAGES = select_packages(ROLES, "tooling")
 PACKAGES = (*APPLICATION_PACKAGES, *TOOLING_PACKAGES)
 _PACKAGE_UNIT_TEST = re.compile(rf"(?:{'|'.join(PACKAGES)})/(?:[^/]+/)*tests/(?:[^/]+/)*[^/]+\.py")
 _TOOLING_PYTHON = re.compile(rf"(?:{'|'.join(TOOLING_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")

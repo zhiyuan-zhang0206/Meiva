@@ -18,13 +18,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.roles import packages
+from meizel.checkout import roles_at
+from meizel.roles import select_packages
 from meizel.state import lint_paths
 from meizel.state import no_os_environ_plan as plan
 
 __all__ = ["main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+ROLES = roles_at(_REPO_ROOT)
 
 # Everything below is listed in meizel.policy.toml under [no-os-environ], each entry with its reason.
 _POLICY = allowances.load(_REPO_ROOT)
@@ -35,7 +38,9 @@ _TEST_ONLY_DIRS = _POLICY.names("no-os-environ", "test-only-dirs")
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
 _SCAN_TARGETS = plan.scan_targets(
-    packages("application", "standalone"), packages("tooling"), _TEST_ONLY_DIRS
+    select_packages(ROLES, "application", "standalone"),
+    select_packages(ROLES, "tooling"),
+    _TEST_ONLY_DIRS,
 )
 
 _PROVIDER_KEY_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "provider-key-vars"))
