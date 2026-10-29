@@ -40,6 +40,7 @@ class DataPlaneConfig:
     memory_search_backend: str
     embedding_backend: str
     walg_config_file: Path | None
+    embedding_revision: str | None = None
 
     # meiva:note
     # Whether the data plane is hosted off-box: derived from the URLs, never stored, so a copy with
@@ -69,5 +70,6 @@ def data_plane_config_from_boot(boot: ConfigBoot) -> DataPlaneConfig:
         events_channel=plane.events_channel,
         memory_search_backend=view.services.memory_search_backend,
         embedding_backend=view.services.embedding_backend,
+        embedding_revision=view.services.embeddinggemma_revision,
         walg_config_file=view.walg.walg_config_file,
     )

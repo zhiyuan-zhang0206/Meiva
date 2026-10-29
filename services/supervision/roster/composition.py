@@ -116,6 +116,7 @@ def build_services(
     memory_search_port = int(get_field("memory_search_port"))
     memory_search_uri = str(get_field("memory_search_uri"))
     embedding_backend = str(get_field("embedding_backend"))
+    embedding_revision = get_field("embeddinggemma_revision")
     gateway_port = int(get_field("gateway_port"))
     browser_origin = str(get_field("browser_origin"))
     browser_cdp_port = int(get_field("browser_cdp_port"))
@@ -238,6 +239,7 @@ def build_services(
                 memory_search_probe,
                 uri=memory_search_uri,
                 embedding_name=embedding_backend,
+                embedding_revision=embedding_revision,
             ),
             healthcheck_module="services.supervision.healthchecks.memory_search",
         ),

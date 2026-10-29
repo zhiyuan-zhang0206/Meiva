@@ -22,6 +22,8 @@ from base.config import ConfigBoot
 from base.host.env.health_ports import health_port
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 from ops.cluster.rpc import RpcClient
+from services.derived.memory_indexer.embeddings import factory as embedding_factory
+from services.derived.memory_indexer.embeddings.embeddinggemma import EmbeddingGemmaConfig
 
 
 # meiva:note
@@ -138,6 +140,7 @@ class MemorySearchSettings:
     rerank_model: str
     rerank_candidates: int
     dedup_candidates: int
+    embeddinggemma_config: EmbeddingGemmaConfig | None = None
 
 
 # meiva:note
@@ -356,6 +359,17 @@ def gateway_config_from_boot(
             rerank_model=services.memory_rerank_model,
             rerank_candidates=services.memory_rerank_candidates,
             dedup_candidates=services.memory_dedup_candidates,
+            embeddinggemma_config=embedding_factory.embeddinggemma_config(
+                services.embedding_backend,
+                endpoint=services.embeddinggemma_endpoint,
+                model=services.embeddinggemma_model,
+                revision=services.embeddinggemma_revision,
+                api_key=(
+                    None
+                    if services.embeddinggemma_api_key is None
+                    else services.embeddinggemma_api_key.get_secret_value()
+                ),
+            ),
         ),
         heartbeat=HeartbeatTiming(
             idle_threshold_seconds=daemon.heartbeat_idle_threshold_seconds,

@@ -19,7 +19,13 @@ from collections.abc import Sequence
 import httpx
 import numpy as np
 
-from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit
+from services.derived.memory_indexer.backends.base import (
+    BATCH_COMMIT_TIMEOUT_S,
+    EMBEDDING_SPACE_HEADER,
+    INDEX_API_PREFIX,
+    KIND_BODY,
+    ChunkHit,
+)
 
 
 def _hits_of(body: dict[str, list[dict[str, object]]]) -> list[ChunkHit]:
@@ -40,8 +46,9 @@ class NumPyBackend:
 
     name = "numpy"
 
-    def __init__(self, *, uri: str, readonly: bool = False) -> None:
+    def __init__(self, *, uri: str, fingerprint: str, readonly: bool = False) -> None:
         self._uri = uri
+        self._headers = {EMBEDDING_SPACE_HEADER: fingerprint}
         self._client: httpx.Client | None = None
         self._readonly = readonly
 
@@ -49,9 +56,9 @@ class NumPyBackend:
         """Open the sync client + prove the service answers (a real GET
         /meta, not a TCP connect — a foreign process on the port fails here
         and the daemon's retry loop keeps waiting)."""
-        client = httpx.Client(base_url=self._uri, timeout=5.0)
+        client = httpx.Client(base_url=self._uri, timeout=5.0, headers=self._headers)
         try:
-            client.get("/meta").raise_for_status()
+            client.get(f"{INDEX_API_PREFIX}/meta").raise_for_status()
         except Exception:
             client.close()
             raise
@@ -89,7 +96,7 @@ class NumPyBackend:
         """Write / update one chunk row — see `backends.base`."""
         self._require_writable()
         resp = self._require_client().post(
-            "/upsert",
+            f"{INDEX_API_PREFIX}/upsert",
             json={
                 "path": path,
                 "mtime": float(mtime),
@@ -107,7 +114,7 @@ class NumPyBackend:
         if not rows:
             return
         resp = self._require_client().post(
-            "/upsert_batch",
+            f"{INDEX_API_PREFIX}/upsert_batch",
             json={
                 "rows": [
                     {
@@ -121,14 +128,16 @@ class NumPyBackend:
                     for path, mtime, content_hash, embedding, kind, chunk_idx in rows
                 ]
             },
-            timeout=300.0,
+            timeout=BATCH_COMMIT_TIMEOUT_S,
         )
         resp.raise_for_status()
 
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path`; the service no-ops when absent."""
         self._require_writable()
-        self._require_client().post("/delete", json={"path": path}).raise_for_status()
+        self._require_client().post(
+            f"{INDEX_API_PREFIX}/delete", json={"path": path}
+        ).raise_for_status()
 
     def delete_stale_rows(
         self,
@@ -140,14 +149,14 @@ class NumPyBackend:
         if not entries:
             return
         self._require_client().post(
-            "/delete_stale_batch",
+            f"{INDEX_API_PREFIX}/delete_stale_batch",
             json={"entries": [{"path": path, "kind_limits": limits} for path, limits in entries]},
         ).raise_for_status()
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — see
         `backends.base`."""
-        resp = self._require_client().get("/meta")
+        resp = self._require_client().get(f"{INDEX_API_PREFIX}/meta")
         resp.raise_for_status()
         return {
             path: (float(mtime), str(hash_), str(fingerprint))
@@ -157,7 +166,7 @@ class NumPyBackend:
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
         """Exact cosine top-k files, each with its best chunk row — see `backends.base`."""
         resp = self._require_client().post(
-            "/search",
+            f"{INDEX_API_PREFIX}/search",
             json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
         )
         resp.raise_for_status()
@@ -168,9 +177,11 @@ class NumPyBackend:
     ) -> list[ChunkHit]:
         """Async twin of `search_topk` — a per-call async client bounded by
         the caller's deadline, closed in `finally`."""
-        async with httpx.AsyncClient(base_url=self._uri, timeout=timeout) as client:
+        async with httpx.AsyncClient(
+            base_url=self._uri, timeout=timeout, headers=self._headers
+        ) as client:
             resp = await client.post(
-                "/search",
+                f"{INDEX_API_PREFIX}/search",
                 json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
             )
             resp.raise_for_status()

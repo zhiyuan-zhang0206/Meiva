@@ -59,6 +59,7 @@ def build_embedder(settings: MemorySearchSettings, catalog: ModelCatalog) -> Emb
         catalog=catalog,
         timeout_s=settings.embedding_timeout,
         api_key=settings.api_key,
+        embeddinggemma_config=settings.embeddinggemma_config,
     )
 
 

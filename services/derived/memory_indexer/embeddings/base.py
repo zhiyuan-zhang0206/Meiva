@@ -1,21 +1,21 @@
-"""The embedding provider contract.
-
-One protocol (`EmbeddingProvider`), N implementations (Gemini today), one
-switch (`embeddings.factory.get_provider()` receiving
-`MEIVA_EMBEDDING_BACKEND`). The indexer daemon (document batch path) and the
-gateway search endpoint (async query path) both take their provider from
-the factory; neither imports a concrete provider directly.
-
-The provider is the single source of truth for the vector space. `dim`
-declares the row width (what every storage backend's schema must fit) and
-`fingerprint` identifies the semantic space uniquely — a provider switch
-changes the space even at the same dim, so the indexer records the
-fingerprint per index row and re-embeds any row whose fingerprint differs
-(see `services.derived.memory_indexer.daemon` and `backends.base`). Storage
-backends receive `dim` + `fingerprint` at construction via
-`backends.factory.get_backend(...)`, never by importing provider
-constants.
-"""
+# meiva:note
+# The embedding provider contract.
+#
+# One protocol (`EmbeddingProvider`), N implementations (Gemini and EmbeddingGemma HTTP), one
+# switch (`embeddings.factory.get_provider()` receiving
+# `MEIVA_EMBEDDING_BACKEND`). The indexer daemon (document batch path) and the
+# gateway search endpoint (async query path) both take their provider from
+# the factory; neither imports a concrete provider directly.
+#
+# The provider is the single source of truth for the vector space. `dim`
+# declares the row width (what every storage backend's schema must fit) and
+# `fingerprint` identifies the semantic space uniquely — a provider switch
+# changes the space even at the same dim, so the indexer records the
+# fingerprint per index row and re-embeds any row whose fingerprint differs
+# (see `services.derived.memory_indexer.daemon` and `backends.base`). Storage
+# backends receive `dim` + `fingerprint` at construction via
+# `backends.factory.get_backend(...)`, never by importing provider
+# constants.
 
 from __future__ import annotations
 
@@ -25,12 +25,13 @@ import numpy as np
 
 
 class EmbeddingAPIError(RuntimeError):
-    """An embedding provider call still failed after N retries.
-
-    The indexer daemon records the failure; a follow-up reconcile pass
-    retries the remaining dirty paths while keeping liveness beating.
-    `meiva.memory.search` wraps this as `IndexerUnavailable` and raises to the caller.
-    """
+    # meiva:note
+    # An embedding provider call failed after its bounded attempt policy.
+    #
+    # The indexer daemon records the failure; a follow-up reconcile pass
+    # retries the remaining dirty paths while keeping liveness beating.
+    # `meiva.memory.search` wraps this as `IndexerUnavailable` and raises to the caller.
+    pass
 
 
 class EmbeddingProvider(Protocol):

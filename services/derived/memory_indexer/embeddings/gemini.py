@@ -1,9 +1,8 @@
 # meiva:note
 # Gemini Embedding 2 adapter — direct REST over httpx.
 #
-# The one implementation of the `EmbeddingProvider` contract today (the
-# abstraction deliberately ships no second vendor; a new provider is a new
-# class behind `embeddings.factory`). This is a thin wrapper over the
+# The Gemini implementation of the `EmbeddingProvider` contract. This is
+# a thin wrapper over the
 # Gemini Developer API `batchEmbedContents` endpoint, moved verbatim from
 # the pre-abstraction `services/derived/memory_indexer/embedder.py` — the wire
 # contract (endpoint, payload, auth header, retry policies, dim, shape
@@ -40,8 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, override
+from typing import Any
 
 import httpx
 import numpy as np
@@ -56,6 +54,7 @@ from base.host.net.resilience import (
 )
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+from services.derived.memory_indexer.embeddings.sync_call import run_sync
 
 MODEL_ID = "gemini-embedding-2"
 DIM = 3072
@@ -199,21 +198,6 @@ async def post_attempt_once(
         raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s") from exc
 
 
-class _DetachedExecutor(ThreadPoolExecutor):
-    @override
-    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
-        super().shutdown(wait=False, cancel_futures=cancel_futures)
-
-
-def _attempt_loop() -> asyncio.AbstractEventLoop:
-    # asyncio.run waits for the default executor during shutdown, so a stalled
-    # resolver thread would extend caller-visible sync time beyond the deadline.
-    # The detached executor lets that thread finish in the background.
-    loop = asyncio.new_event_loop()
-    loop.set_default_executor(_DetachedExecutor())
-    return loop
-
-
 def embed(
     texts: list[str],
     task_type: str,
@@ -252,18 +236,7 @@ def embed(
             return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
 
     def _call() -> dict[str, Any]:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:  # noqa: S110 - no running loop is the required sync calling context
-            pass
-        else:
-            raise RuntimeError(
-                "This is the sync embedding provider API; call it from a worker thread "
-                "with asyncio.to_thread or an executor. From async code use "
-                "embed_query_async where available; batch embedding stays sync "
-                "and the indexer calls it via asyncio.to_thread."
-            )
-        return asyncio.run(_attempt(), loop_factory=_attempt_loop)
+        return run_sync(_attempt)
 
     try:
         body = retry(policy)(_call)

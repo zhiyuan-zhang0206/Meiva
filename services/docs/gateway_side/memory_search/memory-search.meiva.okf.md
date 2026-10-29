@@ -69,3 +69,7 @@ server adds no database startup requirement. Before hard exit each daemon stops
 its owned pipeline with a two-second bound; an unfinished receipt is reported,
 and cleanup failure retains a failing exit. The standalone reconciliation tool
 captures its gate only after confirmation and a nonempty query pool.
+
+## Embedding-space consistency
+
+The versioned `/v1` index protocol requires `x-meiva-embedding-space` on metadata, search and all mutations. A missing or mismatched value is HTTP 409; health and statistics remain readable. Startup ignores derived caches containing another fingerprint, including same-width models. Legacy unversioned paths are absent; new clients refuse old services before writing. This makes mixed gateway/indexer/store generations fail closed. See [[services/docs/gateway_side/memory_indexer/embeddinggemma.meiva.okf.md]].

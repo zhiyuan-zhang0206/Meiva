@@ -65,6 +65,24 @@ class MemoryStore:
         self._last_save_seconds: float | None = None
         self._saves = 0
 
+    def require_space(self, fingerprint: str | None) -> None:
+        # meiva:note
+        # Reject a client from another embedding generation before reading or writing.
+        if fingerprint != self._fingerprint:
+            raise ValueError(
+                "embedding space mismatch; restart all memory services with matching configuration"
+            )
+
+    # meiva:note
+    # Matching width alone is insufficient: every cached row must name the configured space.
+    def _cache_matches_space(self, matrix: np.ndarray, embedders: Sequence[str]) -> bool:
+        return (
+            matrix.ndim == 2
+            and matrix.shape[1] == self._dim
+            and len(embedders) == matrix.shape[0]
+            and all(fingerprint == self._fingerprint for fingerprint in embedders)
+        )
+
     # ── persistence ──────────────────────────────────────────────────────
 
     def load(self) -> None:
@@ -91,19 +109,13 @@ class MemoryStore:
                 matrix = data[_NPZ_VECTORS].astype(np.float32)
                 if matrix.ndim == 1:
                     matrix = matrix.reshape(1, -1)
-                if matrix.shape[1] != self._dim:
-                    # Another provider's vector space (same dim ≠ same
-                    # semantic space, but a different dim cannot even be
-                    # searched consistently) — the npz is a stale cache.
+                embedders = [str(e) for e in data[_NPZ_EMBEDDERS].tolist()]
+                if not self._cache_matches_space(matrix, embedders):
                     _log.warning(
-                        "[memory_search] %s vector dim %d != configured provider dim %d — "
-                        "starting empty; cold-start will rebuild the index",
+                        "[memory_search] %s cache has an incompatible vector space — starting empty",
                         self._data_file,
-                        matrix.shape[1],
-                        self._dim,
                     )
                     return
-                embedders = [str(e) for e in data[_NPZ_EMBEDDERS].tolist()]
                 pk_index = {pk: idx for idx, pk in enumerate(pks)}
         except (OSError, ValueError, EOFError, KeyError, BadZipFile) as exc:
             # np.load raises ValueError / EOFError on foreign bytes, BadZipFile

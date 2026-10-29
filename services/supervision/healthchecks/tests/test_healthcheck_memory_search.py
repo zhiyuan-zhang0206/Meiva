@@ -38,7 +38,7 @@ def test_search_probe_sends_a_zero_vector_sized_by_the_provider_descriptor() -> 
         assert hc.post_search(service.url, embedding_name="gemini") == {"hits": []}
 
         ((method, path, body),) = service.requests
-        assert (method, path) == ("POST", "/search")
+        assert (method, path) == ("POST", "/v1/search")
         assert json.loads(body) == {"vector": [0.0] * descriptor.dim, "k": 1}
 
 
