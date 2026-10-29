@@ -554,6 +554,7 @@ async def serve_ops_daemon(
         server = await start_health_server(
             "ops",
             endpoint.health_port,
+            home=home,
             host=bind_host,
             extra_routes={
                 ("POST", "/ops"): functools.partial(

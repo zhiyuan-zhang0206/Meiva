@@ -28,6 +28,7 @@ from base.daemon.health import Liveness, start_health_server
 from base.db import Database
 from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from services.entrypoints.im_bridge import daemon
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.adapters.run_plan import (
@@ -220,7 +221,7 @@ async def test_cleanup_attempts_every_resource_and_reports_an_unknown_adapter_fa
     fault = RuntimeError("unknown adapter stop fault")
     broken, healthy = _StopFault(fault), _StopFault(None)
     health = await start_health_server(
-        "im_bridge", 0, image=LoadedCommit(Path(), None), liveness=Liveness(5.0)
+        "im_bridge", 0, home=meiva_home(), image=LoadedCommit(Path(), None), liveness=Liveness(5.0)
     )
     port = health.sockets[0].getsockname()[1]
     pidfile = tmp_path / "run" / "im_bridge.pid"

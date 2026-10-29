@@ -264,7 +264,7 @@ async def run(
     liveness = Liveness(LIVENESS_TIMEOUT_S)
     endpoint = labeler_endpoint(process_config, runtime=runtime)
     health = await start_health_server(
-        "labeler", endpoint.health_port, liveness=liveness, image=image
+        "labeler", endpoint.health_port, home=meiva_home(), liveness=liveness, image=image
     )
     _log.info("[labeler] healthz listening on :%s", endpoint.health_port)
 

@@ -152,7 +152,7 @@ async def run(
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
-        "ttl_reaper", endpoint.health_port, liveness=liveness, image=image
+        "ttl_reaper", endpoint.health_port, home=meiva_home(), liveness=liveness, image=image
     )
     _log.info("[ttl-reaper] healthz listening on :%s", endpoint.health_port)
 
