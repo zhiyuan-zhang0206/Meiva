@@ -34,7 +34,7 @@ def test_mixed_ttl_usage_from_pinned_sdk_prices_each_input_token_once(
     metadata = _create_usage_metadata(usage)
     assert metadata["input_tokens"] == 1_000
     writes = cache_write_tokens(metadata.get("input_token_details") or {})
-    assert writes == (300, 400)
+    assert writes == (300, 400, 0)
     priced = quote(
         "claude-opus-5-5",
         1_000,
@@ -61,15 +61,15 @@ def test_mixed_ttl_usage_from_pinned_sdk_prices_each_input_token_once(
 @pytest.mark.parametrize(
     "details,expected",
     [
-        ({}, (0, 0)),
-        ({"cache_creation": 700}, (700, 0)),
+        ({}, (0, 0, 0)),
+        ({"cache_creation": 700}, (700, 0, 0)),
         (
             {
                 "cache_creation": 700,
                 "ephemeral_5m_input_tokens": 300,
                 "ephemeral_1h_input_tokens": 400,
             },
-            (300, 400),
+            (300, 400, 0),
         ),
         (
             {
@@ -77,12 +77,12 @@ def test_mixed_ttl_usage_from_pinned_sdk_prices_each_input_token_once(
                 "ephemeral_5m_input_tokens": 300,
                 "ephemeral_1h_input_tokens": 400,
             },
-            (300, 400),
+            (300, 400, 0),
         ),
     ],
 )
 def test_legacy_and_ttl_usage_do_not_double_count(
-    details: dict[str, int], expected: tuple[int, int]
+    details: dict[str, int], expected: tuple[int, int, int]
 ) -> None:
     assert cache_write_tokens(details) == expected
 

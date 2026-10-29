@@ -22,6 +22,7 @@ class ModelPricing(BaseModel):
     output: float  # output rate
     cache_write_5m: float | None = None
     cache_write_1h: float | None = None
+    cache_write_30m: float | None = None
 
 
 class HarnessModelInfo(BaseModel):
