@@ -432,6 +432,7 @@ async def _start(
     owned.health = await start_health_server(
         "im_bridge",
         endpoint.health_port,
+        home=meiva_home(),
         liveness=liveness,
         extra_routes={
             ("POST", "/send"): await handle_send(core),

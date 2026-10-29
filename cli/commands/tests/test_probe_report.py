@@ -106,7 +106,9 @@ def _spec(session: str, *, url: str | None) -> ServiceSpec:
         cmd="unused",
         capabilities=GATEWAY,
         requires_db=False,
-        identity_probe=None if url is None else partial(probe_home, url, timeout_s=2.0),
+        identity_probe=None
+        if url is None
+        else partial(probe_home, url, expected_home=meiva_home(), timeout_s=2.0),
     )
 
 

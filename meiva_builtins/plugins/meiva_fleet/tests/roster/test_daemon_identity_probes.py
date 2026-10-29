@@ -74,9 +74,10 @@ def test_every_standard_daemon_probe_is_scoped_to_its_name_url_and_pidfile() -> 
             name,
             f"http://localhost:{ServiceEndpoints.from_settings().of(name).health_port}/healthz",
         ), spec.session
-        assert probe.keywords == {"pidfile": ServiceEndpoints.from_settings().of(name).pidfile}, (
-            spec.session
-        )
+        assert probe.keywords == {
+            "pidfile": ServiceEndpoints.from_settings().of(name).pidfile,
+            "expected_home": meiva_home(),
+        }, spec.session
 
 
 def test_every_standard_daemon_records_the_pidfile_its_probe_reads(

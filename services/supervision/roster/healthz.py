@@ -55,7 +55,12 @@ def healthz_url(name: str) -> str:
     return f"http://localhost:{ServiceEndpoints.from_settings().of(name).health_port}/healthz"
 
 
-def daemon_identity(name: str, pidfile: Path) -> Callable[[], DaemonProbe]:
+# meiva:note
+# The probe is bound to the unit home the roster hands in, the same home
+# `probe_gate` and `probe_protocol` are bound to: a health identity check is worth
+# nothing if the value it compares against is the one the probing process happens
+# to run in.
+def daemon_identity(name: str, pidfile: Path, *, home: Path) -> Callable[[], DaemonProbe]:
     """The ``identity_probe`` for a daemon that serves the standard Meiva ``/healthz``.
 
     Binds ``probe_daemon`` to the three facts that identify one daemon: its
@@ -65,13 +70,14 @@ def daemon_identity(name: str, pidfile: Path) -> Callable[[], DaemonProbe]:
     own specs and must be able to state the same contract without restating the
     probe (``meiva_builtins/plugins/*/services.py``).
     """
-    return partial(probe_daemon, name, healthz_url(name), pidfile=pidfile)
+    return partial(probe_daemon, name, healthz_url(name), pidfile=pidfile, expected_home=home)
 
 
 def healthz_daemon(
     session: str,
     *,
     module: str,
+    home: Path,
     capabilities: frozenset[MachineRole],
     requires_db: bool,
     gate: Callable[[], str | None] | None = None,
@@ -112,7 +118,9 @@ def healthz_daemon(
         capabilities=capabilities,
         requires_db=requires_db,
         curl_url=healthz_url(name),
-        identity_probe=daemon_identity(name, ServiceEndpoints.from_settings().of(name).pidfile),
+        identity_probe=daemon_identity(
+            name, ServiceEndpoints.from_settings().of(name).pidfile, home=home
+        ),
         health_name=name,
         gate=gate,
         profile=profile,

@@ -63,6 +63,7 @@ def services(*, home: Path) -> tuple[ServiceSpec, ...]:
     return (
         healthz_daemon(
             "task-maintenance",
+            home=home,
             module="meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon",
             capabilities=_GATEWAY,
             # assert_schema_current at boot, then it scans the tasks tables — a
