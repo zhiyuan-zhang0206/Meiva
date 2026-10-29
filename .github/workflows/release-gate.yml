@@ -77,9 +77,10 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "certifying $sha as v${{ inputs.version }}"
 
+      # Stdlib only, so the refusal costs seconds and cannot fail on an environment problem.
       - name: Refuse a tree without a certified base
         run: >
-          uv run python scripts/host_ops/release/base.py
+          python3 scripts/host_ops/release/base.py
           --repo .
           --target ${{ steps.target.outputs.sha }}
           --provenance-dir release
