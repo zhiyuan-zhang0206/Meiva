@@ -33,6 +33,7 @@ from meizel.contracts.debt_sites import approved, format_approved, format_sites,
 from meizel.contracts.debt_symbol import (
     SymbolMove,
     defines,
+    parse_symbol_move_lines,
     parse_symbol_moves,
     symbol_debt,
 )
@@ -288,10 +289,27 @@ def _measured(repo: GitRepo, ref: str, extra: Collection[str]) -> list[str]:
     ]
 
 
+# meiva:note
+# The `Symbol-Move` lines the change declared, read from the record the caller passed. A missing file
+# is no declaration at all; a declaration is not proof of anything by itself — `rule_diff` re-checks
+# each one against the diff before it retargets an import.
+def _declared_symbols(repo: GitRepo, path: str | None) -> list[SymbolMove]:
+    if not path:
+        return []
+    # meiva:note
+    # Read through the seat that reads every other file: an absolute path is taken as given (the
+    # record a CI step writes under the runner's temporary directory), a relative one from the
+    # repository root. Reading it here would be a new effect site in a strict module.
+    return parse_symbol_move_lines(repo.load_text(path))
+
+
 def _run_diff(repo: GitRepo, ref: str, on_growth: str, args: argparse.Namespace) -> int:
-    rules_changed = rule_change(repo, ref, args.waive_if_changed)
+    symbols = _declared_symbols(repo, args.symbol_moves_file)
+    rules_changed = rule_change(repo, ref, args.waive_if_changed) or bool(symbols)
     if rules_changed:
-        result = rule_diff(repo, ref, totals_at(repo, ref), renames_since(repo, ref), args.jobs)
+        result = rule_diff(
+            repo, ref, totals_at(repo, ref), renames_since(repo, ref), args.jobs, symbols
+        )
         print("\n".join(result.lines()))
         print("\n".join(_measured(repo, ref, args.waive_if_changed)))
         print("\n".join(result.explanation()))

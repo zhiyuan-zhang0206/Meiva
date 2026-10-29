@@ -819,19 +819,6 @@ jobs:
       - name: Locality gate (meizel check, whole repository)
         run: env -u VIRTUAL_ENV uv run python -m meizel check
 
-      - name: Recorded locality debt against the base (fails on growth)
-        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
-        # Strict-to-be debt may only shrink. The one exception is a rule change (it edits meizel's
-        # rule code, its policy, or a manifest's declarations, which decide what is an acquisition):
-        # the tool runs the new device on the base's content and reports the change it causes there,
-        # which widening a rule makes unavoidable, and fails the growth the content causes. The base
-        # may be main or a merge-queue parent; the comparison does not depend on which, so a queued
-        # PR is not blamed for the one ahead of it. Nobody judges it by eye.
-        run: |
-          env -u VIRTUAL_ENV uv run python -m meizel debt diff \
-            --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
-            --waive-if-changed ':(glob)meizel/**/*.py' 'meizel.policy.toml' ':(exclude,glob)meizel/**/tests/**' ':(exclude,glob)meizel/state/**' ':(exclude)meizel/language/path_imports.py' ':(exclude)meizel/language/no_script_sibling_imports.py' ':(exclude)meizel/allowances.py'
-
       - name: Allowance policy removals need a declaration
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
         # meizel.policy.toml is the one closed list of allowances, so a removed entry is the one
@@ -854,9 +841,44 @@ jobs:
           # The token `gh` reads the batch's pull requests with; without it the batch is unjudged.
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The record is also written out: the steps after this one read the same text, so a
+          # `Symbol-Move` line and the `Policy-Removal` lines can never come from two different
+          # descriptions of the same change.
           env -u VIRTUAL_ENV uv run python scripts/lint/policy_removal.py \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-removal=fail \
-            --event "${GITHUB_EVENT_PATH:-}" --summary "$GITHUB_STEP_SUMMARY"
+            --event "${GITHUB_EVENT_PATH:-}" --summary "$GITHUB_STEP_SUMMARY" \
+            --record-out "$RUNNER_TEMP/pull-request-record.md"
+
+      - name: Recorded locality debt against the base (fails on growth)
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
+        # Strict-to-be debt may only shrink. The one exception is a rule change (it edits meizel's
+        # rule code, its policy, or a manifest's declarations, which decide what is an acquisition):
+        # the tool runs the new device on the base's content and reports the change it causes there,
+        # which widening a rule makes unavoidable, and fails the growth the content causes. The base
+        # may be main or a merge-queue parent; the comparison does not depend on which, so a queued
+        # PR is not blamed for the one ahead of it. Nobody judges it by eye.
+        #
+        # A change that moves a top-level function or class between files declares it in the same
+        # record, one line per move:
+        #
+        #   Symbol-Move: <old file>::<name> -> <new file> — <why>
+        #
+        # The base's replay then reads that symbol at its new home, so the same site is measured once
+        # instead of twice — once under the old name, which no longer exists, and once under the new
+        # one. Only a declared move applies, only when the diff really made it, and every rewrite is
+        # copied to the summary: a gate that repairs the tree it measures has to say so.
+        run: |
+          set -o pipefail
+          moves="$RUNNER_TEMP/pull-request-record.md"
+          args=()
+          if [ -f "$moves" ]; then args=(--symbol-moves-file "$moves"); fi
+          env -u VIRTUAL_ENV uv run python -m meizel debt diff \
+            --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
+            --waive-if-changed ':(glob)meizel/**/*.py' 'meizel.policy.toml' ':(exclude,glob)meizel/**/tests/**' ':(exclude)meizel/state/**' ':(exclude)meizel/language/path_imports.py' ':(exclude)meizel/language/no_script_sibling_imports.py' ':(exclude)meizel/allowances.py' \
+            ${args[@]+"${args[@]}"} | tee "$RUNNER_TEMP/debt-diff.log"
+          status=$?
+          grep '^base import rewritten:' "$RUNNER_TEMP/debt-diff.log" >> "$GITHUB_STEP_SUMMARY" || true
+          exit $status
 
       - name: Save pre-commit environments
         if: success() && steps.precommit-cache.outputs.cache-hit != 'true'

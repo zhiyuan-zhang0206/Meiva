@@ -234,6 +234,15 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
         help="with --by-target and no prefix: how many dotted names of a target form a group",
     )
     growth.add_argument(
+        "--symbol-moves-file",
+        metavar="path",
+        help=(
+            "read `Symbol-Move: <old file>::<name> -> <new file> — <why>` lines from this file (the "
+            "pull request record): each one lets the base's replay find the moved symbol at its new "
+            "home, and the run reports every import it rewrote"
+        ),
+    )
+    growth.add_argument(
         "--waive-if-changed",
         nargs="+",
         default=[],

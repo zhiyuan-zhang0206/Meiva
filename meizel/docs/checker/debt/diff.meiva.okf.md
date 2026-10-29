@@ -54,6 +54,14 @@ not a repair and must not look like one.
   violation fails, on purpose — letting both through together is the one hole this comparison exists
   to close, and `test_a_rule_change_that_also_adds_a_violation_fails` owns that rule. A file that
   would need recorded debt is a file to write clean, or to fix in the change that adds it.
+- A change that moves a top-level function or class between files declares it in the pull request
+  record, one line per move: `Symbol-Move: <old file>::<name> -> <new file> — <why>`. The base's
+  replay then reads that symbol at its new home, so the same site is measured once instead of twice,
+  and every import it rewrites is printed with its file and line — and copied into the CI summary,
+  because a gate that repairs the tree it measures has to say so. Only a declared move applies, only
+  when the change really made it — the name has left the old file, the new one defines it, and the
+  diff touches both — and a declaration that describes no move is a warning, not a failure. Nothing
+  here remembers a move for a later change: the line lives in the record of the change that needs it.
 - `--waive-if-changed <pathspec>...` adds pathspecs that also count as a rule change (CI passes the
   rule-code set). It only adds to the detection above; a change that touches none of them is judged
   by totals, with no waiver.
