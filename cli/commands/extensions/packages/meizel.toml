@@ -6,6 +6,3 @@ exports = ["cluster_registry.py", "refresh.py", "refresh_git_plan.py", "refresh_
 
 [purity]
 "refresh_git_plan.py" = "strict"
-
-[debt.ambient-read]
-"refresh.py#environ base.host.git.gitenv.git_env" = 6
