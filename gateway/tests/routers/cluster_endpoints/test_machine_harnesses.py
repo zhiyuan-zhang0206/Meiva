@@ -148,6 +148,33 @@ def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySette
     ]
 
 
+def test_only_explicit_refresh_probes_the_runner(
+    db_conn: psycopg.Connection, set_machine_identity: MachineIdentitySetter
+) -> None:
+    machine = set_machine_identity(role="gateway", name="gw-only")
+    with (
+        runner_ops(db_conn, REMOTE, {"harness_probe": completed(_WIRE)}) as runner,
+        gateway_test_client(machine=machine) as client,
+    ):
+        path = f"/api/cluster/machines/{REMOTE}/harnesses"
+        for _ in range(2):
+            response = client.get(path)
+            assert response.status_code == 200, response.text
+            assert response.json() == []
+        assert runner.calls_of("harness_probe") == []
+
+        refreshed = client.post(f"{path}/refresh")
+        assert refreshed.status_code == 200, refreshed.text
+        assert len(runner.calls_of("harness_probe")) == 1
+        assert [row["harness"] for row in refreshed.json()] == [h.value for h in Harness]
+
+        assert client.get(path).json() == refreshed.json()
+        assert len(runner.calls_of("harness_probe")) == 1
+
+        assert client.post(f"{path}/refresh").status_code == 200
+        assert len(runner.calls_of("harness_probe")) == 2
+
+
 # meiva:note
 # The two refusals reach the client as HTTP status plus a readable detail, which the
 # form turns into `unknown` — it never renders "no such machine" as "not installed".

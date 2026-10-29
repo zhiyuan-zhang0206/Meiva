@@ -34,7 +34,7 @@ Native uses the model's `reasoning_effort_options` and
 `harness_settings`. An unsupported stored effort falls back to the selected
 harness binding's concrete default, never the native model default. External harnesses expose no history-model or summary-effort settings: their
 CLI owns context and compaction, and Meiva retains a basic timeline projection.
-The footer states the action only — one `Spawn` button, disabled with
+The action rail puts `Refresh` immediately above `Spawn`. Spawn is disabled with
 the first refusal that applies (a down host, then a harness the machine cannot
 start).
 
@@ -74,9 +74,15 @@ row records it once and a fork inherits its source's value, so the fork dialog
 says so instead of offering a choice the backend would refuse with
 `fork_harness_mismatch`.
 
-The picker reads `GET /api/cluster/machines/{name}/harnesses` for the machine
-the agent would be placed on — the probe runs where the runtime would run, not on
-the gateway. The wire row carries `status` (`available` / `unavailable` /
+Opening the picker reads the last snapshot from
+`GET /api/cluster/machines/{name}/harnesses`; it never starts a probe. The sidebar
+has no page-load warm-up. `Refresh` explicitly calls
+`POST /api/cluster/machines/{name}/harnesses/refresh` for the selected machine,
+with a pending state and repeat clicks disabled. Successful results replace that
+machine's query cache even if the selection changed during the request; failure
+keeps prior results and shows a retryable error. An empty snapshot asks the user
+to refresh. The gateway retains snapshots until its next explicit check or
+restart, and coalesces concurrent checks per machine. The wire row carries `status` (`available` / `unavailable` /
 `unknown`), the probe's `reason`, and `launchable`; the row on screen carries one
 word. `available` when `launchable`, `unavailable` otherwise, and the row is
 disabled in the second case. `unknown` and `unavailable` are one thing to the

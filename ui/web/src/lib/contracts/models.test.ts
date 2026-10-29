@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { groupedModels, isSuperseded, providerLabel, runsOnHarness } from "./models";
+import { groupedModels, isSuperseded, modelLabel, providerLabel, reasoningEffortLabel, runsOnHarness } from "./models";
 import type { ModelsResponse } from "./types";
 
 function modelsResponse(
@@ -42,6 +42,27 @@ describe("providerLabel", () => {
 
   it("handles an empty string without throwing", () => {
     expect(providerLabel("")).toBe("");
+  });
+});
+
+describe("readable execution labels", () => {
+  it.each([
+    ["gemini-4-argon", "Gemini 4 Argon"],
+    ["claude-fable-5-1", "Claude Fable 5.1"],
+    ["gpt-6.1-sol", "GPT 6.1 Sol"],
+    ["gpt-6.1-sol-fast", "GPT 6.1 Sol Fast"],
+    ["claude-haiku-4-5-20251001", "Claude Haiku 4.5 20251001"],
+    ["deepseek-v4-pro", "DeepSeek V4 Pro"],
+    ["gpt-oss-120b", "GPT OSS 120B"],
+    ["custom-model", "Custom Model"],
+  ])("formats %s without requiring a model roster", (id, label) => {
+    expect(modelLabel(id)).toBe(label);
+  });
+
+  it("formats effort without changing its wire value", () => {
+    expect(reasoningEffortLabel("high")).toBe("High");
+    expect(reasoningEffortLabel("xhigh")).toBe("Extra High");
+    expect(reasoningEffortLabel("ultra")).toBe("Ultra");
   });
 });
 

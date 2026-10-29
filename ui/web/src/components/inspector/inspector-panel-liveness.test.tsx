@@ -38,7 +38,7 @@ describe("InspectorPanel liveness identity rows", () => {
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
     const livenessSection = screen.getByText("Liveness").closest("section");
     expect(within(livenessSection!).getByText("Codex")).toBeTruthy();
-    expect(within(livenessSection!).getByText("claude-opus-4-8")).toBeTruthy();
+    expect(within(livenessSection!).getByText("Claude Opus 4.8")).toBeTruthy();
   });
 
   it("hides TPS, LM Output, and Code Execution in Activity for external harnesses", async () => {

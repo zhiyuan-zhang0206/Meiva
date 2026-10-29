@@ -246,7 +246,7 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
     expect(screen.getByText('["example-skill","*"]')).toBeTruthy();
     expect(screen.queryByText(/example_skill/)).toBeNull();
-    expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
+    expect(screen.getByText("Claude Opus 4.8")).toBeTruthy();
   });
 
   it("window selector re-queries with the chosen hours", async () => {

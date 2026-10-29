@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { groupedModels, providerLabel } from "@/lib/contracts/models";
+import { groupedModels, modelLabel, providerLabel } from "@/lib/contracts/models";
 import type { ResolvedFieldView } from "@/lib/contracts/types";
 
 import { fieldLabel, formatConfigValue } from "../config-groups";
@@ -98,7 +98,7 @@ export function PerModelPanel({
             <optgroup key={provider} label={providerLabel(provider)}>
               {ids.map((m) => (
                 <option key={m} value={m}>
-                  {m}
+                  {modelLabel(m)}
                 </option>
               ))}
             </optgroup>
