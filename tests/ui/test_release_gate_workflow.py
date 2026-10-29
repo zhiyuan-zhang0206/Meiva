@@ -41,8 +41,8 @@ def test_the_precheck_refuses_a_tree_without_a_certified_base() -> None:
     refusal = _step(precheck["steps"], "Refuse a tree without a certified base")
 
     assert "scripts/host_ops/release/base.py" in refusal["run"]
-    # The first release can only bootstrap here; base.py holds the history condition that
-    # closes the door again, so the flag is wiring, not the decision.
+    # meiva:note
+    # The first release can only bootstrap here; base.py holds the history condition that closes the door again, so the flag is wiring, not the decision.
     assert "--bootstrap-when-empty" in refusal["run"]
 
 
