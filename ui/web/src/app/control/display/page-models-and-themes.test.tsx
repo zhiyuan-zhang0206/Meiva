@@ -45,12 +45,12 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("deepseek-v4-pro")).toBeTruthy();
+      expect(screen.getByText("DeepSeek V4 Pro")).toBeTruthy();
     });
     expect(screen.getByText("DeepSeek")).toBeTruthy();
     expect(screen.getByText("Claude")).toBeTruthy();
-    expect(screen.getByText("claude-sonnet-5")).toBeTruthy();
-    expect(screen.getByText("claude-haiku-4-5-20251001")).toBeTruthy();
+    expect(screen.getByText("Claude Sonnet 5")).toBeTruthy();
+    expect(screen.getByText("Claude Haiku 4.5 20251001")).toBeTruthy();
   });
 
   it("writes the provider switch to models.hidden_providers and the model switch to models.hidden", async () => {
@@ -66,7 +66,7 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
       expect(transport.putSetting).toHaveBeenCalledWith("models.hidden_providers", ["claude"]);
     });
 
-    fireEvent.click(screen.getByRole("switch", { name: "claude-opus-5-5" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Claude Opus 5.5" }));
     await waitFor(() => {
       expect(transport.putSetting).toHaveBeenCalledWith("models.hidden", ["claude-opus-5-5"]);
     });
@@ -93,10 +93,10 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
     });
     renderPage();
 
-    await screen.findByLabelText<HTMLButtonElement>("deepseek-flash");
-    expect(screen.queryByLabelText("deepseek-v4-pro")).toBeNull();
+    await screen.findByLabelText<HTMLButtonElement>("DeepSeek Flash");
+    expect(screen.queryByLabelText("DeepSeek V4 Pro")).toBeNull();
     expect(screen.queryByText(/superseded by/)).toBeNull();
-    expect(screen.getByLabelText<HTMLButtonElement>("deepseek-flash").disabled).toBe(false);
+    expect(screen.getByLabelText<HTMLButtonElement>("DeepSeek Flash").disabled).toBe(false);
   });
 
   it("has no Theme section when no plugin contributes a skin", async () => {

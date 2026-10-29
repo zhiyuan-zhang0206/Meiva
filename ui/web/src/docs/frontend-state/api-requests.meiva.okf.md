@@ -48,7 +48,7 @@ Every reader takes what the root hands down: components and hooks call `useApi()
 the global and per-agent streams arrive through `useEventStream.tsx`'s contexts, and
 a module that cannot call a hook takes the client as a required parameter
 (`inspector-queries.ts:fetchWindowedInspect`,
-`use-harness-availability.ts:probeQuery`). All of them throw outside their provider;
+`use-harness-availability.ts:snapshotQuery`). All of them throw outside their provider;
 only the composition root itself imports `api.ts`.
 
 ## Test boundary

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
+from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException
 
@@ -14,34 +14,49 @@ from gateway.cluster.schemas import HarnessAvailability
 from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import HarnessProbeResult
 
-_HARNESS_CACHE_TTL_S = 30.0
-
 
 # meiva:note
-# The probe answers for the machine an agent would be born on, so it runs there —
-# this module only asks and remembers. An answer is cached per machine for 30
-# seconds because an install or a login changes at human speed, while the spawn
-# form can be opened, closed and reopened many times in that window.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# Reads retain the last explicit probe for this gateway process. Reading or
+# expiring a snapshot never starts a machine probe; only refresh does that.
+# meiva:link base/agents/docs/harness/availability.meiva.okf.md
 class HarnessProbeCache:
-    def __init__(self, *, ttl_s: float = _HARNESS_CACHE_TTL_S) -> None:
-        self._ttl_s = ttl_s
-        self._rows: dict[str, tuple[float, list[HarnessAvailability]]] = {}
+    def __init__(self) -> None:
+        self._rows: dict[str, list[HarnessAvailability]] = {}
         self._lock = threading.Lock()
+        self._refreshes: dict[str, asyncio.Future[list[HarnessAvailability]]] = {}
 
-    # meiva:note
-    # A stale entry is dropped by the reader, so an expired answer is never
-    # mistaken for a fresh one; the caller recomputes and stores the replacement.
     def get(self, machine: str) -> list[HarnessAvailability] | None:
         with self._lock:
-            cached = self._rows.get(machine)
-            if cached is None or time.monotonic() - cached[0] >= self._ttl_s:
-                return None
-            return cached[1]
+            return self._rows.get(machine)
 
     def store(self, machine: str, rows: list[HarnessAvailability]) -> None:
         with self._lock:
-            self._rows[machine] = (time.monotonic(), rows)
+            self._rows[machine] = rows
+
+    async def refresh(
+        self, machine: str, probe: Callable[[], Awaitable[list[HarnessAvailability]]]
+    ) -> list[HarnessAvailability]:
+        pending = self._refreshes.get(machine)
+        if pending is not None:
+            return await asyncio.shield(pending)
+        pending = asyncio.get_running_loop().create_future()
+        self._refreshes[machine] = pending
+        # meiva:note
+        # The first HTTP request owns the probe directly; followers share only
+        # its result. Cancelling a follower cannot cancel that request's work.
+        # Cancelling the leader ends its probe and all followers honestly.
+        # meiva:link base/agents/docs/harness/availability.meiva.okf.md
+        try:
+            rows = await probe()
+            self.store(machine, rows)
+            pending.set_result(rows)
+            return rows
+        except BaseException as exc:
+            pending.set_exception(exc)
+            pending.exception()
+            raise
+        finally:
+            self._refreshes.pop(machine, None)
 
 
 # meiva:note
@@ -49,10 +64,10 @@ class HarnessProbeCache:
 # birth one there, so its install state would be an answer to a question nobody can
 # act on — it reports 503 like any other unrunnable target, and the form shows
 # `unknown` rather than a `launchable` option that leads nowhere.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
-async def probe_harnesses(
-    target: str, *, db: Database, local_machine: MachineIdentityReader, rpc: RpcClient
-) -> HarnessProbeResult:
+# meiva:link base/agents/docs/harness/availability.meiva.okf.md
+async def require_harness_target(
+    target: str, *, db: Database, local_machine: MachineIdentityReader
+) -> None:
     if target == local_machine.name():
         role = local_machine.role()
     else:
@@ -68,6 +83,12 @@ async def probe_harnesses(
                 "it cannot run an agent, so it cannot report which harnesses it can run"
             ),
         )
+
+
+async def probe_harnesses(
+    target: str, *, db: Database, local_machine: MachineIdentityReader, rpc: RpcClient
+) -> HarnessProbeResult:
+    await require_harness_target(target, db=db, local_machine=local_machine)
     return HarnessProbeResult.model_validate(
         await dispatch_op(db, target, "harness_probe", {}, rpc=rpc)
     )

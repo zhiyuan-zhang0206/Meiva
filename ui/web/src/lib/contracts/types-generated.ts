@@ -1151,6 +1151,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cluster/machines/{name}/harnesses/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refresh_machine_harnesses_api_cluster_machines__name__harnesses_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cluster/machines/{name}/staging": {
         parameters: {
             query?: never;
@@ -6253,6 +6269,35 @@ export interface operations {
         };
     };
     get_machine_harnesses_api_cluster_machines__name__harnesses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HarnessAvailability"][];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_machine_harnesses_api_cluster_machines__name__harnesses_refresh_post: {
         parameters: {
             query?: never;
             header?: never;

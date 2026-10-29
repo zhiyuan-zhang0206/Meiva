@@ -1,3 +1,4 @@
+import { modelLabel, reasoningEffortLabel } from "@/lib/contracts/models";
 // meiva:note
 // SpawnForm renders inside the sidebar's create popover, so every test mounts it
 // directly. Agent processes only run on agent-runner machines: a form with no
@@ -188,7 +189,9 @@ function column(element: HTMLElement, name: string): HTMLElement {
 }
 
 function row(element: HTMLElement, name: string, option: string | RegExp): HTMLElement {
-  return within(column(element, name)).getByRole("button", { name: option });
+  const raw = typeof option === "string" ? option : option.source;
+  const label = name === MODEL_COLUMN ? modelLabel(raw) : name === EFFORT_COLUMN ? reasoningEffortLabel(raw) : raw;
+  return within(column(element, name)).getByRole("button", { name: typeof option === "string" ? label : new RegExp(label, option.flags) });
 }
 
 function selected(element: HTMLElement, name: string, option: string | RegExp): boolean {
@@ -304,8 +307,8 @@ describe("spawn table", () => {
     const form = await table();
     pick(form, HARNESS_COLUMN, "Codex");
     expect(selected(form, EFFORT_COLUMN, "low")).toBe(true);
-    expect(within(column(form, EFFORT_COLUMN)).queryByRole("button", { name: "minimal" })).toBeNull();
-    expect(within(column(form, EFFORT_COLUMN)).queryByRole("button", { name: "medium" })).toBeNull();
+    expect(within(column(form, EFFORT_COLUMN)).queryByRole("button", { name: "Minimal" })).toBeNull();
+    expect(within(column(form, EFFORT_COLUMN)).queryByRole("button", { name: "Medium" })).toBeNull();
     pick(form, EFFORT_COLUMN, "ultra");
     fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith({
@@ -358,7 +361,7 @@ describe("spawn table", () => {
     const form = await table();
     expect(row(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBeTruthy();
     pick(form, HARNESS_COLUMN, "Claude Code");
-    expect(within(column(form, MODEL_COLUMN)).queryByText("deepseek-v4-pro")).toBeNull();
+    expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("deepseek-v4-pro"))).toBeNull();
     expect(selected(form, MODEL_COLUMN, /claude-opus-4-8/)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith({
@@ -391,10 +394,10 @@ describe("spawn table", () => {
     });
     wrap();
     const form = await table();
-    expect(within(column(form, MODEL_COLUMN)).queryByText("gpt-5.6")).toBeTruthy();
+    expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("gpt-5.6"))).toBeTruthy();
     pick(form, HARNESS_COLUMN, "Codex");
-    expect(within(column(form, MODEL_COLUMN)).queryByText("deepseek-v4-pro")).toBeTruthy();
-    expect(within(column(form, MODEL_COLUMN)).queryByText("gpt-5.6")).toBeNull();
+    expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("deepseek-v4-pro"))).toBeTruthy();
+    expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("gpt-5.6"))).toBeNull();
     expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
   });
 

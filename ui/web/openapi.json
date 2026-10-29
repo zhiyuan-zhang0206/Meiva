@@ -3697,7 +3697,7 @@
     "/api/cluster/machines/{name}/harnesses": {
       "get": {
         "summary": "Get Machine Harnesses",
-        "description": "What one machine can run, one row per harness, cached 30 seconds.",
+        "description": "Read the last explicit harness check. Empty until refreshed; never probes a runner.",
         "operationId": "get_machine_harnesses_api_cluster_machines__name__harnesses_get",
         "parameters": [
           {
@@ -3721,6 +3721,50 @@
                     "$ref": "#/components/schemas/HarnessAvailability"
                   },
                   "title": "Response Get Machine Harnesses Api Cluster Machines  Name  Harnesses Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cluster/machines/{name}/harnesses/refresh": {
+      "post": {
+        "summary": "Refresh Machine Harnesses",
+        "description": "Explicitly check one runner's harness installations and login state, replacing its snapshot on success.",
+        "operationId": "refresh_machine_harnesses_api_cluster_machines__name__harnesses_refresh_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HarnessAvailability"
+                  },
+                  "title": "Response Refresh Machine Harnesses Api Cluster Machines  Name  Harnesses Refresh Post"
                 }
               }
             }

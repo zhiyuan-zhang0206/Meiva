@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { providerLabel } from "@/lib/contracts/models";
+import { modelLabel, providerLabel } from "@/lib/contracts/models";
 import type { ModelsResponse } from "@/lib/contracts/types";
 
 import { ModelPickerSection } from "./_model_picker";
@@ -49,7 +49,7 @@ function renderPicker(overrides: Partial<Parameters<typeof ModelPickerSection>[0
 
 afterEach(cleanup);
 
-const switchNamed = (name: string) => screen.getByRole("switch", { name });
+const switchNamed = (name: string) => screen.getByRole("switch", { name: modelLabel(name) });
 
 describe("ModelPickerSection hierarchy", () => {
   it("keeps every model inside the group its provider heading owns", () => {
@@ -62,7 +62,7 @@ describe("ModelPickerSection hierarchy", () => {
       expect(group?.getAttribute("data-provider-group")).toBe(provider);
 
       for (const model of models) {
-        const toggle = within(section).getByRole("switch", { name: model });
+        const toggle = within(section).getByRole("switch", { name: modelLabel(model) });
         expect(toggle.closest("[data-provider-group]")).toBe(group);
       }
     }
@@ -70,12 +70,10 @@ describe("ModelPickerSection hierarchy", () => {
     expect(section.querySelectorAll("[data-provider-group]")).toHaveLength(GROUPS.length);
   });
 
-  it("prints a provider name once instead of in every row", () => {
+  it("keeps one provider heading above the readable model labels", () => {
     renderPicker();
-    const text = screen.getByTestId("model-picker").textContent;
-
-    expect(text.split("DeepSeek")).toHaveLength(2);
-    expect(text.split("Claude")).toHaveLength(2);
+    expect(screen.getAllByRole("heading").map((el) => el.textContent)).toEqual(["DeepSeek", "Claude"]);
+    expect(screen.getByText("Claude Opus 5.5")).toBeTruthy();
   });
 
   it("reaches a provider before the models it governs", () => {
@@ -84,10 +82,10 @@ describe("ModelPickerSection hierarchy", () => {
 
     expect(within(section).getAllByRole("switch").map((el) => el.getAttribute("aria-label"))).toEqual([
       "DeepSeek",
-      "deepseek-flash",
+      "DeepSeek Flash",
       "Claude",
-      "claude-opus-5-5",
-      "claude-sonnet-5-5",
+      "Claude Opus 5.5",
+      "Claude Sonnet 5.5",
     ]);
     const tabbable = [...section.querySelectorAll("[tabindex]")].filter(
       (el) => Number(el.getAttribute("tabindex")) > 0,
