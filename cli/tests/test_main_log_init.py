@@ -343,7 +343,7 @@ def _cold_report(
         producer=args.producer,
         services=frozenset({"prometheus"}),
         helper=refuse_helper,
-        host=fake_host(platform=DARWIN_ARM64),
+        host=fake_host(platform=DARWIN_ARM64, uid=os.geteuid()),
         session=UserSession(user_home=path, login_shell="/bin/zsh", interactive=False),
         timers=ManualTimers(),
         clock=Clock(
