@@ -76,6 +76,7 @@ def get_models(request: Request) -> ModelsResponse:
                 output=rates.output,
                 cache_write_5m=rates.cache_write_5m,
                 cache_write_1h=rates.cache_write_1h,
+                cache_write_30m=rates.cache_write_30m,
             )
 
             resolved_effort = explain_setting(

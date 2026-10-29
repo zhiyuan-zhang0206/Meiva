@@ -108,6 +108,9 @@ export function SpawnTable({
             ...(price.cache_write_1h != null
               ? [t("cacheWritePrice", { duration: "1h", price: formatModelPrice(price.cache_write_1h) })]
               : []),
+            ...(price.cache_write_30m != null
+              ? [t("cacheWritePrice", { duration: "30m", price: formatModelPrice(price.cache_write_30m) })]
+              : []),
           ]
         : []),
       tps

@@ -7,7 +7,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
 from loguru import logger
@@ -38,6 +38,10 @@ def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) 
         raise ValueError(f"Fast model {requested_model!r} has no served_speed adapter")
     speed = InferenceSpeed(binding.served_speed(msg.response_metadata))
     return requested_model if speed == InferenceSpeed.FAST else spec.fast_of
+
+
+def _default_cache_write_ttl(model: str, *, catalog: ModelCatalog) -> Literal["5m", "30m"]:
+    return "30m" if vendor_of_model(model, catalog=catalog) == "openai" else "5m"
 
 
 def _metered_cache_read(usage: Mapping[str, Any], cached: int) -> int | None:
@@ -82,6 +86,7 @@ class UsageFields:
     tok_cached: int | None = None
     cache_write_5m: int = 0
     cache_write_1h: int = 0
+    cache_write_30m: int = 0
     tok_reasoning: int = 0
     latency_ms: float | None = None
     source: str | None = None
@@ -127,7 +132,10 @@ def log_usage_from_message(
     from base.lm.reasoning import extract_reasoning_tokens
 
     reasoning = extract_reasoning_tokens(msg.usage_metadata, content=msg.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    write_5m, write_1h = cache_write_tokens(usage_metadata.get("input_token_details") or {})
+    write_5m, write_1h, write_30m = cache_write_tokens(
+        usage_metadata.get("input_token_details") or {},
+        default_ttl=_default_cache_write_ttl(model, catalog=catalog),
+    )
     record: dict[str, Any] = {}
     logged = _log_usage(
         _UsageEvent(
@@ -137,6 +145,7 @@ def log_usage_from_message(
             cache_read=cache_read,
             cache_write_5m=write_5m,
             cache_write_1h=write_1h,
+            cache_write_30m=write_30m,
             reasoning=reasoning,
             latency_ms=options.latency_ms,
             decode_ms=options.decode_ms,
@@ -173,6 +182,7 @@ def log_usage_fields(
             cache_read=fields.tok_cached,
             cache_write_5m=fields.cache_write_5m,
             cache_write_1h=fields.cache_write_1h,
+            cache_write_30m=fields.cache_write_30m,
             reasoning=fields.tok_reasoning,
             latency_ms=fields.latency_ms,
             usage_kind=usage_kind,
@@ -205,6 +215,7 @@ def _price_snapshot(priced: CostQuote) -> dict[str, float]:
             for key, value in (
                 ("price_write_5m", priced.rates.cache_write_5m),
                 ("price_write_1h", priced.rates.cache_write_1h),
+                ("price_write_30m", priced.rates.cache_write_30m),
             )
             if value is not None
         },
@@ -212,7 +223,7 @@ def _price_snapshot(priced: CostQuote) -> dict[str, float]:
 
 
 def _cache_usage(
-    cache_read: int | None, in_total: int, write_5m: int, write_1h: int
+    cache_read: int | None, in_total: int, write_5m: int, write_1h: int, write_30m: int
 ) -> tuple[dict[str, int], str]:
     # meiva:note
     # Only measured cache counts enter events or their human-readable usage line.
@@ -223,8 +234,10 @@ def _cache_usage(
         text = f" cached={cache_read}"
         if in_total:
             text += f" ({cache_read / in_total * 100:.0f}%)"
-    if cache_read is not None or write_5m or write_1h:
+    if cache_read is not None or write_5m or write_1h or write_30m:
         fields.update(cache_write_5m=write_5m, cache_write_1h=write_1h)
+    if write_30m:
+        fields["cache_write_30m"] = write_30m
     return fields, text
 
 
@@ -246,6 +259,7 @@ class _UsageEvent:
     requested_model: str | None = None
     cache_write_5m: int = 0
     cache_write_1h: int = 0
+    cache_write_30m: int = 0
     attribution: str | None = None
     calls: int = 1
 
@@ -258,7 +272,11 @@ def _log_usage(
     # meiva:note
     # Emit one priced or explicitly unpriced usage event and billing span.
     cache_fields, cache_text = _cache_usage(
-        event.cache_read, event.in_total, event.cache_write_5m, event.cache_write_1h
+        event.cache_read,
+        event.in_total,
+        event.cache_write_5m,
+        event.cache_write_1h,
+        event.cache_write_30m,
     )
     reason_pct = f" ({event.reasoning / event.out_total * 100:.0f}%)" if event.out_total else ""
     priced = quote(
@@ -269,6 +287,7 @@ def _log_usage(
             read=0 if event.cache_read is None else event.cache_read,
             write_5m=event.cache_write_5m,
             write_1h=event.cache_write_1h,
+            write_30m=event.cache_write_30m,
         ),
         at=event.priced_at,
         prices=event.catalog.prices,
@@ -307,6 +326,7 @@ def _log_usage(
                 tok_cached=event.cache_read,
                 cache_write_5m=event.cache_write_5m,
                 cache_write_1h=event.cache_write_1h,
+                cache_write_30m=event.cache_write_30m,
                 cost_usd=priced.cost_usd if priced is not None else 0.0,
                 usage_kind=event.usage_kind,
                 unpriced=priced is None,
@@ -350,6 +370,7 @@ MEIVA_BILLING_ATTR_TS = "meiva.billing.ts"
 MEIVA_BILLING_ATTR_CACHE_READ_TOKENS = "meiva.billing.cache_read_tokens"
 MEIVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS = "meiva.billing.cache_write_5m_tokens"
 MEIVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS = "meiva.billing.cache_write_1h_tokens"
+MEIVA_BILLING_ATTR_CACHE_WRITE_30M_TOKENS = "meiva.billing.cache_write_30m_tokens"
 MEIVA_BILLING_ATTR_UNPRICED = "meiva.billing.unpriced"
 
 _CORE_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = ()
@@ -404,6 +425,7 @@ class BillingSpan:
     tok_cached: int | None = None
     cache_write_5m: int = 0
     cache_write_1h: int = 0
+    cache_write_30m: int = 0
     unpriced: bool = False
     start_time_ns: int | None = None
 
@@ -448,6 +470,8 @@ def emit_billing_event(span_data: BillingSpan) -> None:
             span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS, span_data.cache_write_5m)
         if span_data.cache_write_1h:
             span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS, span_data.cache_write_1h)
+        if span_data.cache_write_30m:
+            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_30M_TOKENS, span_data.cache_write_30m)
         if span_data.unpriced:
             span.set_attribute(MEIVA_BILLING_ATTR_UNPRICED, span_data.unpriced)
         span.end()
@@ -477,7 +501,10 @@ def emit_billing_from_message(
         resolved_vendor = vendor_of_model(model, catalog=catalog)
         if resolved_vendor is None:
             return
-        write_5m, write_1h = cache_write_tokens(usage_metadata.get("input_token_details") or {})
+        write_5m, write_1h, write_30m = cache_write_tokens(
+            usage_metadata.get("input_token_details") or {},
+            default_ttl=_default_cache_write_ttl(model, catalog=catalog),
+        )
         priced = quote(
             model,
             tok_in,
@@ -486,6 +513,7 @@ def emit_billing_from_message(
                 read=0 if tok_cached is None else tok_cached,
                 write_5m=write_5m,
                 write_1h=write_1h,
+                write_30m=write_30m,
             ),
             prices=catalog.prices,
         )
@@ -498,6 +526,7 @@ def emit_billing_from_message(
                 tok_cached=tok_cached,
                 cache_write_5m=write_5m,
                 cache_write_1h=write_1h,
+                cache_write_30m=write_30m,
                 cost_usd=priced.cost_usd if priced is not None else 0.0,
                 usage_kind=usage_kind,
                 unpriced=priced is None,

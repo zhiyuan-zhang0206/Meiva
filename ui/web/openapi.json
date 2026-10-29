@@ -13890,6 +13890,17 @@
               }
             ],
             "title": "Cache Write 1H"
+          },
+          "cache_write_30m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 30M"
           }
         },
         "type": "object",

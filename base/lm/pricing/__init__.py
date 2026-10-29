@@ -149,6 +149,7 @@ def plugin_model_price(
         ("output", price.output),
         ("cache_write_5m", price.cache_write_5m),
         ("cache_write_1h", price.cache_write_1h),
+        ("cache_write_30m", price.cache_write_30m),
     ):
         if value is not None and (not math.isfinite(value) or value < 0):
             raise ValueError(
@@ -170,6 +171,7 @@ def plugin_model_price(
                             "output": tier.output,
                             "cache_write_5m": getattr(tier, "cache_write_5m", None),
                             "cache_write_1h": getattr(tier, "cache_write_1h", None),
+                            "cache_write_30m": getattr(tier, "cache_write_30m", None),
                         },
                         "utc_daily_overrides": [
                             {
@@ -181,6 +183,7 @@ def plugin_model_price(
                                     "output": window.output,
                                     "cache_write_5m": getattr(window, "cache_write_5m", None),
                                     "cache_write_1h": getattr(window, "cache_write_1h", None),
+                                    "cache_write_30m": getattr(window, "cache_write_30m", None),
                                 },
                             }
                             for window in tier.windows
@@ -206,6 +209,7 @@ def plugin_model_price(
                             "output": price.output,
                             "cache_write_5m": price.cache_write_5m,
                             "cache_write_1h": price.cache_write_1h,
+                            "cache_write_30m": price.cache_write_30m,
                         },
                         "utc_daily_overrides": [],
                     }
@@ -293,33 +297,26 @@ def quote(
     """
     if tok_in is None or tok_out is None:
         return None
-    if isinstance(tok_cached, CacheTokens):
-        cache_read = tok_cached.read
-        cache_write_5m = tok_cached.write_5m
-        cache_write_1h = tok_cached.write_1h
-    else:
-        cache_read = 0 if tok_cached is None else tok_cached
-        cache_write_5m = 0
-        cache_write_1h = 0
-    if (
-        min(tok_in, tok_out, cache_read, cache_write_5m, cache_write_1h) < 0
-        or cache_read + cache_write_5m + cache_write_1h > tok_in
-    ):
+    cache = (
+        tok_cached
+        if isinstance(tok_cached, CacheTokens)
+        else CacheTokens(read=0 if tok_cached is None else tok_cached)
+    )
+    writes = (cache.write_5m, cache.write_1h, cache.write_30m)
+    if min(tok_in, tok_out, cache.read, *writes) < 0 or cache.read + sum(writes) > tok_in:
         raise ValueError("token counts must be non-negative and cached tokens cannot exceed input")
     selected = rates_at(model, at, tok_in, prices=prices)
     if selected is None:
         return None
-    if (cache_write_5m and selected.cache_write_5m is None) or (
-        cache_write_1h and selected.cache_write_1h is None
-    ):
+    write_rates = (selected.cache_write_5m, selected.cache_write_1h, selected.cache_write_30m)
+    if any(count and rate is None for count, rate in zip(writes, write_rates, strict=True)):
         return None
-    cache_miss = tok_in - cache_read - cache_write_5m - cache_write_1h
+    cache_miss = tok_in - cache.read - sum(writes)
     cost = (
         cache_miss * selected.cache_miss
-        + cache_read * selected.cache_hit
+        + cache.read * selected.cache_hit
         + tok_out * selected.output
-        + cache_write_5m * (selected.cache_write_5m or 0)
-        + cache_write_1h * (selected.cache_write_1h or 0)
+        + sum(count * (rate or 0) for count, rate in zip(writes, write_rates, strict=True))
     ) / 1_000_000
     return CostQuote(cost_usd=cost, rates=selected)
 
