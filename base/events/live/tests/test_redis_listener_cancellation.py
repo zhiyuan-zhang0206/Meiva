@@ -12,7 +12,11 @@ class _PubSub:
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
         self.open_task: asyncio.Task[object] | None = None
-        self.parent: asyncio.Task[None] | None = None
+        # meiva:note
+        # Holds whatever task the caller parked here and only ever cancels it. `wait_one`
+        # answers bool while redis's own `PubSub.parent` is typed `Task[None]`, so the slot
+        # takes the task's value type as `object` instead of demanding None.
+        self.parent: asyncio.Task[object] | None = None
         self.closed = False
 
     async def subscribe(self, channel: str) -> None:
