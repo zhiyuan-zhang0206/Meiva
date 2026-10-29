@@ -29,6 +29,7 @@ from meizel.graph.model import (
     AmbientKind,
     EntropySite,
     Sources,
+    Unless,
     stdlib_kind,
 )
 from meizel.graph.universe import Universe
@@ -99,6 +100,49 @@ def _given(call: ast.Call) -> int:
         keyword.arg is None for keyword in call.keywords
     )
     return 99 if unpacked else len(call.args) + len(call.keywords)
+
+
+# meiva:note
+# Whether the call hands the reader the value that spares its read. An explicit `None` is still a
+# read, and an argument list whose shape is hidden (`*args`) cannot prove that a value was given.
+def _spares(call: ast.Call, unless: Unless | None) -> bool:
+    if unless is None:
+        return False
+    for keyword in call.keywords:
+        if keyword.arg == unless.parameter:
+            return not _is_none(keyword.value)
+    position = unless.position
+    if position is None or len(call.args) <= position:
+        return False
+    if any(isinstance(argument, ast.Starred) for argument in call.args[: position + 1]):
+        return False
+    return not _is_none(call.args[position])
+
+
+def _is_none(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+# meiva:note
+# The dotted module a file defines (`pkg/mod.py` -> `pkg.mod`, `pkg/__init__.py` -> `pkg`), needed
+# here to spell a call of a function this same file defines.
+def _module_of(path: str) -> str:
+    parts = path.removesuffix(".py").split("/")
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+# meiva:note
+# The kind of read a call is: None when it names no reader, and None when the call hands the reader
+# the value that spares the read, so that `called` stays a list of the acquisitions it adds.
+def _reader_of(
+    call: ast.Call, callee: str | None, sources: Sources
+) -> tuple[AmbientKind, str] | None:
+    if callee is None:
+        return None
+    kind = sources.calls.get(callee)
+    if kind is None or _spares(call, sources.unless.get(callee)):
+        return None
+    return kind, callee
 
 
 # meiva:note
@@ -285,9 +329,9 @@ class AmbientRecorder:
             self._add(call.lineno, open_call[0], f"{callee}()")
         if _expands_home(call, callee) and not self._from_caller(_expanded_receiver(call)):
             self._add(call.lineno, AmbientKind.HOME, "pathlib.Path.expanduser")
-        kind = None if callee is None else self.sources.calls.get(callee)
-        if kind is not None and callee is not None:
-            self._add(call.lineno, kind, callee)
+        reader = _reader_of(call, callee, self.sources)
+        if reader is not None:
+            self._add(call.lineno, *reader)
 
     # meiva:note
     # The acquisitions of the file once every function is known. The functions of the module that
@@ -337,7 +381,14 @@ class AmbientAccess(PatchForms):
     ) -> None:
         super().__init__(universe, path, tree, walrus=walrus)
         self.ambient = AmbientRecorder(sources)
+        self.sources = sources
         self.records_ambient = not (self.test_file or is_test_path(path))
+        self.module = _module_of(path)
+        self.module_defs = frozenset(
+            node.name
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        )
         self.entropy_scopes: list[tuple[list[ast.stmt], Scope]] = []
         self.entropy_marked: list[bool] = [False]
         self.entropy_wrappers: list[tuple[str, int]] = []
@@ -346,7 +397,29 @@ class AmbientAccess(PatchForms):
         self.entropy_marked.append(False)
 
     def record_call(self, callee: str | None, call: ast.Call) -> None:
+        if callee is None:
+            callee = self._local_callee(call.func)
         self.ambient.called(callee, call, loop_clock=fake_entropy.is_loop_clock(call, self.dotted))
+
+    # meiva:note
+    # The module-level function of this same file that a bare call names, when its entry says a
+    # passed parameter spares the read. The import resolver knows only imported names, so without
+    # this the clause could not hold where a wrapper sits beside its caller. It is asked only for
+    # the readers that declare a clause: resolving every entry here would change what each of them
+    # means for the whole repository, which is a rule change of its own. The answer feeds the
+    # ambient rule alone: facts, locality and purity keep their own resolution.
+    def _local_callee(self, func: ast.expr) -> str | None:
+        if not isinstance(func, ast.Name) or func.id not in self.module_defs:
+            return None
+        target = f"{self.module}.{func.id}"
+        if target not in self.sources.unless:
+            return None
+        scope = self.scope
+        while scope.parent is not None:
+            if func.id in scope.shadowed or func.id in scope.imports:
+                return None
+            scope = scope.parent
+        return target
 
     # meiva:note
     # The clock a function is a one-line wrapper over, judged with the names of its own scope. Only a
