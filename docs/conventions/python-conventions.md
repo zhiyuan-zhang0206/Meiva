@@ -29,7 +29,7 @@ subpackage with a narrow `meizel.toml` exports door. Mechanical `_part2` or
 The budget covers the eight governed
 packages (`agent`, `meiva`, `meiva_builtins`, `gateway`, `base`, `services`, `ops`,
 `cli`) plus `tests/` and `scripts/`. The retired ambient machine_role() call rejection applies only to the eight packages.
-The TYPE_CHECKING ban follows the checked repository's application, tooling, template and
+The TYPE_CHECKING ban follows the checked repository's application, standalone, tooling, template and
 test roles, including helper modules and root/package `conftest.py`; direct `test_*.py`
 modules are excluded. Its reviewed allowances come from that repository's own policy.
 

@@ -11,6 +11,5 @@ exports = ["clock_lattice.py", "decisions.py"]
 [debt.impure-call]
 "clock_lattice.py#Path.is_file" = 1
 "clock_lattice.py#Path.resolve" = 1
-"clock_lattice.py#Path.rglob" = 1
 "decisions.py#Path.is_file" = 1
 "decisions.py#Path.resolve" = 1

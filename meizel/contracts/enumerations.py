@@ -69,7 +69,7 @@ class Region:
         if self.format == "dirs":
             return [f"{self.indent}{name}/" for name in names]
         if self.format == "regex-names":
-            return [f"{self.indent}{'|'.join(names)}"]
+            return [f"{self.indent}{'|'.join(names) if names else '(?!)'}"]
         raise MeizelError(f"{self.path}:{self.begin}: unknown generated format {self.format!r}")
 
 
@@ -321,6 +321,11 @@ def run_roles(repo: Checkout, mode: str, role_names: tuple[str, ...] = ()) -> in
     if mode == "list":
         for name in role_api.packages(*role_names, root=repo.root):
             print(name)
+        return 0
+    if mode == "projects":
+        role_api.roles(repo.root)
+        for project in repo.universe().standalone_projects:
+            print(project.directory)
         return 0
     if mode == "write":
         for path in write(repo):

@@ -146,6 +146,7 @@ def _build_parser() -> argparse.ArgumentParser:
     modes = declared.add_subparsers(dest="mode", required=True)
     listing = modes.add_parser("list", help="print the top-level directories of the given roles")
     listing.add_argument("role_names", nargs="+", metavar="role")
+    modes.add_parser("projects", help="print validated standalone projects for independent checks")
     modes.add_parser("check", help="fail on a stale generated region or a copy of a role's list")
     modes.add_parser("write", help="regenerate every generated region")
     return parser
