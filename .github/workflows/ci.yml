@@ -216,6 +216,7 @@ jobs:
             --base-ref "$(cat "$SELECTION_TMP/base.txt")" \
             --head-ref "$HEAD_REF" \
             --event "$EVENT" \
+            --batch-body "$GITHUB_EVENT_PATH" \
             --json | tee "$SELECTION_TMP/selector-output.json"
           SELECTION_JSON="$SELECTION_TMP/selector-output.json" python3 - <<'PY'
           import hashlib

@@ -195,26 +195,42 @@ The first matching rule decides the outcome. FULL keeps the full backend suite;
 SKIP keeps the existing documentation-only behavior (no backend suite); only
 SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 
-FULL has two kinds of cause and no third. Rule 1 is the queue and non-PR events,
-which run everything by design. Rules 3 to 5 are impact unknown: the selector
-cannot say which tests a change affects, so it does not guess. A large computed
-impact is not a cause: no rule compares the subset with the full suite.
+FULL has two kinds of cause and no third. Rules 1, 2 and 4 keep everything by
+construction: a non-PR event, a Trunk batch whose member list this run cannot
+read, and a batch that changes both sides of the frontend/backend contract.
+Rules 5 to 7 are impact unknown: the selector cannot say which tests a change
+affects, so it does not guess. A large computed impact is not a cause: no rule
+compares the subset with the full suite.
 
 | Order | Changed-path or event condition | Result |
 | --- | --- | --- |
-| 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
-| 2 | Every path is documentation and has no known runtime reader in either tree | SKIP |
-| 3 | A path is GLOBAL | FULL (impact unknown; `global-path:<first path>`, the payload lists every global path) |
-| 4 | A path is UNMAPPED | FULL (impact unknown; unmapped, the payload lists the paths) |
-| 5 | A deleted path without base facts | FULL (impact unknown; incomplete-impact with diagnostic locations and reasons) |
-| 6 | Otherwise, union the contribution of every path, the tree-scan tests and every test reaching an opaque input in either tree | SELECTED (owner-tests) |
+| 1 | Not a pull_request | FULL (non-pr-event) |
+| 2 | A Trunk batch whose member list cannot be read out of its body | FULL (queue-members-unknown) |
+| 3 | Every path is documentation and has no known runtime reader in either tree | SKIP |
+| 4 | A batch that changes both a frontend path and a backend one | FULL (cross-domain-batch; the payload names one path from each side) |
+| 5 | A path is GLOBAL | FULL (impact unknown; `global-path:<first path>`, the payload lists every global path) |
+| 6 | A path is UNMAPPED | FULL (impact unknown; unmapped, the payload lists the paths) |
+| 7 | A deleted path without base facts | FULL (impact unknown; incomplete-impact with diagnostic locations and reasons) |
+| 8 | Otherwise, union the contribution of every path, the tree-scan tests and every test reaching an opaque input in either tree | SELECTED (owner-tests) |
 
-A change that no test consumes still selects the tree-scan tests, so rule 6
+Rules 2 and 4 apply to a Trunk batch only, and they are the whole difference
+between a batch and a pull request. The queue's synthetic pull request lists the
+pull requests it tests under `## Pull Requests Being Tested`, and those numbers
+reach the run in the event payload — no token, no network. The batch's
+`changed.txt` is already the union of its members, so the ordinary rules measure
+it once; what a subset cannot vouch for is the completeness of that union, and a
+batch whose member list is missing keeps the full suite rather than selecting
+from a list it cannot check. A batch that spans the frontend and the backend
+keeps the full suite too: the two sides meet in a contract — a route, a payload,
+a generated type — that no owner rule crosses, so a subset built from each side
+alone can miss the test that reads both.
+
+A change that no test consumes still selects the tree-scan tests, so rule 8
 never yields an empty candidate in the repository (a candidate that held no
 test at all would be a checkout without a single tree-scan test, which
 tests/scripts/test_test_selector_contract.py rules out for the repository).
 
-Rule 4 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
+Rule 6 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
 classifies every tracked path and fails when any is UNMAPPED, so the trunk never
 reaches rule 4; a new top-level directory or root file needs a class in the
 selector before it can merge.

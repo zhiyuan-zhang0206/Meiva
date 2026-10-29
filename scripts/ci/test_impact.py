@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import ast
 import io
+import json
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -762,3 +764,37 @@ def apply_interface_cutoff(
         )
     )
     return replace(base_impact, cutoff=cutoff), replace(head_impact, cutoff=cutoff)
+
+
+# meiva:note
+# The pull requests a batch tests, out of the body the queue writes. That body also links the base
+# commit, the queue page and the batching document, so a member is a link whose text is its own
+# number. The allowance gate reads the same list as its record.
+_MEMBER_SECTION = re.compile(r"## Pull Requests Being Tested(.*?)(?=\n## |\Z)", re.DOTALL)
+_MEMBER_LINK = re.compile(r"\[(\d+)\]\([^)\s]*/pull/\1\)")
+
+
+def member_numbers(body: str) -> list[int]:
+    section = _MEMBER_SECTION.search(body)
+    if section is None:
+        return []
+    return [int(match.group(1)) for match in _MEMBER_LINK.finditer(section.group(1))]
+
+
+# meiva:note
+# The same list from the event payload's own body: no token, no network; None means "cannot tell".
+def members_from_event(path: Path) -> tuple[int, ...] | None:
+    try:
+        payload: object = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    request = payload.get("pull_request")
+    if not isinstance(request, dict):
+        return None
+    body = request.get("body")
+    if not isinstance(body, str):
+        return None
+    numbers = member_numbers(body)
+    return tuple(numbers) or None
