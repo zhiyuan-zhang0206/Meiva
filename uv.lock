@@ -1,15 +1,15 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
@@ -1300,8 +1300,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
@@ -2330,8 +2330,8 @@ wheels = [
 name = "meiva"
 version = "1.0.0"
 source = { editable = "." }
+default-groups = ["dev", "user-code"]
 dependencies = [
-    { name = "aiohttp" },
     { name = "beautifulsoup4" },
     { name = "croniter" },
     { name = "cryptography" },
@@ -2348,42 +2348,27 @@ dependencies = [
     { name = "langgraph-checkpoint-postgres" },
     { name = "lark-oapi" },
     { name = "loguru" },
-    { name = "lxml" },
     { name = "markdown-it-py" },
-    { name = "matplotlib" },
     { name = "mcp" },
     { name = "mdit-py-plugins" },
     { name = "numpy" },
-    { name = "openpyxl" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
     { name = "oss2" },
-    { name = "pandas" },
     { name = "pillow" },
     { name = "psutil" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
     { name = "pydantic-settings" },
-    { name = "pypdf" },
     { name = "pyte" },
-    { name = "python-dateutil" },
-    { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "redis" },
     { name = "requests" },
-    { name = "rich" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "statsmodels" },
-    { name = "tabulate" },
-    { name = "tqdm" },
     { name = "traceloop-sdk" },
     { name = "trafilatura" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "watchdog" },
     { name = "websockets" },
-    { name = "xlsxwriter" },
     { name = "yt-dlp" },
 ]
 
@@ -2408,10 +2393,27 @@ dev = [
     { name = "radon" },
     { name = "ruff" },
 ]
+user-code = [
+    { name = "aiohttp" },
+    { name = "lxml" },
+    { name = "matplotlib" },
+    { name = "openpyxl" },
+    { name = "pandas" },
+    { name = "pypdf" },
+    { name = "python-dateutil" },
+    { name = "python-docx" },
+    { name = "rich" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "statsmodels" },
+    { name = "tabulate" },
+    { name = "tqdm" },
+    { name = "watchdog" },
+    { name = "xlsxwriter" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.3" },
     { name = "claude-agent-sdk", marker = "extra == 'harness-claude'", specifier = ">=0.2.168,<0.3" },
     { name = "croniter", specifier = ">=6.2.2" },
@@ -2429,42 +2431,27 @@ requires-dist = [
     { name = "langgraph-checkpoint-postgres", specifier = ">=3.1.3" },
     { name = "lark-oapi", specifier = ">=1.7.1" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "lxml", specifier = ">=5.2.0" },
     { name = "markdown-it-py", specifier = ">=4.0" },
-    { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "mcp", specifier = ">=2.0.0,<3" },
     { name = "mdit-py-plugins", specifier = ">=0.6" },
     { name = "numpy", specifier = ">=2.4.4" },
-    { name = "openpyxl", specifier = ">=3.1.2" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.30" },
     { name = "opentelemetry-sdk", specifier = ">=1.30" },
     { name = "oss2", specifier = ">=2.19.1" },
-    { name = "pandas", specifier = ">=2.2.3" },
     { name = "pillow", specifier = ">=10.4.0" },
     { name = "psutil", specifier = ">=7.1.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "psycopg-pool", specifier = ">=3.2" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
-    { name = "pypdf", specifier = ">=4.2.0" },
     { name = "pyte", specifier = ">=0.8.0" },
-    { name = "python-dateutil", specifier = ">=2.9.0" },
-    { name = "python-docx", specifier = ">=1.1.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "redis", specifier = ">=7.4.0" },
     { name = "requests", specifier = ">=2.32.0" },
-    { name = "rich", specifier = ">=13.7.0" },
-    { name = "scikit-learn", specifier = ">=1.5.0" },
-    { name = "scipy", specifier = ">=1.14.1" },
-    { name = "statsmodels", specifier = ">=0.14.4" },
-    { name = "tabulate", specifier = ">=0.9.0" },
-    { name = "tqdm", specifier = ">=4.66.0" },
     { name = "traceloop-sdk", specifier = ">=0.61" },
     { name = "trafilatura", specifier = ">=2.1.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40" },
-    { name = "watchdog", specifier = ">=6.0.0" },
     { name = "websockets", specifier = ">=15.0.1" },
-    { name = "xlsxwriter", specifier = ">=3.2.0" },
     { name = "yt-dlp", specifier = ">=2026.3.17" },
 ]
 provides-extras = ["harness-claude"]
@@ -2484,6 +2471,24 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "radon", specifier = "==6.0.1" },
     { name = "ruff", specifier = ">=0.16.7,<0.17" },
+]
+user-code = [
+    { name = "aiohttp", specifier = ">=3.9.0" },
+    { name = "lxml", specifier = ">=5.2.0" },
+    { name = "matplotlib", specifier = ">=3.9.0" },
+    { name = "openpyxl", specifier = ">=3.1.2" },
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pypdf", specifier = ">=4.2.0" },
+    { name = "python-dateutil", specifier = ">=2.9.0" },
+    { name = "python-docx", specifier = ">=1.1.0" },
+    { name = "rich", specifier = ">=13.7.0" },
+    { name = "scikit-learn", specifier = ">=1.5.0" },
+    { name = "scipy", specifier = ">=1.14.1" },
+    { name = "statsmodels", specifier = ">=0.14.4" },
+    { name = "tabulate", specifier = ">=0.9.0" },
+    { name = "tqdm", specifier = ">=4.66.0" },
+    { name = "watchdog", specifier = ">=6.0.0" },
+    { name = "xlsxwriter", specifier = ">=3.2.0" },
 ]
 
 [[package]]

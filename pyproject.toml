@@ -40,7 +40,6 @@ dependencies = [
     "langchain-moonshot>=0.1.0",
     "croniter>=6.2.2",
     "google-genai>=2.0",
-    "watchdog>=6.0.0",
     "numpy>=2.4.4",
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
@@ -56,29 +55,17 @@ dependencies = [
     "feedparser>=6.0.12",
     "trafilatura>=2.1.0",
     # --- Common libraries pre-installed for the agent runtime (task #630) ---
-    # Agents routinely import these (data/image/Excel/PDF/HTTP); the user wants
-    # them available out of the box even though the set is heavy. Deliberately
-    # excluded: torch / tensorflow / jax / transformers / opencv / numba / dask.
-    "pandas>=2.2.3",  # tabular data — DataFrame
-    "scipy>=1.14.1",  # scientific computing
-    "scikit-learn>=1.5.0",  # machine learning
-    "statsmodels>=0.14.4",  # statistics / regression
-    "matplotlib>=3.9.0",  # plotting
+    # Imported by shipped code or tooling (Pillow, requests, bs4, mdit,
+    # cryptography, lark, websockets, oss2) and kept in the runtime set. The data
+    # analysis half of that promise lives in the `user-code` default group below:
+    # no module imports it, so a service profile can leave it out.
+    # Still excluded outright: torch / tensorflow / jax / transformers / opencv /
+    # numba / dask.
     "Pillow>=10.4.0",  # image processing (PIL)
-    "openpyxl>=3.1.2",  # Excel .xlsx read/write
-    "xlsxwriter>=3.2.0",  # Excel .xlsx writing
-    "python-docx>=1.1.0",  # Word .docx
-    "pypdf>=4.2.0",  # PDF text extraction
     "requests>=2.32.0",  # sync HTTP client
-    "aiohttp>=3.9.0",  # async HTTP client
     "beautifulsoup4>=4.12.3",  # HTML parsing
-    "lxml>=5.2.0",  # fast XML/HTML parsing
     "mdit-py-plugins>=0.6",  # GFM footnote references in shared documents
     "markdown-it-py>=4.0",  # Markdown document reference parsing
-    "rich>=13.7.0",  # terminal formatting
-    "tqdm>=4.66.0",  # progress bars
-    "python-dateutil>=2.9.0",  # date parsing
-    "tabulate>=0.9.0",  # table formatting
     "cryptography>=42.0.0",  # crypto primitives
     "lark-oapi>=1.7.1",
     "websockets>=15.0.1",
@@ -142,6 +129,11 @@ exclude = ["**/tests/**"]
 
 [tool.uv]
 package = true
+# `dev` builds the product, `user-code` is what agents import from execute_code.
+# Naming both keeps every `uv sync` (developer, CI, fleet update) installing the
+# same set as before this group existed, so no existing venv loses a library;
+# a service profile excludes the second explicitly with --no-group user-code.
+default-groups = ["dev", "user-code"]
 
 [dependency-groups]
 dev = [
@@ -169,6 +161,34 @@ dev = [
     # extra still works, but pyright resolves that import while checking, so the
     # development environment has to carry it.
     "claude-agent-sdk>=0.2.168,<0.3",
+]
+
+# Installed by default, because `[tool.uv] default-groups` names it: this is the
+# set `execute_code` code may import, not part of the application's own import
+# graph. Kept out of `[project.dependencies]` so a deployment that runs no agent
+# code can build without it:
+#     uv sync --no-group user-code
+#     uv export --no-group user-code
+# No first-party module imports any member (tests/contracts/test_user_code_group.py
+# re-derives that on every run); removing or adding one changes the measured
+# install face, so update that test with the group.
+user-code = [
+    "pandas>=2.2.3",  # tabular data — DataFrame
+    "scipy>=1.14.1",  # scientific computing
+    "scikit-learn>=1.5.0",  # machine learning
+    "statsmodels>=0.14.4",  # statistics / regression
+    "matplotlib>=3.9.0",  # plotting
+    "openpyxl>=3.1.2",  # Excel .xlsx read/write
+    "xlsxwriter>=3.2.0",  # Excel .xlsx writing
+    "python-docx>=1.1.0",  # Word .docx
+    "pypdf>=4.2.0",  # PDF text extraction
+    "lxml>=5.2.0",  # fast XML/HTML parsing
+    "python-dateutil>=2.9.0",  # date parsing
+    "aiohttp>=3.9.0",  # async HTTP client
+    "rich>=13.7.0",  # terminal formatting
+    "tqdm>=4.66.0",  # progress bars
+    "tabulate>=0.9.0",  # table formatting
+    "watchdog>=6.0.0",  # filesystem events in agent-authored code
 ]
 
 [tool.ruff]
