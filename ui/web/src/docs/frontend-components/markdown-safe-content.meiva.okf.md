@@ -38,6 +38,14 @@ content without a `$` never imports the math chunk, and KaTeX output renders
 after the sanitizer — its inputs cannot produce injection and its trust and
 strict defaults stand.
 
+The chunk is a value, like the code chunk: `lib/markdown/math.ts` builds a
+source with one deferred import per instance (the first attempt shared, a failed
+attempt dropped so the next caller retries), `MarkdownMathProvider` supplies it,
+and production wires nothing — the module's own source is the provider's
+default, so every surface shares one cache. A test wraps its tree in the
+provider with a source built around a fake importer, which is why no shipped
+module exports a test-only reset or import override for math.
+
 Display math needs help from two places, because `remark-math` treats a
 single-line `$$…$$` pair as *inline* math (only a fence on its own line, content
 below, is flow math). A recovery plugin reads the `$$` delimiters back from the
