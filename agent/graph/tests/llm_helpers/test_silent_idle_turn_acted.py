@@ -116,10 +116,10 @@ async def test_silent_idle_after_this_turns_tool_return_halts_silently(
 
 
 # meiva:note
-# A failed tool still counts as acting: LangChain returns a ToolMessage typed status="error" for it,
-# so the rule keys on the message type and the model's own decision to stop after seeing the failure
-# is not re-prompted as if nothing had happened.
-async def test_silent_idle_after_a_failed_tool_return_halts_silently(
+# A failed tool keeps the original nudge and cap: LangChain types the return status="error", and
+# halting on it would report the failure to the user as a finished turn. Only a successful return
+# is a turn that acted and may end silently, so this one still accumulates budget and continues.
+async def test_silent_idle_after_a_failed_tool_return_keeps_the_nudge(
     hosted_resources: HostedTurnResources,
     loguru_records: LogRecords,
     database_gate: ProcessDbGate,
@@ -134,10 +134,12 @@ async def test_silent_idle_after_a_failed_tool_return_halts_silently(
     )
 
     assert isinstance(result, Command)
-    assert result.update["halted"] is True
+    assert result.update["halted"] is False
     silent_idle = loguru_records.events("silent_idle")
     assert len(silent_idle) == 1
-    assert "turn already acted" in silent_idle[0]["message"]
+    assert silent_idle[0]["extra"]["halted"] is False
+    assert "turn already acted" not in silent_idle[0]["message"]
+    assert ledger.silent_idle_output_tokens("7") == 42
 
 
 # meiva:note
