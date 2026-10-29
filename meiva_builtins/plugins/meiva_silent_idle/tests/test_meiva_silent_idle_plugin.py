@@ -194,8 +194,11 @@ async def test_defers_when_auto_compact_would_fire(
         )
         is None
     )  # pyright: ignore[reportUnknownMemberType]
-    assert any(
-        record["extra"].get("label") == "silent-idle"
-        and record["extra"].get("event") == "silent_idle"
+    defer = [
+        record
         for record in loguru_records
-    )
+        if record["extra"].get("label") == "silent-idle"
+        and record["extra"].get("event") == "silent_idle"
+    ]
+    assert len(defer) == 1, "the defer log names the registered `silent_idle` event"  # pyright: ignore[reportUnknownArgumentType]
+    assert defer[0]["extra"]["agent_id"] == 1, "a silent_idle record must name its agent"
