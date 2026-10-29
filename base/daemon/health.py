@@ -81,7 +81,6 @@ from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
 
@@ -187,6 +186,9 @@ def _healthz_payload(
 #   content_type). On handler exception -> 500. Body size
 #   exceeding 64 KB -> 413 (actually returned as 400 for
 #   simplicity).
+# - `home`: the unit home this daemon serves, handed in by its process entry — the
+#   same `$MEIVA_HOME` the entry booted with, so the payload cannot name a home
+#   this process did not start under, and no read of the ambient home happens here.
 # - `liveness`: optional main-loop heartbeat or concurrent-loop group; when
 #   it is not alive, `/healthz` returns 503 instead of 200 so the
 #   watchdog respawns a wedged daemon. Groups also expose per-loop
@@ -209,6 +211,7 @@ async def start_health_server(
     name: str,
     port: int,
     *,
+    home: Path,
     host: str = "127.0.0.1",
     extra_routes: Mapping[tuple[str, str], RouteHandler] | None = None,
     liveness: Liveness | LivenessGroup | None = None,
@@ -219,8 +222,10 @@ async def start_health_server(
 ) -> asyncio.Server:
     started_at = time.time()
     pid = os.getpid()
-    # Resolved once at bind time, not per request: meiva_home() mkdirs on every call.
-    home = str(meiva_home())
+    # meiva:note
+    # The home the payload states is the one the entry handed in, read once at bind time:
+    # resolving it per request would mkdir on every call.
+    home_text = str(home)
 
     def health_response() -> tuple[int, bytes]:
         current_components = components() if callable(components) else components
@@ -228,7 +233,7 @@ async def start_health_server(
         return _healthz_payload(
             name,
             pid,
-            home,
+            home_text,
             started_at,
             liveness,
             current_components,
@@ -432,7 +437,7 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
     return parsed
 
 
-def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
+def probe_home(url: str, *, expected_home: Path, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     """Probe a health endpoint that carries ``home`` but no ``name``/``pid``,
     ALWAYS returning a verdict.
 
@@ -442,13 +447,15 @@ def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     polls, with ``--auto-rollback --threshold 3`` armed against it.
     """
     try:
-        return probe_unit_home(url, timeout_s=timeout_s)
+        return probe_unit_home(url, expected_home=expected_home, timeout_s=timeout_s)
     except Exception as exc:
         _log.exception("[probe_home] %s probe raised unexpectedly; treating as down", url)
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
-def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
+def probe_unit_home(
+    url: str, *, expected_home: Path, timeout_s: float = PROBE_TIMEOUT_S
+) -> DaemonProbe:
     """2xx from ``url`` AND a ``home`` matching this unit's ``$MEIVA_HOME``.
 
     The same failure mode ``probe_daemon`` exists for — a 200 only proves
@@ -480,17 +487,22 @@ def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonPr
     payload = _health_payload(url, timeout_s)
     if isinstance(payload, DaemonProbe):
         return payload
-    got_home, expected_home = payload.get("home"), str(meiva_home())
-    if got_home != expected_home:
+    got_home, wanted_home = payload.get("home"), str(expected_home)
+    if got_home != wanted_home:
         return DaemonProbe.port_taken(
-            f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "
+            f"identity mismatch on {url}: home={got_home!r} != {wanted_home!r} — "
             "another unit's daemon holds this port"
         )
-    return DaemonProbe.up(f"home {expected_home}")
+    return DaemonProbe.up(f"home {wanted_home}")
 
 
 def probe_daemon(
-    name: str, url: str, *, pidfile: Path, timeout_s: float = PROBE_TIMEOUT_S
+    name: str,
+    url: str,
+    *,
+    pidfile: Path,
+    expected_home: Path,
+    timeout_s: float = PROBE_TIMEOUT_S,
 ) -> DaemonProbe:
     """Probe a daemon's ``/healthz`` and verify the answering process is ours,
     ALWAYS returning a verdict.
@@ -510,7 +522,9 @@ def probe_daemon(
     miss is caught here, logged with a traceback, and reported as down.
     """
     try:
-        return probe_daemon_identity(name, url, pidfile=pidfile, timeout_s=timeout_s)
+        return probe_daemon_identity(
+            name, url, pidfile=pidfile, expected_home=expected_home, timeout_s=timeout_s
+        )
     except Exception as exc:
         # Down, not "unknown": a verdict the watchdog can act on beats silence.
         # An unforeseen probe failure is not evidence of a healthy daemon.
@@ -557,6 +571,7 @@ def probe_daemon_identity(
     url: str,
     *,
     pidfile: Path,
+    expected_home: Path,
     timeout_s: float = PROBE_TIMEOUT_S,
     listener_lookup: Callable[[str], str] = _listening_holders,
 ) -> DaemonProbe:
@@ -619,10 +634,10 @@ def probe_daemon_identity(
             f"identity mismatch on {url}: name={got_name!r} != {name!r} — "
             "a different daemon kind holds this port"
         )
-    expected_home = str(meiva_home())
-    if got_home != expected_home:
+    wanted_home = str(expected_home)
+    if got_home != wanted_home:
         return DaemonProbe.port_taken(
-            f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "
+            f"identity mismatch on {url}: home={got_home!r} != {wanted_home!r} — "
             "another unit's daemon holds this port"
         )
     recorded = recorded_pid(pidfile)

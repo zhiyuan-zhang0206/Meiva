@@ -43,7 +43,7 @@ from base.host.db_authority.unit import UnitIdentity
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 from gateway.tests.support.runner_ops.ops_stub import OpsCall, RunnerOps, register_machine
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, in_flight
@@ -166,7 +166,7 @@ async def _serve(
             raise
 
     server = await start_health_server(
-        "ops", 0, extra_routes={("POST", "/ops"): recorded}, image=image
+        "ops", 0, home=meiva_home(), extra_routes={("POST", "/ops"): recorded}, image=image
     )
     return _Daemon(
         server=server,

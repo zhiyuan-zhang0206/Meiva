@@ -280,13 +280,14 @@ def test_every_service_declares_an_identity_probe() -> None:
 def test_daemon_identity_binds_the_probe_to_one_daemons_facts(tmp_path: Path) -> None:
     pidfile = tmp_path / "ops.pid"
 
-    bound = cast("partial[DaemonProbe]", roster.daemon_identity("ops", pidfile))
+    home = meiva_home()
+    bound = cast("partial[DaemonProbe]", roster.daemon_identity("ops", pidfile, home=home))
 
     assert bound.func is probe_daemon
     name, url = bound.args
     assert name == "ops"
     assert str(ServiceEndpoints.from_settings().of("ops").health_port) in url
-    assert bound.keywords == {"pidfile": pidfile}
+    assert bound.keywords == {"pidfile": pidfile, "expected_home": home}
 
 
 @pytest.mark.parametrize(
