@@ -9,6 +9,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.paths import meiva_home
 from base.telemetry.observability import cluster_label
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
@@ -51,7 +52,7 @@ def _event(
         (
             uuid.uuid4().int % (1 << 62),
             datetime.now(UTC) - timedelta(minutes=minutes_ago),
-            cluster_label() if cluster is None else cluster,
+            cluster_label(meiva_home()) if cluster is None else cluster,
             process,
             category,
             event_name,

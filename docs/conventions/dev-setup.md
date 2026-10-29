@@ -204,7 +204,53 @@ uv export --no-group user-code   # the requirement set to install into an image
 ```
 
 `lxml`, `aiohttp`, `python-dateutil` and `rich` stay installed in that mode anyway,
-because `trafilatura`, `traceloop-sdk`, `croniter` and `textual` require them.
+because `trafilatura` (from `skill-tools`), `traceloop-sdk`, `croniter` and `textual` require
+them.
+
+## The `skill-tools` dependency group
+
+`[dependency-groups].skill-tools` holds what the built-in skill *scripts* run, not what the
+application imports: `trafilatura` (web-sources generic scrape), `feedparser` (web-sources
+rss) and the `yt-dlp` program (audio-transcribe, web-sources youtube).
+`tests/contracts/test_skill_tools_group.py` re-derives the "no module outside
+`meiva_builtins/skills/` imports one" half on every run, so a shipped module that starts
+importing a member fails the suite instead of quietly widening the group.
+
+It is a default group for the same reason `user-code` is, and for one more: the update wave
+that would move it out of the default set builds its command *before* the checkout moves
+(`switch_command` in `cli/fleet_update/plan/host_commands.py`), so that wave cannot add
+`--group skill-tools` and every host would lose the group until the next update. Default
+membership costs a service face nothing, because `uv export --only-group svc-X` emits that
+group's closure alone, never another default group's.
+
+A face that runs no skill leaves the group out:
+
+```bash
+uv sync --only-group svc-exec-host     # a service face: no skill tools
+uv sync --no-group skill-tools         # a one-machine build without the skill scripts
+```
+
+A skill script whose library or program is missing raises `MissingSkillToolError`
+(`meiva_builtins/skills/skill_tools.py`), which names the group and the install command
+instead of leaving an `ImportError` in a traceback.
+
+## Service faces
+
+`[dependency-groups].svc-<service>` lists the third-party distributions one service's own code
+imports, so an image can be built from that service alone:
+
+```bash
+uv export --only-group svc-exec-host    # 24 distributions
+uv export --only-group svc-agent-host   # 163 distributions, skill-tools included
+```
+
+Two faces exist today — `svc-exec-host` and `svc-agent-host` — as the first step of the
+per-service image work; neither is a default group. A member the project also declares repeats
+the project's requirement exactly, extras included: a bare `psycopg` would drop the binary
+payload that no import names, and `tests/contracts/test_skill_tools_group.py` fails when the
+two disagree. `claude-agent-sdk` is the one deliberate omission from the agent-host face — it
+stays behind the `harness-claude` extra, so a machine that runs no Claude harness builds
+without it (`--extra harness-claude` adds it back).
 
 ## Machine Python indexes
 

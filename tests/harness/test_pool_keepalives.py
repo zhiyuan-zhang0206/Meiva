@@ -52,6 +52,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
 from base.db.code_version_gate import ProcessDbGate
+from base.paths import meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
 from services.agent_runner.agent_ops import boot
 from tests.fixtures.gateway_config import gateway_test_client
@@ -179,7 +180,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
     sink_id = base.telemetry.process_logging.add_event_sink(
-        producer=lambda: pipeline, machine_reader=machine_identity.name
+        home=meiva_home(), producer=lambda: pipeline, machine_reader=machine_identity.name
     )
     try:
         assert not pipeline.stopped

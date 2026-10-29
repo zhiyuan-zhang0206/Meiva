@@ -193,6 +193,7 @@ def init_logger(
             agent_id=agent_id,
             producer=producer,
             machine_reader=machine_reader,
+            home=home,
         )
     except Exception:
         logger.warning(

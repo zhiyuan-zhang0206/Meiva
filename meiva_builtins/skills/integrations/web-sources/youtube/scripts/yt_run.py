@@ -34,12 +34,15 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
+
+from meiva_builtins.skills.skill_tools import missing
 
 # meiva:note
 # The pure modules are siblings in this skill's own scripts/ dir, not an importable package
@@ -132,10 +135,20 @@ def _now_iso() -> str:
 
 # meiva:note
 # Run a yt-dlp request and return what it printed. Metadata fetches fail fast (`check=True`).
+def _ytdlp_program(config: YoutubeConfig) -> str:
+    # meiva:note
+    # The `yt-dlp` the requests run: the name the caller configured, resolved once per request
+    # so a missing program fails here with the group's name rather than as a bare
+    # FileNotFoundError out of subprocess.
+    found = shutil.which(config.ytdlp)
+    if found is None:
+        raise missing("web-sources", f"the `{config.ytdlp}` program")
+    return found
+
+
 def _ytdlp_stdout(config: YoutubeConfig, request: YtDlpRequest) -> str:
-    done = subprocess.run(
-        ytdlp_argv(config.ytdlp, request), capture_output=True, text=True, check=True
-    )
+    program = _ytdlp_program(config)
+    done = subprocess.run(ytdlp_argv(program, request), capture_output=True, text=True, check=True)
     return done.stdout
 
 
@@ -184,8 +197,9 @@ def fetch_transcript(config: YoutubeConfig, video_id: str, prefer_lang: str) -> 
         with tempfile.TemporaryDirectory() as tmp:
             template = str(Path(tmp) / "%(id)s.%(ext)s")
             request = SubsRequest(video_url(video_id), kind, prefer_lang, template)
+            program = _ytdlp_program(config)
             subprocess.run(
-                ytdlp_argv(config.ytdlp, request), capture_output=True, text=True, check=False
+                ytdlp_argv(program, request), capture_output=True, text=True, check=False
             )
             vtts = sorted(Path(tmp).glob(f"{video_id}*.vtt"))
             if vtts:

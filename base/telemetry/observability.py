@@ -12,31 +12,29 @@ ObservabilityEndpointVariable = Literal[
 ]
 
 
-def cluster_label(home: Path | None = None) -> str:
-    """Return the process home's display label without touching the data plane.
+# meiva:note
+# The label a row carries when this process has not materialized its cluster yet: the
+# same `.unknown` the label itself degrades to, so a reader cannot meet two spellings of
+# "no cluster". `init_telemetry` materializes the real one from the home the boot hands it.
+UNKNOWN_CLUSTER = ".unknown"
 
-    ``home_label`` is the canonical identity presented in telemetry. Startup
-    diagnostics must not crash because identity formatting failed, so an
-    unexpected resolver failure falls back to the stable home slug; if even
-    resolving the home itself fails, the explicit ``.unknown`` label preserves
-    the required dimension without inventing another source of identity.
-    """
-    from base import cluster, paths
+
+# meiva:note
+# The home is the caller's: the boot that resolved `$MEIVA_HOME` states it here once, and
+# the value is the process's own cluster identity. Reading the ambient home here would
+# make a label that silently answers for whichever home the *querier* runs in.
+def cluster_label(home: Path) -> str:
+    from base import cluster
 
     try:
-        resolved_home = home if home is not None else paths.meiva_home()
-    except Exception as exc:
-        _report_label_fallback("home resolution", exc)
-        return ".unknown"
-    try:
-        return _resolve_non_empty_home_label(resolved_home)
+        return _resolve_non_empty_home_label(home)
     except Exception as exc:
         _report_label_fallback("home label", exc)
         try:
-            return cluster.home_slug(resolved_home)
+            return cluster.home_slug(home)
         except Exception as slug_exc:
             _report_label_fallback("home slug", slug_exc)
-            return ".unknown"
+            return UNKNOWN_CLUSTER
 
 
 def _resolve_non_empty_home_label(resolved_home: Path) -> str:
