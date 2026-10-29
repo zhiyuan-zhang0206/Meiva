@@ -27,6 +27,9 @@ so this owner delivers a real schema-owned projection from its private home
 with `plugin_bootstrap_config`. `skip` never grants local authority. It restores
 the previous carrier at session teardown. Catalog/authority subprocess tests
 receive explicit homes, roles and projections, including missing/invalid packets.
+Fleet fixture overrides start from the same complete schema-owned packet and
+replace only their Fleet values, preserving other plugins' cluster policy.
+Launched SDK probes also generate that complete packet before importing the SDK.
 
 Collection precedes session fixture setup. The provider roster matrix therefore
 reads its real catalog in one bounded child with a bare scratch home and an
