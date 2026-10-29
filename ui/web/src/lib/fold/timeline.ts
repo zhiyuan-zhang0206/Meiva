@@ -236,6 +236,22 @@ export function applySystemEvent(
   nowMs = 1,
 ): BackendTimelineItem[] {
   const now = new Date(nowMs).toISOString();
+  if (ev.role === "llm_keepalive") {
+    if (items.some((it) => parseItemId(it.item_id)?.[0] === ev.msg_idx)) return items;
+    return createStartItem(items, `${ev.msg_idx}.0`, "agent_reasoning", nowMs).map(
+      (it) => it.item_id === `${ev.msg_idx}.0` ? { ...it, llmWaiting: true, partial: true } : it,
+    );
+  }
+  if (
+    ev.role === "chat_start" || ev.role === "chat_delta" ||
+    ev.role === "code_start" || ev.role === "code_delta" ||
+    ev.role === "reasoning_start" || ev.role === "reasoning_delta" ||
+    ev.role === "exec_start" || ev.role === "exec_output_chunk" ||
+    ev.role === "exec_output" || ev.role === "llm_done" ||
+    ev.role === "cancelled" || ev.role === "error"
+  ) {
+    if (items.some((it) => it.llmWaiting)) items = items.filter((it) => !it.llmWaiting);
+  }
   switch (ev.role) {
     case "chat_start":
       // Chat content begins → reasoning + code phases are over. Freeze the
@@ -575,6 +591,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
       streamingIds: new Set(),
       items: t.items.filter(
         (it) =>
+          !it.llmWaiting &&
           !t.streamingIds.has(it.item_id) &&
           !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       ),
@@ -584,6 +601,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
   // turn lifecycle tracking
   const turnStart =
     ev.role === "inbound_arrived" ||
+    ev.role === "llm_keepalive" ||
     ev.role === "chat_start" ||
     ev.role === "code_start" ||
     ev.role === "reasoning_start" ||

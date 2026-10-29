@@ -10,6 +10,7 @@ export type BackendTimelineItem = Omit<
   readonly created_at: string | null;
   readonly inbound_id: number | null;
   readonly partial?: boolean;
+  readonly llmWaiting?: boolean;
   readonly interrupted?: boolean;
 
   readonly reasoningStartedAt?: number;
@@ -133,6 +134,11 @@ export interface TokenUsageEvent extends BaseEvent {
   readonly output_tokens: number;
   readonly reasoning_tokens?: number;
 }
+export interface LLMKeepaliveEvent extends BaseEvent {
+  readonly role: "llm_keepalive";
+  readonly msg_idx: number;
+  readonly content: "";
+}
 export interface LLMDoneEvent extends BaseEvent {
   readonly role: "llm_done";
 }
@@ -235,6 +241,7 @@ export type SystemEvent =
   | PageOpenedEvent
   | PageClosedEvent
   | TokenUsageEvent
+  | LLMKeepaliveEvent
   | LLMDoneEvent
   | TimelineSnapshotEvent
   | AgentSpawnedEvent

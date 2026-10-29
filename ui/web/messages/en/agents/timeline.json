@@ -1,4 +1,5 @@
 {
+  "waitingForModel": "Waiting for model · {duration}",
   "systemPrompt": "System prompt",
   "thinking": "Thinking",
   "thinkingFor": "Thinking for {duration}",

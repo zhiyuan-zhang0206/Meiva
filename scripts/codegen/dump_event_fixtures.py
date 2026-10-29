@@ -148,6 +148,12 @@ def _samples() -> dict[str, dict]:
             "output_tokens": 56,
             "reasoning_tokens": 0,
         },
+        "llm_keepalive": {
+            "role": "llm_keepalive",
+            "agent_id": agent_id,
+            "msg_idx": 5,
+            "content": "",
+        },
         "llm_done": {"role": "llm_done", "agent_id": agent_id},
         "timeline_snapshot": {
             "role": "timeline_snapshot",

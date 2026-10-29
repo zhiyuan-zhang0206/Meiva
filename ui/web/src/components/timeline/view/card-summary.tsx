@@ -169,7 +169,9 @@ function ThinkingSummary({
       : null;
 
   let label: string;
-  if (live && item.reasoningStartedAt != null) {
+  if (item.llmWaiting && item.reasoningStartedAt != null) {
+    label = t("waitingForModel", { duration: formatDuration(now - item.reasoningStartedAt) });
+  } else if (live && item.reasoningStartedAt != null) {
     label = t("thinkingFor", { duration: formatDuration(now - item.reasoningStartedAt) });
   } else if (item.reasoning_ms != null) {
     label = t("thoughtFor", { duration: formatDuration(item.reasoning_ms) });
