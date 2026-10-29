@@ -1,4 +1,5 @@
-exports = ["logger_add_diagnose.py", "loguru_format.py", "no_emoji.py", "time_bomb.py", "zombie_pyright_ignores.py"]
+exports = ["logger_add_diagnose.py", "loguru_format.py", "no_emoji.py", "time_bomb.py", "time_bomb_rule", "zombie_pyright_ignores.py"]
 
 [uses]
+"time_bomb.py" = ["time_bomb_rule"]
 "tests" = ["logger_add_diagnose.py", "loguru_format.py", "no_emoji.py", "no_silent_failures.py", "time_bomb.py", "zombie_pyright_ignores.py"]
