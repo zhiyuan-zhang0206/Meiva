@@ -35,8 +35,12 @@ neither replaces the other.
   work ended. They are not releases, and nothing reads them as one.
 - **Deployment precondition.** A release wave may only deploy a commit that descends from (or
   is) a certified commit: `git merge-base --is-ancestor <certified> <target>`.
-  `scripts/host_ops/release/base.py` is that check; the deployment precheck calls it and
-  refuses a wave whose base is missing.
+  `scripts/host_ops/release/base.py` is that check, and the release gate runs it before it
+  spends a runner-hour on a matrix. **The deployment path does not call it yet**: only the gate
+  reads a release record today, so a wave launched through the existing deployment tooling is
+  not refused by this rule. Wiring that check into the wave is a change to the release path and
+  waits for the operator's decision; until then this paragraph describes the gate, not every
+  wave.
 - **Hotfix channel.** Stop-the-bleed work may reach production before the gate ran, but such a
   commit is **not a usable base** until a gate run is recorded on it within 24 hours. The
   reader names that case (`hotfix-not-followed-up`) instead of guessing.
