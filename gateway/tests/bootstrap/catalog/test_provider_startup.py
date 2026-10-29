@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -116,3 +117,48 @@ def test_provider_repair_restores_catalog_after_safe_failure(
     provider_path.write_text(valid_provider)
     with gateway_test_client(machine=machine_identity, boot=boot) as client:
         assert client.get("/api/models").status_code == 200
+
+
+# meiva:note
+# The cluster default is named by config, so an unpriced default has no overlay to refuse at.
+# These two tests pin the boot-time half of that door: the catalog fails (model routes refuse)
+# instead of the gateway promising a bill it cannot price.
+def test_an_unpriced_cluster_default_fails_the_catalog() -> None:
+    from gateway import app as gateway_app
+
+    priced = _catalog_with({"priced-model"})
+    result = load_model_catalog(
+        partial(
+            gateway_app.catalog_with_priced_default,
+            build=lambda: priced,
+            default_model="unpriced",
+        )
+    )
+    assert isinstance(result, CatalogLoadFailure)
+    assert isinstance(result.error, gateway_app.UnpricedDefaultModelError)
+    assert "no price in the pricing catalog" in str(result.error)
+    assert "undercount" in str(result.error)
+    assert "pricing_catalog_archive.json" in str(result.error)
+
+
+def test_a_priced_cluster_default_builds_the_catalog() -> None:
+    from gateway import app as gateway_app
+
+    priced = _catalog_with({"priced-model"})
+    built = gateway_app.catalog_with_priced_default(
+        build=lambda: priced, default_model="priced-model"
+    )
+    assert built is priced
+
+
+def _catalog_with(models: set[str]) -> ModelCatalog:
+    # meiva:note
+    # Reuse a real archive entry rather than hand-building a ModelPrice: the point of these
+    # tests is the presence check, not the price arithmetic.
+    from base.lm.pricing import PriceBook
+    from base.lm.pricing.archive import load_archive
+
+    one = next(iter(load_archive().values()))
+    return ModelCatalog(
+        models={}, bindings={}, stops={}, prices=PriceBook(dict.fromkeys(models, one), {})
+    )
