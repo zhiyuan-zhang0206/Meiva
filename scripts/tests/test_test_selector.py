@@ -42,6 +42,24 @@ def test_a_batch_without_its_member_list_keeps_the_full_suite(tmp_path: Path) ->
     assert (push_result.decision, push_result.reason) == ("FULL", "non-pr-event")
 
 
+def test_a_batch_that_names_members_but_changes_nothing_keeps_the_full_suite(
+    tmp_path: Path,
+) -> None:
+    # meiva:note
+    # The one contradiction the selector can see without a member's own diff: a body that names
+    # members and a changed list that is empty cannot both be true.
+    repo_root = _selector_repo(tmp_path)
+    result = test_selector.select_tests(
+        [],
+        repo_root=repo_root,
+        event="pull_request",
+        head_ref="trunk-merge/batch-42",
+        members=(7603, 7610),
+    )
+
+    assert (result.decision, result.reason) == ("FULL", "queue-members-no-changes")
+
+
 def test_a_batch_with_its_members_selects_what_the_union_of_them_selects(tmp_path: Path) -> None:
     # meiva:note
     # The batch's changed list is already its members' union; the ordinary rules measure it.
