@@ -87,7 +87,7 @@ describe("useTimeline mount + pagination", () => {
     expect(result.current.hasMoreOlder).toBe(true);
     timelineReads.length = 0;
 
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
 
     await waitFor(() => expect(result.current.items).toHaveLength(9));
     expect(timelineReads).toEqual([{
@@ -120,7 +120,7 @@ describe("useTimeline mount + pagination", () => {
     expect(result.current.hasMoreOlder).toBe(false);
 
     timelineReads.length = 0;
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
     expect(timelineReads).toHaveLength(0);
   });
 
@@ -140,7 +140,7 @@ describe("useTimeline mount + pagination", () => {
     await waitFor(() => expect(result.current.items).toHaveLength(1));
     timelineReads.length = 0;
 
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
 
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(false));
     expect(timelineReads).toContainEqual({
@@ -181,7 +181,7 @@ describe("useTimeline mount + pagination", () => {
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
     timelineReads.length = 0;
 
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
 
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(false));
     expect(timelineReads).toContainEqual({
@@ -220,6 +220,49 @@ describe("useTimeline mount + pagination", () => {
     act(() => result.current.retryTimeline());
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("read restored"));
     expect(result.current.error).toBeNull();
+  });
+
+  // meiva:note
+  // The strip above the messages presents the reader's own read; the in-flight
+  // flag is the concurrency guard that four callers hold. Recording the origin
+  // where the request begins is what lets the two differ.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  it("marks an older-page read as the reader's own only when the reader asked for it", async () => {
+    timeline.queue(resolves(tlResp([
+      snapshotItem({ item_id: "10.0", kind: "agent_chat", payload: "newest" }),
+    ], true)));
+    let completeReader: ((page: TimelineResponse) => void) | undefined;
+    timeline.queue(new Promise<TimelineResponse>((resolve) => { completeReader = resolve; }).then(resolves));
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
+
+    act(() => result.current.loadOlder("reader"));
+    await waitFor(() => expect(result.current.loadingOlder).toBe(true));
+    expect(result.current.readerLoadingOlder).toBe(true);
+
+    await act(async () => {
+      completeReader?.(tlResp([
+        snapshotItem({ item_id: "9.0", kind: "agent_chat", payload: "older" }),
+      ], true));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.loadingOlder).toBe(false));
+    expect(result.current.readerLoadingOlder).toBe(false);
+
+    let completeBackground: ((page: TimelineResponse) => void) | undefined;
+    timeline.queue(new Promise<TimelineResponse>((resolve) => { completeBackground = resolve; }).then(resolves));
+    act(() => result.current.loadOlder("background"));
+    await waitFor(() => expect(result.current.loadingOlder).toBe(true));
+    expect(result.current.readerLoadingOlder).toBe(false);
+
+    await act(async () => {
+      completeBackground?.(tlResp([
+        snapshotItem({ item_id: "8.0", kind: "agent_chat", payload: "older still" }),
+      ], false));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.loadingOlder).toBe(false));
+    expect(result.current.readerLoadingOlder).toBe(false);
   });
 
   it("keeps loaded history when a refresh returns 503 and during its pending manual retry", async () => {

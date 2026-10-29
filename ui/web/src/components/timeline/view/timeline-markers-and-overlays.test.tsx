@@ -332,9 +332,14 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     expect(screen.getByTestId("scroll-viewport").className).toContain("overscroll-y-contain");
   });
-  it("Scroll-to-bottom arrow button always in DOM (visibility controlled by opacity)", () => {
+  // meiva:note
+  // The control is absent while the reader is at the bottom — the former rule
+  // kept it in the DOM and faded, which left a hover target over a click that
+  // did nothing (user report 2026-10-30).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  it("Scroll-to-bottom control is absent while the reader is at the bottom", () => {
     render(<TimelineView items={[]} />);
-    expect(screen.getByLabelText("Scroll to bottom")).toBeTruthy();
+    expect(screen.queryByLabelText("Scroll to bottom")).toBeNull();
   });
 });
 
@@ -396,9 +401,9 @@ describe("load-older circle (revealed above the messages)", () => {
     expect(overlay?.className).not.toContain("opacity-100");
     expect(overlay?.getAttribute("aria-hidden")).toBe("true");
   });
-  it("loadingOlder=true → spinner visible (opacity-100), stays mounted at the top, exposed to assistive tech", () => {
+  it("readerLoadingOlder=true → spinner visible (opacity-100), stays mounted at the top, exposed to assistive tech", () => {
     render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder readerLoadingOlder />,
     );
     const label = screen.getByText(/Loading earlier messages/);
     const overlay = label.closest("div");
@@ -436,21 +441,22 @@ describe("load-older circle (revealed above the messages)", () => {
       screen.getByText(/Loading earlier messages/).closest("div")?.className,
     ).toContain("pointer-events-none");
     rerender(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder readerLoadingOlder />,
     );
     expect(
       screen.getByText(/Loading earlier messages/).closest("div")?.className,
     ).toContain("pointer-events-none");
   });
-  it("re-render with loadingOlder flipping true→false does not remount the overlay (same node, opacity only)", () => {
+  it("re-render with the load flipping true→false does not remount the overlay (same node, opacity only)", () => {
     const { rerender } = render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder readerLoadingOlder />,
     );
     const nodeWhileLoading = screen.getByText(/Loading earlier messages/).closest("div");
     rerender(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x" })]}
         loadingOlder={false}
+        readerLoadingOlder={false}
       />,
     );
     const nodeAfterLoad = screen.getByText(/Loading earlier messages/).closest("div");

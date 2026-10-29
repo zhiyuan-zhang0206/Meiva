@@ -350,7 +350,7 @@ describe("useTimeline mount + initial fetch", () => {
     await waitFor(() => expect(result.current.items).toHaveLength(2));
     expect(result.current.hasMoreOlder).toBe(true);
 
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
 
     await waitFor(() => expect(result.current.items).toHaveLength(3));
     expect(timelineReads.at(-1)).toEqual({ agentId: 42, before: "5.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
@@ -407,7 +407,7 @@ describe("useTimeline mount + initial fetch", () => {
     expect(result.current.hasMoreOlder).toBe(true);
     timelineReads.length = 0;
 
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
 
     await waitFor(() => expect(result.current.items).toHaveLength(4));
     expect(timelineReads[0]).toEqual({
@@ -424,7 +424,7 @@ describe("useTimeline mount + initial fetch", () => {
     ]);
     expect(result.current.hasMoreOlder).toBe(true);
 
-    act(() => result.current.loadOlder());
+    act(() => result.current.loadOlder("reader"));
 
     await waitFor(() => expect(result.current.items).toHaveLength(5));
     expect(timelineReads[1]).toEqual({
@@ -497,7 +497,7 @@ describe("timeline ownership when a transport ignores abort", () => {
         initialProps: { id: 1 }, wrapper,
       });
       await waitFor(() => expect(view.result.current.hasMoreOlder).toBe(true));
-      act(() => view.result.current.loadOlder());
+      act(() => view.result.current.loadOlder("reader"));
       await waitFor(() => expect(rig.sent.filter((sent) => new URL(sent.url).searchParams.has("before"))).toHaveLength(1));
       const history = rig.sent.find((sent) => new URL(sent.url).searchParams.has("before"));
       if (cause === "selection") {
