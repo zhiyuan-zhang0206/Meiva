@@ -20,6 +20,7 @@ from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
+from base.deploy.lifecycle import start_serving
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.roster.roster_rows import RosterRowSpec
@@ -53,6 +54,7 @@ def _env(
         probe_timeout_s=8.0,
         clock=system_clock(),
         rpc=gateway_test_rpc(),
+        observe=start_serving.observe_root,
         environ=dict(os.environ),
     )
 

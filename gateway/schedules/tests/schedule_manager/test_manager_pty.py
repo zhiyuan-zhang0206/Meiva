@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.lifecycle.tests.serving_root import observe
 from base.host.env.registry import process_environment
 from base.paths import meiva_home
 from base.sessions.backend import get_shell_backend
@@ -97,7 +98,10 @@ def _host_is_serving(serving_root: RootBirth, _pty_home: str) -> Iterator[None]:
 
     home = meiva_home()
     generation = start_serving.begin_start(home)
-    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime) is True
+    assert (
+        start_serving.mark_serving(home, generation, runtime=serving_root.runtime, observe=observe)
+        is True
+    )
     try:
         yield
     finally:

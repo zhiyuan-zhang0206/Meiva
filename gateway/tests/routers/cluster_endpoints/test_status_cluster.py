@@ -18,9 +18,10 @@ import pytest
 
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
+from base.deploy.lifecycle.tests.serving_root import observe, observe_unreadable
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from gateway.cluster.status import StatusCache
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_process
 from gateway.tests.routers.cluster_endpoints.cluster_support import serving_gate as serving_gate
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsCall,
@@ -138,8 +139,22 @@ class TestClusterPanel:
     def test_current_machine_role_paused_from_local(
         self, serving_gate: None, stub_machine_identity: MachineIdentityReader
     ) -> None:
-        with gateway_test_client(machine=stub_machine_identity) as client:
+        # meiva:note
+        # `current_paused` is the marked birth as the process's observation confirms it: answered
+        # it is open, unanswerable the same marker reads paused.
+        with (
+            gateway_test_process(
+                machine=stub_machine_identity, observe=observe_unreadable
+            ) as unreadable_process,
+            gateway_test_client(process=unreadable_process) as unreadable_client,
+        ):
+            unreadable = unreadable_client.get("/api/status")
+        with (
+            gateway_test_process(machine=stub_machine_identity, observe=observe) as process,
+            gateway_test_client(process=process) as client,
+        ):
             r = client.get("/api/status")
+        assert unreadable.json()["cluster"]["current_paused"] is True
         assert r.status_code == 200
         data = r.json()
         # meiva:note
@@ -178,7 +193,8 @@ class TestClusterPanel:
         with (
             runner_ops(db_conn, "test-host", {"status_probe": _probe_answer("test-host")}),
             runner_ops(db_conn, "runner-test", {"status_probe": refused(404, "probe failed")}),
-            gateway_test_client(machine=stub_machine_identity) as client,
+            gateway_test_process(machine=stub_machine_identity, observe=observe) as process,
+            gateway_test_client(process=process) as client,
         ):
             r = client.get("/api/status")
         assert r.status_code == 200
@@ -187,6 +203,19 @@ class TestClusterPanel:
         by_name = {m["name"]: m for m in machines}
         _assert_local_machine_row(by_name["cloud-test"])
         _assert_remote_machine_rows(by_name)
+        # meiva:note
+        # The local row's `paused` is that same observation: an unanswerable root pauses it.
+        with (
+            runner_ops(db_conn, "test-host", {"status_probe": _probe_answer("test-host")}),
+            runner_ops(db_conn, "runner-test", {"status_probe": refused(404, "probe failed")}),
+            gateway_test_process(
+                machine=stub_machine_identity, observe=observe_unreadable
+            ) as unreadable_process,
+            gateway_test_client(process=unreadable_process) as unreadable_client,
+        ):
+            unreadable = unreadable_client.get("/api/status")
+        local = {m["name"]: m for m in unreadable.json()["cluster"]["machines"]}["cloud-test"]
+        assert local["paused"] is True
 
     # meiva:note
     # A pure observability-station row (machines.role carries only the

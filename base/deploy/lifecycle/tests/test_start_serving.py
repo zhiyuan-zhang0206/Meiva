@@ -6,7 +6,7 @@ from threading import Event, Thread
 import pytest
 
 from base.deploy.lifecycle.start_serving import RootBirth
-from base.deploy.lifecycle.tests.serving_root import override_observed_root
+from base.deploy.lifecycle.tests.serving_root import observe, override_observed_root
 
 
 @pytest.fixture
@@ -27,15 +27,24 @@ def test_new_start_attempt_invalidates_a_previous_serving_generation(
     from base.deploy.lifecycle import start_serving
 
     previous = start_serving.begin_start(home)
-    assert start_serving.mark_serving(home, previous, runtime=serving_root.runtime) is True
-    assert start_serving.is_serving(home) is True
+    assert (
+        start_serving.mark_serving(home, previous, runtime=serving_root.runtime, observe=observe)
+        is True
+    )
+    assert start_serving.is_serving(home, observe=observe) is True
 
     current = start_serving.begin_start(home)
 
-    assert start_serving.is_serving(home) is False
-    assert start_serving.mark_serving(home, previous, runtime=serving_root.runtime) is False
-    assert start_serving.mark_serving(home, current, runtime=serving_root.runtime) is True
-    assert start_serving.is_serving(home) is True
+    assert start_serving.is_serving(home, observe=observe) is False
+    assert (
+        start_serving.mark_serving(home, previous, runtime=serving_root.runtime, observe=observe)
+        is False
+    )
+    assert (
+        start_serving.mark_serving(home, current, runtime=serving_root.runtime, observe=observe)
+        is True
+    )
+    assert start_serving.is_serving(home, observe=observe) is True
 
 
 def test_clear_serving_keeps_revival_blocked(
@@ -44,11 +53,14 @@ def test_clear_serving_keeps_revival_blocked(
     from base.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start(home)
-    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime) is True
+    assert (
+        start_serving.mark_serving(home, generation, runtime=serving_root.runtime, observe=observe)
+        is True
+    )
 
     start_serving.clear_serving(home)
 
-    assert start_serving.is_serving(home) is False
+    assert start_serving.is_serving(home, observe=observe) is False
 
 
 def test_start_waits_for_an_authorized_recovery_action(
@@ -57,13 +69,16 @@ def test_start_waits_for_an_authorized_recovery_action(
     from base.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start(home)
-    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime) is True
+    assert (
+        start_serving.mark_serving(home, generation, runtime=serving_root.runtime, observe=observe)
+        is True
+    )
     recovery_authorized = Event()
     release_recovery = Event()
     start_completed = Event()
 
     def recover() -> None:
-        with start_serving.recovery_permitted(home) as permitted:
+        with start_serving.recovery_permitted(home, observe=observe) as permitted:
             assert permitted is True
             recovery_authorized.set()
             assert release_recovery.wait(timeout=2)
@@ -83,7 +98,7 @@ def test_start_waits_for_an_authorized_recovery_action(
     recovery_thread.join(timeout=2)
     start_thread.join(timeout=2)
     assert start_completed.is_set()
-    assert start_serving.is_serving(home) is False
+    assert start_serving.is_serving(home, observe=observe) is False
 
 
 @pytest.mark.parametrize("change", ["root", "launch", "runtime", "home", "unknown"])
@@ -97,7 +112,9 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
     from base.native_process.root_control.client import RootClientError
 
     generation = start_serving.begin_start(home)
-    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime)
+    assert start_serving.mark_serving(
+        home, generation, runtime=serving_root.runtime, observe=observe
+    )
     original = state_path.read_bytes()
     observed = serving_root
     if change == "root":
@@ -117,9 +134,9 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
         return observed
 
     override_observed_root(current)
-    assert start_serving.born_identity(home) is None
-    assert not start_serving.is_serving(home)
-    with start_serving.recovery_permitted(home) as permitted:
+    assert start_serving.born_identity(home, observe=observe) is None
+    assert not start_serving.is_serving(home, observe=observe)
+    with start_serving.recovery_permitted(home, observe=observe) as permitted:
         assert not permitted
     assert state_path.read_bytes() == original
 
@@ -132,8 +149,8 @@ def test_marker_rejects_a_different_loaded_runtime(
     generation = start_serving.begin_start(home)
     other = serving_root.runtime.model_copy(update={"interpreter": "/foreign/python"})
     with pytest.raises(RuntimeError, match="admitted loaded runtime"):
-        start_serving.mark_serving(home, generation, runtime=other)
-    assert not start_serving.is_serving(home)
+        start_serving.mark_serving(home, generation, runtime=other, observe=observe)
+    assert not start_serving.is_serving(home, observe=observe)
 
 
 @pytest.mark.parametrize(
@@ -163,14 +180,16 @@ def test_birth_read_refuses_marker_replaced_during_native_observation(
     from base.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start(home)
-    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime)
+    assert start_serving.mark_serving(
+        home, generation, runtime=serving_root.runtime, observe=observe
+    )
 
     def raced(_home: Path) -> RootBirth:
         start_serving.begin_start(home)
         return serving_root
 
     override_observed_root(raced)
-    assert start_serving.born_identity(home) is None
+    assert start_serving.born_identity(home, observe=observe) is None
 
 
 def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(

@@ -1,6 +1,6 @@
 import random
 import uuid
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from functools import partial
@@ -20,6 +20,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
+from base.deploy.lifecycle import start_serving
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_providers import build_model_catalog
 from gateway.app import create_app
@@ -129,6 +130,7 @@ def gateway_test_process(
     config: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,
     process: GatewayProcess | None = None,
+    observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
 ) -> Generator[GatewayProcess]:
     owned = process is None
     if owned:
@@ -142,6 +144,7 @@ def gateway_test_process(
             image=LOADED_IMAGE,
             machine=resolved_machine,
             host=fake_host(),
+            observe=observe,
         )
     assert process is not None
     with process.lifetime() if owned else nullcontext(process):

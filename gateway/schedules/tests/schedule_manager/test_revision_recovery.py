@@ -17,6 +17,7 @@ import base.db
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.tests.serving_root import observe
 from base.paths import run_dir
 from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.pty.paths import service_socket_path
@@ -48,7 +49,9 @@ def backend(
     provenance: list[dict[str, Any]], serving_root: start_serving.RootBirth, unit_home: Path
 ) -> Backend:
     generation = start_serving.begin_start(unit_home)
-    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime)
+    assert start_serving.mark_serving(
+        unit_home, generation, runtime=serving_root.runtime, observe=observe
+    )
     return Backend(provenance)
 
 

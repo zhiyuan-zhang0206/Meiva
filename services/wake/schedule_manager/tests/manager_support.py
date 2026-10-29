@@ -13,6 +13,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.deploy.lifecycle.tests.serving_root import observe
 from base.paths import meiva_home
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager.manager import REPO_ROOT, ScheduleManager
@@ -43,4 +44,5 @@ def schedule_manager(
         home=meiva_home(),
         policy=policy,
         launch_env=launch_env,
+        observe=observe,
     )

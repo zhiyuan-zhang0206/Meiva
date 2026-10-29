@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, assert_never
 
@@ -30,6 +30,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.cluster import session_name
 from base.db.transaction import write_transaction
+from base.deploy.lifecycle import start_serving
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import host_restart, revisions
@@ -93,6 +94,7 @@ class ScheduleManager:
         home: Path,
         policy: ManagerPolicy,
         launch_env: Mapping[str, str],
+        observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
     ) -> None:
         self._pool = db_pool
         self._backend = backend
@@ -100,6 +102,9 @@ class ScheduleManager:
         self._home = home
         self._policy = policy
         self._launch_env = launch_env
+        # meiva:note
+        # How this manager sees the running root: `observe_root` unless the caller names another.
+        self._observe = observe
         # Enabled sessions whose stale same-name survivor resisted a reap. A
         # live session normally means adopt, but these need another official
         # reap before their replacement may launch. In memory: a restarted
@@ -204,9 +209,7 @@ class ScheduleManager:
         return self._launch_revision(schedule_id, now)
 
     def _launch_revision(self, schedule_id: int, now: float) -> bool:
-        from base.deploy.lifecycle import start_serving
-
-        with start_serving.recovery_permitted(self._home) as permitted:
+        with start_serving.recovery_permitted(self._home, observe=self._observe) as permitted:
             if not permitted:
                 self._refuse_launch(
                     schedule_id, "the serving receipt does not name this root; run meiva start"
@@ -273,11 +276,9 @@ class ScheduleManager:
         self._observe_recovery_gate(now)
 
     def _observe_recovery_gate(self, now: float) -> None:
-        from base.deploy.lifecycle import start_serving
-
         step = observe_gate(
             self._gate,
-            permitted=start_serving.is_serving(self._home),
+            permitted=start_serving.is_serving(self._home, observe=self._observe),
             now=now,
             alert_after_s=self._policy.recovery_gate_alert_seconds,
         )
