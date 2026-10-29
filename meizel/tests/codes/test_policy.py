@@ -251,3 +251,19 @@ def test_a_policy_line_is_found_inside_its_table_only() -> None:
     assert policy.line_of("child.py") == 2
     assert policy.line_of("child.py", TABLE) == 5
     assert policy.line_of("absent.py", TABLE) == 1
+
+
+def test_policy_diff_lists_a_clause_change_on_its_own(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    listed = (
+        '[ambient-readers.pid]\n"app.reader()" = { why = "reads the process", unless = "euid" }\n'
+    )
+    root = repo(make_repo, POLICY + "\n" + listed)
+    commit(root)
+    changed = listed.replace('"euid"', '"uid"')
+    write(root, {"meizel.policy.toml": POLICY + "\n" + changed})
+    assert run(root, "policy", "diff", "--against", "HEAD") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "~ [ambient-readers.pid unless] app.reader(): unless euid -> unless uid" in out
+    assert not [line for line in out if line.startswith(("+", "-"))]

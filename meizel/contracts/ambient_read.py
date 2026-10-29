@@ -25,6 +25,7 @@ from meizel.graph.model import (
     Diagnostic,
     MeizelError,
     Sources,
+    Unless,
 )
 from meizel.graph.universe import Universe
 from meizel.language.scan import FileScan, module_bindings
@@ -101,7 +102,7 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Un
     calls.update(_followed(universe, _readers(policy, call=True)))
     readers = _followed(universe, _readers(policy, call=False))
     names.update(readers)
-    return Sources(names, calls, frozenset(readers))
+    return Sources(names, calls, frozenset(readers), _spared(universe, policy))
 
 
 # meiva:note
@@ -194,6 +195,48 @@ def _readers(policy: Policy, *, call: bool) -> dict[str, AmbientKind]:
 
 
 # meiva:note
+# The `unless` clause of one entry: the parameter, and where it sits among the arguments that can
+# be given by position. The reason the clause cannot be read - no such module, not a module-level
+# function, no such parameter - comes back as text instead, for the stale-reader diagnostic.
+def _unless(universe: Universe, target: str, parameter: str) -> Unless | str:
+    located = _locate(universe, target)
+    if located is None:
+        return "names no tracked module"
+    _, file, member = located
+    if len(member) != 1:
+        return f"is a method: `unless` is read for a module-level function only, in {file}"
+    functions = [
+        node
+        for node in ast.parse(universe.load_text(file)).body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == member[0]
+    ]
+    if not functions:
+        return f"is not a module-level function of {file}"
+    arguments = functions[-1].args
+    positional = [argument.arg for argument in (*arguments.posonlyargs, *arguments.args)]
+    if parameter in positional:
+        return Unless(parameter, positional.index(parameter))
+    if any(argument.arg == parameter for argument in arguments.kwonlyargs):
+        return Unless(parameter, None)
+    return f"names no parameter {parameter!r}"
+
+
+# meiva:note
+# The readers whose read a passed parameter spares, by the name a call spells them: the clause is a
+# property of the entry, so a re-exported spelling keeps it only where the policy lists that
+# spelling. Entries whose clause cannot be read are left to `stale_readers`.
+def _spared(universe: Universe, policy: Policy) -> dict[str, Unless]:
+    found: dict[str, Unless] = {}
+    for kind in AmbientKind:
+        for name, parameter in policy.unless_for(_READERS, kind.value).items():
+            target = name.removesuffix(_CALL_MARK)
+            resolved = _unless(universe, target, parameter)
+            if isinstance(resolved, Unless):
+                found[target] = resolved
+    return found
+
+
+# meiva:note
 # The shape of the policy's `[ambient-readers.<kind>]` entries: a fully qualified call
 # (`pkg.module.name()`, `pkg.module.Class.method()`) or name (`pkg.module.NAME`), listed under
 # exactly one kind.
@@ -214,6 +257,15 @@ def reader_problems(policy: Policy) -> list[Diagnostic]:
                 seen.add(name)
                 continue
             found.append(Diagnostic(POLICY, line, Code.POLICY_SYNTAX, message))
+    for kind in AmbientKind:
+        for name in policy.unless_for(_READERS, kind.value):
+            if name.endswith(_CALL_MARK):
+                continue
+            message = (
+                f"[{_READERS}.{kind.value}] {name!r} is not a call: `unless` spares the read a call "
+                f"makes, so list it as `{name}()` or drop the clause"
+            )
+            found.append(Diagnostic(POLICY, policy.line_of(name), Code.POLICY_SYNTAX, message))
     return found
 
 
@@ -298,10 +350,18 @@ def _missing_reader(universe: Universe, target: str, *, call: bool) -> str | Non
 # whole-repository run knows.
 def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
     found: list[Diagnostic] = []
+    moved = ("remove the entry, or fix the name if the function moved",)
+    clause = ("fix the parameter name, or drop the `unless` clause",)
     for kind in AmbientKind:
+        spared = policy.unless_for(_READERS, kind.value)
         for name in policy.reasons(_READERS, kind.value):
-            call = name.endswith(_CALL_MARK)
-            problem = _missing_reader(universe, name.removesuffix(_CALL_MARK), call=call)
+            target = name.removesuffix(_CALL_MARK)
+            problem = _missing_reader(universe, target, call=name.endswith(_CALL_MARK))
+            hint = moved
+            if problem is None and name in spared:
+                resolved = _unless(universe, target, spared[name])
+                problem = resolved if isinstance(resolved, str) else None
+                hint = clause
             if problem is not None:
                 found.append(
                     Diagnostic(
@@ -309,7 +369,7 @@ def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
                         policy.line_of(name),
                         Code.STALE_READER,
                         f"[{_READERS}.{kind.value}] {name!r} {problem}",
-                        ("remove the entry, or fix the name if the function moved",),
+                        hint,
                     )
                 )
     return found
