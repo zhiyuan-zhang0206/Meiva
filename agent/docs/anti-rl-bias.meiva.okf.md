@@ -17,6 +17,11 @@ turn ambiguous silence into supervisable state. A fleet that runs unattended
 cannot afford agents that look done when they are not, or that stall silently
 instead of asking; an agent that declares intent beats a prompt that asks it to.
 
+A completed model response without a tool call may end quietly, including
+a reasoning-only response. Silence alone does not authorize another model
+call or a forced completion message. Explicit wake-ups and task reminders
+continue to supervise outstanding work.
+
 ## Mechanisms
 
 1. **Idle heartbeat** — `services/wake/heartbeat/` ([[services/docs/gateway_side/heartbeat.meiva.okf.md]]).
@@ -25,33 +30,27 @@ instead of asking; an agent that declares intent beats a prompt that asks it to.
    suppresses nudges for a declared window; real wake-ups still arrive), or done
    (terminate). Opt-out is an active agent choice, not an escalation chain
    ([why](../../docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md)).
-2. **Silent-idle continue nudge** — `meiva_builtins/plugins/meiva_silent_idle/`
-   ([[meiva_builtins/plugins/meiva_silent_idle/docs/meiva_silent_idle.meiva.okf.md]]).
-   When the model produces reasoning but no text and no tool call, the kernel
-   keeps the reasoning in context and loops back, and a hook injects a nudge to
-   produce text or a tool call, or to state completion in text. A consecutive-count
-   guard bounds a model that habitually stalls.
-3. **SDK reminder** — `meiva_builtins/plugins/meiva_sdk_reminder/`
+2. **SDK reminder** — `meiva_builtins/plugins/meiva_sdk_reminder/`
    ([[meiva_builtins/plugins/meiva_sdk_reminder/docs/meiva_sdk_reminder.meiva.okf.md]]).
    Hints the first time the agent reaches for a native-Python equivalent
    (`subprocess` → `meiva.shell.run`, `time.sleep` loops → `meiva.watcher`,
    `open()` → `meiva.files`, `requests` → `meiva.web`), and reminds an agent that
    a plain text reply reaches nobody — the verb is `meiva.agents.send_message`.
-4. **Capabilities drift check** — `agent/graph/hooks/capabilities.py`. Before every LLM
+3. **Capabilities drift check** — `agent/graph/hooks/capabilities.py`. Before every LLM
    call the live skill index is diffed against the snapshot the context window
    was built from; skills installed since are named in one system note, so an
    agent cannot silently rebuild a capability it already has.
-5. **Task progress reminders** — the gateway tasks API (`remind_interval_seconds`).
+4. **Task progress reminders** — the gateway tasks API (`remind_interval_seconds`).
    The owner of an in-progress task is periodically reminded to post progress;
    reminders cannot be disabled (capped at 24 h), so a task that goes dark is a
    visible fact.
-6. **Delivery semantics** — a bare text turn delivers nothing:
+5. **Delivery semantics** — a bare text turn delivers nothing:
    `meiva.agents.send_message` (peers) and `meiva.ui.notify` (the user) are the only
    delivery verbs, so "not done yet" must be said out loud and silence reads as
    busy ([why](../../docs/decisions/agents/messages/2026-08-01-one-send-is-one-inbound.md)).
-7. **Standing memory injection** — the memory index (`MEMORY.md`) is injected at
+6. **Standing memory injection** — the memory index (`MEMORY.md`) is injected at
    cold start and after every compact, so long-lived rules stay in front of the
    agent ([[agent/graph/docs/context-notes/memory-injection.meiva.okf.md]]).
-8. **Prompt-layer discipline** — agents give scope and trade-offs, never time
+7. **Prompt-layer discipline** — agents give scope and trade-offs, never time
    estimates, and describe current behavior
    ([`communicating-with-user.md`](../../docs/conventions/communicating-with-user.md)).

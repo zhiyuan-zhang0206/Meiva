@@ -21,7 +21,6 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from agent.graph.llm_errors import LlmLedger
 from agent.messages import InboundTimes, inbound_message, tail_has_agent_inbound
 from agent.state import CompactState
 from base.agents.messages.kwargs import ExecStatus
@@ -329,7 +328,7 @@ async def test_real_runner_compaction_wins_no_note(
     assert isinstance(hook_update, dict) and "messages" not in hook_update
     from agent.graph.llm.node import llm_node
 
-    cmd = await llm_node(state, runtime, make_config(), ledger=LlmLedger(), rng=_rng())
+    cmd = await llm_node(state, runtime, make_config(), rng=_rng())
     update = cmd.update
     assert isinstance(update, dict)
     # Apply the real add_messages reducer to get the committed messages.

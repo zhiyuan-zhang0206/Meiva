@@ -50,7 +50,7 @@ import tests._test_env_file
 #
 # A credential is a whole name element, never a substring: `MEIVA_API_TOKEN`,
 # `MEIVA_FEISHU_APP_SECRET`, `MEIVA_DB_CAPABILITY_KEY` are credentials;
-# `MEIVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS` is a budget and
+# `MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS` is a budget and
 # `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` is a path TO a credential — a rule that called
 # those two credentials would teach the reader to ignore this one. `MEIVA_PROCESS_PROFILE`
 # is no credential and rides along anyway: it names which profile the LAUNCHER ran, and the

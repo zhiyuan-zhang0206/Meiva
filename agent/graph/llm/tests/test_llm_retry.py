@@ -22,7 +22,6 @@ from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
-    LlmLedger,
     LLMStreamCorruptedError,
     LLMStreamStallTimeoutError,
     LLMStreamTruncatedError,
@@ -192,7 +191,7 @@ async def _node_run(
         model, model_catalog=model_catalog, database_gate=database_gate, pins={**_QUICK, **pins}
     )
     config: RunnableConfig = {"configurable": {"thread_id": thread}}
-    return await node.llm_node(_STATE, runtime, config, ledger=LlmLedger(), rng=_seeded(seed))
+    return await node.llm_node(_STATE, runtime, config, rng=_seeded(seed))
 
 
 async def test_the_node_retries_a_transient_failure_and_returns_the_next_success(

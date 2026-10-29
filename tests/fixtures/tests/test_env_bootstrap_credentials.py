@@ -77,7 +77,7 @@ def test_the_delivered_login_marker_does_not_survive_the_bootstrap() -> None:
         ("MEIVA_DB_CAPABILITY_KEY", True),
         ("MEIVA_REDIS_ADMIN_PASSWORD", True),
         ("MEIVA_PROCESS_PROFILE", True),
-        ("MEIVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS", False),
+        ("MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS", False),
         ("MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE", False),
         ("DEEPSEEK_API_KEY", False),
         ("MEIVA_GATEWAY_URL", False),

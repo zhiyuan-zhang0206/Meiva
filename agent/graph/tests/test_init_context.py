@@ -22,7 +22,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
 from agent.graph.hooks.tests.scripted_model import ScriptedModel
-from agent.graph.llm_errors import LlmLedger
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext
@@ -511,7 +510,6 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
             llm=fake_llm,
         ),
         _config(tid),
-        ledger=LlmLedger(),
         rng=_rng(),
     )
     assert cmd.goto == "init_context"

@@ -39,6 +39,8 @@ class NoteTag(StrEnum):
     TASK = "task"
     COMPACT_REMINDER = "compact_reminder"
     HISTORY_DUMP = "history_dump"
+    # meiva:note
+    # Retained for historical checkpoints; no runtime hook emits this note.
     SILENT_IDLE_CONTINUE = "silent_idle_continue"
     MEMORY = "memory"
     MEMORY_WRITE_CHECK = "memory_write_check"

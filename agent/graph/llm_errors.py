@@ -1,5 +1,3 @@
-"""Model failure classification and the successful silent-idle token budget."""
-
 from __future__ import annotations
 
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
@@ -236,26 +234,3 @@ class LLMStreamTruncatedError(LLMStreamUnexpectedStopReasonError):
 
     This invariant was formed by a max_tokens truncation incident (agent 169).
     """
-
-
-class LlmLedger:
-    """Output-token budget of consecutive successful silent-idle turns.
-
-    One ledger belongs to one graph; records are keyed by agent thread id.
-    Provider failures have no cross-turn retry state.
-    """
-
-    def __init__(self) -> None:
-        self._silent_idle_output_tokens: dict[str, int] = {}
-
-    def silent_idle_output_tokens(self, thread_id: str) -> int:
-        """Budget units the thread's consecutive silent-idle turns have used so far."""
-        return self._silent_idle_output_tokens.get(thread_id, 0)
-
-    def record_silent_idle_output_tokens(self, thread_id: str, cumulative: int) -> None:
-        """Store the cumulative budget after one more silent-idle turn."""
-        self._silent_idle_output_tokens[thread_id] = cumulative
-
-    def reset_silent_idle(self, thread_id: str) -> None:
-        """End the silent-idle streak (a real action, or the cap firing)."""
-        self._silent_idle_output_tokens.pop(thread_id, None)

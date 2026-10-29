@@ -112,7 +112,7 @@ def test_only_enabled_plugins_are_imported(unit_home: Path):
 
     _write_enabled(
         {
-            "meiva_silent_idle": {"enabled": True},
+            "meiva_syntax_fix": {"enabled": True},
             "compact": {"enabled": True},
             "syntax_fix": {"enabled": True},
             "demo": {"enabled": False},
@@ -124,11 +124,22 @@ def test_only_enabled_plugins_are_imported(unit_home: Path):
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
     imported = _imported_plugins()
-    assert "meiva_builtins.plugins.meiva_silent_idle.plugin" in imported
+    assert "meiva_builtins.plugins.meiva_syntax_fix.plugin" in imported
     assert "plugins.compact.plugin" in imported
     assert "plugins.syntax_fix.plugin" in imported
     assert not any("demo" in name for name in imported)
     assert not any("meiva_to_user" in name for name in imported)
+
+
+def test_retired_silent_idle_plugin_config_does_not_restore_the_nudge(unit_home: Path) -> None:
+    from meiva.sdk_surface import extensions as _loader
+
+    _write_enabled({"meiva_silent_idle": {"enabled": True}, "meiva_syntax_fix": {"enabled": True}})
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
+
+    imported = _imported_plugins()
+    assert "meiva_builtins.plugins.meiva_syntax_fix.plugin" in imported
+    assert not any("meiva_silent_idle" in name for name in imported)
 
 
 def test_external_plugin_also_loaded(unit_home: Path):
@@ -400,11 +411,11 @@ def test_broken_builtin_plugin_skipped_and_others_load(tmp_path: Path, unit_home
     assert "meiva_builtins.plugins.syntax_fix.plugin" not in sys.modules
 
     _make_plugin(unit_home, "syntax_fix", "raise RuntimeError('boom')\n")
-    _write_enabled({"syntax_fix": {"enabled": True}, "meiva_silent_idle": {"enabled": True}})
+    _write_enabled({"syntax_fix": {"enabled": True}, "meiva_syntax_fix": {"enabled": True}})
 
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)  # must not raise
 
-    assert "meiva_builtins.plugins.meiva_silent_idle.plugin" in sys.modules
+    assert "meiva_builtins.plugins.meiva_syntax_fix.plugin" in sys.modules
     assert "plugins.syntax_fix.plugin" not in sys.modules
 
 

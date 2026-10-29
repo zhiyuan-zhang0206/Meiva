@@ -13,7 +13,6 @@ from langchain_core.runnables import RunnableConfig
 from agent.graph.llm._backoff import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
-from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -47,7 +46,6 @@ async def test_turn_end_ok_false_record_carries_exception(
             llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
             _config_with_thread(),
             Attempt(1, time.time()),
-            LlmLedger(),
         )
 
     turn_end_records = loguru_records.events("turn_end")
@@ -75,7 +73,6 @@ async def test_turn_end_ok_true_record_no_exception(
         _STATE,
         llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
         _config_with_thread(),
-        ledger=LlmLedger(),
         rng=_rng(),
     )
 

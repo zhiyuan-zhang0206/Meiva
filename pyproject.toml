@@ -1422,11 +1422,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/plugins/meiva_silent_idle/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_syntax_fix/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

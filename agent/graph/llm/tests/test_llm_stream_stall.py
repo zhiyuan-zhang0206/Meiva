@@ -19,7 +19,7 @@ from agent.graph.llm.tests.llm_support import (
     end_turn_chunk,
     llm_runtime,
 )
-from agent.graph.llm_errors import LlmLedger, LLMStreamStallTimeoutError
+from agent.graph.llm_errors import LLMStreamStallTimeoutError
 from agent.state import AgentState
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
@@ -34,7 +34,7 @@ async def _one_try(
     model: ScriptedModel, pins: dict[str, Any], model_catalog: ModelCatalog, gate: ProcessDbGate
 ) -> Any:
     runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=gate, pins=pins)
-    return await llm_attempt(_STATE, runtime, _CONFIG, Attempt(1, time.time()), LlmLedger())
+    return await llm_attempt(_STATE, runtime, _CONFIG, Attempt(1, time.time()))
 
 
 async def test_stall_at_ttft_raises_with_ttft_marker(
