@@ -99,7 +99,7 @@ added. What to do instead is in
 
 A few test-support files patch on purpose, because their job is to keep the suite off the host or
 to put a child process in a state no parameter reaches. `[approved-patches.files]` in
-[[meizel/docs/checker/policy.meiva.okf.md|the policy]] lists such a file with its reason, and none of its patches is
+[[meizel/docs/checker/policy/policy.meiva.okf.md|the policy]] lists such a file with its reason, and none of its patches is
 recorded or judged. Three purposes qualify: an autouse guard, the entry of a subprocess a test starts,
 and the global setup of the test runner. Production code and test modules (`test_*.py`, `*_test.py`,
 `*.test.ts`, `*.spec.ts`) cannot be listed (`policy-syntax`): a test that patches is converted. No baseline
