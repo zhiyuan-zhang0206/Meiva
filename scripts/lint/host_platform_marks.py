@@ -152,8 +152,16 @@ def _exempt(lines: list[str], span: tuple[int, int]) -> bool:
 
 
 def findings_in_source(src: str) -> list[tuple[int, str, str]]:
-    tree = ast.parse(src)
+    return _findings_in_tree(ast.parse(src), src)
+
+
+def _findings_in_tree(tree: ast.Module, src: str) -> list[tuple[int, str, str]]:
     lines = src.splitlines()
+    # meiva:note
+    # `_exempt` looks for the marker in the lines of a span, so a file that never writes it
+    # has no exemption anywhere: skipping the search keeps the verdict and drops a scan of
+    # every expression's lines (2026-10-29: it was the largest single cost of a whole-tree run).
+    exempt_anywhere = EXEMPTION in src
     out: list[tuple[int, str, str]] = []
 
     def visit(node: ast.AST, *, marked: bool, span: tuple[int, int] | None) -> None:
@@ -167,7 +175,7 @@ def findings_in_source(src: str) -> list[tuple[int, str, str]]:
                 continue
             if isinstance(child, ast.expr):
                 line = (child.lineno, child.end_lineno or child.lineno)
-                if not marked and not _exempt(lines, span or line):
+                if not marked and not (exempt_anywhere and _exempt(lines, span or line)):
                     for kind, what in (
                         ("platform", _platform_read(child)),
                         ("path", _path_read(child)),
@@ -186,7 +194,16 @@ def findings_in_source(src: str) -> list[tuple[int, str, str]]:
 # that writes the marker into a string literal is data, not an exemption. The innermost
 # function wins — an exemption inside a method does not exempt the class.
 def exemptions_in_source(src: str) -> list[tuple[str, str]]:
-    tree = ast.parse(src)
+    return _exemptions_in_tree(ast.parse(src), src)
+
+
+def _exemptions_in_tree(tree: ast.Module, src: str) -> list[tuple[str, str]]:
+    # meiva:note
+    # An exemption is a comment that contains the marker, and a comment token's text is a
+    # substring of the source: without the marker in the source there is nothing to read,
+    # so the tokenizer pass and the owner walk are both skipped.
+    if EXEMPTION not in src:
+        return []
     owners = [
         (node.lineno, node.end_lineno or node.lineno, node.name)
         for node in ast.walk(tree)
@@ -234,24 +251,15 @@ def job_names(root: Path) -> frozenset[str]:
     return frozenset(name.strip("\"'") for name in names if name.strip())
 
 
-def _scan_file(path: Path) -> list[tuple[int, str, str]]:
-    text = lint_common.read_utf8_text(path)
-    if text is None:
-        return []
+# meiva:note
+# Both verdicts come from one parse: the findings and the exemptions read the same tree,
+# and a whole-tree run parses every test file it walks (2026-10-29: 3191 files, 21.3 MB).
+def judge_source(text: str) -> tuple[list[tuple[int, str, str]], list[tuple[str, str]]]:
     try:
-        return findings_in_source(text)
+        tree = ast.parse(text)
+        return _findings_in_tree(tree, text), _exemptions_in_tree(tree, text)
     except SyntaxError:
-        return []
-
-
-def _exemptions_of(path: Path) -> list[tuple[str, str]]:
-    text = lint_common.read_utf8_text(path)
-    if text is None:
-        return []
-    try:
-        return exemptions_in_source(text)
-    except SyntaxError:
-        return []
+        return [], []
 
 
 def _test_files(targets: list[Path]) -> Iterator[Path]:
@@ -315,10 +323,10 @@ def _judge(
         if not lint_common.is_test_path(rel):
             continue
         scanned.add(rel)
-        findings = _scan_file(path)
+        findings, found_exemptions = judge_source(lint_common.read_utf8_text(path) or "")
         if findings:
             judged[rel] = findings
-        for owner, reason in _exemptions_of(path):
+        for owner, reason in found_exemptions:
             exemptions.setdefault(f"{rel}::{owner}", []).append(reason)
     return judged, exemptions
 

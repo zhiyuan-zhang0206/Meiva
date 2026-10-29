@@ -381,3 +381,27 @@ def test_the_marker_inside_a_string_is_not_an_exemption() -> None:
     # meiva:note
     # A fixture that writes the marker into a string is data; only a comment is a claim.
     assert _lint.exemptions_in_source('X = "# host-ok: not mine"\n') == []
+
+
+# meiva:note
+# One parse answers both questions. A whole-tree run parses every test file it walks
+# (2026-10-29: 3191 files, 21.3 MB), so the findings and the exemptions must not each pay
+# for a tree of their own.
+def test_one_parse_yields_both_verdicts() -> None:
+    src = (
+        "import sys\n\n\n"
+        "def test_flagged():\n"
+        "    assert sys.platform == 'darwin'\n\n\n"
+        "def test_exempt():\n"
+        "    assert sys.platform == 'darwin'  "
+        "# host-ok: the subject is the launchd lane (`tests/fixtures/host_platform.py`)\n"
+    )
+    findings, exemptions = _lint.judge_source(src)
+    assert [what for _, what, _ in findings] == ["sys.platform"]
+    assert exemptions == [
+        ("test_exempt", "the subject is the launchd lane (`tests/fixtures/host_platform.py`)")
+    ]
+
+
+def test_a_file_that_does_not_parse_contributes_nothing() -> None:
+    assert _lint.judge_source("def broken(\n") == ([], [])
