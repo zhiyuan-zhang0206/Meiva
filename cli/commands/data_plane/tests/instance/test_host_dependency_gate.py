@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import random
 import shutil
 import stat
@@ -55,12 +56,12 @@ def _program(path: Path, body: str = "exit 0") -> Path:
     return path
 
 
-def _host(directory: Path, *, macos: bool = False, uid: int = 1000) -> Host:
+def _host(directory: Path, *, macos: bool = False, uid: int | None = None) -> Host:
     return Host(
         run=run_bounded,
         which=partial(shutil.which, path=str(directory)),
         platform=DARWIN_ARM64 if macos else LINUX_X86,
-        uid=uid,
+        uid=os.geteuid() if uid is None else uid,
         environ={},
     )
 

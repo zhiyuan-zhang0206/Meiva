@@ -1,6 +1,7 @@
 # meiva:note
 # Actual private plist writes; the command resource refuses every scheduler command.
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,8 +36,8 @@ def test_register_macos_writes_plist_but_never_bootstraps(tmp_path: Path) -> Non
 def test_register_macos_prints_the_reload_form_too(tmp_path: Path) -> None:
     result = _run("write", tmp_path)
     plist = tmp_path / "user & <private>" / "Library/LaunchAgents/com.meiva.autostart.plist"
-    assert f"launchctl bootstrap gui/1000 {plist}" in result.stdout
-    assert f"launchctl bootout gui/1000/{plist.stem}" in result.stdout
+    assert f"launchctl bootstrap gui/{os.geteuid()} {plist}" in result.stdout
+    assert f"launchctl bootout gui/{os.geteuid()}/{plist.stem}" in result.stdout
     assert "OLD definition" in result.stdout
 
 
