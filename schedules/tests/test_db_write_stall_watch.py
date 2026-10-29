@@ -123,6 +123,7 @@ def _watch(tmp_path: Path, agents: tuple[int, ...] = (1818, 405)) -> StallWatch:
     return StallWatch(
         log=tmp_path / "pgbouncer.log",
         state=tmp_path / "run" / "db-write-stall-watch.json",
+        history=tmp_path / "state" / "db-write-stall-history.jsonl",
         zone=ZoneInfo("Asia/Shanghai"),
         report_agents=agents,
     )
@@ -208,3 +209,50 @@ def test_the_watch_loop_reads_the_log_and_keeps_its_state_file(tmp_path: Path) -
         child.wait(timeout=10)
 
     assert json.loads(state.read_text())["last_sample"] == "2026-10-24 11:02:03.456"
+
+
+def test_every_new_minute_lands_in_the_history_file(tmp_path: Path) -> None:
+    watch = _watch(tmp_path, agents=())
+    watch.log.write_text("\n".join(_line(m, *_STALLED) for m in (1, 2, 3)) + "\n")
+
+    poll_once(watch, initial_state(watch), now=4000.0)
+
+    rows = [json.loads(line) for line in watch.history.read_text().splitlines()]
+    assert [row["stamp"] for row in rows] == [
+        "2026-10-24 11:01:03.456",
+        "2026-10-24 11:02:03.456",
+        "2026-10-24 11:03:03.456",
+    ]
+    assert rows[0] == {
+        "stamp": "2026-10-24 11:01:03.456",
+        "xacts_per_s": 2,
+        "queries_per_s": 8,
+        "query_us": 400_000,
+        "alert_sent": True,
+        "source": "pgbouncer stats",
+    }
+
+
+def test_a_repeat_poll_does_not_duplicate_history(tmp_path: Path) -> None:
+    watch = _watch(tmp_path, agents=())
+    watch.log.write_text("\n".join(_line(m, *_HEALTHY) for m in (1, 2)) + "\n")
+
+    state = poll_once(watch, initial_state(watch), now=1.0)
+    poll_once(watch, state, now=2.0)
+
+    assert len(watch.history.read_text().splitlines()) == 2
+
+
+def test_the_history_keeps_only_its_newest_lines(tmp_path: Path) -> None:
+    watch = _watch(tmp_path, agents=())
+    watch.history.parent.mkdir(parents=True, exist_ok=True)
+    watch.history.write_text(
+        "\n".join(json.dumps({"stamp": f"old-{index}"}) for index in range(20_000)) + "\n"
+    )
+    watch.log.write_text(_line(1, *_HEALTHY) + "\n")
+
+    poll_once(watch, initial_state(watch), now=1.0)
+
+    rows = watch.history.read_text().splitlines()
+    assert len(rows) == 15_000
+    assert json.loads(rows[-1])["stamp"] == "2026-10-24 11:01:03.456"
