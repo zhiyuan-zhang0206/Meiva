@@ -89,6 +89,43 @@ async def publish_turn_progress_heartbeat(
 
 
 # meiva:note
+# The database beat's failure and its retry result are structured events, not only the log line
+# the host already writes (task #5767): "at 01:36, what did the beat see" has to be answerable
+# from the event stream, and a line that merely mentions the words must not count. `pool` names
+# the leg that failed so a future second beat (another pool, another job) is distinguishable.
+# meiva:link agent/docs/loop.meiva.okf.md
+def _report_database_beat_failure(
+    machine: str, failures: int, error: str, *, will_exit: bool
+) -> None:
+    logger.warning(
+        "the agent host's database beat failed {failures}/3 ({error}) — the beat reaps crash "
+        "corpses and renews host ownership, so a failing beat is the first warning before the "
+        "host exits",
+        event="host_database_beat_failed",
+        machine=machine,
+        pool="host-reaper",
+        failures=failures,
+        limit=3,
+        will_exit=will_exit,
+        error=error,
+    )
+
+
+# meiva:note
+# The other half of the same fact: a beat that failed and then succeeded says so, so an incident
+# review pairs the failures with the recovery instead of reading the gap as silence.
+# meiva:link agent/docs/loop.meiva.okf.md
+def _report_database_beat_recovery(machine: str, failures_cleared: int) -> None:
+    logger.warning(
+        "the agent host's database beat recovered after {failures_cleared} consecutive failure(s)",
+        event="host_database_beat_recovered",
+        machine=machine,
+        pool="host-reaper",
+        failures_cleared=failures_cleared,
+    )
+
+
+# meiva:note
 # Report a long queue episode without cancelling its intentionally silent turn.
 def _report_long_admission_waits(
     host: AgentHost, *, read_alert_seconds: Callable[[], float]
@@ -129,12 +166,17 @@ async def beat_forever(
         liveness.beat()
         try:
             await asyncio.wait_for(host.reap_corpses(), timeout=beat_db_timeout_s)
-        except (TimeoutError, psycopg.OperationalError, PoolTimeout):
+        except (TimeoutError, psycopg.OperationalError, PoolTimeout) as error:
             beat_failures += 1
             host_log.exception("[agent-host] database beat failed (%s/3)", beat_failures)
+            _report_database_beat_failure(
+                machine, beat_failures, type(error).__name__, will_exit=beat_failures >= 3
+            )
             if beat_failures >= 3:
                 raise
         else:
+            if beat_failures:
+                _report_database_beat_recovery(machine, beat_failures)
             beat_failures = 0
         published = await publish_turn_progress_heartbeat(
             bus, machine, scheduler.active_agents, host.turn_progress, timeout_s=publish_timeout_s
