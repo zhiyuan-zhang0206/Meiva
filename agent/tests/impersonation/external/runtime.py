@@ -157,14 +157,6 @@ class Takeover:
         )
         self.cluster.db_conn.commit()
 
-    def declare_no_capabilities(self) -> None:
-        self.cluster.db_conn.execute(
-            "UPDATE agent_impersonations SET capabilities='[]'::jsonb, "
-            "capability_declared_by='caller-default' WHERE id=%s",
-            (self.lease_id,),
-        )
-        self.cluster.db_conn.commit()
-
     def replacement_lease(self) -> str:
         return self.cluster.lease(self.owner, phase="active")["id"]
 

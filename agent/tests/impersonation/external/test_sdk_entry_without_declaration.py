@@ -1,12 +1,12 @@
 # meiva:note
-# A lease's stored capability declaration is a record, never a gate. The user ruled
-# (2026-10-19) that a takeover declares nothing and may still use every SDK entry, so
-# the one acceptance property is: with the strictest stored declaration - an empty
-# array - every public `meiva.*` entry is still admitted. The check runs on the seam
-# every entry passes through (the metering recorder -> `Attachment.admit_sdk_call`),
-# not on a helper that answers a boolean: each entry is driven through the real
-# recorder against a real, attached `Attachment`. Only the entry's body is replaced
-# with a no-op, because the walk must not perform the real operations the whole
+# A takeover declares nothing and may use every SDK entry (user ruling, 2026-10-19). The
+# declaration that ruling repealed is gone from the schema too: `capabilities` and
+# `capability_declared_by` were dropped from `agent_impersonations` (task #5335), so
+# nothing can gate on a stored declaration - there is no column to read. What still needs
+# proving is the seam every entry passes through (the metering recorder ->
+# `Attachment.admit_sdk_call`), not a helper that answers a boolean: each entry is driven
+# through the real recorder against a real, attached `Attachment`. Only the entry's body is
+# replaced with a no-op, because the walk must not perform the real operations the whole
 # surface exposes.
 
 from __future__ import annotations
@@ -22,12 +22,11 @@ from meiva.impersonation.attachment import Attachment
 from meiva.sdk_surface import meiva_module, metering, process_context
 
 
-def test_a_lease_that_declares_no_capability_reaches_every_sdk_entry(
+def test_every_public_sdk_entry_reaches_the_admission_seam_of_an_attached_lease(
     attached_mcp_runtime: tuple[Takeover, Attachment],
     emitted_events: EmittedEvents,
 ) -> None:
-    takeover, attachment = attached_mcp_runtime
-    takeover.declare_no_capabilities()
+    _takeover, attachment = attached_mcp_runtime
     bound = process_context.current_context()
     # meiva:note
     # The recorder hands every metered entry's admission to the bound context's owner:
