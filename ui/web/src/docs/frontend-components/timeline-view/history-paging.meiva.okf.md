@@ -43,3 +43,19 @@ through backend `has_more` and `MEIVA_TIMELINE_COMPACT_HISTORY` depth.
 
 
 While following the bottom, `display.timeline_retained_items_max` (250 by default) evicts the oldest selected-thread rows and keeps older paging available. A reader parked in history keeps the loaded and visible window until returning to the bottom. The temporary compact transition buffer is kept intact through its anchor handoff, then the canonical list is trimmed.
+
+## Which read presents the strip
+
+The strip above the messages presents the reader's own older-page request: a
+pull gesture that committed, or the keyboard paging control. The store's
+in-flight flag is not a display contract — it is the concurrency guard that every
+backward read holds, and two of those reads page history nobody pulled for: the
+cold first-viewport fill (at most two pages on a short thread) and
+compact-history retention after a compact replaces the window. Keying the strip
+on that flag lit it for both, and because every load mounted a fresh ring the
+spin restarted instead of turning (user report 2026-10-29). Each request
+therefore records its origin where it begins (`OlderLoadOrigin` in
+`lib/timeline/timeline-plan.ts`), and only a `reader` origin is presented. One
+request keeps one ring element from its start to its landing, so a parent
+re-render, however frequent, never rebuilds it
+([[ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md|The loading ring]]).

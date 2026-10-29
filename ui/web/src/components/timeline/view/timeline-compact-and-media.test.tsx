@@ -149,6 +149,11 @@ describe("continuous compact history", () => {
     expect(loadOlder).not.toHaveBeenCalled();
     historyWheel(viewport, -20, true);
     expect(loadOlder).toHaveBeenCalledTimes(1);
+    // meiva:note
+    // The released pull is the reader's own read — the only origin that may
+    // present the loading strip.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+    expect(loadOlder).toHaveBeenCalledWith("reader");
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });

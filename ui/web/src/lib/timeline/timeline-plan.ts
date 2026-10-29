@@ -3,6 +3,15 @@ import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } fr
 
 export type OlderSegmentLoadResult = "loaded" | "exhausted" | "unready" | "aborted" | "failed";
 
+// meiva:note
+// Who asked for an older page. Only the reader's own request — the pull gesture
+// or the keyboard control — presents the loading strip above the messages; the
+// two automatic fills (the cold first-viewport fill, compact-history retention)
+// read history nobody pulled for, and presenting them showed a ring the reader
+// never triggered (user report 2026-10-29).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+export type OlderLoadOrigin = "reader" | "background";
+
 export function startsTurn(event: SystemEvent): boolean {
   return (
     event.role === "inbound_arrived" ||

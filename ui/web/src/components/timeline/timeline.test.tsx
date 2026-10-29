@@ -270,6 +270,11 @@ describe("bounded timeline history (#4702)", () => {
     geometry(viewport, 300);
     layoutChange();
     expect(loadOlder).toHaveBeenCalledTimes(1); // first screen still fills
+    // meiva:note
+    // The fill reads history the reader never asked for, so it must not present
+    // the loading strip above the messages (user report 2026-10-29).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+    expect(loadOlder).toHaveBeenCalledWith("background");
     for (let i = 0; i < 8; i++) layoutChange();
     expect(loadOlder).toHaveBeenCalledTimes(1);
 

@@ -278,7 +278,7 @@ function HomeContent({
     [activeId, client],
   );
 
-  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, loadingNewer, retryTimeline } =
+  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, readerLoadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, loadingNewer, retryTimeline } =
     useTimeline(activeId, showError, activeAgent?.status);
   const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
     activeId,
@@ -381,6 +381,7 @@ function HomeContent({
             turnActive={agentBusy}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
+            readerLoadingOlder={readerLoadingOlder}
             onLoadOlder={loadOlder}
             retainedItemsMax={retainedItemsMax}
             loading={isLoading}

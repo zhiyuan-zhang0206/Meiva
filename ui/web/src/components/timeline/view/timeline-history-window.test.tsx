@@ -54,7 +54,11 @@ describe("deep history DOM window", () => {
     height = 52 + count * 92;
     rerender(view(items));
     expect(viewport.scrollTop).toBe(3000);
-    expect(screen.getByLabelText("Scroll to bottom").className).toContain("opacity-100");
+    // meiva:note
+    // Away from the bottom the control is present and interactive; at the bottom
+    // it is not rendered at all (user report 2026-10-30).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    expect(screen.getByLabelText("Scroll to bottom").className).not.toContain("opacity-0");
     if (count > 100) expect(viewport.querySelector("[data-timeline-spacer]")).not.toBeNull();
     const scrollTo = vi.spyOn(viewport, "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
       if (typeof options === "object") smoothTarget = options.top ?? null;
