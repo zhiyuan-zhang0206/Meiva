@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scripts.content_lint import lint_skill_descriptions as lint
 
 
@@ -104,3 +106,24 @@ def test_dash_dir_and_dash_frontmatter_pass(tmp_path: Path) -> None:
         "---\nname: meiva-goal\ndescription: d\n---\n",
     )
     assert lint.main(repo_root=tmp_path) == 0
+
+
+# meiva:note
+# The ceiling says a skill's index line is a summary, not a place to store the body — and the old
+# "aim under 50" target is gone, because a second number below the line is a budget to fill rather
+# than a reason to re-structure the skill.
+def test_the_description_failure_points_at_the_body_not_a_second_target(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(
+        tmp_path,
+        ".agents/skills/x/SKILL.md",
+        f'---\nname: x\ndescription: "{"word " * 90}"\n---\n',
+    )
+    assert lint.main(repo_root=tmp_path) == 1
+    captured = capsys.readouterr()
+    out = (captured.out + captured.err).lower()
+
+    assert "body" in out
+    assert "lint-skill-descriptions.meiva.okf.md" in out
+    assert "aim under" not in out

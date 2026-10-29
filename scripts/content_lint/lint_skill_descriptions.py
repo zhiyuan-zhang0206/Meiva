@@ -18,7 +18,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
 _HARD_CEILING = 80
-_SOFT_TARGET = 50
 
 
 # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
@@ -66,8 +65,12 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
         if n > _HARD_CEILING:
             print(
                 f"{rel}: description is {n} units (CJK chars + non-CJK words), over the "
-                f"{_HARD_CEILING}-unit hard ceiling — trim it (aim under {_SOFT_TARGET}); "
-                f"the depth belongs in the skill body, not the index line."
+                f"{_HARD_CEILING}-unit hard ceiling. The description is the line an agent "
+                f"scans to decide whether to load this skill, so it states what the skill is "
+                f"for — the detail belongs in the body, where it is read only after the skill "
+                f"is chosen. Move that detail into the skill and keep this line a summary; do "
+                f"not condense the body to make room here. See "
+                f"scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md."
             )
             errors += 1
 
@@ -89,11 +92,18 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
                 f"{rel}: frontmatter name {entry.name!r} does not fold to the "
                 f"directory name {dir_name!r} — dash and underscore are one name; "
                 f"rename the frontmatter name to match the directory (the directory "
-                f"is the identity source)."
+                f"is the identity source). See "
+                f"scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md."
             )
             errors += 1
     if errors:
-        print(f"\n{errors} SKILL.md frontmatter error(s).", file=sys.stderr)
+        print(
+            f"\n{errors} SKILL.md frontmatter error(s). The frontmatter is what the skill index "
+            f"is built from: the name selects the skill and the description is the line an agent "
+            f"reads before loading it, so both must describe the skill that is actually there. "
+            f"See scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md.",
+            file=sys.stderr,
+        )
         return 1
     return 0
 
