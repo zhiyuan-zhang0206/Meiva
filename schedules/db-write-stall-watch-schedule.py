@@ -23,6 +23,7 @@ if __name__ == "__main__":
         StallWatch(
             log=home / "pgbouncer" / "pgbouncer.log",
             state=home / "run" / "db-write-stall-watch.json",
+            history=home / "state" / "db-write-stall-history.jsonl",
             zone=ZoneInfo(cluster_timezone()),
             report_agents=REPORT_AGENTS,
         ),
