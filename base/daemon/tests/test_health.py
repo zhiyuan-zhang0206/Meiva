@@ -107,6 +107,7 @@ def test_liveness_group_reports_the_worst_loop() -> None:
         "stale_for",
         "last_success_at",
         "last_error",
+        "consecutive_failures",
         "wedged",
     }
     assert dispatch.is_alive() is False
