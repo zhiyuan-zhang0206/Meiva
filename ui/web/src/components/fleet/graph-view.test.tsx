@@ -1,26 +1,24 @@
-// GraphView render tests — the force-directed fleet graph.
-//
-// The d3-force layout is a real, time-driven simulation (a black-box physics
-// loop on requestAnimationFrame); these tests don't pin exact coordinates. They
-// drive the real simulation just far enough to settle node positions, then
-// assert the SVG the component renders off those positions:
-//   - nodes / edges paint (incl. the message / fork / spawn edge variants);
-//   - hovering a node highlights it;
-//   - single-clicking selects (no navigation); double-clicking opens the agent;
-//   - empty graph shows the loading / empty / error placeholder.
-//
-// useFleetGraph and next/navigation are mocked so the graph is fed directly and
-// router.push is observable. The pure structure helpers have their own tests in
-// fleet-graph.test.ts.
+// meiva:note
+// GraphView render tests: the force-directed fleet graph. The d3-force layout is a real, time-driven
+// simulation (a black-box physics loop on requestAnimationFrame), so these tests do not pin exact
+// coordinates: they drive the simulation far enough to settle node positions and assert the SVG the
+// component renders off them — nodes and edges (including the message / fork / spawn variants),
+// hover, select-on-click, open-on-double-click, and the loading / empty / error placeholders. Rows
+// arrive through the fake transport, so no data hook is replaced. The pure structure helpers have
+// their own tests in fleet-graph.test.ts.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/contracts/types";
-import type { FleetGraphResult } from "@/lib/fleet/use-fleet-graph";
-
-import { resetMockSettings } from "@/test-support/user-settings-mock";
+import type {
+  AgentRow,
+  WireFleetGraph,
+  WireFleetGraphEdge,
+  WireFleetGraphNode,
+} from "@/lib/contracts/types";
 
 import { GraphView } from "./graph-view";
 
@@ -29,27 +27,18 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
 }));
 
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
-// useFleetGraph is exercised on its own in use-fleet-graph.test.ts; here we feed
-// GraphView a fixed graph so the render is deterministic.
-const useFleetGraph = vi.fn<() => FleetGraphResult>();
-vi.mock("@/lib/fleet/use-fleet-graph", () => ({
-  useFleetGraph: () => useFleetGraph(),
-}));
-
 const { getAgentRoster } = vi.hoisted(() => ({ getAgentRoster: vi.fn() }));
 
 import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
-import { renderWithApi as render } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
+import { renderWithProviders } from "@/test-support/render";
 beforeEach(() => {
   resetTransport();
   transport.getAgentRoster.mockImplementation(getAgentRoster);
 });
 
 
-function node(agent_id: number, over: Partial<FleetGraphNode> = {}): FleetGraphNode {
+function node(agent_id: number, over: Partial<WireFleetGraphNode> = {}): WireFleetGraphNode {
   return {
     agent_id,
     label: null,
@@ -66,9 +55,9 @@ function node(agent_id: number, over: Partial<FleetGraphNode> = {}): FleetGraphN
 function edge(
   from_agent: number,
   to_agent: number,
-  event_type: FleetGraphEdge["event_type"],
-  over: Partial<FleetGraphEdge> = {},
-): FleetGraphEdge {
+  event_type: string,
+  over: Partial<WireFleetGraphEdge> = {},
+): WireFleetGraphEdge {
   return {
     from_agent,
     to_agent,
@@ -80,19 +69,45 @@ function edge(
   };
 }
 
+// meiva:note
+// The test's door to the graph: the endpoint answers the graph the test states (or never settles, or
+// fails, for the loading and error states), and the roster cache holds the agents the view resolves
+// lineage against — production shape, never graph.nodes, which is live-only. Roster data reaches
+// lineageById through the query cache; the default empty seed stops the mounted roster query from
+// fetching in tests that do not exercise lineage (the fetch itself is asserted separately). The
+// settings cache is seeded empty so the force sliders read defaults instead of fetching.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 function renderGraph(
-  ui: React.ReactElement,
-  seed?: { live?: AgentRow[]; terminated?: AgentRow[] },
+  ui: ReactElement,
+  {
+    graph,
+    roster,
+    fetch = "ok",
+  }: {
+    graph?: WireFleetGraph;
+    roster?: { live?: AgentRow[]; terminated?: AgentRow[] };
+    fetch?: "ok" | "pending" | "reject";
+  } = {},
 ) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  // Roster data reaches lineageById through the query cache (production
-  // shape) — never through graph.nodes, which is live-only. The default
-  // empty seeds stop the mounted roster queries from fetching in tests that
-  // don't exercise lineage; the fetch itself is asserted separately.
-  qc.setQueryData(AGENTS_QUERY_KEY, { agents: seed?.live ?? [], ancestors: seed?.terminated ?? [] });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  qc.setQueryData(AGENTS_QUERY_KEY, { agents: roster?.live ?? [], ancestors: roster?.terminated ?? [] });
+  if (fetch === "pending") {
+    transport.getFleetGraph.mockImplementation(neverSettles);
+  } else if (fetch === "reject") {
+    transport.getFleetGraph.mockRejectedValue(new Error("gateway unavailable"));
+  } else if (graph !== undefined) {
+    transport.getFleetGraph.mockResolvedValue(graph);
+  }
+  return renderWithProviders(ui, { queryClient: qc, settings: {}, wallNow: () => Date.now() });
+}
+
+// meiva:note
+// A request that never settles is how a test holds the cold loading state: the fetch the query waits
+// on stays unresolved, so the view keeps its first-load placeholder.
+function neverSettles(): Promise<WireFleetGraph | undefined> {
+  return new Promise<WireFleetGraph | undefined>(() => undefined);
 }
 
 function queryNodeLabel(id: number): HTMLElement | null {
@@ -109,15 +124,15 @@ function getNodeLabel(id: number): HTMLElement {
   return label;
 }
 
-function richGraph(): FleetGraph {
+function richGraph(): WireFleetGraph {
   const seen = "2026-06-17T00:00:00Z";
-  const nodes: FleetGraphNode[] = [
+  const nodes: WireFleetGraphNode[] = [
     node(1, { label: "alpha", node_score: 50_000, total_tokens: 1_500_000 }),
     node(2, { status: "idling" }),
     node(3, {}),
     ...[4, 5, 6, 7, 8, 9].map((id) => node(id)),
   ];
-  const edges: FleetGraphEdge[] = [
+  const edges: WireFleetGraphEdge[] = [
     edge(1, 2, "spawn"),
     edge(1, 3, "fork", { last_seen_at: seen }),
     ...[4, 5, 6, 7, 8, 9].map((id) =>
@@ -132,31 +147,28 @@ function richGraph(): FleetGraph {
   };
 }
 
-function ok(
-  graph: Omit<FleetGraph, "telemetry_stale" | "snapshot_at"> & {
+// meiva:note
+// The wire shape the endpoint returns: a fixture states the nodes and edges it cares about, and the
+// two telemetry fields default here.
+function graph(
+  partial: Omit<WireFleetGraph, "telemetry_stale" | "snapshot_at"> & {
     telemetry_stale?: boolean;
     snapshot_at?: string | null;
   },
-): FleetGraphResult {
-  return {
-    graph: { telemetry_stale: false, snapshot_at: null, ...graph },
-    loading: false,
-    error: false,
-  };
+): WireFleetGraph {
+  return { telemetry_stale: false, snapshot_at: null, ...partial };
 }
 
 beforeEach(() => {
   push.mockReset();
-  useFleetGraph.mockReset();
   getAgentRoster.mockReset();
-  resetMockSettings();
 });
 
 afterEach(cleanup);
 
 describe("GraphView", () => {
   it("renders nodes and edges; selects on click, opens on double-click", async () => {
-    useFleetGraph.mockReturnValue(ok(richGraph()));
+    transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -177,7 +189,7 @@ describe("GraphView", () => {
   });
 
   it("has only a reset zoom control (no +/- buttons)", async () => {
-    useFleetGraph.mockReturnValue(ok(richGraph()));
+    transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
@@ -187,7 +199,7 @@ describe("GraphView", () => {
   });
 
   it("explains status colors without terminated/offline or activity-score sizing legend", () => {
-    useFleetGraph.mockReturnValue(ok(richGraph()));
+    transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
     const legend = screen.getByLabelText("Agent graph legend");
@@ -204,12 +216,10 @@ describe("GraphView", () => {
     // The old native <title> tooltip (whose appearance the browser deferred)
     // is gone; the instant hover card carries the identity instead — visible
     // at any zoom level.
-    useFleetGraph.mockReturnValue(
-      ok({
+    transport.getFleetGraph.mockResolvedValue(graph({
         nodes: [node(1, { label: "alpha" }), node(2)],
         edges: [edge(1, 2, "spawn")],
-      }),
-    );
+      }));
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
@@ -236,7 +246,7 @@ describe("GraphView", () => {
   });
 
   it("selecting a node focuses it (non-identity transform); reset restores identity", async () => {
-    useFleetGraph.mockReturnValue(ok(richGraph()));
+    transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
     const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
     // Node 2 has only one edge (→ node 1), so the neighbor bounding box is a
@@ -262,7 +272,7 @@ describe("GraphView", () => {
   });
 
   it("wheel zoom is not capped (scale can exceed the old 4x limit)", async () => {
-    useFleetGraph.mockReturnValue(ok(richGraph()));
+    transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
     const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
@@ -294,7 +304,7 @@ describe("GraphView", () => {
   });
 
   it("clicking an already-selected node is a no-op (does not deselect)", async () => {
-    useFleetGraph.mockReturnValue(ok(richGraph()));
+    transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
     const onSelect = vi.fn();
 
     // Render with agent 1 already selected.
@@ -311,7 +321,7 @@ describe("GraphView", () => {
 
   it("renders every edge solid and gray (message, spawn, and fork alike)", async () => {
     // User ruling 2026-08-05: no blue message edges — one muted gray for all.
-    useFleetGraph.mockReturnValue(ok(richGraph()));
+    transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
@@ -329,15 +339,13 @@ describe("GraphView", () => {
   });
 
   it("scales message-edge opacity across the graph's weight range", async () => {
-    useFleetGraph.mockReturnValue(
-      ok({
+    transport.getFleetGraph.mockResolvedValue(graph({
         nodes: [node(1), node(2), node(3)],
         edges: [
           edge(1, 2, "message", { weight: 1 }),
           edge(1, 3, "message", { weight: 2 }),
         ],
-      }),
-    );
+      }));
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
@@ -358,8 +366,7 @@ describe("GraphView", () => {
     // tree), so even a backend leak of a terminated row cannot paint it or
     // its edges. A live node whose lineage partner is terminated renders
     // without that edge.
-    useFleetGraph.mockReturnValue(
-      ok({
+    transport.getFleetGraph.mockResolvedValue(graph({
         nodes: [
           node(1, { label: "live" }),
           node(2, { label: "dead", status: "terminated" }),
@@ -369,8 +376,7 @@ describe("GraphView", () => {
           edge(2, 1, "spawn"), // touches the terminated node — dropped
           edge(1, 3, "spawn"), // live-live — kept
         ],
-      }),
-    );
+      }));
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );

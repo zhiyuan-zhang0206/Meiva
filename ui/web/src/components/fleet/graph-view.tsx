@@ -270,16 +270,20 @@ export function GraphView({
   const paintedNodes: ForceGraphNode[] = rosterPending ? [] : nodes;
   const paintedEdges: ForceGraphEdge[] = rosterPending ? [] : edges;
 
-  // When the selected agent disappears from the graph (e.g. it was
-  // terminated) — clear the stale selection so the canvas and selection stay in sync.
+  // meiva:note
+  // When the selected agent disappears from the graph (e.g. it was terminated) — clear the stale
+  // selection so the canvas and selection stay in sync. A graph that has not answered yet holds no
+  // nodes at all, so clearing then would drop the selection a cold load or a deep link just set:
+  // only a load with data or a failure can prove the agent is gone.
   useEffect(() => {
+    if (loading || error) return;
     if (
       selectedAgentId != null &&
       !nodes.some((n) => n.id === selectedAgentId)
     ) {
       onSelectAgent(null);
     }
-  }, [nodes, selectedAgentId, onSelectAgent]);
+  }, [loading, error, nodes, selectedAgentId, onSelectAgent]);
 
   // Instant hover card — the shared canvas shows it the moment the cursor
   // enters a node (replacing the delayed native <title>): identity, status

@@ -1,18 +1,32 @@
-// Fleet route jumps (task #2909) — the deep links an inspector widget button
-// produces. `?notice=` opens one notice's detail in the Inbox; `?task=`
-// selects a task, mounts the Tasks surface, and must not rewrite the durable
-// view preference; malformed params are inert.
+// meiva:note
+// Fleet route jumps (task #2909): the deep links an inspector widget button produces. `?notice=`
+// opens one notice's detail in the Inbox; `?task=` selects a task, mounts the Tasks surface, and
+// must not rewrite the durable view preference; malformed params are inert. The real surfaces and
+// the real data hooks run here — a jump is asserted on what it puts on screen, not on a stub that
+// echoes its props. The canvases themselves are covered by graph-view.test / task-graph.test.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { cleanup, screen, waitFor } from "@testing-library/react";
-import { renderWithBrowser } from "@/test-support/render";
-import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { USER_SETTING_DEFAULTS, type AgentRow, type NoticeItem, type TaskRow } from "@/lib/contracts/types";
-import type { TasksResult } from "@/lib/notifications/use-tasks";
+import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
+import {
+  USER_SETTING_DEFAULTS,
+  type AgentRow,
+  type NoticeItem,
+  type TaskRow,
+} from "@/lib/contracts/types";
+import {
+  NOTICES_QUERY_KEY,
+  NOTICES_RESOLVED_QUERY_KEY,
+} from "@/lib/notifications/use-notices";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+
+import { FleetView } from "./fleet-view";
+import { resetTransport, transport } from "@/test-support/fake-api";
+import { renderWithProviders } from "@/test-support/render";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -22,30 +36,6 @@ vi.mock("next/link", () => ({
     <a href={href} {...rest}>
       {children}
     </a>
-  ),
-}));
-
-// meiva:note
-// The two left-pane surfaces are stubbed to their identity — these tests
-// assert WHICH surface is mounted and with which selection, not the canvas
-// (graph-view.test / task-graph.test cover the canvases).
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-vi.mock("@/components/fleet/graph-view", () => ({
-  GraphView: () => <div data-testid="graph-view" />,
-}));
-vi.mock("@/components/fleet/task-graph", () => ({
-  TaskGraph: ({
-    selectedTaskId,
-    routeTaskId,
-  }: {
-    selectedTaskId: number | null;
-    routeTaskId?: number | null;
-  }) => (
-    <div
-      data-testid="task-graph"
-      data-selected={String(selectedTaskId)}
-      data-route={String(routeTaskId ?? "")}
-    />
   ),
 }));
 
@@ -64,7 +54,7 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   value: vi.fn(),
 });
 
-const agentsMock = vi.fn<() => AgentRow[]>(() => [
+const AGENTS: AgentRow[] = [
   {
     agent_id: 7,
     spawner: "user",
@@ -82,45 +72,22 @@ const agentsMock = vi.fn<() => AgentRow[]>(() => [
     heartbeat_paused_until: null,
     liveness_state: "online",
   },
-]);
-vi.mock("@/lib/agents/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
+];
 
 const putSettingMock = vi.fn((key: string, value: unknown) =>
   Promise.resolve({ key, value, updated_at: "2026-06-14T00:00:00Z" }),
 );
 
-interface TestNoticesFeed {
+// meiva:note
+// What a test states about the queue: the three lists the feed hook renders.
+interface FeedRows {
   open: NoticeItem[];
   awaiting: NoticeItem[];
   resolved: NoticeItem[];
-  fetchNextPage: () => void;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  error: boolean;
-  resolvedError: boolean;
-  isLoading: boolean;
 }
-const useNoticesMock = vi.fn<() => TestNoticesFeed>(() => ({
-  open: [],
-  awaiting: [],
-  resolved: [],
-  fetchNextPage: () => undefined,
-  hasNextPage: false,
-  isFetchingNextPage: false,
-  error: false,
-  resolvedError: false,
-  isLoading: false,
-}));
-vi.mock("@/lib/notifications/use-notices", () => ({ useNotices: () => useNoticesMock() }));
 
-const useTasksMock = vi.fn<() => TasksResult>(() => ({ tasks: [], loading: false, error: false }));
-vi.mock("@/lib/notifications/use-tasks", () => ({ useTasks: () => useTasksMock() }));
+const NO_NOTICES: FeedRows = { open: [], awaiting: [], resolved: [] };
 
-vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
-
-import { FleetView } from "./fleet-view";
-
-import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
   transport.getNotices.mockImplementation(() =>
@@ -170,17 +137,49 @@ function task(over: Partial<TaskRow> & { id: number }): TaskRow {
   };
 }
 
-function wrap(ui: ReactElement) {
+// meiva:note
+// The test door for this file: the roster, the notice feed and the task registry a jump lands in
+// enter through the caches the hooks read, in the shape the app stores; the transport answers the
+// reads the surfaces still make, including an empty graph for the Agents tab.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function wrap(
+  ui: ReactElement,
+  {
+    agents = AGENTS,
+    notices = NO_NOTICES,
+    tasks = [],
+  }: { agents?: AgentRow[]; notices?: FeedRows; tasks?: TaskRow[] } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS });
-  return renderWithBrowser(
-    // meiva:note
-    // The queue's rows age against the page's clock; the app's own answer keeps this file's
-    // relative labels meaning what they said before.
-    <WallClockProvider wallNow={() => Date.now()}>
-      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
-    </WallClockProvider>,
-  );
+  qc.setQueryData(AGENTS_QUERY_KEY, { agents, ancestors: [] });
+  qc.setQueryData(NOTICES_QUERY_KEY, {
+    open: notices.open,
+    awaiting: notices.awaiting,
+    resolved_page: [],
+    next_cursor: null,
+  });
+  qc.setQueryData(NOTICES_RESOLVED_QUERY_KEY, {
+    pages: [{ resolved_page: notices.resolved, next_cursor: null }],
+    pageParams: [undefined],
+  });
+  // meiva:note
+  // The board reads the graph projection of the 24h window and the queue joins against the 7d
+  // summary projection, so both keys are seeded with the same rows.
+  for (const window of ["24h", "7d", "30d", "all"] as const) {
+    qc.setQueryData(["tasks", "graph", window], { tasks });
+  }
+  qc.setQueryData(["tasks", "summary", "7d"], { tasks });
+  qc.setQueryData(["all-pages"], []);
+  transport.getTasks.mockResolvedValue({ tasks });
+  transport.listAllPages.mockResolvedValue([]);
+  transport.getFleetGraph.mockResolvedValue({
+    nodes: [],
+    edges: [],
+    telemetry_stale: false,
+    snapshot_at: null,
+  });
+  return renderWithProviders(ui, { queryClient: qc, wallNow: () => Date.now() });
 }
 
 beforeEach(() => {
@@ -196,43 +195,39 @@ afterEach(() => {
 
 describe("fleet route jumps", () => {
   it("?task= selects the task and mounts the Tasks surface without persisting the view", async () => {
-    useTasksMock.mockReturnValue({ tasks: [task({ id: 42, owner: 7 })], loading: false, error: false });
+    const tasks: TaskRow[] = [task({ id: 42, owner: 7 })];
     window.history.replaceState(null, "", "/fleet?task=42");
-    wrap(<FleetView />);
+    wrap(<FleetView />, { tasks });
+    // meiva:note
+    // The route's task is selected on the real board: its node carries the selection ring. The pin
+    // that lets this outrank an ambient agent selection (task #3500) is behavioural, and is covered
+    // where the real board can show it (tests/task-graph-selection.test.tsx).
     await waitFor(() => {
-      expect(screen.getByTestId("task-graph").getAttribute("data-selected")).toBe("42");
+      const node = screen.getAllByText(/#42/)[0].closest("g")!;
+      expect(node.querySelector('[stroke-dasharray="4 3"]')).toBeTruthy();
     });
-    expect(screen.queryByTestId("graph-view")).toBeNull();
-    // The route id flows down as the pin that outranks an ambient agent
-    // selection (task #3500).
-    expect(screen.getByTestId("task-graph").getAttribute("data-route")).toBe("42");
+    expect(screen.queryByLabelText("Agent graph legend")).toBeNull();
     // The jump reveals the view but does not rewrite the durable preference.
     expect(putSettingMock).not.toHaveBeenCalledWith("display.fleet_left_view", expect.anything());
   });
 
   it("without ?task= the default view stays the agent graph", () => {
     wrap(<FleetView />);
-    expect(screen.getByTestId("graph-view")).toBeTruthy();
-    expect(screen.queryByTestId("task-graph")).toBeNull();
+    expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
+    expect(screen.queryByLabelText("Task graph legend")).toBeNull();
   });
 
   it("?notice= opens that notice's detail (targeting a non-default row)", async () => {
-    useNoticesMock.mockReturnValue({
+    const notices: FeedRows = {
       open: [],
       awaiting: [
         notice({ id: 7, title: "first notice", created_at: "2026-06-14T00:00:00Z" }),
         notice({ id: 8, title: "second notice", created_at: "2026-06-14T01:00:00Z" }),
       ],
       resolved: [],
-      fetchNextPage: () => undefined,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      error: false,
-      resolvedError: false,
-      isLoading: false,
-    });
+    };
     window.history.replaceState(null, "", "/fleet?notice=8");
-    wrap(<FleetView />);
+    wrap(<FleetView />, { notices });
     // The reply box (require_response notice) carries the selected notice's
     // title in its accessible name — the unambiguous "which detail is open".
     await waitFor(() => {
@@ -241,18 +236,12 @@ describe("fleet route jumps", () => {
   });
 
   it("without ?notice= the queue keeps its own default selection", async () => {
-    useNoticesMock.mockReturnValue({
+    const notices: FeedRows = {
       open: [],
       awaiting: [notice({ id: 7, title: "first notice" })],
       resolved: [],
-      fetchNextPage: () => undefined,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      error: false,
-      resolvedError: false,
-      isLoading: false,
-    });
-    wrap(<FleetView />);
+    };
+    wrap(<FleetView />, { notices });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: /first notice/ })).toBeTruthy();
     });
@@ -260,36 +249,31 @@ describe("fleet route jumps", () => {
 
   it("?task= on mobile switches to the tasks tab", async () => {
     window.innerWidth = 375;
-    useTasksMock.mockReturnValue({ tasks: [task({ id: 42, owner: 7 })], loading: false, error: false });
+    const tasks: TaskRow[] = [task({ id: 42, owner: 7 })];
     window.history.replaceState(null, "", "/fleet?task=42");
-    wrap(<FleetView />);
+    wrap(<FleetView />, { tasks });
     await waitFor(() => {
-      expect(screen.getByTestId("task-graph").getAttribute("data-selected")).toBe("42");
+      const node = screen.getAllByText(/#42/)[0].closest("g")!;
+      expect(node.querySelector('[stroke-dasharray="4 3"]')).toBeTruthy();
     });
-    expect(screen.getByTestId("task-graph").getAttribute("data-route")).toBe("42");
+    expect(screen.getByRole("tab", { name: /Tasks/, selected: true })).toBeTruthy();
   });
 
   it("malformed route ids are inert (default view, no crash)", () => {
     window.history.replaceState(null, "", "/fleet?task=abc&notice=");
     wrap(<FleetView />);
-    expect(screen.getByTestId("graph-view")).toBeTruthy();
-    expect(screen.queryByTestId("task-graph")).toBeNull();
+    expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
+    expect(screen.queryByLabelText("Task graph legend")).toBeNull();
   });
 
   it("an unknown ?notice= id leaves the default selection alone", async () => {
-    useNoticesMock.mockReturnValue({
+    const notices: FeedRows = {
       open: [],
       awaiting: [notice({ id: 7, title: "first notice" })],
       resolved: [],
-      fetchNextPage: () => undefined,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      error: false,
-      resolvedError: false,
-      isLoading: false,
-    });
+    };
     window.history.replaceState(null, "", "/fleet?notice=999");
-    wrap(<FleetView />);
+    wrap(<FleetView />, { notices });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: /first notice/ })).toBeTruthy();
     });
