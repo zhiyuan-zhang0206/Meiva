@@ -19,14 +19,32 @@ MARKER = "# timing-guard:"
 # `monotonic`, `perf_counter`, `process_time` and `time` are clock attributes no library reuses for
 # anything else. `.time()` is the exception: it is the clock on a time module or a loop, and
 # `queue.time()` would be someone else's method, so that one also checks the owner's name.
+# `from time import monotonic` binds the same read to a bare name, so the import is read too: a
+# clock judged only when it is spelled `time.<attr>()` would leave every bare import ungoverned
+# (2026-10-30: `_until_sessions` in test_daemon_entry spends 30 s of wall clock that way).
 _CLOCK_ATTRS = frozenset({"monotonic", "perf_counter", "process_time", "time"})
 _CLOCK_OWNERS = frozenset({"time", "loop", "clock"})
 Site = tuple[str, int, ast.Compare, ast.FunctionDef | ast.AsyncFunctionDef]
 
 
-def _is_clock_call(node: ast.AST) -> bool:
+def _imported_clocks(tree: ast.Module) -> frozenset[str]:
     # meiva:note
-    # True for `time.monotonic()`, `loop.time()`, `self._loop.time()` and their family.
+    # The bare names `from time import monotonic` (or `... as now`) binds in this module.
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "time":
+            names.update(
+                alias.asname or alias.name for alias in node.names if alias.name in _CLOCK_ATTRS
+            )
+    return frozenset(names)
+
+
+def _is_clock_call(node: ast.AST, bare: frozenset[str] = frozenset()) -> bool:
+    # meiva:note
+    # True for `time.monotonic()`, `loop.time()`, `self._loop.time()`, their family, and a clock
+    # this module imported by name.
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id in bare
     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
         return False
     attr = node.func.attr
@@ -52,7 +70,7 @@ def _own_nodes(node: ast.AST) -> Iterator[ast.AST]:
                 pending.append(child)
 
 
-def _clock_names(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+def _clock_names(fn: ast.FunctionDef | ast.AsyncFunctionDef, bare: frozenset[str]) -> set[str]:
     # meiva:note
     # Names bound to a clock read, or to a difference of two of them, to a fixed point.
     names: set[str] = set()
@@ -62,7 +80,7 @@ def _clock_names(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
         for node in _own_nodes(fn):
             if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
                 continue
-            if not _is_clock_quantity(node.value, names):
+            if not _is_clock_quantity(node.value, names, bare):
                 continue
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
@@ -72,7 +90,7 @@ def _clock_names(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     return names
 
 
-def _is_clock_quantity(node: ast.AST, names: set[str]) -> bool:
+def _is_clock_quantity(node: ast.AST, names: set[str], bare: frozenset[str]) -> bool:
     # meiva:note
     # A clock read, a name bound to one, or a sum/difference of those -- a duration or an instant.
     #
@@ -82,12 +100,14 @@ def _is_clock_quantity(node: ast.AST, names: set[str]) -> bool:
     #
     if isinstance(node, ast.Name):
         return node.id in names
-    if _is_clock_call(node):
+    if _is_clock_call(node, bare):
         return True
     if isinstance(node, ast.UnaryOp):
-        return _is_clock_quantity(node.operand, names)
+        return _is_clock_quantity(node.operand, names, bare)
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Sub, ast.Add)):
-        return _is_clock_quantity(node.left, names) or _is_clock_quantity(node.right, names)
+        return _is_clock_quantity(node.left, names, bare) or _is_clock_quantity(
+            node.right, names, bare
+        )
     return False
 
 
@@ -101,7 +121,7 @@ def _is_number(node: ast.AST) -> bool:
     return False
 
 
-def _judges_a_clock(node: ast.AST, names: set[str]) -> ast.Compare | None:
+def _judges_a_clock(node: ast.AST, names: set[str], bare: frozenset[str]) -> ast.Compare | None:
     # meiva:note
     # The first comparison under `node` that puts a clock quantity against a number.
     for sub in _own_nodes(node):
@@ -109,8 +129,8 @@ def _judges_a_clock(node: ast.AST, names: set[str]) -> ast.Compare | None:
             continue
         sides = [sub.left, *sub.comparators]
         for left, right in pairwise(sides):
-            if (_is_number(right) and _is_clock_quantity(left, names)) or (
-                _is_number(left) and _is_clock_quantity(right, names)
+            if (_is_number(right) and _is_clock_quantity(left, names, bare)) or (
+                _is_number(left) and _is_clock_quantity(right, names, bare)
             ):
                 return sub
     return None
@@ -157,15 +177,16 @@ def _sites(src: str, rel_path: str) -> list[Site]:
         # A file that does not parse is another lint's finding, not this one's.
         return []
     lines = src.splitlines()
+    bare = _imported_clocks(tree)
     sites: list[Site] = []
     for fn in _functions(tree):
-        names = _clock_names(fn)
+        names = _clock_names(fn, bare)
         if not names:
             continue
         for node in _own_nodes(fn):
             if not isinstance(node, ast.Assert) or _commented(lines, node.lineno):
                 continue
-            compare = _judges_a_clock(node.test, names)
+            compare = _judges_a_clock(node.test, names, bare)
             if compare is not None:
                 sites.append((rel_path, node.lineno, compare, fn))
     return sites
