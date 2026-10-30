@@ -372,5 +372,4 @@ export async function resetHomePageTestState() {
   hooksState.inspectorOpen = false;
   hooksState.contextPanelOpen = false;
   hooksState.unresolvedAlerts = 0;
-  hooksState.loadOlder = vi.fn();
 }
