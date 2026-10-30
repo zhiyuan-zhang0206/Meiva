@@ -9,12 +9,12 @@
 // machine comes first — a harness is only available *on* a machine).
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import type { ModelsResponse } from "@/lib/contracts/types";
-import { modelLabel as formatModelLabel, providerLabel, reasoningEffortLabel } from "@/lib/contracts/models";
+import { modelLabel as formatModelLabel, reasoningEffortLabel } from "@/lib/contracts/models";
 import { formatModelPrice } from "@/lib/format/format-price";
 import { cn } from "@/lib/format/utils";
 import { FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
@@ -32,7 +32,8 @@ import {
 // the panel follows it instead of the other way round.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 const COLUMNS = "grid grid-cols-[auto_auto_auto_auto] border-b border-border text-xs";
-const HEADER = "border-b border-r border-border px-2 py-1.5 font-medium text-muted-foreground";
+const HEADER = "border-b border-r border-border px-2.5 py-1.5 font-medium text-muted-foreground";
+const COLUMN_LIST = "max-h-[300px] overflow-y-auto border-r border-border p-1.5";
 const CELL = "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left";
 const SELECTED = "bg-foreground/10 font-medium text-foreground";
 const IDLE = "text-muted-foreground hover:bg-accent hover:text-foreground";
@@ -53,7 +54,7 @@ export interface SpawnPickerProps {
   harnessRows: HarnessAvailability[];
   harness: Harness;
   onHarness: (harness: Harness) => void;
-  modelGroups: [provider: string, models: string[]][];
+  modelIds: string[];
   models: ModelsResponse["models"] | undefined;
   model: string | undefined;
   onModel: (model: string) => void;
@@ -74,7 +75,7 @@ export function SpawnTable({
   harnessRows,
   harness,
   onHarness,
-  modelGroups,
+  modelIds,
   models,
   model,
   onModel,
@@ -125,7 +126,7 @@ export function SpawnTable({
       <div className={HEADER}>{modelLabel}</div>
       <div className={cn(HEADER, "border-r-0")}>{effortLabel}</div>
 
-      <ul aria-label={t("machine")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
+      <ul aria-label={t("machine")} className={COLUMN_LIST}>
         {machines.map((row) => {
           const selected = row.name === machine;
           const blocked = row.reason !== undefined;
@@ -140,14 +141,13 @@ export function SpawnTable({
                 className={cn(CELL, selected ? SELECTED : IDLE, "disabled:opacity-50 disabled:hover:bg-transparent")}
               >
                 <span className={cn(MIN_W_0, FLEX_1, "truncate")}>{row.name}</span>
-                {selected && <Check className="ml-1 size-3 shrink-0" />}
               </button>
             </li>
           );
         })}
       </ul>
 
-      <ul aria-label={t("harness")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
+      <ul aria-label={t("harness")} className={COLUMN_LIST}>
         {harnessRows.map((row) => {
           const selected = row.harness === harness;
           return (
@@ -160,55 +160,44 @@ export function SpawnTable({
                 className={cn(CELL, selected ? SELECTED : IDLE, "disabled:opacity-50 disabled:hover:bg-transparent")}
               >
                 <span className="truncate">{harnessLabel(row.harness)}</span>
-                {selected && <Check className="ml-auto size-3 shrink-0" />}
               </button>
             </li>
           );
         })}
       </ul>
 
-      <ul aria-label={modelLabel} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
-        {modelGroups.map(([provider, providerModels]) => (
-          <li key={provider}>
-            <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
-              {providerLabel(provider)}
-            </div>
-            <ul>
-              {providerModels.map((candidate) => {
-                const selected = candidate === model;
-                const price = models?.[candidate]?.pricing;
-                return (
-                  <li key={candidate}>
-                    <button
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => onModel(candidate)}
-                      title={detailFor(candidate)}
-                      className={cn(CELL, selected ? SELECTED : IDLE)}
-                    >
-                      <span className={cn(MIN_W_0, FLEX_1)}>
-                        <span className="block truncate" title={candidate}>{formatModelLabel(candidate)}</span>
-                        {prices && price != null && (
-                          <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
-                            {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
-                            {formatModelPrice(price.output)}
-                          </span>
-                        )}
-                      </span>
-                      {selected && <Check className="ml-1 size-3 shrink-0" />}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        ))}
-        {modelGroups.length === 0 && (
+      <ul aria-label={modelLabel} className={COLUMN_LIST}>
+        {modelIds.map((candidate) => {
+          const selected = candidate === model;
+          const price = models?.[candidate]?.pricing;
+          return (
+            <li key={candidate}>
+              <button
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onModel(candidate)}
+                title={detailFor(candidate)}
+                className={cn(CELL, selected ? SELECTED : IDLE)}
+              >
+                <span className={cn(MIN_W_0, FLEX_1)}>
+                  <span className="block truncate" title={candidate}>{formatModelLabel(candidate)}</span>
+                  {prices && price != null && (
+                    <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
+                      {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
+                      {formatModelPrice(price.output)}
+                    </span>
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+        {modelIds.length === 0 && (
           <li className="px-2 py-1 text-muted-foreground">{t("modelsUnavailable")}</li>
         )}
       </ul>
 
-      <ul aria-label={effortLabel} className="max-h-[300px] overflow-y-auto py-1 pb-2">
+      <ul aria-label={effortLabel} className={cn(COLUMN_LIST, "border-r-0")}>
         {efforts.map((level) => {
           const selected = level === effort;
           return (
@@ -220,7 +209,6 @@ export function SpawnTable({
                 className={cn(CELL, selected ? SELECTED : IDLE)}
               >
                 <span className="truncate">{reasoningEffortLabel(level)}</span>
-                {selected && <Check className="ml-auto size-3 shrink-0" />}
               </button>
             </li>
           );
@@ -246,12 +234,10 @@ export function SpawnTable({
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 const STACK_SECTION = "border-b border-border";
 const STACK_CELL = "flex w-full min-h-11 items-center gap-2 px-3 py-2 text-left";
-const STACK_LIST = "max-h-[40vh] overflow-y-auto border-t border-border py-1";
+const STACK_LIST = "max-h-[40vh] overflow-y-auto border-t border-border p-1.5";
 const STACK_NOTE = "block truncate text-[11px] text-muted-foreground";
 
 type StackSectionKey = "machine" | "harness" | "model" | "effort";
-
-
 
 function StackSection({
   id,
@@ -315,12 +301,12 @@ function StackRow({
       onClick={onClick}
       className={cn(
         STACK_CELL,
+        "rounded-sm",
         selected ? SELECTED : IDLE,
         "disabled:opacity-50 disabled:hover:bg-transparent",
       )}
     >
       {children}
-      {selected && <Check className="ml-auto size-4 shrink-0" />}
     </button>
   );
 }
@@ -332,7 +318,7 @@ export function SpawnStack({
   harnessRows,
   harness,
   onHarness,
-  modelGroups,
+  modelIds,
   models,
   model,
   onModel,
@@ -430,35 +416,26 @@ export function SpawnStack({
         onToggle={() => toggle("model")}
       >
         <ul aria-label={modelLabel} className={STACK_LIST}>
-          {modelGroups.map(([provider, providerModels]) => (
-            <li key={provider}>
-              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
-                {providerLabel(provider)}
-              </div>
-              <ul>
-                {providerModels.map((candidate) => {
-                  const selected = candidate === model;
-                  const price = models?.[candidate]?.pricing;
-                  return (
-                    <li key={candidate}>
-                      <StackRow selected={selected} onClick={() => pick("model", () => onModel(candidate))}>
-                        <span className={cn(MIN_W_0, FLEX_1)}>
-                          <span className="block truncate" title={candidate}>{formatModelLabel(candidate)}</span>
-                          {prices && price != null && (
-                            <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
-                              {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
-                              {formatModelPrice(price.output)}
-                            </span>
-                          )}
-                        </span>
-                      </StackRow>
-                    </li>
-                  );
-                })}
-              </ul>
-            </li>
-          ))}
-          {modelGroups.length === 0 && (
+          {modelIds.map((candidate) => {
+            const selected = candidate === model;
+            const price = models?.[candidate]?.pricing;
+            return (
+              <li key={candidate}>
+                <StackRow selected={selected} onClick={() => pick("model", () => onModel(candidate))}>
+                  <span className={cn(MIN_W_0, FLEX_1)}>
+                    <span className="block truncate" title={candidate}>{formatModelLabel(candidate)}</span>
+                    {prices && price != null && (
+                      <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
+                        {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
+                        {formatModelPrice(price.output)}
+                      </span>
+                    )}
+                  </span>
+                </StackRow>
+              </li>
+            );
+          })}
+          {modelIds.length === 0 && (
             <li className="px-3 py-2 text-muted-foreground">{t("modelsUnavailable")}</li>
           )}
         </ul>

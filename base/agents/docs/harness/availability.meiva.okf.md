@@ -56,7 +56,8 @@ probe binaries or login stores. The gateway retains successful snapshots for its
 process lifetime; a gateway restart leaves them unchecked again.
 
 The Refresh button above Spawn calls
-`POST /api/cluster/machines/{name}/harnesses/refresh` for the selected machine.
+`POST /api/cluster/machines/{name}/harnesses/refresh` for every ready runner
+machine in one action.
 Only that endpoint dispatches `harness_probe` to its runner, which answers from
 `probe_local_harnesses()`. Concurrent refresh requests for one machine share the
 same in-flight probe, owned by the leading HTTP request. Cancelling a follower
@@ -66,7 +67,8 @@ reported to the caller. A name no machine carries answers 404, and a machine
 without an agent-runner answers 503. Unchecked never means not installed.
 The route contract declares refresh retry-safe: repeating it only inspects CLI
 availability and replaces the snapshot; it does not launch or authenticate a
-session. The browser still makes one request per explicit refresh.
+session. The browser still makes one request per ready machine on each explicit
+refresh.
 
 Each row carries the probe's `status` and `reason` unchanged, plus `launchable`,
 which the gateway composes from two facts: a launcher for that harness exists in

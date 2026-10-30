@@ -26,6 +26,6 @@
   "newAgent": "新建 agent",
   "refresh": "刷新",
   "refreshing": "刷新中…",
-  "refreshNeeded": "点击刷新，检查这台机器可用的 harness。",
+  "refreshNeeded": "点击刷新，检查可用的 harness。",
   "refreshFailed": "刷新失败，保留上次结果。"
 }
