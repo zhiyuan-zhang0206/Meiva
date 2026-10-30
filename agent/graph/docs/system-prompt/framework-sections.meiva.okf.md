@@ -13,6 +13,7 @@ tags: []
 - `_keep_it_simple_section` — "Keep It Simple"
 - `conversation.user_reply_section` — Always-on reply, language and milestone rules: ordinary text is self-contained, substantive communication with the user. Follow user language, default to meaningful milestones, preserve answers/questions/deliverables, and skip routine operations or wake/peer courtesy summaries. See [prompt architecture](../../../docs/prompt-architecture.md).
 - `_communication_style_section` — Optional `MEIVA_AGENT_COMMUNICATION_STYLE`: `off` (default; omitted), `oriented` (live pairing), `concise` (brief milestones), `silent` (one human-requested report plus blockers/questions). Per-agent overlays may select pairing; core language and text usefulness remain active.
+- `user_tone_section` — `MEIVA_SYSTEM_PROMPT_USER_TONE` gates family-specific tone. GPT models lead with affirmative conclusions, reserve corrective framing for concrete misunderstandings, and state material limitations once beside the claim. The section applies across languages and to progress updates and reports.
 - `_output_conciseness_section` — Output conciseness
 - `_outcome_reporting_section` — Honest reporting
 - `_action_caution_section` — Confirm before irreversible actions

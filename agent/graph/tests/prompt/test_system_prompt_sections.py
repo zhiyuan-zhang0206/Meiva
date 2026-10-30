@@ -489,6 +489,23 @@ def test_user_tone_claude_variant_requires_explicit_enablement() -> None:
     assert "not a cheerleader" not in rendered
 
 
+@pytest.mark.parametrize("enabled", [None, True, False])
+def test_gpt_affirmative_tone_is_family_scoped_and_gated(enabled: bool | None) -> None:
+    catalog = build_model_catalog(home=meiva_home())
+    gpt_models = [name for name, spec in catalog.models.items() if spec.provider == "gpt"]
+    assert gpt_models
+    for model, spec in catalog.models.items():
+        rendered = user_tone_section(
+            _inputs(agent__prompt_user_tone_enabled=enabled, lm__llm_model=model)
+        )
+        expected = spec.provider == "gpt" and enabled is not False
+        assert ("otherwise state Y directly" in rendered) == expected, model
+        if expected:
+            assert "concrete misunderstanding" in rendered
+            assert "when it materially changes" in rendered
+            assert "factual uncertainty" in rendered
+
+
 def test_user_tone_unknown_model_uses_light_variant() -> None:
 
     assert "State conclusions and judgments directly" in user_tone_section(
