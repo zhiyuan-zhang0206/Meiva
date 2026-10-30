@@ -16,8 +16,10 @@
 #   nothing to prove, and the drill recovers to the end of the archive instead; the record
 #   says so (`target_lsn` is None).
 # - **The data is readable.** The promoted database goes through the same check the logical
-#   restore drill uses (`verify_restored_database`): the required tables, row counts and a
-#   real agent conversation read back through the production checkpoint reader.
+#   restore drill uses (`verify_restored_database`): the required tables, row counts, a real
+#   agent conversation read back through the production checkpoint reader, and a type census —
+#   every class named by the newest checkpoint of the newest conversations is one this build
+#   can load or has deliberately retired.
 # - **The target was reached** (`pg_current_wal_lsn()` on the promoted instance).
 #
 # The scratch copy lives on `select_throwaway_base(required_bytes)`, where `required_bytes`
@@ -238,7 +240,8 @@ def _verify(
             raise RestoreError("the recovered instance was promoted before the recovery target")
     return (
         f"{report.agents} agents, {report.checkpoints} checkpoints, "
-        f"conversation of agent {report.sample_agent_id} has {report.sample_message_count} messages"
+        f"conversation of agent {report.sample_agent_id} has {report.sample_message_count}"
+        f" messages; {report.census.summary()}"
     )
 
 

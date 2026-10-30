@@ -1,4 +1,5 @@
-"""Contract tests for the standalone encrypted-backup restore drill."""
+# meiva:note
+# Contract tests for the standalone encrypted-backup restore drill.
 
 from __future__ import annotations
 
@@ -8,12 +9,15 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import ormsgpack
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.serde.jsonplus import EXT_PYDANTIC_V2
 
+from base.agents.history.checkpoint_serde import RetiredCheckpointType
 from base.cluster.authority import ensure_groups
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import settings
@@ -58,9 +62,9 @@ def _write_checkpoint(agent_id: int) -> None:
 def test_verification_reports_schema_counts_and_readable_conversation(
     db_conn: psycopg.Connection,
 ) -> None:
-    """The drill's verification is stronger than a successful pg_restore: it
-    reads every checkpoint table and loads one restored conversation through
-    the production checkpoint reader."""
+    # meiva:note
+    # The drill's verification is stronger than a successful pg_restore: it reads every checkpoint
+    # table and loads one restored conversation through the production checkpoint reader.
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         row = cur.fetchone()
@@ -81,12 +85,172 @@ def test_verification_reports_schema_counts_and_readable_conversation(
     assert report.sample_message_count == 1
 
 
+def _envelope(module: str, name: str, kwargs: dict[str, object] | None = None) -> bytes:
+    # meiva:note
+    # One pydantic-v2 ext envelope, as the serializer writes a pydantic object.
+    return ormsgpack.packb(
+        ormsgpack.Ext(
+            EXT_PYDANTIC_V2,
+            ormsgpack.packb(
+                (module, name, {"value": 1} if kwargs is None else kwargs, "model_validate_json")
+            ),
+        )
+    )
+
+
+def _store_channel(db_conn: psycopg.Connection, agent_id: int, channel: str, blob: bytes) -> None:
+    # meiva:note
+    # Give the thread's newest checkpoint one more stored channel, bypassing the writer.
+    #
+    # The point of the census is what is *stored*: a class the writer no longer has cannot be
+    # produced through the saver, so a poisoned row is written directly.
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE checkpoints "
+            "SET checkpoint = jsonb_set("
+            "checkpoint, ARRAY['channel_versions', %s::text], to_jsonb('1'::text)) "
+            "WHERE thread_id = %s",
+            (channel, str(agent_id)),
+        )
+        cur.execute(
+            "INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob) "
+            "VALUES (%s, '', %s, '1', 'msgpack', %s)",
+            (str(agent_id), channel, blob),
+        )
+    db_conn.commit()
+
+
+def _verify() -> restore_drill.RestoreReport:
+    return restore_drill.verify_restored_database(
+        settings.data_plane.db_url, database_for_url=_database_factory()
+    )
+
+
+def test_the_census_names_the_classes_a_restored_conversation_holds(
+    db_conn: psycopg.Connection,
+) -> None:
+    # meiva:note
+    # A green drill now carries its denominator: which classes it saw, over how many conversations,
+    # and that none of them was unknown.
+    _seed_conversation(db_conn)
+
+    report = _verify()
+
+    assert report.census.threads >= 1
+    assert report.census.blobs + report.census.writes >= 1
+    assert report.census.unknown == ()
+    assert report.census.failure() is None
+    assert "langchain_core.messages.human.HumanMessage" in report.census.types
+
+
+def test_the_census_refuses_a_class_nothing_accounts_for(
+    db_conn: psycopg.Connection,
+) -> None:
+    # meiva:note
+    # The failure the drill could not see before: the serializer answers an unregistered envelope
+    # with the raw dict and a warning, so every other check stays green.
+    agent_id = _seed_conversation(db_conn)
+    _store_channel(db_conn, agent_id, "weird", _envelope("no.such.module", "GhostType"))
+
+    with pytest.raises(RuntimeError, match="neither load nor account for"):
+        _verify()
+
+
+def test_the_census_names_a_retired_class_it_cannot_build(
+    db_conn: psycopg.Connection,
+) -> None:
+    # meiva:note
+    # A class the code deleted is historical residue, not a fault: the reader answers the envelope
+    # with the raw payload, and the record counts the name so a reader of the record knows what the
+    # green covers.
+    agent_id = _seed_conversation(db_conn)
+    _store_channel(
+        db_conn,
+        agent_id,
+        "native_work",
+        _envelope("base.agents.incarnation.native_work_models", "NativeWorkTarget"),
+    )
+
+    report = _verify()
+
+    assert report.census.retired == ("base.agents.incarnation.native_work_models.NativeWorkTarget",)
+    assert report.census.revived == ()
+    assert report.census.failure() is None
+
+
+def test_the_census_refuses_a_retired_class_the_reader_still_builds(
+    db_conn: psycopg.Connection,
+) -> None:
+    # meiva:note
+    # The registry saying "deleted" while the reader still resolves the class is the fault the
+    # census exists for: the class came back, or the registry is stale. Judged through the reader's
+    # own serializer, so an allowlisted class counts even though the drill never imports it.
+    entry = RetiredCheckpointType(
+        module="agent.state_channels",
+        name="AttachState",
+        retired_in="0000000000",
+        retired_at=datetime(2026, 1, 1, tzinfo=UTC),
+        note="a class this build still has",
+    )
+    agent_id = _seed_conversation(db_conn)
+    _store_channel(
+        db_conn,
+        agent_id,
+        "attach",
+        _envelope("agent.state_channels", "AttachState"),
+    )
+
+    census = restore_drill.census_checkpoint_types(db_conn, retired=(entry,))
+
+    assert census.retired == ("agent.state_channels.AttachState",)
+    assert census.revived == ("agent.state_channels.AttachState",)
+    refusal = census.failure()
+    assert refusal is not None
+    assert "importable in this build" in refusal
+
+
+def test_the_census_refuses_a_retired_class_the_build_can_still_build(
+    db_conn: psycopg.Connection,
+) -> None:
+    # meiva:note
+    # A class that came back is a fault even before anyone allowlists it: the writer can produce it
+    # again while the reader silently degrades to the raw payload. Asked of the serializer — decode
+    # the row with the class allowed and see whether it built anything.
+    entry = RetiredCheckpointType(
+        module="json",
+        name="JSONDecoder",
+        retired_in="0000000000",
+        retired_at=datetime(2026, 1, 1, tzinfo=UTC),
+        note="a stdlib class this build trivially has",
+    )
+    agent_id = _seed_conversation(db_conn)
+    _store_channel(db_conn, agent_id, "decoder", _envelope("json", "JSONDecoder", {}))
+
+    census = restore_drill.census_checkpoint_types(db_conn, retired=(entry,))
+
+    assert census.revived == ("json.JSONDecoder",)
+    refusal = census.failure()
+    assert refusal is not None
+    assert "importable in this build" in refusal
+
+
+def test_the_census_does_not_green_an_empty_sample(db_conn: psycopg.Connection) -> None:
+    # meiva:note
+    # A zero denominator is not a pass: a store with no conversation proves nothing.
+    census = restore_drill.census_checkpoint_types(db_conn)
+
+    assert census.threads == 0
+    refusal = census.failure()
+    assert refusal is not None
+    assert "no checkpoint to census" in refusal
+
+
 def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
-    """Reproduce the prod role set in the test DB so the dump carries the
-    GRANT/OWNER statements that broke production drills (the throwaway cluster
-    only has `meiva`, so pg_restore hit `role does not exist`): the 2026-08-27
-    missing roles, plus the 2026-09-21 admin-owned-object variant — a
-    `zzy`-owned ad-hoc table, as the sweep backup convention leaves behind."""
+    # meiva:note
+    # Reproduce the prod role set in the test DB so the dump carries the GRANT/OWNER statements that
+    # broke production drills (the throwaway cluster only has `meiva`, so pg_restore hit `role does
+    # not exist`): the 2026-08-27 missing roles, plus the 2026-09-21 admin-owned-object variant — a
+    # `zzy`-owned ad-hoc table, as the sweep backup convention leaves behind.
     from psycopg import sql as pgsql
 
     # This is the session database: capability groups must retain their formal
@@ -137,12 +301,13 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     db_url: str,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """The command path decrypts, restores, and proves a checkpoint
-    reader can consume the restored conversation without touching the source DB.
-
-    The test DB carries the prod role set (meiva_main / meiva_runner / grafana_ro /
-    zzy with grants, plus a zzy-owned ad-hoc table) so the dump exercises the
-    same restore path that failed in production on 2026-08-27 and 2026-09-21."""
+    # meiva:note
+    # The command path decrypts, restores, and proves a checkpoint reader can consume the restored
+    # conversation without touching the source DB.
+    #
+    # The test DB carries the prod role set (meiva_main / meiva_runner / grafana_ro / zzy with
+    # grants, plus a zzy-owned ad-hoc table) so the dump exercises the same restore path that failed
+    # in production on 2026-08-27 and 2026-09-21.
     _grant_prod_roles(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -225,10 +390,10 @@ def test_with_no_managed_artifact_the_default_target_is_a_fault(tmp_path: Path) 
 
 
 def test_scratch_space_requirement_scales_with_the_dump_size(tmp_path: Path) -> None:
-    """The base is picked against a multiple of the decrypted dump's size: measured
-    restores ran ~1.7x (10.16 GiB artifact, 2026-09-14) and >=2.7x (3.0 GiB
-    artifact, 2026-09-19), so the drill reserves 3x as the floor for choosing a
-    base."""
+    # meiva:note
+    # The base is picked against a multiple of the decrypted dump's size: measured restores ran
+    # ~1.7x (10.16 GiB artifact, 2026-09-14) and >=2.7x (3.0 GiB artifact, 2026-09-19), so the drill
+    # reserves 3x as the floor for choosing a base.
     dump = tmp_path / "backup.dump"
     dump.write_bytes(b"x" * 1000)
     assert restore_drill.scratch_space_requirement(dump) == 3000

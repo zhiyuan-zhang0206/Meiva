@@ -1,7 +1,7 @@
 ---
 type: doc
 title: WAL-G restore and weekly recovery drill
-description: Restoring a WAL-G backup (meiva backup walg restore) fetches it and recovers it to a time, an LSN or the end of the archive with a scratch Postgres whose settings are all launch arguments; the weekly drill runs the same code on the newest backup, recovers to the start of the newest archived segment to prove the WAL chain, and reads a real conversation back.
+description: Restoring a WAL-G backup (meiva backup walg restore) fetches it and recovers it to a time, an LSN or the end of the archive with a scratch Postgres whose settings are all launch arguments; the weekly drill runs the same code on the newest backup, recovers to the start of the newest archived segment to prove the WAL chain, reads a real conversation back, and censuses the classes the newest conversations name.
 tags: []
 ---
 
@@ -59,11 +59,12 @@ one code path with two callers.
   (the run lock admits one drill at a time) and reports `scratch: removed … leftovers`; the
   removal itself is reported as `scratch: removed <name>`. Evidence on 2026-10-30: the drill
   that finished ok freed 44 GiB (`/var/tmp/meiva-walg-drill-*` gone, 13 → 56 GiB free).
+- **The type census**: `verify_restored_database` also accounts for every class the newest
+  conversations name, and a green run carries its denominators — see
+  [the drill's type census](walg-drill-type-census.meiva.okf.md).
 - **What the green asserts**: the schema exists, the counts are non-zero, one conversation reads
-  back, and the target LSN was reached. It does **not** assert that every serialized class in
-  the data is readable by this build — a checkpoint class outside
-  `STATIC_CHECKPOINT_MSGPACK_TYPES` degrades silently (the serializer returns the raw payload
-  and logs one warning). A type census is tracked as task #5849 (P3).
+  back, the newest conversations name only classes this build can load or has retired, and the
+  target LSN was reached.
 - **Schedule and record** (`drill.py`, `tick.py`, `state.py`): due when a backup exists and
   none succeeded for a week minus one tick period (the drill can only run at a tick, so a
   full-week test would slip to eight days). The record (`finished_at`, `ok`, `backup`,
