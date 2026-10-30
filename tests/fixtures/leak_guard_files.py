@@ -17,6 +17,40 @@ Replaced = tuple[str, str, Any, Any]
 
 
 # meiva:note
+# `new` names the same thing `old` did, and the module that defines it serves that very object now:
+# its body ran again in the dict the process already registered. That is the plugin loader's design
+# (`base/packages/plugins/loading/plugin_loader.py` re-executes a spec in place, its #147 contract),
+# not a test leaving process state behind — a name a face imports from a sibling face is rebound to
+# the sibling's new class, instance and all. `#7832` (2026-10-30) named this after the guard reddened
+# every shard that loaded the plugin faces twice: `agent_runtime.FleetConfig` is `default_config`'s
+# class, re-executed, and the hook objects beside it are instances of a class whose module ran again.
+# A name defined in the compared module itself stays exempt outright: that is that module's own body
+# running again, which no comparison can tell from a redefinition.
+#
+# What it deliberately still reports: a stand-in whose definition is elsewhere (a class a test file
+# defines) or under another name, and a binding the defining module no longer serves. A test that
+# installs its own object therefore cannot borrow this exemption by naming it the same.
+def _definition(value: object) -> tuple[str, str] | None:
+    subject = value if isinstance(value, (type, types.FunctionType)) else type(value)
+    module = getattr(subject, "__module__", None)
+    name = getattr(subject, "__qualname__", None)
+    if module is None or module == "builtins" or name is None or "." in name:
+        return None
+    return (module, name)
+
+
+def _own_binding(old: object, new: object, compared: str) -> bool:
+    if getattr(new, "__module__", None) == compared:
+        return True
+    identity = _definition(new)
+    if identity is None or identity != _definition(old):
+        return False
+    module, name = identity
+    served = getattr(sys.modules.get(module), name, MISSING)
+    return served is (new if isinstance(new, (type, types.FunctionType)) else type(new))
+
+
+# meiva:note
 # The existing callables a file left pointing at a different object than when it began.
 #
 # `ModuleWatch` compares dict sizes, so it cannot see an EXISTING name handed a new object: the size
@@ -58,11 +92,10 @@ class FileIdentities:
         return {k: v for k, v in module_dict.items() if not k.startswith("__") and callable(v)}
 
     # meiva:note
-    # Compare against the file's baseline and forget it. A replacement whose defining module is the
-    # module being compared is not a stand-in: it is the module's own body running again in the same
-    # dict (a plugin loader executing its spec a second time, `importlib.reload`), which rebinds every
-    # callable it defines. `gateway/tests/extensions/test_schedule_runner.py` is the case that named
-    # this rule: the `meiva_to_user` plugin is re-executed in place.
+    # Compare against the file's baseline and forget it. `_own_binding` decides what a binding that
+    # changed identity anyway still is: the same name served by the same module, which is a module's
+    # body running again in the same dict (a plugin loader executing its spec a second time,
+    # `importlib.reload`), not a test leaving a stand-in behind.
     def close(self) -> list[Replaced]:
         label, baseline = self.label, self.baseline
         self.label, self.baseline = None, ()
@@ -80,7 +113,7 @@ class FileIdentities:
                 continue
             for attr, old in before.items():
                 new = current.get(attr, MISSING)
-                if new is old or getattr(new, "__module__", None) == name:
+                if new is old or _own_binding(old, new, name):
                     continue
                 found.append((name, attr, old, new))
                 self.replaced.append((name, attr, old, new))
