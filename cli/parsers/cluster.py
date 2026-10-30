@@ -127,7 +127,10 @@ def _h_cluster_db_authority_install_unit(args: argparse.Namespace) -> int:
     from cli.commands.cluster.control import cmd_db_authority_install_unit
 
     return cmd_db_authority_install_unit(
-        bundle=args.bundle, transport_key=args.transport_key, home=args.runtime.home
+        bundle=args.bundle,
+        transport_key=args.transport_key,
+        home=args.runtime.home,
+        now=args.runtime.clock.now().timestamp(),
     )
 
 

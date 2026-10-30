@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -71,6 +72,7 @@ def test_a_runners_first_join_reaches_the_gateway(
         )["MEIVA_DB_URL"],
         cluster_secret=secret,
         ttl_s=600,
+        now=time.time(),
     )
     bundle = tmp_path / "mini.bundle"
     bundle.write_bytes(issued.envelope)
@@ -80,6 +82,7 @@ def test_a_runners_first_join_reaches_the_gateway(
             runner,
             str(bundle),
             issued.transport_key,
+            now=time.time(),
         )
     installed = unit.require_unit_capability(runner)
     assert installed.api is not None and not bundle.exists()

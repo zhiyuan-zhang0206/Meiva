@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -42,7 +43,10 @@ def test_it_installs_the_bundle_deletes_it_and_presents_the_bundles_token(
         )
 
         rc = cmd_db_authority_install_unit(
-            bundle=str(sealed.path), transport_key=sealed.transport_key, home=home
+            bundle=str(sealed.path),
+            transport_key=sealed.transport_key,
+            home=home,
+            now=time.time(),
         )
 
     assert rc == 0
@@ -62,7 +66,10 @@ def test_a_fresh_bundle_of_the_same_generation_renews_the_installed_one(
         )
         assert (
             cmd_db_authority_install_unit(
-                bundle=str(first.path), transport_key=first.transport_key, home=home
+                bundle=str(first.path),
+                transport_key=first.transport_key,
+                home=home,
+                now=time.time(),
             )
             == 0
         )
@@ -72,7 +79,10 @@ def test_a_fresh_bundle_of_the_same_generation_renews_the_installed_one(
             gateway_home, tmp_path / "renewal.bundle", endpoint=database_endpoint, unit_home=home
         )
         rc = cmd_db_authority_install_unit(
-            bundle=str(renewal.path), transport_key=renewal.transport_key, home=home
+            bundle=str(renewal.path),
+            transport_key=renewal.transport_key,
+            home=home,
+            now=time.time(),
         )
 
     assert rc == 0
@@ -93,7 +103,10 @@ def test_it_refuses_a_gateway_home_and_keeps_the_bundle(
         )
 
         rc = cmd_db_authority_install_unit(
-            bundle=str(sealed.path), transport_key=sealed.transport_key, home=home
+            bundle=str(sealed.path),
+            transport_key=sealed.transport_key,
+            home=home,
+            now=time.time(),
         )
 
     assert rc == 1
@@ -115,7 +128,10 @@ def test_it_refuses_a_home_init_has_not_initialized(
         )
 
         rc = cmd_db_authority_install_unit(
-            bundle=str(sealed.path), transport_key=sealed.transport_key, home=uninitialized
+            bundle=str(sealed.path),
+            transport_key=sealed.transport_key,
+            home=uninitialized,
+            now=time.time(),
         )
 
     assert rc == 1
@@ -132,7 +148,9 @@ def test_it_needs_the_transport_key_and_keeps_the_bundle(
             gateway_home, tmp_path / "unit.bundle", endpoint=refused_endpoint(), unit_home=home
         )
 
-        rc = cmd_db_authority_install_unit(bundle=str(sealed.path), transport_key="", home=home)
+        rc = cmd_db_authority_install_unit(
+            bundle=str(sealed.path), transport_key="", home=home, now=time.time()
+        )
 
     assert rc == 1
     assert "MEIVA_DB_CAPABILITY_KEY" in capsys.readouterr().err
@@ -154,7 +172,10 @@ def test_it_refuses_another_units_bundle_and_keeps_it(
         )
 
         rc = cmd_db_authority_install_unit(
-            bundle=str(sealed.path), transport_key=sealed.transport_key, home=home
+            bundle=str(sealed.path),
+            transport_key=sealed.transport_key,
+            home=home,
+            now=time.time(),
         )
 
     assert rc == 1
