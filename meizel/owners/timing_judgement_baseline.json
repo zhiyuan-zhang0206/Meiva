@@ -237,11 +237,6 @@
       "comparison": "time.monotonic() - started < N"
     },
     {
-      "path": "gateway/tests/routers/cluster_endpoints/test_probe_agent_runner.py",
-      "function": "test_the_probe_budget_is_the_configured_status_probe_timeout",
-      "comparison": "elapsed < N"
-    },
-    {
       "path": "gateway/tests/routers/cluster_endpoints/test_roster_snapshots.py",
       "function": "test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget",
       "comparison": "elapsed < N"
