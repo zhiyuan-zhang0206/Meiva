@@ -6,9 +6,10 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
+import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,12 +19,25 @@ import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 
+// meiva:note
+// This route is the guide page's composition root: it reads the router and hands the shell a
+// `navigate`, so a test passes a spy instead of replacing `next/navigation`.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 export default function GuidePage() {
+  const router = useRouter();
+  const navigate = useCallback((href: Route) => { router.push(href); }, [router]);
+  return <GuidePageView navigate={navigate} />;
+}
+
+export interface GuidePageViewProps {
+  navigate: (href: Route) => void;
+}
+
+export function GuidePageView({ navigate }: GuidePageViewProps) {
   const client = useApi();
   const t = useTranslations("guide");
   const showToast = useStore((s) => s.showToast);
   const setActiveId = useStore((s) => s.setActiveId);
-  const router = useRouter();
   const [nl, setNl] = useState("");
 
   const draftMutation = useMutation({
@@ -33,7 +47,7 @@ export default function GuidePage() {
       setNl("");
       setActiveId(res.agent_id);
       showToast(t("created", { id: res.agent_id }));
-      router.push("/");
+      navigate("/");
     },
     onError: (err: unknown) => showToast(t("failed", { error: errMsg(err) })),
   });

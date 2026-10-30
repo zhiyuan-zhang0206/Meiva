@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-const { redirect } = vi.hoisted(() => ({ redirect: vi.fn() }));
-vi.mock("next/navigation", () => ({ redirect }));
+import { AlertsRedirectView } from "./page";
 
-import AlertsRedirect from "./page";
+const redirect = vi.fn();
 
 describe("AlertsRedirect", () => {
   it("forwards the alert-history deep link to the Insights anchor", () => {
-    AlertsRedirect();
+    AlertsRedirectView({ redirect });
 
     expect(redirect).toHaveBeenCalledWith("/insights#alerts");
   });

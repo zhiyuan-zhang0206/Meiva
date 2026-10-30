@@ -10,7 +10,7 @@ import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import ShellMonitorPage from "@/app/shell/[agentId]/[sessionId]/page";
+import { ShellMonitorView } from "@/app/shell/[agentId]/[sessionId]/page";
 import { USER_SETTING_DEFAULTS, type ShellCapture } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { WallClockProvider } from "@/lib/transport/transport-context";
@@ -50,10 +50,6 @@ const nav = vi.hoisted(() => ({
   params: { agentId: "5", sessionId: "12" },
   bfcacheId: "_b_test_",
 }));
-vi.mock("next/navigation", () => ({
-  useParams: () => nav.params,
-  useRouter: () => ({ bfcacheId: nav.bfcacheId }),
-}));
 
 afterEach(() => {
   vi.useRealTimers();
@@ -71,7 +67,7 @@ function render(browser?: FakeBrowser) {
   return rtlRender(
     <QueryClientProvider client={qc}>
       <WallClockProvider wallNow={() => Date.now()}>
-        <ShellMonitorPage />
+        <ShellMonitorView params={nav.params} bfcacheId={nav.bfcacheId} />
       </WallClockProvider>
     </QueryClientProvider>,
     { browser },
@@ -227,7 +223,7 @@ describe("ShellMonitorPage", () => {
     rtlRender(
       <QueryClientProvider client={qc}>
         <WallClockProvider wallNow={() => Date.now()}>
-          <ShellMonitorPage />
+          <ShellMonitorView params={nav.params} bfcacheId={nav.bfcacheId} />
         </WallClockProvider>
       </QueryClientProvider>,
     );
@@ -382,7 +378,7 @@ describe("ShellMonitorPage terminal theme", () => {
     rtlRender(
       <QueryClientProvider client={qc}>
         <WallClockProvider wallNow={() => Date.now()}>
-          <ShellMonitorPage />
+          <ShellMonitorView params={nav.params} bfcacheId={nav.bfcacheId} />
         </WallClockProvider>
       </QueryClientProvider>,
     );
@@ -407,7 +403,7 @@ describe("ShellMonitorPage terminal theme", () => {
     rtlRender(
       <QueryClientProvider client={qc}>
         <WallClockProvider wallNow={() => Date.now()}>
-          <ShellMonitorPage />
+          <ShellMonitorView params={nav.params} bfcacheId={nav.bfcacheId} />
         </WallClockProvider>
       </QueryClientProvider>,
     );
