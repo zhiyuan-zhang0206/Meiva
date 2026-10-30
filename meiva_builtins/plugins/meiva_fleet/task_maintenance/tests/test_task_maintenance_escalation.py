@@ -1,16 +1,3 @@
-"""Delegator escalation marker (`escalated_at`) — the marker's whole lifecycle.
-
-The delegation leg of the task-maintenance daemon reports an unresponsive owner
-by delivering one digest to the delegator. `escalated_at`, stamped in the same
-transaction as the digest's inbound insert, makes that at-most-once per overdue
-window: a failed delivery leaves it unset (the next sweep retries), and both
-update() paths clear it with the reminder counters (re-arming the task's next
-window). The daemon's reminder/escalation behaviour suite lives in
-test_task_maintenance_daemon.py; the marker tests keep the direct delivery real
-because the marker write lives inside it, and the gateway leg exercises the real
-HTTP boundary — kept together so the lifecycle reads in one place.
-"""
-
 from __future__ import annotations
 
 import json
@@ -28,6 +15,16 @@ from base.events.notifications.outbox import republish_pending
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 
+# meiva:note
+# Delegator escalation marker (`escalated_at`), plus the copy both legs deliver. The
+# delegation leg reports a task still open after repeated reminders by sending one
+# digest to the delegator; the marker, stamped in the same transaction as that
+# digest's inbound insert, makes the message at-most-once per overdue window — a
+# failed delivery leaves it unset (the next sweep retries), and both update() paths
+# clear it with the reminder counters (re-arming the task's next window). The copy
+# asserts reminders and an unchanged task state, never a verdict on the owner: this
+# pass reads task bookkeeping only, and `tasks.log` does not move `updated_at`.
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
 _TASK_TITLE = count(1)
 
 
@@ -354,3 +351,96 @@ def test_delegator_escalation_is_not_a_user_notification(
     assert len(inbound_messages(db_conn, parent_owner)) == 1
     assert notifications(db_conn, owner) == []
     assert notifications(db_conn, parent_owner) == []
+
+
+# meiva:note
+# The copy rule the escalation pass has to keep: its evidence is task bookkeeping
+# (reminder_count, and state changes — `tasks.log` notes deliberately do not move
+# `updated_at`), so it may state reminders and an unchanged state but may never
+# rule on the owner. An owner that answered in chat and one that is gone look
+# identical to this pass, and the same words serve both (2026-10-30, task #5862).
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
+_VERDICT_WORDS = ("unresponsive", "stalled", "not responding")
+
+
+def assert_states_evidence_not_a_verdict(text: str) -> None:
+    lowered = text.lower()
+    for verdict in _VERDICT_WORDS:
+        assert verdict not in lowered, f"escalation copy rules on the owner: {text!r}"
+
+
+# meiva:note
+# One digest carries a task whose owner is running and one whose owner is
+# terminated, under a single header: the pass cannot tell the two apart, so the
+# words must not pretend to (the acceptance shape for task #5862).
+def test_digest_copy_serves_a_live_and_a_gone_owner_alike(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    delegator = make_agent(db_conn)
+    parent = make_task(db_conn, owner=delegator, remind_interval_seconds=None)
+    live_owner = make_agent(db_conn)
+    gone_owner = make_agent(db_conn, status="terminated")
+    live_task = make_task(
+        db_conn,
+        owner=live_owner,
+        parent_id=parent,
+        updated_s_ago=7200,
+        reminder_count=3,
+    )
+    gone_task = make_task(
+        db_conn,
+        owner=gone_owner,
+        parent_id=parent,
+        updated_s_ago=7200,
+        reminder_count=3,
+    )
+
+    assert run_escalate(pool, database, event_bus, 3) == 1
+
+    messages = inbound_messages(db_conn, delegator)
+    assert len(messages) == 1
+    content = messages[0][0]
+    assert content.splitlines()[0] == (
+        "Subtasks still open after repeated reminders — task state unchanged "
+        "(a tasks.log note is not a state change):"
+    )
+    assert f"- #{live_task} " in content
+    assert f"- #{gone_task} " in content
+    assert_states_evidence_not_a_verdict(content)
+
+
+# meiva:note
+# The human queue's notice keeps the same rule and still ends in an action:
+# reminders, an unchanged state, and what the reader can do about it. The title and
+# body are pinned verbatim so a later edit cannot quietly restore a verdict.
+def test_human_notice_copy_states_reminders_and_an_unchanged_state(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    owner, tid, _parent = human_leg_subtask(db_conn)
+
+    assert run_escalate(pool, database, event_bus, 3) == 1
+
+    db_conn.rollback()
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT title, content FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL",
+            (owner,),
+        )
+        notices = cur.fetchall()
+    assert len(notices) == 1
+    title, content = notices[0]
+    assert title.startswith(f"Task #{tid} ")
+    assert title.endswith(" — 3 reminders with no state change; reassign or cancel")
+    assert content == (
+        f"Agent #{owner} has not changed this task's state after 3 reminders "
+        "(a tasks.log note is not a state change), and no live agent owns any ancestor "
+        "task to catch it. Reassign it to another agent, cancel it, or reply to remind "
+        "the owner once more."
+    )
+    assert_states_evidence_not_a_verdict(f"{title}\n{content}")

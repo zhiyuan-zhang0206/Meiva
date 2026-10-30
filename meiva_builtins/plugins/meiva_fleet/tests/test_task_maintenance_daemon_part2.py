@@ -205,7 +205,10 @@ class TestEscalate:
         assert len(deliver.deliveries()) == 1
         delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == delegator
-        assert "Stalled subtasks — owner(s) unresponsive after repeated reminders:" in message
+        assert (
+            "Subtasks still open after repeated reminders — task state unchanged "
+            "(a tasks.log note is not a state change):"
+        ) in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
         # _ESCALATE_SQL sorts nothing: row order is unspecified, and neither the
         # digest message (checked membership-wise above) nor the telemetry makes
@@ -383,9 +386,10 @@ class TestEscalate:
         assert len(notices) == 1
         title, priority, require_response, task_id = notices[0]
         assert require_response is True
-        assert task_id == child  # grouped under the stalled task
+        assert task_id == child
         assert priority == "P1"  # inherits the task's priority
-        assert "stalled" in title.lower()
+        assert "3 reminders with no state change" in title
+        assert "reassign or cancel" in title
         assert _maintenance_events(emitted_events) == [
             (
                 "telemetry",
