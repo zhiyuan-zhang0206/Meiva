@@ -72,10 +72,13 @@ from typing import Any, cast
 
 import pytest
 
+from tests.fixtures.leak_guard_files import MISSING as _MISSING
+from tests.fixtures.leak_guard_files import FileIdentities
+
 _Finding = tuple[str, str]  # (kind, detail)
 MODES = ("off", "warn", "fail")
 LEAK, NOTE, FAULT = "leak_guard", "leak_guard_note", "leak_guard_fault"  # JUnit property names
-STRICT_KINDS = ("env", "module-attr", "cwd", "signal")
+STRICT_KINDS = ("env", "module-attr", "module-attr-replaced", "cwd", "signal")
 _VERDICT_STAGES = ("snapshot", "compare")  # a fault of either leaves no verdict: loud in fail mode
 NOTE_KINDS = ("sys.path",)
 
@@ -98,42 +101,10 @@ SIGNALS = tuple(
 _getsignal: Callable[[int], Any] = _signal.getsignal
 _now = time.perf_counter_ns
 _IGNORED_ENV = os.environ.encodekey("PYTEST_CURRENT_TEST")  # pytest rewrites it on every phase
-# A directory below the rootdir that holds no production module: tests, an installed package.
 _EXCLUDED_DIRS = r"(?:tests|site-packages|node_modules)"
 _module_dict = operator.attrgetter("__dict__")
 _module_file = operator.methodcaller("get", "__file__")
 _module_spec = operator.methodcaller("get", "__spec__")
-_HINTS = {
-    "env": (
-        "monkeypatch.delenv(name, raising=False) records nothing for an absent key, so whatever "
-        "the code under test sets next stays for every later test in this worker. Call "
-        "monkeypatch.setenv(name, '') before the delenv, or put the key in the fixture that "
-        "snapshots and restores it. Undo through monkeypatch or patch.dict, not os.environ[...]."
-    ),
-    "module-attr": (
-        "a name now sits in the module's __dict__ that was not there before. If a test did "
-        "monkeypatch.setattr on a name the module serves from __getattr__, use "
-        "monkeypatch.setitem(vars(module), name, value) (its undo deletes the key). If code "
-        "under test assigned it, undo that in a finalizer or pre-register it with "
-        "monkeypatch.setattr(module, name, value, raising=False)."
-    ),
-    "cwd": "use monkeypatch.chdir(path); a bare os.chdir needs a finally that changes back.",
-    "signal": "restore the handler in a finally / finalizer: signal.signal(sig, previous).",
-}
-
-
-def _environ_data() -> dict[Any, Any]:
-    """The raw mapping behind `os.environ`: a copy through the public API is ~90 times slower."""
-    return vars(os.environ)["_data"]
-
-
-def _show(value: object) -> str:
-    return getattr(value, "__qualname__", None) or repr(value)
-
-
-def _show_handler(handler: object) -> str:
-    """`_signal.getsignal` answers SIG_DFL and SIG_IGN as plain ints: name them as `signal` does."""
-    return signal.Handlers(handler).name if isinstance(handler, int) else _show(handler)
 
 
 def first_party_pattern(root: str) -> re.Pattern[str]:
@@ -306,6 +277,52 @@ class ModuleWatch:
     def tracked(self) -> int:
         return len(self._dicts)
 
+    # meiva:note
+    # Every first-party module located so far: its name and its module dict.
+    @property
+    def modules(self) -> list[tuple[str, dict[str, Any]]]:
+        return list(zip(self._names, self._dicts, strict=True))
+
+
+_HINTS = {
+    "env": (
+        "monkeypatch.delenv(name, raising=False) records nothing for an absent key, so whatever "
+        "the code under test sets next stays for every later test in this worker. Call "
+        "monkeypatch.setenv(name, '') before the delenv, or put the key in the fixture that "
+        "snapshots and restores it. Undo through monkeypatch or patch.dict, not os.environ[...]."
+    ),
+    "module-attr": (
+        "a name now sits in the module's __dict__ that was not there before. If a test did "
+        "monkeypatch.setattr on a name the module serves from __getattr__, use "
+        "monkeypatch.setitem(vars(module), name, value) (its undo deletes the key). If code "
+        "under test assigned it, undo that in a finalizer or pre-register it with "
+        "monkeypatch.setattr(module, name, value, raising=False)."
+    ),
+    "module-attr-replaced": (
+        "an existing name of a first-party module now points at another object, and the file that "
+        "did it never put the original back. Restore it through the tool that records it "
+        "(monkeypatch.setattr, mock.patch.object) or in a finally; a replacement installed for the "
+        "whole file belongs in a fixture that undoes it, so the next file in the worker sees the "
+        "real function."
+    ),
+    "cwd": "use monkeypatch.chdir(path); a bare os.chdir needs a finally that changes back.",
+    "signal": "restore the handler in a finally / finalizer: signal.signal(sig, previous).",
+}
+
+
+def _environ_data() -> dict[Any, Any]:
+    """The raw mapping behind `os.environ`: a copy through the public API is ~90 times slower."""
+    return vars(os.environ)["_data"]
+
+
+def _show(value: object) -> str:
+    return getattr(value, "__qualname__", None) or repr(value)
+
+
+def _show_handler(handler: object) -> str:
+    """`_signal.getsignal` answers SIG_DFL and SIG_IGN as plain ints: name them as `signal` does."""
+    return signal.Handlers(handler).name if isinstance(handler, int) else _show(handler)
+
 
 def _cwd() -> str | None:
     try:
@@ -392,6 +409,7 @@ class Run:
         self.mode = "off"
         # Until configured nothing is first-party.
         self.watch = ModuleWatch(re.compile(r"(?!)").match)
+        self.files = FileIdentities()
         self.checked = 0
         self.ns = 0
         self.scan_ns = 0  # time in the module scans, locating included
@@ -399,6 +417,9 @@ class Run:
         self.fault_first: dict[str, str] = {}
         # Controller side: (nodeid, property, kind, detail) of every finding the reports carried.
         self.findings: list[tuple[str, str, str, str]] = []
+        # meiva:note
+        # Findings with no test to carry them (a file boundary at session end): handed over by key.
+        self.pending: list[tuple[str, str, str, str]] = []
         self.worker_stats: list[dict[str, Any]] = []
 
     def configure(self, rootpath: str) -> None:
@@ -483,6 +504,9 @@ class Run:
             "judged": self.watch.judged,
             "passes": self.watch.passes,
             "slow": self.watch.slow,
+            "file_scans": self.files.scans,
+            "file_ns": self.files.ns,
+            "file_stopped": self.files.stopped,
             "faults": {
                 stage: [n, self.fault_first[stage]] for stage, n in self.fault_counts.items()
             },
@@ -493,7 +517,7 @@ _RUN = Run()
 
 
 def _contained[T](
-    stage: str, item: pytest.Item | None, call: Callable[..., T], *args: Any
+    stage: str, item: pytest.Item | None, call: Callable[..., T], *args: Any, **kwargs: Any
 ) -> T | None:
     """A fault of the guard itself is one report line (and one JUnit property), never a test result.
 
@@ -503,7 +527,7 @@ def _contained[T](
     leak from the gate, so a fault there never fails a test or crashes the session.
     """
     try:
-        return call(*args)
+        return call(*args, **kwargs)
     except Exception as exc:
         if _RUN.mode == "fail" and stage in _VERDICT_STAGES:
             raise
@@ -518,6 +542,58 @@ def pytest_configure(config: pytest.Config) -> None:
     _RUN.configure(str(config.rootpath))
 
 
+# meiva:note
+# The file a test belongs to, relative to the rootdir: the unit a finding names.
+def _file_label(item: pytest.Item) -> str:
+    return item.nodeid.split("::", 1)[0]
+
+
+# meiva:note
+# Compare against the file's baseline and name what it left: the one place that turns the comparison
+# into a finding, so the boundary of a move and the boundary of the run's last file read the same.
+def _boundary_findings(ended: str | None, replaced: list[Any]) -> list[_Finding]:
+    if ended is None:
+        return []
+    return [
+        (
+            "module-attr-replaced",
+            f"{ended} left {name}.{attr} pointing at another object "
+            f"({_show(old)} -> {'nothing' if new is _MISSING else _show(new)})",
+        )
+        for name, attr, old, new in replaced
+    ]
+
+
+# meiva:note
+# The boundary check of one file move: sync the watch (a module an import added since the last file
+# joins the next baseline), compare, and name what the file that ended left behind.
+def _boundary(run: Run, label: str) -> list[_Finding]:
+    run.watch.sync()
+    ended = run.files.label
+    replaced = run.files.track(run.watch.modules, label, restore=run.mode == "fail")
+    return _boundary_findings(ended if ended is not None else label, replaced)
+
+
+# meiva:note
+# The run ended inside a file: its boundary is here, and it carries no test to report on, so the
+# finding goes to the summary (and to the controller, through the worker's handoff).
+def _close_last_file() -> None:
+    ended = _RUN.files.label
+    if ended is None:
+        return
+    replaced = _contained("file", None, _RUN.files.close)
+    found = _boundary_findings(ended, replaced or [])
+    if not found:
+        return
+    for kind, detail in found:
+        finding = (ended, LEAK, kind, detail)
+        _RUN.findings.append(finding)
+        _RUN.pending.append(finding)
+    if _RUN.mode == "fail":
+        _contained("file", None, _RUN.files.restore)
+        _RUN.files.stopped += 1
+
+
 def _record(item: pytest.Item, found: list[_Finding]) -> None:
     for kind, detail in found:
         item.user_properties.append((NOTE if kind in NOTE_KINDS else LEAK, f"{kind}: {detail}"))
@@ -529,6 +605,10 @@ def _leak_guard(request: pytest.FixtureRequest) -> Iterator[None]:
     if run.mode == "off":
         yield
         return
+    label = _file_label(item)
+    carried = _contained("file", item, _boundary, run, label)
+    if carried:
+        _contained("report", item, _record, item, carried)
     before = _contained("snapshot", item, run.capture)
     yield
     if before is None:
@@ -562,19 +642,32 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
 
 def _hand_over(output: dict[str, Any]) -> None:
     output[LEAK] = _RUN.stats()
+    output[LEAK + "-findings"] = _RUN.pending
 
 
+# meiva:note
+# Close the last file, then hand the worker's self-timing and faults to the controller. A file whose
+# end found a replaced attribute reds the run in fail mode without blaming a test: the finding
+# already names the file, and no test is at its teardown when a file ends.
 def pytest_sessionfinish(session: pytest.Session) -> None:
-    """A xdist worker hands its self-timing and faults to the controller through `workeroutput`."""
+    if _RUN.mode != "off":
+        _close_last_file()
     output = getattr(session.config, "workeroutput", None)
     if output is not None and _RUN.mode != "off":
         _contained("handoff", None, _hand_over, output)
+    if _RUN.mode == "fail":
+        own = _contained("summary", None, _RUN.stats)
+        mine = (own,) if own is not None else ()
+        if any(stat.get("file_stopped") for stat in (*_RUN.worker_stats, *mine)):
+            session.exitstatus = 1
 
 
 def _take_over(node: Any) -> None:
-    stats = getattr(node, "workeroutput", {}).get(LEAK)
+    output = getattr(node, "workeroutput", {})
+    stats = output.get(LEAK)
     if stats:
         _RUN.worker_stats.append(stats)
+    _RUN.findings.extend(output.get(LEAK + "-findings", ()))
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -607,20 +700,30 @@ def _micros_per_test(stats: list[dict[str, Any]]) -> float:
     return sum(s["ns"] for s in stats) / checked / 1000 if checked else 0.0
 
 
-def _summary_head(stats: list[dict[str, Any]], faults: dict[str, list[Any]]) -> str:
-    leaks = [f for f in _RUN.findings if f[1] == LEAK]
-    notes = sum(f[1] == NOTE for f in _RUN.findings)
+# meiva:note
+# What the guard cost: per test, what locating the modules took, and the file boundaries.
+def _cost_fragment(stats: list[dict[str, Any]]) -> str:
     checked = sum(s["checked"] for s in stats)
     locating_ns = sum(s["discover_ns"] for s in stats)
-    scan_us = (sum(s["scan_ns"] for s in stats) - locating_ns) / max(checked, 1) / 1000
+    scan_us = max(sum(s["scan_ns"] for s in stats) - locating_ns, 0) / max(checked, 1) / 1000
     return (
-        f"leak guard ({_RUN.mode}): {len(leaks)} leak(s) in {len({f[0] for f in leaks})} test(s), "
-        f"{notes} sys.path note(s), {sum(n for n, _ in faults.values())} guard fault(s); "
         f"{checked} test(s) checked, {_micros_per_test(stats):.0f} us/test"
         f" ({scan_us:.0f} us/test of it module scans, {locating_ns / 1e6:.0f} ms locating "
         f"{sum(s['judged'] for s in stats)} module(s) in {sum(s['passes'] for s in stats)} pass(es)), "
         f"{sum(s['slow'] for s in stats)} slow scan(s), "
-        f"{max(s['tracked'] for s in stats)} module dicts watched"
+        f"{max(s['tracked'] for s in stats)} module dicts watched, "
+        f"{sum(s['file_scans'] for s in stats)} file boundary scan(s) "
+        f"({sum(s['file_ns'] for s in stats) / 1e6:.0f} ms)"
+    )
+
+
+def _summary_head(stats: list[dict[str, Any]], faults: dict[str, list[Any]]) -> str:
+    leaks = [f for f in _RUN.findings if f[1] == LEAK]
+    notes = sum(f[1] == NOTE for f in _RUN.findings)
+    return (
+        f"leak guard ({_RUN.mode}): {len(leaks)} leak(s) in {len({f[0] for f in leaks})} test(s), "
+        f"{notes} sys.path note(s), {sum(n for n, _ in faults.values())} guard fault(s); "
+        + _cost_fragment(stats)
     )
 
 

@@ -277,7 +277,7 @@ five environment keys the code under test set outlived three test files (PR
 **Correct form.** `setenv(name, "")` before `delenv`; `setitem(vars(module),
 name, value)` or `mock.patch.object` for a name served by `__getattr__`;
 `monkeypatch.chdir`; restore a handler in a `finally`. The root
-[leak guard](../../../tests/docs/test-leak-guard.meiva.okf.md) compares these after
+[leak guard](../../../tests/docs/test-leak-guard/test-leak-guard.meiva.okf.md) compares these after
 every test; its default `fail` mode restores after each leaker and fails it at
 its own teardown, and the CI annotation of the counts job lists what it found.
 
