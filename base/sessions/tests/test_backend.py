@@ -87,10 +87,11 @@ def test_pty_child_virtual_env_projection(
         f"report = Path({str(report)!r}); pending = report.with_suffix('.tmp'); "
         "pending.write_text(json.dumps("
         "{key: os.environ.get(key) for key in "
-        "('VIRTUAL_ENV', 'PTY_AMBIENT_SENTINEL', 'MEIVA_DB_URL')})); pending.replace(report)"
+        "('VIRTUAL_ENV', 'PTY_AMBIENT_SENTINEL', 'PTY_PROJECTION_SENTINEL')})); "
+        "pending.replace(report)"
     )
     command = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
-    env = {"VIRTUAL_ENV": "/explicit/venv", "MEIVA_DB_URL": "runner-override"}
+    env = {"VIRTUAL_ENV": "/explicit/venv", "PTY_PROJECTION_SENTINEL": "runner-override"}
     try:
         if projection == "default":
             projected = forward_env_dict(
@@ -112,7 +113,7 @@ def test_pty_child_virtual_env_projection(
         assert child_env["VIRTUAL_ENV"] == expected[expected_venv]
         assert child_env["PTY_AMBIENT_SENTINEL"] == "preserved"
         if projection == "explicit":
-            assert child_env["MEIVA_DB_URL"] == "runner-override"
+            assert child_env["PTY_PROJECTION_SENTINEL"] == "runner-override"
     finally:
         backend.kill_session(name)
         service.stop()

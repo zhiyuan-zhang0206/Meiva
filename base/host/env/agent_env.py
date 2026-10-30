@@ -66,6 +66,12 @@ _SESSION_DELIVERY_KEYS = frozenset({"PATH", "MEIVA_HARNESS_HANDLE", "CLAUDE_CONF
 # they cannot stay resident in every session's environment. The diagnosis channel they used to
 # provide (`psql "$MEIVA_DB_URL"`) moves to `scripts/host_ops/run_with_env.py`, which reads each
 # value fresh and pins it into one child's environment.
+#
+# What an agent-profile child loses is the inherited copy only: `dotenv_boot` re-reads
+# `MEIVA_DB_URL` from the home's `.env` during `import meiva`, so a process that boots the platform
+# still gets its login (measured 2026-10-30: `import meiva` with `MEIVA_PROCESS_PROFILE=agent` and
+# both keys removed prints `IMPORT_OK` and the right AGENT_ID). A plain shell tool is what stops
+# working, which is exactly what run_with_env.py restores.
 SESSION_CREDENTIAL_KEYS = frozenset(
     {
         "MEIVA_ALERTS_WEBHOOK_TOKEN",
