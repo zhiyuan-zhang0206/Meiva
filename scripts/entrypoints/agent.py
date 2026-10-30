@@ -24,13 +24,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from base.cluster.machine.ambient import gateway_access_from_settings
+from base.cluster.machine.boot import gateway_access_from_boot
+from base.config import ConfigBoot
 from base.host.net.http_dial import post as dial_post
 from scripts.entrypoints.spawn_request import build_spawn_request, parse_spawn_agent_id
 
 
 def main() -> None:
-    access = gateway_access_from_settings()  # ambient: O
+    access = gateway_access_from_boot(ConfigBoot())
     request = build_spawn_request(access, idempotency_key=uuid.uuid4().hex)
     resp = dial_post(request.url, json=request.json, headers=request.headers)
     resp.raise_for_status()

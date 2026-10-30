@@ -40,8 +40,7 @@ atomic transaction.
 Initialization does not select this path for an authored Git checkout. Gateway-capable first boot can initialize locally
 because its gateway need not be serving yet. The operation receives its `GatewayAccess`
 explicitly: the builtin scaffold takes it from the `ScaffoldFacts` that `meiva memory init`
-builds from its command runtime, and no `# ambient: B2` caller remains in
-`base/cluster/machine/tests/test_ambient_callers.py`.
+builds from its command runtime.
 
 `init(root, branch, remote)` performs a selected remote clone, branch selection
 or publication and missing gitignore commit. `reconcile_initialized` checks a

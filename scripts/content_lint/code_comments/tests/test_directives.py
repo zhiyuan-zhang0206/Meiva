@@ -188,19 +188,3 @@ def test_a_time_bomb_reason_cannot_continue_on_the_next_line(tmp_path: Path) -> 
         ),
     )
     assert codes(repo) == ["free-comment"]
-
-
-@pytest.mark.parametrize("path", ["pkg/core.py", "pkg/tests/test_core.py"])
-@pytest.mark.parametrize("call", ["gateway_access_from_settings()", "other()"])
-def test_an_ambient_marker_only_names_an_audited_call(tmp_path: Path, path: str, call: str) -> None:
-    repo = repository(tmp_path, {path: f"access = {call}  # ambient: B2\n"})
-    findings = check(repo, strict_paths=repo.files).findings
-    assert bool(findings) is (path != "pkg/core.py" or call != "gateway_access_from_settings()")
-
-
-def test_an_ambient_marker_cannot_include_prose(tmp_path: Path) -> None:
-    repo = repository(
-        tmp_path,
-        {"pkg/core.py": "access = gateway_access_from_settings()  # ambient: B2 because needed\n"},
-    )
-    assert [item.code for item in check(repo, strict_paths=repo.files).findings] == ["free-comment"]

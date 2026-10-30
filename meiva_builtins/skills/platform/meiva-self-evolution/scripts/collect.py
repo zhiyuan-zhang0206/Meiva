@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -567,12 +568,16 @@ def main(argv: Sequence[str], env: CollectFacts, *, database: Database) -> None:
 
 # meiva:note
 # The composition root of the standalone run: this process's gateway access, clock and home.
+# The boot reads this process's environment as a snapshot rather than capturing it: the skill
+# scripts are loaded in process by their tests, and a capturing boot would take the host's
+# delivery out of `os.environ`.
 def process_facts() -> CollectFacts:
-    from base.cluster.machine.ambient import gateway_access_from_settings
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from base.config import ConfigBoot
     from base.paths import meiva_home
 
     return CollectFacts(
-        gateway=gateway_access_from_settings(),  # ambient: O
+        gateway=gateway_access_from_boot(ConfigBoot(environment=dict(os.environ))),
         now=datetime.now(UTC),
         home=meiva_home(),
     )
