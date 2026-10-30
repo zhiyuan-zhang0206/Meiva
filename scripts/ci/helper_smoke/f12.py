@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from base.clock import Timers
+
 from .support import SmokeError, fail, pid_alive, run, save, wait_for
 
 _F12_ROUND_WAIT_S = 10.0
@@ -26,7 +28,9 @@ def _f12_chain_line(pid: int) -> str:
     return proc.stdout.strip() or f"{pid} <gone>"
 
 
-def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) -> dict[str, Any]:
+def _f12_round(
+    workdir: Path, unit_id: str, tag: str, pid: int, timeout: float, *, timers: Timers
+) -> dict[str, Any]:
     rounds_path = workdir / f"unit-results-{unit_id}.json.rounds"
 
     def _found():
@@ -41,11 +45,19 @@ def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) 
                 return record
         return None
 
-    return wait_for(f"round {tag} from unit {unit_id} pid {pid}", _found, timeout, "f12")
+    return wait_for(
+        f"round {tag} from unit {unit_id} pid {pid}", _found, timeout, "f12", timers=timers
+    )
 
 
 def f12_point(
-    workdir: Path, tag: str, units: list[tuple[str, int]], pids: list[int], *, now: float
+    workdir: Path,
+    tag: str,
+    units: list[tuple[str, int]],
+    pids: list[int],
+    *,
+    now: float,
+    timers: Timers,
 ) -> dict[str, Any]:
     """Trigger one probe round per unit id; collect per-pid replies; snapshot chains.
 
@@ -62,7 +74,7 @@ def f12_point(
             record: dict[str, Any] = {"round": tag, "pid": pid, "error": "unit dead"}
         else:
             try:
-                record = _f12_round(workdir, unit_id, tag, pid, _F12_ROUND_WAIT_S)
+                record = _f12_round(workdir, unit_id, tag, pid, _F12_ROUND_WAIT_S, timers=timers)
             except SmokeError:
                 record = {"round": tag, "pid": pid, "error": "no probe response"}
         record["unit"] = unit_id

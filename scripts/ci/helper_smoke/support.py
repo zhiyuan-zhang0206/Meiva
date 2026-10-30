@@ -8,10 +8,11 @@ import os
 import signal
 import socket
 import subprocess
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, TypeGuard
+
+from base.clock import Timers
 
 ROOT_SOCKET = "meiva-root.sock"
 ROOT_WAIT_S = 30.0
@@ -123,17 +124,13 @@ def run(
     return proc
 
 
-def _pause(seconds: float) -> None:
-    time.sleep(seconds)
-
-
-def wait_for(what: str, predicate, timeout: float, phase: str):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+def wait_for(what: str, predicate, timeout: float, phase: str, *, timers: Timers):
+    deadline = timers.monotonic() + timeout
+    while timers.monotonic() < deadline:
         result = predicate()
         if result:
             return result
-        _pause(_POLL_S)
+        timers.sleep(_POLL_S)
     fail(phase, f"timed out after {timeout:.0f}s waiting for {what}")
 
 
