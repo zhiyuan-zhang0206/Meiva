@@ -1,11 +1,15 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { renderWithBrowser } from "@/test-support/render";
-import { WallClockProvider } from "@/lib/transport/transport-context";
+import { renderWithProviders } from "@/test-support/render";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
 import { USER_SETTING_DEFAULTS, type AgentRow, type NoticeItem } from "@/lib/contracts/types";
+import {
+  NOTICES_QUERY_KEY,
+  NOTICES_RESOLVED_QUERY_KEY,
+} from "@/lib/notifications/use-notices";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
 // meiva:note
@@ -22,15 +26,6 @@ vi.mock("next/link", () => ({
       {children}
     </a>
   ),
-}));
-
-// meiva:note
-// GraphView is exercised on its own in graph-view.test.tsx; stub it here so the
-// FleetView layout/tab tests stay deterministic (no d3-force simulation, no
-// /api/fleet/graph fetch).
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-vi.mock("@/components/fleet/graph-view", () => ({
-  GraphView: () => <div data-testid="graph-view">graph</div>,
 }));
 
 // meiva:note
@@ -52,10 +47,6 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   value: vi.fn(),
 });
 
-// The live agent list is injected; the view itself is pure projection.
-const agentsMock = vi.fn<() => AgentRow[]>();
-vi.mock("@/lib/agents/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
-
 let storedSettings: Record<string, unknown> = {};
 const putSettingMock = vi.fn((key: string, value: unknown) => {
   storedSettings = { ...storedSettings, [key]: value };
@@ -63,47 +54,16 @@ const putSettingMock = vi.fn((key: string, value: unknown) => {
 });
 
 // meiva:note
-// The embedded Inbox queue fetches notice history on mount; empty here.
+// What a test states about the queue: the three lists the feed hook renders. The rows are seeded
+// into the notice caches in the shape the app stores them, so the real hook flattens them.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-
-// useInboxFeed needs EventStreamProvider; mock it away for fleet-view tests.
-// useNotices — the queue's single data contract; inject per-test via
-// useNoticesMock (default: empty).
-interface TestNoticesFeed {
+interface FeedRows {
   open: NoticeItem[];
   awaiting: NoticeItem[];
   resolved: NoticeItem[];
-  fetchNextPage: () => void;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  error: boolean;
-  resolvedError: boolean;
-  isLoading: boolean;
 }
-const useNoticesMock = vi.fn<() => TestNoticesFeed>(() => ({
-  open: [],
-  awaiting: [],
-  resolved: [],
-  fetchNextPage: () => undefined,
-  hasNextPage: false,
-  isFetchingNextPage: false,
-  error: false,
-  resolvedError: false,
-  isLoading: false,
-}));
-vi.mock("@/lib/notifications/use-notices", () => ({ useNotices: () => useNoticesMock() }));
 
-// meiva:note
-// useTasks (the queue's grouping join + the Task Graph) also needs
-// EventStreamProvider; an empty registry keeps every queue entry flat.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-vi.mock("@/lib/notifications/use-tasks", () => ({
-  useTasks: () => ({ tasks: [], loading: false, error: false }),
-}));
-
-// The inbox's fleet-wide open-pages hook is SSE-backed (EventStreamProvider);
-// stub it to no open pages for these layout tests.
-vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
+const NO_NOTICES: FeedRows = { open: [], awaiting: [], resolved: [] };
 
 import { BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { FleetView } from "./fleet-view";
@@ -136,17 +96,46 @@ afterEach(() => {
   window.innerWidth = 1024;
 });
 
-function wrap(ui: ReactElement) {
+// meiva:note
+// The test door for this file: the roster, the notice feed, the empty task registry and the empty
+// page list enter through the caches the hooks read — the shape the app stores — and the transport
+// answers the reads the panels still make, including the graph the Agents tab mounts. The settings
+// cache holds what the test stated, so a persisted choice is a value, not a stubbed store.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function wrap(
+  ui: ReactElement,
+  { agents = [], notices = NO_NOTICES }: { agents?: AgentRow[]; notices?: FeedRows } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
-  return renderWithBrowser(
-    // meiva:note
-    // The queue's rows age against the page's clock; the app's own answer keeps this file's
-    // relative labels meaning what they said before.
-    <WallClockProvider wallNow={() => Date.now()}>
-      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
-    </WallClockProvider>,
-  );
+  qc.setQueryData(AGENTS_QUERY_KEY, { agents, ancestors: [] });
+  qc.setQueryData(NOTICES_QUERY_KEY, {
+    open: notices.open,
+    awaiting: notices.awaiting,
+    resolved_page: [],
+    next_cursor: null,
+  });
+  qc.setQueryData(NOTICES_RESOLVED_QUERY_KEY, {
+    pages: [{ resolved_page: notices.resolved, next_cursor: null }],
+    pageParams: [undefined],
+  });
+  for (const window of ["24h", "7d", "30d", "all"] as const) {
+    qc.setQueryData(["tasks", "graph", window], { tasks: [] });
+  }
+  qc.setQueryData(["all-pages"], []);
+  transport.getTasks.mockResolvedValue({ tasks: [] });
+  transport.listAllPages.mockResolvedValue([]);
+  transport.getFleetGraph.mockResolvedValue({
+    nodes: [],
+    edges: [],
+    telemetry_stale: false,
+    snapshot_at: null,
+  });
+  return renderWithProviders(ui, {
+    queryClient: qc,
+    settings: storedSettings,
+    wallNow: () => Date.now(),
+  });
 }
 
 function noticeItem(over: Partial<NoticeItem> & { id: number }): NoticeItem {
@@ -187,20 +176,20 @@ function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
 
 describe("FleetView (desktop)", () => {
   it("shows active/total counts and the graph surface", () => {
-    agentsMock.mockReturnValue([
+    const agents: AgentRow[] = [
       makeAgent({ agent_id: 1, label: "lead", status: "idling" }),
       makeAgent({ agent_id: 2, spawner: "agent:1", label: "worker" }),
       makeAgent({ agent_id: 3, spawner: "agent:1", status: "terminated" }),
-    ]);
-    wrap(<FleetView />);
+    ];
+    wrap(<FleetView />, { agents });
     // 2 alive (idling + running), 1 terminated
     expect(screen.getByText("2 active · 3 total")).toBeTruthy();
-    expect(screen.getByTestId("graph-view")).toBeTruthy();
+    expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
   });
 
   it("shows 0 active · 0 total when there are no agents", () => {
-    agentsMock.mockReturnValue([]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [];
+    wrap(<FleetView />, { agents });
     expect(screen.getByText("0 active · 0 total")).toBeTruthy();
   });
 
@@ -208,15 +197,15 @@ describe("FleetView (desktop)", () => {
     // Regression: main is a row-flex landmark, so a root without flex-1
     // shrinks to its content max-width — clicking a short Inbox item
     // collapsed the whole fleet surface to the left ~60% of the viewport.
-    agentsMock.mockReturnValue([]);
-    const { container } = wrap(<FleetView />);
+    const agents: AgentRow[] = [];
+    const { container } = wrap(<FleetView />, { agents });
     const root = container.firstElementChild as HTMLElement;
     expect(root.classList.contains("flex-1")).toBe(true);
   });
 
   it("aligns the Agents/Tasks bar with the Inbox header (one shared height)", () => {
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1 })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
+    wrap(<FleetView />, { agents });
     // Both bars must pin the SAME explicit height — their content heights
     // differ, so equal padding would still leave the two borders off by a
     // couple of pixels.
@@ -229,15 +218,15 @@ describe("FleetView (desktop)", () => {
   });
 
   it("links the header back to the conversation", () => {
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1 })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
+    wrap(<FleetView />, { agents });
     const link = screen.getByLabelText("Back to conversation");
     expect(link.getAttribute("href")).toBe("/");
   });
 
   it("renders the unified Inbox panel (no Decisions/Reviews split)", () => {
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1, unread_notice_count: 2 })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1, unread_notice_count: 2 })];
+    wrap(<FleetView />, { agents });
     expect(screen.getByText("Inbox")).toBeTruthy();
     expect(screen.queryByText("Decisions")).toBeNull();
     expect(screen.queryByText("Reviews")).toBeNull();
@@ -245,11 +234,11 @@ describe("FleetView (desktop)", () => {
 
   it("reads agent_id from the route and anchors that agent's notice", async () => {
     window.history.replaceState(null, "", "/fleet?agent_id=405");
-    agentsMock.mockReturnValue([
+    const agents: AgentRow[] = [
       makeAgent({ agent_id: 1, label: "lead" }),
       makeAgent({ agent_id: 405, label: "reviewer" }),
-    ]);
-    useNoticesMock.mockReturnValue({
+    ];
+    const notices: FeedRows = {
       open: [],
       awaiting: [
         {
@@ -271,15 +260,9 @@ describe("FleetView (desktop)", () => {
         },
       ],
       resolved: [],
-      fetchNextPage: () => undefined,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      error: false,
-      resolvedError: false,
-      isLoading: false,
-    });
+    };
 
-    wrap(<FleetView />);
+    wrap(<FleetView />, { agents, notices });
 
     const list = screen.getByRole("list", { name: /inbox queue/i });
     const row = within(list).getByText("Review result").closest('[data-testid="inbox-row"]');
@@ -287,13 +270,13 @@ describe("FleetView (desktop)", () => {
   });
 
   it("collapses the queue panel to a static handle and persists the choice", async () => {
-    agentsMock.mockReturnValue([
+    const agents: AgentRow[] = [
       makeAgent({
         agent_id: 1,
         awaiting_response_count: ([{ id: 1, title: "Q", content: null, priority: "P0", require_response: true, blocking: true, created_at: "2026-06-06T00:00:00Z" }]).length, highest_notice_priority: "P0",
       }),
-    ]);
-    wrap(<FleetView />);
+    ];
+    wrap(<FleetView />, { agents });
     fireEvent.click(screen.getByLabelText("Collapse queue"));
 
     // Queue gone; only the static handle remains — and it carries NO dynamic
@@ -305,8 +288,8 @@ describe("FleetView (desktop)", () => {
   });
 
   it("expanding the collapsed queue restores the Inbox and persists", async () => {
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1 })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
+    wrap(<FleetView />, { agents });
     fireEvent.click(screen.getByLabelText("Collapse queue"));
     fireEvent.click(await screen.findByLabelText("Expand queue"));
     await waitFor(() => expect(screen.getByText("Inbox")).toBeTruthy());
@@ -315,8 +298,8 @@ describe("FleetView (desktop)", () => {
 
   it("restores the collapsed state from the DB setting on mount", () => {
     storedSettings = { "display.fleet_queue_collapsed": true };
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1 })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
+    wrap(<FleetView />, { agents });
     expect(screen.queryByText("Inbox")).toBeNull();
     expect(screen.getByLabelText("Expand queue")).toBeTruthy();
   });
@@ -328,8 +311,8 @@ describe("FleetView (mobile)", () => {
   });
 
   it("renders the Agents / Tasks / Inbox mobile tabs; Agents shows the graph", () => {
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1, label: "lead", status: "running" })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1, label: "lead", status: "running" })];
+    wrap(<FleetView />, { agents });
     const tablist = screen.getByRole("tablist", { name: "Fleet sections" });
     expect(tablist.tagName).toBe("DIV");
     expect(screen.getByRole("tab", { name: /Agents/ })).toBeTruthy();
@@ -337,12 +320,12 @@ describe("FleetView (mobile)", () => {
     expect(screen.getByRole("tab", { name: /Inbox/ })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: /Decisions/ })).toBeNull();
     expect(screen.queryByRole("tab", { name: /Reviews/ })).toBeNull();
-    expect(screen.getByTestId("graph-view")).toBeTruthy();
+    expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
   });
 
   it("Inbox tab lands on the list; tapping a row opens detail; back returns to the list", () => {
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1, label: "lead" })]);
-    useNoticesMock.mockReturnValue({
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1, label: "lead" })];
+    const notices: FeedRows = {
       open: [],
       awaiting: [
         {
@@ -364,14 +347,8 @@ describe("FleetView (mobile)", () => {
         },
       ],
       resolved: [],
-      fetchNextPage: () => undefined,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      error: false,
-      resolvedError: false,
-      isLoading: false,
-    });
-    wrap(<FleetView />);
+    };
+    wrap(<FleetView />, { agents, notices });
     fireEvent.click(screen.getByRole("tab", { name: /Inbox/ }));
     expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
     expect(screen.getByText("What next?")).toBeTruthy();
@@ -391,7 +368,7 @@ describe("FleetView (mobile)", () => {
   // includes the response-required notice. Legacy FYI must not inflate its badge.
   // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
   it("shows the Inbox badge from the same feed the panel renders", () => {
-    agentsMock.mockReturnValue([
+    const agents: AgentRow[] = [
       makeAgent({
         agent_id: 1,
         status: "running",
@@ -399,35 +376,33 @@ describe("FleetView (mobile)", () => {
         highest_notice_priority: "P3",
         unread_notice_count: 3,
       }),
-    ]);
-    useNoticesMock.mockReturnValue({
+    ];
+    const notices: FeedRows = {
       open: [noticeItem({ id: 2, require_response: false })],
       awaiting: [noticeItem({ id: 1 })],
       resolved: [],
-      fetchNextPage: () => undefined,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      error: false,
-      resolvedError: false,
-      isLoading: false,
-    });
-    wrap(<FleetView />);
+    };
+    wrap(<FleetView />, { agents, notices });
     expect(screen.getByRole("tab", { name: /Inbox 1/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Agents 1/ })).toBeTruthy();
   });
 
   it("persists mobile tab selection across remounts", () => {
     localStorage.setItem("meiva.fleet.mobileTab", "inbox");
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1, label: "lead", unread_notice_count: 1 })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1, label: "lead", unread_notice_count: 1 })];
+    wrap(<FleetView />, { agents });
     // Should restore to the Inbox tab.
     expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
   });
 
   it("deep link #inbox selects the Inbox tab on mobile", () => {
     window.location.hash = "#inbox";
-    agentsMock.mockReturnValue([makeAgent({ agent_id: 1, label: "lead" })]);
-    wrap(<FleetView />);
+    const agents: AgentRow[] = [makeAgent({ agent_id: 1, label: "lead" })];
+    // meiva:note
+    // The queue states its own row: the list only replaces the empty state when there is something
+    // in it, so a test that wants the list says what the agent is waiting on.
+    const notices: FeedRows = { open: [], awaiting: [noticeItem({ id: 1 })], resolved: [] };
+    wrap(<FleetView />, { agents, notices });
     expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
     expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
     window.location.hash = "";

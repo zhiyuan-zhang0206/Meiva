@@ -1,9 +1,9 @@
 exports = ["fleet-view.tsx"]
 
 [uses]
-"fleet-route-jump.test.tsx" = ["fleet-view.tsx", "graph-view.tsx", "task-graph.tsx"]
+"fleet-route-jump.test.tsx" = ["fleet-view.tsx"]
 "fleet-route.test.ts" = ["fleet-route.ts"]
-"fleet-view.test.tsx" = ["fleet-view.tsx", "graph-view.tsx"]
+"fleet-view.test.tsx" = ["fleet-view.tsx"]
 "fleet-view.tsx" = ["fleet-route.ts", "graph-view.tsx", "inbox-queue", "left-graph-panel.tsx", "task-graph.tsx"]
 "force-graph-geometry.ts" = ["force-controls.tsx"]
 "force-graph-layout.test.ts" = ["force-graph.tsx"]
@@ -16,19 +16,6 @@ exports = ["fleet-view.tsx"]
 "task-graph.test.tsx" = ["task-graph.tsx"]
 "task-graph.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx", "presentation", "task-graph-chrome.tsx", "task-kanban.tsx"]
 "tests" = ["force-controls.tsx", "graph-view.tsx", "presentation", "task-graph-chrome.tsx", "task-graph.tsx", "task-kanban.tsx"]
-
-[debt.first-party-patch]
-"fleet-route-jump.test.tsx#vi.mock ui/web/src/components/fleet/graph-view.tsx" = 1
-"fleet-route-jump.test.tsx#vi.mock ui/web/src/components/fleet/task-graph.tsx" = 1
-"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
-"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/agents/use-fleet-agents.ts" = 1
-"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
-"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
-"fleet-view.test.tsx#vi.mock ui/web/src/components/fleet/graph-view.tsx" = 1
-"fleet-view.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
-"fleet-view.test.tsx#vi.mock ui/web/src/lib/agents/use-fleet-agents.ts" = 1
-"fleet-view.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
-"fleet-view.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
 
 [debt.third-party-patch]
 "fleet-route-jump.test.tsx#vi.mock next/link" = 1
