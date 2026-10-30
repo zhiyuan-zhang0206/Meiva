@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,6 +119,7 @@ def seal_bundle(
         endpoint=endpoint,
         cluster_secret=CLUSTER_SECRET,
         ttl_s=60,
+        now=time.time(),
     )
     path.write_bytes(issued.envelope)
     return SealedBundle(path, issued.transport_key)

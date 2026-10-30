@@ -40,7 +40,6 @@ import base64
 import binascii
 import json
 import os
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -239,10 +238,6 @@ def _parse[M: BaseModel](model: type[M], body: bytes, path: Path) -> M:
         raise UnitCapabilityError(f"{path} is corrupt: {exc}") from exc
 
 
-def _now(now: float | None) -> float:
-    return time.time() if now is None else now
-
-
 def _random_bytes(size: int) -> bytes:
     return random_bytes(size)
 
@@ -261,6 +256,12 @@ class IssuedBundle:
     expires_at: float
 
 
+# meiva:note
+# The bundle's lifetime is measured from the caller's instant, never from a second reading of
+# the clock inside this module: `issue-unit` stamps the invocation's `CommandRuntime.clock`,
+# and the unit that opens the file spends the instant its own entry read (the command's clock,
+# the birth facts). One clock decides whether a bundle is still installable, and a test can
+# place both ends of that window without waiting.
 def issue_bundle(
     home: Path,
     *,
@@ -268,7 +269,7 @@ def issue_bundle(
     endpoint: str,
     cluster_secret: str,
     ttl_s: float,
-    now: float | None = None,
+    now: float,
 ) -> IssuedBundle:
     """Seal the ACTIVE generation's runner login (and API admission) for `unit`.
 
@@ -292,7 +293,7 @@ def issue_bundle(
         gateway=token_digest(secret.api.gateway),
         telemetry=telemetry_token(cluster_secret),
     )
-    issued_at = _now(now)
+    issued_at = now
     capability = UnitCapability(
         version=1,
         unit=unit,
@@ -352,7 +353,7 @@ def write_bundle(path: Path, envelope: bytes) -> None:
 # ── unit: open, install ─────────────────────────────────────────────────────
 
 
-def open_bundle(data: bytes, transport_key: str, *, now: float | None = None) -> Bundle:
+def open_bundle(data: bytes, transport_key: str, *, now: float) -> Bundle:
     """Authenticate and decrypt a bundle; refuse anything altered or expired."""
     from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -380,7 +381,7 @@ def open_bundle(data: bytes, transport_key: str, *, now: float | None = None) ->
     bundle = _parse(Bundle, plaintext, Path("<bundle>"))
     if _header(bundle) != envelope.header:
         raise UnitCapabilityError("the bundle's header contradicts its sealed content")
-    if _now(now) >= bundle.expires_at:
+    if now >= bundle.expires_at:
         raise UnitCapabilityError("the bundle has expired; issue a new one on the gateway")
     return bundle
 

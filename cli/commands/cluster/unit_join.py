@@ -54,9 +54,9 @@ class _Carry:
 # meiva:note
 # Open the carried bundle file under the transport key: authenticated and unexpired, or a
 # refusal.
-def _open(step: CarriedBundle, transport_key: str) -> _Carry:
+def _open(step: CarriedBundle, transport_key: str, *, now: float) -> _Carry:
     sealed = regular_bytes(Path(step.path), max_bytes=_MAX_BUNDLE_BYTES)
-    return _Carry(step, open_bundle(sealed, transport_key))
+    return _Carry(step, open_bundle(sealed, transport_key, now=now))
 
 
 # meiva:note
@@ -78,13 +78,20 @@ def _installed_capability(home: Path) -> UnitCapability:
 # the installed capability must exist. `transport_key` is the operator's key, which the
 # composition root took out of the environment; it is needed only for a bundle.
 def join_gateway(
-    values: dict[str, str], home: Path, capability: str | None, transport_key: str
+    values: dict[str, str],
+    home: Path,
+    capability: str | None,
+    transport_key: str,
+    *,
+    now: float,
 ) -> None:
     target = join_target(values, str(home), _host_of(values.get("MEIVA_GATEWAY_URL", "")))
     credential = plan_credential(
         capability, key_supplied=bool(transport_key), env_name=CAPABILITY_KEY_ENV
     )
-    carry = _open(credential, transport_key) if isinstance(credential, CarriedBundle) else None
+    carry = (
+        _open(credential, transport_key, now=now) if isinstance(credential, CarriedBundle) else None
+    )
     held = carry.bundle.capability if carry is not None else _installed_capability(home)
     served = _fetch(target, held)
     require_routable_data_plane(target, [_host_of(url) for url in data_plane_urls(served)])

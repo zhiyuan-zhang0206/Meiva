@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -488,10 +489,11 @@ def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) 
         endpoint=_ENDPOINT,
         cluster_secret=_HUMAN,
         ttl_s=600,
+        now=time.time(),
     )
     unit.install_bundle(
         home,
-        unit.open_bundle(issued.envelope, issued.transport_key),
+        unit.open_bundle(issued.envelope, issued.transport_key, now=time.time()),
         machine="mini",
         served_endpoint=_ENDPOINT,
         probe=lambda _dsn: None,
@@ -544,6 +546,7 @@ def test_a_bundle_cannot_be_issued_without_the_human_secret(gateway: Path, tmp_p
             endpoint=_ENDPOINT,
             cluster_secret="",
             ttl_s=600,
+            now=time.time(),
         )
 
 
