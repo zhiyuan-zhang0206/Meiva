@@ -8,8 +8,9 @@ tags: [frontend, state, architecture]
 # Browser capability port
 
 A page's address, its two storage areas, its media queries, its clipboard, its
-unload-safe beacon and the view it scrolls are the world this frontend runs in.
-They are read once, at the composition root, and handed down as one value.
+unload-safe beacon, the view it scrolls and the viewport it is drawn into are
+the world this frontend runs in. They are read once, at the composition root,
+and handed down as one value.
 
 `lib/browser/browser.ts` declares the port. `lib/browser/system-browser.ts` is
 the only file that names `window`: it builds the port from the live page, and
@@ -59,6 +60,18 @@ happens, so a test asserts what was scrolled where without a DOM stub. The slash
 menu, the inbox queue's route anchor, both anchor-nav pages and the config page's
 focus jump scroll through `browser.view`; the shared-context panel moves through
 `browser.navigation`.
+
+## The viewport is a measurement, not a stored fact
+
+`browser.viewport.read()` answers a fresh `ViewportReading`: the layout height
+the shell's `100%` resolves against, and the visual band the reader sees (or
+`null` where the browser has none). `subscribe` follows only the visual viewport,
+because that is the one a keyboard, a toolbar or a pinch moves. A phone keyboard
+shrinks only that band, so `lib/browser/viewport.ts` decides whether the shell is
+pinned to it — `pinnedShellHeight` — and `VisualViewportHeightSync`
+applies the answer to the document. That decision is a pure function of the
+reading, so a test asserts it directly and never installs a stub on `innerHeight`
+or `visualViewport`.
 
 ## What a test does
 

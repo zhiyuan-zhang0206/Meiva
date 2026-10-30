@@ -66,6 +66,20 @@ export interface BrowserView {
   scrollIntoView(target: Element, block: ScrollLogicalPosition): void;
 }
 
+// meiva:note
+// The viewport the page is drawn into. `layoutHeight` is what the shell's `100%` resolves against;
+// `visual` is the band the reader actually sees — a phone keyboard shrinks only that one, and a
+// pinch zoom reports a scale other than 1. A frame with no page has no visual viewport at all.
+export interface ViewportReading {
+  readonly layoutHeight: number;
+  readonly visual: { readonly height: number; readonly scale: number } | null;
+}
+
+export interface BrowserViewport {
+  read(): ViewportReading;
+  subscribe(onChange: () => void): () => void;
+}
+
 export interface Browser {
   readonly navigation: BrowserNavigation;
   readonly local: BrowserStorage;
@@ -74,6 +88,7 @@ export interface Browser {
   readonly clipboard: BrowserClipboard;
   readonly beacon: BrowserBeacon;
   readonly view: BrowserView;
+  readonly viewport: BrowserViewport;
 }
 
 // meiva:note
