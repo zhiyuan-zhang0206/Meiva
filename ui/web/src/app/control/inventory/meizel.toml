@@ -5,6 +5,3 @@ exports = ["page.tsx"]
 
 [debt.third-party-patch]
 "page.test.tsx#vi.mock next/navigation" = 1
-
-[debt.unresolved-patch]
-"page.test.tsx#vi.spyOn qc.\"invalidateQueries\"" = 1
