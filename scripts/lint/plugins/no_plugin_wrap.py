@@ -58,7 +58,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeGuard
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
@@ -164,7 +164,7 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
 
 def _under_plugins(path: Path, repo_root: Path = REPO_ROOT) -> bool:
     try:
-        rel = path.resolve().relative_to(repo_root).as_posix()
+        rel = path.relative_to(repo_root).as_posix()
     except ValueError:
         return False
     return rel == SCAN_DIR or rel.startswith(f"{SCAN_DIR}/")
@@ -189,7 +189,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = REPO_ROOT) -> int:
         ]
     else:
         roots = lint_common.scan_roots(repo_root, (SCAN_DIR,))
-        files = [path for root in roots for path in root.rglob("*.py")]
+        files = lint_common.python_files(roots, repo_root)
 
     scope = lint_common.changed_scope(only, repo_root)
 

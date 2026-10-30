@@ -17,7 +17,7 @@ from typing import Any, NamedTuple, TypeGuard
 
 from langchain_core.messages import BaseMessage
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from audit import LeakPaths, invalidated, scan
 from label import label
