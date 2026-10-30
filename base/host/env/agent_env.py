@@ -20,6 +20,7 @@ __all__ = [
     "HOST_PASSTHROUGH_KEYS",
     "MEIVA_HOME_ENV",
     "NETWORK_PROXY_KEYS",
+    "SESSION_CREDENTIAL_KEYS",
     "ModelOverrides",
     "session_child_env_keys",
 ]
@@ -44,6 +45,37 @@ NETWORK_PROXY_KEYS = frozenset(
 )
 _TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
 _SESSION_DELIVERY_KEYS = frozenset({"PATH", "MEIVA_HARNESS_HANDLE", "CLAUDE_CONFIG_DIR"})
+
+# meiva:note
+# Credentials a session child never inherits, whatever its parent happens to carry (task #5864,
+# 405 ruling 2026-10-30).
+#
+# A pty session's environment is the pty-sessions service's own environment plus the caller's
+# overlay, so every secret the service inherits reaches every shell child - a schedule script, an
+# agent shell, a watcher. Measured 2026-10-30 on the gateway home: a schedule script saw 107
+# MEIVA_* keys including the cluster secret, the Cloudflare token, the Feishu app secret and the
+# redis passwords, none of which any schedule job reads.
+#
+# Rule: a credential is read from the file that holds it, never carried in a child's environment.
+# A job that needs one reads its home's `.env` or its installed capability; `consume_unit` already
+# supplies the machine token that way, and `schedules/jobs/self_evolution_weekly.py` reads the
+# cluster secret out of the `.env` text itself.
+#
+# `MEIVA_DB_URL` and `MEIVA_REDIS_URL` are deliberately NOT here: they also carry a password, but
+# they are the operator's psql/redis-cli channel for a live session, and stripping them would
+# break diagnosis on every host. They are the first candidates of the second step.
+SESSION_CREDENTIAL_KEYS = frozenset(
+    {
+        "MEIVA_ALERTS_WEBHOOK_TOKEN",
+        "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
+        "MEIVA_CF_API_TOKEN",
+        "MEIVA_CLUSTER_SECRET",
+        "MEIVA_FEISHU_APP_SECRET",
+        "MEIVA_REDIS_ADMIN_PASSWORD",
+        "MEIVA_REDIS_PASSWORD",
+        "MEIVA_TELEGRAM_BOT_TOKEN",
+    }
+)
 
 
 def session_child_env_keys() -> frozenset[str]:

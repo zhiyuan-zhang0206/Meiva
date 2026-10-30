@@ -41,6 +41,9 @@ from base.host.env.agent_env import (
     NETWORK_PROXY_KEYS as NETWORK_PROXY_KEYS,
 )
 from base.host.env.agent_env import (
+    SESSION_CREDENTIAL_KEYS as SESSION_CREDENTIAL_KEYS,
+)
+from base.host.env.agent_env import (
     session_child_env_keys as session_child_env_keys,
 )
 from base.host.env.config_lite_table import (
@@ -298,6 +301,18 @@ def session_forward_keys() -> frozenset[str]:
     `child_env`, not part of this set. A new host-scope field is forwarded
     automatically."""
     return _scope_aliases("host") | {MEIVA_HOME_ENV}
+
+
+# meiva:note
+# The credentials a session child never receives (task #5864, 405 ruling 2026-10-30).
+#
+# `child_env` is the allowlist for daemon-built children; a pty session child is built the other
+# way round - it inherits the pty-sessions service's own environment and then takes the caller's
+# overlay. That path never consults an allowlist, so the drop has to be its own projection. The
+# declaration lives in `base/host/env/agent_env.py` with the other key sets; this function is the
+# reader the session backend asks.
+def session_credential_keys() -> frozenset[str]:
+    return SESSION_CREDENTIAL_KEYS
 
 
 @lru_cache(maxsize=1)
