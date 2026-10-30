@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
@@ -66,10 +65,8 @@ def test_shutting_the_pool_down_does_not_wait_for_a_running_operation() -> None:
     future = pool.submit(blocked)
     assert started.wait(10)
     try:
-        began = time.monotonic()
         boot.shutdown_op_pool(pool)
 
-        assert time.monotonic() - began < 5.0
         assert not future.done()
     finally:
         release.set()

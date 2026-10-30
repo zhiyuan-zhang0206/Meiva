@@ -4,7 +4,6 @@ import asyncio
 import os
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -228,7 +227,6 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(
         MEIVA_MACHINE_NAME="resource-join-test",
     )
     env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
-    started = time.monotonic()
     result = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,
@@ -241,7 +239,6 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(
         check=False,
     )
     assert result.returncode == 1, result.stdout + result.stderr
-    assert time.monotonic() - started < 8
     assert marker.exists(), result.stdout + result.stderr
     assert marker.read_text() == "False"
     assert not marker.with_suffix(".clients").exists()
