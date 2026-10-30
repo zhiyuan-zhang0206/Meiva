@@ -1,5 +1,6 @@
 "use client";
 
+// meiva:note
 // /shell/{agentId}/{sessionId} — full-screen live tail of one of an agent's
 // persistent shell sessions. Opened from the inspector panel's shell list;
 // polls GET /api/agents/{id}/shell/{sid}?lines=N every 3s and renders the
@@ -36,6 +37,7 @@ import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 
 const POLL_MS = 3000;
+// meiva:note
 // Baked fallbacks: the live default comes from
 // display.shell_capture_default_lines via /api/config (useDisplayLimit);
 // MIN/MAX must match the gateway's _MIN_LINES/_MAX_LINES (protective
@@ -75,17 +77,31 @@ function useResolvedTheme(theme: TerminalTheme): "light" | "dark" {
   return systemDark ? "dark" : "light";
 }
 
+// meiva:note
+// This route is the shell monitor's composition root: it resolves the route params and the history
+// entry (both `next/navigation` reads) and hands them to the view, so a test passes values instead
+// of replacing the router module.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 export default function ShellMonitorPage() {
-  const client = useApi();
-  // Route params via useParams (a client hook — no Suspend): they are
-  // available on the FIRST render, so the query enables immediately and the
-  // cached capture paints in the first commit. Reading them off the params
-  // prop instead (a promise) needs a state+effect unwrap, which left the
-  // first commit (and the whole SSR output) on the invalid-params branch —
-  // the "full page reload" flash on entry. Number() keeps the NaN guard for
-  // broken links (/shell/NaN/NaN).
   const params = useParams<{ agentId: string; sessionId: string }>();
   const { bfcacheId } = useRouter();
+  return <ShellMonitorView params={params} bfcacheId={bfcacheId} />;
+}
+
+export interface ShellMonitorViewProps {
+  params: { agentId: string; sessionId: string };
+  bfcacheId: string;
+}
+
+export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
+  const client = useApi();
+  // meiva:note
+  // Route params come in as values on the FIRST render, so the query enables immediately and the
+  // cached capture paints in the first commit. Reading them off the params prop instead (a
+  // promise) needs a state+effect unwrap, which left the first commit (and the whole SSR output)
+  // on the invalid-params branch -- the "full page reload" flash on entry. Number() keeps the NaN
+  // guard for broken links (/shell/NaN/NaN).
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
   const agentId = Number(params.agentId);
   const sessionId = Number(params.sessionId);
   const validParams = Number.isFinite(agentId) && Number.isFinite(sessionId);
@@ -99,6 +115,7 @@ export default function ShellMonitorPage() {
   const [theme, toggleTheme] = useTerminalTheme();
   const { formatShort } = useTimeFormat();
 
+  // meiva:note
   // Adopt the configured default once /api/config resolves, unless the
   // user has already committed an explicit window.
   const userSetLines = useRef(false);
@@ -115,12 +132,14 @@ export default function ShellMonitorPage() {
     queryFn: () => client.getAgentShell(agentId, sessionId, lines),
     refetchInterval: POLL_MS,
     retry: false,
+    // meiva:note
     // Fetch on every entry, not just cold: the entry paints its cached
     // capture immediately, and staleTime 0 keeps it always-stale so the query
     // refetches it in the background on mount — the global 5min staleTime
     // would otherwise leave a cached capture until the next 3s poll. The
     // cached output stays on screen while the refetch runs (no blank flash).
     staleTime: 0,
+    // meiva:note
     // Don't fire the query for NaN params (e.g. /shell/NaN/NaN from a
     // broken link) — show the invalid-params message instantly.
     enabled: validParams,
@@ -130,6 +149,7 @@ export default function ShellMonitorPage() {
     document.title = `Agent #${agentId} Shell #${sessionId}`;
   }, [agentId, sessionId]);
 
+  // meiva:note
   // Commit the input value to `lines` after the user finishes typing (Enter or blur).
   const commitLines = useCallback(() => {
     const n = Number(inputValue);
@@ -137,22 +157,26 @@ export default function ShellMonitorPage() {
       userSetLines.current = true;
       setLines(n);
     } else {
+      // meiva:note
       // Revert to the current valid value.
       setInputValue(String(lines));
     }
   }, [inputValue, lines]);
 
+  // meiva:note
   // Stick the pane to the bottom on new output, but only when the user is
   // already near the bottom — so scrolling up to read history isn't yanked
   // away on the next 3s poll.
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  // meiva:note
   // The position saved under this history entry, read once at mount and held
   // until the restore effect lands it (see the effect below).
   const pendingRestoreRef = useRef<SavedScroll | null>(
     bfcacheId ? readScrollMemory(bfcacheId) : null,
   );
 
+  // meiva:note
   // Back/forward restore: land the saved reading position. Runs on every
   // commit while a restore is pending — the first commit of a re-entry can
   // precede the cached capture's layout, and the position must arrive in the
@@ -165,11 +189,11 @@ export default function ShellMonitorPage() {
     const el = scrollRef.current;
     if (!el) return;
     if (saved.contentKey !== `${agentId}:${sessionId}`) {
-      pendingRestoreRef.current = null; // other content now — position is stale
+      pendingRestoreRef.current = null;
       return;
     }
     const max = el.scrollHeight - el.clientHeight;
-    if (max <= 0) return; // no capture rendered yet — retry on the next commit
+    if (max <= 0) return;
     el.scrollTop = Math.min(saved.scrollTop, max);
     stickRef.current = saved.followBottom;
     pendingRestoreRef.current = null;
@@ -194,6 +218,7 @@ export default function ShellMonitorPage() {
     }
   }, [data]);
 
+  // meiva:note
   // Title-bar meta: runtime + TTL from the capture response's timestamps.
   // Runtime is launch → now (ticking via the shared 1s tick, falling back to
   // the probe-time uptime snapshot when created_at is missing); TTL remaining
@@ -210,11 +235,20 @@ export default function ShellMonitorPage() {
     ? Math.max(0, Math.floor((expiresMs - now.getTime()) / 1000))
     : null;
 
+  // meiva:note
   // Terminal colour classes keyed on the resolved theme.
   const terminalBg = isDark ? "bg-black" : "bg-gray-100";
   const terminalFg = isDark ? "text-green-400" : "text-gray-900";
   const terminalMuted = isDark ? "text-muted-foreground" : "text-gray-500";
 
+  // meiva:note
+  // The header carries the session's meta facts (runtime + TTL, moved here from the inspector by a
+  // user correction on 2026-08-28), the theme toggle (system -> light -> dark -> system), the lines
+  // control and a manual refresh. The health indicator follows the actual poll, not a hardcoded
+  // green: a failing poll turns it amber + "stale" while the pane keeps showing the last-good
+  // output below, and a healthy poll is green + "live". The terminal pane below is theme-aware via
+  // that toggle.
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
   return (
     <main id="main-content" className={cn("h-full bg-background text-foreground", FLEX, MIN_H_0, FLEX_COL)}>
       <header className={cn("items-center gap-3 border-b border-border px-3 py-2 sm:px-4", FLEX)}>
@@ -236,8 +270,6 @@ export default function ShellMonitorPage() {
           </span>
         )}
 
-        {/* Runtime + TTL — the session's meta facts, live on the title bar
-            (user correction 2026-08-28: moved here from the inspector). */}
         {data && (
           <span className={cn("shrink-0 items-center gap-2 font-mono text-[11px] text-muted-foreground", FLEX)}>
             <span className="tabular-nums">
@@ -258,7 +290,6 @@ export default function ShellMonitorPage() {
           </span>
         )}
 
-        {/* Theme toggle — cycles system → light → dark → system */}
         <button
           type="button"
           onClick={toggleTheme}
@@ -268,7 +299,6 @@ export default function ShellMonitorPage() {
           {theme === "system" ? <Monitor className="size-3.5" /> : theme === "light" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
         </button>
 
-        {/* Lines control */}
         <div className={cn("shrink-0 items-center gap-1.5", FLEX)}>
           <label htmlFor="shell-lines" className="font-mono text-[10px] text-muted-foreground">
             Lines
@@ -287,7 +317,6 @@ export default function ShellMonitorPage() {
             className="w-14 rounded border border-input bg-background px-1.5 py-0.5 text-center font-mono text-[11px] text-foreground focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
           />
 
-          {/* Manual refresh button */}
           <button
             type="button"
             onClick={() => refetch()}
@@ -299,9 +328,6 @@ export default function ShellMonitorPage() {
           </button>
         </div>
 
-        {/* Health indicator — follows the actual poll, not a hardcoded green.
-            A failing poll turns it amber + "stale" (the pane keeps showing the
-            last-good output below); a healthy poll is green + "live". */}
         <span className={cn("shrink-0 items-center gap-1.5 font-mono text-[11px] text-muted-foreground", FLEX)}>
           <span
             className={`size-1.5 rounded-full ${error ? "bg-amber-500" : "bg-green-500"}`}
@@ -310,7 +336,6 @@ export default function ShellMonitorPage() {
         </span>
       </header>
 
-      {/* Terminal pane — theme-aware via the toggle above */}
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -322,6 +347,7 @@ export default function ShellMonitorPage() {
             Invalid agent or session id
           </p>
         ) : error && !data ? (
+          // meiva:note
           // Cold failure only — with no output yet there is nothing to keep
           // showing, so surface the error. Once we have output, a failed poll
           // falls through to the stale pane below (the amber "stale" dot flags it).

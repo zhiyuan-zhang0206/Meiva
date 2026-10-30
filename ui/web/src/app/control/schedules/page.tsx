@@ -1,5 +1,6 @@
 "use client";
 
+// meiva:note
 // /control/schedules — schedule management: list, status, logs, run history,
 // create (natural-language via a writer agent, or a raw script), edit, and
 // start/stop/restart/delete.
@@ -15,9 +16,10 @@ import {
   Plus,
   Sparkles,
 } from "lucide-react";
+import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
@@ -49,13 +51,26 @@ const EMPTY_FORM: ScheduleCreate = {
   enabled: true,
 };
 
+// meiva:note
+// This route is the schedules page's composition root: it reads the router and hands the shell a
+// `navigate`, so a test passes a spy instead of replacing `next/navigation`.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 export default function SchedulesPage() {
+  const router = useRouter();
+  const navigate = useCallback((href: Route) => { router.push(href); }, [router]);
+  return <SchedulesPageView navigate={navigate} />;
+}
+
+export interface SchedulesPageViewProps {
+  navigate: (href: Route) => void;
+}
+
+export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
   const client = useApi();
   const t = useTranslations("schedules");
   const queryClient = useQueryClient();
   const showToast = useStore((s) => s.showToast);
   const setActiveId = useStore((s) => s.setActiveId);
-  const router = useRouter();
   const visible = useSectionVisible();
 
   const { data: schedules, isLoading, error } = useQuery({
@@ -94,6 +109,7 @@ export default function SchedulesPage() {
     onError: onErr("Restart"),
   });
 
+  // meiva:note
   // --- natural-language create: spawn a writer agent, open its conversation ---
   const [nl, setNl] = useState("");
   const draftMutation = useMutation({
@@ -103,11 +119,12 @@ export default function SchedulesPage() {
       setNl("");
       setActiveId(res.agent_id);
       showToast(t("writerCreated", { id: res.agent_id }));
-      router.push("/");
+      navigate("/");
     },
     onError: onErr("Draft"),
   });
 
+  // meiva:note
   // --- raw create form ---
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<ScheduleCreate>(EMPTY_FORM);
@@ -131,6 +148,7 @@ export default function SchedulesPage() {
       </div>
     );
   }
+  // meiva:note
   // stale-while-error (Task #1051): a failed 15s poll must not swap the
   // table the user is looking at for an error page — only a cold failure
   // (nothing loaded yet) shows the error state.
@@ -144,10 +162,13 @@ export default function SchedulesPage() {
 
   const list = schedules ?? [];
 
+  // meiva:note
+  // The body warms the syntax-highlighter chunk once idle, ahead of a script actually being
+  // expanded (see python-code.tsx), then presents three blocks: the natural-language create form,
+  // the raw create form, and the schedule table.
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
   return (
     <div className="space-y-4">
-      {/* Warms the syntax-highlighter chunk once idle, ahead of a script
-          actually being expanded — see python-code.tsx. */}
       <CodeHighlighterPreloader />
       <div className={cn("items-center justify-between", FLEX)}>
         <div className={cn("items-center gap-2", FLEX)}>
@@ -163,7 +184,6 @@ export default function SchedulesPage() {
         </Button>
       </div>
 
-      {/* --- Natural-language create --- */}
       <div className={cn("items-center gap-2", FLEX)}>
         <Input
           className="h-8 text-xs"
@@ -189,7 +209,6 @@ export default function SchedulesPage() {
         </Button>
       </div>
 
-      {/* --- Raw create form --- */}
       {showForm && (
         <ScheduleForm
           title={t("createTitle")}
@@ -203,7 +222,6 @@ export default function SchedulesPage() {
         />
       )}
 
-      {/* --- Table --- */}
       {list.length === 0 ? (
         <p className="text-xs text-muted-foreground py-4 text-center">{t("noSchedules")}</p>
       ) : (
@@ -226,6 +244,7 @@ export default function SchedulesPage() {
                   schedule={s}
                   expanded={expandedId === s.id}
                   onExpand={() => setExpandedId((id) => (id === s.id ? null : s.id))}
+                  // meiva:note
                   // Edit must ENSURE the row is expanded (toggle semantics
                   // collapsed an already-expanded row's details — Task #1051).
                   onEnsureExpanded={() => setExpandedId(s.id)}
