@@ -73,7 +73,7 @@ def _main_sha(repo: str, *, host: Host) -> str | None:
     return _sha_from(
         ["git", "ls-remote", f"https://github.com/{repo}.git", "refs/heads/main"],
         host=host,
-        env=git_env(),
+        env=git_env(host.environ),
     )
 
 
