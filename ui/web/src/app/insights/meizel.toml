@@ -1,10 +1,5 @@
 exports = ["run"]
 
 [uses]
-"page.test.tsx" = ["ops", "page.tsx", "status"]
+"page.test.tsx" = ["page.tsx"]
 "page.tsx" = ["ops", "status"]
-
-[debt.first-party-patch]
-"page.test.tsx#vi.mock ui/web/src/app/insights/ops/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/app/insights/status/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/components/ops/alerts-section.tsx" = 1

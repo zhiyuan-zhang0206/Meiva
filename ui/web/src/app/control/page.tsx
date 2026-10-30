@@ -16,6 +16,7 @@ import { ExternalLink, MessageSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
+import type { ComponentProps, ComponentType } from "react";
 
 import { useSettledAnchorScroll } from "./anchor-scroll";
 
@@ -42,11 +43,50 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
 
+type GuideSlot = ComponentType<ComponentProps<typeof GuidePage>>;
+type ConfigSlot = ComponentType<ComponentProps<typeof ConfigPage>>;
+type DisplaySlot = ComponentType<ComponentProps<typeof DisplaySettingsPage>>;
+type PluginsSlot = ComponentType<ComponentProps<typeof PluginsInventory>>;
+type McpSlot = ComponentType<ComponentProps<typeof McpInventory>>;
+type SkillsSlot = ComponentType<ComponentProps<typeof SkillsPage>>;
+type SchedulesSlot = ComponentType<ComponentProps<typeof SchedulesPage>>;
+
+export interface ControlShellProps {
+  Guide: GuideSlot;
+  Config: ConfigSlot;
+  Display: DisplaySlot;
+  Plugins: PluginsSlot;
+  Mcp: McpSlot;
+  Skills: SkillsSlot;
+  Schedules: SchedulesSlot;
+}
+
+// meiva:note
+// This route is the Control page's composition root: it names the seven section bodies and hands
+// them to the shell. The shell owns the layout, the nav and the anchor scroll, and takes each body
+// as a required prop, so a test renders the shell with its own stand-ins instead of replacing the
+// section modules.
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
 export default function ControlPage() {
+  return (
+    <ControlShell
+      Guide={GuidePage}
+      Config={ConfigPage}
+      Display={DisplaySettingsPage}
+      Plugins={PluginsInventory}
+      Mcp={McpInventory}
+      Skills={SkillsPage}
+      Schedules={SchedulesPage}
+    />
+  );
+}
+
+export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Schedules }: ControlShellProps) {
   const t = useTranslations("control");
   const ts = useTranslations("control.sections");
   const appBridge = useAppBridge();
   const sections = appBridge ? [...CONTROL_SECTIONS, APP_SETTINGS_SECTION] : CONTROL_SECTIONS;
+  // meiva:note
   // Honor a #anchor on first load / direct link: resolve the target once,
   // from the URL hash at mount (later hash changes come from nav clicks,
   // which scroll themselves). The target scrolls into the container — no
@@ -61,6 +101,13 @@ export default function ControlPage() {
   });
   useSettledAnchorScroll(CONTROL_SCROLL_ID, anchorTarget);
 
+  // meiva:note
+  // Two notes for the tree below. The outer row clips (overflow-hidden) so the document/body never
+  // gains a third scrollbar: the nav rail and the content column each own their vertical scroll,
+  // so nothing should overflow the row even if a child mis-sizes. And the plugin pages
+  // (contributions.ui.nav, location "settings") render beside the roster they belong to, absent
+  // when nothing declares one.
+  // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
   return (
     <div className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
       <header className={cn("shrink-0 items-center gap-1.5 border-b border-border px-4 py-2", FLEX)}>
@@ -76,10 +123,6 @@ export default function ControlPage() {
         </Link>
       </header>
 
-      {/* overflow-hidden here is the outer boundary: the two children (nav rail +
-          content) each own their vertical scroll, so nothing should overflow this
-          row — clipping it guarantees the document/body itself never gains a third
-          scrollbar even if a child mis-sizes. */}
       <div className={cn("md:flex-row", FLEX, FLEX_COL, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
         <ControlNav
           sections={sections}
@@ -93,11 +136,11 @@ export default function ControlPage() {
               label={ts("guide")}
               description={t("guideDescription")}
             >
-              <GuidePage />
+              <Guide />
             </ControlSection>
 
             <ControlSection id="config" label={ts("config")}>
-              <ConfigPage />
+              <Config />
             </ControlSection>
 
             <ControlSection
@@ -105,7 +148,7 @@ export default function ControlPage() {
               label={ts("display")}
               description={t("displayDescription")}
             >
-              <DisplaySettingsPage />
+              <Display />
             </ControlSection>
 
             <ControlSection
@@ -113,10 +156,7 @@ export default function ControlPage() {
               label={ts("plugins")}
               description={t("pluginsDescription")}
             >
-              <PluginsInventory />
-              {/* Pages contributed by enabled plugins (contributions.ui.nav,
-                  location "settings") — rendered here beside the roster they
-                  belong to; absent when nothing declares one. */}
+              <Plugins />
               <PluginNavList location="settings" />
             </ControlSection>
 
@@ -125,7 +165,7 @@ export default function ControlPage() {
               label={ts("mcp")}
               description={t("mcpDescription")}
             >
-              <McpInventory />
+              <Mcp />
             </ControlSection>
 
             <ControlSection
@@ -133,7 +173,7 @@ export default function ControlPage() {
               label={ts("skills")}
               description={t("skillsDescription")}
             >
-              <SkillsPage />
+              <Skills />
             </ControlSection>
 
             <ControlSection
@@ -141,7 +181,7 @@ export default function ControlPage() {
               label={ts("schedules")}
               description={t("schedulesDescription")}
             >
-              <SchedulesPage />
+              <Schedules />
             </ControlSection>
 
             {appBridge ? (

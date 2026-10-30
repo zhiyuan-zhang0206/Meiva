@@ -10,18 +10,49 @@ import { cleanup, fireEvent, screen, within, waitFor } from "@testing-library/re
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/control/guide/page", () => ({ default: () => <div>GUIDE_BODY</div> }));
-vi.mock("@/app/control/config/page", () => ({ default: () => <div>CONFIG_BODY</div> }));
-vi.mock("@/app/control/display/page", () => ({ default: () => <div>DISPLAY_BODY</div> }));
-vi.mock("@/app/control/schedules/page", () => ({ default: () => <div>SCHEDULES_BODY</div> }));
-vi.mock("@/app/control/skills/page", () => ({ default: () => <div>SKILLS_BODY</div> }));
-vi.mock("@/app/control/inventory/page", () => ({
-  PluginsInventory: () => <div>PLUGINS_BODY</div>,
-  McpInventory: () => <div>MCP_BODY</div>,
-}));
-
-import ControlPage from "./page";
+import { ControlShell } from "./page";
 import { CONTROL_SCROLL_ID, CONTROL_SECTIONS } from "./sections";
+
+// meiva:note
+// The section bodies are stand-ins: the shell takes each one as a required prop, so this file
+// covers only the shell wiring (each body has its own test file) and keeps the heavy per-section
+// dependencies (api) out.
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+function GuideBody() {
+  return <div>GUIDE_BODY</div>;
+}
+function ConfigBody() {
+  return <div>CONFIG_BODY</div>;
+}
+function DisplayBody() {
+  return <div>DISPLAY_BODY</div>;
+}
+function PluginsBody() {
+  return <div>PLUGINS_BODY</div>;
+}
+function McpBody() {
+  return <div>MCP_BODY</div>;
+}
+function SkillsBody() {
+  return <div>SKILLS_BODY</div>;
+}
+function SchedulesBody() {
+  return <div>SCHEDULES_BODY</div>;
+}
+
+function ControlPage() {
+  return (
+    <ControlShell
+      Guide={GuideBody}
+      Config={ConfigBody}
+      Display={DisplayBody}
+      Plugins={PluginsBody}
+      Mcp={McpBody}
+      Skills={SkillsBody}
+      Schedules={SchedulesBody}
+    />
+  );
+}
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
