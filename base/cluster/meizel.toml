@@ -21,4 +21,4 @@ exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "front
 
 [debt.ambient-read]
 "postgres.py#pid os.getuid" = 1
-"postgres.py#platform base.native_process.os_platform.Platform.current" = 3
+"postgres.py#platform base.native_process.os_platform.Platform.current" = 2

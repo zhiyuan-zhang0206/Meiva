@@ -80,7 +80,10 @@ def _inode(path: Path) -> tuple[int, int]:
 
 
 def boot_id() -> str:
-    Platform.current()
+    # meiva:note
+    # No platform read stands here: `native_boot_id()` already refuses a platform whose boot scope
+    # it cannot name, and it reads afresh on every call. What this function adds is the boot-scope
+    # identity a receipt is compared against, so a launch from before a reboot is never adopted.
     boot = native_boot_id()
     if boot is None:
         raise RuntimeError("cannot observe PostgreSQL native boot scope")
