@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -17,8 +18,8 @@ from base.agents.upload_delivery.models import Manifest, Object
 _BATCH = "0" * 32
 
 
-def object_payload(**overrides: object) -> dict[str, object]:
-    payload: dict[str, object] = {
+def object_payload(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "ordinal": 0,
         "filename": "report.txt",
         "name": f"{_BATCH}-0.txt",
