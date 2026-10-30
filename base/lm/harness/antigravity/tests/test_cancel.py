@@ -67,10 +67,14 @@ async def test_close_during_a_tool_reaps_or_reports_its_child(
         assert child is not None
         if can_reap:
             await harness.stop()
-            assert (
-                not psutil.pid_exists(child)
-                or psutil.Process(child).status() == psutil.STATUS_ZOMBIE
-            )
+            # meiva:note
+            # A child that vanished between the pid_exists() sample and the status read is
+            # gone, which is what the reap asserts; only a child still running fails.
+            try:
+                reaped = psutil.Process(child).status() == psutil.STATUS_ZOMBIE
+            except psutil.NoSuchProcess:
+                reaped = True
+            assert reaped, f"the reaped child {child} is still running"
             assert harness.session.exit_code is not None
         else:
             with pytest.raises(RuntimeError, match="left 1 process\\(es\\) running"):

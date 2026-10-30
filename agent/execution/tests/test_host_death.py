@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import signal
 import subprocess
 import sys
@@ -76,5 +77,8 @@ async def test_a_killed_host_takes_the_group_with_it(tmp_path: Path) -> None:
         host.kill()
         host.wait(timeout=10)
         for pid in (leader,):
-            if psutil.pid_exists(pid):
+            # meiva:note
+            # Death is what this test asserts, so a pid that vanished between
+            # pid_exists() and the kill reads as gone rather than as a failure.
+            with contextlib.suppress(psutil.NoSuchProcess):
                 psutil.Process(pid).kill()

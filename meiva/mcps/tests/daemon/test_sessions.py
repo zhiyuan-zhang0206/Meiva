@@ -25,7 +25,11 @@ from meiva.mcps.tests.daemon.daemon_support import (
 async def process_gone(pid: int, timeout: float = 15.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+        try:
+            status = psutil.Process(pid).status()
+        except psutil.NoSuchProcess:
+            return True
+        if status == psutil.STATUS_ZOMBIE:
             return True
         await asyncio.sleep(0.05)
     return False
