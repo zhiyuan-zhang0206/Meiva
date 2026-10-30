@@ -1,44 +1,37 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+// meiva:note
+// The task graph's hover card: the grace window that lets the pointer reach the capped card, and
+// the three data states (empty, cold failure, stale-while-error). The board reads its rows from the
+// gateway through TanStack Query, so a test answers the fake transport and seeds the same cache the
+// app fills; nothing replaces a hook module.
+
+import { QueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { type ReactElement } from "react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TaskRow } from "@/lib/contracts/types";
-import type { TasksResult } from "@/lib/notifications/use-tasks";
-import { resetMockSettings } from "@/test-support/user-settings-mock";
+import type { TaskListResponse, TaskRow } from "@/lib/contracts/types";
 
 import { TaskGraph } from "../task-graph";
-import { renderWithApi as render } from "@/test-support/render";
-import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
-beforeEach(() => {
-  resetTransport();
-  transport.getTask.mockImplementation((id: number) => getTask(id));
-});
+import { renderWithProviders } from "@/test-support/render";
 
+afterEach(cleanup);
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 // meiva:note
-// The hover card ages its rows on the page's clock; the real one keeps these geometry assertions
-// as they were.
-const wrapGraph = (ui: ReactElement) => (
-  <WallClockProvider wallNow={() => Date.now()}>
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-  </WallClockProvider>
-);
-
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
+// The one replacement left in this file: the board navigates through Next's router, which needs a
+// mounted app router. It leaves with the third-party-patch family.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
 
-const useTasks = vi.fn<(...args: string[]) => TasksResult>();
-vi.mock("@/lib/notifications/use-tasks", () => ({
-  useTasks: (...args: string[]) => useTasks(...args),
-}));
+beforeEach(() => {
+  resetTransport();
+  getTask.mockReset();
+  getTask.mockResolvedValue(task(0));
+  transport.getTask.mockImplementation((id: number) => getTask(id));
+});
 
 function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
   return {
@@ -68,19 +61,46 @@ function sampleTasks(): TaskRow[] {
   ];
 }
 
-function ok(tasks: TaskRow[]): TasksResult {
-  return { tasks, loading: false, error: false };
+const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+
+// meiva:note
+// The one door this file renders through: the rows the gateway would return are answered on the
+// fake transport AND pre-seeded in the query cache, so the board paints them on the first frame and
+// its mount refetch agrees instead of failing unanswered. `fetchRejects` is the unreachable gateway:
+// with rows seeded that is the stale-while-error state, with none the cold failure.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function renderGraph(
+  tasks: readonly TaskRow[],
+  {
+    props,
+    settings,
+    fetchRejects = false,
+  }: {
+    props?: Partial<ComponentProps<typeof TaskGraph>>;
+    settings?: Record<string, unknown>;
+    fetchRejects?: boolean;
+  } = {},
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  for (const window of TASK_WINDOWS) {
+    queryClient.setQueryData<TaskListResponse>(["tasks", "graph", window], { tasks });
+  }
+  if (fetchRejects) {
+    transport.getTasks.mockRejectedValue(new Error("gateway unavailable"));
+  } else {
+    transport.getTasks.mockResolvedValue({ tasks });
+  }
+  return renderWithProviders(
+    <TaskGraph
+      selectedAgentId={null}
+      onSelectAgent={vi.fn()}
+      selectedTaskId={null}
+      onSelectTask={vi.fn()}
+      {...props}
+    />,
+    { queryClient, settings, wallNow: () => Date.now() },
+  );
 }
-
-beforeEach(() => {
-  queryClient.clear();
-  useTasks.mockReset();
-  getTask.mockReset();
-  getTask.mockResolvedValue(task(0));
-  resetMockSettings();
-});
-
-afterEach(cleanup);
 
 function mockCardSize(width: number, height: number): () => void {
   const proto = HTMLElement.prototype;
@@ -113,10 +133,7 @@ function mockCardSize(width: number, height: number): () => void {
 
 describe("TaskGraph hover card grace window and states", () => {
   it("keeps the capped card open when the pointer moves from the node onto it", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     const canvas = container.querySelector("svg[role='img']")!.parentElement!;
@@ -140,10 +157,7 @@ describe("TaskGraph hover card grace window and states", () => {
   });
 
   it("gives the pointer a grace window to reach the capped card, then hides", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     const canvas = container.querySelector("svg[role='img']")!.parentElement!;
@@ -174,10 +188,7 @@ describe("TaskGraph hover card grace window and states", () => {
   });
 
   it("hides the capped card when the grace window expires without reaching it", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     const canvas = container.querySelector("svg[role='img']")!.parentElement!;
@@ -208,10 +219,7 @@ describe("TaskGraph hover card grace window and states", () => {
       task(1, { title: "root", status: "in_progress" }),
       task(2, { title: "orphan", parent_id: 999 }),
     ];
-    useTasks.mockReturnValue(ok(tasks));
-    render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    renderGraph(tasks);
     const texts = await waitFor(() => { const r = screen.getAllByText(/orphan/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
 
     fireEvent.mouseEnter(texts[0].closest("g")!);
@@ -228,10 +236,7 @@ describe("TaskGraph hover card grace window and states", () => {
       task(1, { title: "root", status: "in_progress" }),
       task(2, { title: "agent-made", parent_id: 1, created_by: "405", owner: 405 }),
     ];
-    useTasks.mockReturnValue(ok(tasks));
-    render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    renderGraph(tasks);
     const texts = await waitFor(() => { const r = screen.getAllByText(/^agent-$/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
 
     fireEvent.mouseEnter(texts[0].closest("g")!);
@@ -240,23 +245,20 @@ describe("TaskGraph hover card grace window and states", () => {
   });
 
   it("empty task list (not loading, no error) shows the empty placeholder", () => {
-    useTasks.mockReturnValue({ tasks: [], loading: false, error: false });
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph([]);
     expect(screen.getByText("No tasks yet.")).toBeTruthy();
   });
 
-  it("cold error (no tasks loaded) shows the error placeholder", () => {
-    useTasks.mockReturnValue({ tasks: [], loading: false, error: true });
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
-    expect(screen.getByText("Failed to load tasks.")).toBeTruthy();
+  it("cold error (no tasks loaded) shows the error placeholder", async () => {
+    renderGraph([], { fetchRejects: true });
+    await waitFor(() => expect(screen.getByText("Failed to load tasks.")).toBeTruthy());
   });
 
   it("stale-while-error: error WITH tasks keeps the board (not the failure screen) and flags stale", async () => {
-    useTasks.mockReturnValue({ tasks: sampleTasks(), loading: false, error: true });
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks(), { fetchRejects: true });
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText("Failed to load tasks.")).toBeNull();
-    expect(screen.getByText("Stale")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Stale")).toBeTruthy());
   });
 });
