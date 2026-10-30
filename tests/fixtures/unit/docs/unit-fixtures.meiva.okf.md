@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Opt-in Unit Capabilities"
-description: "Consumer-local homes, identity, generation ledgers, gateway clients, model owners, serving doubles, logging and retry observations."
+description: "Consumer-local homes, identity, generation ledgers, gateway clients, model owners, serving doubles and logging."
 tags:
 - evaluation
 - quality-assurance
@@ -31,11 +31,13 @@ not import Installation or construct a model catalog. The fixture bodies and
 their dependencies remain unchanged; consumers choose when to install the SDK
 owner. Catalog mutation helpers keep their existing public type aliases.
 
-Logging consumers import `log_capture.loguru_records`; retry consumers import
-`retry_waits.retry_waits`, which records the retry library's bounded waits
-instead of sleeping. It is never a global no-op wait: wall-clock loops must
-still progress, and the existing wait-count bound remains enforced. Serving
-lifecycle consumers import their package's `serving_root` observation double.
+Logging consumers import `log_capture.loguru_records`. A retry wait is a value,
+not a fixture: `retry()` / `aretry()` take a `sleep` / `asleep` keyword whose
+default is `base.host.net.resilience`'s own hook, and a consumer that asserts the
+bounded waits passes a `base.clock.tests.manual_timers.ManualTimers` method
+instead of sleeping. Nothing patches a global hook, so no test can turn waits off
+process-wide. Serving lifecycle consumers import their package's `serving_root`
+observation double.
 Those capabilities use local conftests at shared consumer test directories.
 When a directory is full, its existing scope declaration names exact consumer
 files, including child files when the full child has no declaration of its own.
