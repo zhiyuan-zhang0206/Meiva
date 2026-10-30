@@ -17,7 +17,7 @@ import { PythonCodeHighlighterProvider } from "@/components/content/python-code"
 import { useStore } from "@/lib/state/store";
 import type { ScheduleSummary, ScheduleView } from "@/lib/contracts/types";
 
-import SchedulesPage from "./page";
+import { SchedulesPageView } from "./page";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -46,7 +46,6 @@ const FULL: ScheduleView = {
 };
 
 const pushSpy = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
 
 afterEach(() => {
   cleanup();
@@ -94,7 +93,7 @@ describe("SchedulesPage", () => {
   it("ignores Enter while the draft is pending", async () => {
     transport.listSchedules.mockResolvedValue([]);
     const draft = transport.draftSchedule.mockReturnValue(new Promise(() => undefined));
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
     fireEvent.change(input, { target: { value: "run nightly" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -110,7 +109,7 @@ describe("SchedulesPage", () => {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
     renderWithBrowser(
       <WallClockProvider wallNow={() => Date.now()}>
-        <QueryClientProvider client={client}><SchedulesPage /></QueryClientProvider>
+        <QueryClientProvider client={client}><SchedulesPageView navigate={pushSpy} /></QueryClientProvider>
       </WallClockProvider>,
     );
     const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
@@ -123,32 +122,32 @@ describe("SchedulesPage", () => {
 
   it("shows loading spinner", () => {
     transport.listSchedules.mockReturnValue(new Promise<ScheduleSummary[]>(() => undefined));
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     expect(document.querySelector(".animate-spin")).toBeTruthy();
   });
 
   it("shows error state", async () => {
     transport.listSchedules.mockRejectedValue(new Error("fail"));
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText(/Couldn't load schedules/)).toBeTruthy());
   });
 
   it("shows empty state", async () => {
     transport.listSchedules.mockResolvedValue([]);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText(/No schedules configured/)).toBeTruthy());
   });
 
   it("renders a schedule with name + status", async () => {
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     expect(screen.getByText("running")).toBeTruthy();
   });
 
   it("description cell carries a title attribute for the truncated full text", async () => {
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     const cell = await screen.findByText("consolidate nightly");
     expect(cell.getAttribute("title")).toBe("consolidate nightly");
   });
@@ -156,7 +155,7 @@ describe("SchedulesPage", () => {
   it("draft: spawns a writer and navigates to the conversation", async () => {
     transport.listSchedules.mockResolvedValue([]);
     const draft = transport.draftSchedule.mockResolvedValue({ agent_id: 42 });
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText(/No schedules configured/)).toBeTruthy());
 
     const input = screen.getByPlaceholderText(/Describe a scheduled task/);
@@ -170,7 +169,7 @@ describe("SchedulesPage", () => {
   it("toggle: a running schedule stops", async () => {
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
     const stop = transport.stopSchedule.mockResolvedValue({ ...SCHEDULE, script: "x", enabled: false });
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(stop).toHaveBeenCalledWith(1));
@@ -180,7 +179,7 @@ describe("SchedulesPage", () => {
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
     const del = transport.deleteSchedule.mockResolvedValue({ status: "deleted" });
     window.confirm = vi.fn(() => true);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(del).toHaveBeenCalledWith(1));
@@ -190,7 +189,7 @@ describe("SchedulesPage", () => {
     const stopped: ScheduleSummary = { ...SCHEDULE, enabled: false, status: "stopped" };
     transport.listSchedules.mockResolvedValue([stopped]);
     const start = transport.startSchedule.mockResolvedValue({ ...FULL, enabled: false });
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(start).toHaveBeenCalledWith(1));
@@ -199,7 +198,7 @@ describe("SchedulesPage", () => {
   it("restart: calls restartSchedule", async () => {
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
     const restart = transport.restartSchedule.mockResolvedValue(FULL);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await waitFor(() => expect(restart).toHaveBeenCalledWith(1));
@@ -208,7 +207,7 @@ describe("SchedulesPage", () => {
   it("raw form: fills + creates a schedule", async () => {
     transport.listSchedules.mockResolvedValue([]);
     const create = transport.createSchedule.mockResolvedValue(FULL);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText(/No schedules configured/)).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: /New \(raw\)/ }));
@@ -229,14 +228,14 @@ describe("SchedulesPage", () => {
     // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
     const hoverImport = vi.fn(() => new Promise<never>(() => undefined));
-    wrap(<SchedulesPage />, createLazyChunk({ name: "test-highlighter", importModule: hoverImport }));
+    wrap(<SchedulesPageView navigate={pushSpy} />, createLazyChunk({ name: "test-highlighter", importModule: hoverImport }));
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.pointerEnter(screen.getByRole("button", { name: "Expand" }));
     expect(hoverImport).toHaveBeenCalledTimes(1);
 
     cleanup();
     const focusImport = vi.fn(() => new Promise<never>(() => undefined));
-    wrap(<SchedulesPage />, createLazyChunk({ name: "test-highlighter", importModule: focusImport }));
+    wrap(<SchedulesPageView navigate={pushSpy} />, createLazyChunk({ name: "test-highlighter", importModule: focusImport }));
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.focus(screen.getByRole("button", { name: "Expand" }));
     expect(focusImport).toHaveBeenCalledTimes(1);
@@ -249,7 +248,7 @@ describe("SchedulesPage", () => {
     transport.scheduleRuns.mockResolvedValue([
       { id: 7, ran_at: "2026-06-29T09:00:00Z", ok: true, agent_id: 5, note: "did the thing" },
     ]);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
     await waitFor(() => expect(screen.getByText("print('hi')")).toBeTruthy());
@@ -269,7 +268,7 @@ describe("SchedulesPage", () => {
       { id: 8, ran_at: "2026-06-29T09:00:00Z", ok: false, agent_id: null, note: "interrupted" },
       { id: 7, ran_at: "2026-06-29T08:00:00Z", ok: true, agent_id: null, note: null },
     ]);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
     await waitFor(() => expect(screen.getByText(/…/)).toBeTruthy());
@@ -281,7 +280,7 @@ describe("SchedulesPage", () => {
     transport.getSchedule.mockResolvedValue(FULL);
     const logs = transport.scheduleLogs.mockResolvedValue({ source: "none", lines: [] });
     transport.scheduleRuns.mockResolvedValue([]);
-    const view = wrap(<SchedulesPage />);
+    const view = wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
 
     vi.useFakeTimers();
@@ -313,7 +312,7 @@ describe("SchedulesPage", () => {
     transport.scheduleLogs.mockResolvedValue({ source: "none", lines: [] });
     transport.scheduleRuns.mockResolvedValue([]);
     const update = transport.updateSchedule.mockResolvedValue({ ...FULL, script: "print(2)" });
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeTruthy());
@@ -326,7 +325,7 @@ describe("SchedulesPage", () => {
   it("raw form cancel closes it; a disabled schedule shows (off)", async () => {
     const off: ScheduleSummary = { ...SCHEDULE, enabled: false, status: "stopped" };
     transport.listSchedules.mockResolvedValue([off]);
-    wrap(<SchedulesPage />);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("(off)")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /New \(raw\)/ }));
     expect(screen.getByText("Create schedule")).toBeTruthy();

@@ -3,6 +3,3 @@ exports = ["page.tsx"]
 [uses]
 "page.test.tsx" = ["page.tsx"]
 "page.tsx" = ["_schedule_components.tsx"]
-
-[debt.third-party-patch]
-"page.test.tsx#vi.mock next/navigation" = 1
