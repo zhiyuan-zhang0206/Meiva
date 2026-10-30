@@ -167,8 +167,12 @@ or unreadable owner is preserved even if its title lacks pytest/xdist hints;
 those hints remain diagnostic. A recycled live PID may therefore leave some
 stale residue until it exits. Explicit `include_own` teardown still cleans this
 worker's children; it never grants ownership of a peer's children.
-The fixture `-m tests.e2e.process_support` entry supplies only the explicit test
-serving gate; it does not establish production root custody.
+The fixture `-m tests.e2e.process_support` entry names a role per child: `owner` serves the
+home's fake root control socket and follows the gate file into the serving receipt, `reader`
+serves nothing and reads that gate through the same client any other process uses. Ownership is
+explicit, so it never depends on which child bound a socket first, and these business tests still
+exclude production root custody proof. `flow/test_serving_gate.py` asserts the cross-process read
+(a reader child sees the gate open, then closed).
 
 **Differences between fork scenario and lifecycle**: fork creates a **new agent_id** (not reused).
 `build()` uses its explicit `agent_id` and that identity's `kind='fork'` inbound

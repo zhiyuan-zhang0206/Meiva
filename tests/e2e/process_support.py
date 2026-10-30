@@ -20,7 +20,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
+from base.native_process.root_control.tests.status_root import publish_with, serve
 from base.paths import meiva_home, run_dir
 from base.sessions.pty import client as pty_client
 from base.sessions.pty.paths import service_socket_path
@@ -765,18 +765,32 @@ def pty_sessions_proc() -> Iterator[None]:
         yield
 
 
-def fixture_entrypoint() -> None:
-    """Direct-process E2E serving injection, deliberately excluding root custody.
+SERVING_OWNER = "owner"
+SERVING_READER = "reader"
 
-    This test-only module is explicitly selected by conftest; no environment
-    flag or product entry point can bypass the real native birth gate.
-    """
+
+# meiva:note
+# Run one product module as a direct-process fixture with this suite's fake root.
+#
+# Every child names its role, so ownership is explicit and never depends on which child bound a
+# socket first: `owner` serves the home's root control socket and follows the suite's gate file
+# into the receipt; `reader` serves nothing and reads the gate through the same client any other
+# process uses. The gate file, not the role, decides when the unit is serving.
+def fixture_entrypoint() -> None:
     import runpy
 
-    gate, module, *arguments = sys.argv[1:]
-    inject_fixture_gate(Path(gate))
+    role, gate, module, *arguments = sys.argv[1:]
+    if role not in (SERVING_OWNER, SERVING_READER):
+        raise SystemExit(
+            f"unknown serving role {role!r}; expected {SERVING_OWNER!r} or {SERVING_READER!r}"
+        )
     sys.argv[:] = [module, *arguments]
-    runpy.run_module(module, run_name="__main__", alter_sys=True)
+    if role == SERVING_READER:
+        runpy.run_module(module, run_name="__main__", alter_sys=True)
+        return
+    home = meiva_home()
+    with serve(home=home) as answer, publish_with(Path(gate), home=home, answer=answer):
+        runpy.run_module(module, run_name="__main__", alter_sys=True)
 
 
 if __name__ == "__main__":

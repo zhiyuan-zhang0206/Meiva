@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.tests.short_tmp import short_tmp as short_tmp
 from tests.e2e import process_support as processes
 
 
@@ -641,29 +642,35 @@ def test_managed_frontend_receipt_identifies_its_exact_owner(tmp_path: Path) -> 
     assert events[0]["owner"] == os.getpid() and events[0]["signal"] == signal.SIGTERM
 
 
+# meiva:note
+# The suite's owner entry: a real socket and receipt, driven by the gate file. `short_tmp` is the
+# home because `observe_root` pins the socket at `<home>/run/meiva-root/meiva-root.sock`, and a
+# pytest `tmp_path` is too long for AF_UNIX.
 @pytest.mark.parametrize("serving", [False, True])
-def test_public_module_entry_launches_with_only_the_explicit_fixture_gate(
-    tmp_path: Path, serving: bool
+def test_the_serving_entry_serves_only_while_the_gate_file_exists(
+    short_tmp: Path, serving: bool
 ) -> None:
-    gate = tmp_path / "serving"
+    gate = short_tmp / "serving"
     if serving:
-        gate.write_text("ready\n")
-    target = tmp_path / "fixture_gate_target.py"
+        gate.write_text("ready\n", encoding="utf-8")
+    target = short_tmp / "serving_target.py"
     target.write_text(
-        "from pathlib import Path\n"
         "from base.deploy.lifecycle import start_serving\n"
-        "print(start_serving.is_serving(Path('.')), flush=True)\n"
-        "with start_serving.recovery_permitted(Path('.')) as allowed:\n"
-        "    print(allowed, flush=True)\n"
+        "from base.paths import meiva_home\n"
+        "print(start_serving.is_serving(meiva_home()), flush=True)\n"
+        "with start_serving.recovery_permitted(meiva_home()) as allowed:\n"
+        "    print(allowed, flush=True)\n",
+        encoding="utf-8",
     )
     env = os.environ.copy()
     root = Path(__file__).resolve().parents[2]
-    env["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(root)))
-    log_path = tmp_path / "entry.log"
+    env["PYTHONPATH"] = os.pathsep.join((str(short_tmp), str(root)))
+    env["MEIVA_HOME"] = str(short_tmp)
+    log_path = short_tmp / "entry.log"
     with processes.managed_proc(
-        [sys.executable, "-m", "tests.e2e.process_support", str(gate), target.stem],
+        [sys.executable, "-m", "tests.e2e.process_support", "owner", str(gate), target.stem],
         env=env,
-        label="fixture-entry-proof",
+        label="serving-entry-proof",
         log_path=str(log_path),
     ) as child:
         assert child.wait(timeout=15) == 0

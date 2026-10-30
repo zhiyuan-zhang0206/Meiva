@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from threading import Event, Thread
 
@@ -8,6 +7,8 @@ import pytest
 
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.lifecycle.tests.serving_root import observe, override_observed_root
+from base.host.tests.short_tmp import short_tmp as short_tmp
+from base.paths import root_run_dir
 
 
 @pytest.fixture
@@ -62,6 +63,11 @@ def test_clear_serving_keeps_revival_blocked(
     start_serving.clear_serving(home)
 
     assert start_serving.is_serving(home, observe=observe) is False
+    # meiva:note
+    # Blocked revival is the reader that grants a revival action, asserted on its own: a cleared
+    # home answers `is_serving` false and must refuse recovery, not just fail to look alive.
+    with start_serving.recovery_permitted(home, observe=observe) as permitted:
+        assert permitted is False
 
 
 def test_start_waits_for_an_authorized_recovery_action(
@@ -193,85 +199,33 @@ def test_birth_read_refuses_marker_replaced_during_native_observation(
     assert start_serving.born_identity(home, observe=observe) is None
 
 
-def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(
-    tmp_path: Path, home: Path
-) -> None:
+# meiva:note
+# The end-to-end path the e2e suite and the direct-process fixture rely on: a socket served by a
+# process, the receipt that names it, and the reads that confirm it -- then a stop clears it.
+def test_a_socket_marked_birth_serves_until_a_stop_clears_it(short_tmp: Path) -> None:
     from base.deploy.lifecycle import start_serving
-    from base.deploy.lifecycle.tests.serving_entrypoint import (
-        clear_fixture_gate,
-        inject_fixture_gate,
+    from base.native_process.root_control.tests.status_root import (
+        birth_from_response,
+        serve,
+        write_receipt,
     )
 
-    gate = tmp_path / "e2e-serving"
-    try:
-        inject_fixture_gate(gate)
+    home = short_tmp / "home"
+    home.mkdir()
+    with serve(home=home) as answer:
+        write_receipt(home, birth_from_response(answer["root"]))
 
-        assert not start_serving.is_serving(home)
-        gate.write_text("ready\n")
-        assert start_serving.is_serving(home)
+        assert start_serving.is_serving(home) is True
         with start_serving.recovery_permitted(home) as permitted:
             assert permitted
-        gate.unlink()
-        assert not start_serving.is_serving(home)
-    finally:
-        clear_fixture_gate()
 
+        start_serving.clear_serving(home)
 
-# meiva:note
-# The fixture replaces the serving gate for the whole process, so it must answer the call the
-# production readers make -- including the `observe` keyword. With the older one-argument shape
-# the failure lands in whichever test runs next, as "got an unexpected keyword argument
-# 'observe'" (2026-10-30: the merge queue caught it when a lifecycle test and a gateway roster
-# test shared a shard). This pins the passthrough at the seam instead of in a consumer.
-def test_the_injected_fixture_gate_answers_the_callers_observe_keyword(
-    tmp_path: Path, home: Path
-) -> None:
-    from base.deploy.lifecycle import start_serving
-    from base.deploy.lifecycle.tests.serving_entrypoint import (
-        clear_fixture_gate,
-        inject_fixture_gate,
-    )
+        assert start_serving.is_serving(home) is False
+        with start_serving.recovery_permitted(home) as permitted:
+            assert permitted is False
 
-    gate = tmp_path / "e2e-serving-observe"
-    try:
-        inject_fixture_gate(gate)
-
-        assert not start_serving.is_serving(home, observe=start_serving.observe_root)
-        gate.write_text("ready\n")
-        assert start_serving.is_serving(home, observe=start_serving.observe_root)
-        with start_serving.recovery_permitted(home, observe=start_serving.observe_root) as allowed:
-            assert allowed
-    finally:
-        clear_fixture_gate()
-
-
-# meiva:note
-# The fixture patches two module attributes for the whole process, so it owes them two things: the
-# same signature as the functions it replaces (a new keyword must not turn into a TypeError in a
-# later test) and the originals back when the gate is cleared. Both halves are asserted here
-# because nothing else in the suite can see them: a stand-in drifts, or a patch leaks, silently.
-def test_clearing_the_fixture_gate_puts_the_real_functions_back(tmp_path: Path) -> None:
-    from base.deploy.lifecycle import start_serving
-    from base.deploy.lifecycle.tests.serving_entrypoint import (
-        clear_fixture_gate,
-        inject_fixture_gate,
-    )
-
-    original_is_serving = start_serving.is_serving
-    original_recovery = start_serving.recovery_permitted
-    try:
-        inject_fixture_gate(tmp_path / "gate")
-        assert inspect.signature(start_serving.is_serving) == inspect.signature(
-            original_is_serving
-        ), "the stand-in for is_serving must take exactly what the real function takes"
-        assert inspect.signature(start_serving.recovery_permitted) == inspect.signature(
-            original_recovery
-        ), "the stand-in for recovery_permitted must take exactly what the real function takes"
-    finally:
-        clear_fixture_gate()
-    assert start_serving.is_serving is original_is_serving, (
-        "clearing the gate must put the real is_serving back"
-    )
-    assert start_serving.recovery_permitted is original_recovery, (
-        "clearing the gate must put the real recovery_permitted back"
-    )
+    # meiva:note
+    # The socket and the marker are the home's only residue; both leave when the server stops.
+    assert not (root_run_dir(home) / "meiva-root.sock").exists()
+    assert not start_serving.state_path(home).exists()
