@@ -21,8 +21,8 @@ missing grant in the middle of a task.
 - **One catalog.** `base/host/permissions_helper/grants/catalog.py` describes every
   authorization Meiva can need: which process holds it, what it unlocks, whether
   a dialog can still grant it, which System Settings pane holds it, and how to
-  confirm it. The CLI, the converge step, the gateway endpoint and the console
-  section all read it; no other file spells a TCC service or a "why" line.
+  confirm it. The CLI, the converge step and the gateway endpoint all read it; no
+  other file spells a TCC service or a "why" line.
 - **One probe.** `base/host/permissions_helper/grants/probe.py` reads the matrix through a
   helper-spawned child (`children/preflight.py`). `--check` and the gate call the
   same function, so the tool and the product cannot disagree about a host.
@@ -37,9 +37,7 @@ missing grant in the middle of a task.
   person can still answer and then re-probes; `meiva permissions defer` records
   "later"; `meiva permissions restart-helper` prints how to recreate the helper
   under custody (stop this unit, then start it again; see `meiva stop --help` and `meiva start --help`) so a fresh Screen Recording
-  grant is re-read -- it runs no process control of its own. The console renders the same rows at
-  Control -> Permissions (`GET /api/host/permissions`) and keeps a banner up
-  while `state` is restricted.
+  grant is re-read -- it runs no process control of its own.
 
 Rules the implementation keeps:
 
@@ -56,7 +54,7 @@ Rules the implementation keeps:
   missing grant mid-task.
 - **Denied is asked once, then manual; stale is never asked.** The grant state is
   the TCC record (`TCCAccessPreflight`): denied stays denied and is only requested
-  again by `meiva permissions onboard` or the console's Ask button. A record that
+  again by `meiva permissions onboard`. A record that
   holds the grant while the running helper still reports `preflight_screen` /
   `ax_trusted` false reads `stale`: the fix is a helper restart
   (`meiva permissions restart-helper`, coordinated on a shared machine), never a
@@ -150,7 +148,7 @@ attempt -- `meiva permissions status`, a converge, a failed click -- reads the s
 state and reports the missing grant instead of asking again. Two conditions still show
 a dialog: the grant has never been answered and a *new* helper has been started since
 (stopping and starting this unit again re-arms the one ask), or the operator asked for it
-explicitly from the console's Ask button / `meiva permissions onboard`, which spends the
+explicitly from `meiva permissions onboard`, which spends the
 same single ask. A dismissed dialog is not re-raised by the process that raised it.
 
 Reading the last three rows: Meiva raises no macOS notification authorization

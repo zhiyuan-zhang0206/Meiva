@@ -14,7 +14,6 @@ import type {
   DefaultModelView,
   EventResolutionRow,
   GuideDraftResponse,
-  HostPermissionsPayload,
   InventoryAggregate,
   InventoryWriteResult,
   MemoryNoteResponse,
@@ -303,18 +302,6 @@ export function createControlApi(http: Http) {
     getUiContributions: (): Promise<UiContributionsResponse> => {
       return f("/api/ui/contributions").then(ok<UiContributionsResponse>);
     },
-
-    getHostPermissions: (signal?: AbortSignal): Promise<HostPermissionsPayload> =>
-      f(`/api/host/permissions`, { signal }).then(ok<HostPermissionsPayload>),
-
-    recheckHostPermissions: (): Promise<HostPermissionsPayload> =>
-      f(`/api/host/permissions/recheck`, postInit).then(ok<HostPermissionsPayload>),
-
-    requestHostPermissions: (): Promise<HostPermissionsPayload> =>
-      f(`/api/host/permissions/request`, postInit).then(ok<HostPermissionsPayload>),
-
-    deferHostPermissions: (): Promise<HostPermissionsPayload> =>
-      f(`/api/host/permissions/defer`, postInit).then(ok<HostPermissionsPayload>),
 
     resolveNotice: (
       agentId: number,

@@ -1,6 +1,0 @@
-exports = ["permission-banner.tsx", "permission-checklist.tsx"]
-
-[uses]
-"permission-banner.tsx" = ["use-host-permissions.ts"]
-"permission-checklist.test.tsx" = ["permission-checklist.tsx"]
-"permission-checklist.tsx" = ["use-host-permissions.ts"]

@@ -12,5 +12,5 @@ exports = ["page.tsx"]
 "_notification-categories.tsx#cast NotificationCategoryRows" = 1
 "_notification-categories.tsx#cast NotificationCategoryRows.<lambda>" = 1
 "_rows.tsx#cast ColorRow.<lambda>" = 1
-"page.tsx#cast DisplaySettingsPage" = 15
+"page.tsx#cast DisplaySettingsPage" = 14
 "page.tsx#cast DisplaySettingsPage.<lambda>" = 1

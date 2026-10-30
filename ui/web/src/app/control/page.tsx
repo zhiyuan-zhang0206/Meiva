@@ -25,7 +25,6 @@ import GuidePage from "@/app/control/guide/page";
 import { McpInventory, PluginsInventory } from "@/app/control/inventory/page";
 import SchedulesPage from "@/app/control/schedules/page";
 import SkillsPage from "@/app/control/skills/page";
-import { PermissionChecklist } from "@/components/permissions/permission-checklist";
 import { PluginNavList } from "@/components/plugins/plugin-nav";
 import { buttonVariants } from "@/components/ui/button";
 import { assetUrl } from "@/lib/transport/api";
@@ -107,14 +106,6 @@ export default function ControlPage() {
               description={t("displayDescription")}
             >
               <DisplaySettingsPage />
-            </ControlSection>
-
-            <ControlSection
-              id="permissions"
-              label={ts("permissions")}
-              description={t("permissionsDescription")}
-            >
-              <PermissionChecklist />
             </ControlSection>
 
             <ControlSection

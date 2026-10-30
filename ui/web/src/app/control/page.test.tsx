@@ -102,17 +102,17 @@ describe("ControlPage shell", () => {
     expect(window.location.hash).toBe("#skills");
   });
 
-  it("does NOT render the Status, Ops or Metrics sections (moved to /insights)", () => {
+  it("does NOT render the Status, Ops, Metrics or Permissions sections", () => {
     wrap(<ControlPage />);
-    for (const label of ["Status", "Ops", "Metrics"]) {
+    for (const label of ["Status", "Ops", "Metrics", "Permissions"]) {
       expect(screen.queryByRole("heading", { name: label })).toBeNull();
     }
     expect(document.getElementById("status")).toBeNull();
     expect(document.getElementById("ops")).toBeNull();
     expect(document.getElementById("metrics")).toBeNull();
-    // The nav rail doesn't list them either.
+    expect(document.getElementById("permissions")).toBeNull();
     const nav = screen.getByRole("navigation", { name: /control sections/i });
-    for (const label of ["Status", "Ops", "Metrics"]) {
+    for (const label of ["Status", "Ops", "Metrics", "Permissions"]) {
       expect(within(nav).queryByRole("button", { name: label })).toBeNull();
     }
   });

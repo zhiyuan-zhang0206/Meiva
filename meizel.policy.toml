@@ -547,7 +547,6 @@ scopes = [
     "ui/web/src/components/inspector",
     "ui/web/src/components/notifications",
     "ui/web/src/components/ops",
-    "ui/web/src/components/permissions",
     "ui/web/src/components/plugins",
     "ui/web/src/components/run-timeline",
     "ui/web/src/components/shell",

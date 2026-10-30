@@ -131,8 +131,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.clock_format": "24h",
   "display.show_timezone": false,
 
-  "display.render_reasoning_markdown": true,
-
   "display.context_meter_width": "comfortable",
 
   "display.timeline_width_px": 768,

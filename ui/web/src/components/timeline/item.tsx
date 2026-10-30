@@ -27,7 +27,6 @@ import { assetUrl } from "@/lib/transport/api";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { SSE_EVENT_WINDOW_MS } from "@/lib/contracts/constants-generated";
 import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
-import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
 
 import { EphemeralSystemMarker, MarkerBody } from "./markers";
@@ -342,7 +341,6 @@ export const ItemView = memo(function ItemView({
   streaming: boolean;
 }) {
   const t = useTranslations("timeline");
-  const { settings } = useUserSettings();
   // Throttle the heavy-parse content (chat markdown / python highlight) while it
   // streams. The hook is called unconditionally (rules of hooks); `live` is
   // false for every other kind, making it a no-op pass-through.
@@ -419,7 +417,7 @@ export const ItemView = memo(function ItemView({
       );
 
     case "agent_reasoning":
-      return settings["display.render_reasoning_markdown"] as boolean ? (
+      return (
         <>
           <div
             className={cn(
@@ -431,20 +429,6 @@ export const ItemView = memo(function ItemView({
             {item.partial ? <span className="text-muted-foreground">… </span> : null}
             <ChatMarkdown content={streamingPayload} />
           </div>
-          {item.interrupted ? <InterruptedNotice /> : null}
-        </>
-      ) : (
-        <>
-          <pre
-            className={cn(
-              "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-muted-foreground/90 m-0",
-              item.partial && "italic opacity-75",
-              item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
-            )}
-          >
-            {item.partial ? "… " : ""}
-            {item.payload}
-          </pre>
           {item.interrupted ? <InterruptedNotice /> : null}
         </>
       );
