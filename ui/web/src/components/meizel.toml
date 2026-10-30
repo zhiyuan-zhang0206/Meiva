@@ -1,4 +1,4 @@
-exports = ["agent-sidebar", "app", "auth", "connection", "content", "context", "conversation", "fleet", "inspector", "ops", "permissions", "plugins", "run-timeline", "shell", "ui"]
+exports = ["agent-sidebar", "app", "auth", "connection", "content", "context", "conversation", "fleet", "inspector", "ops", "plugins", "run-timeline", "shell", "ui"]
 
 [uses]
 "agent-sidebar" = ["agents", "notifications", "plugins", "ui"]
@@ -12,7 +12,6 @@ exports = ["agent-sidebar", "app", "auth", "connection", "content", "context", "
 "inspector" = ["agents", "notifications", "ui"]
 "notifications" = ["content", "ui"]
 "ops" = ["ui"]
-"permissions" = ["ui"]
 "plugins" = ["ui"]
 "run-timeline" = ["content", "inspector", "ui"]
 "shell" = ["connection", "notifications", "plugins", "ui"]

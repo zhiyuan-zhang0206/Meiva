@@ -13,7 +13,6 @@ import { AgentSidebar } from "@/components/agent-sidebar";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
 import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { Composer } from "@/components/conversation/composer";
-import { PermissionBanner } from "@/components/permissions/permission-banner";
 import { HeaderBar } from "@/components/shell/header-bar";
 import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import { HomeLayout } from "@/components/shell/home-layout";
@@ -62,12 +61,11 @@ export default function HomePage() {
 
   return (
     // meiva:note
-    // The page stacks the permission banner above the shell, and both wrapper layers carry FLEX explicitly: the outer one as `flex flex-col` (banner row plus shell row) and the inner one as `flex` (HomeLayout's narrow branch is a fragment whose children are flex items of it). A wrapper built from FLEX_COL alone is display:block and the chain collapses to content height -- measured 2026-10-17 at 320/390/768: the timeline surface grew to 4920px inside a 664px viewport, I6 failed, and the composer was pushed off screen. The banner adds one row when the host is restricted and renders nothing otherwise, so the geometry with no banner is the pre-banner geometry.
+    // Both wrapper layers carry FLEX explicitly: the outer one as `flex flex-col` and the inner one as `flex` (HomeLayout's narrow branch is a fragment whose children are flex items of it). A wrapper built from FLEX_COL alone is display:block and the chain collapses to content height -- measured 2026-10-17 at 320/390/768: the timeline surface grew to 4920px inside a 664px viewport, I6 failed, and the composer was pushed off screen.
     // meiva:link ui/web/src/app/docs/layout-chain.meiva.okf.md
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
       <CodeHighlighterPreloader />
       <div className={cn(FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
-        <PermissionBanner />
         <div className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
           <HomeShell showError={showError} />
         </div>

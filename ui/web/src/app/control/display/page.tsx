@@ -27,7 +27,6 @@ import {
   Palette,
   Rows3,
   Ruler,
-  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/format/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -256,13 +255,6 @@ export default function DisplaySettingsPage() {
           value={detailsMode}
           onChange={(v) => { setDetailsMode(v as DetailsMode); resetManualExpansions(); }}
           reapplyOnSelect
-        />
-        <ToggleRow
-          icon={Sparkles}
-          label="Render thinking as markdown"
-          description="Render agent thinking content as formatted markdown; off shows the raw text"
-          value={settings["display.render_reasoning_markdown"] as boolean}
-          onChange={(v) => setSetting("display.render_reasoning_markdown", v)}
         />
         <RadioRow
           icon={History}

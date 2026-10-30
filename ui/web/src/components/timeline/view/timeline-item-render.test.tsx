@@ -71,7 +71,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
     );
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
   });
-  it("agent_reasoning renders markdown by default below a 'Thinking' toggle chip", () => {
+  it("agent_reasoning renders markdown below a 'Thinking' toggle chip", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_reasoning", payload: "thinking..." })]}
@@ -79,16 +79,6 @@ describe("ItemView: agent_code + agent_reasoning", () => {
     );
     expect(screen.getByTestId("chat-markdown").textContent).toBe("thinking...");
     expect(screen.getByText("Thinking")).toBeTruthy();
-  });
-  it("agent_reasoning renders raw text when markdown rendering is disabled", () => {
-    setUserSettings({ "display.render_reasoning_markdown": false });
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_reasoning", payload: "raw thinking" })]}
-      />,
-    );
-    expect(screen.queryByTestId("chat-markdown")).toBeNull();
-    expect(screen.getByText("raw thinking").tagName).toBe("PRE");
   });
 });
 

@@ -124,7 +124,6 @@ export const toggleState = {
 };
 
 export const userSettingsState: Record<string, unknown> = {
-  "display.render_reasoning_markdown": true,
   "display.show_timestamp_weekday": true,
   "display.clock_format": "24h",
   "display.show_timezone": false,
@@ -182,7 +181,6 @@ export function resetUserSettings() {
   for (const key of Object.keys(userSettingsState)) {
     Reflect.deleteProperty(userSettingsState, key);
   }
-  userSettingsState["display.render_reasoning_markdown"] = true;
   userSettingsState["display.show_timestamp_weekday"] = true;
   userSettingsState["display.clock_format"] = "24h";
   userSettingsState["display.show_timezone"] = false;

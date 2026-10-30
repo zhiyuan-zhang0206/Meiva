@@ -134,6 +134,7 @@ describe("DisplaySettingsPage", () => {
     // The machine-name row is gone — the name renders in the Inspector's
     // Liveness block now (task #3904).
     expect(screen.queryByText("Show machine name")).toBeNull();
+    expect(screen.queryByText("Render thinking as markdown")).toBeNull();
     expect(screen.getByText("Show activity line")).toBeTruthy();
     expect(screen.getByText("Show terminated agents")).toBeTruthy();
     expect(screen.getByText("Clock format")).toBeTruthy();
@@ -292,26 +293,6 @@ describe("DisplaySettingsPage", () => {
     const radio = await screen.findByRole("radio", { name: "Last block only" });
     await waitFor(() => {
       expect((radio as HTMLInputElement).checked).toBe(true);
-    });
-  });
-
-  it("renders the thinking markdown toggle", async () => {
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Render thinking as markdown")).toBeTruthy();
-    });
-  });
-
-  it("persists disabling thinking markdown", async () => {
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Render thinking as markdown")).toBeTruthy();
-    });
-    fireEvent.click(screen.getByLabelText("Render thinking as markdown"));
-    await waitFor(() => {
-      expect(transport.putSetting).toHaveBeenCalledWith("display.render_reasoning_markdown", false);
     });
   });
 
