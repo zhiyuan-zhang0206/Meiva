@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -258,11 +258,11 @@ def test_real_redis_stops_owned_instance_only(
             owned_client.set("owned-test", "latest-unsaved")
         config = replace(local_plane, redis_url=owned.url)
         assert stop_plane(config, 3, operator_pipeline, home) == ("redis",)
-        assert (
-            not OwnedProcess.capture(psutil.Process(owned.pid)).live()
-            if psutil.pid_exists(owned.pid)
-            else True
-        )
+        # meiva:note
+        # A vanished pid is the outcome this asserts: capture only what is still there.
+        if psutil.pid_exists(owned.pid):
+            with suppress(psutil.NoSuchProcess):
+                assert not OwnedProcess.capture(psutil.Process(owned.pid)).live()
         with redis.Redis.from_url(sibling.url) as sibling_client:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             assert sibling_client.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
         assert stop_plane(config, 1, operator_pipeline, home) == ()

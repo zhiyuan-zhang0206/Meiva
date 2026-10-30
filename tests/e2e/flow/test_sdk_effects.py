@@ -38,6 +38,16 @@ def _human_text(call: Call) -> str:
     return "\n".join(m["text"] for m in call if m["type"] == "human")
 
 
+# meiva:note
+# Death is what the caller waits for, so the read is the judgement: a pid that vanished
+# between a pid_exists() sample and the status read is gone, not an error.
+def _running(pid: int) -> bool:
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+
+
 def _last_tool(call: Call) -> str:
     tools = [m["text"] for m in call if m["type"] == "tool"]
     return tools[-1] if tools else ""
@@ -154,20 +164,9 @@ def test_exec_timeout_kills_the_whole_process_tree_and_tells_the_model(
         int(p.read_text())
         for p in (world.sandbox() / "child.pid", world.sandbox() / "grandchild.pid")
     ]
-    alive = [
-        pid
-        for pid in pids
-        if psutil.pid_exists(pid) and psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
-    ]
+    alive = [pid for pid in pids if _running(pid)]
     poll_until(
-        lambda: (
-            not [
-                p
-                for p in pids
-                if psutil.pid_exists(p) and psutil.Process(p).status() != psutil.STATUS_ZOMBIE
-            ],
-            alive,
-        ),
+        lambda: (not any(_running(p) for p in pids), alive),
         timeout=15.0,
         interval=0.5,
         what=f"timed-out exec processes {pids} die",
