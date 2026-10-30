@@ -305,6 +305,10 @@ def test_a_list_entry_whose_site_is_gone_is_stale(tmp_path: pathlib.Path) -> Non
         "[ambient-state.sink-facades] entry" in message and "no module-level state" in message
         for message in problems
     )
+    assert all(
+        "an exemption that outlives its site is a permission nobody re-checks" in m
+        for m in problems
+    )
 
 
 def test_a_list_entry_for_a_missing_file_or_function_is_stale(tmp_path: pathlib.Path) -> None:
@@ -354,6 +358,31 @@ def test_the_closed_lists_carry_a_reason_for_every_entry() -> None:
 )
 def test_a_baseline_key_must_name_a_known_rule_and_a_name(target: str, known: bool) -> None:
     assert (ambient_state.site_message(target) is not None) is known
+
+
+# meiva:note
+# The site message is the rule's whole handover: what the site holds and the repair, why the rule
+# exists, what the author of the site now owns, and the document that states it. Each mechanism
+# reports its own reason, so one entry per family is asserted here.
+@pytest.mark.parametrize(
+    ("target", "reason"),
+    [
+        ("ambient-container:_REGISTRY", "no caller or test can hand in a different value"),
+        ("contextvar:_V", "disappears from the signature"),
+        ("foreign-rebind:_x", "cannot see who changes it"),
+        ("class-level-container:Registry", "instances and tests leak into each other"),
+        ("import-time-call:atexit.register", "import order and the host decide"),
+        ("asyncio-task:Service.start", "its failure is never observed"),
+    ],
+)
+def test_a_site_message_carries_the_reason_the_owner_and_the_rule_document(
+    target: str, reason: str
+) -> None:
+    message = ambient_state.site_message(target) or ""
+
+    assert reason in message
+    assert "owns" in message
+    assert "meizel/docs/ambient-state.meiva.okf.md" in message
 
 
 # meiva:note
