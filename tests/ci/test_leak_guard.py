@@ -515,6 +515,37 @@ def test_fail_mode_puts_a_replaced_attribute_back_and_reds_the_run(replace_root:
     assert "leak_guard" not in clean.out
 
 
+@pytest.fixture(scope="module")
+def reload_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp("leak_reload")
+    leak_guard_suite.write_reload_suite(root)
+    return root
+
+
+# meiva:note
+# A module body run again in the dict the process already registered rebinds every name the module
+# imports from a re-executed sibling face. That is the plugin loader's contract, not a test leaving
+# state behind, and the file boundary sees only the identity move (#7832, 2026-10-30: the guard
+# reddened every shard that loaded the plugin faces twice). Silent here means the guard's own run:
+# any finding makes the run exit non-zero, so `code == 0` is the verdict.
+def test_a_face_executed_again_in_place_is_not_a_leak(reload_root: Path) -> None:
+    run = _pytest(reload_root, f"{_TESTS}/reload_clean", "fail", False, "", 0, plugins=(_GUARD,))
+    assert run.code == 0
+    assert "LEAK" not in run.out
+
+
+# meiva:note
+# The exemption is not "a same-named object is fine": a class this test file defines, installed under
+# the same binding, is still a stand-in, and the file that installed it is still the one named.
+def test_a_stand_in_named_like_the_imported_object_is_still_a_leak(reload_root: Path) -> None:
+    run = _pytest(reload_root, f"{_TESTS}/reload_standin", "warn", False, "", 1, plugins=(_GUARD,))
+    leaks = shard_counts.count_junit(run.junit)["leaks"]
+    assert [x["kind"] for x in leaks] == ["module-attr-replaced"]
+    assert leaks[0]["detail"].startswith(
+        f"{_TESTS}/reload_standin/test_a_standin.py left leakdemo.runtime.Config"
+    )
+
+
 def test_the_properties_the_guard_writes_are_what_shard_counts_reads(suite: Suite) -> None:
     counted = shard_counts.count_junit(suite.run().junit)
     assert {x["test"].rpartition("::")[2]: x["kind"] for x in counted["leaks"]} == LEAKERS
