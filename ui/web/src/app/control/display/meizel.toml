@@ -7,10 +7,3 @@ exports = ["page.tsx"]
 "page-models-and-themes.test.tsx" = ["page.tsx"]
 "page.test.tsx" = ["page.tsx"]
 "page.tsx" = ["_model_picker.tsx", "_notification-categories.tsx", "_rows.tsx"]
-
-[debt.type-cast]
-"_notification-categories.tsx#cast NotificationCategoryRows" = 1
-"_notification-categories.tsx#cast NotificationCategoryRows.<lambda>" = 1
-"_rows.tsx#cast ColorRow.<lambda>" = 1
-"page.tsx#cast DisplaySettingsPage" = 14
-"page.tsx#cast DisplaySettingsPage.<lambda>" = 1
