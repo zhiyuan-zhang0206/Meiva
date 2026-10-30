@@ -309,14 +309,12 @@ describe("HomePage top-level render", () => {
     hooksState.inspectorOpen = true;
     inspectorMockState.shouldThrow = true;
     // meiva:note
-    // The boundary logs the error it catches; this test asserts the fallback and its reset, not
-    // the console.
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // This test asserts the fallback and its reset; the log the boundary and React emit on the
+    // way there is theirs, so the test neither silences nor inspects it.
     wrap(<HomePage />);
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     expect(screen.getByText("Simulated inspector render crash")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
-    consoleSpy.mockRestore();
   });
   it("resets the inspector ErrorBoundary when activeId changes via resetKey", async () => {
     hooksState.activeId = 5;
@@ -324,10 +322,6 @@ describe("HomePage top-level render", () => {
     hooksState.settings = { "display.timeline_width_px": 768 };
     hooksState.inspectorOpen = true;
     inspectorMockState.shouldThrow = true;
-    // meiva:note
-    // The boundary logs the error it catches; this test asserts the fallback and its reset, not
-    // the console.
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { rerender } = wrap(<HomePage />);
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     inspectorMockState.shouldThrow = false;
@@ -347,6 +341,5 @@ describe("HomePage top-level render", () => {
     // Recovery rendered a fresh panel (its first successful mount); the
     // boundary reset did not tear down a healthy tree.
     expect(inspectorMockState.mounts).toBe(1);
-    consoleSpy.mockRestore();
   });
 });

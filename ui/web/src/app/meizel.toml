@@ -10,4 +10,3 @@ exports = ["insights"]
 
 [debt.stdlib-patch]
 "page-dispatch.test.tsx#vi.stubGlobal crypto" = 1
-"page.test.tsx#vi.spyOn console.error" = 2
