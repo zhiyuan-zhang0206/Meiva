@@ -16,7 +16,7 @@ import socket
 import subprocess
 import time
 from collections.abc import Callable
-from contextlib import closing
+from contextlib import closing, suppress
 from pathlib import Path
 
 import psutil
@@ -343,10 +343,11 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
 
             assert stopped.stopped == ("pgbouncer", "postgres", "redis")
             assert not pool.identity.live() and not postmaster.live()
-            assert (
-                not psutil.pid_exists(store.pid)
-                or not OwnedProcess.capture(psutil.Process(store.pid)).live()
-            )
+            # meiva:note
+            # A vanished store pid is the outcome this asserts: capture only what is there.
+            if psutil.pid_exists(store.pid):
+                with suppress(psutil.NoSuchProcess):
+                    assert not OwnedProcess.capture(psutil.Process(store.pid)).live()
             assert owned_pooler(unit_home) is None and ownership.postgres(data) is None
             with (
                 pytest.raises(ConnectionRefusedError),
