@@ -36,10 +36,10 @@ def measure(tree: ast.Module, rel_path: str, roots: tuple[str, ...]) -> dict[str
 
 def _new_site_message(kind: str, target: str) -> str:
     if kind == path_imports.SECTION:
-        return f"imports by file path (`{target}`) — {path_imports.FIX}"
+        return path_imports.site_message(target)
     if kind == ambient_state.SECTION:
         return ambient_state.site_message(target) or ""
-    return f"bypasses the single owner of `{target}` — {decisions.DECISIONS[target].fix}"
+    return decisions.site_message(target)
 
 
 def site_errors(
@@ -95,7 +95,7 @@ def _stale_errors(
             action = f"lower it to {now}" if now else "remove it"
             errors.append(
                 f"{baseline_shards.shard_path(kind, key)}: stale {kind} entry {key} is frozen at {count} but the "
-                f"code has {now} — {action} (the baseline must match reality)"
+                f"code has {now} — {action}. {baseline_shards.SHRINK_ONLY}"
             )
     return errors
 

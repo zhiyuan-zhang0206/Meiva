@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -132,3 +134,85 @@ def test_an_unrelated_touch_keeps_the_admitted_set(tmp_path: Path) -> None:
     before = lint_common.python_files([root / "app"], root)
     (root / "docs/notes.md").touch()
     assert lint_common.python_files([root / "app"], root) == before
+
+
+# meiva:note
+# The file set a lint may read is the checkout's: a path reached through a link is not in
+# it, because git tracks a path, not how it is reached. `tracked_files(regular=True)`
+# decides that, so the rule is pinned where the lints consume it — a directory's answer is
+# remembered for one listing rather than rebuilt per component, and never across two reads.
+def _regular(root: Path) -> set[str]:
+    return set(lint_common.tracked_files(root, include_untracked=True, regular=True))
+
+
+def test_a_file_that_is_a_link_is_not_regular(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "pkg/real.py")
+    root = tmp_path / "repo"
+    (root / "pkg/link.py").symlink_to(root / "pkg/real.py")
+    assert "pkg/real.py" in _regular(root)
+    assert "pkg/link.py" not in _regular(root)
+
+
+def test_a_file_below_a_linked_directory_is_not_regular(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/owned/source.py")
+    root = tmp_path / "repo"
+    (root / "app/owned").rename(tmp_path / "foreign")
+    (root / "app/owned").symlink_to(tmp_path / "foreign", target_is_directory=True)
+    assert "app/owned/source.py" not in _regular(root)
+
+
+def test_a_link_two_levels_above_the_file_is_found(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/owned/deep/source.py")
+    root = tmp_path / "repo"
+    (root / "app/owned").rename(tmp_path / "foreign")
+    (root / "app/owned").symlink_to(tmp_path / "foreign", target_is_directory=True)
+    assert "app/owned/deep/source.py" not in _regular(root)
+
+
+def test_a_rejected_link_does_not_hide_a_regular_sibling(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "pkg/a.py", "pkg/b.py")
+    root = tmp_path / "repo"
+    (root / "pkg/link.py").symlink_to(root / "pkg/a.py")
+    assert {"pkg/a.py", "pkg/b.py"} <= _regular(root)
+
+
+def test_a_directory_replaced_by_a_link_is_read_again(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/owned/source.py")
+    root = tmp_path / "repo"
+    assert "app/owned/source.py" in _regular(root)
+    (root / "app/owned").rename(tmp_path / "foreign")
+    (root / "app/owned").symlink_to(tmp_path / "foreign", target_is_directory=True)
+    assert "app/owned/source.py" not in _regular(root)
+
+
+def test_a_directory_replaced_by_a_regular_file_is_skipped(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/keep.py", "app/owned/source.py")
+    root = tmp_path / "repo"
+    (root / "app/owned").rename(tmp_path / "moved")
+    (root / "app/owned").write_text("not a directory\n", encoding="utf-8")
+    kept = _regular(root)
+    assert "app/keep.py" in kept
+    assert "app/owned/source.py" not in kept
+
+
+# meiva:note
+# The other half of the error contract: an answer that is not "missing" still fails the
+# caller, so no lint silently judges a smaller file set. A locked directory produces it on
+# a normal runner but not under root, so the test passes the reader whose answer it needs
+# instead of spending a skip site on the uid.
+def test_a_file_the_filesystem_refuses_to_read_fails_the_caller(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/owned/source.py")
+    root = tmp_path / "repo"
+
+    def unreadable(path: str) -> os.stat_result:
+        raise PermissionError(errno.EACCES, "permission denied", path)
+
+    with pytest.raises(PermissionError):
+        lint_common.tracked_files(root, regular=True, lstat=unreadable)
+
+
+def test_a_file_deleted_after_the_listing_is_skipped(tmp_path: Path) -> None:
+    _git_fixture(tmp_path / "repo", "app/keep.py", "app/gone.py")
+    root = tmp_path / "repo"
+    (root / "app/gone.py").unlink()
+    assert _regular(root) == {"app/keep.py"}

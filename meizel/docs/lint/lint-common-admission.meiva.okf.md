@@ -10,6 +10,9 @@ tags: [tool, evaluation]
 Every lint that judges a directory asks `meizel.lint_common` for the checked-out
 files. Git owns that admission: tracked regular files plus new non-ignored files,
 with any path reached through a symlinked parent rejected (`meizel/checkout.py`).
+Applying that rule is cheap: one `lstat` per name decides the file half, and each
+directory's answer is remembered for the listing — 0.05 s for this repository's
+9.1k names, against 0.63 s when every component of every name was a `Path`.
 
 The ask used to be per target, and each ask re-read `git ls-files` and then
 re-checked every component of every path for symlinks. Measured on 2026-10-30 for
@@ -54,7 +57,9 @@ log and in a direct run.
 ## What pins it
 
 `meizel/tests/test_lint_common.py` covers the scope (read once, ends with the run,
-an unrelated touch does not change the admitted set);
+an unrelated touch does not change the admitted set) and the link rule itself (a
+file that is a link, a linked directory, a link two levels up, a rejected link
+beside a regular sibling, a directory replaced by a link between two reads);
 `meizel/owners/tests/test_lint_clock_lattice.py` covers it end to end — a
 violation created between two runs fails the second one, and a touched unrelated
 file keeps the verdict. Restoring a cross-run cache turns that end-to-end case red
