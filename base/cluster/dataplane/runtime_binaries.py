@@ -8,11 +8,11 @@ import shutil
 import tarfile
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
-from base.host.net.resilience import Policy, retry
+from base.host.net.resilience import Policy, retry, retry_sleep
 from base.log import logger
 from base.native_process.os_platform import Platform
 
@@ -185,6 +185,7 @@ def download_with_opener(
     headers: dict[str, str] | None = None,
     what: str = "vendored Postgres",
     policy: Policy = _DOWNLOAD_POLICY,
+    sleep: Callable[[float], None] = retry_sleep,
 ) -> bytes:
     attempt = 0
 
@@ -210,7 +211,7 @@ def download_with_opener(
             raise
 
     try:
-        return retry(policy)(_fetch_once)
+        return retry(policy, sleep=sleep)(_fetch_once)
     except urllib.error.URLError as exc:
         raise RuntimeError(f"failed to download {what} from {url}: {exc}") from exc
 

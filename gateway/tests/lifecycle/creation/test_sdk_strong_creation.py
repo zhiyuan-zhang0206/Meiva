@@ -17,12 +17,12 @@ import meiva.agents
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import router as agent_router
 from gateway.app import lifespan
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.auth.sdk_transport import AppTransport, wired_sdk
+from gateway.tests.auth.sdk_transport import zero_retry_delay as zero_retry_delay
 from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
@@ -71,9 +71,11 @@ def _older(current: FastAPI) -> FastAPI:
     return older
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_sdk_lost_response_downgrade_and_restore_one_birth(
-    client: GatewayTestClient, db_conn: psycopg.Connection, wire: AppTransport
+    zero_retry_delay: None,
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    wire: AppTransport,
 ) -> None:
     wire.losing_responses = True
     with pytest.raises(GatewayUnavailable):

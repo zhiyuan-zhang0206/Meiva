@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from typing import Any
 
-from base.host.net.resilience import Policy, aretry
+from base.host.net.resilience import Policy, aretry, retry_asleep
 from services.desktop.browser.protocol import Response
 
 LINE_LIMIT = 64 * 1024 * 1024
@@ -44,6 +44,7 @@ async def dial_unix_socket(
     line_limit: int = LINE_LIMIT,
     attempts: int = 10,
     delay: float = 0.5,
+    asleep: Callable[[float], Awaitable[None]] = retry_asleep,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     """Dial a supervised daemon, allowing a cold start to finish."""
     policy = Policy(
@@ -62,7 +63,7 @@ async def dial_unix_socket(
 
     last: OSError | None = None
     try:
-        return await aretry(policy)(once)
+        return await aretry(policy, asleep=asleep)(once)
     except (FileNotFoundError, ConnectionRefusedError) as exc:
         last = exc
     raise ConnectionError(f"{service_label} not reachable at {sock}: {last}")
@@ -130,6 +131,7 @@ class ReconnectingLink:
         base_delay: float,
         rejection_message: str | None = None,
         close_on_error: Callable[[Exception], bool],
+        asleep: Callable[[float], Awaitable[None]] = retry_asleep,
     ) -> None:
         self._connect = connect
         self._link_factory = link_factory
@@ -137,6 +139,7 @@ class ReconnectingLink:
         self._base_delay = base_delay
         self._rejection_message = rejection_message
         self._close_on_error = close_on_error
+        self._asleep = asleep
         self._link: SocketLink | None = None
         self._lock = asyncio.Lock()
 
@@ -194,4 +197,4 @@ class ReconnectingLink:
                         self._drop_link()
                     raise
 
-            return await aretry(policy)(once)
+            return await aretry(policy, asleep=self._asleep)(once)

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 import meiva.mcps._browser as browser_mod
+from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
 from base.paths import chrome_mcp_socket
 from meiva.mcps.tests.line_streams import LinePeer, leftover_socket, line_pair
@@ -293,27 +294,29 @@ async def test_connect_browser_direct_retries_until_socket_appears(
 
 @pytest.mark.parametrize("failure", ["missing", "refused"])
 async def test_dial_browser_exhaustion_has_no_trailing_sleep(
-    retry_waits: list[float], browser_home: Path, failure: str
+    browser_home: Path, failure: str
 ) -> None:
+    timers = ManualTimers()
     absent = browser_home / "absent.sock"
     sock = str(absent if failure == "missing" else leftover_socket(browser_home / "dead.sock"))
     with pytest.raises(ConnectionError) as error:
-        await browser_mod.dial_browser_mcp(sock, attempts=4, delay_s=0.5)
+        await browser_mod.dial_browser_mcp(sock, attempts=4, delay_s=0.5, asleep=timers.asleep)
     assert str(error.value).startswith(f"browser-mcp daemon not reachable at {sock}: ")
     assert error.value.__context__ is None
-    assert retry_waits == [0.5] * 3
+    assert timers.sleeps == [0.5] * 3
 
 
 # meiva:note
 # A path below a regular file fails with NotADirectoryError, which is no cold-start race.
-async def test_dial_browser_non_retryable_error_passes_through(
-    retry_waits: list[float], browser_home: Path
-) -> None:
+async def test_dial_browser_non_retryable_error_passes_through(browser_home: Path) -> None:
+    timers = ManualTimers()
     a_file = browser_home / "plain"
     a_file.write_text("x")
     with pytest.raises(NotADirectoryError):
-        await browser_mod.dial_browser_mcp(str(a_file / "svc.sock"), attempts=4, delay_s=0.5)
-    assert retry_waits == []
+        await browser_mod.dial_browser_mcp(
+            str(a_file / "svc.sock"), attempts=4, delay_s=0.5, asleep=timers.asleep
+        )
+    assert timers.sleeps == []
 
 
 async def test_call_tool_wire_carries_agent_id() -> None:

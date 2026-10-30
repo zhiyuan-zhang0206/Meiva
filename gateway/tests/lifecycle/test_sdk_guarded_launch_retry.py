@@ -3,9 +3,9 @@ import psycopg
 import pytest
 
 from base.api_contracts.agent_contract import GatewayUnavailable
-from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.auth.sdk_transport import AppTransport
+from gateway.tests.auth.sdk_transport import zero_retry_delay as zero_retry_delay
 from gateway.tests.lifecycle.test_keyed_launch_retry import birth
 from gateway.tests.lifecycle.test_keyed_launch_retry import client as client
 from gateway.tests.lifecycle.test_keyed_launch_retry import runner as runner
@@ -13,9 +13,8 @@ from meiva import agents
 from meiva.gateway_client import use_client
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_sdk_observation_lost_response_and_historical_replay(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient, db_conn: psycopg.Connection, zero_retry_delay: None
 ) -> None:
     agent_id, prior = birth(client)
     wire = AppTransport(client)

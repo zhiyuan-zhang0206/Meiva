@@ -1,31 +1,3 @@
-"""Shared retry primitives for explicitly classified transient failures.
-
-``Policy`` declares immutable retry parameters: attempts, backoff, jitter,
-classification, idempotency and Retry-After handling. ``retry`` / ``aretry``
-execute zero-argument callables without depending on their HTTP client.
-Bootstrap fetches already use this owner; ``base/lm/call.py`` and
-``base/events/live/redis_listener.py`` still have dedicated loops with their
-own consumer semantics. Remaining verification is recorded in
-``future/infra/engineering/retry-consumer-contracts.md``.
-
-``http_classifier`` provides common HTTP classification; callers compose
-local overrides through ``with_(permanent=...)`` / ``with_(transient=...)``.
-``jittered`` and ``extract_retry_after`` supply the shared wait calculations.
-``retry_sleep`` / ``retry_asleep`` are the wait hooks described below.
-
-Idempotency gate: with ``idempotent=False`` the call runs exactly once
-and a final failure MUST be made visible — ``on_final_failure`` compensation
-hook (alert / queue / raise) or the raised exception itself; silent loss is
-structurally impossible.
-
-Wait hooks: ``retry()`` sleeps through ``retry_sleep`` and ``aretry()`` awaits
-``retry_asleep``. Both are looked up in this module at every wait, not bound
-when the retry is built, so a test observes or skips the waits through the
-``retry_waits`` fixture without patching ``time`` / ``asyncio`` globally.
-
-``with_`` carries a trailing underscore because ``with`` is a Python keyword.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -62,10 +34,19 @@ _TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
 # a longer header is treated as absent rather than blindly slept.
 MAX_RETRY_AFTER_RESPECT_S = 120.0
 
-# The wait hooks (see the module docstring): looked up at every wait, replaced
-# only by tests, through the `retry_waits` fixture.
-retry_sleep: Callable[[float], None] = time.sleep
-retry_asleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+
+# meiva:note
+# The wait seam: `retry()` waits through its `sleep` keyword and `aretry()` awaits its `asleep`,
+# both defaulting to these two functions. The defaults are this module's own functions, never
+# `time.sleep` / `asyncio.sleep`: a default binds at definition time, so a caller passes the wait it
+# wants and an identity check can notice a signature that stopped naming the hook. Patching these
+# globals would not reach a loop that already bound its default.
+def retry_sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+async def retry_asleep(seconds: float) -> None:
+    await asyncio.sleep(seconds)
 
 
 class Backoff(Protocol):
@@ -270,9 +251,9 @@ class Policy:
     on_final_failure: Callable[[Exception], None] | None = None
 
 
-# meiva:link base/host/docs/host.meiva.okf.md
+# meiva:link base/host/docs/resilience.meiva.okf.md
 def retry(
-    policy: Policy, *, sleep: Callable[[float], None] | None = None
+    policy: Policy, *, sleep: Callable[[float], None] = retry_sleep
 ) -> Callable[[Callable[[], T]], T]:
     """Wrap a sync ``fn`` in the one retry loop."""
 
@@ -288,11 +269,7 @@ def retry(
                         retry_after = extract_retry_after(exc)
                         if retry_after is not None:
                             delay = max(delay, retry_after)
-                    seconds = jittered(delay, policy.jitter_span, policy.jitter)
-                    if sleep is None:
-                        retry_sleep(seconds)
-                    else:
-                        sleep(seconds)
+                    sleep(jittered(delay, policy.jitter_span, policy.jitter))
                     continue
                 if policy.on_final_failure is not None:
                     policy.on_final_failure(exc)
@@ -302,7 +279,9 @@ def retry(
     return _run
 
 
-def aretry(policy: Policy) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
+def aretry(
+    policy: Policy, *, asleep: Callable[[float], Awaitable[None]] = retry_asleep
+) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
     """Wrap an async ``fn`` in the one retry loop (async twin of ``retry``)."""
 
     def _run(fn: Callable[[], Awaitable[T]]) -> Awaitable[T]:
@@ -318,7 +297,7 @@ def aretry(policy: Policy) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T
                             retry_after = extract_retry_after(exc)
                             if retry_after is not None:
                                 delay = max(delay, retry_after)
-                        await retry_asleep(jittered(delay, policy.jitter_span, policy.jitter))
+                        await asleep(jittered(delay, policy.jitter_span, policy.jitter))
                         continue
                     if policy.on_final_failure is not None:
                         policy.on_final_failure(exc)

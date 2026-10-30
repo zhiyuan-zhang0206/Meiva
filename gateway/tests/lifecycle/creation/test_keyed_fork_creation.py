@@ -3,9 +3,9 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from base.api_contracts.agent_contract import GatewayUnavailable
-from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.auth.sdk_transport import AppTransport
+from gateway.tests.auth.sdk_transport import zero_retry_delay as zero_retry_delay
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
@@ -22,10 +22,13 @@ def _checkpoint(conn: psycopg.Connection, agent_id: int, checkpoint_id: str) -> 
     conn.commit()
 
 
-@pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("source_change", ["advanced", "empty"])
 def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
-    client: GatewayTestClient, db_conn: psycopg.Connection, wire: AppTransport, source_change: str
+    zero_retry_delay: None,
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    wire: AppTransport,
+    source_change: str,
 ) -> None:
     parent = client.post(
         PATH, json={"machine": "local-test"}, headers={**HEADERS, "Idempotency-Key": "parent"}

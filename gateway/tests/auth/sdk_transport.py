@@ -9,15 +9,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config.tests.configuration import snapshot_process_config
+from meiva.boot import derived_clients
 from meiva.gateway_client import use_client
+from meiva.sdk_surface import process_context
 
-__all__ = ["AppTransport", "wired_sdk"]
+__all__ = ["AppTransport", "wired_sdk", "zero_retry_delay"]
 
 
 class AppTransport(httpx.BaseTransport):
@@ -71,3 +77,22 @@ def wired_sdk(target: TestClient) -> Generator[AppTransport]:
         use_client(sdk_client),
     ):
         yield transport
+
+
+# meiva:note
+# The SDK's own bounded retry backs off 1/2/4 s of real time; a test that provokes it (a lost
+# response) rebinds the process context's clients over the same configuration with a zero base
+# delay, so the retry loop still runs every attempt and its waits cost nothing. The per-agent
+# jitter offset stays: it is a property of the identity, not of the delay the test configures.
+@pytest.fixture
+def zero_retry_delay() -> Iterator[None]:
+    bound = process_context.current_context()
+    config = snapshot_process_config()
+    config.set_field("gateway_client_retry_delay_seconds", 0.0)
+    context = replace(bound, clients=derived_clients(config, ConfiguredMachineIdentity(config)))
+    process_context.bind_context(context)
+    try:
+        yield
+    finally:
+        process_context.bind_context(bound)
+        context.clients.close()

@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
 from mcp.types import CallToolResult, ListToolsResult, Tool
 
-from base.host.net.resilience import Policy, aretry
+from base.host.net.resilience import Policy, aretry, retry_asleep
 
 # Snapshot results stay small (PNG metadata), but keep the same generous line
 # cap as the browser direct-dial so a future inline-image tier fits.
@@ -47,9 +48,11 @@ class ComputerLineSession:
         writer: asyncio.StreamWriter,
         *,
         sock: str | None = None,
+        asleep: Callable[[float], Awaitable[None]] = retry_asleep,
     ) -> None:
         self._reader = reader
         self._writer = writer
+        self._asleep = asleep
         self._id = 0
         self._sock = sock  # re-dial path used when the stream desyncs
         self.client_agent_id: int | None = None
@@ -61,7 +64,7 @@ class ComputerLineSession:
         await self.close()
         if self._sock is None:
             return
-        reader, writer = await dial_computer_mcp(self._sock)
+        reader, writer = await dial_computer_mcp(self._sock, asleep=self._asleep)
         self._reader = reader
         self._writer = writer
         self._id = 0
@@ -114,7 +117,7 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
 
 
 async def dial_computer_mcp(
-    sock: str,
+    sock: str, *, asleep: Callable[[float], Awaitable[None]] = retry_asleep
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     policy = Policy(
         max_attempts=_CONNECT_ATTEMPTS,
@@ -132,7 +135,7 @@ async def dial_computer_mcp(
 
     last: OSError | None = None
     try:
-        return await aretry(policy)(once)
+        return await aretry(policy, asleep=asleep)(once)
     except (FileNotFoundError, ConnectionRefusedError) as exc:
         last = exc
     raise ConnectionError(f"computer-mcp daemon not reachable at {sock}: {last}")
@@ -140,6 +143,8 @@ async def dial_computer_mcp(
 
 # meiva:note
 # Dial the computer-mcp service socket `sock`; return (session, stack). Mirrors `meiva.mcps._browser.connect_browser_direct`: the returned stack is empty (the socket is the whole connection; nothing to close beyond the session's own writer), kept for interface parity with the stdio path.
-async def connect_computer_direct(sock: str) -> tuple[ComputerLineSession, AsyncExitStack]:
-    reader, writer = await dial_computer_mcp(sock)
-    return ComputerLineSession(reader, writer, sock=sock), AsyncExitStack()
+async def connect_computer_direct(
+    sock: str, *, asleep: Callable[[float], Awaitable[None]] = retry_asleep
+) -> tuple[ComputerLineSession, AsyncExitStack]:
+    reader, writer = await dial_computer_mcp(sock, asleep=asleep)
+    return ComputerLineSession(reader, writer, sock=sock, asleep=asleep), AsyncExitStack()

@@ -29,6 +29,8 @@ from base.host.net.resilience import (
     jitter_delay,
     jittered,
     retry,
+    retry_asleep,
+    retry_sleep,
 )
 from base.host.net.tests.resilience_process import report
 
@@ -63,62 +65,69 @@ def _http_error(status: int, *, retry_after: str | None = None) -> urllib.error.
     )
 
 
-# Backoff waits are recorded, never slept; tests that do not read them assert call counts.
-pytestmark = pytest.mark.usefixtures("retry_waits")
-
-# Captured at import, before any fixture replaces them.
-_DEFAULT_WAIT_HOOKS = (resilience.retry_sleep, resilience.retry_asleep)
-
 # meiva:note
-# Collection builds these closures before retry_waits replaces the existing public hooks.
-_PREBUILT_RETRY = retry(Policy(max_attempts=3, backoff=ExponentialBackoff(1, 2, 8), jitter="none"))
-_PREBUILT_ARETRY = aretry(
-    Policy(max_attempts=3, backoff=ExponentialBackoff(1, 2, 8), jitter="none")
-)
+# Every case here drives the loop through a recorder: a backoff wait lands in `timers.sleeps` and
+# nothing sleeps for real. It is local because this package may not reach the clock's manual
+# timers (that import closes a host -> clock cycle), and the seam needs nothing more than these two
+# methods.
+class _RecordingTimers:
+    def __init__(self) -> None:
+        self.sleeps: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+    async def asleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+
+@pytest.fixture
+def timers() -> _RecordingTimers:
+    return _RecordingTimers()
 
 
 class TestRetry:
-    def test_success_first_attempt(self) -> None:
+    def test_success_first_attempt(self, timers: _RecordingTimers) -> None:
         f = _Flaky(ValueError("x"), 0)
-        assert retry(Policy())(f) == "ok"
+        assert retry(Policy(), sleep=timers.sleep)(f) == "ok"
         assert f.calls == 1
 
-    def test_transient_then_success(self) -> None:
+    def test_transient_then_success(self, timers: _RecordingTimers) -> None:
         f = _Flaky(urllib.error.URLError("boom"), 2)
-        assert retry(Policy(max_attempts=4))(f) == "ok"
+        assert retry(Policy(max_attempts=4), sleep=timers.sleep)(f) == "ok"
         assert f.calls == 3
 
-    def test_exhausts_raises_last_error(self) -> None:
+    def test_exhausts_raises_last_error(self, timers: _RecordingTimers) -> None:
         f = _Flaky(urllib.error.URLError("boom"), 100)
         with pytest.raises(urllib.error.URLError):
-            retry(Policy(max_attempts=3))(f)
+            retry(Policy(max_attempts=3), sleep=timers.sleep)(f)
         assert f.calls == 3
 
-    def test_permanent_status_not_retried(self) -> None:
+    def test_permanent_status_not_retried(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(400), 100)
         with pytest.raises(urllib.error.HTTPError):
-            retry(Policy(max_attempts=3))(f)
+            retry(Policy(max_attempts=3), sleep=timers.sleep)(f)
         assert f.calls == 1
 
-    def test_transient_status_retried(self) -> None:
+    def test_transient_status_retried(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(429), 2)
-        assert retry(Policy(max_attempts=4))(f) == "ok"
+        assert retry(Policy(max_attempts=4), sleep=timers.sleep)(f) == "ok"
         assert f.calls == 3
 
-    def test_non_http_exception_is_permanent(self) -> None:
+    def test_non_http_exception_is_permanent(self, timers: _RecordingTimers) -> None:
         f = _Flaky(ValueError("bug"), 100)
         with pytest.raises(ValueError):
-            retry(Policy(max_attempts=3))(f)
+            retry(Policy(max_attempts=3), sleep=timers.sleep)(f)
         assert f.calls == 1
 
-    def test_idempotent_false_single_attempt(self) -> None:
+    def test_idempotent_false_single_attempt(self, timers: _RecordingTimers) -> None:
         """Non-idempotent: exactly one execution even for retryable errors."""
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
-            retry(Policy(idempotent=False, on_final_failure=lambda _e: None))(f)
+            retry(Policy(idempotent=False, on_final_failure=lambda _e: None), sleep=timers.sleep)(f)
         assert f.calls == 1
 
-    def test_on_final_failure_hook_sees_last_error(self) -> None:
+    def test_on_final_failure_hook_sees_last_error(self, timers: _RecordingTimers) -> None:
         seen: list[Exception] = []
         f = _Flaky(_http_error(500), 100)
 
@@ -126,19 +135,19 @@ class TestRetry:
             seen.append(exc)
 
         with pytest.raises(urllib.error.HTTPError):
-            retry(Policy(max_attempts=2, on_final_failure=_hook))(f)
+            retry(Policy(max_attempts=2, on_final_failure=_hook), sleep=timers.sleep)(f)
         assert len(seen) == 1
         assert isinstance(seen[0], urllib.error.HTTPError)
 
-    def test_on_final_failure_can_convert_error_type(self) -> None:
+    def test_on_final_failure_can_convert_error_type(self, timers: _RecordingTimers) -> None:
         def _hook(exc: Exception) -> None:
             raise RuntimeError(f"converted: {exc}") from exc
 
         f = _Flaky(_http_error(502), 100)
         with pytest.raises(RuntimeError, match="converted"):
-            retry(Policy(on_final_failure=_hook))(f)
+            retry(Policy(on_final_failure=_hook), sleep=timers.sleep)(f)
 
-    def test_backoff_sequence(self, retry_waits: list[float]) -> None:
+    def test_backoff_sequence(self, timers: _RecordingTimers) -> None:
         """Exponential shape: base * factor**attempt, capped."""
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
@@ -147,11 +156,12 @@ class TestRetry:
                     max_attempts=4,
                     backoff=ExponentialBackoff(1.0, 2.0, 8.0),
                     jitter="none",
-                )
+                ),
+                sleep=timers.sleep,
             )(f)
-        assert retry_waits == [1.0, 2.0, 4.0]
+        assert timers.sleeps == [1.0, 2.0, 4.0]
 
-    def test_backoff_capped(self, retry_waits: list[float]) -> None:
+    def test_backoff_capped(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -159,11 +169,12 @@ class TestRetry:
                     max_attempts=5,
                     backoff=ExponentialBackoff(1.0, 2.0, 3.0),
                     jitter="none",
-                )
+                ),
+                sleep=timers.sleep,
             )(f)
-        assert retry_waits == [1.0, 2.0, 3.0, 3.0]
+        assert timers.sleeps == [1.0, 2.0, 3.0, 3.0]
 
-    def test_retry_after_overrides_backoff(self, retry_waits: list[float]) -> None:
+    def test_retry_after_overrides_backoff(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(429, retry_after="30"), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -171,11 +182,12 @@ class TestRetry:
                     max_attempts=2,
                     backoff=ExponentialBackoff(1.0, 1.0, 1.0),
                     jitter="none",
-                )
+                ),
+                sleep=timers.sleep,
             )(f)
-        assert retry_waits == [30.0]
+        assert timers.sleeps == [30.0]
 
-    def test_respect_retry_after_false(self, retry_waits: list[float]) -> None:
+    def test_respect_retry_after_false(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(429, retry_after="30"), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -184,81 +196,91 @@ class TestRetry:
                     backoff=ExponentialBackoff(1.0, 1.0, 1.0),
                     jitter="none",
                     respect_retry_after=False,
-                )
+                ),
+                sleep=timers.sleep,
             )(f)
-        assert retry_waits == [1.0]
+        assert timers.sleeps == [1.0]
 
 
 class TestAretry:
-    async def test_aretry_transient_then_success(self) -> None:
+    async def test_aretry_transient_then_success(self, timers: _RecordingTimers) -> None:
         f = _Flaky(httpx.ConnectError("boom"), 2)
 
         async def _call() -> object:
             return f()
 
-        assert await aretry(Policy(max_attempts=4))(_call) == "ok"
+        assert await aretry(Policy(max_attempts=4), asleep=timers.asleep)(_call) == "ok"
         assert f.calls == 3
 
-    async def test_aretry_permanent_not_retried(self) -> None:
+    async def test_aretry_permanent_not_retried(self, timers: _RecordingTimers) -> None:
         f = _Flaky(ValueError("bug"), 100)
 
         async def _call() -> object:
             return f()
 
         with pytest.raises(ValueError):
-            await aretry(Policy(max_attempts=3))(_call)
+            await aretry(Policy(max_attempts=3), asleep=timers.asleep)(_call)
         assert f.calls == 1
 
-    async def test_aretry_idempotent_false_single_attempt(self) -> None:
+    async def test_aretry_idempotent_false_single_attempt(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(503), 100)
 
         async def _call() -> object:
             return f()
 
         with pytest.raises(urllib.error.HTTPError):
-            await aretry(Policy(idempotent=False, on_final_failure=lambda _e: None))(_call)
+            await aretry(
+                Policy(idempotent=False, on_final_failure=lambda _e: None), asleep=timers.asleep
+            )(_call)
         assert f.calls == 1
 
 
-class TestWaitHooks:
-    """`retry_sleep` / `retry_asleep` are the public seam tests observe backoff waits through."""
+# meiva:note
+# `retry` / `aretry` wait through the callable they are handed, not a patched global.
+class TestWaitSeam:
+    def test_the_defaults_are_the_named_hooks(self) -> None:
+        # meiva:note
+        # The hook is this module's own function, so a signature that spells `time.sleep` binds a
+        # different object and fails here rather than silently missing the seam later.
+        assert inspect.signature(retry).parameters["sleep"].default is retry_sleep
+        assert inspect.signature(aretry).parameters["asleep"].default is retry_asleep
+        assert retry_sleep is not time.sleep
+        assert retry_asleep is not asyncio.sleep
 
-    def test_hooks_are_public_and_default_to_the_real_waits(self) -> None:
+    def test_the_hooks_are_exported(self) -> None:
         assert {"retry_sleep", "retry_asleep"} <= set(resilience.__all__)
-        assert (time.sleep, asyncio.sleep) == _DEFAULT_WAIT_HOOKS
 
-    def test_retry_reads_the_hook_at_each_wait(self, retry_waits: list[float]) -> None:
-        with pytest.raises(urllib.error.HTTPError):
-            _PREBUILT_RETRY(_Flaky(_http_error(503), 100))
-        assert retry_waits == [1.0, 2.0]
+    def test_retry_sleeps_through_the_callable_it_is_handed(self, timers: _RecordingTimers) -> None:
+        # meiva:link base/host/docs/host.meiva.okf.md
+        run = retry(
+            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none"),
+            sleep=timers.sleep,
+        )
+        assert run(_Flaky(urllib.error.URLError("boom"), 1)) == "ok"
+        assert timers.sleeps == [1.0]
 
-    async def test_aretry_reads_the_hook_at_each_wait(self, retry_waits: list[float]) -> None:
-        flaky = _Flaky(_http_error(503), 100)
+    async def test_aretry_awaits_through_the_callable_it_is_handed(
+        self, timers: _RecordingTimers
+    ) -> None:
+        flaky = _Flaky(urllib.error.URLError("boom"), 1)
 
         async def call() -> object:
             return flaky()
 
-        with pytest.raises(urllib.error.HTTPError):
-            await _PREBUILT_ARETRY(call)
-        assert retry_waits == [1.0, 2.0]
-
-    def test_retry_uses_the_callers_own_wait(self, retry_waits: list[float]) -> None:
-        # meiva:link base/host/docs/host.meiva.okf.md
-        seen: list[float] = []
-        run = retry(
-            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none"),
-            sleep=seen.append,
+        assert (
+            await aretry(
+                Policy(max_attempts=2, backoff=ExponentialBackoff(3.0, 1.0, 3.0), jitter="none"),
+                asleep=timers.asleep,
+            )(call)
+            == "ok"
         )
-        assert run(_Flaky(urllib.error.URLError("boom"), 1)) == "ok"
-        assert seen == [1.0]
-        assert retry_waits == []
+        assert timers.sleeps == [3.0]
 
-    async def test_retry_waits_records_sync_and_async_waits_in_call_order(
-        self, retry_waits: list[float]
+    async def test_one_recorder_captures_sync_and_async_waits_in_call_order(
+        self, timers: _RecordingTimers
     ) -> None:
         policy = Policy(max_attempts=2, backoff=ExponentialBackoff(1.0, 1.0, 1.0), jitter="none")
-        flaky_sync = _Flaky(urllib.error.URLError("boom"), 1)
-        assert retry(policy)(flaky_sync) == "ok"
+        assert retry(policy, sleep=timers.sleep)(_Flaky(urllib.error.URLError("boom"), 1)) == "ok"
         flaky_async = _Flaky(urllib.error.URLError("boom"), 1)
 
         async def _call() -> object:
@@ -266,19 +288,12 @@ class TestWaitHooks:
 
         assert (
             await aretry(
-                Policy(max_attempts=2, backoff=ExponentialBackoff(3.0, 1.0, 3.0), jitter="none")
+                Policy(max_attempts=2, backoff=ExponentialBackoff(3.0, 1.0, 3.0), jitter="none"),
+                asleep=timers.asleep,
             )(_call)
             == "ok"
         )
-        assert retry_waits == [1.0, 3.0]
-        assert inspect.iscoroutinefunction(resilience.retry_asleep)
-
-    def test_retry_waits_fails_fast_when_a_loop_never_ends(self, retry_waits: list[float]) -> None:
-        """A recorder that keeps filling means a caller loops around an instant wait (#1001)."""
-        with pytest.raises(AssertionError, match="issue #1001"):
-            for _ in range(100_000):
-                resilience.retry_sleep(0.0)
-        assert 0 < len(retry_waits) < 100_000
+        assert timers.sleeps == [1.0, 3.0]
 
 
 class TestHttpClassifier:
@@ -459,6 +474,6 @@ def test_transport_phase_uses_process_not_env_identity() -> None:
         assert observed["phase"] == 10.0 * (pid % 1000) / 1000.0
 
 
-def test_aretry_schedules_backoff_on_the_active_event_loop() -> None:
+def test_aretry_awaits_the_timers_it_is_handed_in_a_fresh_process() -> None:
     observed = report("async-waits")
-    assert observed == {"attempts": 3, "waits": [1.0, 2.0], "closed": True, "same_error": True}
+    assert observed == {"attempts": 3, "waits": [1.0, 2.0], "same_error": True}

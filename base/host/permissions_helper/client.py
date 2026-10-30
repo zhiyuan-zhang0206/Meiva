@@ -26,7 +26,7 @@ from typing import Any, Literal, overload
 
 from base.host.converge.accessibility import AccessibilityState, AccessibilityStatus
 from base.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
-from base.host.net.resilience import Policy, retry
+from base.host.net.resilience import Policy, retry, retry_sleep
 
 from .client_stateful import StatefulCalls
 from .wire import (
@@ -166,7 +166,7 @@ class UserAbortError(PermissionsHelperError):
     main display's top-left corner. The action must not be retried or replayed."""
 
 
-def connect(path: str) -> socket.socket:
+def connect(path: str, *, sleep: Callable[[float], None] = retry_sleep) -> socket.socket:
     """Open the helper's Unix socket, retrying briefly while it is absent or refusing."""
     phase = ["socket"]
     policy = Policy(
@@ -203,7 +203,7 @@ def connect(path: str) -> socket.socket:
 
     last: OSError | None = None
     try:
-        return retry(policy)(once)
+        return retry(policy, sleep=sleep)(once)
     except PermissionError:
         raise
     except OSError as exc:
@@ -298,9 +298,16 @@ class PermissionsHelperClient(StatefulCalls):
     decides which helper a caller talks to, and every call below dials that one.
     """
 
-    def __init__(self, sock_path: str | Path, *, call_timeout_s: float = CALL_TIMEOUT_S) -> None:
+    def __init__(
+        self,
+        sock_path: str | Path,
+        *,
+        call_timeout_s: float = CALL_TIMEOUT_S,
+        sleep: Callable[[float], None] = retry_sleep,
+    ) -> None:
         self._sock_path = Path(sock_path)
         self._call_timeout_s = call_timeout_s
+        self._sleep = sleep
 
     @property
     def sock_path(self) -> Path:
@@ -311,7 +318,10 @@ class PermissionsHelperClient(StatefulCalls):
     def _call_raw(self, method: str, **args: object) -> Mapping[str, Any]:
         req = {"id": 1, "method": method, **args}
         return _exchange(
-            connect(str(self._sock_path)), method, req, call_timeout_s=self._call_timeout_s
+            connect(str(self._sock_path), sleep=self._sleep),
+            method,
+            req,
+            call_timeout_s=self._call_timeout_s,
         )
 
     def ping(self) -> PingResult:

@@ -7,9 +7,9 @@ import pytest
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.auth.sdk_transport import AppTransport
+from gateway.tests.auth.sdk_transport import zero_retry_delay as zero_retry_delay
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import sdk
@@ -17,7 +17,6 @@ from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 from meiva.gateway_client import use_client
 
 
-@pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("rotate", [False, True])
 def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     runner: RunnerOps,
@@ -25,6 +24,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     rotate: bool,
     *,
     machine_identity: MachineIdentityReader,
+    zero_retry_delay: None,
 ) -> None:
     with gateway_test_client(
         cluster_secret=SECRET,
