@@ -61,6 +61,10 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 """,
     "leakdemo/lazy_pkg/sub.py": "VALUE = 7\n",
+    "leakdemo/gate.py": """
+def is_open() -> bool:
+    return False
+""",
 }
 
 PYTEST_INI = """
@@ -462,6 +466,40 @@ def write_suite(root: Path) -> None:
     _write(root, "leakdemo/tests/test_known_leaks.py", KNOWN_LEAKS)
     _write(root, "leakdemo/tests/test_other_state.py", OTHER_STATE)
     _write(root, "leakdemo/tests/test_clean_patterns.py", CLEAN_PATTERNS)
+
+
+REPLACE_LEAKER = '''
+"""A file that hands an existing attribute of a first-party module a new object."""
+
+from leakdemo import gate
+
+
+def test_replaces_an_existing_function() -> None:
+    gate.is_open = lambda: True  # the module's function now points at this test's lambda
+    assert gate.is_open()
+'''
+
+REPLACE_AFTER = '''
+"""The next file in the worker: where the boundary of the file above is observed."""
+
+from leakdemo import gate
+
+
+def test_reads_the_real_function() -> None:
+    assert gate.is_open() is False  # the stand-in from the file above would answer True
+'''
+
+
+# meiva:note
+# Two files, in this order: the first hands an existing attribute of a first-party module another
+# object and puts nothing back; the second reads the real function, so its first test is the point
+# where the guard's file boundary is observed.
+def write_replace_suite(root: Path) -> None:
+    for rel, text in PACKAGE.items():
+        _write(root, rel, text)
+    _write(root, "pytest.ini", PYTEST_INI)
+    _write(root, "leakdemo/tests/test_a_replace.py", REPLACE_LEAKER)
+    _write(root, "leakdemo/tests/test_b_after.py", REPLACE_AFTER)
 
 
 def write_order_suite(root: Path, plugins: list[str]) -> None:

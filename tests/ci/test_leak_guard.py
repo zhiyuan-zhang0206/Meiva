@@ -182,6 +182,17 @@ def suite(tmp_path_factory: pytest.TempPathFactory) -> Suite:
     return Suite(tmp_path_factory.mktemp("leak_suite"))
 
 
+@pytest.fixture(scope="module")
+def replace_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp("leak_replace")
+    leak_guard_suite.write_replace_suite(root)
+    return root
+
+
+def _run_replace(root: Path, mode: str, n: int, *, xdist: bool = False) -> Run:
+    return _pytest(root, _TESTS, mode, xdist, "", n, plugins=(_GUARD,))
+
+
 def _kinds(run: Run, name: str) -> list[str]:
     return [
         v.partition(": ")[0] for p, v in run.properties.get(name, []) if p != "leak_guard_fault"
@@ -449,6 +460,59 @@ def test_a_clean_session_with_a_broken_guard_still_passes_in_warn_mode(suite: Su
 
 
 # -- the report the aggregator reads ---------------------------------------------------------------
+
+
+# meiva:note
+# The shape `#7796` had: a file hands an existing module attribute a new object and keeps going. The
+# size of the module dict never moves, so the per-test checks cannot see it; the file's own tests stay
+# green, the finding names the FILE, and it lands on the test that followed it.
+def test_a_replaced_existing_attribute_is_named_at_the_file_boundary(
+    replace_root: Path,
+) -> None:
+    run = _run_replace(replace_root, "warn", 0)
+    assert run.bad() == {"test_reads_the_real_function"}
+    assert {
+        x["test"].rpartition("::")[2] for x in shard_counts.count_junit(run.junit)["leaks"]
+    } == {"test_reads_the_real_function"}
+    assert [x["kind"] for x in shard_counts.count_junit(run.junit)["leaks"]] == [
+        "module-attr-replaced"
+    ]
+    detail = shard_counts.count_junit(run.junit)["leaks"][0]["detail"]
+    assert detail.startswith(f"{_TESTS}/test_a_replace.py left leakdemo.gate.is_open")
+
+
+# meiva:note
+# A worker that ends inside the leaking file has no next test to carry the finding: the boundary is
+# observed at session end and handed to the controller through workeroutput, so the run is red and
+# the file is named there too.
+def test_under_xdist_the_file_each_worker_ends_is_still_named(replace_root: Path) -> None:
+    run = _run_replace(replace_root, "fail", 3, xdist=True)
+    assert run.code == 1
+    assert run.bad() == set()
+    assert re.search(
+        rf"LEAK \S*test_a_replace\.py -- module-attr-replaced: {_TESTS}/test_a_replace.py left "
+        r"leakdemo\.gate\.is_open",
+        run.out,
+    )
+
+
+# meiva:note
+# Restoring before the next file keeps the victim green; the run is still red, and the finding names
+# the file that left the stand-in behind.
+def test_fail_mode_puts_a_replaced_attribute_back_and_reds_the_run(replace_root: Path) -> None:
+    run = _run_replace(replace_root, "fail", 1)
+    assert run.bad() == set()
+    # meiva:note
+    # A file boundary has no test at its teardown, so the verdict rides on the session's exit status
+    # rather than on a test result; failing the next file's first test would name an innocent one.
+    assert run.code == 1
+    assert re.search(
+        rf"^  LEAK \S+::test_reads_the_real_function -- module-attr-replaced: {_TESTS}/test_a_replace.py",
+        run.out,
+        re.M,
+    )
+    clean = _run_replace(replace_root, "off", 2)
+    assert "leak_guard" not in clean.out
 
 
 def test_the_properties_the_guard_writes_are_what_shard_counts_reads(suite: Suite) -> None:
