@@ -9,7 +9,7 @@ exports = ["fleet-view.tsx"]
 "force-graph-layout.test.ts" = ["force-graph.tsx"]
 "force-graph.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "presentation"]
 "graph-view.test.tsx" = ["graph-view.tsx"]
-"graph-view.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx"]
+"graph-view.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx", "presentation"]
 "left-graph-panel.tsx" = ["graph-view.tsx", "task-graph.tsx"]
 "task-graph-chrome.tsx" = ["presentation"]
 "task-graph-forces.test.ts" = ["force-controls.tsx"]
@@ -24,12 +24,6 @@ exports = ["fleet-view.tsx"]
 "fleet-view.test.tsx#vi.mock next/navigation" = 1
 "graph-view.test.tsx#vi.mock next/navigation" = 1
 "task-graph.test.tsx#vi.mock next/navigation" = 1
-
-[debt.type-cast]
-"force-graph.tsx#cast ForceGraph.<lambda>" = 1
-"graph-view.tsx#cast GraphView.<lambda>" = 3
-"task-graph-chrome.tsx#cast FilterCluster.<lambda>" = 1
-"task-graph.tsx#cast TaskGraph.<lambda>" = 1
 
 [debt.unresolved-patch]
 "task-graph.test.tsx#vi.spyOn canvas.\"getBoundingClientRect\"" = 6

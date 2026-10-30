@@ -233,7 +233,11 @@ export const ForceGraph = memo(function ForceGraph({
           {/* Nodes. */}
           <g>
             {placed.map(({ node: sim, p }) => {
-              const n = nodeById.get(sim.id as number);
+              // meiva:note
+              // The layout's id is the union d3 accepts; only a numeric one can name a node here,
+              // and a non-numeric id simply draws nothing.
+              // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+              const n = typeof sim.id === "number" ? nodeById.get(sim.id) : undefined;
               if (!n) return null;
               const r = radiusOf(n.score, maxScore, params.nodeSizeMin, params.nodeSizeMax);
               const isHovered = hovered?.id === n.id;

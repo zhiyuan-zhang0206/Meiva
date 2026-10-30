@@ -15,7 +15,4 @@ exports = ["schema_mismatch.py"]
 "shell_plans.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["clock", "settings"], why = "Cluster status snapshot composition root stamps the cluster wall-clock instant, builds the process clock from the settings and hands the session backend the system timers its stop waits run on; the agent-host pidfile it probes arrives as a required path" }
-
-[debt.ambient-read]
-"__init__.py#environ base.host.env.registry.process_environment" = 1
+"__init__.py" = { kinds = ["clock", "environ", "settings"], why = "Cluster status snapshot composition root stamps the cluster wall-clock instant, builds the process clock from the settings, hands the checkout-head read the process environment its git child runs in and hands the session backend the system timers its stop waits run on; the agent-host pidfile it probes arrives as a required path" }

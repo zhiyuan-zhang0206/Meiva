@@ -224,7 +224,10 @@ export function FilterCluster({
       <WindowSelect
         value={taskWindow}
         options={taskWindowOptions}
-        onChange={(v) => setTaskWindow(v as TaskWindow)}
+        onChange={(v) => {
+          const next = TASK_WINDOW_VALUES.find((window) => window === v);
+          if (next !== undefined) setTaskWindow(next);
+        }}
         ariaLabel={t("window")}
         className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       />

@@ -5,29 +5,27 @@ import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { ComponentProps } from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
-import type { NoticesFeed } from "@/lib/notifications/use-notices";
+import type { AgentRow, NoticeItem, OpenNotice } from "@/lib/contracts/types";
+import {
+  NOTICES_QUERY_KEY,
+  NOTICES_RESOLVED_QUERY_KEY,
+} from "@/lib/notifications/use-notices";
 
 const resolveNotice = vi.fn<
   (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
 >();
 
-const inboxFeedMock = vi.fn<() => NoticesFeed>();
-const dropOpenNotices = vi.fn<(queryClient: unknown, noticeIds: number[]) => void>();
-vi.mock("@/lib/notifications/use-notices", () => ({
-  useNotices: () => inboxFeedMock(),
-  dropOpenNotices: (qc: unknown, ids: number[]) => dropOpenNotices(qc, ids),
-}));
+// meiva:note
+// The rows the queue renders: seeded into the notice caches before the render, in the shape the app
+// stores them, so the real feed hook (and the real optimistic drop) runs.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+interface FeedRows {
+  open: NoticeItem[];
+  awaiting: NoticeItem[];
+  resolved: NoticeItem[];
+}
 
-const useTasksMock = vi.fn<(window?: string, fields?: string) => { tasks: TaskSummaryRow[]; loading: boolean; error: boolean }>(
-  () => ({ tasks: [], loading: false, error: false }),
-);
-vi.mock("@/lib/notifications/use-tasks", () => ({
-  useTasks: (window?: string, fields?: string) => useTasksMock(window, fields),
-}));
-
-const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
-vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
+let nextFeed: FeedRows = { open: [], awaiting: [], resolved: [] };
 
 import { InboxQueue } from "../inbox-queue";
 
@@ -41,26 +39,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  inboxFeedMock.mockReturnValue(emptyFeed());
-  useTasksMock.mockReturnValue({ tasks: [], loading: false, error: false });
-  useAllPagesMock.mockReturnValue([]);
+  setFeed();
 });
 
-function emptyFeed(over: Partial<NoticesFeed> = {}): NoticesFeed {
-  return {
-    open: over.open ?? [],
-    awaiting: over.awaiting ?? [],
-    resolved: over.resolved ?? [],
-    fetchNextPage: over.fetchNextPage ?? vi.fn(),
-    hasNextPage: over.hasNextPage ?? false,
-    isFetchingNextPage: over.isFetchingNextPage ?? false,
-    error: over.error ?? false,
-    resolvedError: over.resolvedError ?? false,
-    isLoading: over.isLoading ?? false,
-  };
-}
-function setFeed(over: Partial<NoticesFeed> = {}) {
-  inboxFeedMock.mockReturnValue(emptyFeed(over));
+function setFeed(over: Partial<FeedRows> = {}) {
+  nextFeed = { open: over.open ?? [], awaiting: over.awaiting ?? [], resolved: over.resolved ?? [] };
 }
 
 function n(over: Partial<NoticeItem> & { id: number; title: string }): NoticeItem {
@@ -125,11 +108,29 @@ function agent(over: {
   };
 }
 
+// meiva:note
+// The test door for this file: the queue's rows enter through the notice caches the feed hook reads,
+// and the exports stay empty — the same values the app would have fetched.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 function renderQueue(
   agents: AgentRow[],
   props: Omit<ComponentProps<typeof InboxQueue>, "agents"> = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  qc.setQueryData(NOTICES_QUERY_KEY, {
+    open: nextFeed.open,
+    awaiting: nextFeed.awaiting,
+    resolved_page: [],
+    next_cursor: null,
+  });
+  qc.setQueryData(NOTICES_RESOLVED_QUERY_KEY, {
+    pages: [{ resolved_page: nextFeed.resolved, next_cursor: null }],
+    pageParams: [undefined],
+  });
+  qc.setQueryData(["tasks", "summary", "7d"], { tasks: [] });
+  qc.setQueryData(["all-pages"], []);
+  transport.getTasks.mockResolvedValue({ tasks: [] });
+  transport.listAllPages.mockResolvedValue([]);
   return renderWithBrowser(
     // meiva:note
     // The queue's rows age against the page's clock; the app's own answer (the system clock) is
@@ -211,12 +212,6 @@ describe("InboxQueue — open stream", () => {
 describe("InboxQueue — route anchor", () => {
   it("scrolls to and briefly highlights the matching notice without reordering", async () => {
     vi.useFakeTimers();
-    const raf = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        callback(0);
-        return 1;
-      });
     try {
       setFeed({
         awaiting: [
@@ -230,6 +225,10 @@ describe("InboxQueue — route anchor", () => {
       );
 
       expect(listTitles()).toEqual(["first", "target"]);
+      // meiva:note
+      // The anchor scroll runs on the page's next frame; the fake clock runs that frame, so the
+      // test states time instead of replacing the page's scheduler.
+      await act(() => vi.advanceTimersByTime(16));
       const target = screen.getByText("target").closest('[data-testid="inbox-row"]');
       expect(target?.getAttribute("data-anchor-highlighted")).toBe("true");
       expect(target?.className).toContain("bg-primary/10");
@@ -239,7 +238,6 @@ describe("InboxQueue — route anchor", () => {
       expect(target?.getAttribute("data-anchor-highlighted")).toBeNull();
       expect(listTitles()).toEqual(["first", "target"]);
     } finally {
-      raf.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -353,6 +351,10 @@ describe("InboxQueue — notice lifecycle", () => {
     setFeed({ awaiting: [n({ id: 1, title: "first" }), n({ id: 2, title: "second" })] });
     renderQueue([]);
     fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
-    await waitFor(() => expect(dropOpenNotices).toHaveBeenCalledWith(expect.anything(), [1]));
+    // meiva:note
+    // The drop is asserted where the user sees it: the dismissed row leaves the queue at once, and
+    // the next one is selected.
+    await waitFor(() => expect(screen.queryByText("first")).toBeNull());
+    expect(listTitles()).toEqual(["second"]);
   });
 });
