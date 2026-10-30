@@ -137,6 +137,17 @@ repos:
         language: system
         files: ^(meizel\.policy\.toml|.*\.py)$
 
+      # A test that judges the code by the real wall clock: a bound loose enough not to flake
+      # passes the defect it was written to catch (#7725 kept `elapsed < 0.5` green under a probe
+      # re-consuming its budget per segment). Assert a counted fact, or buy silence per line with
+      # `# timing-guard: <only catches a hang | injected clock>`; the sites that predate the rule
+      # live in scripts/lint/timing_judgement_baseline.json. See scripts/lint/timing_judgement.py.
+      - id: lint-timing-judgement
+        name: lint wall-clock judgements in tests (assert a counted fact)
+        entry: .venv/bin/python -m meizel.owners.timing_judgement_cli --only
+        language: system
+        files: ^(meizel/owners/timing_judgement_baseline\.json|meizel/owners/timing_judgement.*\.py|.*\.py)$
+
       # PYTHONSAFEPATH=1 (2026-08-22 hardening) keeps a script's own directory
       # off sys.path, so a script-mode file importing a same-dir sibling without
       # restoring its directory first breaks (daily_scan.py 2026-08-23 crash).
