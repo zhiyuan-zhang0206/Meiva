@@ -9,12 +9,7 @@
 "audit.py" = "strict"
 "events_window.py" = "strict"
 "label.py" = "strict"
-"record.py" = "strict-to-be"
+"record.py" = "strict"
 "record_inputs.py" = "strict"
-"scan_report.py" = "strict-to-be"
-"window_records.py" = "strict-to-be"
-
-[debt.impure-call]
-"record.py#Path.resolve" = 1
-"scan_report.py#Path.resolve" = 1
-"window_records.py#Path.resolve" = 1
+"scan_report.py" = "strict"
+"window_records.py" = "strict"
