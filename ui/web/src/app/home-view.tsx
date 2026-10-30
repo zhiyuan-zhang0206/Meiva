@@ -39,7 +39,6 @@ import type { UseTimelineResult } from "@/lib/timeline/use-timeline";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { useApi } from "@/lib/transport/transport-context";
-import { AgentEventStreamProvider } from "@/lib/transport/useEventStream";
 
 // meiva:note
 // The home route splits in two: `page.tsx` is the composition root that reads every hook and
@@ -239,8 +238,7 @@ export function HomePageView(props: HomePageProps) {
     </ErrorBoundary>
   );
   const mainColumn = (
-    <AgentEventStreamProvider>
-      <HomeContent
+    <HomeContent
         activeId={activeId}
         activeAgent={activeAgent}
         showError={showError}
@@ -262,7 +260,6 @@ export function HomePageView(props: HomePageProps) {
         UploadButton={UploadButton}
         sidebar={sidebar}
       />
-    </AgentEventStreamProvider>
   );
   const inspectorColumn =
     showContext && activeId != null ? (

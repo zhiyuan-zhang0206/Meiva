@@ -9,6 +9,7 @@ import { Composer } from "@/components/conversation/composer";
 import { UploadButton } from "@/components/conversation/upload-button";
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { HeaderBar } from "@/components/shell/header-bar";
+import { AgentEventStreamProvider } from "@/lib/transport/useEventStream";
 import { TimelineView } from "@/components/timeline";
 import { useAgents } from "@/lib/agents/use-agents";
 import { useSidebarCollapsed } from "@/lib/agents/sidebar";
@@ -36,6 +37,19 @@ const SharedContextPanel = dynamic(
 // surface shows out of this function.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 export default function HomePage() {
+  return (
+    <AgentEventStreamProvider>
+      <HomePageWiring />
+    </AgentEventStreamProvider>
+  );
+}
+
+// meiva:note
+// The wiring sits under <AgentEventStreamProvider>: the timeline, token usage and pending-message
+// reads subscribe to the active agent's event stream, and a provider cannot supply a read its own
+// component makes.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+function HomePageWiring() {
   const showToast = useStore((state) => state.showToast);
   const focusComposer = useStore((state) => state.focusComposer);
   const composerFocusToken = useStore((state) => state.composerFocusToken);
