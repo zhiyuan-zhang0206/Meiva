@@ -19,6 +19,3 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "pr_flow_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block and reads ~/.trunk/api-token" }
 "runs_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling, builds the process clock from the settings and resolves the home it operates once in its __main__ block, for its state directory and the event writer" }
 "watch_pr.py" = { kinds = ["environ", "home", "platform", "settings"], why = "watcher template resolves the home once to place the verdict file in the launching agent's workspace; builds the process clock from the settings; builds the host of this process with Host.system(), handing it the process environment" }
-
-[debt.ambient-read]
-"trunk_api.py#environ base.host.git.gitenv.git_env" = 1
