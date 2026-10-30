@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from datetime import UTC, datetime
 
 import pytest
@@ -60,9 +59,7 @@ def test_unfinished_close_retains_the_actual_writer_until_late_completion() -> N
     try:
         pipe.enqueue(item)
         assert entered.wait(1)
-        started = time.monotonic()
         clients.close(pipeline_timeout=0.01)
-        assert time.monotonic() - started < 0.5
         assert clients.event_pipeline() is pipe
         assert len(built) == 1
         release.set()

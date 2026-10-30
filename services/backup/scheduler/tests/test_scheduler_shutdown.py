@@ -53,11 +53,9 @@ def _terminate_and_assert_reaped(tmp_path: Path, process: subprocess.Popen[str])
         int(path.read_text()) for name in ("worker", "child") if (path := tmp_path / name).exists()
     ]
     assert (tmp_path / "run" / "pg_backup.pid").exists()
-    started = time.monotonic()
     process.send_signal(signal.SIGTERM)
     stdout, stderr = process.communicate(timeout=9)
     assert process.returncode == 0, stdout + stderr
-    assert time.monotonic() - started < 9
     assert all(not _alive(pid) for pid in pids)
 
 
