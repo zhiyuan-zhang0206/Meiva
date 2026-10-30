@@ -21,6 +21,7 @@ from base.host.env import port_lease
 from base.host.env.port_table import FIXED_PORTS
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, health_port_env_aliases
 from base.host.proc import run_bounded
+from base.log import logger
 from base.log.tests.stdlib_logging import stdlib_logging_isolated
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -59,6 +60,7 @@ __all__ = [
     "discover_scopes",
     "get_field",
     "health_port_env_aliases",
+    "logger",
     "meiva_home",
     "modules_by_path",
     "plugin_bootstrap_config",

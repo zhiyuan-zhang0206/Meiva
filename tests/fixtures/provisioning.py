@@ -24,6 +24,7 @@ from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
     TEST_MEIVA_HOME,
 )
+from tests.fixtures.loaded_modules import loaded_attribute
 from tests.fixtures.static_environment import static_mode
 
 _OS_JOBS_AT_START = host_meiva_os_jobs()
@@ -267,22 +268,24 @@ def _db_stall_guard(provisioned_db: str, postgres_access: None) -> Iterator[None
 # telemetry has nothing running to quiesce, and importing it here would put the whole
 # telemetry package into every test's dependency set (the rule `_telemetry_event_store_off`
 # in `guards.py` follows too).
-def _quiesce_loaded_telemetry() -> None:
-    emitter = sys.modules.get("base.telemetry.emitter")
-    if emitter is not None:
-        emitter.sync()
-    observed_metrics = sys.modules.get("base.telemetry.metrics.observed_metrics")
-    if observed_metrics is not None:
-        observed_metrics.close_projection()
-    event_store = sys.modules.get("base.telemetry.event_store")
-    if event_store is not None:
-        event_store.close_store()
+def quiesce_loaded_telemetry() -> None:
+    sync = loaded_attribute("base.telemetry.emitter", "sync")
+    if sync is not None:
+        sync()
+    close_projection = loaded_attribute(
+        "base.telemetry.metrics.observed_metrics", "close_projection"
+    )
+    if close_projection is not None:
+        close_projection()
+    close_store = loaded_attribute("base.telemetry.event_store", "close_store")
+    if close_store is not None:
+        close_store()
 
 
-def _disable_loaded_event_store() -> None:
-    event_store = sys.modules.get("base.telemetry.event_store")
-    if event_store is not None:
-        event_store.set_enabled(enabled=False)
+def disable_loaded_event_store() -> None:
+    set_enabled = loaded_attribute("base.telemetry.event_store", "set_enabled")
+    if set_enabled is not None:
+        set_enabled(enabled=False)
 
 
 @pytest.fixture
@@ -305,9 +308,9 @@ def _clean_db(
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
     _rewrite_test_env_file_line(env_file, "MEIVA_DB_URL", provisioned_db)
-    _disable_loaded_event_store()
+    disable_loaded_event_store()
 
-    _quiesce_loaded_telemetry()
+    quiesce_loaded_telemetry()
     with psycopg.connect(settings.data_plane.db_url) as conn:
         for attempt in range(3):
             try:
@@ -323,8 +326,8 @@ def _clean_db(
     try:
         yield
     finally:
-        _quiesce_loaded_telemetry()
-        _disable_loaded_event_store()
+        quiesce_loaded_telemetry()
+        disable_loaded_event_store()
 
 
 @pytest.fixture
