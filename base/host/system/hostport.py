@@ -55,6 +55,11 @@ class Host:
         # meiva:note
         # The real machine; the composition root's constructor. The root names the environment it
         # holds (its configuration owner's `process_environment()`), so this constructor reads none.
+        #
+        # The platform and the user id are the two facts it does read, and they stay here: this is
+        # the door that builds the port, and `meizel.toml` records its two acquisitions. Handing
+        # them in would make each of the nineteen call sites read `Platform.current()` and
+        # `current_uid()` itself — the same two system calls, booked once per caller.
         return cls(
             run=run_bounded,
             which=shutil.which,
