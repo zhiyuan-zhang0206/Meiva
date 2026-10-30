@@ -201,28 +201,37 @@ async def test_a_malformed_response_is_online_unknown(
 # meiva:note
 # The deadline is `gateway.status_probe_timeout_seconds`, not a hardcoded literal — a
 # slow-but-healthy runner must not read offline because its snapshot outgrew a fixed 3s budget
-# (task #1200). A runner slower than the configured budget reads offline within it.
-def test_the_probe_budget_is_the_configured_status_probe_timeout(
-    db_conn: psycopg.Connection,
-) -> None:
-    release = threading.Event()
+# (task #1200).
+#
+# The pair below judges *where the budget comes from*, not how long anything took: the same
+# half-second probe reads offline under a 0.1 s budget and online under a 1.0 s one. `elapsed < 1.5`
+# could not separate those two without also separating a loaded runner from a healthy one — it went
+# red on a trunk batch (2026-10-30T14:31Z, `assert 1.658 < 1.5`) with the budget logic unchanged.
+_PROBE_DELAY_S = 0.5
 
+
+def _roster_row_under_budget(db_conn: psycopg.Connection, budget: float) -> dict[str, object]:
     def slow(call: OpsCall) -> OpsReply:
         del call
-        release.wait(timeout=5.0)
+        time.sleep(_PROBE_DELAY_S)
         return completed(_status())
 
     with (
         runner_ops(db_conn, "runner-a", {"status_probe": slow}),
-        gateway_test_client(fields={"status_probe_timeout_seconds": 0.1}) as client,
+        gateway_test_client(fields={"status_probe_timeout_seconds": budget}) as client,
     ):
-        started = time.monotonic()
-        try:
-            roster = client.get("/api/cluster/roster?fresh=true").json()
-        finally:
-            release.set()
-        elapsed = time.monotonic() - started
+        roster = client.get("/api/cluster/roster?fresh=true").json()
 
-    row = next(m for m in roster if m["name"] == "runner-a")
-    assert row["online"] is False
-    assert elapsed < 1.5
+    return next(m for m in roster if m["name"] == "runner-a")
+
+
+def test_a_probe_slower_than_the_configured_budget_reads_offline(
+    db_conn: psycopg.Connection,
+) -> None:
+    assert _roster_row_under_budget(db_conn, 0.1)["online"] is False
+
+
+def test_a_probe_inside_the_configured_budget_reads_online(
+    db_conn: psycopg.Connection,
+) -> None:
+    assert _roster_row_under_budget(db_conn, 1.0)["online"] is True
