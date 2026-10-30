@@ -315,25 +315,18 @@ describe("DisplaySettingsPage", () => {
     });
   });
 
-  // Task #715: the Timeline max-width slider renders with the default ratio
-  // (0.4 → "40%") and persists changes (debounced PUT) to
-  // display.timeline_width_ratio.
-  it("renders the Timeline max width slider with the default ratio", async () => {
+  it("renders the Timeline max width slider with the default pixel width", async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Timeline max width")).toBeTruthy();
     });
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByLabelText returns HTMLElement; narrowing to access .type/.value
-    const slider = screen.getByLabelText("Timeline max width") as HTMLInputElement;
+    const slider = screen.getByLabelText<HTMLInputElement>("Timeline max width");
     expect(slider.type).toBe("range");
-    expect(slider.value).toBe("0.4");
-    expect(screen.getByText("40%")).toBeTruthy();
+    expect(slider.value).toBe("768");
+    expect(screen.getByText("768px")).toBeTruthy();
   });
 
-  // Task #805: on narrow viewports (phones) the timeline is full-width and
-  // the ratio setting is inert — the slider is disabled (greyed out) rather
-  // than offering an effect it won't have.
   it("narrow viewport → timeline max-width slider is disabled", async () => {
     window.innerWidth = 375;
     renderPage();
@@ -341,11 +334,9 @@ describe("DisplaySettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Timeline max width")).toBeTruthy();
     });
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByLabelText returns HTMLElement; narrowing to access .disabled
-    const slider = screen.getByLabelText("Timeline max width") as HTMLInputElement;
+    const slider = screen.getByLabelText<HTMLInputElement>("Timeline max width");
     expect(slider.disabled).toBe(true);
-    // Changing a disabled slider must not persist.
-    fireEvent.change(slider, { target: { value: "0.6" } });
+    fireEvent.change(slider, { target: { value: "960" } });
     expect(transport.putSetting).not.toHaveBeenCalled();
   });
 
@@ -355,23 +346,21 @@ describe("DisplaySettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Timeline max width")).toBeTruthy();
     });
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByLabelText returns HTMLElement; narrowing to access .disabled
-    const slider = screen.getByLabelText("Timeline max width") as HTMLInputElement;
+    const slider = screen.getByLabelText<HTMLInputElement>("Timeline max width");
     expect(slider.disabled).toBe(false);
   });
 
-  it("persists a slider change to display.timeline_width_ratio (debounced)", async () => {
+  it("persists a slider change to display.timeline_width_px (debounced)", async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByLabelText("Timeline max width")).toBeTruthy();
     });
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByLabelText returns HTMLElement; narrowing to access .value
-    const slider = screen.getByLabelText("Timeline max width") as HTMLInputElement;
-    fireEvent.change(slider, { target: { value: "0.6" } });
-    expect(slider.value).toBe("0.6");
+    const slider = screen.getByLabelText<HTMLInputElement>("Timeline max width");
+    fireEvent.change(slider, { target: { value: "960" } });
+    expect(slider.value).toBe("960");
     await waitFor(() => {
-      expect(transport.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.6);
+      expect(transport.putSetting).toHaveBeenCalledWith("display.timeline_width_px", 960);
     });
   });
 });

@@ -37,9 +37,10 @@ import { groupedModels, isSuperseded } from "@/lib/contracts/models";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import {
   TIMELINE_NARROW_BREAKPOINT_PX,
-  TIMELINE_WIDTH_RATIO_DEFAULT,
-  TIMELINE_WIDTH_RATIO_MAX,
-  TIMELINE_WIDTH_RATIO_MIN,
+  TIMELINE_WIDTH_PX_DEFAULT,
+  TIMELINE_WIDTH_PX_MAX,
+  TIMELINE_WIDTH_PX_MIN,
+  TIMELINE_WIDTH_PX_STEP,
 } from "@/lib/timeline/timeline-width";
 import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
 import { useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
@@ -64,9 +65,9 @@ export default function DisplaySettingsPage() {
   const { detailsMode, setDetailsMode } = useContentToggle();
   const setComposerContextMeter = (value: boolean) =>
     setSetting("display.composer_context_meter", value);
-  const [widthRatio, setWidthRatio] = useDebouncedSetting<number>(
-    "display.timeline_width_ratio",
-    TIMELINE_WIDTH_RATIO_DEFAULT,
+  const [widthPx, setWidthPx] = useDebouncedSetting<number>(
+    "display.timeline_width_px",
+    TIMELINE_WIDTH_PX_DEFAULT,
   );
   // Task #805: the width ratio is a desktop concept — on narrow viewports
   // (below md, phones) the timeline is full-width and the setting is inert,
@@ -234,13 +235,13 @@ export default function DisplaySettingsPage() {
         <SliderRow
           icon={MoveHorizontal}
           label="Timeline max width"
-          description={`Max width of the conversation column as a fraction of the viewport (${Math.round(TIMELINE_WIDTH_RATIO_MIN * 100)}%–${Math.round(TIMELINE_WIDTH_RATIO_MAX * 100)}%), capped at 1280px so ultra-wide screens stay readable. Desktop only: on phones (below ${TIMELINE_NARROW_BREAKPOINT_PX}px) the timeline is full-width and this setting is ignored. Default ${Math.round(TIMELINE_WIDTH_RATIO_DEFAULT * 100)}% = 768px on a 1920px screen.`}
-          min={TIMELINE_WIDTH_RATIO_MIN}
-          max={TIMELINE_WIDTH_RATIO_MAX}
-          step={0.05}
-          value={widthRatio}
-          onChange={setWidthRatio}
-          format={(v) => `${Math.round(v * 100)}%`}
+          description={`Max width of the conversation column in pixels (${TIMELINE_WIDTH_PX_MIN}px–${TIMELINE_WIDTH_PX_MAX}px). The column fills its pane up to this ceiling and centers with side gutters when wider. Desktop only: on phones (below ${TIMELINE_NARROW_BREAKPOINT_PX}px) the timeline is full-width and this setting is ignored. Default ${TIMELINE_WIDTH_PX_DEFAULT}px.`}
+          min={TIMELINE_WIDTH_PX_MIN}
+          max={TIMELINE_WIDTH_PX_MAX}
+          step={TIMELINE_WIDTH_PX_STEP}
+          value={widthPx}
+          onChange={setWidthPx}
+          format={(v) => `${v}px`}
           disabled={isNarrow}
         />
         <RadioRow

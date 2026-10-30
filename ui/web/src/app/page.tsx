@@ -247,10 +247,10 @@ function HomeContent({
   const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarCollapsed();
   const contentColumnMaxWidth = isNarrow
     ? undefined
-    : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
+    : timelineMaxWidthCss(userSettings["display.timeline_width_px"]);
   const composerMaxWidth = isNarrow
     ? undefined
-    : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
+    : timelineMaxWidthCss(userSettings["display.timeline_width_px"]);
   const setMobileSidebarOpen = useStore((s) => s.setMobileSidebarOpen);
   const requestScrollToBottom = useTimelineStore((s) => s.requestScrollToBottom);
   const { bfcacheId } = useRouter();

@@ -39,7 +39,7 @@ export const hooksState = {
   setInspectorHours: vi.fn(),
   requestScrollToBottom: vi.fn(),
   setSetting: vi.fn(),
-  settings: { "display.timeline_width_ratio": 0.4 } as Record<string, unknown>,
+  settings: { "display.timeline_width_px": 768 } as Record<string, unknown>,
 };
 
 export const inspectorMockState = {
@@ -207,7 +207,7 @@ export async function resetHomePageTestState() {
   hooksState.timelineFetching = false;
   hooksState.connectionState = "open";
   hooksState.turnActive = false;
-  hooksState.settings = { "display.timeline_width_ratio": 0.4 };
+  hooksState.settings = { "display.timeline_width_px": 768 };
   hooksState.setSetting = vi.fn();
   hooksState.setMobileInspectorOpen = vi.fn();
   hooksState.setInspectorHours = vi.fn();
