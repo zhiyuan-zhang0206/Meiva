@@ -9,6 +9,7 @@ receipt, publishes readiness, and fails on purpose where `failure` says.
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -52,7 +53,12 @@ def main(params: dict[str, Any]) -> None:
     if failure == "before":
         receipt.with_suffix(".failure").write_text("before")
         raise RuntimeError("failed before publication")
-    publish_root_ready(home, native_identity(status["root"]), host=Host.system(environ={}))
+    publish_root_ready(
+        home,
+        native_identity(status["root"]),
+        host=Host.system(environ={}),
+        control_pid=os.getpid(),
+    )
     if failure == "after":
         receipt.with_suffix(".failure").write_text("after")
         raise RuntimeError("failed after publication")
