@@ -15,6 +15,7 @@ import type {
   BrowserMedia,
   BrowserNavigation,
   BrowserStorage,
+  BrowserViewport,
   MediaQuery,
 } from "./browser";
 import { pageLocation } from "./browser";
@@ -30,6 +31,13 @@ export interface LiveDocument {
   execCommand(command: "copy"): boolean;
 }
 
+export interface LiveViewport {
+  readonly height: number;
+  readonly scale: number;
+  addEventListener(type: "resize" | "scroll", listener: () => void): void;
+  removeEventListener(type: "resize" | "scroll", listener: () => void): void;
+}
+
 export interface LivePage {
   readonly location: { readonly href: string; assign(url: string): void };
   readonly history: {
@@ -43,6 +51,8 @@ export interface LivePage {
   localStorage(): Storage | null;
   sessionStorage(): Storage | null;
   matchMedia(query: string): MediaQueryList;
+  readonly innerHeight: number;
+  readonly visualViewport: LiveViewport | null;
   readonly navigator: LiveNavigator;
   readonly document: LiveDocument;
 }
@@ -215,6 +225,35 @@ export function viewOver(page: LivePage | null): Browser["view"] {
   };
 }
 
+// meiva:note
+// The page's viewport. Every read is a fresh measurement — a height is not a stored fact — and the
+// subscription follows only the visual viewport: the one a keyboard, a toolbar or a pinch moves.
+// A frame with no page (a server render) has neither, and says so with a zero reading.
+export function viewportOver(page: LivePage | null): BrowserViewport {
+  return {
+    read: () =>
+      page === null
+        ? { layoutHeight: 0, visual: null }
+        : {
+            layoutHeight: page.innerHeight,
+            visual:
+              page.visualViewport === null
+                ? null
+                : { height: page.visualViewport.height, scale: page.visualViewport.scale },
+          },
+    subscribe(onChange) {
+      const visual = page?.visualViewport ?? null;
+      if (visual === null) return () => undefined;
+      visual.addEventListener("resize", onChange);
+      visual.addEventListener("scroll", onChange);
+      return () => {
+        visual.removeEventListener("resize", onChange);
+        visual.removeEventListener("scroll", onChange);
+      };
+    },
+  };
+}
+
 const warnToConsole = (message: string): void => console.warn(message);
 
 export function browserOver(page: LivePage | null, warn: (message: string) => void): Browser {
@@ -226,6 +265,7 @@ export function browserOver(page: LivePage | null, warn: (message: string) => vo
     clipboard: clipboardOver(page?.navigator ?? null, page?.document ?? null),
     beacon: beaconOver(page?.navigator ?? null),
     view: viewOver(page),
+    viewport: viewportOver(page),
   };
 }
 
@@ -244,6 +284,8 @@ export const browser: Browser =
         localStorage: () => window.localStorage,
         sessionStorage: () => window.sessionStorage,
         matchMedia: (query) => window.matchMedia(query),
+        innerHeight: window.innerHeight,
+        visualViewport: window.visualViewport,
         navigator: window.navigator,
         document: window.document,
       }, warnToConsole);

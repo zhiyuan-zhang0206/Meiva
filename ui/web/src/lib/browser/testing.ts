@@ -19,7 +19,7 @@
 
 import { createElement, type ReactNode } from "react";
 
-import type { Browser, MediaQuery, PageLocation, StorageRead } from "./browser";
+import type { Browser, MediaQuery, PageLocation, StorageRead, ViewportReading } from "./browser";
 import { pageLocation } from "./browser";
 import { BrowserProvider } from "./browser-provider";
 
@@ -44,6 +44,9 @@ export interface FakeBrowser extends Browser {
   moveTo(href: string): void;
   traverse(href: string): void;
   answerMedia(query: string, matches: boolean): void;
+  // meiva:note
+  // Answer the next viewport read, and tell whoever subscribed that it moved.
+  answerViewport(reading: ViewportReading): void;
   refuseStorage(refused: boolean): void;
   failStorage(area: "local" | "session", operations: "write" | "remove" | "both"): void;
   clipboardAccepts(accepts: boolean): void;
@@ -55,6 +58,7 @@ export interface FakeBrowser extends Browser {
 
 export interface FakeBrowserOptions {
   readonly href?: string;
+  readonly viewport?: ViewportReading;
   readonly local?: Readonly<Record<string, string>>;
   readonly session?: Readonly<Record<string, string>>;
   readonly media?: Readonly<Record<string, boolean>>;
@@ -127,6 +131,21 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     ]),
   );
   const traverseListeners = new Set<() => void>();
+  const viewportListeners = new Set<() => void>();
+  // meiva:note
+  // Without an answer the fake is the page the test runs in, the same rule its storage and media
+  // follow: a suite that does not care about the viewport keeps the meaning it had.
+  const liveVisual = live?.visualViewport ?? null;
+  let viewportReading: ViewportReading =
+    options.viewport ??
+    (liveVisual === null ||
+    typeof liveVisual.height !== "number" ||
+    typeof liveVisual.scale !== "number"
+      ? { layoutHeight: live?.innerHeight ?? 0, visual: null }
+      : {
+          layoutHeight: live?.innerHeight ?? 0,
+          visual: { height: liveVisual.height, scale: liveVisual.scale },
+        });
   const resolve = (url: string): string => new URL(url, href).href;
   const actions: FakeActions = {
     assigned: [],
@@ -247,6 +266,15 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
         actions.scrolled.push({ target, block });
       },
     },
+    viewport: {
+      read: () => viewportReading,
+      subscribe(onChange) {
+        viewportListeners.add(onChange);
+        return () => {
+          viewportListeners.delete(onChange);
+        };
+      },
+    },
     href: () => href,
     moveTo(next) {
       href = resolve(next);
@@ -254,6 +282,10 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     traverse(next) {
       href = resolve(next);
       for (const listener of [...traverseListeners]) listener();
+    },
+    answerViewport(reading) {
+      viewportReading = reading;
+      for (const listener of [...viewportListeners]) listener();
     },
     answerMedia(query, matches) {
       const heard = answer(query);
