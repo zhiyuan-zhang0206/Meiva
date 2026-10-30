@@ -509,3 +509,93 @@ def write_order_suite(root: Path, plugins: list[str]) -> None:
     _write(root, "order_other.py", ORDER_PLUGIN)
     _write(root, "conftest.py", ORDER_CONFTEST.format(plugins=plugins))
     _write(root, "leakdemo/tests/test_order.py", ORDER_TESTS)
+
+
+RELOAD_FACED = '''
+"""The module whose class and instance a sibling face imports."""
+
+
+class Config:
+    def __init__(self, name: str) -> None:
+        self.name = name
+'''
+
+RELOAD_RUNTIME = '''
+"""A face importing a sibling's class and building an instance, the way a plugin runtime face does."""
+
+from leakdemo.faced import Config
+
+SETTING = Config("framework")
+'''
+
+RELOAD_BASELINE = '''
+"""The file before the reload: both modules are loaded and agree."""
+
+from leakdemo import faced, runtime
+
+
+def test_the_face_uses_what_its_sibling_defines() -> None:
+    assert runtime.Config is faced.Config
+    assert type(runtime.SETTING) is faced.Config
+'''
+
+RELOAD_IN_PLACE = '''
+"""A module body run again in the dict the process already registered: what a plugin load does."""
+
+import importlib
+
+from leakdemo import faced, runtime
+
+
+def test_reloading_both_faces_in_place_is_not_a_leak() -> None:
+    config, setting = runtime.Config, runtime.SETTING
+    importlib.reload(faced)
+    importlib.reload(runtime)
+    # Both faces were re-executed: the names moved, the modules did not.
+    assert runtime.Config is faced.Config
+    assert runtime.Config is not config
+    assert runtime.SETTING is not setting
+'''
+
+RELOAD_STANDIN = '''
+"""The same binding, handed this file's own class: still a leak."""
+
+from leakdemo import runtime
+
+
+class Config:
+    """This test file's class, not the module's."""
+
+
+def test_replaces_the_imported_class_with_its_own() -> None:
+    runtime.Config = Config
+    assert runtime.Config is Config
+'''
+
+RELOAD_AFTER = '''
+"""The next file in the worker: where the boundary of the file above is observed."""
+
+from leakdemo import runtime
+
+
+def test_reads_the_binding_the_file_above_left() -> None:
+    assert runtime.Config is not None
+'''
+
+
+# meiva:note
+# Two suites: the pair that must stay silent (a face re-executed in place, the plugin loader's shape:
+# `#7832`'s `agent_runtime.FleetConfig` came from `default_config`), and the pair that must still be
+# named (the same binding handed a class this test file defines). Separate directories so each run
+# selects one shape. `RELOAD_IN_PLACE` relies on `importlib.reload` re-executing a module in the dict
+# the process already registered, which is what `load_plugin_module` does by spec.
+def write_reload_suite(root: Path) -> None:
+    for rel, text in PACKAGE.items():
+        _write(root, rel, text)
+    _write(root, "pytest.ini", PYTEST_INI)
+    _write(root, "leakdemo/faced.py", RELOAD_FACED)
+    _write(root, "leakdemo/runtime.py", RELOAD_RUNTIME)
+    _write(root, "leakdemo/tests/reload_clean/test_a_baseline.py", RELOAD_BASELINE)
+    _write(root, "leakdemo/tests/reload_clean/test_b_in_place.py", RELOAD_IN_PLACE)
+    _write(root, "leakdemo/tests/reload_standin/test_a_standin.py", RELOAD_STANDIN)
+    _write(root, "leakdemo/tests/reload_standin/test_b_after.py", RELOAD_AFTER)
