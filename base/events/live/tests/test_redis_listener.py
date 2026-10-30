@@ -24,11 +24,18 @@ import redis.asyncio as aredis
 from redis.exceptions import NoPermissionError
 
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel, redis_channel_prefix
 from base.config import settings
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener, WakeFailure, WakeState
+from base.events.live.tests.wait_bounds import (
+    CONSUME_GRACE_S,
+    await_bounded,
+    await_wait_one,
+    hang_guard_s,
+)
 
 
 async def _publish_inbound(
@@ -81,12 +88,23 @@ def _consuming(listener: RedisInboundListener) -> bool:
 
 
 # meiva:note
+# The named consumes grace and the hang guard live in `wait_bounds`; this pins the one property
+# the guard has to keep for the budgets used here.
+def test_the_hang_guard_leaves_room_for_both_phases() -> None:
+    for budget_s in (0.3, 0.5, 1.0, 10.0):
+        assert hang_guard_s(budget_s) > budget_s + CONSUME_GRACE_S, (
+            "a guard inside the documented bound would judge the wait, not a hang"
+        )
+
+
+# meiva:note
 # A listener on the test cluster's events channel, measured by the process timers: every test in
 # this module used the live channel and the process clock through the listener's own readings, and
 # those two values now arrive as arguments, so they are named once here instead of at each site.
 def _listener(url: str, *args: Any, **kwargs: Any) -> RedisInboundListener:
     kwargs.setdefault("events_channel", settings.data_plane.events_channel)
     kwargs.setdefault("timers", SYSTEM_TIMERS)
+    kwargs.setdefault("consume_abandon_grace", CONSUME_GRACE_S)
     return RedisInboundListener(url, *args, **kwargs)
 
 
@@ -109,18 +127,16 @@ class TestRedisInboundListener:
         listener = _listener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
             # Start wait_one in background
-            started = time.monotonic()
-            wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
+            budget_s = 10.0
+            wait_task = asyncio.create_task(listener.wait_one(timeout=budget_s))
 
             # Publish only once Redis reports the subscription: pub/sub drops a message that
             # has no subscriber yet.
             await _subscribed(agent_id)
             await _publish_inbound(agent_id)
 
-            await asyncio.wait_for(wait_task, timeout=5.0)
-            elapsed = time.monotonic() - started
-            # Should wake quickly (well under 10s timeout)
-            assert elapsed < 5.0, f"wait_one took {elapsed:.1f}s — publish didn't wake?"
+            woke = await await_bounded(wait_task, budget_s=budget_s, what="wait_one over a publish")
+            assert woke is True, "publish didn't wake the listener"
         finally:
             await listener.close()
 
@@ -128,11 +144,10 @@ class TestRedisInboundListener:
         """`wait_one` returns after timeout (no publish)."""
         listener = _listener(settings.data_plane.redis_url, agent_id=9997)
         try:
-            started = time.monotonic()
-            await listener.wait_one(timeout=0.5)
-            elapsed = time.monotonic() - started
-            # Should return around timeout (with some tolerance)
-            assert elapsed < 2.0, f"wait_one took {elapsed:.1f}s for 0.5s timeout"
+            woke = await await_wait_one(
+                listener, timeout_s=0.5, what="wait_one with nothing published"
+            )
+            assert woke is False, "nothing was published, so nothing can have woken"
         finally:
             await listener.close()
 
@@ -353,12 +368,10 @@ class TestWaitOneBudgetAndCancel:
             redis_factory=_open_factory,
         )
 
-        t0 = asyncio.get_running_loop().time()
-        await listener.wait_one(timeout=0.3)
-        elapsed = asyncio.get_running_loop().time() - t0
+        woke = await await_wait_one(listener, timeout_s=0.3, what="wait_one over a wedged open")
 
         assert opened.is_set(), "the open attempt must actually have started"
-        assert elapsed < 2.0, f"wait_one took {elapsed:.2f}s for a 0.3s budget — contract violated"
+        assert woke is False, "an abandoned open cannot report a delivery"
         assert any("did not complete within" in r["message"] for r in loguru_records)
         await asyncio.sleep(0)  # let the cancelled open task unwind before loop close
 
@@ -383,17 +396,15 @@ class TestWaitOneBudgetAndCancel:
 
         await listener.ensure_listening()
 
-        t0 = asyncio.get_running_loop().time()
         try:
-            await asyncio.wait_for(listener.wait_one(timeout=0.3), timeout=8.0)
-        except TimeoutError:
-            pytest.fail("wait_one hung past 8s on a 0.3s budget — abandon backstop lost")
+            woke = await await_wait_one(
+                listener, timeout_s=0.3, what="wait_one over a consume that never ticks"
+            )
         finally:
             await listener.stop()
-        elapsed = asyncio.get_running_loop().time() - t0
 
         assert started.is_set(), "the consume attempt must actually have started"
-        assert elapsed < 5.0, f"wait_one took {elapsed:.2f}s for a 0.3s budget + 2s grace"
+        assert woke is False, "an abandoned consume cannot report a delivery"
         assert any(
             "consume never started its timer" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
             for r in loguru_records
@@ -420,14 +431,14 @@ class TestWaitOneBudgetAndCancel:
 
             # A fresh wait on the same listener still wakes on publish — proof the
             # cancelled consume released the shared pubsub instead of leaking.
-            wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
+            budget_s = 10.0
+            wait_task = asyncio.create_task(listener.wait_one(timeout=budget_s))
             await _until(lambda: _consuming(listener), "the fresh wait_one to enter its consume")
-            t0 = time.monotonic()
             await _publish_inbound(agent_id)
-            await asyncio.wait_for(wait_task, timeout=5.0)
-            assert time.monotonic() - t0 < 3.0, (
-                "publish did not wake after a prior cancel — consumer leaked"
+            woke = await await_bounded(
+                wait_task, budget_s=budget_s, what="the fresh wait after a cancelled one"
             )
+            assert woke is True, "publish did not wake after a prior cancel — consumer leaked"
         finally:
             await listener.close()
 
@@ -487,17 +498,17 @@ class TestWakeHealth:
         # meiva:note
         # The stalled consume is the path under test, so it announces itself: the
         # assertion can then tell "consume abandoned" from an open that outspent
-        # the budget without recording a degradation. The 1.0s budget covers only
-        # the consume, and with the 2.0s abandon grace the wait still returns
-        # inside the 5s timing assertion.
+        # the budget without recording a degradation.
         # meiva:link base/events/live/redis_listener.py
         try:
             await listener.ensure_listening()
-            started = time.monotonic()
-            waiter = asyncio.create_task(listener.wait_one(timeout=1.0))
+            budget_s = 1.0
+            waiter = asyncio.create_task(listener.wait_one(timeout=budget_s))
             await asyncio.wait_for(consuming.wait(), timeout=10.0)
-            await asyncio.wait_for(waiter, timeout=10.0)
-            assert time.monotonic() - started < 5.0
+            woke = await await_bounded(
+                waiter, budget_s=budget_s, what="wait_one over a wedged consume"
+            )
+            assert woke is False, "the consume was abandoned, not delivered"
 
             assert listener.wake_state is WakeState.DEGRADED, (
                 f"wake_state={listener.wake_state} reason={listener.wake_degrade_reason}"
@@ -532,9 +543,10 @@ class TestWakeHealth:
             redis_factory=_open_factory,
         )
         try:
-            started_at = time.monotonic()
-            await listener.wait_one(timeout=0.3)
-            assert time.monotonic() - started_at < 2.0
+            woke = await await_bounded(
+                listener.wait_one(timeout=0.3), budget_s=0.3, what="wait_one over a wedged open"
+            )
+            assert woke is False, "an abandoned open cannot report a delivery"
             assert started.is_set()
             assert listener.wake_state is WakeState.DEGRADED
             assert listener.wake_degrade_reason == WakeFailure.OPEN_ABANDON.value
@@ -649,19 +661,30 @@ class TestAclScopedChannel:
         cadence instead of the agent crashing on idle-wait."""
         # Scoped to a DIFFERENT prefix → inbound_channel (meiva:acltest:*) is denied.
         _make_scoped_user("acl_wrong", "&meiva:other:*")
+        timers = ManualTimers()
         listener = _listener(
             _scoped_user_url("acl_wrong"),
             agent_id=8124,
             events_channel="meiva:acltest:events",
+            timers=timers,
         )
         try:
             # Must not raise — degrades to a no-op subscribe.
             await listener.ensure_listening()
-            started = time.monotonic()
-            await listener.wait_one(timeout=0.5)  # must not raise NoPermissionError
-            elapsed = time.monotonic() - started
-            # Degraded path sleeps out the budget then returns (no crash, no hot loop).
-            assert 0.4 < elapsed < 3.0, f"degraded wait_one elapsed {elapsed:.2f}s"
+            timers.sleeps.clear()
+            woke = await await_bounded(
+                listener.wait_one(timeout=0.5),
+                budget_s=0.5,
+                what="wait_one under a denied subscribe",
+            )
+            assert woke is False, "a denied subscribe cannot deliver"
+            # meiva:note
+            # The judgement is what the degraded path asked the clock for, not how long it took:
+            # it sleeps out the remaining budget instead of spinning, so the sleeps it requested
+            # cover that budget. A hot loop asks for nothing; a partial sleep asks for less.
+            assert sum(timers.sleeps) >= 0.5, (
+                f"the degraded path asked for {sum(timers.sleeps):.2f}s of a 0.5s budget"
+            )
             # Instant wake is genuinely off for the episode — the wake-health view
             # must say DEGRADED, not look healthy (fake-alive).
             assert listener.wake_state is WakeState.DEGRADED

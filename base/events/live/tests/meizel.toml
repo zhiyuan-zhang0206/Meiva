@@ -1,4 +1,4 @@
-exports = ["fakes.py", "live_capture.py", "rng.py"]
+exports = ["fakes.py", "live_capture.py", "rng.py", "wait_bounds.py"]
 
 [uses]
 "live_capture.py" = ["rng.py"]
@@ -6,3 +6,4 @@ exports = ["fakes.py", "live_capture.py", "rng.py"]
 "test_publish_best_effort.py" = ["fakes.py"]
 "test_publisher.py" = ["rng.py"]
 "test_redis_client.py" = ["fakes.py", "rng.py"]
+"test_redis_listener.py" = ["wait_bounds.py"]
