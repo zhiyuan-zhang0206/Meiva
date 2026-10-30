@@ -14,9 +14,13 @@ Unit identity reuses `base.host.db_authority.unit.UnitIdentity`; native machine 
 resolved `MEIVA_HOME` identify the receiver, not the physical uploads quota owner.
 
 `paths` owns the shared upload URL, path, image MIME, limits and safe-serving
-helpers used by gateway, Ops and inbound image consumers. `agent_upload_dir`
-lives under the OS user's home (`<user home>/Downloads`, independent of `MEIVA_HOME`);
-`source.accept` takes that home as `upload_home` from the gateway, which builds it once. Its image fetch
+helpers used by gateway, Ops and inbound image consumers. Two directories, named by
+the same owner: `agent_upload_dir` is the gateway's staging directory for one agent
+(`<MEIVA_HOME>/uploads/<agent_id>` unless `MEIVA_UPLOAD_STAGING_ROOT` moves the root),
+which `source.accept` receives as `upload_root`; `delivered_upload_dir` is the copy
+the agent reads (`<that machine's MEIVA_HOME>/workspaces/<agent_id>/<configured
+name>`), which only a receiver builds and always from the home of the machine the
+batch targets. Staging is internal state and never a user-visible folder. Its image fetch
 dials the gateway with the same auth headers as every other agent -> gateway call
 (`base.cluster.machine.gateway_auth_headers`): the delivered machine API token
 when the process carries one, the cluster secret otherwise.
@@ -38,8 +42,9 @@ late proof. New placement and inbound acceptance share locks and transaction.
 See the [Gateway domain contract](../../../../gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md)
 for source rounds, remote Ops proof and authentication.
 
-Upload directory and traversal helpers receive the OS-user home explicitly;
-request roots bind that path before giving a two-argument resolver to a consumer.
+Upload directory and traversal helpers receive their root explicitly (the staging
+root, or the delivered machine's home); a request root binds that path once before
+giving a two-argument resolver to a consumer.
 Image fetch receives the existing gateway HTTP client through its narrow
 `UploadClient` contract. The hosted claim root passes the context's lazy client
 factory, so text and invalid image references do not construct a gateway client.

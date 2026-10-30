@@ -117,7 +117,7 @@ def _process_state(
 ) -> None:
     host = fake_host(platform=DARWIN_ARM64, environ=environ) if darwin else fake_host()
     app.state.gateway_process = SimpleNamespace(home=home, host=host)
-    app.state.gateway_config = SimpleNamespace(upload_home=home / "account", rng=seeded_rng())
+    app.state.gateway_config = SimpleNamespace(user_home=home / "account", rng=seeded_rng())
     app.state.clock = clock_at(NOW)
 
 

@@ -24,7 +24,7 @@ from base.agents.upload_delivery.models import (
     UploadQuotaExceededError,
     make_manifest,
 )
-from base.agents.upload_delivery.paths import agent_upload_dir
+from base.agents.upload_delivery.paths import delivered_upload_dir
 from base.cluster.machine import GatewayAccess
 from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
@@ -33,8 +33,15 @@ from ops.upload_delivery import ReceiverConfig, copy_batch
 from ops.upload_delivery.tests.object_server import serve_objects
 
 _AGENT = 7
-_TARGET = UnitIdentity(machine="runner-a", home="/runner/a/home")
 _SOURCE = UnitIdentity(machine="gateway-box", home="/gateway/home")
+
+
+# meiva:note
+# The receiving machine for one test: its own home under `tmp_path`, because the delivered copy
+# lands inside that home's agent workspace.
+def _target(home: Path) -> UnitIdentity:
+    return UnitIdentity(machine="runner-a", home=str(home / "meiva-home"))
+
 
 # meiva:note
 # An isolated test credential: the loopback gateway stand-in accepts any bearer and records it.
@@ -47,18 +54,20 @@ class Batch:
     contents: dict[int, bytes]
 
     def stored(self, config: ReceiverConfig, ordinal: int) -> Path:
-        directory = agent_upload_dir(_AGENT, create=False, home=config.user_home).resolve()
+        directory = delivered_upload_dir(
+            _AGENT, home=Path(config.unit.home), name=config.upload_dir_name, create=False
+        ).resolve()
         item = self.request.manifest.objects[ordinal]
         return directory / NAMESPACE / self.request.manifest.batch_id / item.name
 
 
-def _batch(*contents: bytes) -> Batch:
+def _batch(home: Path, *contents: bytes) -> Batch:
     manifest = make_manifest(
         _AGENT,
         [f"file-{n}.png" for n in range(len(contents))],
         [("", data, "image/png") for data in contents],
     )
-    request = ReceiveRequest(version=1, target=_TARGET, source=_SOURCE, manifest=manifest)
+    request = ReceiveRequest(version=1, target=_target(home), source=_SOURCE, manifest=manifest)
     return Batch(request, dict(enumerate(contents)))
 
 
@@ -69,8 +78,8 @@ def _config(
     tmp_path: Path, url: str, *, quota_bytes: int = 10_000, quota_files: int = 100
 ) -> ReceiverConfig:
     return ReceiverConfig(
-        unit=_TARGET,
-        user_home=tmp_path / "os-home",
+        unit=_target(tmp_path),
+        upload_dir_name="uploads",
         access=GatewayAccess(
             gateway_url=url,
             cluster_secret="human-secret",  # noqa: S106
@@ -103,7 +112,7 @@ def _copies(db_conn: psycopg.Connection) -> list[tuple[str, bool]]:
 def test_a_batch_is_pulled_published_and_proven(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first", b"second")
+    batch = _batch(tmp_path, b"first", b"second")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -117,7 +126,7 @@ def test_a_batch_is_pulled_published_and_proven(
     ]
     assert batch.stored(config, 0).read_bytes() == b"first"
     assert batch.stored(config, 1).read_bytes() == b"second"
-    assert proof.target == _TARGET and proof.manifest_hash == manifest.fingerprint()
+    assert proof.target == config.unit and proof.manifest_hash == manifest.fingerprint()
     assert proof.directory == str(batch.stored(config, 0).parent)
     assert _copies(db_conn) == [(manifest.batch_id, True)]
 
@@ -128,7 +137,7 @@ def test_a_batch_is_pulled_published_and_proven(
 def test_a_repeat_reuses_the_files_and_fetches_nothing(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first", b"second")
+    batch = _batch(tmp_path, b"first", b"second")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -147,7 +156,7 @@ def test_a_repeat_reuses_the_files_and_fetches_nothing(
 # Only the absent objects are fetched: a file that survived a partial earlier run stays, and its
 # neighbour is pulled.
 def test_only_the_absent_objects_are_fetched(pool: ConnectionPool, tmp_path: Path) -> None:
-    batch = _batch(b"first", b"second")
+    batch = _batch(tmp_path, b"first", b"second")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -168,10 +177,10 @@ def test_only_the_absent_objects_are_fetched(pool: ConnectionPool, tmp_path: Pat
 def test_a_request_for_another_unit_is_refused(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     other = batch.request.model_copy(
-        update={"target": _TARGET.model_copy(update={"home": "/runner/a/second-home"})}
+        update={"target": _target(tmp_path).model_copy(update={"home": "/runner/a/other-home"})}
     )
     with (
         serve_objects(
@@ -191,7 +200,7 @@ def test_a_request_for_another_unit_is_refused(
 def test_a_changed_manifest_for_a_reserved_batch_conflicts(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     item = manifest.objects[0]
     changed = batch.request.model_copy(
@@ -215,11 +224,12 @@ def test_a_changed_manifest_for_a_reserved_batch_conflicts(
 
 # meiva:note
 # The same batch against another native root is a conflict too: the reservation freezes the
-# physical directory it was made for.
+# physical directory it was made for. Only the directory name can move it now — the rest of the
+# path follows the unit's own home.
 def test_a_reserved_batch_cannot_move_to_another_native_root(
     pool: ConnectionPool, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -228,7 +238,7 @@ def test_a_reserved_batch_cannot_move_to_another_native_root(
         copy_batch(pool, batch.request, config)
 
         with pytest.raises(UploadDeliveryConflictError, match="another manifest or native root"):
-            copy_batch(pool, batch.request, replace(config, user_home=tmp_path / "elsewhere"))
+            copy_batch(pool, batch.request, replace(config, upload_dir_name="inbox"))
 
 
 # meiva:note
@@ -236,7 +246,7 @@ def test_a_reserved_batch_cannot_move_to_another_native_root(
 def test_a_batch_beyond_the_quota_reserves_nothing(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first", b"second")
+    batch = _batch(tmp_path, b"first", b"second")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -257,7 +267,7 @@ def test_a_batch_beyond_the_quota_reserves_nothing(
 def test_a_removed_source_object_fails_without_a_false_ready(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -278,7 +288,7 @@ def test_a_removed_source_object_fails_without_a_false_ready(
 def test_bytes_that_differ_from_the_manifest_are_never_published(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects={0: b"tampered"}
@@ -297,7 +307,7 @@ def test_bytes_that_differ_from_the_manifest_are_never_published(
 def test_a_spent_network_round_fails_before_dialing(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -318,7 +328,7 @@ def test_a_spent_network_round_fails_before_dialing(
 def test_the_database_connection_is_released_across_the_pull(
     database: Database, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first", b"second")
+    batch = _batch(tmp_path, b"first", b"second")
     manifest = batch.request.manifest
     with database.pool(min_size=1, max_size=1) as single:
         with serve_objects(
@@ -337,7 +347,7 @@ def test_the_database_connection_is_released_across_the_pull(
 def test_a_failed_ready_commit_recovers_without_a_second_copy(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -369,7 +379,7 @@ def test_a_failed_ready_commit_recovers_without_a_second_copy(
 def test_concurrent_receivers_converge_on_one_copy(
     pool: ConnectionPool, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first", b"second")
+    batch = _batch(tmp_path, b"first", b"second")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -395,7 +405,7 @@ def test_concurrent_receivers_converge_on_one_copy(
 def test_a_blank_gateway_url_fails_only_when_a_pull_is_needed(
     pool: ConnectionPool, tmp_path: Path
 ) -> None:
-    batch = _batch(b"first")
+    batch = _batch(tmp_path, b"first")
     manifest = batch.request.manifest
     with serve_objects(
         agent_id=_AGENT, batch_id=manifest.batch_id, objects=batch.contents
@@ -404,7 +414,7 @@ def test_a_blank_gateway_url_fails_only_when_a_pull_is_needed(
         copy_batch(pool, batch.request, config)
     blank = replace(config, access=replace(config.access, gateway_url=" "))
 
-    assert copy_batch(pool, batch.request, blank).target == _TARGET
+    assert copy_batch(pool, batch.request, blank).target == config.unit
 
     batch.stored(config, 0).unlink()
     with pytest.raises(RuntimeError, match="gateway_url unset"):

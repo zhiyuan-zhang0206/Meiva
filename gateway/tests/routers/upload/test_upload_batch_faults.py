@@ -52,7 +52,7 @@ def batch_target(db_conn: psycopg.Connection, tmp_path: Path) -> Path:
     db_conn.execute("INSERT INTO agents_meta (id, status) VALUES (123, 'idling')")
     db_conn.commit()
     ensure_private_dir(tmp_path / "writer-home")
-    return ensure_private_dir(tmp_path / "Downloads" / "MeivaAgent-123")
+    return ensure_private_dir(tmp_path / "uploads" / "123")
 
 
 @pytest.mark.parametrize("phase", ["receiving", "first-file", "published", "ready"])

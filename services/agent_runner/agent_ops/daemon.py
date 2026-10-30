@@ -494,12 +494,15 @@ async def ops_route(
 
 # meiva:note
 # What the upload receiver needs from its environment, read once by `main()`: this machine and home
-# as the unit identity, the OS user's home (where `Downloads/MeivaAgent-N` lives), the gateway
-# access `main()` built from this boot, and the per-agent quota.
-def receiver_config(*, machine: str, home: Path, access: GatewayAccess) -> ReceiverConfig:
+# as the unit identity (the delivered copy lands in the agent's workspace under that home), the
+# directory name the gateway names too, the gateway access `main()` built from this boot, and the
+# per-agent quota.
+def receiver_config(
+    *, machine: str, home: Path, access: GatewayAccess, upload_dir_name: str
+) -> ReceiverConfig:
     return ReceiverConfig(
         unit=UnitIdentity(machine=machine, home=str(home.resolve())),
-        user_home=Path.home(),
+        upload_dir_name=upload_dir_name,
         access=access,
         quota_bytes=MAX_AGENT_UPLOAD_BYTES,
         quota_files=MAX_AGENT_UPLOAD_FILES,
@@ -700,7 +703,12 @@ def main(*, argv: list[str] | None = None) -> None:
                     host=Host.system(environ=config.process_environment()),
                     rng=_new_rng(),
                     home=home,
-                    receiver=receiver_config(machine=machine.name(), home=home, access=access),
+                    receiver=receiver_config(
+                        machine=machine.name(),
+                        home=home,
+                        access=access,
+                        upload_dir_name=config.view.gateway.upload_dir_name,
+                    ),
                     access=access,
                 )
             )

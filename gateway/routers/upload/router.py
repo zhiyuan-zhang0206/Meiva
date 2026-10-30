@@ -106,7 +106,7 @@ async def upload_files(
         request.app.state.db_pool,
         key,
         agent_id,
-        agent_upload_dir(agent_id, create=False, home=config.upload_home),
+        agent_upload_dir(agent_id, create=False, root=config.upload_staging_root),
         batch,
         [file.filename or "untitled" for file in files],
         batch_id=UUID(int=config.rng.getrandbits(128), version=4).hex,
@@ -129,7 +129,10 @@ def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse
             raise AgentNotFound(agent_id)
     try:
         path = resolve_upload_path(
-            agent_id, filename, home=request.app.state.gateway_config.upload_home
+            agent_upload_dir(
+                agent_id, create=False, root=request.app.state.gateway_config.upload_staging_root
+            ),
+            filename,
         )
     except ValueError as e:
         # A traversal attempt is a bad request, not a server error.

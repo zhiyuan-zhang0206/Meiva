@@ -266,7 +266,7 @@ async def lifespan(
                 # meiva:note
                 # The job is anchored to the home this entry resolved, the checkout this module was
                 # imported from, and the account home the root read once into the app config
-                # (`upload_home`: the uploads live under that account's `Downloads`).
+                # (`user_home`: the folder a Desktop/Documents/Downloads permission grant names).
                 await asyncio.to_thread(
                     register_os_cron,
                     enabled=config.view.general.os_jobs_enabled,
@@ -274,7 +274,7 @@ async def lifespan(
                     roots=JobRoots(
                         home=process.home,
                         repo=paths.repo_root(),
-                        user_home=app.state.gateway_config.upload_home,
+                        user_home=app.state.gateway_config.user_home,
                     ),
                 )
             except Exception:
@@ -291,7 +291,6 @@ async def lifespan(
                 app.state.db,
                 app.state.bus,
                 machine=process.machine,
-                home=app.state.gateway_config.upload_home,
                 claim_seconds=config.view.gateway.upload_recovery_claim_seconds,
                 rpc=app.state.rpc,
             )
@@ -627,6 +626,7 @@ def process_config(config: ConfigBoot, *, home: Path) -> GatewayConfig:
     return gateway_config_from_boot(
         config,
         user_home=Path.home(),
+        home=home,
         memory_root=paths.gateway_memory_dir(
             roles=ConfiguredMachineIdentity(config).role(), home=home
         ),

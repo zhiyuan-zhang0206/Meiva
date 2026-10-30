@@ -1,11 +1,13 @@
 """Real native transactions, filesystem faults and guarded delivered-upload consumers."""
 
+import base64
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -14,14 +16,17 @@ from psycopg_pool import ConnectionPool
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import (
+    NAMESPACE,
     CopyProof,
     ReceiveRequest,
     UnitIdentity,
     UploadDeliveryConflictError,
     current_unit,
 )
+from base.agents.upload_delivery.paths import delivered_upload_dir, fetch_upload_b64
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.paths import WORKSPACES_DIR_NAME
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
@@ -29,6 +34,16 @@ from gateway.tests.auth.gateway_config import (
 )
 from gateway.tests.events.test_notices_endpoint import seed_agent
 from gateway.tests.support.db_faults.update_fault import failing_update
+from gateway.tests.support.runner_ops.ops_stub import runner_ops
+from gateway.tests.upload_delivery.support import (
+    receiver_for as receiver_for,
+)
+from gateway.tests.upload_delivery.support import (
+    receiver_op as receiver_op,
+)
+from gateway.tests.upload_delivery.support import (
+    serving_gateway as serving_gateway,
+)
 from gateway.upload_delivery.worker import UploadRecovery
 from ops import upload_delivery as receiver
 
@@ -45,26 +60,31 @@ def uploaded_agent(
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     unit = current_unit(local_machine=machine_identity.name())
     agent = seed_agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO machines(name,gateway_url) VALUES (%s,'http://runner:7001') "
-        "ON CONFLICT(name) DO UPDATE SET gateway_url=excluded.gateway_url",
-        (unit.machine,),
-    )
-    db_conn.execute(
-        "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
-        "VALUES (%s,%s,true,'http://runner:7001')",
-        (unit.machine, unit.home),
-    )
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()
     # Deterministic fault tests call a real round explicitly; no background race.
-    config = gateway_test_config(
-        upload_home=default_home, cluster_secret=SECRET, upload_recovery_enabled=False
-    )
-    with gateway_test_client(
-        machine=machine_identity, config=config, raise_server_exceptions=False
-    ) as client:
-        yield client, agent
+    config = gateway_test_config(cluster_secret=SECRET, upload_recovery_enabled=False)
+    with (
+        gateway_test_client(
+            machine=machine_identity, config=config, raise_server_exceptions=False
+        ) as client,
+        # meiva:note
+        # A receiver pulls the staged bytes over HTTP, so the access a copy is built from dials
+        # this loopback port rather than the launch configuration's address.
+        serving_gateway(client, client.app.state.db_pool) as source_url,
+    ):
+        client.app.state.gateway_access = replace(
+            client.app.state.gateway_access, gateway_url=source_url
+        )
+        receive = receiver_op(client, receiver_for(client, unit))
+        with runner_ops(db_conn, unit.machine, {"upload-receive-v1": receive}) as runner:
+            db_conn.execute(
+                "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
+                "VALUES (%s,%s,true,%s)",
+                (unit.machine, unit.home, runner.url),
+            )
+            db_conn.commit()
+            yield client, agent
 
 
 # meiva:note
@@ -101,7 +121,6 @@ def recovery_for(client: GatewayTestClient, machine: MachineIdentityReader) -> U
         client.app.state.db,
         client.app.state.bus,
         machine=machine,
-        home=client.app.state.gateway_config.upload_home,
         claim_seconds=CLAIM_SECONDS,
         rpc=client.app.state.rpc,
     )
@@ -137,9 +156,15 @@ def request_for(pool: ConnectionPool, batch_id: str, *, local_machine: str) -> R
     )
 
 
-def proof_for(request: ReceiveRequest) -> CopyProof:
-    path = source.agent_upload_dir(
-        request.manifest.agent_id, create=False, home=Path.home()
+# meiva:note
+# The proof a receiver on `request.target` returns: the batch's namespace inside that agent's own
+# workspace on the target machine, named by the cluster's configured directory name.
+def proof_for(client: GatewayTestClient, request: ReceiveRequest) -> CopyProof:
+    path = delivered_upload_dir(
+        request.manifest.agent_id,
+        home=Path(request.target.home),
+        name=client.app.state.gateway_config.upload_dir_name,
+        create=False,
     ).resolve()
     return CopyProof(
         version=1,
@@ -160,7 +185,7 @@ def test_lost_response_replay_retains_original_notification_after_deletion(
     assert response.status_code == 202, response.text
     batch_id = response.json()["batch_id"]
     request = request_for(client.app.state.db_pool, batch_id, local_machine=machine_identity.name())
-    proof = proof_for(request)
+    proof = proof_for(client, request)
     iid = source.complete(client.app.state.db_pool, request, proof)
     assert source.complete(client.app.state.db_pool, request, proof) == iid
     db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (iid,))
@@ -229,7 +254,7 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
             [("f.png", b"native", "image/png")],
             InboundProvenance("cluster_bearer", "http"),
             local_machine=machine_identity.name(),
-            upload_home=client.app.state.gateway_config.upload_home,
+            upload_root=client.app.state.gateway_config.upload_staging_root,
         )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -252,7 +277,7 @@ def test_placement_or_bad_proof_rejected_before_inbound(
         first["batch_id"],
         local_machine=machine_identity.name(),
     )
-    proof = proof_for(request)
+    proof = proof_for(client, request)
     with pytest.raises(UploadDeliveryConflictError):
         source.complete(
             client.app.state.db_pool,
@@ -268,9 +293,13 @@ def test_placement_or_bad_proof_rejected_before_inbound(
     ).fetchone() == (0,)
 
 
-def test_receiver_same_physical_root_different_home_counts_once_and_verifies_ready(
+# meiva:note
+# A receiver on another home publishes into that home's own workspace, reserves once, and refuses
+# a file that no longer matches the manifest — the delivered copy is verified, not trusted.
+def test_receiver_on_another_home_copies_once_and_verifies_ready(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
 ):
@@ -281,15 +310,9 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
         first["batch_id"],
         local_machine=machine_identity.name(),
     )
-    unit = request.target.model_copy(update={"home": request.target.home + "-other"})
+    unit = request.target.model_copy(update={"home": str(tmp_path / "other-home")})
     request = request.model_copy(update={"target": unit})
-    config = receiver.ReceiverConfig(
-        unit=unit,
-        user_home=client.app.state.gateway_config.upload_home,
-        access=client.app.state.gateway_access,
-        quota_bytes=5,
-        quota_files=client.app.state.gateway_config.max_agent_upload_files,
-    )
+    config = replace(receiver_for(client, unit), quota_bytes=5)
     proof = receiver.copy_batch(
         client.app.state.db_pool,
         request,
@@ -323,16 +346,14 @@ def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
         first["batch_id"],
         local_machine=machine_identity.name(),
     )
-    config = receiver.ReceiverConfig(
-        unit=request.target.model_copy(update={"home": "/wrong"}),
-        user_home=client.app.state.gateway_config.upload_home,
-        access=client.app.state.gateway_access,
-        quota_bytes=client.app.state.gateway_config.max_agent_upload_bytes,
-        quota_files=client.app.state.gateway_config.max_agent_upload_files,
-    )
-    with pytest.raises(UploadDeliveryConflictError):
-        receiver.copy_batch(client.app.state.db_pool, request, config)
-    path = Path(proof_for(request).directory) / request.manifest.objects[0].name
+    config = receiver_for(client, request.target)
+    proof = receiver.copy_batch(client.app.state.db_pool, request, config)
+    path = Path(proof.directory) / request.manifest.objects[0].name
+    assert path.read_bytes() == b"bytes"
+
+    elsewhere = replace(config, unit=request.target.model_copy(update={"home": "/wrong"}))
+    with pytest.raises(UploadDeliveryConflictError, match="different native machine/home"):
+        receiver.copy_batch(client.app.state.db_pool, request, elsewhere)
     assert path.read_bytes() == b"bytes"
 
 
@@ -376,7 +397,7 @@ def test_completed_receipt_rejects_different_immutable_intent(
     client, agent = uploaded_agent
     batch = post(client, agent).json()["batch_id"]
     request = request_for(client.app.state.db_pool, batch, local_machine=machine_identity.name())
-    iid = source.complete(client.app.state.db_pool, request, proof_for(request))
+    iid = source.complete(client.app.state.db_pool, request, proof_for(client, request))
     raw = request.model_dump()
     if changed == "manifest":
         raw["manifest"]["objects"][0]["filename"] = "different-display.png"
@@ -384,8 +405,10 @@ def test_completed_receipt_rejects_different_immutable_intent(
         raw[changed]["home"] += "-different"
     changed_request = ReceiveRequest.model_validate(raw)
     with pytest.raises(UploadDeliveryConflictError, match="stored intent"):
-        source.complete(client.app.state.db_pool, changed_request, proof_for(changed_request))
-    assert source.complete(client.app.state.db_pool, request, proof_for(request)) == iid
+        source.complete(
+            client.app.state.db_pool, changed_request, proof_for(client, changed_request)
+        )
+    assert source.complete(client.app.state.db_pool, request, proof_for(client, request)) == iid
 
 
 def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers(
@@ -422,8 +445,8 @@ def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
     assert client.get(path).status_code == 422
     assert client.get(path + "/objects/0").status_code == 422
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (0,)
-    home = client.app.state.gateway_config.upload_home
-    assert not source.agent_upload_dir(invalid_agent, create=False, home=home).exists()
+    root = client.app.state.gateway_config.upload_staging_root
+    assert not source.agent_upload_dir(invalid_agent, create=False, root=root).exists()
 
 
 # meiva:note
@@ -444,3 +467,149 @@ def test_due_claims_a_batch_once(
     second = source.due(pool, local_machine=machine_identity.name(), claim_seconds=300)
     assert batch_id in [item.manifest.batch_id for item in first]
     assert batch_id not in [item.manifest.batch_id for item in second]
+
+
+# meiva:note
+# Where a delivered copy lives for the agent in these tests: the agent's own workspace on the
+# machine the batch targets, under the cluster's configured directory name.
+def delivered_copy(
+    client: GatewayTestClient, unit: UnitIdentity, agent: int, *, create: bool = False
+) -> Path:
+    return delivered_upload_dir(
+        agent,
+        home=Path(unit.home),
+        name=client.app.state.gateway_config.upload_dir_name,
+        create=create,
+    )
+
+
+# meiva:note
+# Acceptance: a delivered attachment lands inside the agent's own workspace and the notice the
+# agent reads names that path. The bytes the gateway received stay in staging, which is not a
+# user-visible folder and is never what the agent is pointed at.
+def test_a_delivered_upload_lands_in_the_agents_own_workspace(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    db_conn: psycopg.Connection[Any],
+    *,
+    machine_identity: MachineIdentityReader,
+):
+    client, agent = uploaded_agent
+    accepted = post(client, agent).json()
+    request = request_for(
+        client.app.state.db_pool, accepted["batch_id"], local_machine=machine_identity.name()
+    )
+    config = receiver_for(client, request.target)
+    proof = receiver.copy_batch(client.app.state.db_pool, request, config)
+
+    workspace = delivered_copy(client, request.target, agent)
+    copy = Path(proof.directory) / request.manifest.objects[0].name
+    assert Path(proof.directory).resolve().is_relative_to(workspace.resolve())
+    assert copy.read_bytes() == b"bytes"
+    assert not workspace.resolve().is_relative_to(
+        client.app.state.gateway_config.upload_staging_root.resolve()
+    )
+
+    iid = source.complete(client.app.state.db_pool, request, proof)
+    row = db_conn.execute("SELECT content FROM inbound_messages WHERE id=%s", (iid,)).fetchone()
+    assert row is not None
+    assert str(copy) in row[0]
+
+    staged = source.agent_upload_dir(
+        agent, create=False, root=client.app.state.gateway_config.upload_staging_root
+    )
+    assert (
+        staged / NAMESPACE / request.manifest.batch_id / request.manifest.objects[0].name
+    ).read_bytes() == b"bytes"
+
+
+# meiva:note
+# A proof whose batch namespace is right but which is not inside the target machine's workspace is
+# refused: the notice an agent reads must name a file in its own workspace, not an arbitrary
+# directory shaped like one — and `..` in the free directory-name segment would put the namespace
+# beside the workspace rather than inside it.
+@pytest.mark.parametrize("shape", ["not-the-workspace-root", "escape-with-dotdot"])
+def test_a_proof_outside_the_workspace_root_is_refused(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    shape: str,
+    *,
+    machine_identity: MachineIdentityReader,
+):
+    client, agent = uploaded_agent
+    accepted = post(client, agent).json()
+    request = request_for(
+        client.app.state.db_pool, accepted["batch_id"], local_machine=machine_identity.name()
+    )
+    proof = receiver.copy_batch(
+        client.app.state.db_pool, request, receiver_for(client, request.target)
+    )
+
+    parts = Path(proof.directory).parts
+    assert WORKSPACES_DIR_NAME in parts
+    elsewhere = (
+        Path(*(p if p != WORKSPACES_DIR_NAME else "not-workspaces" for p in parts))
+        if shape == "not-the-workspace-root"
+        else Path(*parts[:-3], "..", *parts[-2:])
+    )
+    with pytest.raises(UploadDeliveryConflictError, match="fixed agent batch namespace"):
+        source.complete(
+            client.app.state.db_pool,
+            request,
+            proof.model_copy(update={"directory": str(elsewhere)}),
+        )
+    assert source.complete(client.app.state.db_pool, request, proof)
+
+
+# meiva:note
+# Acceptance: uploading the same file name twice keeps both copies. Each batch is published
+# create-only into its own namespace directory, so the newer upload never replaces the older one.
+def test_the_same_file_name_uploaded_twice_keeps_both_copies(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    *,
+    machine_identity: MachineIdentityReader,
+):
+    client, agent = uploaded_agent
+    copies: list[Path] = []
+    for key, data in (("first", b"first"), ("second", b"second")):
+        accepted = post(client, agent, key=key, data=data).json()
+        request = request_for(
+            client.app.state.db_pool, accepted["batch_id"], local_machine=machine_identity.name()
+        )
+        proof = receiver.copy_batch(
+            client.app.state.db_pool, request, receiver_for(client, request.target)
+        )
+        copies.append(Path(proof.directory) / request.manifest.objects[0].name)
+
+    assert len({path.parent for path in copies}) == 2
+    assert [path.read_bytes() for path in copies] == [b"first", b"second"]
+
+
+# meiva:note
+# The silent image lane still works after the move: the bytes are served back at the url the
+# upload returned, and nothing is written into the agent's workspace — the claim node fetches
+# them over HTTP and never reads the gateway's disk.
+def test_a_silent_image_upload_is_served_from_its_url_and_not_delivered(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    *,
+    machine_identity: MachineIdentityReader,
+):
+    client, agent = uploaded_agent
+    image = b"\x89PNG\r\n\x1a\n" + b"pixels"
+    saved = client.post(
+        f"/api/agents/{agent}/uploads",
+        headers=HEADERS,
+        files=[("files", ("shot.png", image, "image/png"))],
+    )
+    assert saved.status_code == 200, saved.text
+    stored = saved.json()["files"][0]
+    name = Path(stored["url"]).name
+
+    with (
+        serving_gateway(client, client.app.state.db_pool) as source_url,
+        httpx.Client(base_url=source_url) as http,
+    ):
+        mime, b64 = fetch_upload_b64(agent, name, client=lambda: http)
+
+    assert mime == "image/png"
+    assert base64.standard_b64decode(b64) == image
+    unit = current_unit(local_machine=machine_identity.name())
+    assert not delivered_copy(client, unit, agent).exists()

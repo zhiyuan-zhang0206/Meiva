@@ -26,7 +26,7 @@ def gate_service(request: Request) -> GateService:
     return GateService(
         host=gate_host(
             home=process.home,
-            user_home=config.upload_home,
+            user_home=config.user_home,
             environ=process.host.environ,
             helper=helper_for(process.host.platform, home=process.home),
             timers=clock,

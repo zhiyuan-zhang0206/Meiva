@@ -30,6 +30,7 @@ from base.agents.upload_delivery.paths import (
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
+from base.paths import WORKSPACES_DIR_NAME
 
 # Copy attempts a batch gets before it is held for a person to re-upload.
 MAX_COPY_ATTEMPTS = 3
@@ -79,13 +80,13 @@ def _claim(
     provenance: InboundProvenance,
     *,
     local_machine: str,
-    upload_home: Path,
+    upload_root: Path,
 ) -> tuple[Any, ...]:
     fingerprint = request_hash(names, batch)
     source = current_unit(
         local_machine=local_machine,
     )
-    directory = agent_upload_dir(agent_id, create=False, home=upload_home).resolve()
+    directory = agent_upload_dir(agent_id, create=False, root=upload_root).resolve()
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, agent_id)
         found = _lookup(conn, key, fingerprint)
@@ -144,7 +145,7 @@ def accept(
     provenance: InboundProvenance,
     *,
     local_machine: str,
-    upload_home: Path,
+    upload_root: Path,
 ) -> Acceptance:
     claimed = _claim(
         pool,
@@ -154,7 +155,7 @@ def accept(
         batch,
         provenance,
         local_machine=local_machine,
-        upload_home=upload_home,
+        upload_root=upload_root,
     )
     if claimed[4] is not None:
         return Acceptance.model_validate(claimed[4])
@@ -163,7 +164,7 @@ def accept(
     ):
         raise UploadDeliveryConflictError("receiving source belongs to another native unit")
     manifest = Manifest.model_validate(claimed[1])
-    directory = agent_upload_dir(agent_id, create=False, home=upload_home).resolve()
+    directory = agent_upload_dir(agent_id, create=False, root=upload_root).resolve()
     if str(directory) != claimed[5]:
         raise UploadDeliveryConflictError("receiving source binds another native physical root")
     # No DB connection is held across filesystem publication. Fixed namespace and
@@ -313,12 +314,23 @@ def record_failure(pool: ConnectionSource, batch_id: str, reason: str, *, hold: 
     return None if row is None else row[0]
 
 
-def _proof_paths(proof: CopyProof, manifest: Manifest) -> list[str]:
+# meiva:note
+# The received files' own namespace inside the agent's workspace:
+# `<target home>/workspaces/<agent id>/<configured name>/.delivered-v1/<batch>/<object>`. The home,
+# the workspaces root, the agent's own directory, the batch and the namespace are all pinned to
+# what the batch froze, so a proof can only name a file in the workspace of the machine the batch
+# targets. The one free segment is the delivered-directory name (`MEIVA_UPLOAD_DIR_NAME`): a
+# receiver whose config lags the gateway still delivered a real, readable file, and refusing that
+# proof would turn a stale config into a batch nobody can accept. `..` is refused outright — as
+# that free segment it would put the namespace beside the workspace instead of inside it.
+def _proof_paths(proof: CopyProof, manifest: Manifest, *, home: str) -> list[str]:
     native_directory = PurePosixPath(proof.directory)
+    workspace = PurePosixPath(home) / WORKSPACES_DIR_NAME / str(manifest.agent_id)
     if (
-        native_directory.name != manifest.batch_id
+        ".." in native_directory.parts
+        or native_directory.name != manifest.batch_id
         or native_directory.parent.name != NAMESPACE
-        or native_directory.parent.parent.name != f"MeivaAgent-{manifest.agent_id}"
+        or native_directory.parent.parent.parent != workspace
     ):
         raise UploadDeliveryConflictError(
             "copy proof directory differs from its fixed agent batch namespace"
@@ -355,7 +367,7 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
             raise UploadDeliveryConflictError("held delivery cannot accept a late copy proof")
         if target_unit(conn, manifest.agent_id) != request.target:
             raise UploadDeliveryConflictError("agent placement changed after upload acceptance")
-        paths = _proof_paths(proof, manifest)
+        paths = _proof_paths(proof, manifest, home=request.target.home)
         content = (
             "Uploaded files on "
             + request.target.machine

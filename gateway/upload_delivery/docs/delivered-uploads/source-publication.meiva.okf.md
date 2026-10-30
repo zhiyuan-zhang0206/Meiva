@@ -22,11 +22,16 @@ and reservation never expire; interrupted source publication needs original key
 and bytes. Ready replay precedes mutable target/deletion checks. No cleanup of
 finals, unbound staging or other attempts is performed.
 
-Physical finals use `~/Downloads/MeivaAgent-{id}/.delivered-v1/{batch}/{object}`.
-`agent_upload_dir` is independent of `MEIVA_HOME`: two homes on one machine may
-share this root. `storage.check_quota` serializes through the existing agent xact
+Source finals use the gateway's staging root:
+`{MEIVA_HOME}/uploads/{id}/.delivered-v1/{batch}/{object}` by default, or
+`MEIVA_UPLOAD_STAGING_ROOT/{id}/...` when that is set. Staging is this unit's
+internal state, not a user-visible folder, and never the agent's workspace: the
+copy an agent reads is the receiver's (`<that machine's MEIVA_HOME>/workspaces/
+{id}/MEIVA_UPLOAD_DIR_NAME/.delivered-v1/{batch}/{object}`). `storage.check_quota` serializes through the existing agent xact
 gate and counts actual flat files, legal hidden finals and receiving reservations
-bound to machine/resolved directory. Same batch paths count once across source
+bound to machine/resolved directory. Because reservations are matched by that
+directory, changing `MEIVA_UPLOAD_DIR_NAME` starts a fresh account: copies under the
+old name stay where they are and no longer count against the agent's quota. Same batch paths count once across source
 and receiver homes. Old silent receiving rows have no physical binding and are
 conservatively retained in accounting, never assigned or deleted by inference.
 Native primitive dot-temp files are staging; hard-crash leftovers are held and
