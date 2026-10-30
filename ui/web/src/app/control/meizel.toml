@@ -9,21 +9,13 @@ exports = ["anchor-scroll.ts", "nav.tsx", "section.tsx", "sections.ts", "visibil
 "inventory" = ["visibility.tsx"]
 "nav.test.tsx" = ["nav.tsx"]
 "nav.tsx" = ["sections.ts"]
-"page.test.tsx" = ["config", "display", "guide", "inventory", "page.tsx", "schedules", "sections.ts", "skills"]
+"page.test.tsx" = ["page.tsx", "sections.ts"]
 "page.tsx" = ["anchor-scroll.ts", "config", "display", "guide", "inventory", "nav.tsx", "schedules", "section.tsx", "sections.ts", "skills"]
 "schedules" = ["visibility.tsx"]
 "section.test.tsx" = ["section.tsx"]
 "section.tsx" = ["visibility.tsx"]
 "skills" = ["visibility.tsx"]
 "visibility.test.tsx" = ["visibility.tsx"]
-
-[debt.first-party-patch]
-"page.test.tsx#vi.mock ui/web/src/app/control/config/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/app/control/display/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/app/control/guide/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/app/control/inventory/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/app/control/schedules/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/app/control/skills/page.tsx" = 1
 
 [debt.stdlib-patch]
 "anchor-scroll.test.tsx#vi.stubGlobal ResizeObserver" = 1

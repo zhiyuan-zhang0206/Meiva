@@ -18,6 +18,7 @@ import { MessageSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
+import type { ComponentProps, ComponentType } from "react";
 
 import { useSettledAnchorScroll } from "@/app/control/anchor-scroll";
 import { ControlNav } from "@/app/control/nav";
@@ -33,9 +34,30 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
 
+type StatusSlot = ComponentType<ComponentProps<typeof StatusPage>>;
+type OpsSlot = ComponentType<ComponentProps<typeof OpsPage>>;
+type AlertsSlot = ComponentType<ComponentProps<typeof AlertsSection>>;
+
+export interface InsightsShellProps {
+  Status: StatusSlot;
+  Ops: OpsSlot;
+  Alerts: AlertsSlot;
+}
+
+// meiva:note
+// This route is the Insights page's composition root: it names the three section bodies and hands
+// them to the shell. The shell owns the layout, the nav and the anchor scroll, and takes each body
+// as a required prop, so a test renders the shell with its own stand-ins instead of replacing the
+// section modules.
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
 export default function InsightsPage() {
+  return <InsightsShell Status={StatusPage} Ops={OpsPage} Alerts={AlertsSection} />;
+}
+
+export function InsightsShell({ Status, Ops, Alerts }: InsightsShellProps) {
   const t = useTranslations("insights");
   const runTimelineT = useTranslations("runTimeline");
+  // meiva:note
   // Honor a #anchor on first load / direct link: resolve the target once,
   // from the URL hash at mount (later hash changes come from nav clicks,
   // which scroll themselves). The scroll itself is re-applied by
@@ -50,6 +72,10 @@ export default function InsightsPage() {
   });
   useSettledAnchorScroll(INSIGHTS_SCROLL_ID, anchorTarget);
 
+  // meiva:note
+  // The outer row clips (overflow-hidden): the nav rail and the content column each own their
+  // vertical scroll, so the document/body never gains a third scrollbar.
+  // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
   return (
     <div className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
       <header className={cn("shrink-0 items-center gap-1.5 border-b border-border px-4 py-2", FLEX)}>
@@ -65,8 +91,6 @@ export default function InsightsPage() {
         </Link>
       </header>
 
-      {/* overflow-hidden outer boundary: nav rail + content each own their
-          vertical scroll, so the document/body never gains a third scrollbar. */}
       <div className={cn("md:flex-row", FLEX, FLEX_COL, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
         <ControlNav
           sections={INSIGHTS_SECTIONS}
@@ -80,7 +104,7 @@ export default function InsightsPage() {
               label={t("statusLabel")}
               description={t("statusDescription")}
             >
-              <StatusPage />
+              <Status />
             </ControlSection>
 
             <ControlSection
@@ -88,7 +112,7 @@ export default function InsightsPage() {
               label={t("ops")}
               description={t("opsDescription")}
             >
-              <OpsPage />
+              <Ops />
             </ControlSection>
 
             <ControlSection
@@ -104,7 +128,7 @@ export default function InsightsPage() {
               label={t("alerts")}
               description={t("alertsDescription")}
             >
-              <AlertsSection />
+              <Alerts />
             </ControlSection>
 
           </div>
