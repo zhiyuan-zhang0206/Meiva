@@ -216,6 +216,8 @@ def _drill(
     state.update_state(home, drill=record)
     if record.ok:
         report(f"drill: ok in {record.seconds:.0f}s ({record.detail})")
+    elif record.last_refused_at is not None and record.last_refused_at == record.finished_at:
+        report(f"drill: REFUSED: {record.detail}")
     else:
         report(f"drill: FAILED after {record.seconds:.0f}s: {record.detail}")
     return record.ok
