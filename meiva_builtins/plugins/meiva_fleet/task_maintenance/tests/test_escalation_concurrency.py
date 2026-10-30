@@ -24,7 +24,10 @@ def test_competing_rounds_accept_one_window(
 ) -> None:
     delegator, _, task = stalled_subtask(db_conn)
     with ThreadPoolExecutor(max_workers=2) as workers:
-        rounds = [workers.submit(accept_escalations, pool, 3) for _ in range(2)]
+        rounds = [
+            workers.submit(accept_escalations, pool, 3, notice_ttl_limit_seconds=7200)
+            for _ in range(2)
+        ]
         assert sorted(len(future.result(timeout=10)) for future in rounds) == [0, 1]
     assert len(inbound_messages(db_conn, delegator)) == 1
     assert escalated_at(db_conn, task) is not None
@@ -45,14 +48,14 @@ def test_locked_parent_change_defers_and_uses_current_state(
     if close:
         db_conn.execute("UPDATE agent_tasks SET status='done' WHERE id=ANY(%s)", ([parent, task],))
     with ThreadPoolExecutor(max_workers=1) as workers:
-        future = workers.submit(accept_escalations, pool, 3)
+        future = workers.submit(accept_escalations, pool, 3, notice_ttl_limit_seconds=7200)
         try:
             assert future.result(timeout=3) == []
         finally:
             db_conn.commit()
     assert inbound_messages(db_conn, old_delegator) == []
     assert escalated_at(db_conn, task) is None
-    accepted = accept_escalations(pool, 3)
+    accepted = accept_escalations(pool, 3, notice_ttl_limit_seconds=7200)
     assert len(accepted) == (0 if close else 1)
     if not close:
         assert accepted[0].recipient == new_delegator
@@ -66,12 +69,12 @@ def test_locked_update_cannot_escalate_old_overdue_window(
     delegator, _, task = stalled_subtask(db_conn)
     db_conn.execute("UPDATE agent_tasks SET reminder_count=0 WHERE id=%s", (task,))
     with ThreadPoolExecutor(max_workers=1) as workers:
-        future = workers.submit(accept_escalations, pool, 3)
+        future = workers.submit(accept_escalations, pool, 3, notice_ttl_limit_seconds=7200)
         try:
             assert future.result(timeout=3) == []
         finally:
             db_conn.commit()
-    assert accept_escalations(pool, 3) == []
+    assert accept_escalations(pool, 3, notice_ttl_limit_seconds=7200) == []
     assert inbound_messages(db_conn, delegator) == []
     assert escalated_at(db_conn, task) is None
 
@@ -103,7 +106,7 @@ def test_human_notice_shares_creator_lock(
     task = make_task(db_conn, owner=owner, parent_id=root[0], reminder_count=3)
     db_conn.execute("SELECT id FROM agents WHERE id=%s FOR UPDATE", (owner,))
     with ThreadPoolExecutor(max_workers=1) as workers:
-        future = workers.submit(accept_escalations, pool, 3)
+        future = workers.submit(accept_escalations, pool, 3, notice_ttl_limit_seconds=7200)
         try:
             _wait_for_blocker(pool, db_conn.info.backend_pid)
             db_conn.execute("SET LOCAL statement_timeout = '2s'")
@@ -130,9 +133,9 @@ def test_acceptance_failure_rolls_back_entire_batch(
         inserts_failing(db_conn, "inbound_messages", for_agent=second),
         pytest.raises(psycopg.errors.RaiseException, match="inbound_messages inserts refused"),
     ):
-        accept_escalations(pool, 3)
+        accept_escalations(pool, 3, notice_ttl_limit_seconds=7200)
     assert inbound_messages(db_conn, first) == []
     assert inbound_messages(db_conn, second) == []
     assert escalated_at(db_conn, one) is None and escalated_at(db_conn, two) is None
-    assert len(accept_escalations(pool, 3)) == 2
-    assert accept_escalations(pool, 3) == []
+    assert len(accept_escalations(pool, 3, notice_ttl_limit_seconds=7200)) == 2
+    assert accept_escalations(pool, 3, notice_ttl_limit_seconds=7200) == []

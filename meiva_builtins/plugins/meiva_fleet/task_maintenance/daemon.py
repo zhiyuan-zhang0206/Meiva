@@ -39,9 +39,10 @@ from base.packages.plugins.config_registration import (
     read_config_image,
     read_service_config,
 )
+from base.packages.plugins.flags import read_declared_flag
 from base.paths import meiva_home, run_dir
 from base.telemetry.process_logging import init_gateway_process
-from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
+from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import routing
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -272,8 +273,23 @@ def _accept_manager_digest(
     )
 
 
+# meiva:note
+# The notice TTL every staging call gets: read once per pass and narrowed once here, so the
+# staging layers take an int they cannot re-read from settings themselves.
+def notice_ttl_limit_seconds() -> float:
+    value = read_declared_flag("daemon.notice_ttl_limit_seconds", contribute().flags)
+    if not isinstance(value, int | float):
+        raise TypeError("daemon.notice_ttl_limit_seconds must be a number")
+    return float(value)
+
+
 def _accept_human_notice(
-    cur: psycopg.Cursor, conn: psycopg.Connection, owner: int, tasks: list[_DueTask]
+    cur: psycopg.Cursor,
+    conn: psycopg.Connection,
+    owner: int,
+    tasks: list[_DueTask],
+    *,
+    notice_ttl_limit_seconds: float,
 ) -> _HumanNotice | None:
     staged = routing.stage_human_notice(
         cur,
@@ -283,6 +299,7 @@ def _accept_human_notice(
         title=_stranded_notice_title(owner, tasks),
         content=_stranded_notice_content(owner, tasks),
         priority=min(task.priority for task in tasks),
+        notice_ttl_limit_seconds=notice_ttl_limit_seconds,
     )
     for task in tasks:
         advance_reminder_counters(cur, task.id)
@@ -292,7 +309,11 @@ def _accept_human_notice(
 
 
 def _accept_reroutes(
-    cur: psycopg.Cursor, conn: psycopg.Connection, orphaned: dict[int, list[_DueTask]]
+    cur: psycopg.Cursor,
+    conn: psycopg.Connection,
+    orphaned: dict[int, list[_DueTask]],
+    *,
+    notice_ttl_limit_seconds: float,
 ) -> tuple[list[_Reroute], list[_HumanNotice]]:
     managers = routing.nearest_manager(
         cur, [task.id for tasks in orphaned.values() for task in tasks]
@@ -322,7 +343,9 @@ def _accept_reroutes(
             (sorted(stranded),),
         )
     for owner, tasks in sorted(stranded.items()):
-        notice = _accept_human_notice(cur, conn, owner, tasks)
+        notice = _accept_human_notice(
+            cur, conn, owner, tasks, notice_ttl_limit_seconds=notice_ttl_limit_seconds
+        )
         if notice is not None:
             notices.append(notice)
     return reroutes, notices
@@ -410,7 +433,12 @@ def run_reminders(
             task = _DueTask(task_id, owner, title, interval, elapsed, priority)
             (orphaned if status == AgentStatus.TERMINATED else live)[owner].append(task)
         digests = _accept_owner_digests(cur, live)
-        reroutes, notices = _accept_reroutes(cur, conn, orphaned)
+        reroutes, notices = _accept_reroutes(
+            cur,
+            conn,
+            orphaned,
+            notice_ttl_limit_seconds=notice_ttl_limit_seconds(),
+        )
     _announce_owner_digests(digests, db, bus)
     _announce_reroutes(reroutes, db, bus)
     _announce_human_notices(notices, pool, bus)
@@ -443,7 +471,11 @@ def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: 
     from base.events.notifications.publish import announce_sync
     from meiva_builtins.plugins.meiva_fleet.task_maintenance.escalation import accept_escalations
 
-    receipts = accept_escalations(pool, escalate_n)
+    receipts = accept_escalations(
+        pool,
+        escalate_n,
+        notice_ttl_limit_seconds=notice_ttl_limit_seconds(),
+    )
     for receipt in receipts:
         if receipt.notification_id is not None:
             # meiva:note

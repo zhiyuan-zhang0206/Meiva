@@ -88,7 +88,11 @@ _STATE_CHANGE_BASIS = "a tasks.log note is not a state change"
 
 
 def _user_notice(
-    cur: psycopg.Cursor, conn: psycopg.Connection, task: _Task
+    cur: psycopg.Cursor,
+    conn: psycopg.Connection,
+    task: _Task,
+    *,
+    notice_ttl_limit_seconds: float,
 ) -> EscalationReceipt | None:
     if task.owner is None:
         raise ValueError("human escalation requires a task owner")
@@ -110,6 +114,7 @@ def _user_notice(
         title=title,
         content=content,
         priority=task.priority,
+        notice_ttl_limit_seconds=notice_ttl_limit_seconds,
     )
     if staged is None:
         return None
@@ -174,7 +179,9 @@ def _eligible_groups(
     return delegated, human
 
 
-def accept_escalations(pool: ConnectionPool, threshold: int) -> list[EscalationReceipt]:
+def accept_escalations(
+    pool: ConnectionPool, threshold: int, *, notice_ttl_limit_seconds: float
+) -> list[EscalationReceipt]:
     """Commit each eligible digest/notice from current task and parent rows.
 
     Parent changes discovered after locking are deferred if the actual parent
@@ -193,7 +200,9 @@ def accept_escalations(pool: ConnectionPool, threshold: int) -> list[EscalationR
             _delegator_note(cur, owner, tasks) for owner, tasks in sorted(delegated.items())
         ]
         for task in human:
-            receipt = _user_notice(cur, conn, task)
+            receipt = _user_notice(
+                cur, conn, task, notice_ttl_limit_seconds=notice_ttl_limit_seconds
+            )
             if receipt is not None:
                 receipts.append(receipt)
         return receipts

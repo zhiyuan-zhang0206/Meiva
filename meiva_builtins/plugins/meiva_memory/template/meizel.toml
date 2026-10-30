@@ -1,7 +1,4 @@
 exports = ["validate.py"]
 
 [roots]
-"validate.py" = { kinds = ["environ"], why = "OKF validator reads MEIVA_MEMORY_NOTE_CAP environment override to match commit-hook note character cap" }
-
-[debt.ambient-read]
-"validate.py#home pathlib.Path.expanduser" = 1
+"validate.py" = { kinds = ["environ", "home"], why = "OKF validator reads MEIVA_MEMORY_NOTE_CAP environment override to match commit-hook note character cap, and expands the `~` a note's fact-check command line names before running the whitelisted command" }
