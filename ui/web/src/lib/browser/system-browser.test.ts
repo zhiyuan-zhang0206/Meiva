@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { LiveDocument, LiveNavigator, LivePage } from "./system-browser";
+import type { LiveDocument, LiveNavigator, LivePage, LiveViewport } from "./system-browser";
 import {
   beaconOver,
   browserOver,
@@ -15,6 +15,7 @@ import {
   navigationOver,
   storageOver,
   viewOver,
+  viewportOver,
 } from "./system-browser";
 
 function warnings(): string[] {
@@ -57,9 +58,35 @@ function documentOf(overrides: Partial<LiveDocument> = {}): LiveDocument {
   };
 }
 
+// meiva:note
+// A viewport a test can move: `height` is writable here (the port's reading is a snapshot, so the
+// real interface has it read-only), and `fire` tells every subscriber what a browser would.
+interface ViewportDouble extends LiveViewport {
+  height: number;
+  fire(): void;
+  listening(): number;
+}
+
+function viewportOf(height: number, scale = 1): ViewportDouble {
+  const listeners: Record<"resize" | "scroll", Set<() => void>> = {
+    resize: new Set(),
+    scroll: new Set(),
+  };
+  return {
+    height,
+    scale,
+    addEventListener: (type, listener) => void listeners[type].add(listener),
+    removeEventListener: (type, listener) => void listeners[type].delete(listener),
+    fire: () => {
+      for (const set of [listeners.resize, listeners.scroll]) for (const listener of [...set]) listener();
+    },
+    listening: () => listeners.resize.size + listeners.scroll.size,
+  };
+}
+
 function pageOf(overrides: Partial<LivePage> = {}): LivePage {
   const listeners = new Set<() => void>();
-  return {
+  const page: LivePage = {
     location: { href: "http://gateway.test/shell/7#inbox", assign: () => undefined },
     history: {
       state: null,
@@ -71,16 +98,17 @@ function pageOf(overrides: Partial<LivePage> = {}): LivePage {
     removeEventListener: (_type, listener) => void listeners.delete(listener),
     localStorage: () => storageOf(),
     sessionStorage: () => storageOf(),
-    matchMedia: (query) =>
-      ({
-        matches: query === "(min-width: 768px)",
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-      }) as unknown as MediaQueryList,
+    matchMedia: (query) => ({
+      matches: query === "(min-width: 768px)",
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }) as unknown as MediaQueryList,
+    innerHeight: 900,
+    visualViewport: viewportOf(900),
     navigator: navigatorOf(),
     document: documentOf(),
-    ...overrides,
   };
+  return Object.assign(page, overrides);
 }
 
 describe("storageOver", () => {
@@ -302,6 +330,45 @@ describe("viewOver", () => {
   it("throws in a frame with no page", () => {
     const target = { scrollIntoView: () => undefined } as unknown as Element;
     expect(() => viewOver(null).scrollIntoView(target, "start")).toThrow(/server render/);
+  });
+});
+
+describe("viewportOver", () => {
+  it("reads the layout height and the visual band each time it is asked", () => {
+    const visual = viewportOf(640, 1);
+    const viewport = viewportOver(pageOf({ innerHeight: 900, visualViewport: visual }));
+    expect(viewport.read()).toEqual({ layoutHeight: 900, visual: { height: 640, scale: 1 } });
+    visual.height = 900;
+    expect(viewport.read().visual).toEqual({ height: 900, scale: 1 });
+  });
+
+  it("tells a page without a visual viewport from one the keyboard moved", () => {
+    const viewport = viewportOver(pageOf({ innerHeight: 900, visualViewport: null }));
+    expect(viewport.read()).toEqual({ layoutHeight: 900, visual: null });
+  });
+
+  it("follows the visual viewport's resize and scroll, and stops on unsubscribe", () => {
+    const visual = viewportOf(640);
+    const viewport = viewportOver(pageOf({ visualViewport: visual }));
+    let heard = 0;
+    const unsubscribe = viewport.subscribe(() => {
+      heard += 1;
+    });
+    expect(visual.listening()).toBe(2);
+    visual.fire();
+    expect(heard).toBe(2);
+
+    unsubscribe();
+    expect(visual.listening()).toBe(0);
+    visual.fire();
+    expect(heard).toBe(2);
+  });
+
+  it("has nothing to follow in a frame with no page", () => {
+    const viewport = viewportOver(null);
+    expect(viewport.read()).toEqual({ layoutHeight: 0, visual: null });
+    const unsubscribe = viewport.subscribe(() => undefined);
+    expect(unsubscribe()).toBeUndefined();
   });
 });
 

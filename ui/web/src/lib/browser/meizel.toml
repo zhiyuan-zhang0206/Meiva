@@ -1,4 +1,4 @@
-exports = ["browser.ts", "browser-provider.tsx", "system-browser.ts", "testing.ts"]
+exports = ["browser.ts", "browser-provider.tsx", "system-browser.ts", "testing.ts", "viewport.ts"]
 
 [uses]
 "browser-provider.test.tsx" = ["browser-provider.tsx", "testing.ts"]
@@ -8,9 +8,11 @@ exports = ["browser.ts", "browser-provider.tsx", "system-browser.ts", "testing.t
 "system-browser.ts" = ["browser.ts"]
 "testing.test.ts" = ["testing.ts"]
 "testing.ts" = ["browser-provider.tsx", "browser.ts"]
+"viewport.ts" = ["browser.ts"]
 
 [purity]
 "browser.ts" = "strict"
+"viewport.ts" = "strict"
 
 [roots]
 "system-browser.ts" = { kinds = ["environ", "platform"], why = "the browser capability port's system implementation: this is the composition root where the frontend's world enters — it reads the live page once (its address, its two storage areas, its media queries and its navigator) and every component receives the port from it through <BrowserProvider>" }
