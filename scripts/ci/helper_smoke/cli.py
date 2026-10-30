@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from base.clock import SYSTEM_TIMERS
+
 from .f12 import f12_finish, f12_point
 from .support import (
     ROOT_SOCKET,
@@ -244,14 +246,19 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         bootout(label, uid=uid)
         helper_sock.unlink(missing_ok=True)
         run(["launchctl", "bootstrap", launchctl_domain(uid), str(plist_path)], timeout=60.0)
-        wait_for("helper socket", helper_sock.exists, _HELPER_WAIT_S, "launch")
+        wait_for(
+            "helper socket", helper_sock.exists, _HELPER_WAIT_S, "launch", timers=SYSTEM_TIMERS
+        )
         ping = wait_for(
             "helper ping",
             lambda: ping_or_none(helper_client),
             _HELPER_WAIT_S,
             "launch",
+            timers=SYSTEM_TIMERS,
         )
-        helper_pid = wait_for("helper job pid", lambda: job_pid(label), _HELPER_WAIT_S, "launch")
+        helper_pid = wait_for(
+            "helper job pid", lambda: job_pid(label), _HELPER_WAIT_S, "launch", timers=SYSTEM_TIMERS
+        )
         recorded_pids.add(helper_pid)
         save(
             evidence,
@@ -264,9 +271,19 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
     def check_chain() -> tuple[int, dict[str, int]]:
         # ---- chain ---------------------------------------------------------
-        wait_for("root socket", (run_dir / ROOT_SOCKET).exists, ROOT_WAIT_S, "chain")
+        wait_for(
+            "root socket",
+            (run_dir / ROOT_SOCKET).exists,
+            ROOT_WAIT_S,
+            "chain",
+            timers=SYSTEM_TIMERS,
+        )
         status = wait_for(
-            "root running", lambda: status_if_running(root_status), ROOT_WAIT_S, "chain"
+            "root running",
+            lambda: status_if_running(root_status),
+            ROOT_WAIT_S,
+            "chain",
+            timers=SYSTEM_TIMERS,
         )
         root_pid = int(status["root"]["pid"])
         recorded_pids.add(root_pid)
@@ -333,7 +350,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             for unit_id in initial_units:
                 results_path = workdir / f"unit-results-{unit_id}.json"
                 wait_for(
-                    f"unit {unit_id} preflight results", results_path.exists, 30.0, "attribute"
+                    f"unit {unit_id} preflight results",
+                    results_path.exists,
+                    30.0,
+                    "attribute",
+                    timers=SYSTEM_TIMERS,
                 )
                 unit_results[unit_id] = json.loads(results_path.read_text())
             time.sleep(2.0)
@@ -384,19 +405,20 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         ab_chain = [helper_pid, root_pid, *initial_units.values()]
         if args.sample_conflict:
             conflict_f12["points"]["h0"] = f12_point(
-                workdir, "h0", ab_units, ab_chain, now=time.time()
+                workdir, "h0", ab_units, ab_chain, now=time.time(), timers=SYSTEM_TIMERS
             )
         kill(helper_pid, signal.SIGKILL)
         if args.sample_conflict:
             conflict_f12["kill_ts"] = round(time.time(), 3)
             conflict_f12["points"]["h1"] = f12_point(
-                workdir, "h1", ab_units, ab_chain, now=time.time()
+                workdir, "h1", ab_units, ab_chain, now=time.time(), timers=SYSTEM_TIMERS
             )
         new_helper_pid = wait_for(
             "helper relaunched",
             lambda: relaunched_helper(label, helper_pid),
             _HELPER_WAIT_S,
             "conflict",
+            timers=SYSTEM_TIMERS,
         )
         recorded_pids.add(new_helper_pid)
         conflict = wait_for(
@@ -404,13 +426,19 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             lambda: status_if_conflict(helper_root_status),
             ROOT_WAIT_S,
             "conflict",
+            timers=SYSTEM_TIMERS,
         )
         if int(conflict["conflict"]["pid"]) != root_pid:
             fail("conflict", f"conflict pid {conflict['conflict']['pid']} != orphan {root_pid}")
         save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
         if args.sample_conflict:
             conflict_f12["points"]["h2"] = f12_point(
-                workdir, "h2", ab_units, [new_helper_pid, *ab_chain], now=time.time()
+                workdir,
+                "h2",
+                ab_units,
+                [new_helper_pid, *ab_chain],
+                now=time.time(),
+                timers=SYSTEM_TIMERS,
             )
 
         # The helper never signals a root it did not seed: a plain stop and a
@@ -433,16 +461,23 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             lambda: not any(pid_alive(pid) for pid in orphan_tree),
             _RESTART_WAIT_S,
             "conflict",
+            timers=SYSTEM_TIMERS,
         )
         if args.sample_conflict:
             conflict_f12["points"]["h3"] = f12_point(
-                workdir, "h3", ab_units, [new_helper_pid, *ab_chain], now=time.time()
+                workdir,
+                "h3",
+                ab_units,
+                [new_helper_pid, *ab_chain],
+                now=time.time(),
+                timers=SYSTEM_TIMERS,
             )
         reseeded = wait_for(
             "reseeded root",
             lambda: status_if_keeper_running(helper_root_status),
             ROOT_WAIT_S,
             "conflict",
+            timers=SYSTEM_TIMERS,
         )
         reseeded_pid = int(reseeded["pid"])
         recorded_pids.add(reseeded_pid)
@@ -451,6 +486,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             lambda: status_if_running(root_status, excluding=root_pid),
             ROOT_WAIT_S,
             "conflict",
+            timers=SYSTEM_TIMERS,
         )
         reseeded_units = {
             unit_id: int(unit_entry(reseeded_status, unit_id)["pid"]) for unit_id in UNIT_IDS
@@ -473,6 +509,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 [*ab_units, *reseeded_units.items()],
                 [new_helper_pid, reseeded_pid, *reseeded_units.values()],
                 now=time.time(),
+                timers=SYSTEM_TIMERS,
             )
             conflict_f12.update(
                 {
