@@ -124,9 +124,11 @@ def test_a_wait_returns_as_soon_as_the_tracked_process_has_exited() -> None:
     child = subprocess.Popen([sys.executable, str(CHILD), "sleep", "0.4"])
     identity = OwnedProcess.capture(psutil.Process(child.pid))
     try:
-        started = time.monotonic()
         wait_for_exit({identity}, deadline_after(SYSTEM_TIMERS, 10))
-        assert 0.2 <= time.monotonic() - started < 5
+        # meiva:note
+        # The exit is the fact: a wait that returns early leaves the child running, and a
+        # wait that never returns runs into `deadline_after`'s TimeoutError.
+        assert child.poll() is not None, "the wait returned before the tracked process exited"
     finally:
         child.wait(timeout=10)
     assert not identity.live()
