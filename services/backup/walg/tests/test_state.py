@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import stat
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -203,3 +203,36 @@ def test_a_drill_without_a_target_or_a_success_round_trips(sandbox: Sandbox) -> 
     for drill in (record, never):
         state.write_state(sandbox.home, State(drill=drill))
         assert state.read_state(sandbox.home).drill == drill
+
+
+# meiva:note
+# A refusal survives a later success: the record has to answer "when did we last refuse, and why"
+# even when the newest drill passed. A state file written before the fields existed still reads.
+def test_a_refusal_is_carried_and_an_older_state_file_still_reads(sandbox: Sandbox) -> None:
+    refused = DrillRecord(
+        finished_at=T1,
+        ok=False,
+        backup="base_1",
+        target_lsn=None,
+        seconds=0.0,
+        detail="drill refused, nothing written: short by 11.0 GiB",
+        last_ok_at=None,
+        last_refused_at=T1,
+        last_refused_reason="drill refused, nothing written: short by 11.0 GiB",
+    )
+    after_success = replace(
+        refused, ok=True, detail="ok", last_ok_at=T1, finished_at=T1 + timedelta(hours=1)
+    )
+
+    for drill in (refused, after_success):
+        state.write_state(sandbox.home, State(drill=drill))
+        assert state.read_state(sandbox.home).drill == drill
+
+    written = json.loads(state.state_path(sandbox.home).read_text())
+    del written["drill"]["last_refused_at"]
+    del written["drill"]["last_refused_reason"]
+    state.state_path(sandbox.home).write_text(json.dumps(written))
+
+    older = state.read_state(sandbox.home).drill
+    assert older is not None
+    assert older.last_refused_at is None

@@ -9,6 +9,7 @@ segment by a scratch postmaster, and read through the production checkpoint read
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import tempfile
@@ -78,7 +79,7 @@ def _facts(**overrides: Any) -> SourceFacts:
         last_archived_wal="000000010000000000000008",
         segment_bytes=SEGMENT,
         max_wal_size_bytes=1 << 30,
-        wal_since_backup_bytes=5 * SEGMENT,
+        data_bytes=5 * SEGMENT,
     )
     return replace(base, **overrides)
 
@@ -135,8 +136,58 @@ def test_without_a_newer_archived_segment_there_is_no_target(facts: SourceFacts)
     assert drill.target_lsn(_backup(), facts) is None
 
 
-def test_the_scratch_space_is_built_from_known_quantities() -> None:
-    assert drill.required_bytes(_backup(), _facts()) == 1000 + 5 * SEGMENT + (1 << 30)
+def test_the_scratch_space_is_the_cluster_it_rebuilds_with_headroom() -> None:
+    facts = _facts(data_bytes=100 << 20)
+    assert drill.required_bytes(_backup(), facts) == (
+        math.ceil((100 << 20) * drill.SPACE_FACTOR) + (1 << 30)
+    )
+
+
+# meiva:note
+# The regression that cost 2026-10-30: a delta backup records its own bytes (2.0 GiB), and the
+# drill that trusted that figure asked for 26 GiB, wrote 44 GiB and left the host at 99%.
+def test_a_delta_backups_own_size_never_stands_in_for_the_cluster() -> None:
+    delta = _backup(uncompressed_bytes=2 << 30)
+    facts = _facts(data_bytes=42 << 30)
+
+    assert drill.required_bytes(delta, facts) == math.ceil((42 << 30) * drill.SPACE_FACTOR) + (
+        1 << 30
+    )
+
+
+def test_a_full_backup_larger_than_the_source_is_not_under_read() -> None:
+    full = _backup(uncompressed_bytes=60 << 30)
+
+    assert drill.required_bytes(full, _facts(data_bytes=42 << 30)) == math.ceil(
+        (60 << 30) * drill.SPACE_FACTOR
+    ) + (1 << 30)
+
+
+# meiva:note
+# The four boundaries of the rule: room to spare, exactly enough (the floor is kept, not
+# exceeded), one byte short of the floor, and nothing free at all.
+@pytest.mark.parametrize(
+    ("required", "floor", "available", "shortfall"),
+    [(10, 5, 100, 0), (10, 5, 15, 0), (10, 5, 14, 1), (10, 5, 0, 15)],
+)
+def test_the_shortfall_is_what_the_host_cannot_afford(
+    required: int, floor: int, available: int, shortfall: int
+) -> None:
+    assert drill.room_shortfall(required, floor, available) == shortfall
+
+
+def test_the_sweep_removes_every_leftover_drill_directory(tmp_path: Path) -> None:
+    fresh = tmp_path / "meiva-walg-drill-fresh"
+    stale = tmp_path / "meiva-walg-drill-stale"
+    other = tmp_path / "unrelated"
+    for path in (fresh, stale, other):
+        path.mkdir()
+    (stale / "data").write_text("44 GiB of somebody's afternoon")
+
+    assert drill.sweep_stale_scratch(tmp_path) == 2
+    assert not fresh.exists()
+    assert not stale.exists()
+    assert other.exists()
 
 
 # ── the schedule ─────────────────────────────────────────────────────────────
@@ -348,8 +399,16 @@ def _run_drill(
     *,
     scratch_base: Path,
     socket_root: Path | None = None,
+    host_floor_bytes: int | None = None,
 ) -> tuple[DrillRecord, list[str]]:
     lines: list[str] = []
+    # meiva:note
+    # The scratch base here is a temporary directory on the test host, not a production
+    # filesystem: the host floor defaults to zero so a runner with a small disk still runs the
+    # drill. The floor and the disk reading are exercised by their own cases below.
+    space: dict[str, Any] = {
+        "host_floor_bytes": 0 if host_floor_bytes is None else host_floor_bytes
+    }
     record = drill.run_drill(
         source.target,
         source.newest_backup(),
@@ -360,6 +419,7 @@ def _run_drill(
         throwaway=ThrowawayConfig(scratch_base, home=sandbox.home),
         home=sandbox.home,
         **({} if socket_root is None else {"socket_root": socket_root}),
+        **space,
     )
     return record, lines
 
@@ -385,6 +445,50 @@ def test_the_drill_restores_the_newest_backup_to_the_newest_archived_segment_and
     assert record.backup == source.newest_backup().name
     assert any(line.startswith("drill: restoring base_") for line in lines)
     assert list(scratch_base.iterdir()) == []  # the scratch copy is gone
+
+
+# meiva:note
+# The refusal has to happen before the copy is written, and it has to be a record: a drill that
+# silently skipped is the "no run at all" false green, and the host it was protecting looks fine.
+def test_a_drill_with_no_room_is_refused_before_it_writes_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
+) -> None:
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+    with archiving_postgres(sandbox=sandbox) as pg:
+        source = Source(sandbox, pg)
+
+        record, lines = _run_drill(
+            source, sandbox, scratch_base=scratch_base, host_floor_bytes=1 << 62
+        )
+
+    assert not record.ok
+    assert "drill refused, nothing written" in record.detail
+    assert "short by" in record.detail
+    assert record.last_refused_at == record.finished_at
+    assert record.last_refused_reason == record.detail
+    assert record.last_ok_at is None
+    assert list(scratch_base.iterdir()) == []
+    assert any(line.startswith("drill: restoring base_") for line in lines) is False
+
+
+def test_a_leftover_scratch_directory_is_removed_before_the_drill_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
+) -> None:
+    stale = scratch_base / "meiva-walg-drill-from-a-killed-run"
+    (stale / "data").mkdir(parents=True)
+    (stale / "data" / "PG_VERSION").write_text("17")
+
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+    with archiving_postgres(sandbox=sandbox) as pg:
+        source = Source(sandbox, pg)
+
+        record, lines = _run_drill(source, sandbox, scratch_base=scratch_base)
+
+    assert record.ok, record.detail
+    assert any(
+        line == f"scratch: removed 1 leftover drill directory on {scratch_base}" for line in lines
+    )
+    assert list(scratch_base.iterdir()) == []
 
 
 def test_a_missing_segment_after_the_backup_fails_the_drill_and_cleans_up(

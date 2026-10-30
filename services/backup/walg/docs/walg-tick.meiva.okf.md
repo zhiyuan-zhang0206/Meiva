@@ -48,7 +48,8 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
 - **State file** (`state.py`): `$MEIVA_HOME/backups/walg/state.json`, 0600, replaced
   atomically, strict on read: `tick` (latest start, or why it skipped), `run` (latest
   executed run: ok or failed, and the step), `backup`, `verify`, `retention`, and
-  `drill` (the latest recovery drill and when one last succeeded). Only the tick (or
+  `drill` (the latest recovery drill, when one last succeeded, and when and why one was last
+  refused). Only the tick (or
   `meiva backup walg drill`) writes, under the lock; the probe reads. A corrupt file fails the tick instead of
   being replaced by an empty one.
 - **The OS job** (`base/host/system/walg_job.py`): one crontab line (`# meiva-walg`) or
