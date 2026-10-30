@@ -19,6 +19,7 @@ A test that leaves an environment key, a stored module attribute, the cwd or a s
 |---|---|---|
 | `env` | `os.environ` keys added, removed or changed (values are never printed) | `monkeypatch.delenv(key, raising=False)` on an absent key records nothing, so the key the code under test sets next stays |
 | `module-attr` | a first-party module's `__dict__` gained a non-dunder, non-module name | `monkeypatch.setattr` on a name the module serves from `__getattr__` stores the dynamic value for good on undo; code under test marking a module object that outlives the test |
+| `module-attr-replaced` | at a **file** boundary (and at session end): a first-party module's existing callable now points at another object | a fixture stand-in replaces `start_serving.is_serving` and nothing puts the function back, so every later test in the worker calls the stand-in (`#7796`, 2026-10-30) |
 | `cwd` | `os.getcwd()` | a bare `os.chdir` |
 | `signal` | `signal.getsignal` of the common signals | a handler that raises, installed and not put back |
 | `sys.path` | a note, never a leak: entries added or removed | tests insert on purpose |
@@ -41,17 +42,20 @@ A fault of the guard itself (an exception in the snapshot, the comparison, the p
 
 ## Why it is second in `pytest_plugins`
 
-pytest tears fixtures down in reverse setup order. As the first function-scoped autouse fixture to set up, the guard is the last to tear down, so it compares after `monkeypatch` has undone everything it recorded and before any module-scoped or session-scoped fixture finalizes (what those set up is already in the "before" snapshot, so a module's first and last test are not special). Registered after another autouse plugin that uses `monkeypatch` it would compare too early and blame a clean test. `env_bootstrap` stays first: the guard imports only the standard library and pytest. `tests/ci/test_leak_guard.py` locks the position statically (the plugin list), dynamically (the closure of a real test) and by experiment (the same suite with the guard first and last).
+The guard sets up first so it compares last, after every function-scoped fixture has undone
+what it recorded. [[plugin-order.meiva.okf.md]] owns the reasoning and the three ways the
+position is locked.
+
 
 ## Where the findings go
 
 - Each finding is a JUnit property on the leaker's testcase: `leak_guard`, `leak_guard_note` (`sys.path`), `leak_guard_fault`; value `<kind>: <detail>`.
 - The terminal prints a `leak guard` section (always in CI: the line proves the guard ran and its us/test).
-- `scripts/ci/shard_counts.py shard` carries them into `shard-counts-N.json` (`leaks`, `notes`, `faults`; absent when empty). The `backend test counts (all shards)` job reports the whole run: the job summary, one `::warning title=leak guard` annotation of at most 40 lines (one line per file, kind and thing leaked) and the `test-leak-report` artifact (the full list). Read it without any shard log: [[../../.github/test-gate.meiva.okf.md]].
+- `scripts/ci/shard_counts.py shard` carries them into `shard-counts-N.json` (`leaks`, `notes`, `faults`; absent when empty). The `backend test counts (all shards)` job reports the whole run: the job summary, one `::warning title=leak guard` annotation of at most 40 lines (one line per file, kind and thing leaked) and the `test-leak-report` artifact (the full list). Read it without any shard log: [[../../../.github/test-gate.meiva.okf.md]].
 
 ## What it cannot see
 
-An existing module attribute assigned a new value (a static lint's job; the agent identity is one, see below), a container mutated in place, a module object swapped through `sys.modules` (a per-test `del sys.modules[...]` and re-import), and the disk, sockets, processes and the databases (`_clean_state` owns those). In `warn` mode only the first leaker of a key is named: a later test that `delenv`s the now-present key is recorded and undone by monkeypatch; `fail` restores after every leaker, so it names them all.
+A replacement that the same file puts back before its last test, an existing attribute holding a plain object (per-test state with its own owner: the bound agent identity is one, see below), a container mutated in place, a module object swapped through `sys.modules` (a per-test `del sys.modules[...]` and re-import), and the disk, sockets, processes and the databases (`_clean_state` owns those). In `warn` mode only the first leaker of a key is named: a later test that `delenv`s the now-present key is recorded and undone by monkeypatch; `fail` restores after every leaker, so it names them all.
 
 ## The agent identity is restored, not compared
 
@@ -60,7 +64,17 @@ Identity restoration and its SDK boundary are owned by
 
 ## Fixing a finding
 
-Recipes per kind are in the fail-mode message and in [flaky-tests §9](../../docs/conventions/engineering/flaky-tests.md): `setenv(name, "")` before `delenv`; `monkeypatch.setitem(vars(module), name, value)` or `mock.patch.object`; `monkeypatch.chdir`; restore the handler in a `finally`; nothing for the agent identity: `identity_restore` puts it back (below).
+Recipes per kind are in the fail-mode message and in [flaky-tests §9](../../../docs/conventions/engineering/flaky-tests.md): `setenv(name, "")` before `delenv`; `monkeypatch.setitem(vars(module), name, value)` or `mock.patch.object`; `monkeypatch.chdir`; restore the handler in a `finally`; nothing for the agent identity: `identity_restore` puts it back (below).
+
+## ## The file boundary
+
+`module-attr` compares dict sizes, so it cannot see an existing name handed a different object: the
+size does not move. `module-attr-replaced` closes that hole with a comparison per FILE, over the
+callables of the dicts the watch already located. A finding names the file, lands on the test that
+followed it, and in `fail` mode the originals are put back before the next file's tests run — no
+victim fails, and the run is red through the session's exit status.
+[[file-boundary.meiva.okf.md]] owns the detail (what is compared, the measured cost, the blind spots
+and the `#7796` mutation that is its regression case).
 
 ## Cost threshold
 
