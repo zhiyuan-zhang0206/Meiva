@@ -405,9 +405,10 @@ class AmbientAccess(PatchForms):
     # The module-level function of this same file that a bare call names, when its entry says a
     # passed parameter spares the read. The import resolver knows only imported names, so without
     # this the clause could not hold where a wrapper sits beside its caller. It is asked only for
-    # the readers that declare a clause: resolving every entry here would change what each of them
-    # means for the whole repository, which is a rule change of its own. The answer feeds the
-    # ambient rule alone: facts, locality and purity keep their own resolution.
+    # the readers that declare a clause: a reader this file defines is already recorded by this
+    # file's own entry for the kind, so resolving every entry here would record one read twice
+    # (measured 2026-10-30: six sites, each in a file that already carries its kind). The answer
+    # feeds the ambient rule alone: facts, locality and purity keep their own resolution.
     def _local_callee(self, func: ast.expr) -> str | None:
         if not isinstance(func, ast.Name) or func.id not in self.module_defs:
             return None
