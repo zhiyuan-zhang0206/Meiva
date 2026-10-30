@@ -226,19 +226,17 @@ describe("InventoryPage toggle (putInventory)", () => {
     );
   });
 
-  it("a settled write invalidates the inventory query", async () => {
+  it("a settled write re-reads the inventory", async () => {
     transport.getInventory.mockResolvedValue(AGGREGATE);
     transport.putInventory.mockResolvedValue(OK_RESULT);
-    const qc = makeQc();
-    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
-    wrap(<InventoryPage />, qc);
+    wrap(<InventoryPage />);
     const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H1}`));
     fireEvent.click(cell);
-    await waitFor(() => {
-      const keys = invalidateSpy.mock.calls.map(([opts]) => opts?.queryKey);
-      const hit = keys.some((k) => Array.isArray(k) && k[0] === "inventory");
-      expect(hit).toBe(true);
-    });
+    // meiva:note
+    // The initial read, then the one the settlement asks for: the second GET is what the user
+    // sees (the matrix reflects the write), and no assertion has to watch the cache's method to
+    // know it happened.
+    await waitFor(() => expect(transport.getInventory).toHaveBeenCalledTimes(2));
   });
 
   it("enable-all fans out one putInventory per installed+enableable host", async () => {
