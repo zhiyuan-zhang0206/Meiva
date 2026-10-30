@@ -14,7 +14,6 @@ import pytest
         "loguru_records",
         "model_catalog",
         "model_installation",
-        "retry_waits",
         "runner_unit",
         "sdk_via_gateway",
         "sdk_model_owner",
@@ -36,7 +35,6 @@ def test_optin_fixtures_are_not_visible_to_unrelated_collectors(
     assert request.config.pluginmanager.get_plugin("agent.graph.tests.cancel_fixture") is None
     assert request.config.pluginmanager.get_plugin("base.packages.tests.model_catalog") is None
     assert request.config.pluginmanager.get_plugin("base.log.tests.log_records") is None
-    assert request.config.pluginmanager.get_plugin("base.host.net.tests.retry_waits") is None
     assert (
         request.config.pluginmanager.get_plugin("base.deploy.lifecycle.tests.serving_root") is None
     )

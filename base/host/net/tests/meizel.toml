@@ -1,12 +1,7 @@
-exports = ["fake_url_opener.py", "local_http.py", "retry_waits.py"]
+exports = ["fake_url_opener.py", "local_http.py"]
 
 [uses]
-"conftest.py" = ["retry_waits.py"]
 "resilience_process.py" = ["_resilience_child.py"]
 "test_httpx_import.py" = ["resilience_process.py"]
 "test_ports.py" = ["fake_url_opener.py"]
 "test_resilience.py" = ["resilience_process.py"]
-
-[debt.first-party-patch]
-"retry_waits.py#monkeypatch.setattr base.host.net.resilience.retry_asleep" = 1
-"retry_waits.py#monkeypatch.setattr base.host.net.resilience.retry_sleep" = 1
