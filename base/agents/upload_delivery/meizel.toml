@@ -4,6 +4,7 @@ exports = ["models.py", "paths.py", "source.py", "storage.py"]
 "models.py" = ["paths.py"]
 "source.py" = ["models.py", "paths.py", "storage.py"]
 "storage.py" = ["models.py"]
+"tests" = ["models.py"]
 
 [purity]
 "__init__.py" = "strict"
