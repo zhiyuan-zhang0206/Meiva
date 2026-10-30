@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
 import subprocess
-from collections.abc import Collection, Generator, Mapping
+from collections.abc import Callable, Collection, Generator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -275,30 +277,69 @@ def toplevel(cwd: Path) -> Path:
 # meiva:note
 # A path is regular when it is a file and no component between it and the root is a
 # link: git tracks a path, not how it is reached, so a directory swapped for a link
-# keeps its tracked children listed. The answer for a directory is remembered for
-# one listing — the same parent serves every file below it, and asking the
-# filesystem once per component per file made a 91k-file listing cost ~900k calls.
-def _is_regular(root: Path, rel: str, links: dict[Path, bool]) -> bool:
-    full = root / rel
-    if not full.is_file():
-        return False
-    for candidate in (full, *full.parents):
-        if candidate == root:
-            break
-        if not candidate.is_relative_to(root):
+# keeps its tracked children listed. `git ls-files` names are relative, so one `lstat`
+# answers the file half (a link is not a regular file) and each directory's answer is
+# remembered for one listing — the same rule as before without a `Path` per component
+# per file (9.1k names: 0.63s -> 0.05s). The join is textual, and `git ls-files` emits
+# only relative names, so this walk claims nothing about a name that leaves the root.
+# These four are exactly the errors `Path.is_file()` answers "missing"
+# for (`pathlib._IGNORED_ERRNOS` in 3.12) and it raises the rest, so a directory this
+# user cannot read still fails the caller instead of quietly dropping a tracked file
+# from every lint's file set. The reader is a parameter because that failure is a fault a
+# test must cause and a root runner's disk cannot produce: a locked directory still opens
+# for it, and gating the test on the uid would spend a skip site this tree may only remove.
+_ABSENT = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
+
+
+def _regular_paths(
+    root: Path, names: list[str], *, lstat: Callable[[str], os.stat_result]
+) -> list[str]:
+    root_text = str(root).rstrip("/") or "/"
+    links: dict[str, bool] = {}
+    kept: list[str] = []
+    for name in names:
+        full = f"{root_text}/{name}"
+        try:
+            mode = lstat(full).st_mode
+        except OSError as error:
+            if error.errno not in _ABSENT:
+                raise
             continue
-        linked = links.get(candidate)
-        if linked is None:
-            linked = links[candidate] = candidate.is_symlink()
-        if linked:
-            return False
-    return True
+        if not stat.S_ISREG(mode):
+            continue
+        if _link_free(full.rsplit("/", 1)[0], root_text, links):
+            kept.append(name)
+    return kept
+
+
+def _link_free(directory: str, root: str, links: dict[str, bool]) -> bool:
+    chain: list[str] = []
+    answer = links.get(directory)
+    while answer is None:
+        if directory == root:
+            answer = True
+            break
+        parent = directory.rsplit("/", 1)[0]
+        if parent == directory:
+            answer = False
+            break
+        chain.append(directory)
+        directory = parent
+        answer = links.get(directory)
+    for path in reversed(chain):
+        answer = answer and not Path(path).is_symlink()
+        links[path] = answer
+    return answer
 
 
 # meiva:note
 # Fixed Git argv and NUL framing preserve tracked names containing whitespace or newlines.
 def tracked_files(
-    repo_root: Path, *, include_untracked: bool = False, regular: bool = False
+    repo_root: Path,
+    *,
+    include_untracked: bool = False,
+    regular: bool = False,
+    lstat: Callable[[str], os.stat_result] = os.lstat,
 ) -> list[str]:
     extra = ("--cached", "--others", "--exclude-standard") if include_untracked else ()
     result = subprocess.run(  # noqa: S603
@@ -312,8 +353,7 @@ def tracked_files(
     names = [path.decode() for path in result.stdout.split(b"\0") if path]
     if not regular:
         return names
-    links: dict[Path, bool] = {}
-    return [path for path in names if _is_regular(repo_root, path, links)]
+    return _regular_paths(repo_root, names, lstat=lstat)
 
 
 def load_universe(root: Path, *, include_untracked: bool = False) -> Universe:
