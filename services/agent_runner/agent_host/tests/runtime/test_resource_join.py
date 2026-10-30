@@ -21,7 +21,7 @@ from base.agents.sdk.tests.sampling_owners import gateway_sampling_owner
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
-from base.config import ConfigBoot
+from base.config import ConfigBoot, get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -29,7 +29,7 @@ from base.events.live.bus import EventBus
 from base.host.net.tests.local_http import serve_json
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.host import AgentHost
@@ -84,7 +84,11 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
         assert gateway.arrived.wait(2)
         worker = sampling.worker
         assert worker is not None and worker.completed.wait(5)
-    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile = (
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+        .of("agent_host")
+        .pidfile
+    )
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text("123\n")
     events: list[str] = []
@@ -103,6 +107,7 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
             None,
             None,
             None,
+            pidfile=pidfile,
         )
     assert sampling.error is not None
     assert isinstance(caught.value, httpx.HTTPStatusError) and caught.value is sampling.error[0]

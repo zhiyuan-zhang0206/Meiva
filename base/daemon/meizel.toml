@@ -12,7 +12,6 @@ exports = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py",
 "endpoints.py" = ["endpoints"]
 
 [debt.ambient-read]
-"endpoints.py#home base.paths.meiva_home" = 1
 "health.py#clock time.time" = 1
 "health.py#pid os.getpid" = 1
 "loop_health.py#clock datetime.datetime.now" = 1

@@ -8,9 +8,10 @@ import pytest
 
 import cli.commands.probe as _probe_commands
 import services.supervision.roster.service_spec as _service_spec
+from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from cli.commands._repo import register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
@@ -134,7 +135,9 @@ def test_register_agent_runner_advertises_ops_url(
     command_runtime: CommandRuntime,
 ) -> None:
     command_runtime.machine.set(host="10.0.0.2")
-    ops_port = ServiceEndpoints.from_settings().of("ops").health_port
+    ops_port = (
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home())).of("ops").health_port
+    )
     db = database
 
     rc = register_machine_or_die(

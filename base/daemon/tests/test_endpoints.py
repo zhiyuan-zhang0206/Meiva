@@ -12,11 +12,12 @@ from base.paths import meiva_home, run_dir
 
 
 def test_every_health_daemon_has_an_endpoint_from_its_setting_and_the_run_dir() -> None:
-    table = ServiceEndpoints.from_settings()
+    home = meiva_home()
+    table = ServiceEndpoints.from_fields(get_field, runtime=run_dir(home))
     assert {e.name for e in table} == set(health_port_env_aliases())
     for endpoint in table:
         assert endpoint.health_port == int(get_field(f"{endpoint.name}_health_port"))
-        assert endpoint.pidfile == run_dir(meiva_home()) / f"{endpoint.name}.pid"
+        assert endpoint.pidfile == run_dir(home) / f"{endpoint.name}.pid"
 
 
 def test_a_port_override_reaches_the_row_and_only_that_row(tmp_path: Path) -> None:
@@ -57,7 +58,7 @@ def test_a_healthz_url_names_the_host_the_caller_reaches_it_from() -> None:
 
 def test_an_unregistered_daemon_is_a_key_error() -> None:
     with pytest.raises(KeyError):
-        ServiceEndpoints.from_settings().of("no_such_daemon")
+        ServiceEndpoints.from_fields(get_field, runtime=Path("/run")).of("no_such_daemon")
 
 
 def test_boot_tables_use_only_their_owner_and_follow_live_fields_on_rebuild(
@@ -66,7 +67,9 @@ def test_boot_tables_use_only_their_owner_and_follow_live_fields_on_rebuild(
     first, second = ConfigBoot(), ConfigBoot()
     first.read_process_environment()
     second.read_process_environment()
-    ambient_port = ServiceEndpoints.from_settings().of("labeler").health_port
+    ambient_port = (
+        ServiceEndpoints.from_fields(get_field, runtime=tmp_path).of("labeler").health_port
+    )
     first_port = 18761 if ambient_port != 18761 else 18765
     second_port = 18762 if ambient_port != 18762 else 18766
     first.view.services.labeler_health_port = first_port

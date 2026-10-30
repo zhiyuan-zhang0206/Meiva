@@ -24,6 +24,7 @@ from functools import partial
 from pathlib import Path
 
 from base.cluster.machine import MachineRole
+from base.daemon.endpoints import ServiceEndpoints
 from base.packages.plugins.config_registration import disk_image_path, read_config_image
 from meiva_builtins.plugins.meiva_memory.default_config import MemoryConfig
 from services.supervision.roster import healthz_daemon
@@ -43,7 +44,7 @@ def _memory_indexer_gate(config: MemoryConfig) -> str | None:
     return None
 
 
-def services(*, home: Path) -> tuple[ServiceSpec, ...]:
+def services(*, home: Path, endpoints: ServiceEndpoints) -> tuple[ServiceSpec, ...]:
     """The ops services the memory plugin contributes to the roster.
 
     The gateway-side indexing daemon. Ordering against memory-search (which it
@@ -56,6 +57,7 @@ def services(*, home: Path) -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "memory-indexer",
             home=home,
+            endpoints=endpoints,
             module="services.derived.memory_indexer.daemon",
             capabilities=_GATEWAY,
             # The pool is a markdown checkout on disk and the default index backends

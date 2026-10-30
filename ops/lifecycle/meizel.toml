@@ -12,4 +12,4 @@ exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "term
 "resurrect_plan.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["endpoints", "settings"], why = "Lifecycle op dispatch root resolves local agent-host endpoint and default model from settings" }
+"__init__.py" = { kinds = ["settings"], why = "Lifecycle op dispatch root reads the default model from settings; the local agent-host port it hands the stop gate arrives as a required number" }

@@ -24,6 +24,7 @@ from functools import partial
 from pathlib import Path
 
 from base.cluster.machine import MachineRole
+from base.daemon.endpoints import ServiceEndpoints
 from base.packages.plugins.config_registration import disk_image_path, read_config_image
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from services.supervision.roster import healthz_daemon
@@ -49,7 +50,7 @@ def _task_maintenance_gate(config: FleetConfig) -> str | None:
     return None
 
 
-def services(*, home: Path) -> tuple[ServiceSpec, ...]:
+def services(*, home: Path, endpoints: ServiceEndpoints) -> tuple[ServiceSpec, ...]:
     """The ops services the fleet plugin contributes to the roster.
 
     Currently the gateway-side task-maintenance daemon (cluster-wide task
@@ -64,6 +65,7 @@ def services(*, home: Path) -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "task-maintenance",
             home=home,
+            endpoints=endpoints,
             module="meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon",
             capabilities=_GATEWAY,
             # assert_schema_current at boot, then it scans the tasks tables — a

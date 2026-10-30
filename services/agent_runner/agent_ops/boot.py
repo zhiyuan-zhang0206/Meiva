@@ -196,6 +196,13 @@ def endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
     return ServiceEndpoints.from_boot(config, runtime=runtime).of("ops")
 
 
+# meiva:note
+# The agent host's row in the same table: the ops server answers for the unit it supervises, so it
+# names that unit's port and pidfile from its own boot rather than from a second home.
+def agent_host_row(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("agent_host")
+
+
 def pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return endpoint(config, runtime=runtime).pidfile
 
