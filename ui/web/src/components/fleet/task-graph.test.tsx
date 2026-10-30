@@ -1,58 +1,29 @@
-// TaskGraph tests — the free force-directed graph + Kanban column view.
-//
-// Like the Graph View tests, the d3-force layout is a real, time-driven
-// simulation; these tests drive it just far enough to settle card positions,
-// then assert the SVG / DOM the component renders.
-//
-// useTasks is mocked so the view is fed a fixed task list.
+// meiva:note
+// TaskGraph tests: the free force-directed graph plus the Kanban column view. Like the Graph View
+// tests, the d3-force layout is a real, time-driven simulation; these tests drive it just far enough
+// to settle card positions, then assert the SVG / DOM the component renders. Rows arrive the way the
+// app supplies them (the query cache, answered by the fake transport), so no hook module is replaced.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { type ReactElement } from "react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TaskRow } from "@/lib/contracts/types";
-import type { TasksResult } from "@/lib/notifications/use-tasks";
-import { resetMockSettings } from "@/test-support/user-settings-mock";
+import type { TaskListResponse, TaskRow, UserSettingRow } from "@/lib/contracts/types";
 
 import { TaskGraph } from "./task-graph";
-import { renderWithApi as render } from "@/test-support/render";
-import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
-beforeEach(() => {
-  resetTransport();
-  transport.getTask.mockImplementation((id: number) => getTask(id));
-});
-
+import { renderWithProviders } from "@/test-support/render";
 
 // meiva:note
-// The hover card reads its one row through TanStack Query, so the hover tests
-// wrap their render in a client; the other tests never mount the card.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-// meiva:note
-// Lower-case helper (not a component): the hover tests need the Query client the
-// card's one-row read runs in and the page's clock it ages its rows on; the rest
-// never mount the card.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-const wrapGraph = (ui: ReactElement) => (
-  <WallClockProvider wallNow={() => Date.now()}>
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-  </WallClockProvider>
-);
-
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
+// The one replacement left in this file: the board navigates through Next's router, which needs a
+// mounted app router. It leaves with the third-party-patch family.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
-
-const useTasks = vi.fn<(...args: string[]) => TasksResult>();
-vi.mock("@/lib/notifications/use-tasks", () => ({
-  useTasks: (...args: string[]) => useTasks(...args),
-}));
 
 function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
   return {
@@ -82,20 +53,59 @@ function sampleTasks(): TaskRow[] {
   ];
 }
 
-function ok(tasks: TaskRow[]): TasksResult {
-  return { tasks, loading: false, error: false };
+const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+
+// meiva:note
+// The one door this file renders through: the rows the gateway would return are answered on the fake
+// transport AND pre-seeded in the query cache, so the board paints them on the first frame and its
+// mount refetch agrees. Preferences come from the settings cache the app fills, and the settings
+// surface answers reads and writes, so a clicked mode or toggle survives its reconcile fetch.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function renderGraph(
+  tasks: readonly TaskRow[],
+  {
+    props,
+    settings,
+  }: {
+    props?: Partial<ComponentProps<typeof TaskGraph>>;
+    settings?: Record<string, unknown>;
+  } = {},
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  for (const window of TASK_WINDOWS) {
+    queryClient.setQueryData<TaskListResponse>(["tasks", "graph", window], { tasks });
+  }
+  transport.getTasks.mockResolvedValue({ tasks });
+  const stored = new Map<string, unknown>(Object.entries(settings ?? {}));
+  const row = (key: string, value: unknown): UserSettingRow => ({
+    key,
+    value,
+    updated_at: "2026-01-01T00:00:00Z",
+  });
+  transport.getSettings.mockImplementation(() =>
+    Promise.resolve({ settings: [...stored].map(([key, value]) => row(key, value)) }),
+  );
+  transport.putSetting.mockImplementation((key: string, value: unknown) => {
+    stored.set(key, value);
+    return Promise.resolve(row(key, value));
+  });
+  return renderWithProviders(
+    <TaskGraph
+      selectedAgentId={null}
+      onSelectAgent={vi.fn()}
+      selectedTaskId={null}
+      onSelectTask={vi.fn()}
+      {...props}
+    />,
+    { queryClient, settings, wallNow: () => Date.now() },
+  );
 }
 
 beforeEach(() => {
-  queryClient.clear();
-  useTasks.mockReset();
+  resetTransport();
   getTask.mockReset();
   getTask.mockResolvedValue(task(0));
-  // meiva:note
-  // Reset persisted graph/kanban mode + toggle state (now DB-backed user
-  // settings) so a previous test's mode switch or toggle doesn't leak.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-  resetMockSettings();
+  transport.getTask.mockImplementation((id: number) => getTask(id));
 });
 
 afterEach(cleanup);
@@ -157,11 +167,8 @@ describe("TaskGraph hover detail card", () => {
       task(1, { title: "root", status: "in_progress" }),
       fullTask,
     ];
-    useTasks.mockReturnValue(ok(tasks));
     getTask.mockResolvedValue(fullTask);
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(tasks);
 
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -199,9 +206,8 @@ describe("TaskGraph hover detail card", () => {
 
   it("says so in one line when the full row cannot be read", async () => {
     const tasks: TaskRow[] = [task(1, { title: "root" }), task(2, { title: "no-detail", parent_id: 1 })];
-    useTasks.mockReturnValue(ok(tasks));
     getTask.mockRejectedValue(new Error("offline"));
-    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    renderGraph(tasks);
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     fireEvent.mouseEnter(texts[0].closest("g")!);
     await waitFor(() => expect(screen.getByTestId("task-detail-failed")).toBeTruthy());
@@ -217,10 +223,7 @@ describe("TaskGraph hover detail card", () => {
     // capped) — the non-interactive card must hide the moment the pointer
     // leaves the node (the capped card instead gets a grace window so its
     // scroll stays reachable; covered by its own test below).
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     const canvas = container.querySelector("svg[role='img']")!.parentElement!;
@@ -245,10 +248,7 @@ describe("TaskGraph hover detail card", () => {
     // User ruling 2026-08-29: the detail card shows on mouseenter and hides
     // on mouseleave — it must not chase the cursor. The card is pinned to
     // the node's on-screen box; a mousemove over the node leaves it put.
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
 
@@ -269,10 +269,7 @@ describe("TaskGraph hover detail card", () => {
     // QA #990 BLOCK regression: the flip baseline must be the node's left
     // edge — the old formula anchored the flip at the right edge and parked
     // the card ON the hovered node (~70% overlap on right-edge nodes).
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     // Canvas 300×400; the node box [250, 286] × [100, 136] sits at the right
@@ -304,10 +301,7 @@ describe("TaskGraph hover detail card", () => {
   });
 
   it("places the card vertically above a mid-band node when no horizontal side fits (QA #990: 320x390)", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     // 320x390 canvas; the node box [130,166] x [180,216] sits mid-band on
@@ -336,10 +330,7 @@ describe("TaskGraph hover detail card", () => {
   });
 
   it("caps the card height when it is taller than both vertical sides (long card, short canvas)", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     const canvas = container.querySelector("svg[role='img']")!.parentElement!;
@@ -375,10 +366,7 @@ describe("TaskGraph hover detail card", () => {
     // placement used to flip above only when the card fitted there, and
     // otherwise left it running past the bottom edge, where the canvas clipped
     // it (the legend sat right on top of that cut).
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     const canvas = container.querySelector("svg[role='img']")!.parentElement!;
@@ -406,10 +394,7 @@ describe("TaskGraph hover detail card", () => {
   });
 
   it("keeps the legend readable: a card in its column stops above it", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
     const canvas = container.querySelector("svg[role='img']")!.parentElement!;
