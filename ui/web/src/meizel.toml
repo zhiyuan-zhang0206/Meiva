@@ -10,9 +10,8 @@ exports = ["proxy.ts"]
 [purity]
 "proxy.ts" = "strict-to-be"
 
-[debt.ambient-read]
-"proxy.ts#environ process.env" = 1
-"proxy.ts#random crypto.randomUUID" = 1
+[roots]
+"proxy.ts" = { kinds = ["environ", "random"], why = "the Next middleware entry: it runs once per page request, reads the deployment's NEXT_PUBLIC_* settings from the build environment and draws the response's CSP nonce, then hands both to the pure policy builder in lib/auth/content-security-policy.ts" }
 
 [debt.impure-call]
 "proxy.ts#proxy#crypto.randomUUID" = 1
