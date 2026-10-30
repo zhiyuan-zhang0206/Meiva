@@ -28,6 +28,7 @@ from redis.asyncio.connection import AbstractConnection as AsyncRedisConnection
 from redis.connection import AbstractConnection as RedisConnection
 
 from base.log.tests.stdlib_logging import stdlib_logging_isolated
+from tests.fixtures.loaded_modules import loaded_attribute
 
 __all__ = ["HelperDoorGuard", "refuse_native_data_plane", "stub_boundaries", "stub_everywhere"]
 
@@ -85,16 +86,16 @@ def _telemetry_event_store_off() -> Iterator[None]:
     producer with no DB dependency remains behind the default driver refusal.
     Drain any pipeline created by this test before its access window closes.
     """
-    event_store = sys.modules.get("base.telemetry.event_store")
-    if event_store is not None:
-        event_store.set_enabled(enabled=False)
+    set_enabled = loaded_attribute("base.telemetry.event_store", "set_enabled")
+    if set_enabled is not None:
+        set_enabled(enabled=False)
     yield
-    module = sys.modules.get("base.telemetry.emitter")
-    if module is not None:
-        module.sync()
-        event_store = sys.modules.get("base.telemetry.event_store")
-        if event_store is not None:
-            event_store.set_enabled(enabled=False)
+    sync = loaded_attribute("base.telemetry.emitter", "sync")
+    if sync is not None:
+        sync()
+        set_enabled = loaded_attribute("base.telemetry.event_store", "set_enabled")
+        if set_enabled is not None:
+            set_enabled(enabled=False)
 
 
 @pytest.fixture

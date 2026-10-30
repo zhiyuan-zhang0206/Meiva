@@ -1,11 +1,11 @@
-exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "host_platform.py", "identity_restore.py", "leak_guard.py", "leak_guard_files.py", "path_scopes.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit"]
+exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "host_platform.py", "identity_restore.py", "leak_guard.py", "leak_guard_files.py", "loaded_modules.py", "path_scopes.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit"]
 
 [uses]
-"guards.py" = ["env_bootstrap.py"]
+"guards.py" = ["env_bootstrap.py", "loaded_modules.py"]
 "leak_guard.py" = ["leak_guard_files.py"]
-"provisioning.py" = ["env_bootstrap.py", "static_environment.py"]
+"provisioning.py" = ["env_bootstrap.py", "loaded_modules.py", "static_environment.py"]
 "static_environment.py" = ["guards.py"]
-"tests" = ["env_bootstrap.py", "guards.py", "plugin_registrations.py", "provisioning.py", "static_environment.py"]
+"tests" = ["env_bootstrap.py", "guards.py", "loaded_modules.py", "plugin_registrations.py", "provisioning.py", "static_environment.py"]
 "unit" = ["gateway_config.py"]
 
 [loads]
