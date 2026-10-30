@@ -12,8 +12,5 @@ exports = ["page.tsx"]
 "config-test-mock.tsx#vi.stubGlobal cancelIdleCallback" = 1
 "config-test-mock.tsx#vi.stubGlobal requestIdleCallback" = 1
 
-[debt.type-cast]
-"page.tsx#cast ConfigPage.<lambda>" = 1
-
 [debt.unresolved-patch]
 "page-editing.test.tsx#vi.spyOn qc.\"invalidateQueries\"" = 1

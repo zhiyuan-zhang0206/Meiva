@@ -178,7 +178,9 @@ function ColorRow({
         <select
           aria-label={label}
           value={value}
-          onChange={(e) => onChange(e.target.value as ColorFamily)}
+          onChange={(e) => {
+            if (isColorFamily(e.target.value)) onChange(e.target.value);
+          }}
           className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
         >
           {COLOR_FAMILIES.map((f) => (

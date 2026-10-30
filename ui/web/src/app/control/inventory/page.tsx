@@ -142,7 +142,7 @@ function useInventoryController(): InventoryController {
       for (const m of machines) {
         // A machine column may be absent from a row's hosts map (e.g. an
         // unreachable host) — guard the lookup before reading state.
-        const h = row.hosts[m] as InventoryItemHostState | undefined;
+        const h = Object.hasOwn(row.hosts, m) ? row.hosts[m] : undefined;
         if (!h?.present) continue;
         if (h.enabled === target) continue;
         if (target && h.can_enable === false) continue;

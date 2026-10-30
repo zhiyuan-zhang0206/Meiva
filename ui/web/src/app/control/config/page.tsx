@@ -186,9 +186,7 @@ export default function ConfigPage() {
   const applyWriteResult = useCallback((names: string[], result: ConfigWriteResult) => {
     const failures: Record<string, string> = {};
     for (const name of new Set([...names, ...Object.keys(result.results)])) {
-      const r = result.results[name] as
-        | ConfigWriteResult["results"][string]
-        | undefined;
+      const r = Object.hasOwn(result.results, name) ? result.results[name] : undefined;
       if (r?.ok === false) failures[name] = r.reason ?? "rejected";
     }
     const written = new Set([...names, ...Object.keys(result.results)]);

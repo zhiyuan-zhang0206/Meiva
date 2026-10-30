@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
@@ -137,8 +137,10 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   }, [loaded]);
   const linksRead = useQuery({
     queryKey: ["run-timeline-links", [...ids].sort((a, b) => a - b).join(","), linkWindow?.from, linkWindow?.to],
-    queryFn: () => client.getRunTimelineLinks(ids, linkWindow as { from: string; to: string }),
-    enabled: linkWindow !== null,
+    queryFn:
+      linkWindow === null
+        ? skipToken
+        : () => client.getRunTimelineLinks(ids, linkWindow),
   });
   const links = useMemo(
     () => resolveLinks(linksRead.data?.links ?? [], new Set(ids), new Map(loaded.map(({ id, data }) => [id, data]))),
