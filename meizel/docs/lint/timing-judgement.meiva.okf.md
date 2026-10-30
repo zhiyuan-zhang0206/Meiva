@@ -88,6 +88,15 @@ has to be the same both times:
 - **No clock against clock.** `deadline = monotonic() + 30; ... assert monotonic() < deadline`
   is a timeout with a named deadline, not the claim `elapsed < 0.5`, and the rule leaves it
   alone.
+- **No class attributes as bounds.** `class C: B = 5` with `assert clock - started < C.B` is not
+  resolved; only a plain module-level name is.
+- **A function that binds no clock is not scanned at all.** The scan skips a function whose body
+  binds no clock name, so a bare `assert time.monotonic() < 30` there is invisible. Measured
+  2026-10-30: removing the filter adds 10 sites and every one of them is a false positive —
+  assertions on an injected clock's own reading (`assert timers.monotonic() == 10.0`). The filter
+  stays; the price is that an instant guard with no binding is invisible. Closing it means
+  treating `time.<clock>()` as an instant read only when nothing is bound and
+  `timers.monotonic()` as object state — one more decision, not a deleted line.
 
 Each of these is a widening of what the rule claims, so each needs its own decision and its
 own review — not an implementation detail slipped in beside a fix.
