@@ -34,7 +34,11 @@ Hidden `.delivered-v1/{batch}/{UUID-ordinal-suffix}` objects publish through nat
 `create_private_bytes`: no overwrite, only matching size/hash recovery, then fsync.
 Verified manifest paths cannot escape native root. Suffix/type/name validation
 precedes reservation; basenames reserve 38 bytes for the native temporary name.
-Original display filenames are not physical paths.
+Original display filenames are not physical paths, and carry no control characters:
+the delivered-batch system message echoes each one verbatim as a `- name: path`
+line, so a newline in a name would forge a line of its own. The intake boundary
+refuses one with a 422 and `Object.filename` refuses it again when a stored manifest
+is replayed (task #5855).
 
 `source` owns retained acceptance and single-inbound outcome with no TTL/cleanup FK.
 Accepted outcome is consulted before mutable target facts; HOLD cannot accept a

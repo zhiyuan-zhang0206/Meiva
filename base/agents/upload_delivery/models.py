@@ -8,7 +8,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from base.agents.upload_delivery.paths import MAX_UPLOAD_BYTES
+from base.agents.upload_delivery.paths import FILENAME_PATTERN, MAX_UPLOAD_BYTES
 from base.host.db_authority.unit import UnitIdentity
 from base.paths import meiva_home
 
@@ -33,7 +33,7 @@ class Record(BaseModel):
 
 class Object(Record):
     ordinal: int = Field(ge=0, lt=1000)
-    filename: str = Field(min_length=1, max_length=4096)
+    filename: str = Field(min_length=1, max_length=4096, pattern=FILENAME_PATTERN)
     name: str = Field(pattern=OBJECT_NAME_PATTERN)
     size: int = Field(ge=0, le=MAX_UPLOAD_BYTES)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -41,7 +41,7 @@ class Object(Record):
 
     @model_validator(mode="after")
     def bounded_name(self) -> Self:
-        if len(self.name.encode()) > MAX_OBJECT_NAME_BYTES or "\x00" in self.filename:
+        if len(self.name.encode()) > MAX_OBJECT_NAME_BYTES:
             raise ValueError("upload name exceeds the immutable filesystem contract")
         return self
 

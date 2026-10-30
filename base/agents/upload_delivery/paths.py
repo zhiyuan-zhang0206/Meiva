@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -59,6 +60,22 @@ def delivered_upload_dir(agent_id: int, *, home: Path, name: str, create: bool =
 def sanitize_upload_name(filename: str) -> str:
     """Strip directory separators from an uploaded filename (no traversal on write)."""
     return filename.replace("/", "_").replace("\\", "_")
+
+
+# meiva:note
+# A display filename is text, never a path: `source.complete` echoes it verbatim into
+# the system message that announces a delivered batch, one `- name: path` line per
+# object. A control character there would let the name forge another line, so the
+# character class is owned once, here, and enforced twice: at the intake boundary
+# (a 422 the caller can act on) and in `Object.filename` (the record itself, which
+# also covers replay of a stored manifest) — task #5855.
+# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
+CONTROL_CHARACTERS = r"\x00-\x1f\x7f"
+FILENAME_PATTERN = rf"^[^{CONTROL_CHARACTERS}]+$"
+
+
+def has_control_characters(name: str) -> bool:
+    return re.search(rf"[{CONTROL_CHARACTERS}]", name) is not None
 
 
 def upload_url(agent_id: int, name: str) -> str:

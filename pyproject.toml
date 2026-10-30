@@ -877,6 +877,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/upload_delivery/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/api_contracts/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
