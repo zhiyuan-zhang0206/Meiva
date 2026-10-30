@@ -57,13 +57,13 @@ def nearest_manager(cur: psycopg.Cursor, task_ids: Iterable[int]) -> dict[int, i
 
 
 # meiva:note
-# The human leg both passes fall back to: one require_response notice on the stalled
-# owner, which the human queue already surfaces and groups by agent. An open notice on
-# the same agent suppresses a second one — the queue shows one thing at a time for an
-# agent, and a second row would only repeat the first. `notification_id` is None when the
-# spine suppressed the delivery (category switched off, dedupe window open); the notice
-# row itself still exists for the queue. The caller owns the transaction and announces
-# the staged notification after commit.
+# The human leg both passes fall back to: one require_response notice on the owner,
+# which the human queue already surfaces and groups by agent. An open notice on the
+# same agent suppresses a second one — the queue shows one thing at a time for an
+# agent, and a second row would only repeat the first. `notification_id` is None when
+# the spine suppressed the delivery (category switched off, dedupe window open); the
+# notice row itself still exists for the queue. The caller owns the transaction and
+# announces the staged notification after commit.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 def stage_human_notice(
     cur: psycopg.Cursor,
