@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import httpx
@@ -63,7 +64,7 @@ def test_a_carried_bundle_authenticates_the_fetch_then_is_installed_and_consumed
     with serving({BOOTSTRAP: bootstrap_reply(database_endpoint)}) as gateway:
         values = _identity(gateway.url, MEIVA_DB_URL="postgresql://stale@elsewhere/db")
 
-        join_gateway(values, runner_home, str(sealed.path), sealed.transport_key)
+        join_gateway(values, runner_home, str(sealed.path), sealed.transport_key, now=time.time())
 
     (seen,) = gateway.requests
     assert seen.target == "/api/bootstrap"
@@ -89,11 +90,17 @@ def test_a_join_without_a_bundle_presents_the_installed_capability_and_installs_
         gateway_home, tmp_path / "mini.bundle", endpoint=database_endpoint, unit_home=runner_home
     )
     with serving({BOOTSTRAP: bootstrap_reply(database_endpoint)}) as gateway:
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), sealed.transport_key)
+        join_gateway(
+            _identity(gateway.url),
+            runner_home,
+            str(sealed.path),
+            sealed.transport_key,
+            now=time.time(),
+        )
         installed = unit_capability_path(runner_home).read_bytes()
         capsys.readouterr()
 
-        join_gateway(_identity(gateway.url), runner_home, None, "")
+        join_gateway(_identity(gateway.url), runner_home, None, "", now=time.time())
 
     first, second = gateway.requests
     assert second.headers["authorization"] == first.headers["authorization"]
@@ -108,7 +115,7 @@ def test_a_unit_holding_no_capability_and_carrying_no_bundle_never_dials_the_gat
         serving({BOOTSTRAP: bootstrap_reply(refused_endpoint())}) as gateway,
         pytest.raises(ValueError, match="holds no database capability"),
     ):
-        join_gateway(_identity(gateway.url), runner_home, None, "")
+        join_gateway(_identity(gateway.url), runner_home, None, "", now=time.time())
 
     assert gateway.requests == []
 
@@ -123,7 +130,7 @@ def test_a_bundle_without_its_transport_key_is_refused_before_anything_is_dialle
         serving({BOOTSTRAP: bootstrap_reply(refused_endpoint())}) as gateway,
         pytest.raises(ValueError, match=f"requires its transport key in {CAPABILITY_KEY_ENV}"),
     ):
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), "")
+        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), "", now=time.time())
 
     assert gateway.requests == [] and sealed.path.exists()
 
@@ -142,7 +149,13 @@ def test_a_bundle_the_transport_key_does_not_open_is_refused_before_anything_is_
         serving({BOOTSTRAP: bootstrap_reply(endpoint)}) as gateway,
         pytest.raises(UnitCapabilityError, match="does not authenticate"),
     ):
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), other.transport_key)
+        join_gateway(
+            _identity(gateway.url),
+            runner_home,
+            str(sealed.path),
+            other.transport_key,
+            now=time.time(),
+        )
 
     assert gateway.requests == [] and sealed.path.exists()
 
@@ -156,7 +169,9 @@ def test_a_unit_holding_the_human_secret_is_refused_before_anything_is_dialled(
     with serving({BOOTSTRAP: bootstrap_reply(refused_endpoint())}) as gateway:
         values = {**_identity(gateway.url), "MEIVA_CLUSTER_SECRET": "the-human-secret"}
         with pytest.raises(ValueError, match="records the human cluster secret"):
-            join_gateway(values, runner_home, str(sealed.path), sealed.transport_key)
+            join_gateway(
+                values, runner_home, str(sealed.path), sealed.transport_key, now=time.time()
+            )
 
     assert gateway.requests == [] and sealed.path.exists()
 
@@ -171,7 +186,13 @@ def test_a_gateway_that_refuses_the_bundles_token_leaves_the_bundle_and_the_unit
         serving({BOOTSTRAP: Reply(status=401, body={"detail": "no"})}) as gateway,
         pytest.raises(httpx.HTTPStatusError),
     ):
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), sealed.transport_key)
+        join_gateway(
+            _identity(gateway.url),
+            runner_home,
+            str(sealed.path),
+            sealed.transport_key,
+            now=time.time(),
+        )
 
     assert len(gateway.requests) == 1
     assert sealed.path.exists() and load_unit_capability(runner_home) is None
@@ -187,7 +208,13 @@ def test_a_gateway_that_serves_no_database_endpoint_installs_nothing(
         serving({BOOTSTRAP: Reply(body={})}) as gateway,
         pytest.raises(ValueError, match="serves no MEIVA_DB_URL"),
     ):
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), sealed.transport_key)
+        join_gateway(
+            _identity(gateway.url),
+            runner_home,
+            str(sealed.path),
+            sealed.transport_key,
+            now=time.time(),
+        )
 
     assert sealed.path.exists() and load_unit_capability(runner_home) is None
 
@@ -207,7 +234,13 @@ def test_a_bundle_for_another_machine_is_refused_after_the_fetch_and_kept(
         serving({BOOTSTRAP: bootstrap_reply(endpoint)}) as gateway,
         pytest.raises(UnitCapabilityError, match="was issued for elsewhere:"),
     ):
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), sealed.transport_key)
+        join_gateway(
+            _identity(gateway.url),
+            runner_home,
+            str(sealed.path),
+            sealed.transport_key,
+            now=time.time(),
+        )
 
     assert len(gateway.requests) == 1
     assert sealed.path.exists() and load_unit_capability(runner_home) is None
@@ -224,6 +257,12 @@ def test_a_cluster_that_refuses_the_runner_login_installs_nothing_and_keeps_the_
         serving({BOOTSTRAP: bootstrap_reply(endpoint)}) as gateway,
         pytest.raises(UnitCapabilityError, match="the cluster refuses generation 0's"),
     ):
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), sealed.transport_key)
+        join_gateway(
+            _identity(gateway.url),
+            runner_home,
+            str(sealed.path),
+            sealed.transport_key,
+            now=time.time(),
+        )
 
     assert sealed.path.exists() and load_unit_capability(runner_home) is None

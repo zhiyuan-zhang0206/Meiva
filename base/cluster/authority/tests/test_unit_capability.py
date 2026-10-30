@@ -45,7 +45,7 @@ def test_a_tampered_bundle_is_refused(gateway: Path, runner_home: Path, mutation
     data = json.loads(issued.envelope)
     _MUTATIONS[mutation](data)
     with pytest.raises(unit.UnitCapabilityError, match="does not authenticate"):
-        unit.open_bundle(json.dumps(data).encode(), issued.transport_key)
+        unit.open_bundle(json.dumps(data).encode(), issued.transport_key, now=time.time())
     assert unit.load_unit_capability(runner_home) is None
 
 
@@ -53,11 +53,11 @@ def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_ho
     issued, other = issue(gateway, runner_home), issue(gateway, runner_home)
     assert issued.transport_key != other.transport_key
     with pytest.raises(unit.UnitCapabilityError, match="does not authenticate"):
-        unit.open_bundle(issued.envelope, other.transport_key)
+        unit.open_bundle(issued.envelope, other.transport_key, now=time.time())
     with pytest.raises(unit.UnitCapabilityError, match="32-byte key"):
-        unit.open_bundle(issued.envelope, "AAAA")
+        unit.open_bundle(issued.envelope, "AAAA", now=time.time())
     with pytest.raises(unit.UnitCapabilityError, match="not a database capability bundle"):
-        unit.open_bundle(b"{}", issued.transport_key)
+        unit.open_bundle(b"{}", issued.transport_key, now=time.time())
     bundle = open_issued(issued)
     assert bundle.capability.api is not None
     for secret in (bundle.capability.password, bundle.capability.api.token):

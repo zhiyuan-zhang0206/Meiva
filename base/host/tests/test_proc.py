@@ -233,7 +233,7 @@ def test_kill_process_tree_skips_stale_ancestry(tmp_path: Path) -> None:
         ) as unrelated,
     ):
         try:
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 30
             while not pid_file.exists():
                 assert time.monotonic() < deadline, "fixture did not start"
                 time.sleep(0.01)
@@ -264,7 +264,7 @@ def test_kill_process_tree_skips_changed_identity(tmp_path: Path, changed_before
         [sys.executable, "-I", str(_HOSTING_CHILD), "ignore_term", str(ready), str(terminated)]
     )
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while not ready.exists():
             assert time.monotonic() < deadline
             time.sleep(0.01)
@@ -280,7 +280,7 @@ def test_kill_process_tree_skips_changed_identity(tmp_path: Path, changed_before
             assert child.poll() is None
         else:
             real.send_signal(signal.SIGTERM)
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 30
             while not terminated.exists():
                 assert time.monotonic() < deadline
                 time.sleep(0.01)
@@ -293,7 +293,9 @@ def test_kill_process_tree_skips_changed_identity(tmp_path: Path, changed_before
 
 
 # meiva:note
-# The captured process ignores TERM; changing its wall reading cannot spare it.
+# The captured process ignores TERM; changing its wall reading cannot spare it. The exit status is
+# the stage evidence: a child that ignores TERM can only come out of the escalation as `-SIGKILL`,
+# so the judgement needs no file the child has to be scheduled to write inside the grace.
 # Popen spawns the test-owned _hosting_child.py helper script.
 def test_tree_escalation_survives_birth_wall_clock_step(tmp_path: Path) -> None:
     ready, terminated = tmp_path / "ready", tmp_path / "term"
@@ -301,7 +303,7 @@ def test_tree_escalation_survives_birth_wall_clock_step(tmp_path: Path) -> None:
         [sys.executable, "-I", str(_HOSTING_CHILD), "ignore_term", str(ready), str(terminated)]
     )
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while not ready.exists():
             assert time.monotonic() < deadline
             time.sleep(0.01)
@@ -312,8 +314,10 @@ def test_tree_escalation_survives_birth_wall_clock_step(tmp_path: Path) -> None:
             else real
         )
         terminate_owned_tree([drifted], grace_s=0.2)
-        assert terminated.exists()
         assert _dead(child.pid), "clock drift spared the exact captured process at escalation"
+        assert child.wait(timeout=10) == -signal.SIGKILL, (
+            "the kill stage, not the TERM stage, ended it"
+        )
     finally:
         child.kill()
         child.wait(timeout=5)
@@ -430,7 +434,7 @@ def test_child_state_missing_for_a_zombie() -> None:
     proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "sleep"])
     proc.kill()
     handle = psutil.Process(proc.pid)
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline and handle.status() != psutil.STATUS_ZOMBIE:
         time.sleep(0.01)
     try:

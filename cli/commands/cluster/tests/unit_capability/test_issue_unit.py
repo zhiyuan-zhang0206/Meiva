@@ -78,7 +78,9 @@ def test_it_seals_the_active_generation_for_one_unit_under_the_key_it_prints(
     assert stat.S_IMODE(out.stat().st_mode) == 0o600
     assert f"written to {out} (0600)" in printed
     assert "`meiva cluster db-authority install-unit <bundle>`" in printed
-    bundle = open_bundle(out.read_bytes(), _printed_key(printed))
+    bundle = open_bundle(
+        out.read_bytes(), _printed_key(printed), now=command.clock.now().timestamp()
+    )
     capability = bundle.capability
     assert capability.unit == UnitIdentity(machine=MACHINE, home="/home/u/.meiva")
     assert capability.endpoint == f"postgresql://meiva@{_REACHABLE}:6433/meiva"

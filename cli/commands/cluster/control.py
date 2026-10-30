@@ -279,6 +279,7 @@ def cmd_db_authority_issue_unit(
             ).served_db_endpoint(),
             cluster_secret=config.view.data_plane.cluster_secret,
             ttl_s=ttl_hours * 3600,
+            now=command.clock.now().timestamp(),
         )
         write_bundle(target, issued.envelope)
     except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:
@@ -306,7 +307,9 @@ def cmd_db_authority_issue_unit(
 # the bundle file is deleted once installed. After a write-generation rotation: stop the unit,
 # install the new bundle, start it. Refused on a gateway home (it keeps its own ledger) and on
 # a home `meiva init` has not initialized.
-def cmd_db_authority_install_unit(*, bundle: str, transport_key: str, home: Path) -> int:
+def cmd_db_authority_install_unit(
+    *, bundle: str, transport_key: str, home: Path, now: float
+) -> int:
     try:
         admitted = require_initialized(home)
     except (RuntimeError, ValueError, OSError) as exc:
@@ -317,7 +320,7 @@ def cmd_db_authority_install_unit(*, bundle: str, transport_key: str, home: Path
         print(refusal, file=sys.stderr)
         return 1
     try:
-        join_gateway(stored_values(home), home, bundle, transport_key)
+        join_gateway(stored_values(home), home, bundle, transport_key, now=now)
     except (AuthorityRefusedError, BootstrapFetchError, ValueError, RuntimeError, OSError) as exc:
         print(failure_line("install-unit", str(exc)), file=sys.stderr)
         return 1
