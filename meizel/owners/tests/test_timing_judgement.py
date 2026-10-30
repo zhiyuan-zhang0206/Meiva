@@ -84,6 +84,74 @@ def test_a_local_function_named_like_a_clock_is_ignored() -> None:
     assert _findings(src) == []
 
 
+# meiva:note
+# A bound written as a name instead of a literal is the same judgement: `_BUDGET = 5` and `5` are one
+# claim, and judging only the literal one made the rule's verdict depend on spelling.
+def test_a_module_constant_bound_is_a_finding() -> None:
+    src = (
+        "import time\n"
+        "\n"
+        "_BUDGET = 5\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    started = time.monotonic()\n"
+        "    assert time.monotonic() - started < _BUDGET\n"
+    )
+    assert len(_findings(src)) == 1
+
+
+def test_a_derived_module_constant_bound_is_a_finding() -> None:
+    src = (
+        "import time\n"
+        "\n"
+        "_LEG = 2.0\n"
+        "_BUDGET = _LEG * 3\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    started = time.monotonic()\n"
+        "    assert time.monotonic() - started < _BUDGET\n"
+    )
+    assert len(_findings(src)) == 1
+
+
+# meiva:note
+# The three boundaries the resolution deliberately keeps: a name bound inside a function, a bound a
+# call returns, and a stored deadline (clock against clock). Each stays unjudged until someone
+# decides to widen the rule.
+def test_a_name_bound_inside_a_function_is_not_a_bound() -> None:
+    src = (
+        "import time\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    budget = 5\n"
+        "    started = time.monotonic()\n"
+        "    assert time.monotonic() - started < budget\n"
+    )
+    assert _findings(src) == []
+
+
+def test_a_bound_a_call_returns_is_not_resolved() -> None:
+    src = (
+        "import time\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    started = time.monotonic()\n"
+        "    assert time.monotonic() - started < budget()\n"
+    )
+    assert _findings(src) == []
+
+
+def test_a_stored_deadline_is_clock_against_clock_and_stays_unjudged() -> None:
+    src = (
+        "from time import monotonic\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    deadline = monotonic() + 30\n"
+        "    assert monotonic() < deadline\n"
+    )
+    assert _findings(src) == []
+
+
 def test_a_clock_read_inside_the_assert_is_a_finding() -> None:
     src = (
         "import time\n"
