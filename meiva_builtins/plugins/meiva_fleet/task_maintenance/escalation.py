@@ -74,16 +74,33 @@ def _lock_candidates(cur: psycopg.Cursor, threshold: int) -> tuple[list[int], di
     return [row[0] for row in candidates], locked
 
 
+# meiva:note
+# Escalation copy states the evidence, never a verdict on the owner. This pass reads
+# task bookkeeping only — status, reminder_count, escalated_at and the ancestor
+# owners — and `tasks.log` deliberately leaves `updated_at` alone, so "no state
+# change" is the strongest claim the daemon can support. An owner that answered in
+# chat, worked in a shell or advanced a peer's task is indistinguishable here from
+# one that is gone, and the same words have to serve both (2026-10-30 ruling, task
+# #5862). Liveness lives in `agents_meta` and `routing.nearest_manager` already
+# reads it to pick a recipient; it is deliberately not a claim about the owner.
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
+_STATE_CHANGE_BASIS = "a tasks.log note is not a state change"
+
+
 def _user_notice(
     cur: psycopg.Cursor, conn: psycopg.Connection, task: _Task
 ) -> EscalationReceipt | None:
     if task.owner is None:
         raise ValueError("human escalation requires a task owner")
-    title = f'Task #{task.id} "{task.title}" stalled after repeated reminders — reassign or cancel'
+    title = (
+        f'Task #{task.id} "{task.title}" — {task.reminder_count} reminders with no state '
+        "change; reassign or cancel"
+    )
     content = (
-        f"Agent #{task.owner} has not updated this task after repeated reminders, and no live "
-        "agent owns any ancestor task to catch it. Reassign it to another agent, "
-        "cancel it, or reply to remind the owner once more."
+        f"Agent #{task.owner} has not changed this task's state after "
+        f"{task.reminder_count} reminders ({_STATE_CHANGE_BASIS}), and no live agent owns "
+        "any ancestor task to catch it. Reassign it to another agent, cancel it, or reply "
+        "to remind the owner once more."
     )
     staged = stage_human_notice(
         cur,
@@ -100,7 +117,10 @@ def _user_notice(
 
 
 def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> EscalationReceipt:
-    lines = ["Stalled subtasks — owner(s) unresponsive after repeated reminders:"]
+    lines = [
+        "Subtasks still open after repeated reminders — task state unchanged "
+        f"({_STATE_CHANGE_BASIS}):"
+    ]
     lines.extend(
         f'- #{task.id} "{task.title}" — owner #{task.owner}, {task.reminder_count} reminders'
         for task in tasks
