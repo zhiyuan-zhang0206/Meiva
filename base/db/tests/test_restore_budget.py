@@ -302,6 +302,9 @@ def test_the_transaction_budget_interrupts_a_stalled_commit(db_url: str) -> None
             conn.execute("INSERT INTO restore_budget_stall VALUES (1)")
             started = time.monotonic()
             conn.commit()
+            # meiva:note
+            # timing-guard: the 3 s is the trigger's own sleep, not machine speed -- #7756 moved the
+            # verdict to the marker above and kept this lower bound as a real assertion.
             assert time.monotonic() - started >= 2.5, (
                 "without the budget the commit waits the trigger"
             )
