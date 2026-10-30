@@ -96,7 +96,7 @@ def write_state(path: Path, *, refused: bool, free_gib: float) -> None:
     # meiva:note
     # Same one-step replace as the peak table, and a failing write never fails the job it
     # describes: the worst case is a refusal that has to be re-earned by three fresh samples.
-    # The file's own mtime is when it last changed — no clock read, nothing to keep in step.
+    # The state carries no timestamp and needs none: one reading at the reset line clears it.
     record = {"refused": refused, "free_gib": round(free_gib, 2)}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
