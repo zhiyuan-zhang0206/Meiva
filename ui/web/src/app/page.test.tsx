@@ -1,7 +1,8 @@
 // meiva:note
-// HomePage tests — mock all use-* hooks and child components as stubs to test
-// top-level wiring and state flow (send asks the timeline to stay with a
-// follower, handleSend errors bubble to toast, composerMode tri-state).
+// HomePage tests — the surface renders from its props, so a test steers the
+// values it wants through `hooksState` and watches the stand-ins `page-test-mock.tsx`
+// supplies (send asks the timeline to stay with a follower, handleSend errors
+// bubble to toast, composerMode tri-state). No module is replaced.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen } from "@testing-library/react";
@@ -12,130 +13,15 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
 import { transport } from "@/test-support/fake-api";
 import { deferred } from "@/test-support/deferred";
-import { ComposerMock, cleanupHomePageTest, setReplySuggestions, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
-vi.mock("@/lib/agents/use-agents", () => ({
-  useAgents: () => ({
-    agents: hooksState.agents,
-    ancestors: [],
-    activeAgent: hooksState.agents.find((a) => a.agent_id === hooksState.activeId),
-    activeId: hooksState.activeId,
-    setActiveId: vi.fn(),
-    pendingActions: {},
-    pendingSpawnCount: 0,
-    spawn: hooksState.spawn,
-    fork: hooksState.fork,
-    terminate: hooksState.terminate,
-    restart: hooksState.restart,
-    resurrect: hooksState.resurrect,
-    refresh: vi.fn(),
-  }),
-}));
-vi.mock("@/lib/timeline/use-timeline", () => ({
-  useTimeline: () => ({
-    items: hooksState.timelineItems,
-    streamingCode: false,
-    connectionState: hooksState.connectionState,
-    turnActive: hooksState.turnActive,
-    isLoading: false,
-    isRefetching: false,
-    error: hooksState.timelineError,
-    isFetching: hooksState.timelineFetching,
-    retryTimeline: hooksState.retryTimeline,
-  }),
-}));
-vi.mock("@/lib/inspector/use-token-usage", () => ({
-  useTokenUsage: () => ({ contextTokens: 0, maxContextTokens: 0, softCompactTokens: 0, hardCompactTokens: 0 }),
-}));
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({ settings: hooksState.settings, setSetting: hooksState.setSetting, isLoading: false }),
-}));
-vi.mock("@/lib/state/store", () => ({
-  useStore: <T,>(selector: (s: unknown) => T): T =>
-    selector({
-      toast: hooksState.toast,
-      showToast: hooksState.showToast,
-      focusComposer: hooksState.focusComposer,
-      composerFocusToken: 0,
-      setMobileSidebarOpen: hooksState.setMobileSidebarOpen,
-      mobileInspectorOpen: false,
-      setMobileInspectorOpen: hooksState.setMobileInspectorOpen,
-      inspectorHours: 24,
-      setInspectorHours: hooksState.setInspectorHours,
-      agents: hooksState.agents,
-      ancestors: [],
-      activeAgent: hooksState.agents.find((a) => a.agent_id === hooksState.activeId),
-    }),
-}));
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({ tier: hooksState.isDesktop ? "xl" : "xs", isNarrow: !hooksState.isDesktop, isLarge: hooksState.isLarge }),
-}));
-vi.mock("@/lib/timeline/timeline-store", () => ({
-  useTimelineStore: <T,>(selector: (s: unknown) => T): T =>
-    selector({ requestScrollToBottom: hooksState.requestScrollToBottom }),
-}));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ bfcacheId: "_b_test_" }),
-}));
-vi.mock("@/components/agent-sidebar", () => ({
-  AgentSidebar: ({ onSpawn }: { onSpawn: (opts: { machine?: string; model?: string }) => void }) => (
-    <button data-testid="sidebar-spawn" onClick={() => { onSpawn({}); }}>spawn</button>
-  ),
-}));
-vi.mock("@/components/shell/header-bar", () => ({
-  HeaderBar: ({
-    label,
-    children,
-    maxWidthCss,
-  }: {
-    label: string;
-    children?: React.ReactNode;
-    maxWidthCss?: string;
-  }) => (
-    <header data-testid="header-bar" data-label={label} style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}>
-      {children}
-    </header>
-  ),
-}));
-vi.mock("@/components/timeline", () => ({
-  TimelineView: ({ turnActive, maxWidthCss, items }: { turnActive?: boolean; maxWidthCss?: string; items: unknown[] }) => (
-    <div
-      data-testid="timeline"
-      data-turn-active={turnActive ? "1" : "0"}
-      data-item-count={items.length}
-      style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-    />
-  ),
-}));
-vi.mock("@/components/conversation/composer", () => ({
-  Composer: ComposerMock,
-}));
-vi.mock("@/components/conversation/upload-button", () => ({
-  UploadButton: ({ agentId }: { agentId: number | null }) => (
-    <div data-testid="upload-button" data-agent-id={agentId ?? "null"} />
-  ),
-}));
-vi.mock("@/components/inspector/inspector-panel", async () => {
-  const React = await import("react");
-  return {
-    InspectorPanel: () => {
-      React.useEffect(() => {
-        inspectorMockState.mounts += 1;
-      }, []);
-      if (inspectorMockState.shouldThrow) {
-        throw new Error("Simulated inspector render crash");
-      }
-      return <div data-testid="inspector-panel" />;
-    },
-  };
-});
-import HomePage from "./page";
+import { cleanupHomePageTest, HomePageBound as HomePage, hooksState, inspectorMockState, makeAgent, makeItem, resetHomePageTestState, setReplySuggestions, wrap } from "./page-test-mock";
+
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
 
 describe("HomePage reply suggestion", () => {
   const agentSpoke = [
-    { item_id: "1.0", kind: "inbound_chat", source: "user", payload: "deploy?" },
-    { item_id: "2.0", kind: "agent_chat", source: null, payload: "Deploy now?" },
+    makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "deploy?" }),
+    makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Deploy now?" }),
   ];
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -209,7 +95,7 @@ describe("HomePage top-level render", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(hooksState.retryTimeline).toHaveBeenCalledOnce();
     hooksState.timelineError = null;
-    hooksState.timelineItems = [{ item_id: "0.1", kind: "agent_chat", payload: "read restored" }];
+    hooksState.timelineItems = [makeItem({ item_id: "0.1", kind: "agent_chat", payload: "read restored" })];
     view.rerender(
       <WallClockProvider wallNow={() => Date.now()}>
         <QueryClientProvider client={new QueryClient()}><HomePage /></QueryClientProvider>
@@ -221,7 +107,7 @@ describe("HomePage top-level render", () => {
   it("shows a refresh failure without replacing loaded history, and disables Retry during its read", () => {
     hooksState.activeId = 42;
     hooksState.agents = [makeAgent({ agent_id: 42 })];
-    hooksState.timelineItems = [{ item_id: "0.1", kind: "agent_chat", payload: "retained history" }];
+    hooksState.timelineItems = [makeItem({ item_id: "0.1", kind: "agent_chat", payload: "retained history" })];
     hooksState.timelineError = new Error("Checkpoint history unavailable for agent 42");
     hooksState.timelineFetching = true;
     wrap(<HomePage />);
@@ -261,7 +147,8 @@ describe("HomePage top-level render", () => {
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
     hooksState.activeId = 5;
     hooksState.isLarge = true;
-    hooksState.settings = { "display.timeline_width_px": 768, "display.inspector_open": true };
+    hooksState.settings = { "display.timeline_width_px": 768 };
+    hooksState.inspectorOpen = true;
     hooksState.agents = [makeAgent({ agent_id: 5, label: "research", status: "idling" })];
     wrap(<HomePage />);
     const label = screen.getByTestId("header-bar").getAttribute("data-label");
@@ -354,30 +241,29 @@ describe("HomePage top-level render", () => {
     );
   });
 
+  // meiva:note
   // User ruling 2026-08-23: desktop is a side panel and mobile is a
   // full-screen overlay. Both start closed and open only via the header's
-  // inspector toggle — mount never touches either open-state source.
-  it("mount does not auto-open the inspector", () => {
+  // inspector toggle. The surface renders the column from the open flag and
+  // never opens it on its own; the flag's own derivation (a workspace setting
+  // on desktop, session state on mobile) is `useInspectorOpen`'s, asserted in
+  // lib/inspector/inspector-panel-store.test.ts ("an explicit desktop
+  // preference does not force the overlay open on mobile").
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  it("mount renders no inspector column while the inspector is closed", () => {
     hooksState.isLarge = false;
-    hooksState.settings = { "display.inspector_open": false };
+    hooksState.inspectorOpen = false;
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5 })];
     wrap(<HomePage />);
-    expect(hooksState.setSetting).not.toHaveBeenCalled();
-    expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
-  });
-  it("mobile mount with the setting open still does not open the overlay (task #793)", () => {
-    hooksState.isLarge = false;
-    hooksState.settings = { "display.inspector_open": true };
-    wrap(<HomePage />);
-    expect(hooksState.setSetting).not.toHaveBeenCalled();
-    expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("inspector-panel")).toBeNull();
+    expect(hooksState.inspectorToggle).not.toHaveBeenCalled();
   });
   it("renders an open inspector beside HomeContent in the desktop resizable group", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
-    hooksState.settings = {
-      "display.timeline_width_px": 768,
-      "display.inspector_open": true,
-    };
+    hooksState.settings = { "display.timeline_width_px": 768 };
+    hooksState.inspectorOpen = true;
     wrap(<HomePage />);
 
     // v4 nests each Panel: the group's direct child is the sizing node
@@ -396,10 +282,8 @@ describe("HomePage top-level render", () => {
   it("keeps a healthy inspector mounted across an agent switch (no remount, task #3894)", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
-    hooksState.settings = {
-      "display.timeline_width_px": 768,
-      "display.inspector_open": true,
-    };
+    hooksState.settings = { "display.timeline_width_px": 768 };
+    hooksState.inspectorOpen = true;
     const { rerender } = wrap(<HomePage />);
     await screen.findByTestId("inspector-panel");
     expect(inspectorMockState.mounts).toBe(1);
@@ -421,10 +305,8 @@ describe("HomePage top-level render", () => {
   it("renders ErrorBoundary fallback when inspector panel throws a render error", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
-    hooksState.settings = {
-      "display.timeline_width_px": 768,
-      "display.inspector_open": true,
-    };
+    hooksState.settings = { "display.timeline_width_px": 768 };
+    hooksState.inspectorOpen = true;
     inspectorMockState.shouldThrow = true;
     // meiva:note
     // The boundary logs the error it catches; this test asserts the fallback and its reset, not
@@ -439,10 +321,8 @@ describe("HomePage top-level render", () => {
   it("resets the inspector ErrorBoundary when activeId changes via resetKey", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
-    hooksState.settings = {
-      "display.timeline_width_px": 768,
-      "display.inspector_open": true,
-    };
+    hooksState.settings = { "display.timeline_width_px": 768 };
+    hooksState.inspectorOpen = true;
     inspectorMockState.shouldThrow = true;
     // meiva:note
     // The boundary logs the error it catches; this test asserts the fallback and its reset, not
