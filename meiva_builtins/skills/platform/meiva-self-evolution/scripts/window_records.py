@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, TypeGuard
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from record import build_record
 from record_inputs import (
