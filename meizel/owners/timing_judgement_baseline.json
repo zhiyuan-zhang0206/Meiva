@@ -1,0 +1,390 @@
+{
+  "note": "Timing judgements that predate the rule (the #5821 inventory, re-scanned). Regenerate with --write-baseline and treat the diff as the review.",
+  "sites": [
+    {
+      "path": "agent/graph/exec/tests/test_exec_process.py",
+      "function": "test_a_detached_output_holder_cannot_hold_the_run_past_the_drain_bound",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "agent/tests/impersonation/external/test_external_close.py",
+      "function": "test_close_waits_for_a_dequeued_otlp_record_before_force_flush",
+      "comparison": "time.monotonic() - started >= N"
+    },
+    {
+      "path": "base/agents/impersonation/tests/test_host_transport.py",
+      "function": "test_live_submit_bounds_a_silent_server",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/agents/impersonation/tests/test_host_transport.py",
+      "function": "test_live_submit_does_not_mistake_a_server_request_for_its_reply",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/agents/inbox/tests/test_wake_publish.py",
+      "function": "test_wake_published_before_subscribe_is_not_replayed",
+      "comparison": "elapsed >= N"
+    },
+    {
+      "path": "base/agents/sdk/tests/test_policy_owner.py",
+      "function": "test_stop_retains_late_failure_and_actual_worker",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/agents/tests/test_turn_resources.py",
+      "function": "test_uncooperative_completion_returns_bounded_without_joining",
+      "comparison": "loop.time() - started < N"
+    },
+    {
+      "path": "base/clock/tests/test_timers.py",
+      "function": "test_manual_sleep_records_the_request_and_moves_the_virtual_clock",
+      "comparison": "time.monotonic() - real_start < N"
+    },
+    {
+      "path": "base/clock/tests/test_timers.py",
+      "function": "test_manual_sleep_records_the_request_and_moves_the_virtual_clock",
+      "comparison": "timers.monotonic() == N"
+    },
+    {
+      "path": "base/clock/tests/test_timers.py",
+      "function": "test_system_timers_wait_for_real",
+      "comparison": "time.monotonic() - before >= N"
+    },
+    {
+      "path": "base/clock/tests/test_timers.py",
+      "function": "test_the_clock_awaits_through_its_timers_without_waiting",
+      "comparison": "time.monotonic() - real_start < N"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_budget_ends_a_restore_stuck_on_a_locked_table",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_client_deadline_abandons_a_restore_that_is_never_answered",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_transaction_budget_interrupts_a_stalled_commit",
+      "comparison": "time.monotonic() - started >= N"
+    },
+    {
+      "path": "base/host/env/tests/test_port_lease.py",
+      "function": "_lease_reports",
+      "comparison": "remaining > N"
+    },
+    {
+      "path": "base/sessions/pty/tests/test_client_connect_wait.py",
+      "function": "test_a_wait_pauses_between_attempts_before_giving_up",
+      "comparison": "time.monotonic() - started >= N"
+    },
+    {
+      "path": "base/telemetry/otlp/tests/test_trace_arm.py",
+      "function": "test_stop_observes_one_real_worker_without_holding_its_completion_lock",
+      "comparison": "time.monotonic() - before < N"
+    },
+    {
+      "path": "base/telemetry/tests/_emitter_lifecycle_child.py",
+      "function": "unreleasable_writer",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/telemetry/tests/capture/trace_lifecycle_child.py",
+      "function": "observe_running_shutdown",
+      "comparison": "time.monotonic() - before < N"
+    },
+    {
+      "path": "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py",
+      "function": "test_blocked_sdk_init_stays_owned_after_finite_stop",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py",
+      "function": "test_close_time_gate_fault_raises_after_the_finite_observation",
+      "comparison": "time.monotonic() - started >= N"
+    },
+    {
+      "path": "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py",
+      "function": "test_sdk_flush_does_not_block_observing_caller",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py",
+      "function": "test_zero_timeout_stage_one_leaves_the_exporter_untouched",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/telemetry/tests/test_emitter_lifecycle.py",
+      "function": "test_full_queue_stop_is_finite_and_closes_admission",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/telemetry/tests/test_emitter_lifecycle.py",
+      "function": "test_one_deadline_spans_queue_admission_and_blocked_writer",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/telemetry/tests/test_emitter_lifecycle.py",
+      "function": "test_sync_deadline_covers_marker_admission_and_write",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "base/tests/config/env/test_file_lock_bounded.py",
+      "function": "test_a_second_process_waits_for_the_first",
+      "comparison": "waited >= N"
+    },
+    {
+      "path": "base/tests/test_context_event_owner.py",
+      "function": "test_unfinished_close_retains_the_actual_writer_until_late_completion",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/data_plane/tests/instance/test_bind_wait.py",
+      "function": "test_a_loopback_only_host_never_waits",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/data_plane/tests/instance/test_bind_wait.py",
+      "function": "test_an_address_the_kernel_can_bind_settles_on_the_first_look",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/data_plane/tests/maintenance/test_maintenance_stop.py",
+      "function": "test_a_redis_that_never_answers_cannot_hold_the_stop_past_its_deadline",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/data_plane/tests/maintenance/test_pg_stop_escalation.py",
+      "function": "test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "cli/commands/lifecycle/tests/startup/test_restart_legs.py",
+      "function": "test_the_start_leg_waits_only_as_long_as_the_operators_start_timeout",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "cli/commands/lifecycle/tests/stop/test_data_plane_stop.py",
+      "function": "test_a_leader_that_exits_without_closing_its_children_does_not_end_the_wait",
+      "comparison": "time.monotonic() - started >= N"
+    },
+    {
+      "path": "cli/commands/lifecycle/tests/stop/test_data_plane_stop.py",
+      "function": "test_a_wait_returns_as_soon_as_the_tracked_process_has_exited",
+      "comparison": "N <= time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/lifecycle/tests/stop/test_stop_root_tree.py",
+      "function": "test_a_force_stop_spends_the_operators_budget_on_the_root_as_well",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/lifecycle/tests/stop/test_stop_root_tree.py",
+      "function": "test_a_normal_stop_never_uses_the_interrupting_verb_when_the_root_is_slow",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/lifecycle/tests/stop/test_stop_shell_sessions.py",
+      "function": "test_a_shell_session_that_clears_within_the_stop_deadline_does_not_fail_the_stop",
+      "comparison": "N <= time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/lifecycle/tests/stop/test_stop_shell_sessions.py",
+      "function": "test_force_close_closes_every_session_at_once_without_notices",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/observability/tests/lgtm/test_lgtm_download.py",
+      "function": "test_a_wait_never_runs_past_the_deadline",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/observability/tests/lgtm/test_lgtm_download.py",
+      "function": "test_one_attempt_is_one_request_and_no_wait",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "cli/commands/observability/tests/lgtm/test_lgtm_download.py",
+      "function": "test_the_backoff_is_a_real_wait_that_grows_by_one_step_per_attempt",
+      "comparison": "time.monotonic() - started >= N + N"
+    },
+    {
+      "path": "cli/commands/tests/test_gateway_preflight_budget.py",
+      "function": "test_a_reachable_gateway_costs_one_dial_and_no_sleep",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "cli/tests/fleet_update/test_fleet_update_leases.py",
+      "function": "test_the_confirm_window_holds_the_stops_open",
+      "comparison": "time.monotonic() - started >= N"
+    },
+    {
+      "path": "cli/tests/fleet_update/test_fleet_update_verify.py",
+      "function": "test_the_roster_wait_is_spent_on_the_sessions_clock",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "gateway/tests/routers/cluster_endpoints/test_probe_agent_runner.py",
+      "function": "test_the_probe_budget_is_the_configured_status_probe_timeout",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "gateway/tests/routers/cluster_endpoints/test_roster_snapshots.py",
+      "function": "test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "gateway/tests/routers/memory_search/test_event_loop_isolation.py",
+      "function": "test_congested_gate_fails_fast_with_503",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "gateway/tests/routers/memory_search/test_event_loop_isolation.py",
+      "function": "test_slow_embed_does_not_block_healthz",
+      "comparison": "health_elapsed < N"
+    },
+    {
+      "path": "gateway/tests/routers/memory_search/test_search_budget.py",
+      "function": "test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "meiva/tests/namespaces/web/test_web.py",
+      "function": "test_fetch_batch_runs_concurrently",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "meiva/tests/namespaces/web/test_web_search.py",
+      "function": "test_search_batch_runs_concurrently",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "ops/cluster_status/tests/test_status_snapshot.py",
+      "function": "test_a_pool_with_no_free_connection_degrades_within_the_probe_bound",
+      "comparison": "waited < N"
+    },
+    {
+      "path": "services/agent_runner/agent_host/tests/runtime/test_resource_join.py",
+      "function": "test_unfinished_actual_task_reaches_existing_hard_exit",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "services/agent_runner/agent_ops/tests/daemon/test_state_writes_and_executor.py",
+      "function": "test_shutting_the_pool_down_does_not_wait_for_a_running_operation",
+      "comparison": "time.monotonic() - began < N"
+    },
+    {
+      "path": "services/agent_runner/agent_ops/tests/test_process_exit.py",
+      "function": "test_a_wedged_arm_does_not_hold_the_process_exit",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/backup/scheduler/tests/test_scheduler_shutdown.py",
+      "function": "_terminate_and_assert_reaped",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "services/backup/tests/backup/test_run_with_progress_without_a_sink_defers.py",
+      "function": "test_backup_lock_cross_process_excludes",
+      "comparison": "waited >= N"
+    },
+    {
+      "path": "services/backup/tests/backup/test_run_with_progress_without_a_sink_defers.py",
+      "function": "test_backup_lock_timeout_expires",
+      "comparison": "N <= waited < N"
+    },
+    {
+      "path": "services/backup/tests/backup/test_run_with_progress_without_a_sink_defers.py",
+      "function": "test_run_with_progress_timeout_still_kills_the_child",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "services/backup/tests/test_backup.py",
+      "function": "test_the_requested_timeout_bounds_a_pg_dump_that_cannot_get_its_lock",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "services/backup/walg/tests/test_restore.py",
+      "function": "test_a_role_the_restored_cluster_does_not_have_fails_at_once",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "services/derived/memory_indexer/embeddings/tests/embeddings/test_worst_case_single_attempt_has_no_sleep.py",
+      "function": "test_embed_compressed_trickle_deadline",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/derived/memory_indexer/embeddings/tests/embeddings/test_worst_case_single_attempt_has_no_sleep.py",
+      "function": "test_embed_framing_drip_deadline",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/derived/memory_indexer/embeddings/tests/embeddings/test_worst_case_single_attempt_has_no_sleep.py",
+      "function": "test_embed_slow_error_body_preserves_status",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/derived/memory_indexer/embeddings/tests/embeddings/test_worst_case_single_attempt_has_no_sleep.py",
+      "function": "test_embed_trickle_total_deadline",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/derived/memory_indexer/embeddings/tests/embeddings/test_worst_case_single_attempt_has_no_sleep.py",
+      "function": "test_sync_embed_slow_resolver_deadline",
+      "comparison": "N <= elapsed < N"
+    },
+    {
+      "path": "services/derived/memory_search/tests/test_memory_indexer.py",
+      "function": "test_cold_start_reconcile_beats_liveness_across_chunks",
+      "comparison": "elapsed > N"
+    },
+    {
+      "path": "services/desktop/browser/tests/test_browser_mcp_daemon_stop.py",
+      "function": "scenario",
+      "comparison": "time.monotonic() - start < N"
+    },
+    {
+      "path": "services/desktop/browser/tests/test_browser_mcp_daemon_stop.py",
+      "function": "test_sigterm_during_hung_connect_interrupts_immediately",
+      "comparison": "time.monotonic() - start < N"
+    },
+    {
+      "path": "services/desktop/browser/tests/test_browser_mcp_daemon_stop.py",
+      "function": "test_wedged_cleanup_await_is_bounded",
+      "comparison": "time.monotonic() - start < N"
+    },
+    {
+      "path": "services/desktop/browser/tests/test_browser_mcp_daemon_tab_groups.py",
+      "function": "test_a_stuck_grouping_neither_delays_new_page_nor_holds_the_daemon_lock",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "services/desktop/browser/tests/test_profile_seed_exit.py",
+      "function": "_expect",
+      "comparison": "remaining > N"
+    },
+    {
+      "path": "services/redis_bridge/tests/test_relay_lifecycle.py",
+      "function": "test_one_stop_budget_retains_blocked_dns_then_reaps_late_backend",
+      "comparison": "time.monotonic() - before < N"
+    },
+    {
+      "path": "services/supervision/roster/tests/test_service_graceful_stop.py",
+      "function": "test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup",
+      "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/upkeep/events_maintenance/tests/test_events_maintenance_failure_budget.py",
+      "function": "test_a_wedged_pass_parks_the_loop_without_waiting_out_the_interval",
+      "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "tests/integration/test_schedule_runner_cleanup.py",
+      "function": "test_stall_exit_bounds_failure_records",
+      "comparison": "N <= elapsed < N"
+    }
+  ]
+}

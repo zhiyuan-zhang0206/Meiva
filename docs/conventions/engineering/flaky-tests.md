@@ -21,6 +21,7 @@ reports are allowed; ordinary test jobs must execute tests. See the
 | Serialize timing races without causal investigation | not lintable (operational) | Existing: serial-group admission and exit policy |
 | Assume runner-load readiness | lintable with new rule | New: fake-timer-loop heuristic; bounded waits |
 | Pin wall-clock values or counts | lintable now | Existing: clock-lattice lint and topology tests |
+| Judge a duration by the real wall clock | lintable now | New: `meizel/owners/timing_judgement.py` (a bound loose enough not to flake passes the defect it names) |
 | Generate visual references outside the comparison runner | not lintable (operational) | Runner-native check and refresh workflow |
 
 ## 1. Do not assert process-table disappearance immediately after a kill
@@ -322,6 +323,37 @@ log: `message.record["name"] == "services.backup.walg.startup"`.
 **Lintability — not lintable (operational).** A lint could flag `logger.add(`
 in a test followed by an exact-count assertion, but which selection makes the
 count meaningful is semantic.
+
+## 10. Never judge a duration by the real wall clock
+
+**Rule.** A test asserts what the code did, not how long it took. When a budget is the
+thing under test, assert the counted fact the budget governs (envelopes sent, rounds run,
+records written, the answer the call returned). A bound that is loose enough not to flake
+on a loaded runner is loose enough to pass the defect it was written to catch — `assert
+elapsed < 0.5` proves "nothing hung", never "the budget held".
+
+**Signature.** `elapsed < X`, `duration >= X`, `time.monotonic() - started < X`, or a loop
+clock used the same way, anywhere in an `assert`. Both directions count: a lower bound
+fails a correct implementation that got faster.
+
+**Evidence.** `#7725`: a probe re-consumed its budget per segment, the defect was
+installed on purpose, and the `elapsed < 0.5` assertion stayed green with it (`6 passed`).
+The same shape then reached CI as a flake in
+`test_a_blackhole_stays_inside_the_single_total_budget` (`#5812`). The four wall-clock
+repairs of 2026-10-30 (`#7739`, `#7756`, `#7770`, `#7789`) each replaced one with a counted
+fact.
+
+**Correct form.** Inject a clock the test controls (`base/clock` timers), or assert the
+count. When the assertion only needs to stop a hang, say so — `# timing-guard: only catches
+a hang` on the line, with a bound far outside any real duration. A hang guard at 1.5× the
+budget is a flake with a comment.
+
+**Lintability — lintable now.**
+[`meizel/owners/timing_judgement.py`](../../../meizel/owners/timing_judgement.py) reports
+every wall-clock comparison in an `assert`; the sites that predate the rule are keyed in
+`meizel/owners/timing_judgement_baseline.json`, so the gate reds only on new ones. The
+rule's parts, and who owns the decision when it fires, are in
+[the rule's own document](../../../meizel/docs/lint/timing-judgement.meiva.okf.md).
 
 ## Historical appendix: CI ruling adopted 2026-09-01 21:01
 
