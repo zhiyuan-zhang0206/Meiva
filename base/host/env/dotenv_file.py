@@ -111,6 +111,9 @@ def env_file_path(home: Path) -> Path:
 # The `.env` of this process's own home: the ambient door for a composition root.
 #
 # Code below a root takes the home or the `.env` path as a value (`env_file_path(home)`).
+# The door keeps its one recorded read: its callers are modules that hold no home to pass
+# (`base/config`, `base/lm`, the plugin config view), so handing the home in would move the
+# same `resolve_meiva_home()` to each of them instead of removing it.
 def process_env_file() -> Path:
     from base.paths.home import resolve_meiva_home
 

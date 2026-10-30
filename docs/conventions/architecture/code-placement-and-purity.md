@@ -40,6 +40,17 @@ When code reads `settings`, `os.environ`, the clock (`time.time`, `datetime.now`
 
 - **Lift the read to the composition root** (`wiring.py`, `daemon.py`, `app.py`, `CommandRuntime.create()`) that already owns `[roots]` in `meizel.toml`.
 - **Pass a value or a frozen config dataclass down.** At a component boundary, pass a frozen `XxxConfig` containing only the fields that component reads; inside the component, pass plain values (`now: datetime`, `home: Path`, `timeout_s: float`).
+- **Repay a read where a caller already holds the fact, not where it merely could.**
+  A read leaves a file when the value was decided above it — the launcher's pid the runtime
+  already carries, the instant an entry read once, the home a root resolved — or when it moves
+  into a file that already declares that kind under `[roots]`. A value that *is* this process's
+  own statement about itself (its pid, uid, platform, entropy, its own local wall clock), or the
+  read of a door a composition root calls while every caller is a non-root module with no better
+  copy, has no better provider: passing it up repeats the same system call in another file and
+  leaves the same debt there, often more than once. Decide by measurement, not by reading the
+  call graph: `python -m meizel debt diff --against <base>` on the branch and on the unmodified
+  tree. The entry must disappear; a `+1` on the file that now holds the read is a relocation,
+  and the change is reverted rather than reviewed.
 - **Wrapping a read in a function does not move it.** A repository function that returns what the world decides (`meiva_home()`, `process_environment()` and the like) is listed under `[ambient-readers.<kind>]` in `meizel.policy.toml`, and a call to it is a read of that kind at the call site ([readers](../../../meizel/docs/checker/ambient-readers.meiva.okf.md)).
 - **Never add an ambient fallback in the callee** (`env: Mapping[str, str] | None = None` that falls back to `os.environ`, or `now: datetime | None = None` that calls `datetime.now()`). Defaults on parameters are reserved for pure constants and tuning numbers.
 
