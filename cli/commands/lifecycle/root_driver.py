@@ -98,18 +98,20 @@ def complete_boot_start(
     helper: HelperFactory | None,
     host: Host,
     home: Path,
+    control_pid: int,
     proc_root: Path = Path("/proc"),
 ) -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
     from base.host.system.boot_unit import in_boot_unit, publish_root_ready
 
-    if not in_boot_unit(host=host, proc_root=proc_root):
+    if not in_boot_unit(host=host, pid=control_pid, proc_root=proc_root):
         return
     snapshot = root_status(root_client(home, environ=host.environ))
     if snapshot is None:
         raise RootDriverError("cannot hand systemd an unobservable root")
     require_root_owner(snapshot, helper=helper, home=home)
-    publish_root_ready(home, native_identity(snapshot["root"]), host=host, proc_root=proc_root)
+    ready = native_identity(snapshot["root"])
+    publish_root_ready(home, ready, control_pid, host=host, proc_root=proc_root)
 
 
 class LaunchOutcome(NamedTuple):
