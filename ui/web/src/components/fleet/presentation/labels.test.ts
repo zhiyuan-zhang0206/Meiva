@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GLYPH_WIDTH_FULL, LABEL_LINE_HEIGHT, wrapLabel } from "./labels";
+import { GLYPH_WIDTH_FULL, LABEL_LINE_HEIGHT, agentStatusKey, wrapLabel } from "./labels";
 
 describe("wrapLabel", () => {
   it("returns one label-only line for a short label", () => {
@@ -104,5 +104,21 @@ describe("wrapLabel", () => {
       "\u57df\uff09",
     ]);
     expect(wrapLabel("supercalifragilistic", 22)).toEqual(["supercalif", "ragilistic"]);
+  });
+});
+
+describe("agentStatusKey", () => {
+  it("names each status the display tables are keyed by", () => {
+    for (const status of ["running", "idling", "impersonated", "terminated"] as const) {
+      expect(agentStatusKey(status)).toBe(status);
+    }
+  });
+
+  it("returns null for a status outside the vocabulary instead of asserting one", () => {
+    // meiva:note
+    // The task board reuses the canvas with task statuses, so the card sees strings that are not
+    // agent statuses; none of them may borrow an agent status's colour or label.
+    expect(agentStatusKey("in_progress")).toBeNull();
+    expect(agentStatusKey("")).toBeNull();
   });
 });

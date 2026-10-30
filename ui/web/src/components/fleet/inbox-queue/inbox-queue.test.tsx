@@ -211,12 +211,6 @@ describe("InboxQueue — open stream", () => {
 describe("InboxQueue — route anchor", () => {
   it("scrolls to and briefly highlights the matching notice without reordering", async () => {
     vi.useFakeTimers();
-    const raf = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        callback(0);
-        return 1;
-      });
     try {
       setFeed({
         awaiting: [
@@ -230,6 +224,10 @@ describe("InboxQueue — route anchor", () => {
       );
 
       expect(listTitles()).toEqual(["first", "target"]);
+      // meiva:note
+      // The anchor scroll runs on the page's next frame; the fake clock runs that frame, so the
+      // test states time instead of replacing the page's scheduler.
+      await act(() => vi.advanceTimersByTime(16));
       const target = screen.getByText("target").closest('[data-testid="inbox-row"]');
       expect(target?.getAttribute("data-anchor-highlighted")).toBe("true");
       expect(target?.className).toContain("bg-primary/10");
@@ -239,7 +237,6 @@ describe("InboxQueue — route anchor", () => {
       expect(target?.getAttribute("data-anchor-highlighted")).toBeNull();
       expect(listTitles()).toEqual(["first", "target"]);
     } finally {
-      raf.mockRestore();
       vi.useRealTimers();
     }
   });

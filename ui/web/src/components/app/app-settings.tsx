@@ -12,6 +12,15 @@ interface TauriInternals {
   invoke: (command: string, args?: unknown) => Promise<unknown>;
 }
 
+// meiva:note
+// The desktop host installs this object on the page before the app boots; declaring it on Window is
+// the one place the shape is stated, so the reader below needs no assertion.
+declare global {
+  interface Window {
+    readonly __TAURI_INTERNALS__?: TauriInternals;
+  }
+}
+
 export interface AppBridge {
   openSettings: () => Promise<unknown>;
 }
@@ -21,8 +30,7 @@ let lastBridge: AppBridge | null = null;
 
 export function readAppBridge(): AppBridge | null {
   if (typeof window === "undefined") return null;
-  const internals = (window as unknown as { __TAURI_INTERNALS__?: TauriInternals })
-    .__TAURI_INTERNALS__;
+  const internals = window.__TAURI_INTERNALS__;
   if (!internals || typeof internals.invoke !== "function") {
     lastInternals = null;
     lastBridge = null;

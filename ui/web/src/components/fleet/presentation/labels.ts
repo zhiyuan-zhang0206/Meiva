@@ -2,6 +2,8 @@
 // Label sizing and wrapping are shared by the graph renderer and its direct algorithm contracts.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 
+import type { PublicAgentStatus } from "@/lib/contracts/types";
+
 export function radiusOf(score: number, maxScore: number, minR: number, maxR: number): number {
   const ratio = maxScore > 0 ? score / maxScore : 0;
   return minR + (maxR - minR) * Math.sqrt(ratio);
@@ -80,4 +82,20 @@ export function wrapLabel(label: string, r: number): string[] {
   const keep = charsThatFit(visibleLines[last], maxLineWidth - glyphWidth("…"));
   visibleLines[last] = `${visibleLines[last].slice(0, keep)}…`;
   return visibleLines;
+}
+
+// meiva:note
+// The status vocabulary the display tables are keyed by. A graph node carries a bare string (the
+// task board reuses the same canvas with task statuses), so a view narrows through this list
+// instead of asserting the union at the call site: an unknown value keeps its own text.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const AGENT_STATUSES: readonly PublicAgentStatus[] = [
+  "running",
+  "idling",
+  "impersonated",
+  "terminated",
+];
+
+export function agentStatusKey(status: string): PublicAgentStatus | null {
+  return AGENT_STATUSES.find((known) => known === status) ?? null;
 }

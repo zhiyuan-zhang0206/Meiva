@@ -149,8 +149,8 @@ export function TaskGraph({
   // while Done is toggled off). Hidden ancestors of visible tasks join the
   // graph as dimmed ghost nodes so the tree stays connected — graph-only
   // (the kanban is a flat list with no parent edges).
-  const ghostTasks = useMemo(() => {
-    if (subtasks.length === 0) return [] as TaskGraphRow[];
+  const ghostTasks = useMemo((): TaskGraphRow[] => {
+    if (subtasks.length === 0) return [];
     const visible = new Set(subtasks.map((t) => t.id));
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const ghosts = new Map<number, TaskGraphRow>();

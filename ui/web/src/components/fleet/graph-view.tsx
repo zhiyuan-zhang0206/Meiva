@@ -34,6 +34,7 @@ import {
 } from "./force-controls";
 import { ForceGraph } from "./force-graph";
 import type { ForceGraphEdge, ForceGraphNode } from "./force-graph-geometry";
+import { agentStatusKey } from "./presentation/labels";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
@@ -289,27 +290,38 @@ export function GraphView({
   // enters a node (replacing the delayed native <title>): identity, status
   // and the activity score that drives node size.
   const agentHoverCard = useCallback(
-    (node: ForceGraphNode) => (
-      <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
-        <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
-          {node.label ?? t("unlabeledAgent")}
-        </p>
-        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
-          {t("agent", { id: node.id })}
-        </p>
-        <div className="mt-2 space-y-1 text-[11px]">
-          <p className={cn("items-center gap-1.5", FLEX)}>
-            <span
-              className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as PublicAgentStatus])}
-            />
-            {statusLabels[node.status as PublicAgentStatus]}
+    (node: ForceGraphNode) => {
+      const statusKey = agentStatusKey(node.status);
+      return (
+        <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
+          <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
+            {node.label ?? t("unlabeledAgent")}
           </p>
-          <p className="text-muted-foreground">
-            {t("activityScore", { score: `${(node.score / 1_000_000).toFixed(2)}M` })}
+          <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+            {t("agent", { id: node.id })}
           </p>
-        </div>
+          <div className="mt-2 space-y-1 text-[11px]">
+            <p className={cn("items-center gap-1.5", FLEX)}>
+              <span
+                // meiva:note
+                // The canvas carries a bare status string (the task board reuses it with task
+                // statuses), so the card narrows it through the display vocabulary: a known status
+                // reads its colour and label, and an unknown one shows neither.
+                // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+                className={cn(
+                  "size-2 rounded-full bg-current",
+                  statusKey === null ? "text-slate-400" : STATUS_TEXT[statusKey],
+                )}
+              />
+              {statusKey === null ? null : statusLabels[statusKey]}
+            </p>
+            <p className="text-muted-foreground">
+              {t("activityScore", { score: `${(node.score / 1_000_000).toFixed(2)}M` })}
+            </p>
+          </div>
       </div>
-    ),
+      );
+    },
     [statusLabels, t],
   );
 
@@ -350,7 +362,10 @@ export function GraphView({
           <WindowSelect
             value={String(windowHours)}
             options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
-            onChange={(v) => setWindowHours(Number(v) as StatsWindowHours)}
+            onChange={(v) => {
+              const next = STATS_WINDOWS.find((hours) => String(hours) === v);
+              if (next !== undefined) setWindowHours(next);
+            }}
             ariaLabel={t("window")}
             className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
