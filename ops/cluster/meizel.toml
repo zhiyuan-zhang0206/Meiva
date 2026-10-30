@@ -6,6 +6,3 @@ exports = ["operations.py", "rpc.py", "rpc_plans.py"]
 [purity]
 "__init__.py" = "strict"
 "rpc_plans.py" = "strict"
-
-[debt.ambient-read]
-"operations.py#clock ops.cluster_status.cluster_now" = 2

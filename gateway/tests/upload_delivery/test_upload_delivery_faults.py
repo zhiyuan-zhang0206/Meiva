@@ -1,6 +1,7 @@
 """Remote copy and transactional inbound response-loss fault boundaries."""
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -222,6 +223,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
             home=resolve_meiva_home(),
             receiver=receiver_for(client, request.target),
             agent_host=_agent_host(),
+            now=datetime(2030, 1, 1, tzinfo=UTC),
         )
 
 
@@ -465,6 +467,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
                 config, access=replace(client.app.state.gateway_access, gateway_url=source_url)
             ),
             agent_host=_agent_host(),
+            now=datetime(2030, 1, 1, tzinfo=UTC),
         )
     assert status == OpStatus.FAILED and result["reason"] == "upload-source-unavailable-v1"
     assert not delivered.exists()

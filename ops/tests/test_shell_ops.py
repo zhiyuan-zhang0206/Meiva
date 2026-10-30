@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,11 @@ from ops import cluster_status
 from ops.cluster import operations as cluster
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import ShellKillResult
+
+# meiva:note
+# The instant the caller stamps the op with: a fixed year the machine clock cannot be, so an
+# uptime computed from the process clock instead of this value would not match.
+STAMP = datetime(2030, 1, 1, tzinfo=UTC)
 
 
 @pytest.mark.parametrize("mode", list(ShellKillMode))
@@ -70,14 +76,15 @@ def test_the_probe_op_lists_the_agents_shells_of_this_host(unit_home: Path) -> N
     for name in ("meiva-agent-7-shell-0", "meiva-agent-7-shell-1-watcher", "meiva-agent-8-shell-0"):
         new(name, unit_home)
 
-    result = cluster.shell_probe_op(7, home=unit_home)
+    result = cluster.shell_probe_op(7, home=unit_home, now=STAMP)
 
     assert [(shell.id, shell.name) for shell in result.shells] == [(0, None), (1, "watcher")]
     assert all(shell.created_at is not None for shell in result.shells)
+    assert all(shell.uptime_seconds > 365 * 24 * 3600 for shell in result.shells)
 
 
 def test_the_probe_op_of_a_host_without_the_agents_shells_is_empty(unit_home: Path) -> None:
-    assert cluster.shell_probe_op(7, home=unit_home).shells == []
+    assert cluster.shell_probe_op(7, home=unit_home, now=STAMP).shells == []
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -87,13 +94,14 @@ def test_the_capture_op_returns_the_tail_of_the_resolved_shell(unit_home: Path) 
     type_line(name, "echo op-captured-marker")
     output_until(name, "op-captured-marker")
 
-    result = cluster.shell_capture_op(7, 2, 100, home=unit_home)
+    result = cluster.shell_capture_op(7, 2, 100, home=unit_home, now=STAMP)
 
     assert result.session_name == name
     assert "op-captured-marker" in [line.strip() for line in result.lines]
     assert result.created_at is not None
+    assert result.uptime_seconds > 365 * 24 * 3600
 
 
 def test_the_capture_op_of_a_shell_that_is_not_there_is_not_found(unit_home: Path) -> None:
     with pytest.raises(ShellNotFoundError):
-        cluster.shell_capture_op(7, 2, home=unit_home)
+        cluster.shell_capture_op(7, 2, home=unit_home, now=STAMP)

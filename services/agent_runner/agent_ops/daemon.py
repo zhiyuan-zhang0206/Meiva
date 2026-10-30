@@ -61,7 +61,7 @@ from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from ops import lifecycle
-from ops.cluster_status import ShellNotFoundError
+from ops.cluster_status import ShellNotFoundError, cluster_now
 from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_op_kind
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_flight, ops_plan
@@ -168,6 +168,7 @@ def _dispatch_in_thread(
         home=home,
         receiver=receiver,
         agent_host=agent_host,
+        now=cluster_now(),
     )
 
 
