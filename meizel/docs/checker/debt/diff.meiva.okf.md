@@ -28,7 +28,8 @@ not a repair and must not look like one.
   edits. The measuring device is the checker's rule code, `meizel.policy.toml`, and the
   **declarations** of every `meizel.toml` — everything but its `[debt]` tables: `exports`, `uses`,
   `loads`, `external`, `roles`, `purity`, `state`, `roots`. A change that edits only `[debt]` tables
-  is not a rule change and keeps the totals-only report.
+  is not a rule change and keeps the totals-only report: it prints one line saying no rule code,
+  policy or declaration changed, so the table's moves are all content.
 - **rules** is what this checker, run on a checkout of the ref, records for the ref's unchanged
   code, minus what the ref records. Regenerating the ref writes the change's manifests, minus their
   debt tables, over the ref's content, so declaring a root, a legal edge, an approval or a purity
