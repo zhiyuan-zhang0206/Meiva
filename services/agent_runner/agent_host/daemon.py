@@ -84,7 +84,7 @@ from base.lm.harness.registration import SecureRandom
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
-from base.paths import logs_dir
+from base.paths import logs_dir, run_dir
 from base.paths.home import resolve_meiva_home
 from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
 from meiva import skills as meiva_skills
@@ -120,23 +120,20 @@ host_log = logging.getLogger("services.agent_runner.agent_host.daemon")
 _MODULE = "services.agent_runner.agent_host.daemon"
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("agent_host")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("agent_host")
 
 
-def pidfile_path() -> Path:
-    return _endpoint().pidfile
+def pidfile_path(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
-_pidfile = pidfile_path
-
-
-def _claim_pidfile() -> None:
-    if is_running():
-        host_log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
+def _claim_pidfile(endpoint: ServiceEndpoint) -> None:
+    if is_running(endpoint):
+        host_log.info("[agent-host] daemon already running (pidfile=%s), exiting", endpoint.pidfile)
         sys.exit(1)
-    if not acquire_pidfile(_pidfile(), _MODULE, pid=os.getpid()):
-        host_log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
+    if not acquire_pidfile(endpoint.pidfile, _MODULE, pid=os.getpid()):
+        host_log.info("[agent-host] could not acquire pidfile %s, exiting", endpoint.pidfile)
         sys.exit(1)
 
 
@@ -321,6 +318,7 @@ async def close_process_owners(
     *,
     clients: ClientSet | None = None,
     instance_lock: int | None = None,
+    pidfile: Path,
     primary: BaseException | None = None,
 ) -> None:
     """Collect process owners without replacing a failure from boot or turn drain."""
@@ -328,7 +326,7 @@ async def close_process_owners(
         async with contextlib.AsyncExitStack() as cleanup:
             if instance_lock is not None:
                 cleanup.callback(release_instance_lock, instance_lock)
-            cleanup.callback(remove_pidfile, _pidfile())
+            cleanup.callback(remove_pidfile, pidfile)
             cleanup.push_async_callback(close_joined_host_pools, host, workload_pool, control_pool)
             if host is None and clients is not None:
                 cleanup.callback(clients.close)
@@ -345,8 +343,8 @@ async def close_process_owners(
 
 # meiva:note
 # Whether a host is already running; a live pid whose argv does not name this module is recycled.
-def is_running() -> bool:
-    return pidfile_holds_daemon(_pidfile(), _MODULE)
+def is_running(endpoint: ServiceEndpoint) -> bool:
+    return pidfile_holds_daemon(endpoint.pidfile, _MODULE)
 
 
 def boot_handles(
@@ -412,6 +410,7 @@ async def serve_host_lifecycle(
     write_restart: Callable[[int], Awaitable[OwedRestart]],
     clients: ClientSet | None = None,
     instance_lock: int | None = None,
+    pidfile: Path,
 ) -> None:
     beat: asyncio.Task[Exception | None] | None = None
     beat_tasks: asyncio.TaskGroup | None = None
@@ -449,6 +448,7 @@ async def serve_host_lifecycle(
             beat_tasks,
             clients=clients,
             instance_lock=instance_lock,
+            pidfile=pidfile,
             primary=sys.exception(),
         )
         host_log.info("[agent-host] daemon stopped")
@@ -496,7 +496,8 @@ async def run(
         )
     )
     instance_lock = take_instance_lock(home)
-    _claim_pidfile()
+    endpoint = _endpoint(config, runtime=run_dir(home))
+    _claim_pidfile(endpoint)
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
     from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
@@ -575,7 +576,6 @@ async def run(
             timers=stamping.clock,
         )
         host.bind_wake(scheduler.wake)
-        endpoint = _endpoint()
         wait_s = float(config.view.agent.db_notify_wait_timeout_seconds)
         handed_off = True
         await serve_host_lifecycle(
@@ -629,6 +629,7 @@ async def run(
             write_restart=partial(write_exit_restart, db, bus),
             clients=clients,
             instance_lock=instance_lock,
+            pidfile=endpoint.pidfile,
         )
     finally:
         if not handed_off:
@@ -642,6 +643,7 @@ async def run(
                 None,
                 clients=clients,
                 instance_lock=instance_lock,
+                pidfile=endpoint.pidfile,
                 primary=sys.exception(),
             )
             host_log.info("[agent-host] daemon stopped")

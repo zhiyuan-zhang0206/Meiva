@@ -24,11 +24,12 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
+from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.packages.plugins.config_registration import disk_image_path
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from services.supervision.meiva_root_glue import manifests as gen
 from services.supervision.roster import composition
@@ -44,6 +45,12 @@ from services.supervision.roster.service_spec import (
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 _RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})
 _REPO = Path("/checkout/repo")
+
+
+# meiva:note
+# The health-endpoint table the roster builds: this checkout's reader and its home.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
 
 
 @pytest.fixture(autouse=True)
@@ -145,12 +152,12 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
         cmd=f".venv/bin/python -m {row.module}",
         capabilities=row.capabilities,
         requires_db=row.requires_db,
-        curl_url=healthz_url(name),
+        curl_url=healthz_url(name, _table()),
         identity_probe=partial(
             probe_daemon,
             name,
-            healthz_url(name),
-            pidfile=ServiceEndpoints.from_settings().of(name).pidfile,
+            healthz_url(name, _table()),
+            pidfile=_table().of(name).pidfile,
             expected_home=meiva_home(),
         ),
         profile=row.profile,

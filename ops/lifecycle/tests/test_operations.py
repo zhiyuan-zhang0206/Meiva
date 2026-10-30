@@ -244,6 +244,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
             db_pool,
             catalog=model_catalog,
+            agent_host_port=8114,
             home=resolve_meiva_home(),
         )
     assert db_conn.execute(
@@ -337,6 +338,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
         {"source": "user"},
         db_pool,
         catalog=model_catalog,
+        agent_host_port=8114,
         home=resolve_meiva_home(),
     )
     assert result.status == "enqueued"
@@ -364,6 +366,7 @@ async def test_lifecycle_op_unparseable_path_raises(
             {},
             db_pool,
             catalog=model_catalog,
+            agent_host_port=8114,
             home=resolve_meiva_home(),
         )
 
@@ -386,6 +389,7 @@ async def test_guarded_resurrect_path_requires_trigger(
             {"resurrected_by": "system"},
             db_pool,
             catalog=model_catalog,
+            agent_host_port=8114,
             home=resolve_meiva_home(),
         )
 
@@ -409,6 +413,7 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
             trigger_inbound_id=99,
             trigger_inbound_kind=InboundKind.CHAT,
             catalog=model_catalog,
+            agent_host_port=8114,
             home=resolve_meiva_home(),
         )
 
@@ -431,6 +436,7 @@ async def test_explicit_resurrect_dispatches_manual_op(
         {"resurrected_by": "user"},
         db_pool,
         catalog=model_catalog,
+        agent_host_port=8114,
         home=resolve_meiva_home(),
     )
     assert result.status == "spawned"
@@ -476,6 +482,7 @@ async def test_a_force_terminate_releases_the_pages_of_the_home_it_was_given(
             {"source": "user", "force": True},
             db_pool,
             catalog=model_catalog,
+            agent_host_port=8114,
             home=served_home,
         )
     finally:

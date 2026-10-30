@@ -18,10 +18,11 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
+from base.config import get_field, settings
+from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
@@ -44,6 +45,12 @@ def pool(db_url: str):
 def deliver(db_conn: psycopg.Connection) -> Iterator[TaskNotes]:
     with record_notes(db_conn) as notes:
         yield notes
+
+
+# meiva:note
+# The health-endpoint table a plugin's `services()` hook is handed: this checkout's reader and home.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
 
 
 def _maintenance_events(
@@ -483,7 +490,9 @@ def test_service_command_module_is_importable() -> None:
     from meiva_builtins.plugins.meiva_fleet.services import services
 
     service = next(
-        item for item in services(home=meiva_home()) if item.session == "task-maintenance"
+        item
+        for item in services(home=meiva_home(), endpoints=_table())
+        if item.session == "task-maintenance"
     )
     module = service.cmd.split(" -m ", 1)[1]
     assert importlib.util.find_spec(module) is not None

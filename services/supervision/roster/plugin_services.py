@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from base.daemon.endpoints import ServiceEndpoints
 from services.supervision.roster.service_spec import ServiceSpec
 
 
@@ -50,7 +51,7 @@ from services.supervision.roster.service_spec import ServiceSpec
 # owner; an invalid roster is never presented as a successful partial one.
 # Session-name collisions also fail: no rule can pick between two owners.
 def plugin_services(
-    plugin_dirs: Mapping[str, Path] | None = None, *, home: Path
+    plugin_dirs: Mapping[str, Path] | None = None, *, home: Path, endpoints: ServiceEndpoints
 ) -> tuple[ServiceSpec, ...]:
     from base.packages.plugins import load_report
     from base.packages.plugins.enable_config import installed_plugin_dirs
@@ -63,7 +64,7 @@ def plugin_services(
             continue
         try:
             module = load_plugin_module(name, services_py)
-            specs.extend(_declared_plugin_services(name, module, home=home))
+            specs.extend(_declared_plugin_services(name, module, home=home, endpoints=endpoints))
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
@@ -72,18 +73,20 @@ def plugin_services(
     return tuple(specs)
 
 
-def _declared_plugin_services(name: str, module: object, *, home: Path) -> tuple[ServiceSpec, ...]:
+def _declared_plugin_services(
+    name: str, module: object, *, home: Path, endpoints: ServiceEndpoints
+) -> tuple[ServiceSpec, ...]:
     """Validate the present services face before accepting any roster entries."""
     declare = getattr(module, "services", None)
     if not callable(declare):
         raise PluginServiceError(f"plugin {name!r} services.py must define callable services()")
     try:
-        inspect.signature(declare).bind(home=home)
+        inspect.signature(declare).bind(home=home, endpoints=endpoints)
     except TypeError as exc:
         raise PluginServiceError(
-            f"plugin {name!r} services() must accept the keyword home: {exc}"
+            f"plugin {name!r} services() must accept the keywords home and endpoints: {exc}"
         ) from exc
-    declared = declare(home=home)
+    declared = declare(home=home, endpoints=endpoints)
     declared_any: Any = declared
     if not isinstance(declared, tuple):
         raise PluginServiceError(f"plugin {name!r} services() must return tuple[ServiceSpec, ...]")

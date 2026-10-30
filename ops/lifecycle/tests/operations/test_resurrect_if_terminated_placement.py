@@ -148,6 +148,7 @@ def _home_ops_server(
                 trigger_inbound_id=payload.trigger_inbound_id,
                 trigger_inbound_kind=payload.trigger_inbound_kind,
                 catalog=catalog,
+                agent_host_port=8114,
                 home=resolve_meiva_home(),
             )
         )

@@ -15,10 +15,11 @@ from base.cluster.dataplane.redis_bridge import (
     redis_bridge_endpoint,
 )
 from base.config import get_field
+from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe
 from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
-from base.paths import otel_collector_binary, otel_collector_config
+from base.paths import otel_collector_binary, otel_collector_config, run_dir
 from services.supervision.roster import plugin_services
 from services.supervision.roster.healthz import healthz_daemon
 from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
@@ -108,6 +109,7 @@ def build_services(
     from services.supervision.healthchecks.protocol_probe import probe as probe_protocol
     from services.supervision.healthchecks.redis_bridge import probe_relay
 
+    endpoints = ServiceEndpoints.from_fields(get_field, runtime=run_dir(home))
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
     _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command(home)
@@ -157,6 +159,7 @@ def build_services(
         healthz_daemon(
             "im-bridge",
             home=home,
+            endpoints=endpoints,
             module="services.entrypoints.im_bridge.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -164,6 +167,7 @@ def build_services(
         healthz_daemon(
             "labeler",
             home=home,
+            endpoints=endpoints,
             module="services.derived.labeler.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -175,6 +179,7 @@ def build_services(
         healthz_daemon(
             "heartbeat",
             home=home,
+            endpoints=endpoints,
             module="services.wake.heartbeat.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -185,6 +190,7 @@ def build_services(
         healthz_daemon(
             "delivery-watchdog",
             home=home,
+            endpoints=endpoints,
             module="services.wake.delivery_watchdog.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -195,6 +201,7 @@ def build_services(
         healthz_daemon(
             "events-maintenance",
             home=home,
+            endpoints=endpoints,
             module="services.upkeep.events_maintenance.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -205,6 +212,7 @@ def build_services(
         healthz_daemon(
             "ttl-reaper",
             home=home,
+            endpoints=endpoints,
             module="services.upkeep.ttl_reaper.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -215,6 +223,7 @@ def build_services(
         healthz_daemon(
             "schedule-manager",
             home=home,
+            endpoints=endpoints,
             module="services.wake.schedule_manager.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -272,6 +281,7 @@ def build_services(
         healthz_daemon(
             "pg-backup",
             home=home,
+            endpoints=endpoints,
             module="services.backup.scheduler.daemon",
             capabilities=GATEWAY,
             requires_db=True,
@@ -297,6 +307,7 @@ def build_services(
         healthz_daemon(
             "page-server",
             home=home,
+            endpoints=endpoints,
             module="services.agent_runner.page_server.daemon",
             capabilities=AGENT_RUNNER,
             requires_db=True,
@@ -304,6 +315,7 @@ def build_services(
         healthz_daemon(
             "agent-host",
             home=home,
+            endpoints=endpoints,
             module="services.agent_runner.agent_host.daemon",
             capabilities=AGENT_RUNNER,
             # meiva:note
@@ -326,6 +338,7 @@ def build_services(
         healthz_daemon(
             "ops",
             home=home,
+            endpoints=endpoints,
             module="services.agent_runner.agent_ops.daemon",
             capabilities=AGENT_RUNNER,
             requires_db=True,
@@ -453,7 +466,7 @@ def build_services(
     # Append plugin declarations after core groups. Session-name collisions fail
     # fast because root supervision and status derive their keys from the session.
     plugin = (
-        plugin_services.plugin_services(plugin_dirs=plugin_dirs, home=home)
+        plugin_services.plugin_services(plugin_dirs=plugin_dirs, home=home, endpoints=endpoints)
         if plugins is None
         else plugins
     )

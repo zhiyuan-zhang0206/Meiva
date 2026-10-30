@@ -24,6 +24,8 @@ import pytest
 
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import get_field
+from base.daemon.endpoints import ServiceEndpoints
 from base.db.code_version_gate import ProcessDbGate
 from base.host.tests.daemon_shutdown import (
     EXIT_BOUND_S,
@@ -32,6 +34,7 @@ from base.host.tests.daemon_shutdown import (
 )
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import run_dir
 from base.telemetry import process_name
 from services.agent_runner.agent_host.lifecycle.graceful_exit import OwedRestart
 
@@ -226,7 +229,12 @@ def _run_shutdown(failure: str, *, home: Path) -> None:
             _dispatch_for_shutdown(events, failure),
         )
 
-    pidfile = daemon.pidfile_path()
+    # meiva:note
+    # The row the daemon records: this child's own reader and the home its parent handed it, so a
+    # boot here never depends on the environment the parent happened to export.
+    pidfile = (
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(home)).of("agent_host").pidfile
+    )
     assert daemon.acquire_pidfile(
         pidfile, "services.agent_runner.agent_host.daemon", pid=os.getpid()
     )
@@ -250,6 +258,7 @@ def _run_shutdown(failure: str, *, home: Path) -> None:
                     open_health=_open_health_recorder(events),
                     serve_dispatch=serve_dispatch(home / "plugins"),
                     write_restart=_noop_restart,
+                    pidfile=pidfile,
                 )
             )
         finally:
