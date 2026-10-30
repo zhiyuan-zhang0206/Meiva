@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 from base.agents.impersonation.host_transport import (
     antigravity_rpc,
@@ -18,7 +19,9 @@ from base.agents.impersonation.host_transport import (
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def main() -> int:
     endpoint = resolve_antigravity_endpoint(
-        sys.argv[1], antigravity_server=antigravity_server_from_environment(os.environ)
+        sys.argv[1],
+        home=Path(sys.argv[2]),
+        antigravity_server=antigravity_server_from_environment(os.environ),
     )
     sys.stdout.write(json.dumps(antigravity_rpc("GetWorkspaceInfos", {}, server=endpoint)) + "\n")
     return 0

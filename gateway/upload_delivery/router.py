@@ -41,6 +41,7 @@ async def upload(
             batch,
             request_inbound_provenance(request),
             local_machine=request.app.state.machine.name(),
+            home=request.app.state.gateway_process.home,
             upload_root=request.app.state.gateway_config.upload_staging_root,
         )
     except UploadDeliveryConflictError as exc:
@@ -77,6 +78,7 @@ async def object_file(
             batch_id,
             ordinal,
             local_machine=request.app.state.machine.name(),
+            home=request.app.state.gateway_process.home,
         )
     except UploadDeliveryConflictError as exc:
         raise HTTPException(409, str(exc)) from exc

@@ -545,6 +545,7 @@ class RelayInputs:
     redis_url: str
     codex_home: str | None
     user_home: Path
+    home: Path
     antigravity_server: AntigravityServer | None
     stdout: TextIO
     bus: EventBus
@@ -584,6 +585,7 @@ def cmd_relay(
             destination,
             codex_home=inputs.codex_home,
             user_home=inputs.user_home,
+            home=inputs.home,
             antigravity_server=inputs.antigravity_server,
             stdout=inputs.stdout,
         )

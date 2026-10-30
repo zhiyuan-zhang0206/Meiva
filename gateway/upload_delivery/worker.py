@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -45,12 +46,14 @@ class UploadRecovery:
         bus: EventBus,
         *,
         machine: MachineIdentityReader,
+        home: Path,
         claim_seconds: float,
         rpc: RpcClient,
     ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
         self.rpc = rpc
         self.machine = machine
+        self.home = home
         self.claim_seconds = claim_seconds
         self.stopped = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
@@ -107,6 +110,7 @@ class UploadRecovery:
             self.pool,
             4,
             local_machine=self.machine.name(),
+            home=self.home,
             claim_seconds=self.claim_seconds,
         )
         async with asyncio.TaskGroup() as group:

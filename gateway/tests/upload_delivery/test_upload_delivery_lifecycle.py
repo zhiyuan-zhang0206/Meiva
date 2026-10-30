@@ -20,6 +20,7 @@ from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.events.live.bus import EventBus
+from base.paths import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
@@ -83,7 +84,9 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
             conn,
             agent,
             directory,
-            source.current_unit(local_machine=machine_identity.name()).machine,
+            source.current_unit(
+                local_machine=machine_identity.name(), home=resolve_meiva_home()
+            ).machine,
             0,
             0,
             5,
@@ -246,6 +249,7 @@ async def test_a_lost_wake_is_not_repeated(
         client.app.state.db,
         unpublishable_bus(),
         machine=machine_identity,
+        home=resolve_meiva_home(),
         claim_seconds=CLAIM_SECONDS,
         rpc=client.app.state.rpc,
     )
@@ -272,7 +276,7 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    unit = source.current_unit(local_machine=machine_identity.name())
+    unit = source.current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     # meiva:note
     # The receiving runner never answers the receive op.
     with runner_ops(
@@ -392,7 +396,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_through_its_receiver(
     from gateway.tests.upload_delivery.support import receiver_op, serving_gateway
     from gateway.tests.upload_delivery.test_upload_delivery_recovery import SECRET, receiver_for
 
-    unit = source.current_unit(local_machine=machine_identity.name())
+    unit = source.current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     agent = seed_agent(db_conn)
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()

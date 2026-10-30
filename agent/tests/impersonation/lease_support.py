@@ -268,6 +268,7 @@ def stub_host(
 ) -> TakeoverHost:
     return TakeoverHost(
         local_machine=cluster.local_machine,
+        home=tmp_path,
         workspaces_root=tmp_path / "workspaces",
         relay_program=relay_program(tmp_path / "relay", mode),
         environ=dict(os.environ),

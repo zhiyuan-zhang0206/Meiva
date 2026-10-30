@@ -40,7 +40,6 @@ from websockets.sync.client import ClientConnection, unix_connect
 from websockets.sync.client import connect as ws_connect
 
 from base.host.private_storage import write_private_bytes
-from base.paths import meiva_home
 
 LIVE_SUBMIT_TIMEOUT_SECONDS = 5.0
 """Deadline for one whole live attempt: connect, handshake, and the turn/start.
@@ -217,8 +216,8 @@ def discover_antigravity_server(
 # The record is keyed by the Antigravity conversation, not by a lease: the request
 # writes it before the lease exists, so the accepting runtime cannot race it.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-def antigravity_endpoint_path(thread_id: str, *, home: Path | None = None) -> Path:
-    directory = (home if home is not None else meiva_home()) / "impersonation" / "antigravity"
+def antigravity_endpoint_path(thread_id: str, *, home: Path) -> Path:
+    directory = home / "impersonation" / "antigravity"
     return directory / f"{UUID(str(thread_id))}.json"
 
 
@@ -245,9 +244,7 @@ def read_antigravity_endpoint_file(path: Path) -> AntigravityServer | None:
     return AntigravityServer(address=address, csrf_token=token)
 
 
-def read_antigravity_endpoint(
-    thread_id: str, *, home: Path | None = None
-) -> AntigravityServer | None:
+def read_antigravity_endpoint(thread_id: str, *, home: Path) -> AntigravityServer | None:
     return read_antigravity_endpoint_file(antigravity_endpoint_path(thread_id, home=home))
 
 
@@ -256,9 +253,7 @@ def read_antigravity_endpoint(
 # credential, so it never enters argv, the environment, the database or a log line.
 # Every request rewrites the record, which replaces a token that no longer answers.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-def write_antigravity_endpoint(
-    server: AntigravityServer, *, thread_id: str, home: Path | None = None
-) -> Path:
+def write_antigravity_endpoint(server: AntigravityServer, *, thread_id: str, home: Path) -> Path:
     path = antigravity_endpoint_path(thread_id, home=home)
     payload = json.dumps(
         {
@@ -284,7 +279,7 @@ def write_antigravity_endpoint(
 def resolve_antigravity_endpoint(
     thread_id: str,
     *,
-    home: Path | None = None,
+    home: Path,
     antigravity_server: AntigravityServer | None,
     timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
     scan: Callable[..., AntigravityServer] = discover_antigravity_server,

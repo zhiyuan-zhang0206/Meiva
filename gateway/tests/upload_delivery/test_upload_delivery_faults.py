@@ -243,7 +243,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    source_unit = current_unit(local_machine=machine_identity.name())
+    source_unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     target = source_unit.model_copy(
         update={"machine": "remote", "home": str(tmp_path / "remote-unit")}
     )
@@ -300,7 +300,7 @@ async def test_unknown_remote_kind_holds(
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    unit = current_unit(local_machine=machine_identity.name())
+    unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     # meiva:note
     # A runner of the previous version answers the way its dispatcher does for a kind it lacks.
     old_runner = failed({"error": "unknown kind: 'upload-receive-v1'"})
@@ -541,7 +541,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    unit = current_unit(local_machine=machine_identity.name())
+    unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     target = unit.model_copy(update={"home": unit.home + "-second"})
     config = replace(receiver_for(client, target), quota_bytes=5)
     receive = receiver_op(client, config)

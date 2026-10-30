@@ -40,6 +40,7 @@ class RelayWait:
 @dataclass(frozen=True)
 class TakeoverHost:
     local_machine: str
+    home: Path
     workspaces_root: Path
     relay_program: tuple[str, ...]
     environ: Mapping[str, str] = field(repr=False)

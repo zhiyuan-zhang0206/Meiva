@@ -291,6 +291,7 @@ async def lifespan(
                 app.state.db,
                 app.state.bus,
                 machine=process.machine,
+                home=process.home,
                 claim_seconds=config.view.gateway.upload_recovery_claim_seconds,
                 rpc=app.state.rpc,
             )

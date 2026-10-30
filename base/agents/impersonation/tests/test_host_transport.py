@@ -494,7 +494,7 @@ def test_another_process_reaches_the_conversation_from_the_record_alone(
     }
     try:
         completed = subprocess.run(  # noqa: S603
-            [sys.executable, str(probe), str(THREAD_ID)],
+            [sys.executable, str(probe), str(THREAD_ID), str(tmp_path)],
             capture_output=True,
             text=True,
             env=env,
