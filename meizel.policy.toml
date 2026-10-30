@@ -152,7 +152,6 @@ bus = [
 
 [ambient-readers.settings]
 "base.clock.Clock.from_settings()" = "reads the clock configuration from the process settings; the clock it builds runs on the system timers"
-"base.cluster.machine.ambient.gateway_access_from_settings()" = "reads the gateway credentials from the process settings"
 "base.packages.plugins.flags.read_declared_flag()" = "reads a field of the process settings"
 
 # ambient-state (meizel/state/ambient_state): what module-level state may be let through.

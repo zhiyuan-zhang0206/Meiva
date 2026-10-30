@@ -10,8 +10,9 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
-from base.cluster.machine.ambient import gateway_access_from_settings
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.sessions.tests.poll_until import poll_until
@@ -52,7 +53,7 @@ def test_resurrect_brings_back_terminated_agent(
                 max_retries=settings.gateway.cluster_rpc_max_retries,
             ),
             access=lambda: replace(
-                gateway_access_from_settings(),
+                gateway_access_from_boot(snapshot_process_config()),
                 machine_token=current_credentials().gateway_token,
             ),
             timers=SYSTEM_TIMERS,

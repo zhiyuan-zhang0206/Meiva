@@ -20,7 +20,6 @@ functions, one table per kind of the vocabulary above:
 "base.host.env.registry.process_environment()" = "returns the live os.environ"
 
 [ambient-readers.settings]
-"base.cluster.machine.ambient.gateway_access_from_settings()" = "reads the gateway credentials from the process settings"
 ```
 
 An entry whose function reads the world only when it is not handed the value is a table instead

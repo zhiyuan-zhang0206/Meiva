@@ -53,13 +53,14 @@ watcher on them. Each following turn, reload and check:
 
 ```python
 import evaluate
-from base.cluster.machine.ambient import gateway_access_from_settings
+from base.cluster.machine.boot import gateway_access_from_boot
+from base.config import ConfigBoot
 from meiva.sdk_surface.settings import database as sdk_database
 db = sdk_database()
 state = evaluate.latest_state("meiva-goal")
 progress = evaluate.poll(state, database=db)   # {"done": [...], "pending": [...]}
 # when pending is empty:
-gateway = gateway_access_from_settings()       # the gateway URL and bearer, read once
+gateway = gateway_access_from_boot(ConfigBoot())   # the gateway URL and bearer, from this process's configuration
 report = evaluate.gather(state, database=db, gateway=gateway)   # {"mean": {...}, "per_task": [...]}
 ```
 

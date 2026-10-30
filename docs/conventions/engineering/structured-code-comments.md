@@ -60,7 +60,6 @@ Machine syntax is not prose and stays:
 - `# time-bomb-ok: <reason>` (the time-bomb lint matches that exact form, and the
   marker has to sit inside the assertion's or binding's span where a note block
   cannot go, so its reason is carried inline)
-- `# ambient: BATCH` on the call line the ambient audit examines
 - an exact `/** @deprecated */` attached to a TypeScript declaration
 
 A lint directive needs a `meiva:note` owned by the same definition. Its text, or

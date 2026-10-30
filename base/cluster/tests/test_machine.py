@@ -24,11 +24,10 @@ from base.cluster.machine import (
     format_capabilities,
     roles_from_flags,
 )
-from base.cluster.machine.ambient import gateway_access_from_settings
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.faults import InvalidRoleIdentity
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.paths.tests.homes import point_home
 
 _SECRET = "cluster-" + "s" * 24
@@ -615,11 +614,3 @@ def test_a_foreign_database_host_makes_the_plane_remote(machine_config: ConfigBo
     machine_config.set_field("db_url", "postgresql://meiva:pw@db.example.net:5432/meiva")
 
     assert gateway_access_from_boot(machine_config).remote_plane is True
-
-
-def test_the_ambient_access_describes_the_process_settings() -> None:
-    access = gateway_access_from_settings()
-
-    assert access.gateway_url == settings.gateway.gateway_url
-    assert access.cluster_secret == settings.data_plane.cluster_secret
-    assert access.remote_plane is settings.data_plane.is_remote
