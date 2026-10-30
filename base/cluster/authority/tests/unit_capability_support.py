@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -50,12 +51,14 @@ def issue(
         endpoint=endpoint,
         cluster_secret=cluster_secret,
         ttl_s=ttl_s,
-        now=now,
+        now=time.time() if now is None else now,
     )
 
 
-def open_issued(issued: unit.IssuedBundle) -> unit.Bundle:
-    return unit.open_bundle(issued.envelope, issued.transport_key)
+def open_issued(issued: unit.IssuedBundle, *, now: float | None = None) -> unit.Bundle:
+    return unit.open_bundle(
+        issued.envelope, issued.transport_key, now=time.time() if now is None else now
+    )
 
 
 _open = open_issued

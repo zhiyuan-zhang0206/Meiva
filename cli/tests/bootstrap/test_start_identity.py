@@ -7,6 +7,7 @@ import os
 import socket
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -433,10 +434,11 @@ def test_runner_without_a_capability_refuses_before_persisting(
             endpoint=_RUNNER_ENDPOINT,
             cluster_secret="gateway-human-secret-" + "g" * 32,
             ttl_s=60,
+            now=time.time(),
         )
         unit.install_bundle(
             home,
-            unit.open_bundle(issued.envelope, issued.transport_key),
+            unit.open_bundle(issued.envelope, issued.transport_key, now=time.time()),
             machine="runner",
             served_endpoint=_RUNNER_ENDPOINT,
             probe=lambda _dsn: None,

@@ -119,15 +119,23 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     checkout = tmp_path / "checkout"
     checkout.mkdir()
 
+    # meiva:note
+    # One story, one instant: the operator's invocation clock stamps the bundle, and the
+    # runner's init records the same instant as its birth, so the bundle is not aged by the
+    # gap between the two fixtures' clocks.
+    operator = caller_host(path=str(tmp_path / "tools"))
+    caller = replace(
+        operator, transport_key=key, birth=replace(operator.birth, now=command.clock.now())
+    )
+    now = command.clock.now().timestamp()
     with serving({("GET", "/api/bootstrap"): Reply(body=served)}) as gateway:
-        prepare_init_identity(
-            _runner_args(bundle, gateway.url),
-            HomeSite(runner, checkout),
-            replace(caller_host(path=str(tmp_path / "tools")), transport_key=key),
-        )
+        prepare_init_identity(_runner_args(bundle, gateway.url), HomeSite(runner, checkout), caller)
         assert (
             cmd_db_authority_install_unit(
-                bundle=str(renewal), transport_key=renewal_key, home=runner
+                bundle=str(renewal),
+                transport_key=renewal_key,
+                home=runner,
+                now=now,
             )
             == 0
         )
