@@ -10,7 +10,6 @@ from base.api_contracts.agent_contract import GatewayUnavailable
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents.task_assignment import router as assignments
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.auth.sdk_transport import wired_sdk
@@ -35,9 +34,10 @@ def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
     )
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
-    client: GatewayTestClient, db_conn: psycopg.Connection, body: dict[str, Any]
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    body: dict[str, Any],
 ) -> None:
     with wired_sdk(client) as wire:
         wire.losing_responses = True

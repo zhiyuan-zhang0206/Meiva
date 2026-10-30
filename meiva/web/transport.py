@@ -15,7 +15,7 @@ import urllib.request
 from typing import Any
 
 from base.clock import SYSTEM_TIMERS, Timers
-from base.host.net.resilience import retry
+from base.host.net.resilience import Policy, retry
 from meiva.web.errors import WebError
 from meiva.web.failures import connection_failed_message, http_failed_message, non_json_message
 from meiva.web.pacing import reserve
@@ -84,6 +84,7 @@ def send_json(
     error_type: type[WebError],
     provider_json: bool,
     pacer: RateLimiter | None,
+    policy: Policy = WEB_READ_POLICY,
 ) -> dict[str, Any]:
     def attempt() -> bytes:
         if pacer is not None:
@@ -91,7 +92,7 @@ def send_json(
         return _read(request, timeout_s)
 
     try:
-        data: dict[str, Any] = json.loads(retry(WEB_READ_POLICY)(attempt))
+        data: dict[str, Any] = json.loads(retry(policy)(attempt))
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
         _log.warning(

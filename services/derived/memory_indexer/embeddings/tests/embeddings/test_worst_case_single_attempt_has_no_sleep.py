@@ -9,6 +9,7 @@ import httpx
 import numpy as np
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.config import ConfigBoot
 from base.host.net.resilience import ExponentialBackoff, Policy
 from base.lm.catalog import ModelCatalog
@@ -218,9 +219,11 @@ def test_embed_gzip_response_round_trip(chunked: bool) -> None:
 @pytest.mark.parametrize("mode", ["sync", "async"])
 @pytest.mark.parametrize("status", [400, 429])
 def test_embed_slow_error_body_preserves_status(
-    retry_waits: list[float], mode: str, status: int, model_catalog: ModelCatalog
+    mode: str, status: int, model_catalog: ModelCatalog
 ) -> None:
     from base.host.net import resilience
+
+    timers = ManualTimers()
 
     timeout = 0.3
     classified: list[Exception] = []
@@ -247,6 +250,7 @@ def test_embed_slow_error_body_preserves_status(
                     policy=policy,
                     timeout_s=timeout,
                     api_key=API_KEY,
+                    sleep=timers.sleep,
                 )
             return asyncio.run(
                 gemini.embed_async(
@@ -257,6 +261,7 @@ def test_embed_slow_error_body_preserves_status(
                     policy=policy,
                     timeout_s=timeout,
                     api_key=API_KEY,
+                    asleep=timers.asleep,
                 )
             )
 
@@ -266,12 +271,12 @@ def test_embed_slow_error_body_preserves_status(
                 invoke()
             assert isinstance(error.value.__cause__, httpx.HTTPStatusError)
             assert len(requests) == 1
-            assert retry_waits == []
+            assert timers.sleeps == []
         else:
             result = invoke()
             np.testing.assert_array_equal(result, np.ones((1, DIM), dtype=np.float32))
             assert len(requests) == 2
-            assert retry_waits == [7.0]
+            assert timers.sleeps == [7.0]
         elapsed = time.monotonic() - started
         assert elapsed < 0.25
         assert len(classified) == 1

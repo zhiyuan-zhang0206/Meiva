@@ -6,6 +6,7 @@
 # The events side of the collection runs against a real listener on port 0 (`collection_world.serve_events`), the database side against the throwaway Postgres, and the checkpoint reads against checkpoints written to it.
 
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -18,9 +19,11 @@ from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import GatewayApiBaseMissing
 from base.config import settings
 from base.db import Database
+from base.host.net.resilience import retry_sleep
 from base.host.net.tests.local_http import closed_port_url
 from base.host.proc import run_bounded
 from meiva_builtins.skills.tests.skill_script import load_skill_script
@@ -240,6 +243,7 @@ def _read(
     seconds: float = 7200,
     agent_id: int | None = None,
     gateway: Any = None,
+    sleep: Callable[[float], None] = retry_sleep,
 ) -> list[dict[str, Any]]:
     window = window_mod.Window(world.ts_after(0), world.ts_after(seconds))
     return cast(
@@ -249,6 +253,7 @@ def _read(
             window,
             gateway=gateway if gateway is not None else world.grant(server.url),
             agent_id=agent_id,
+            sleep=sleep,
         ),
     )
 
@@ -368,32 +373,34 @@ def test_fetch_client_disables_env_proxy(tmp_path: Path) -> None:
 # ── retry budget + failure diagnostics (Task #3126) ────────────────────────
 
 
-def test_fetch_retries_transient_then_succeeds(collect_mod: Any, retry_waits: list[float]) -> None:
+def test_fetch_retries_transient_then_succeeds(collect_mod: Any) -> None:
     """A blip inside the budget must not cost the day's dataset."""
+    timers = ManualTimers()
     rows = [world.event_row(1, world.ts_after(0))]
     script = [world.Scripted(502), world.Scripted(None)]
     with world.serve_events(rows, script=script) as server:
-        out = _read(collect_mod, server, seconds=3600)
+        out = _read(collect_mod, server, seconds=3600, sleep=timers.sleep)
 
     assert [r["id"] for r in out] == [1]
     assert len(server.requests) == 3
-    assert retry_waits == [5.0, 10.0]
+    assert timers.sleeps == [5.0, 10.0]
 
 
 @pytest.mark.parametrize("code", [502, 503, 504])
 def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
-    collect_mod: Any, code: int, retry_waits: list[float]
+    collect_mod: Any, code: int
 ) -> None:
     """2026-09-12 regression: a spent budget must raise with the responder's
     status, headers, and body — the evidence that tells a local forward
     proxy's 502 from the gateway's own 503 — on the 5/10/20/40 s schedule."""
+    timers = ManualTimers()
     reply = world.Scripted(
         code,
         headers={"content-type": "text/html", "server": "forward-proxy"},
         body="<html>Bad Gateway</html>",
     )
     with world.serve_events([], script=[reply] * 5) as server, pytest.raises(RuntimeError) as err:
-        _read(collect_mod, server, seconds=3600)
+        _read(collect_mod, server, seconds=3600, sleep=timers.sleep)
 
     message = str(err.value)
     assert f"HTTP {code}" in message
@@ -401,48 +408,48 @@ def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
     assert "<html>Bad Gateway</html>" in message
     assert "after 5 attempts" in message
     assert len(server.requests) == 5
-    assert retry_waits == [5.0, 10.0, 20.0, 40.0]
+    assert timers.sleeps == [5.0, 10.0, 20.0, 40.0]
     assert isinstance(err.value.__cause__, httpx.HTTPStatusError)
 
 
 # meiva:note
 # Transport errors (httpx.TransportError includes TimeoutException) run the same budget, and the spent-budget error names the failure.
-def test_fetch_connection_refused_exhausts_budget_with_diagnostics(
-    collect_mod: Any, retry_waits: list[float]
-) -> None:
+def test_fetch_connection_refused_exhausts_budget_with_diagnostics(collect_mod: Any) -> None:
+    timers = ManualTimers()
     window = window_mod.Window(world.ts_after(0), world.ts_after(3600))
     with pytest.raises(RuntimeError) as err:
-        collect_mod.fetch_events_window("telemetry", window, gateway=world.grant(closed_port_url()))
+        collect_mod.fetch_events_window(
+            "telemetry", window, gateway=world.grant(closed_port_url()), sleep=timers.sleep
+        )
 
     cause = err.value.__cause__
     assert isinstance(cause, httpx.ConnectError)
     assert f"{type(cause).__name__}: {cause}" in str(err.value)
-    assert retry_waits == [5.0, 10.0, 20.0, 40.0]
+    assert timers.sleeps == [5.0, 10.0, 20.0, 40.0]
 
 
-def test_fetch_dropped_connection_exhausts_budget_with_diagnostics(
-    collect_mod: Any, retry_waits: list[float]
-) -> None:
+def test_fetch_dropped_connection_exhausts_budget_with_diagnostics(collect_mod: Any) -> None:
+    timers = ManualTimers()
     with (
         world.serve_events([], script=[world.Scripted(None)] * 5) as server,
         pytest.raises(RuntimeError) as err,
     ):
-        _read(collect_mod, server, seconds=3600)
+        _read(collect_mod, server, seconds=3600, sleep=timers.sleep)
 
     cause = err.value.__cause__
     assert isinstance(cause, httpx.TransportError)
     assert f"{type(cause).__name__}: {cause}" in str(err.value)
     assert len(server.requests) == 5
-    assert retry_waits == [5.0, 10.0, 20.0, 40.0]
+    assert timers.sleeps == [5.0, 10.0, 20.0, 40.0]
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_fetch_exhausted_diagnostics_are_bounded(collect_mod: Any) -> None:
     """A huge body / header block must not flood the scan's log line: each
     diagnostic field is capped, with an explicit truncation marker."""
+    timers = ManualTimers()
     reply = world.Scripted(503, headers={"x-note": "h" * 1000}, body="b" * 1000)
     with world.serve_events([], script=[reply] * 5) as server, pytest.raises(RuntimeError) as err:
-        _read(collect_mod, server, seconds=3600)
+        _read(collect_mod, server, seconds=3600, sleep=timers.sleep)
 
     message = str(err.value)
     assert "b" * 300 in message and "(+700 chars)" in message  # body capped at 300
@@ -451,20 +458,19 @@ def test_fetch_exhausted_diagnostics_are_bounded(collect_mod: Any) -> None:
 
 
 @pytest.mark.parametrize("code", [429, 500, 404])
-def test_fetch_permanent_status_fails_fast(
-    collect_mod: Any, code: int, retry_waits: list[float]
-) -> None:
+def test_fetch_permanent_status_fails_fast(collect_mod: Any, code: int) -> None:
     """Task #3126: only 502/503/504 are retryable. 429/500 (transient in the
     shared default) and every other status are structural for this read —
     one attempt, no sleep, the original HTTPStatusError."""
+    timers = ManualTimers()
     with (
         world.serve_events([], script=[world.Scripted(code)] * 5) as server,
         pytest.raises(httpx.HTTPStatusError),
     ):
-        _read(collect_mod, server, seconds=3600)
+        _read(collect_mod, server, seconds=3600, sleep=timers.sleep)
 
     assert len(server.requests) == 1
-    assert retry_waits == []
+    assert timers.sleeps == []
 
 
 # meiva:note

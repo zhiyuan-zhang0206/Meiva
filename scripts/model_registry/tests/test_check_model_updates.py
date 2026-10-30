@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.paths import meiva_home
 from scripts.model_registry import check_model_updates
 
@@ -476,10 +477,10 @@ def test_missing_key_is_a_provider_error(tmp_path: Path, tracker: Any) -> None:
     assert state["providers"]["glm"]["pending"]["rounds"] == 1
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_retries_a_transient_connection_error(
     tracker: Any,
 ) -> None:
+    timers = ManualTimers()
     url = "https://api.example.com/models"
     payload: dict[str, object] = {"data": []}
     calls: list[str] = []
@@ -500,16 +501,18 @@ def test_fetch_json_retries_a_transient_connection_error(
             params={},
             session_for_host=no_session_for_host,
             http_get=get,
+            sleep=timers.sleep,
         )
         == payload
     )
     assert calls == [url, url]
+    assert len(timers.sleeps) == 1
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
     tracker: Any,
 ) -> None:
+    timers = ManualTimers()
     calls: list[str] = []
 
     def get(request_url: str, **kwargs: object) -> _JSONResponse:
@@ -526,12 +529,14 @@ def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
             params={},
             session_for_host=no_session_for_host,
             http_get=get,
+            sleep=timers.sleep,
         )
     assert len(calls) == 3
+    assert len(timers.sleeps) == 2
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_permanent_http_error_is_not_retried(tracker: Any) -> None:
+    timers = ManualTimers()
     url = "https://api.example.com/models"
     calls: list[str] = []
 
@@ -551,14 +556,16 @@ def test_permanent_http_error_is_not_retried(tracker: Any) -> None:
             params={},
             session_for_host=no_session_for_host,
             http_get=get,
+            sleep=timers.sleep,
         )
     assert calls == [url]
+    assert timers.sleeps == []
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
     tmp_path: Path, tracker: Any
 ) -> None:
+    timers = ManualTimers()
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file)
     gemini_calls: list[str] = []
@@ -583,6 +590,7 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
                     params=params,
                     session_for_host=no_session_for_host,
                     http_get=get,
+                    sleep=timers.sleep,
                 ),
             )
         return known_models(tracker, source, models={})
@@ -598,14 +606,15 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
         == 0
     )
     assert len(gemini_calls) == 2
+    assert len(timers.sleeps) == 1
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"] == "ok"
 
 
-@pytest.mark.usefixtures("retry_waits")
 def test_repeated_provider_failure_announces_once_and_never_repeats(
     tmp_path: Path, tracker: Any
 ) -> None:
+    timers = ManualTimers()
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file)
     calls: list[str] = []
@@ -634,6 +643,7 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
                     params=params,
                     session_for_host=no_session_for_host,
                     http_get=current_get,
+                    sleep=timers.sleep,
                 ),
             )
         return known_models(tracker, source, models={})
@@ -648,13 +658,19 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
             models={},
         )
 
+    # meiva:note
+    # The wait count is the evidence each run reaches the retry loop through the sleep handed to
+    # `fetch_json`: a first-try success never waits, each retry of a failing run waits once, and
+    # this tracker faces the same failing fetch on its next two passes.
     assert run_tracker() == 0
     assert len(calls) == 1
+    assert timers.sleeps == []
 
     current_get = failing_get
     calls.clear()
     assert run_tracker() == 0
     assert len(calls) == 3
+    assert len(timers.sleeps) == 2
 
     calls.clear()
     assert run_tracker() == 2
@@ -663,6 +679,7 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
     calls.clear()
     assert run_tracker() == 0
     assert len(calls) == 3
+    assert len(timers.sleeps) == 6
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"].startswith("error:")
 

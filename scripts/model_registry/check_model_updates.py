@@ -26,7 +26,7 @@ from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from base.host.env.dotenv_file import process_env_file, read_env_aliases
-from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
+from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry, retry_sleep
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
@@ -302,6 +302,7 @@ def fetch_json(
     params: dict[str, str | int],
     session_for_host: Callable[[str], Any],
     http_get: Callable[..., Any],
+    sleep: Callable[[float], None] = retry_sleep,
 ) -> dict[str, Any]:
     def _attempt() -> dict[str, Any]:
         host = urlparse(url).hostname or ""
@@ -316,7 +317,7 @@ def fetch_json(
         response.raise_for_status()
         return _response_object(response.json(), url)
 
-    return retry(_FETCH_POLICY)(_attempt)
+    return retry(_FETCH_POLICY, sleep=sleep)(_attempt)
 
 
 def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
