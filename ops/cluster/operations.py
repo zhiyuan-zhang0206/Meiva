@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -33,7 +34,6 @@ from ops.cluster_status import (
     ClusterStatus,
     agent_shell_sessions,
     capture_shell,
-    cluster_now,
     kill_shell,
     status_snapshot,
 )
@@ -129,10 +129,10 @@ def harness_probe_op(machine: str) -> HarnessProbeResult:
 # The runner-side half of the inspector panel's `shells` list: the gateway dispatches this op
 # when the agent runs on this machine rather than on the gateway's own box
 # (`agent_shell_sessions` is host-scoped, so a local probe on the gateway would always read empty
-# for a remote agent). The listing's times render in the cluster's zone, so the instant is read
-# here, at the op's entry.
-def shell_probe_op(agent_id: int, *, home: Path) -> ShellProbeResult:
-    return ShellProbeResult(shells=agent_shell_sessions(agent_id, now=cluster_now(), home=home))
+# for a remote agent). The listing's times render in the cluster's zone, so the instant arrives
+# from the caller that took it once, at the op's entry.
+def shell_probe_op(agent_id: int, *, home: Path, now: datetime) -> ShellProbeResult:
+    return ShellProbeResult(shells=agent_shell_sessions(agent_id, now=now, home=home))
 
 
 # meiva:note
@@ -293,10 +293,10 @@ def agent_skill_view_op(agent_id: int, pool: ConnectionPool, *, home: Path) -> A
 #     ShellNotFoundError: no live shell with `session_id` on this host.
 #     RuntimeError: the session capture failed.
 def shell_capture_op(
-    agent_id: int, session_id: int, lines: int = 200, *, home: Path
+    agent_id: int, session_id: int, lines: int = 200, *, home: Path, now: datetime
 ) -> ShellCaptureResult:
     full_name, captured, created_at, uptime_seconds = capture_shell(
-        agent_id, session_id, lines, now=cluster_now(), home=home
+        agent_id, session_id, lines, now=now, home=home
     )
     return ShellCaptureResult(
         session_name=full_name,

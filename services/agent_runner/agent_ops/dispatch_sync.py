@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,7 @@ def dispatch_sync(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    now: datetime,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     match kind:
@@ -117,19 +119,24 @@ def dispatch_sync(
                 mode="json"
             )
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
-            return OpStatus.COMPLETED, _agent_arm(kind, payload, pool, home=home)
+            return OpStatus.COMPLETED, _agent_arm(kind, payload, pool, home=home, now=now)
         case _:
             return unknown_kind(kind)
 
 
 def _agent_arm(
-    kind: str, payload: dict[str, Any], pool: ConnectionPool | None, *, home: Path
+    kind: str,
+    payload: dict[str, Any],
+    pool: ConnectionPool | None,
+    *,
+    home: Path,
+    now: datetime,
 ) -> dict[str, object]:
 
     match kind:
         case "shell_probe":
             sp = ShellProbePayload.model_validate(payload)
-            return cluster.shell_probe_op(sp.agent_id, home=home).model_dump(mode="json")
+            return cluster.shell_probe_op(sp.agent_id, home=home, now=now).model_dump(mode="json")
         case "shell_kill":
             sk = ShellKillPayload.model_validate(payload)
             return cluster.shell_kill_op(sk.agent_id, sk.session_id, home=home).model_dump(
@@ -145,7 +152,7 @@ def _agent_arm(
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)
             return cluster.shell_capture_op(
-                sc.agent_id, sc.session_id, sc.lines, home=home
+                sc.agent_id, sc.session_id, sc.lines, home=home, now=now
             ).model_dump(mode="json")
         case _:
             raise ValueError(f"not an agent arm: {kind!r}")
