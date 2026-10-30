@@ -12,12 +12,7 @@ exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
 "slash-autocomplete.test.tsx" = ["slash-autocomplete.tsx"]
 "upload-button.test.tsx" = ["upload-button.tsx"]
 
-[debt.ambient-read]
-"composer.tsx#clock Date.now" = 1
-"composer.tsx#random Math.random" = 1
-
 [debt.stdlib-patch]
-"composer-attachments.test.tsx#vi.spyOn URL.revokeObjectURL" = 2
 "composer-attachments.test.tsx#vi.spyOn performance.now" = 1
 "composer-commands.test.tsx#vi.spyOn console.warn" = 1
 "composer-lifecycle.test.tsx#vi.spyOn performance.now" = 1

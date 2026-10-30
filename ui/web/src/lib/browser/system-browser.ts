@@ -14,6 +14,7 @@ import type {
   BrowserClipboard,
   BrowserMedia,
   BrowserNavigation,
+  BrowserObjectUrls,
   BrowserStorage,
   BrowserViewport,
   MediaQuery,
@@ -49,6 +50,8 @@ export interface LivePage {
   addEventListener(type: "popstate", listener: () => void): void;
   removeEventListener(type: "popstate", listener: () => void): void;
   localStorage(): Storage | null;
+  createObjectUrl(file: Blob): string;
+  revokeObjectUrl(url: string): void;
   sessionStorage(): Storage | null;
   matchMedia(query: string): MediaQueryList;
   readonly innerHeight: number;
@@ -254,6 +257,20 @@ export function viewportOver(page: LivePage | null): BrowserViewport {
   };
 }
 
+// meiva:note
+// Object URLs of the page. A frame with no page has none: only a browser holds a blob under a URL,
+// so a server render says so instead of inventing one.
+export function objectUrlsOver(page: LivePage | null): BrowserObjectUrls {
+  const live = (): LivePage => {
+    if (page === null) throw new Error("a server render has no object URL");
+    return page;
+  };
+  return {
+    create: (file) => live().createObjectUrl(file),
+    revoke: (url) => live().revokeObjectUrl(url),
+  };
+}
+
 const warnToConsole = (message: string): void => console.warn(message);
 
 export function browserOver(page: LivePage | null, warn: (message: string) => void): Browser {
@@ -266,6 +283,8 @@ export function browserOver(page: LivePage | null, warn: (message: string) => vo
     beacon: beaconOver(page?.navigator ?? null),
     view: viewOver(page),
     viewport: viewportOver(page),
+
+    objectUrls: objectUrlsOver(page),
   };
 }
 
@@ -286,6 +305,9 @@ export const browser: Browser =
         matchMedia: (query) => window.matchMedia(query),
         innerHeight: window.innerHeight,
         visualViewport: window.visualViewport,
+
+        createObjectUrl: (file) => URL.createObjectURL(file),
+        revokeObjectUrl: (url) => URL.revokeObjectURL(url),
         navigator: window.navigator,
         document: window.document,
       }, warnToConsole);

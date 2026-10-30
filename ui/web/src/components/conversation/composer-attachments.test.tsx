@@ -165,18 +165,10 @@ describe("Composer file upload (drag + paste)", () => {
 });
 
 describe("Composer image attachments", () => {
-  beforeEach(() => {
-    Object.defineProperty(URL, "createObjectURL", {
-      configurable: true,
-      writable: true,
-      value: vi.fn(() => "blob:preview"),
-    });
-    Object.defineProperty(URL, "revokeObjectURL", {
-      configurable: true,
-      writable: true,
-      value: vi.fn(),
-    });
-  });
+  // meiva:note
+  // The previews are object URLs the browser port hands out (`fakeBrowser().objectUrls`), so a case
+  // reads `browser.actions.createdUrls` / `revokedUrls` instead of replacing the URL API; a preview
+  // that is never released shows up as a created URL with no matching revoke.
   const imageFile = () => new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
   it("pasting an image attaches a thumbnail and uploads it", async () => {
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
@@ -187,19 +179,14 @@ describe("Composer image attachments", () => {
     expect(screen.getByTestId("composer-attachments")).toBeTruthy();
   });
   it("revokes the preview object URL when the composer unmounts", async () => {
-    const revoke = vi.fn();
-    Object.defineProperty(URL, "revokeObjectURL", {
-      configurable: true,
-      writable: true,
-      value: revoke,
-    });
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    const { unmount } = renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+    const { browser, unmount } = renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(screen.getByTestId("composer-attachments")).toBeTruthy());
     unmount();
-    expect(revoke).toHaveBeenCalledWith("blob:preview");
+    expect(browser.actions.createdUrls).toHaveLength(1);
+    expect(browser.actions.revokedUrls).toEqual(browser.actions.createdUrls);
   });
   it("sends text + the resolved image url as onSend's second arg", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
@@ -219,12 +206,10 @@ describe("Composer image attachments", () => {
     );
   });
   it("drops native images when switching agents while keeping text drafts and ordinary file delivery", async () => {
-    const revoke = vi.fn();
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(revoke);
     const onSend = vi.fn(() => Promise.resolve(true));
     const onUploadFiles = vi.fn();
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/807/uploads/shot.png"));
-    const { rerender } = renderComposerTree(
+    const { browser, rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={807} onSend={onSend} onAttachImage={onAttachImage} />,
     );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
@@ -234,7 +219,7 @@ describe("Composer image attachments", () => {
     sessionStorage.setItem("composer-draft-809", "external draft");
     rerender(<Composer {...baseProps} mode="idle" agentId={809} onSend={onSend} onUploadFiles={onUploadFiles} />);
     expect(screen.queryByTestId("composer-attachments")).toBeNull();
-    expect(revoke).toHaveBeenCalledWith("blob:preview");
+    expect(browser.actions.revokedUrls).toEqual(browser.actions.createdUrls);
     expect(ta.value).toBe("external draft");
     expect(sessionStorage.getItem("composer-draft-807")).toBe("native draft");
     const ordinaryFile = new File(["notes"], "notes.txt", { type: "text/plain" });
@@ -247,10 +232,8 @@ describe("Composer image attachments", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("external draft", [], expect.any(String)));
   });
   it("releases an image preview when selection changes before the attachment commits", () => {
-    const revoke = vi.fn();
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(revoke);
     const onAttachImage = vi.fn(() => new Promise<string>(() => undefined));
-    const { rerender } = renderComposerTree(
+    const { browser, rerender } = renderComposerTree(
       <Composer {...baseProps} mode="idle" agentId={837} onAttachImage={onAttachImage} />,
     );
     act(() => {
@@ -260,7 +243,7 @@ describe("Composer image attachments", () => {
       rerender(<Composer {...baseProps} mode="idle" agentId={839} />);
     });
     expect(screen.queryByTestId("composer-attachments")).toBeNull();
-    expect(revoke).toHaveBeenCalledWith("blob:preview");
+    expect(browser.actions.revokedUrls).toEqual(browser.actions.createdUrls);
   });
   it("ignores an old agent's pending upload after switching away and returning", async () => {
     let resolveUpload!: (url: string) => void;

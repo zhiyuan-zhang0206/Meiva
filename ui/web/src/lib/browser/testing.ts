@@ -25,6 +25,8 @@ import { BrowserProvider } from "./browser-provider";
 
 export interface FakeActions {
   readonly assigned: string[];
+  readonly createdUrls: string[];
+  readonly revokedUrls: string[];
   readonly pushed: { readonly url: string; readonly state: unknown }[];
   readonly replaced: { readonly url: string; readonly state: unknown }[];
   readonly scrolled: { readonly target: Element; readonly block: ScrollLogicalPosition }[];
@@ -149,6 +151,8 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
   const resolve = (url: string): string => new URL(url, href).href;
   const actions: FakeActions = {
     assigned: [],
+    createdUrls: [],
+    revokedUrls: [],
     pushed: [],
     replaced: [],
     scrolled: [],
@@ -273,6 +277,20 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
         return () => {
           viewportListeners.delete(onChange);
         };
+      },
+    },
+    // meiva:note
+    // Object URLs the fake hands out carry the same prefix a real page's do, so an assertion reads
+    // like the value the DOM shows, and every create/revoke is recorded in `actions` — a preview
+    // that is never revoked shows up as a created URL with no matching revoke.
+    objectUrls: {
+      create() {
+        const url = `blob:meiva-${actions.createdUrls.length + 1}`;
+        actions.createdUrls.push(url);
+        return url;
+      },
+      revoke(url) {
+        actions.revokedUrls.push(url);
       },
     },
     href: () => href,

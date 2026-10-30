@@ -13,6 +13,7 @@ import {
   clipboardOver,
   mediaOver,
   navigationOver,
+  objectUrlsOver,
   storageOver,
   viewOver,
   viewportOver,
@@ -97,6 +98,8 @@ function pageOf(overrides: Partial<LivePage> = {}): LivePage {
     addEventListener: (_type, listener) => void listeners.add(listener),
     removeEventListener: (_type, listener) => void listeners.delete(listener),
     localStorage: () => storageOf(),
+    createObjectUrl: () => "blob:page",
+    revokeObjectUrl: () => undefined,
     sessionStorage: () => storageOf(),
     matchMedia: (query) => ({
       matches: query === "(min-width: 768px)",
@@ -369,6 +372,32 @@ describe("viewportOver", () => {
     expect(viewport.read()).toEqual({ layoutHeight: 0, visual: null });
     const unsubscribe = viewport.subscribe(() => undefined);
     expect(unsubscribe()).toBeUndefined();
+  });
+});
+
+describe("objectUrlsOver", () => {
+  it("creates and releases through the page it was built from", () => {
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const objectUrls = objectUrlsOver(
+      pageOf({
+        createObjectUrl: () => {
+          created.push("blob:one");
+          return "blob:one";
+        },
+        revokeObjectUrl: (url) => revoked.push(url),
+      }),
+    );
+    const url = objectUrls.create(new Blob(["x"]));
+    objectUrls.revoke(url);
+    expect(created).toEqual(["blob:one"]);
+    expect(revoked).toEqual(["blob:one"]);
+  });
+
+  it("says a server render has no object URL instead of inventing one", () => {
+    const objectUrls = objectUrlsOver(null);
+    expect(() => objectUrls.create(new Blob(["x"]))).toThrow(/server render/);
+    expect(() => objectUrls.revoke("blob:one")).toThrow(/server render/);
   });
 });
 
