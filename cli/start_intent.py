@@ -84,6 +84,7 @@ def finish_start(
     helper: HelperFactory | None,
     host: Host,
     home: Path,
+    control_pid: int,
     proc_root: Path = Path("/proc"),
 ) -> None:
     step = plan_after_start(result)
@@ -92,7 +93,9 @@ def finish_start(
     from cli.commands.lifecycle.root_driver import complete_boot_start
 
     try:
-        complete_boot_start(helper=helper, host=host, home=home, proc_root=proc_root)
+        complete_boot_start(
+            helper=helper, host=host, home=home, control_pid=control_pid, proc_root=proc_root
+        )
     except (RuntimeError, OSError, TimeoutError):
         from base.deploy.lifecycle.start_serving import clear_serving
 
@@ -135,7 +138,13 @@ def start_once(
                 command=args.runtime,
                 boot_attempt=boot,
             )
-            finish_start(result, helper=args.runtime.helper, host=args.runtime.host, home=site.home)
+            finish_start(
+                result,
+                helper=args.runtime.helper,
+                host=args.runtime.host,
+                home=site.home,
+                control_pid=args.runtime.pid,
+            )
             return result
     except ValidationError as exc:
         print(settings_failure_text(exc), file=sys.stderr)
