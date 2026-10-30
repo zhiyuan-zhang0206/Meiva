@@ -13,7 +13,7 @@ import type { BrowserView } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 
-import { controlAnchorIds, type ControlSectionDef } from "./sections";
+import { controlAnchorIds, type ControlSectionDef, type SectionLabelKey } from "./sections";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
@@ -108,8 +108,8 @@ export function ControlNav({
   // with CSS media queries). Switch point preserved from the old CSS `md`
   // rule: the rail shows at >= 768px, the disclosure below it.
   const { isNarrow } = useBreakpoint();
-  const labelOf = (labelKey: string | undefined, label: string) =>
-    labelKey ? t(labelKey as Parameters<typeof t>[0]) : label;
+  const labelOf = (labelKey: SectionLabelKey | undefined, label: string) =>
+    labelKey ? t(labelKey) : label;
   const anchorIds = useMemo(() => controlAnchorIds(sections), [sections]);
   const activeId = useScrollSpy(anchorIds, scrollId);
   // meiva:note

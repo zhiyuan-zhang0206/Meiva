@@ -9,6 +9,14 @@
 // remaining sections only in Control — see CONTROL_SECTIONS / INSIGHTS_SECTIONS
 // below.
 
+import type { useTranslations } from "next-intl";
+
+// meiva:note
+// A section label's translation key, taken from the catalog next-intl already checks against
+// the message file: a key that is renamed or removed fails the build instead of rendering its
+// own name. Both pages' sections read the same "control.sections" namespace.
+export type SectionLabelKey = Parameters<ReturnType<typeof useTranslations<"control.sections">>>[0];
+
 // meiva:note
 // Element ids of each page's scroll container — the scroll-spy attaches its
 // listener here and measures anchor positions relative to it. Distinct ids so
@@ -22,7 +30,7 @@ export interface ControlSubSection {
   // meiva:note
   // i18n key under the "control.sections" namespace — the nav/page render
   // the translated label when present, falling back to `label` (English).
-  labelKey?: string;
+  labelKey?: SectionLabelKey;
 }
 
 export interface ControlSectionDef {
@@ -30,7 +38,7 @@ export interface ControlSectionDef {
   label: string;
   // meiva:note
   // i18n key under the "control.sections" namespace (same fallback rule).
-  labelKey?: string;
+  labelKey?: SectionLabelKey;
   subs?: ControlSubSection[];
 }
 

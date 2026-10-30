@@ -11,7 +11,7 @@ import { Bell } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 
-import { useUserSettings } from "@/lib/state/use-user-settings";
+import { readStoredSetting, useUserSettings } from "@/lib/state/use-user-settings";
 import { ToggleRow } from "./_rows";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -24,6 +24,17 @@ const KNOWN_LABELS = {
   "core.needs_input": "coreNeedsInput",
 } as const;
 
+type KnownCategoryLabel = (typeof KNOWN_LABELS)[keyof typeof KNOWN_LABELS];
+
+// meiva:note
+// The catalog is data, not a build step: a category the core owns has a localized label
+// here, a plugin category carries its own. The lookup answers the label key for an id the
+// table knows, without assuming every id is one of its keys.
+function knownLabelFor(id: string): KnownCategoryLabel | undefined {
+  const entry = Object.entries(KNOWN_LABELS).find(([knownId]) => knownId === id);
+  return entry?.[1];
+}
+
 export function NotificationCategoryRows() {
   const client = useApi();
   const t = useTranslations("displaySettings.categories");
@@ -34,7 +45,7 @@ export function NotificationCategoryRows() {
     staleTime: 60_000,
   });
 
-  const switches = (settings[SWITCHES_KEY] ?? {}) as Record<string, boolean>;
+  const switches = readStoredSetting<Record<string, boolean>>(settings[SWITCHES_KEY], {});
   const categories = data?.categories ?? [];
   if (categories.length === 0) return null;
 
@@ -44,20 +55,19 @@ export function NotificationCategoryRows() {
 
   return (
     <>
-      {categories.map((category) => (
-        <ToggleRow
-          key={category.id}
-          icon={Bell}
-          label={
-            category.id in KNOWN_LABELS
-              ? t(KNOWN_LABELS[category.id as keyof typeof KNOWN_LABELS])
-              : category.label
-          }
-          description={category.description}
-          value={switches[category.id] ?? category.enabled}
-          onChange={(enabled) => setCategory(category.id, enabled)}
-        />
-      ))}
+      {categories.map((category) => {
+        const labelKey = knownLabelFor(category.id);
+        return (
+          <ToggleRow
+            key={category.id}
+            icon={Bell}
+            label={labelKey ? t(labelKey) : category.label}
+            description={category.description}
+            value={switches[category.id] ?? category.enabled}
+            onChange={(enabled) => setCategory(category.id, enabled)}
+          />
+        );
+      })}
     </>
   );
 }

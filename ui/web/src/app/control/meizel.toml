@@ -19,7 +19,3 @@ exports = ["anchor-scroll.ts", "nav.tsx", "section.tsx", "sections.ts", "visibil
 
 [debt.stdlib-patch]
 "anchor-scroll.test.tsx#vi.stubGlobal ResizeObserver" = 1
-
-[debt.type-cast]
-"config-groups.ts#cast displayGroupId" = 1
-"nav.tsx#cast ControlNav.labelOf" = 1

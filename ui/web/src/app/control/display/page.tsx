@@ -32,6 +32,7 @@ import { cn } from "@/lib/format/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 
+import { DEFAULT_DATE_FORMAT } from "@/lib/contracts/types";
 import { groupedModels, isSuperseded } from "@/lib/contracts/models";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import {
@@ -42,13 +43,26 @@ import {
   TIMELINE_WIDTH_PX_STEP,
 } from "@/lib/timeline/timeline-width";
 import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
-import { useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
+import { readStoredSetting, useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
 import { type DetailsMode, useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { FLEX } from "@/lib/layout/layout";
 import { ModelPickerSection } from "./_model_picker";
 import { NotificationCategoryRows } from "./_notification-categories";
 import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
 import { useApi } from "@/lib/transport/transport-context";
+
+// meiva:note
+// The expansion modes the timeline knows, as the rows the control renders: one list, so a
+// selected value can be checked against what the control offers instead of being asserted.
+const DETAILS_MODE_OPTIONS: { value: DetailsMode; label: string }[] = [
+  { value: "all", label: "Expand all blocks" },
+  { value: "last", label: "Last block only" },
+  { value: "none", label: "Collapse all blocks" },
+];
+
+function isDetailsMode(value: string): value is DetailsMode {
+  return DETAILS_MODE_OPTIONS.some((option) => option.value === value);
+}
 
 // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 function resetManualExpansions(): void {
@@ -104,14 +118,14 @@ export default function DisplaySettingsPage() {
       ? compactHistorySetting
       : 1;
 
-  const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
+  const hiddenModels: string[] = readStoredSetting<string[]>(settings["models.hidden"], []);
   // meiva:note
   // A provider switch turns its whole family off without touching the per-model
   // rows: the models keep the state the user gave them, and while the provider is
   // off those rows are not editable (user 2026-10-20). The spawn picker reads the
   // same two lists, so an off provider contributes no models there either.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md
-  const hiddenProviders: string[] = (settings["models.hidden_providers"] as string[] | undefined) ?? [];
+  const hiddenProviders: string[] = readStoredSetting<string[]>(settings["models.hidden_providers"], []);
   // meiva:note
   // A superseded model is not a toggle: the spawn picker already refuses it, so a
   // switch here would change nothing a spawn would read (user 2026-10-20: entries
@@ -131,7 +145,7 @@ export default function DisplaySettingsPage() {
             { value: "en", label: t("english") },
             { value: "zh", label: t("chinese") },
           ]}
-          value={(settings["display.language"] as string | undefined) ?? "en"}
+          value={readStoredSetting(settings["display.language"], "en")}
           onChange={(v) => setSetting("display.language", v)}
         />
       </SettingsSection>
@@ -152,7 +166,7 @@ export default function DisplaySettingsPage() {
                 label: `${p.name} (${p.plugin})${p.dark_tokens ? "" : " — no dark variant"}`,
               })),
             ]}
-            value={(settings["display.theme_pack"] as string | null) ?? ""}
+            value={readStoredSetting(settings["display.theme_pack"], "")}
             onChange={(v) => setSetting("display.theme_pack", v === "" ? null : v)}
           />
         </SettingsSection>
@@ -163,14 +177,14 @@ export default function DisplaySettingsPage() {
           icon={CircleDot}
           label="Show agent status dot"
           description="Show a status color dot (running/idle/…) on each sidebar agent row; off by default to keep the list static and quiet"
-          value={settings["display.show_agent_status"] as boolean}
+          value={settings["display.show_agent_status"] === true}
           onChange={(v) => setSetting("display.show_agent_status", v)}
         />
         <ToggleRow
           icon={Activity}
           label="Show activity line"
           description="In wide-sidebar mode, show a second line of the agent's activity; off by default"
-          value={settings["display.show_activity_line"] as boolean}
+          value={settings["display.show_activity_line"] === true}
           onChange={(v) => setSetting("display.show_activity_line", v)}
         />
         <ToggleRow
@@ -184,7 +198,7 @@ export default function DisplaySettingsPage() {
           icon={CalendarClock}
           label="Show weekday in timestamps"
           description="Show the weekday in timeline card timestamps (e.g. [2026-05-06 Tue 16:56:29])"
-          value={settings["display.show_timestamp_weekday"] as boolean}
+          value={settings["display.show_timestamp_weekday"] === true}
           onChange={(v) => setSetting("display.show_timestamp_weekday", v)}
         />
         <RadioRow
@@ -214,7 +228,7 @@ export default function DisplaySettingsPage() {
             { value: "spawned", label: "Spawned" },
             { value: "hidden", label: "Hidden" },
           ]}
-          value={settings["display.time_mode"] as string}
+          value={readStoredSetting(settings["display.time_mode"], "last_active")}
           onChange={(v) => setSetting("display.time_mode", v)}
         />
         <RadioRow
@@ -225,7 +239,7 @@ export default function DisplaySettingsPage() {
             { value: "relative", label: "Relative (e.g. 3m ago)" },
             { value: "absolute", label: "Absolute (e.g. 7/12 15:45)" },
           ]}
-          value={settings["display.date_format"] as string}
+          value={readStoredSetting(settings["display.date_format"], DEFAULT_DATE_FORMAT)}
           onChange={(v) => setSetting("display.date_format", v)}
         />
       </SettingsSection>
@@ -247,13 +261,12 @@ export default function DisplaySettingsPage() {
           icon={Rows3}
           label="Timeline details"
           description="How much of each work block the timeline expands on its own: every block, only the most recent one (following the stream), or none. Picking a mode again re-applies it, collapsing any blocks you expanded by hand."
-          options={[
-            { value: "all", label: "Expand all blocks" },
-            { value: "last", label: "Last block only" },
-            { value: "none", label: "Collapse all blocks" },
-          ]}
+          options={DETAILS_MODE_OPTIONS}
           value={detailsMode}
-          onChange={(v) => { setDetailsMode(v as DetailsMode); resetManualExpansions(); }}
+          onChange={(v) => {
+            if (isDetailsMode(v)) setDetailsMode(v);
+            resetManualExpansions();
+          }}
           reapplyOnSelect
         />
         <RadioRow
@@ -291,7 +304,7 @@ export default function DisplaySettingsPage() {
             { value: "comfortable", label: "Comfortable (default)" },
             { value: "wide", label: "Wide" },
           ]}
-          value={settings["display.context_meter_width"] as string}
+          value={readStoredSetting(settings["display.context_meter_width"], "comfortable")}
           onChange={(v) => setSetting("display.context_meter_width", v)}
         />
       </SettingsSection>
@@ -301,7 +314,7 @@ export default function DisplaySettingsPage() {
           icon={Bell}
           label="Awaiting-reply notification"
           description="Show a red dot + count badge in the sidebar for agents awaiting reply; off by default — check the Fleet page when you want to know"
-          value={settings["notification.awaiting_reply"] as boolean}
+          value={settings["notification.awaiting_reply"] === true}
           onChange={(v) => setSetting("notification.awaiting_reply", v)}
         />
         <NotificationCategoryRows />
@@ -332,21 +345,21 @@ export default function DisplaySettingsPage() {
           icon={AlertTriangle}
           label="Confirm before terminate"
           description="Show a confirmation dialog when terminating an agent"
-          value={settings["behavior.confirm_terminate"] as boolean}
+          value={settings["behavior.confirm_terminate"] === true}
           onChange={(v) => setSetting("behavior.confirm_terminate", v)}
         />
         <ToggleRow
           icon={AlertTriangle}
           label="Confirm before restart"
           description="Show a confirmation dialog when restarting an agent"
-          value={settings["behavior.confirm_restart"] as boolean}
+          value={settings["behavior.confirm_restart"] === true}
           onChange={(v) => setSetting("behavior.confirm_restart", v)}
         />
         <ToggleRow
           icon={AlertTriangle}
           label="Confirm before force kill"
           description="Show a confirmation dialog when force-killing (kill / SIGKILL) an agent"
-          value={settings["behavior.confirm_force_kill"] as boolean}
+          value={settings["behavior.confirm_force_kill"] === true}
           onChange={(v) => setSetting("behavior.confirm_force_kill", v)}
         />
       </SettingsSection>

@@ -106,7 +106,7 @@ export function useUserSettings(): {
   };
 }
 
-function readStoredSetting<T>(raw: unknown, defaultValue: T): T {
+export function readStoredSetting<T>(raw: unknown, defaultValue: T): T {
   function matchesDefault(candidate: unknown): candidate is T {
     if (candidate === undefined) return false;
     if (defaultValue !== undefined && defaultValue !== null) {

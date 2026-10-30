@@ -19,7 +19,7 @@ import { GROUP_ENV_VARS, OTHER_GROUP_ID } from "./config-group-defs";
 // meiva:note
 // A field not in the static map is grouped by its backend domain group. Every
 // current backend group has a home; new backend groups land in "Other".
-const BACKEND_GROUP_FALLBACK: Record<string, string> = {
+const BACKEND_GROUP_FALLBACK: Partial<Record<string, string>> = {
   LLM: "config-llm",
   Sandbox: "config-exec",
   Agent: "config-exec",
@@ -52,7 +52,7 @@ const ENV_ORDER = new Map<string, number>(
 // meiva:note
 // Display group id for a field: static map > backend-group fallback > Other.
 export function displayGroupId(field: ConfigFieldView): string {
-  const fallback = (BACKEND_GROUP_FALLBACK as Partial<Record<string, string>>)[field.group];
+  const fallback = BACKEND_GROUP_FALLBACK[field.group];
   return ENV_TO_GROUP.get(field.env_var) ?? fallback ?? OTHER_GROUP_ID;
 }
 
