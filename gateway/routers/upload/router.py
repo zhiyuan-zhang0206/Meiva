@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse
 
 from base.agents.upload_delivery.paths import (
     agent_upload_dir,
+    has_control_characters,
     render_safe_headers,
     resolve_upload_path,
     sanitize_upload_name,
@@ -70,6 +71,12 @@ async def read_upload_batch(
     batch: list[_UploadBatchItem] = []
     for file in files:
         safe_name = sanitize_upload_name(file.filename or "untitled")
+        if has_control_characters(safe_name):
+            raise HTTPException(
+                422,
+                f"upload {safe_name!r} has a control character; it cannot be announced "
+                "as a file name",
+            )
         contents = await file.read(max_file_bytes + 1)
         if len(contents) > max_file_bytes:
             raise _per_file_quota_error(safe_name, max_file_bytes)

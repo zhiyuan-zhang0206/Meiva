@@ -129,6 +129,21 @@ class TestUploadFile:
         assert Path(file["path"]).parent == _agent_dir(tmp_path, agent_id)
         assert Path(file["path"]).suffix == ".txt"
 
+    def test_control_characters_in_a_display_name_are_refused(
+        self, db_conn: psycopg.Connection, tmp_path: Path
+    ) -> None:
+        agent_id = _spawn_agent()
+
+        with _upload_client(tmp_path) as client:
+            resp = _upload(
+                client,
+                agent_id,
+                [("files", ("evil\x1b[31m.txt", b"data", "text/plain"))],
+            )
+
+        assert resp.status_code == 422, resp.text
+        assert not _agent_dir(tmp_path, agent_id).exists()
+
     def test_upload_agent_not_found_returns_404(self, tmp_path: Path) -> None:
         with _upload_client(tmp_path) as client:
             resp = _upload(client, 99999, [("files", ("x.txt", b"x", "text/plain"))])
