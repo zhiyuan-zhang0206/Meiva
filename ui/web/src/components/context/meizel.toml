@@ -8,7 +8,3 @@ exports = ["shared-context-panel.tsx"]
 
 [debt.first-party-patch]
 "shared-context-panel.test.tsx#vi.mock ui/web/src/components/inspector/inspector-panel.tsx" = 1
-
-[debt.third-party-patch]
-"shared-context-panel.test.tsx#vi.mock next-intl" = 1
-"to-user-document.test.tsx#vi.mock next-intl" = 1

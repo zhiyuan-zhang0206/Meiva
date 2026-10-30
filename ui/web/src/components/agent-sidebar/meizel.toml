@@ -13,7 +13,6 @@
 
 [debt.third-party-patch]
 "agent-sidebar.test.tsx#vi.mock next/navigation" = 1
-"archive.test.tsx#vi.mock next-intl" = 1
 "footer.test.tsx#vi.mock next/navigation" = 1
 "sidebar-stats-cards.test.tsx#vi.mock next/navigation" = 1
 "sidebar-tree-and-search.test.tsx#vi.mock next/navigation" = 1
