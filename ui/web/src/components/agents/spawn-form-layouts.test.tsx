@@ -247,14 +247,16 @@ describe("spawn table model & effort columns", () => {
     expect(onSpawn).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.6", reasoning_effort: "medium" }));
   });
 
-  it("groups the model column by provider", async () => {
+  it("lists model names directly without provider headings", async () => {
     transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
     transport.getModels.mockResolvedValue(modelsDefault());
     wrap();
     const form = await table();
     const models = column(form, MODEL_COLUMN);
-    expect(within(models).getByText("DeepSeek")).toBeTruthy();
-    expect(within(models).getByText("Claude")).toBeTruthy();
+    expect(within(models).getByText(modelLabel("deepseek-v4-pro"))).toBeTruthy();
+    expect(within(models).getByText(modelLabel("claude-opus-4-8"))).toBeTruthy();
+    expect(within(models).queryByText("DeepSeek")).toBeNull();
+    expect(within(models).queryByText("Claude")).toBeNull();
   });
 
   it("excludes roster-hidden and superseded models", async () => {
@@ -499,7 +501,7 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     transport.getModels.mockResolvedValue(modelsWithTwoLadders());
   });
 
-  it("opening and reopening only reads snapshots; an explicit click checks the selected machine", async () => {
+  it("opening and reopening only reads snapshots; an explicit click checks all ready machines", async () => {
     transport.refreshHarnessAvailability.mockResolvedValue([
       { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
       { harness: "codex", status: "available", reason: "", launchable: true, billing: "subscription" },
@@ -507,7 +509,18 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = () => render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
     const first = view();
-    await screen.findByTestId(`spawn-${layout}`);
+    const form = await screen.findByTestId(`spawn-${layout}`);
+    if (layout === "stack") {
+      fireEvent.click(within(form).getByRole("button", { name: "Model DeepSeek V4 Pro" }));
+    }
+    const modelList = within(form).getByRole("list", { name: MODEL_COLUMN });
+    expect(within(modelList).queryByText("DeepSeek")).toBeNull();
+    expect(within(modelList).queryByText("GPT")).toBeNull();
+    const selectedModelRow = row(form, MODEL_COLUMN, "deepseek-v4-pro");
+    expect(selectedModelRow.getAttribute("aria-pressed")).toBe("true");
+    expect(selectedModelRow.className).toContain("bg-foreground/10");
+    expect(selectedModelRow.querySelector("svg")).toBeNull();
+    expect(modelList.className).toContain("p-1.5");
     await waitFor(() => expect(transport.getHarnessAvailability).toHaveBeenCalled());
     expect(transport.refreshHarnessAvailability).not.toHaveBeenCalled();
     first.unmount();
@@ -560,21 +573,35 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" }).hasAttribute("disabled")).toBe(false));
   });
 
-  it("keeps a late refresh result on its original machine after switching targets", async () => {
+  it("refreshes every ready machine in one click and skips offline hosts", async () => {
     transport.getSystemStatus.mockResolvedValue(statusWith([
-      { name: "cloud", online: true }, { name: "a-host", online: true }, { name: "b-host", online: true },
+      { name: "cloud", online: true },
+      { name: "a-host", online: true },
+      { name: "b-host", online: true },
+      { name: "down-host", online: false },
     ]));
-    const pending = Promise.withResolvers<HarnessAvailability[]>();
-    transport.refreshHarnessAvailability.mockReturnValue(pending.promise);
+    const pendingA = Promise.withResolvers<HarnessAvailability[]>();
+    const pendingB = Promise.withResolvers<HarnessAvailability[]>();
+    transport.refreshHarnessAvailability.mockImplementation((machine: string) =>
+      machine === "a-host" ? pendingA.promise : pendingB.promise,
+    );
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
     const form = await screen.findByTestId(`spawn-${layout}`);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(transport.refreshHarnessAvailability.mock.calls.map(([m]) => m)).toEqual(["a-host", "b-host"]),
+    );
     if (layout === "stack") fireEvent.click(within(form).getByRole("button", { name: "Machine a-host" }));
     pick(form, MACHINE_COLUMN, "b-host");
-    pending.resolve(harnessAllAvailable());
+    pendingA.resolve(harnessAllAvailable());
+    pendingB.resolve([
+      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
+      { harness: "codex", status: "available", reason: "", launchable: true, billing: "subscription" },
+    ]);
     await waitFor(() => expect(qc.getQueryData(["harness-availability", "a-host"])).toEqual(harnessAllAvailable()));
-    expect(qc.getQueryData(["harness-availability", "b-host"])).toEqual([]);
-    expect(transport.refreshHarnessAvailability).toHaveBeenCalledExactlyOnceWith("a-host");
+    await waitFor(() => expect(qc.getQueryData(["harness-availability", "b-host"])).toMatchObject([
+      { harness: "meiva" }, { harness: "codex", launchable: true },
+    ]));
   });
 });

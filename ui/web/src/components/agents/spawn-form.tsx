@@ -263,10 +263,11 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   }
 
   const target = machines.find((row) => row.name === selectedMachine);
+  const refreshMachines = machines.filter((row) => row.reason === undefined).map((row) => row.name);
   const spawnReason = target?.reason ?? (harnessBlocked
     ? t("harnessStatus.unavailable")
     : modelsQuery.error ? t("modelsUnavailable") : undefined);
-  const refreshNotice = refresh.isError && refresh.variables === selectedMachine
+  const refreshNotice = refresh.isError
     ? t("refreshFailed")
     : !harnessByMachine.get(selectedMachine ?? "")?.length ? t("refreshNeeded") : undefined;
   // meiva:note
@@ -281,7 +282,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     harnessRows: tableHarnessRows,
     harness: selectedHarness,
     onHarness: pickHarness,
-    modelGroups,
+    modelIds: visibleModels,
     models: modelsData?.models,
     model: effectiveModel,
     onModel: pickModel,
@@ -311,10 +312,10 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const refreshButton = (className?: string) => (
     <button
       type="button"
-      disabled={refreshing || selectedMachine === undefined || target?.reason !== undefined}
+      disabled={refreshing || refreshMachines.length === 0}
       onClick={() => {
-        if (selectedMachine !== undefined) {
-          refresh.mutate(selectedMachine, { onSettled: () => { void modelsQuery.refetch(); } });
+        if (refreshMachines.length > 0) {
+          refresh.mutate(refreshMachines, { onSettled: () => { void modelsQuery.refetch(); } });
         }
       }}
       className={cn(
@@ -328,7 +329,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   );
 
   const notice = refreshNotice === undefined ? null : (
-    <p role={refresh.isError && refresh.variables === selectedMachine ? "alert" : "status"}
+    <p role={refresh.isError ? "alert" : "status"}
       className="text-xs text-muted-foreground">{refreshNotice}</p>
   );
 

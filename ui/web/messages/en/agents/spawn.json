@@ -26,6 +26,6 @@
   "newAgent": "Create agent",
   "refresh": "Refresh",
   "refreshing": "Refreshing…",
-  "refreshNeeded": "Refresh to check this machine’s harnesses.",
+  "refreshNeeded": "Refresh to check available harnesses.",
   "refreshFailed": "Couldn’t refresh. Previous results are unchanged."
 }

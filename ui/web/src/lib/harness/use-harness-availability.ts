@@ -40,8 +40,17 @@ export function useRefreshHarnessAvailability() {
   const cache = useQueryClient();
   return useMutation({
     mutationKey: ["harness-refresh"],
-    mutationFn: (machine: string) => client.refreshHarnessAvailability(machine),
-    onSuccess: (rows, machine) => cache.setQueryData(["harness-availability", machine], rows),
+    mutationFn: async (machines: readonly string[]) => {
+      const settled = await Promise.allSettled(
+        machines.map(async (machine) => {
+          const rows = await client.refreshHarnessAvailability(machine);
+          cache.setQueryData(["harness-availability", machine], rows);
+          return rows;
+        }),
+      );
+      const failed = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
+      if (failed !== undefined) throw failed.reason;
+    },
     retry: false,
   });
 }

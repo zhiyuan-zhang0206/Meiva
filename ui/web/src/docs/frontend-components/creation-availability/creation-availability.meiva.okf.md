@@ -24,7 +24,8 @@ to the first one it can (the pick itself is left alone, so switching back
 restores it). The model column keeps only the models whose published
 `harnesses` name the chosen harness (`GET /api/models`, `ModelInfo.harnesses`;
 the built-in `meiva` runtime runs every spawnable model and is always listed
-first), grouped under a vendor heading, excluding superseded catalog entries.
+first), ordered by provider without repeating provider headings above the model
+names, excluding superseded catalog entries.
 Hidden models and providers filter native API execution only; external CLI
 choices remain selectable without changing those preferences.
 Which harness runs which model is the registry's declaration, not a frontend
@@ -77,11 +78,11 @@ says so instead of offering a choice the backend would refuse with
 Opening the picker reads the last snapshot from
 `GET /api/cluster/machines/{name}/harnesses`; it never starts a probe. The sidebar
 has no page-load warm-up. `Refresh` explicitly calls
-`POST /api/cluster/machines/{name}/harnesses/refresh` for the selected machine,
-with a pending state and repeat clicks disabled. Successful results replace that
-machine's query cache even if the selection changed during the request; failure
-keeps prior results and shows a retryable error. An empty snapshot asks the user
-to refresh. The gateway retains snapshots until its next explicit check or
+`POST /api/cluster/machines/{name}/harnesses/refresh` across all ready runner
+machines at once, with a shared pending state and repeat clicks disabled. Each
+machine's successful result updates its query cache independently; a failure
+preserves that machine's prior snapshot and shows a retryable error. An empty
+snapshot asks the user to refresh. The gateway retains snapshots until its next explicit check or
 restart, and coalesces concurrent checks per machine. The wire row carries `status` (`available` / `unavailable` /
 `unknown`), the probe's `reason`, and `launchable`; the row on screen carries one
 word. `available` when `launchable`, `unavailable` otherwise, and the row is
