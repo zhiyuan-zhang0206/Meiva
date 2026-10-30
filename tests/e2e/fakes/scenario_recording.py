@@ -13,9 +13,24 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
 from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
 
-__all__ = ["RecordingModel", "exec_call", "model_inputs", "reset_record", "say", "scratch_root"]
+__all__ = [
+    "RecordingModel",
+    "build_plain",
+    "exec_call",
+    "model_inputs",
+    "reset_record",
+    "say",
+    "scratch_root",
+]
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+
+
+# meiva:note
+# A scenario with no scripted answer: the case starts daemons and makes no model call.
+def build_plain(model: str, *, agent_id: int | None) -> RecordingModel:
+    del model
+    return RecordingModel(agent_id=agent_id, script=())
 
 
 def scratch_root(kind: str) -> Path:

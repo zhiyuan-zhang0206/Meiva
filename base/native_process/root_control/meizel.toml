@@ -1,4 +1,4 @@
-exports = ["client.py", "instance_lock.py", "ipc.py"]
+exports = ["client.py", "instance_lock.py", "ipc.py", "tests"]
 
 [uses]
 "client.py" = ["ipc.py"]
