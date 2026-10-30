@@ -3,148 +3,15 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ComposerMock, cleanupHomePageTest, gatewayWrapper, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
-vi.mock("@/lib/agents/use-agents", () => ({
-  useAgents: () => ({
-    agents: hooksState.agents,
-    ancestors: [],
-    activeAgent: hooksState.agents.find((a) => a.agent_id === hooksState.activeId),
-    activeId: hooksState.activeId,
-    setActiveId: vi.fn(),
-    pendingActions: {},
-    pendingSpawnCount: 0,
-    spawn: hooksState.spawn,
-    fork: hooksState.fork,
-    terminate: hooksState.terminate,
-    restart: hooksState.restart,
-    resurrect: hooksState.resurrect,
-    refresh: vi.fn(),
-  }),
-}));
-vi.mock("@/lib/timeline/use-timeline", () => ({
-  useTimeline: () => ({
-    items: hooksState.timelineItems,
-    streamingCode: false,
-    connectionState: hooksState.connectionState,
-    turnActive: hooksState.turnActive,
-    isLoading: false,
-    isRefetching: false,
-    error: hooksState.timelineError,
-    isFetching: hooksState.timelineFetching,
-    retryTimeline: hooksState.retryTimeline,
-  }),
-}));
-vi.mock("@/lib/inspector/use-token-usage", () => ({
-  useTokenUsage: () => ({
-    contextTokens: 0,
-    maxContextTokens: 0,
-    softCompactTokens: 0,
-    hardCompactTokens: 0,
-  }),
-}));
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({
-    settings: hooksState.settings,
-    setSetting: hooksState.setSetting,
-    isLoading: false,
-  }),
-}));
-vi.mock("@/lib/state/store", () => ({
-  useStore: <T,>(selector: (s: unknown) => T): T => {
-    const fakeState = {
-      toast: hooksState.toast,
-      showToast: hooksState.showToast,
-      focusComposer: hooksState.focusComposer,
-      composerFocusToken: 0,
-      setMobileSidebarOpen: hooksState.setMobileSidebarOpen,
-      mobileInspectorOpen: false,
-      setMobileInspectorOpen: hooksState.setMobileInspectorOpen,
-      inspectorHours: 24,
-      setInspectorHours: hooksState.setInspectorHours,
-      agents: hooksState.agents,
-      ancestors: [],
-      activeAgent: hooksState.agents.find((a) => a.agent_id === hooksState.activeId),
-    };
-    return selector(fakeState);
-  },
-}));
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: hooksState.isDesktop ? "xl" : "xs",
-    isNarrow: !hooksState.isDesktop,
-    isLarge: hooksState.isLarge,
-  }),
-}));
-vi.mock("@/lib/timeline/timeline-store", () => ({
-  useTimelineStore: <T,>(selector: (s: unknown) => T): T =>
-    selector({ requestScrollToBottom: hooksState.requestScrollToBottom }),
-}));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ bfcacheId: "_b_test_" }),
-}));
-vi.mock("@/components/agent-sidebar", () => ({
-  AgentSidebar: ({ onSpawn }: { onSpawn: (opts: { machine?: string; model?: string }) => void }) => (
-    <button data-testid="sidebar-spawn" onClick={() => { onSpawn({}); }}>spawn</button>
-  ),
-}));
-vi.mock("@/components/shell/header-bar", () => ({
-  HeaderBar: ({
-    label,
-    children,
-    maxWidthCss,
-  }: {
-    label: string;
-    children?: React.ReactNode;
-    maxWidthCss?: string;
-  }) => (
-    <header data-testid="header-bar" data-label={label} style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}>
-      {children}
-    </header>
-  ),
-}));
-vi.mock("@/components/timeline", () => ({
-  TimelineView: ({ turnActive, maxWidthCss, items }: { turnActive?: boolean; maxWidthCss?: string; items: unknown[] }) => (
-    <div
-      data-testid="timeline"
-      data-turn-active={turnActive ? "1" : "0"}
-      data-item-count={items.length}
-      style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-    />
-  ),
-}));
-vi.mock("@/components/conversation/composer", () => ({
-  Composer: ComposerMock,
-}));
-vi.mock("@/components/conversation/upload-button", () => ({
-  UploadButton: ({ agentId }: { agentId: number | null }) => (
-    <div data-testid="upload-button" data-agent-id={agentId ?? "null"} />
-  ),
-}));
-vi.mock("@/components/inspector/inspector-panel", async () => {
-  const React = await import("react");
-  return {
-    InspectorPanel: () => {
-      React.useEffect(() => {
-        inspectorMockState.mounts += 1;
-      }, []);
-      if (inspectorMockState.shouldThrow) {
-        throw new Error("Simulated inspector render crash");
-      }
-      return <div data-testid="inspector-panel" />;
-    },
-  };
-});
-import HomePage from "./page";
+import { cleanupHomePageTest, gatewayWrapper, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
+
 import { transport } from "@/test-support/fake-api";
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
 
 describe("sidebar app-entry reset", () => {
   it("resets a loaded collapsed preference when the home surface is entered", () => {
-    hooksState.settings = {
-      "display.timeline_width_px": 768,
-      "display.sidebar_collapsed": true,
-    };
+    hooksState.sidebarCollapsed = true;
     wrap(<HomePage />);
     expect(hooksState.setSetting).toHaveBeenCalledWith(
       "display.sidebar_collapsed",
@@ -164,10 +31,7 @@ describe("sidebar app-entry reset", () => {
       { wrapper: gatewayWrapper },
     );
     expect(hooksState.setSetting).not.toHaveBeenCalled();
-    hooksState.settings = {
-      "display.timeline_width_px": 768,
-      "display.sidebar_collapsed": true,
-    };
+    hooksState.sidebarCollapsed = true;
     view.rerender(
       <WallClockProvider wallNow={() => Date.now()}>
         <QueryClientProvider client={queryClient}>

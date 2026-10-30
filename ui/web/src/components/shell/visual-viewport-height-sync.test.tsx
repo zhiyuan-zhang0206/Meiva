@@ -1,75 +1,52 @@
-// VisualViewportHeightSync — the iOS half of the on-screen keyboard contract
-// (the Android half is the `interactiveWidget` viewport export in
-// app/layout.tsx). happy-dom has no VisualViewport at all, so every test
-// installs a controllable stub and states its own innerHeight; the fake moves
-// height and scale the way a real keyboard/toolbar/pinch does.
+// meiva:note
+// VisualViewportHeightSync is the iOS half of the on-screen keyboard contract (the Android half is
+// the `interactiveWidget` viewport export in app/layout.tsx). The heights a keyboard, a toolbar or
+// a pinch produces are answers the browser port gives (`fakeBrowser().answerViewport`), so no case
+// installs a stub on the global; the decision itself is `pinnedShellHeight` in
+// lib/browser/viewport.ts and is asserted directly as well.
+// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
 
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach, expect, it } from "vitest";
 
-import {
-  KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX,
-  VisualViewportHeightSync,
-} from "./visual-viewport-height-sync";
+import { fakeBrowser, type FakeBrowser } from "@/lib/browser/testing";
+import { KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX, pinnedShellHeight } from "@/lib/browser/viewport";
+import { renderWithBrowser } from "@/test-support/render";
+
+import { VisualViewportHeightSync } from "./visual-viewport-height-sync";
 
 const LAYOUT_HEIGHT = 800;
 
-type Listener = () => void;
-
-class FakeVisualViewport {
-  // happy-dom does not implement VisualViewport; the component only reads
-  // height/scale and subscribes to resize/scroll, so that is the whole stub.
-  scale = 1;
-  readonly listeners: Record<"resize" | "scroll", Set<Listener>> = {
-    resize: new Set(),
-    scroll: new Set(),
-  };
-
-  constructor(public height: number) {}
-
-  addEventListener(type: "resize" | "scroll", listener: Listener): void {
-    this.listeners[type].add(listener);
-  }
-
-  removeEventListener(type: "resize" | "scroll", listener: Listener): void {
-    this.listeners[type].delete(listener);
-  }
-
-  /** Move the viewport like the browser would: new height/scale, then resize. */
-  set(height: number, scale = 1): void {
-    this.height = height;
-    this.scale = scale;
-    for (const listener of this.listeners.resize) listener();
-  }
-}
-
-function installVisualViewport(height: number): FakeVisualViewport {
-  const viewport = new FakeVisualViewport(height);
-  vi.stubGlobal("innerHeight", LAYOUT_HEIGHT);
-  vi.stubGlobal("visualViewport", viewport);
-  return viewport;
-}
-
+// meiva:note
+// The pin lives in one inline style on <html>; a failed render would otherwise leak it into the
+// next case, exactly as a real unmount must clear it.
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
-  // cleanup unmounts (which clears the pin); a failed render would otherwise
-  // leak the inline height into the next test.
   document.documentElement.style.height = "";
 });
 
+function page(visual: { height: number; scale?: number } | null): FakeBrowser {
+  return fakeBrowser({
+    viewport: {
+      layoutHeight: LAYOUT_HEIGHT,
+      visual: visual === null ? null : { height: visual.height, scale: visual.scale ?? 1 },
+    },
+  });
+}
+
 it("pins the shell to the visual viewport while the keyboard is up", () => {
-  const viewport = installVisualViewport(LAYOUT_HEIGHT - 320);
-  render(<VisualViewportHeightSync />);
+  const browser = page({ height: LAYOUT_HEIGHT - 320 });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
 
   expect(document.documentElement.style.height).toBe("480px");
-  viewport.set(300); // keyboard grows / user resizes
+  // meiva:note
+  // The keyboard grows, or the user resizes: one answer, one follow.
+  browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: 300, scale: 1 } });
   expect(document.documentElement.style.height).toBe("300px");
 });
 
 it("rounds a fractional visual viewport height", () => {
-  installVisualViewport(LAYOUT_HEIGHT - 320.4);
-  render(<VisualViewportHeightSync />);
+  renderWithBrowser(<VisualViewportHeightSync />, { browser: page({ height: LAYOUT_HEIGHT - 320.4 }) });
 
   expect(document.documentElement.style.height).toBe("480px");
 });
@@ -77,42 +54,59 @@ it("rounds a fractional visual viewport height", () => {
 it("leaves the shell alone when the shortfall is chrome-sized", () => {
   // Exactly at the threshold: a conservative bound, so browser chrome alone
   // (toolbar collapse/expand, tens of px) never shrinks the page.
-  installVisualViewport(LAYOUT_HEIGHT - KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX);
-  render(<VisualViewportHeightSync />);
+  renderWithBrowser(<VisualViewportHeightSync />, {
+    browser: page({ height: LAYOUT_HEIGHT - KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX }),
+  });
 
   expect(document.documentElement.style.height).toBe("");
 });
 
 it("drops the pin while the user pinch-zooms", () => {
-  const viewport = installVisualViewport(LAYOUT_HEIGHT - 320);
-  render(<VisualViewportHeightSync />);
+  const browser = page({ height: LAYOUT_HEIGHT - 320 });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
   expect(document.documentElement.style.height).toBe("480px");
 
-  viewport.set(LAYOUT_HEIGHT - 320, 2);
+  browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: LAYOUT_HEIGHT - 320, scale: 2 } });
   expect(document.documentElement.style.height).toBe("");
 });
 
 it("restores the layout height when the keyboard closes", () => {
-  const viewport = installVisualViewport(LAYOUT_HEIGHT - 320);
-  render(<VisualViewportHeightSync />);
+  const browser = page({ height: LAYOUT_HEIGHT - 320 });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
 
-  viewport.set(LAYOUT_HEIGHT);
+  browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: LAYOUT_HEIGHT, scale: 1 } });
   expect(document.documentElement.style.height).toBe("");
 });
 
 it("clears the pin on unmount", () => {
-  installVisualViewport(LAYOUT_HEIGHT - 320);
-  const { unmount } = render(<VisualViewportHeightSync />);
+  const { unmount } = renderWithBrowser(<VisualViewportHeightSync />, { browser: page({ height: LAYOUT_HEIGHT - 320 }) });
   expect(document.documentElement.style.height).toBe("480px");
 
   unmount();
   expect(document.documentElement.style.height).toBe("");
 });
 
-it("does nothing when the browser has no VisualViewport", () => {
-  vi.stubGlobal("innerHeight", LAYOUT_HEIGHT);
-  vi.stubGlobal("visualViewport", undefined);
-  render(<VisualViewportHeightSync />);
+it("does nothing when the browser has no visual viewport", () => {
+  const browser = fakeBrowser({ viewport: { layoutHeight: LAYOUT_HEIGHT, visual: null } });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
 
   expect(document.documentElement.style.height).toBe("");
+  // meiva:note
+  // A page with no visual viewport has nothing to follow, and the shell says so by staying put.
+  browser.answerViewport({ layoutHeight: 200, visual: null });
+  expect(document.documentElement.style.height).toBe("");
+});
+
+it("decides the pin from the reading alone", () => {
+  const layout = 800;
+  expect(pinnedShellHeight({ layoutHeight: layout, visual: { height: 480, scale: 1 } })).toBe(480);
+  expect(pinnedShellHeight({ layoutHeight: layout, visual: { height: 479.6, scale: 1 } })).toBe(480);
+  expect(
+    pinnedShellHeight({ layoutHeight: layout, visual: { height: layout - KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX, scale: 1 } }),
+  ).toBeNull();
+  expect(pinnedShellHeight({ layoutHeight: layout, visual: { height: 480, scale: 1.5 } })).toBeNull();
+  expect(pinnedShellHeight({ layoutHeight: layout, visual: null })).toBeNull();
+  // meiva:note
+  // A caller can raise the threshold without touching the module's own constant.
+  expect(pinnedShellHeight({ layoutHeight: layout, visual: { height: 480, scale: 1 } }, 400)).toBeNull();
 });
