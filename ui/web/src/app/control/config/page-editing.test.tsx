@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import {  } from "@/test-support/render";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ConfigView, ConfigWriteResult } from "@/lib/contracts/types";
 import {
@@ -227,7 +227,6 @@ describe("Fix 1 — onSettled invalidates written machine's query key", () => {
     transport.putConfig.mockReturnValue(putInflight);
 
     const qc = makeQc();
-    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     wrap(<ConfigPage />, qc);
 
@@ -245,27 +244,17 @@ describe("Fix 1 — onSettled invalidates written machine's query key", () => {
       restart_required: [],
     });
 
-    await waitFor(() => {
-      const invalidatedKeys = invalidateSpy.mock.calls.map(
-        ([opts]) => opts?.queryKey,
-      );
-      const hasCluster = invalidatedKeys.some(
-        (k) =>
-          Array.isArray(k) && k[0] === "config" && k[1] === null,
-      );
-      expect(hasCluster).toBe(true);
-    });
-
-    const invalidatedKeys = invalidateSpy.mock.calls.map(
-      ([opts]) => opts?.queryKey,
+    // meiva:note
+    // The written machine's key is the one marked stale, and the other machine's read is not
+    // re-issued: that pair is the behaviour, so it is read off the cache's own state and the
+    // requests the page sends, not off a spy on the invalidate method.
+    await waitFor(() =>
+      expect(qc.getQueryState(["config", null])?.isInvalidated).toBe(true),
     );
-    const hasWorker = invalidatedKeys.some(
-      (k) =>
-        Array.isArray(k) &&
-        k[0] === "config" &&
-        k[1] === AGENT_RUNNER,
-    );
-    expect(hasWorker).toBe(false);
+    expect(qc.getQueryState(["config", AGENT_RUNNER])?.isInvalidated).toBe(false);
+    expect(
+      transport.getConfig.mock.calls.filter(([machine]) => machine === AGENT_RUNNER),
+    ).toHaveLength(1);
   });
 });
 
