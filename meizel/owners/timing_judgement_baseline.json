@@ -172,16 +172,6 @@
       "comparison": "time.monotonic() - started < N"
     },
     {
-      "path": "cli/commands/lifecycle/tests/stop/test_stop_shell_sessions.py",
-      "function": "test_a_shell_session_that_clears_within_the_stop_deadline_does_not_fail_the_stop",
-      "comparison": "N <= time.monotonic() - started < N"
-    },
-    {
-      "path": "cli/commands/lifecycle/tests/stop/test_stop_shell_sessions.py",
-      "function": "test_force_close_closes_every_session_at_once_without_notices",
-      "comparison": "time.monotonic() - started < N"
-    },
-    {
       "path": "cli/commands/observability/tests/lgtm/test_lgtm_download.py",
       "function": "test_a_wait_never_runs_past_the_deadline",
       "comparison": "time.monotonic() - started < N"
