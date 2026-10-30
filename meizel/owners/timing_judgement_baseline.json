@@ -118,16 +118,6 @@
     },
     {
       "path": "base/telemetry/tests/test_emitter_lifecycle.py",
-      "function": "test_full_queue_stop_is_finite_and_closes_admission",
-      "comparison": "time.monotonic() - started < N"
-    },
-    {
-      "path": "base/telemetry/tests/test_emitter_lifecycle.py",
-      "function": "test_one_deadline_spans_queue_admission_and_blocked_writer",
-      "comparison": "time.monotonic() - started < N"
-    },
-    {
-      "path": "base/telemetry/tests/test_emitter_lifecycle.py",
       "function": "test_sync_deadline_covers_marker_admission_and_write",
       "comparison": "time.monotonic() - started < N"
     },
@@ -135,11 +125,6 @@
       "path": "base/tests/config/env/test_file_lock_bounded.py",
       "function": "test_a_second_process_waits_for_the_first",
       "comparison": "waited >= N"
-    },
-    {
-      "path": "base/tests/test_context_event_owner.py",
-      "function": "test_unfinished_close_retains_the_actual_writer_until_late_completion",
-      "comparison": "time.monotonic() - started < N"
     },
     {
       "path": "cli/commands/data_plane/tests/instance/test_bind_wait.py",
@@ -267,24 +252,9 @@
       "comparison": "waited < N"
     },
     {
-      "path": "services/agent_runner/agent_host/tests/runtime/test_resource_join.py",
-      "function": "test_unfinished_actual_task_reaches_existing_hard_exit",
-      "comparison": "time.monotonic() - started < N"
-    },
-    {
-      "path": "services/agent_runner/agent_ops/tests/daemon/test_state_writes_and_executor.py",
-      "function": "test_shutting_the_pool_down_does_not_wait_for_a_running_operation",
-      "comparison": "time.monotonic() - began < N"
-    },
-    {
       "path": "services/agent_runner/agent_ops/tests/test_process_exit.py",
       "function": "test_a_wedged_arm_does_not_hold_the_process_exit",
       "comparison": "elapsed < N"
-    },
-    {
-      "path": "services/backup/scheduler/tests/test_scheduler_shutdown.py",
-      "function": "_terminate_and_assert_reaped",
-      "comparison": "time.monotonic() - started < N"
     },
     {
       "path": "services/backup/tests/backup/test_run_with_progress_without_a_sink_defers.py",
@@ -343,17 +313,7 @@
     },
     {
       "path": "services/desktop/browser/tests/test_browser_mcp_daemon_stop.py",
-      "function": "scenario",
-      "comparison": "time.monotonic() - start < N"
-    },
-    {
-      "path": "services/desktop/browser/tests/test_browser_mcp_daemon_stop.py",
       "function": "test_sigterm_during_hung_connect_interrupts_immediately",
-      "comparison": "time.monotonic() - start < N"
-    },
-    {
-      "path": "services/desktop/browser/tests/test_browser_mcp_daemon_stop.py",
-      "function": "test_wedged_cleanup_await_is_bounded",
       "comparison": "time.monotonic() - start < N"
     },
     {
