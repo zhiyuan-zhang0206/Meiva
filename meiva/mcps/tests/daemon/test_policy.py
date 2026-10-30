@@ -13,7 +13,7 @@ def test_the_default_policy_is_three_tries_with_a_doubling_delay_capped_at_eight
 
 # meiva:note
 # 3 tries = 2 retries: failed try 0 waits 1 s, failed try 1 waits 2 s, failed try 2 ends.
-def test_each_retry_waits_twice_as_long_and_the_last_try_ends_the_request() -> None:
+def test_each_attempt_waits_twice_as_long_and_the_last_try_ends_the_request() -> None:
     assert [retry_delay(DEFAULT, attempt, transport_error=True) for attempt in (0, 1, 2)] == [
         1.0,
         2.0,

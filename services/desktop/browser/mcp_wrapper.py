@@ -29,6 +29,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
+from base.host.net.resilience import retry_asleep
 from base.paths import chrome_mcp_socket, meiva_home
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
@@ -59,11 +60,18 @@ class Link(SocketLink):
         )
 
 
+# meiva:note
+# The connect retry and the reconnect loop both wait through the callable the caller names, so one
+# value drives every wait this wrapper makes.
 def _connector(
     socket_path: Path,
+    *,
+    asleep: Callable[[float], Awaitable[None]] = retry_asleep,
 ) -> Callable[[], Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]]:
     async def connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await dial_unix_socket(str(socket_path), service_label="chrome MCP daemon")
+        return await dial_unix_socket(
+            str(socket_path), service_label="chrome MCP daemon", asleep=asleep
+        )
 
     return connect
 
@@ -76,14 +84,16 @@ class ReconnectingSocketLink(ReconnectingLink):
         timeout_reader: Callable[[], float],
         max_retries: int = 5,
         base_delay: float = 1.0,
+        asleep: Callable[[float], Awaitable[None]] = retry_asleep,
     ) -> None:
         super().__init__(
-            _connector(socket_path),
+            _connector(socket_path, asleep=asleep),
             lambda reader, writer: Link(reader, writer, timeout_reader=timeout_reader),
             max_attempts=max_retries + 1,
             base_delay=base_delay,
             rejection_message=_UPSTREAM_DOWN_MSG,
             close_on_error=is_transport_error,
+            asleep=asleep,
         )
 
 

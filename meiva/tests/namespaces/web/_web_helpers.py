@@ -10,7 +10,7 @@ import dataclasses
 import socket
 import threading
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 
@@ -27,6 +27,7 @@ from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, ScriptedModels
 from meiva.web import plans, runner, wiring
 from meiva.web.deps import FetchDeps, ReaderProvider, SearchDeps, SearchProvider
+from meiva.web.policy import WEB_READ_POLICY
 from meiva.web.wire import Hit
 
 
@@ -123,6 +124,22 @@ def loopback() -> Iterator[Loopback]:
 # the answer model the fetch deps name, and `search` / `fetch` run the SDK calls against them.
 # Findings the calls raise land in the state update of the exec turn `use_exec_turn` binds, and
 # `findings` reads them back from there.
+# meiva:note
+# The read policy without its waits: the same attempts and classification, a zero backoff and no
+# jitter, so a case that exercises a retry does not spend the backoff. The zero comes from a
+# function of this harness, and every read that runs on this policy leaves its attempt index in
+# `WAITED_ATTEMPTS`: a reader that ignored the policy it was handed would record nothing.
+WAITED_ATTEMPTS: list[int] = []
+
+
+def _attempt_that_does_not_wait(attempt: int) -> float:
+    WAITED_ATTEMPTS.append(attempt)
+    return 0.0
+
+
+NO_WAIT_READ_POLICY = replace(WEB_READ_POLICY, backoff=_attempt_that_does_not_wait, jitter="none")
+
+
 @dataclass
 class WebHarness:
     loopback: Loopback
@@ -206,7 +223,10 @@ class WebHarness:
         max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
     ) -> list[list[Hit]]:
         return runner.run_search(
-            plans.plan_search(queries, count, max_concurrent), self.search_deps, self.delivery()
+            plans.plan_search(queries, count, max_concurrent),
+            self.search_deps,
+            self.delivery(),
+            policy=NO_WAIT_READ_POLICY,
         )
 
     def fetch(
@@ -220,6 +240,7 @@ class WebHarness:
             plans.plan_fetch(targets, max_chars, effort, max_concurrent),
             self.fetch_deps,
             self.delivery(),
+            policy=NO_WAIT_READ_POLICY,
         )
 
 

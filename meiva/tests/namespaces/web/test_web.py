@@ -19,12 +19,10 @@ from pydantic import SecretStr
 
 import meiva
 from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
-from meiva.tests.namespaces.web._web_helpers import Received, Reply, WebHarness
+from meiva.tests.namespaces.web._web_helpers import WAITED_ATTEMPTS, Received, Reply, WebHarness
 from meiva.tests.namespaces.web._web_helpers import loopback as loopback
 from meiva.tests.namespaces.web._web_helpers import web_harness as web_harness
 from meiva.web import FetchError, WebError
-
-pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
 def _page(*, title: str = "", url: str = "", content: str = "", code: int = 200) -> bytes:
@@ -157,9 +155,14 @@ def test_fetch_jina_business_error_raises_before_the_model(web_harness: WebHarne
 
 def test_fetch_http_error_raises_with_the_upstream_body(web_harness: WebHarness) -> None:
     web_harness.loopback.answer(b"rate limit exceeded", status=429)
+    waited_before = len(WAITED_ATTEMPTS)
 
     with pytest.raises(FetchError, match="Jina Reader HTTP 429: rate limit exceeded"):
         web_harness.fetch([("https://example.com", "summarize")])
+
+    # meiva:note
+    # The read ran on the policy the harness handed it, so both retries waited this policy's zero.
+    assert WAITED_ATTEMPTS[waited_before:] == [0, 1]
 
 
 def test_fetch_network_error_raises(web_harness: WebHarness) -> None:

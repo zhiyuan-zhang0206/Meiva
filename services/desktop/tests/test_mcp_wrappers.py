@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from services.desktop.browser import mcp_socket_bridge
 from services.desktop.browser import mcp_wrapper as browser_wrapper
 from services.desktop.browser.mcp_socket_bridge import NotDeliveredError
@@ -19,10 +20,10 @@ from services.desktop.computer import mcp_wrapper as computer_wrapper
 
 # meiva:note
 # Both links are told their socket; the computer link also stamps an identity.
-def _link_kwargs(side: str) -> dict[str, Any]:
+def _link_kwargs(side: str, timers: ManualTimers) -> dict[str, Any]:
     if side == "browser":
-        return {"socket_path": Path("/unused.sock")}
-    return {"sock": "/unused.sock", "agent_id": None}
+        return {"socket_path": Path("/unused.sock"), "asleep": timers.asleep}
+    return {"sock": "/unused.sock", "agent_id": None, "asleep": timers.asleep}
 
 
 # meiva:note
@@ -390,12 +391,11 @@ async def test_link_drain_reset_preserves_unknown_delivery_error() -> None:
     assert len(writer.written) == 1
 
 
-async def test_shared_socket_bridge_dials_with_bounded_retries(
-    retry_waits: list[float],
-) -> None:
+async def test_shared_socket_bridge_dials_with_bounded_retries() -> None:
     import socket
     import tempfile
 
+    timers = ManualTimers()
     bridge = mcp_socket_bridge
     with tempfile.TemporaryDirectory(prefix="meiva-bridge-", dir="/tmp") as directory:
         root = Path(directory)
@@ -403,10 +403,12 @@ async def test_shared_socket_bridge_dials_with_bounded_retries(
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
             stale.bind(str(refused_sock))
         with pytest.raises(ConnectionError) as error:
-            await bridge.dial_unix_socket(str(refused_sock), service_label="chrome MCP daemon")
+            await bridge.dial_unix_socket(
+                str(refused_sock), service_label="chrome MCP daemon", asleep=timers.asleep
+            )
         assert f"chrome MCP daemon not reachable at {refused_sock}:" in str(error.value)
         assert error.value.__context__ is None
-        assert retry_waits == [0.5] * 9
+        assert timers.sleeps == [0.5] * 9
 
         live_sock = root / "live.sock"
 
@@ -418,7 +420,7 @@ async def test_shared_socket_bridge_dials_with_bounded_retries(
         server = await asyncio.start_unix_server(_accept, path=str(live_sock))
         try:
             reader, writer = await bridge.dial_unix_socket(
-                str(live_sock), service_label="chrome MCP daemon"
+                str(live_sock), service_label="chrome MCP daemon", asleep=timers.asleep
             )
             try:
                 assert len(await reader.readline()) == 100_001
@@ -429,11 +431,10 @@ async def test_shared_socket_bridge_dials_with_bounded_retries(
             await server.wait_closed()
 
 
-async def test_shared_socket_bridge_passes_through_unclassified_error(
-    retry_waits: list[float],
-) -> None:
+async def test_shared_socket_bridge_passes_through_unclassified_error() -> None:
     import tempfile
 
+    timers = ManualTimers()
     bridge = mcp_socket_bridge
     with tempfile.TemporaryDirectory(prefix="meiva-bridge-", dir="/tmp") as directory:
         locked = Path(directory) / "locked"
@@ -442,17 +443,22 @@ async def test_shared_socket_bridge_passes_through_unclassified_error(
         try:
             with pytest.raises(PermissionError):
                 await bridge.dial_unix_socket(
-                    str(locked / "test.sock"), service_label="chrome MCP daemon"
+                    str(locked / "test.sock"),
+                    service_label="chrome MCP daemon",
+                    asleep=timers.asleep,
                 )
-            assert retry_waits == []
+            assert timers.sleeps == []
         finally:
             locked.chmod(0o700)
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
-async def test_wrapper_retry_budget_and_backoff(retry_waits: list[float], side: str) -> None:
+async def test_wrapper_retry_budget_and_backoff(side: str) -> None:
+    timers = ManualTimers()
     wrapper = _WRAPPERS[side]
-    reconnecting = wrapper.ReconnectingSocketLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
+    reconnecting = wrapper.ReconnectingSocketLink(
+        **_link_kwargs(side, timers), timeout_reader=lambda: 1.0
+    )
     failure = RuntimeError("offline")
     connect = AsyncMock(side_effect=failure)
     reconnecting._connect_once = connect
@@ -461,11 +467,12 @@ async def test_wrapper_retry_budget_and_backoff(retry_waits: list[float], side: 
     assert error.value is failure
     assert connect.await_count == 6
     base = 1.0 if side == "browser" else 0.5
-    assert retry_waits == [base * 2**attempt for attempt in range(5)]
+    assert timers.sleeps == [base * 2**attempt for attempt in range(5)]
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
+    timers = ManualTimers()
     wrapper = _WRAPPERS[side]
     label = "chrome MCP daemon" if side == "browser" else "computer MCP daemon"
     cases = [
@@ -489,7 +496,7 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
         closed: list[bool] = []
         writer.close = lambda closed=closed: closed.append(True)
         reconnecting = wrapper.ReconnectingSocketLink(
-            **_link_kwargs(side), timeout_reader=lambda: 1.0
+            **_link_kwargs(side, timers), timeout_reader=lambda: 1.0
         )
         connect = AsyncMock(
             return_value=wrapper.Link(
@@ -507,7 +514,8 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
-async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side: str) -> None:
+async def test_upstream_rejection_is_browser_only(side: str) -> None:
+    timers = ManualTimers()
     wrapper = _WRAPPERS[side]
     rejection = "chrome upstream session is down; restart browser-mcp before continuing"
     writers = [FakeWriter(), FakeWriter()]
@@ -529,19 +537,21 @@ async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side
         ),
     ]
     connect = AsyncMock(side_effect=links)
-    reconnecting = wrapper.ReconnectingSocketLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
+    reconnecting = wrapper.ReconnectingSocketLink(
+        **_link_kwargs(side, timers), timeout_reader=lambda: 1.0
+    )
     reconnecting._connect_once = connect
     if side == "browser":
         assert await reconnecting.request({"method": "call_tool", "tool": "x"}) == "ok"
         assert connect.await_count == 2
         assert [len(writer.written) for writer in writers] == [1, 1]
-        assert retry_waits == [1.0]
+        assert timers.sleeps == [1.0]
     else:
         with pytest.raises(RuntimeError, match=rejection):
             await reconnecting.request({"method": "call_tool", "tool": "x"})
         assert connect.await_count == 1
         assert [len(writer.written) for writer in writers] == [1, 0]
-        assert retry_waits == []
+        assert timers.sleeps == []
     assert closed == [0]
 
 
@@ -549,6 +559,7 @@ async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side
 async def test_stalled_drain_is_unknown_delivery_without_retry(
     monkeypatch: pytest.MonkeyPatch, side: str
 ) -> None:
+    timers = ManualTimers()
     wrapper = _WRAPPERS[side]
 
     class StalledWriter(FakeWriter):
@@ -568,7 +579,9 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
             FakeReader([]), writer, timeout_reader=lambda: 0.01, **_identity(side)
         )
     )
-    reconnecting = wrapper.ReconnectingSocketLink(**_link_kwargs(side), timeout_reader=lambda: 0.01)
+    reconnecting = wrapper.ReconnectingSocketLink(
+        **_link_kwargs(side, timers), timeout_reader=lambda: 0.01
+    )
     reconnecting._connect_once = connect
     with pytest.raises(TimeoutError):
         await reconnecting.request({"method": "call_tool", "tool": "x"})
@@ -579,9 +592,8 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 @pytest.mark.parametrize("fail_stage", ["write", "drain"])
-async def test_write_or_drain_failure_is_not_retried(
-    retry_waits: list[float], side: str, fail_stage: str
-) -> None:
+async def test_write_or_drain_failure_is_not_retried(side: str, fail_stage: str) -> None:
+    timers = ManualTimers()
     wrapper = _WRAPPERS[side]
 
     class FailingWriter(FakeWriter):
@@ -611,7 +623,9 @@ async def test_write_or_drain_failure_is_not_retried(
             ),
         ]
     )
-    reconnecting = wrapper.ReconnectingSocketLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
+    reconnecting = wrapper.ReconnectingSocketLink(
+        **_link_kwargs(side, timers), timeout_reader=lambda: 1.0
+    )
     reconnecting._connect_once = connect
     with pytest.raises(BrokenPipeError, match="socket broke"):
         await reconnecting.request({"method": "call_tool", "tool": "x"})
@@ -621,11 +635,12 @@ async def test_write_or_drain_failure_is_not_retried(
         0,
     ]
     assert closed == [True]
-    assert retry_waits == []
+    assert timers.sleeps == []
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) -> None:
+    timers = ManualTimers()
     wrapper = _WRAPPERS[side]
 
     class ResetOnDrain(FakeWriter):
@@ -645,7 +660,9 @@ async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) ->
             ),
         ]
     )
-    reconnecting = wrapper.ReconnectingSocketLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
+    reconnecting = wrapper.ReconnectingSocketLink(
+        **_link_kwargs(side, timers), timeout_reader=lambda: 1.0
+    )
     reconnecting._connect_once = connect
     with pytest.raises(ConnectionResetError, match="reset during drain"):
         await reconnecting.request({"method": "call_tool", "tool": "click"})
@@ -657,9 +674,8 @@ async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) ->
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
-async def test_closed_before_write_retries_without_sending(
-    retry_waits: list[float], side: str
-) -> None:
+async def test_closed_before_write_retries_without_sending(side: str) -> None:
+    timers = ManualTimers()
     wrapper = _WRAPPERS[side]
     closed = FakeWriter()
     closed.close()
@@ -675,12 +691,14 @@ async def test_closed_before_write_retries_without_sending(
             ),
         ]
     )
-    reconnecting = wrapper.ReconnectingSocketLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
+    reconnecting = wrapper.ReconnectingSocketLink(
+        **_link_kwargs(side, timers), timeout_reader=lambda: 1.0
+    )
     reconnecting._connect_once = connect
     assert await reconnecting.request({"method": "call_tool", "tool": "click"}) == "ok"
     assert connect.await_count == 2
     assert [len(closed.written), len(fresh.written)] == [0, 1]
-    assert retry_waits == [1.0 if side == "browser" else 0.5]
+    assert timers.sleeps == [1.0 if side == "browser" else 0.5]
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])

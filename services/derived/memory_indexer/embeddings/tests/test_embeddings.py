@@ -20,7 +20,14 @@ import json
 import sys
 import threading
 import time
-from collections.abc import AsyncGenerator, Generator, Iterator, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Generator,
+    Iterator,
+    Mapping,
+)
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +39,8 @@ import httpx
 import numpy as np
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
+from base.host.net.resilience import retry_asleep, retry_sleep
 from base.host.proc import run_bounded
 from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
@@ -48,15 +57,8 @@ from services.derived.memory_indexer.embeddings.gemini import (
     GeminiEmbeddingProvider,
 )
 
-# Retry backoff waits are recorded, not slept, so retry-path tests do not hang; the retry loop
-# itself is still exercised (call counts). The provider's policy is a module constant (R2-D), no
-# longer settings-driven. Tests that measure elapsed time on real sockets restore the real waits.
-
-
 TIMEOUT_S = 60.0
 API_KEY = "test-gemini-key"
-
-pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
 def build_provider(
@@ -66,6 +68,8 @@ def build_provider(
     api_key: str | None = API_KEY,
     endpoint: str = ENDPOINT,
     transport: httpx.AsyncBaseTransport | None = None,
+    sleep: Callable[[float], None] = retry_sleep,
+    asleep: Callable[[float], Awaitable[None]] = retry_asleep,
 ) -> GeminiEmbeddingProvider:
     active_catalog = build_model_catalog(home=meiva_home()) if catalog is None else catalog
     return GeminiEmbeddingProvider(
@@ -74,6 +78,8 @@ def build_provider(
         api_key=api_key,
         endpoint=endpoint,
         transport=transport,
+        sleep=sleep,
+        asleep=asleep,
     )
 
 
@@ -464,11 +470,13 @@ def test_factory_passes_same_catalog_to_all_embedding_paths() -> None:
 
 def test_embed_http_error_status_retries_then_raises() -> None:
     """Non-2xx (raise_for_status) is a retryable failure; exhausting retries raises."""
+    timers = ManualTimers()
     fake = AsyncClient(vectors=[[1.0] * DIM], status_code=500)
     with pytest.raises(EmbeddingAPIError, match="failed after"):
-        _provider(transport=fake).embed_query("hello")
+        _provider(transport=fake, sleep=timers.sleep).embed_query("hello")
 
     assert len(fake.calls) == QUERY_EMBED_POLICY.max_attempts
+    assert len(timers.sleeps) == QUERY_EMBED_POLICY.max_attempts - 1
 
 
 def test_query_embed_policy_is_lighter_than_document_policy() -> None:
@@ -486,10 +494,12 @@ def test_embed_query_async_uses_the_query_policy() -> None:
     (2 attempts), not the indexer's 4: a 429 during a fleet wake must not burn
     the search deadline on retries."""
 
+    timers = ManualTimers()
     fake = AsyncClient(raises_times=100)
     with pytest.raises(EmbeddingAPIError, match="failed after 2 attempts"):
-        asyncio.run(_provider(transport=fake).embed_query_async("hello"))
+        asyncio.run(_provider(transport=fake, asleep=timers.asleep).embed_query_async("hello"))
     assert len(fake.calls) == QUERY_EMBED_POLICY.max_attempts
+    assert len(timers.sleeps) == QUERY_EMBED_POLICY.max_attempts - 1
 
 
 def test_embed_4xx_fails_immediately() -> None:
@@ -508,13 +518,15 @@ def test_embed_4xx_fails_immediately() -> None:
 # (MEIVA_EMBED_TIMEOUT_SECONDS, task #698 G8); the retry policy is a module
 # constant (R2-D).
 def test_embed_timeout_is_the_value_the_provider_was_given() -> None:
+    timers = ManualTimers()
     fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=1)
 
-    _provider(timeout_s=12.5, transport=fake).embed_batch(["hello"])
+    _provider(timeout_s=12.5, transport=fake, sleep=timers.sleep).embed_batch(["hello"])
 
     # meiva:note
     # 1 failure + 1 retry
     assert len(fake.calls) == 2
+    assert len(timers.sleeps) == 1
     for call in fake.calls:
         assert call["timeout"] == 12.5
 

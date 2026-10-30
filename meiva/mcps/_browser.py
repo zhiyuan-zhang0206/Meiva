@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ from mcp.types import CallToolResult, ListToolsResult, Tool
 from base.agents.lifecycle import (
     release_agent_chrome_pages as release_agent_chrome_pages,
 )
-from base.host.net.resilience import Policy, aretry
+from base.host.net.resilience import Policy, aretry, retry_asleep
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default
@@ -55,9 +56,11 @@ class BrowserLineSession:
         writer: asyncio.StreamWriter,
         *,
         sock: str | None = None,
+        asleep: Callable[[float], Awaitable[None]] = retry_asleep,
     ) -> None:
         self._reader = reader
         self._writer = writer
+        self._asleep = asleep
         self._id = 0
         # Re-dial path used when the stream desyncs; None (test sessions) means
         # the session cannot rebuild itself.
@@ -87,7 +90,7 @@ class BrowserLineSession:
         await self.close()
         if self._sock is None:
             return  # constructed without a re-dial path (unit tests)
-        reader, writer = await dial_browser_mcp(self._sock)
+        reader, writer = await dial_browser_mcp(self._sock, asleep=self._asleep)
         self._reader = reader
         self._writer = writer
         self._id = 0
@@ -158,6 +161,7 @@ async def dial_browser_mcp(
     *,
     attempts: int = CONNECT_ATTEMPTS,
     delay_s: float = CONNECT_DELAY_S,
+    asleep: Callable[[float], Awaitable[None]] = retry_asleep,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     policy = Policy(
         max_attempts=attempts,
@@ -175,7 +179,7 @@ async def dial_browser_mcp(
 
     last: OSError | None = None
     try:
-        return await aretry(policy)(once)
+        return await aretry(policy, asleep=asleep)(once)
     except (FileNotFoundError, ConnectionRefusedError) as exc:
         last = exc
     raise ConnectionError(f"browser-mcp daemon not reachable at {sock}: {last}")
@@ -189,12 +193,13 @@ async def connect_browser_direct(
     *,
     attempts: int = CONNECT_ATTEMPTS,
     delay_s: float = CONNECT_DELAY_S,
+    asleep: Callable[[float], Awaitable[None]] = retry_asleep,
 ) -> tuple[BrowserLineSession, AsyncExitStack]:
     from base.paths import chrome_mcp_socket
 
     sock = str(chrome_mcp_socket(home, cdp_port))
-    reader, writer = await dial_browser_mcp(sock, attempts=attempts, delay_s=delay_s)
-    session = BrowserLineSession(reader, writer, sock=sock)
+    reader, writer = await dial_browser_mcp(sock, attempts=attempts, delay_s=delay_s, asleep=asleep)
+    session = BrowserLineSession(reader, writer, sock=sock, asleep=asleep)
     stack = AsyncExitStack()
     stack.push_async_callback(session.close)
     return session, stack

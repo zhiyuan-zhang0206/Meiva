@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 import meiva.mcps._computer as computer_mod
+from base.clock.tests.manual_timers import ManualTimers
 from meiva.mcps._computer import connect_computer_direct
 from meiva.mcps.tests.line_streams import leftover_socket
 from meiva.mcps.tests.line_streams import short_dir as short_dir
@@ -123,27 +124,27 @@ async def test_daemon_error_surfaces(session_and_server: tuple[Any, FakeServer])
 
 @pytest.mark.parametrize("failure", ["missing", "refused"])
 async def test_dial_computer_exhaustion_has_no_trailing_sleep(
-    retry_waits: list[float], short_dir: Path, failure: str
+    short_dir: Path, failure: str
 ) -> None:
+    timers = ManualTimers()
     sock = str(
         short_dir / "absent.sock"
         if failure == "missing"
         else leftover_socket(short_dir / "dead.sock")
     )
     with pytest.raises(ConnectionError) as error:
-        await computer_mod.dial_computer_mcp(sock)
+        await computer_mod.dial_computer_mcp(sock, asleep=timers.asleep)
     assert str(error.value).startswith(f"computer-mcp daemon not reachable at {sock}: ")
     assert error.value.__context__ is None
-    assert retry_waits == [0.5] * 9
+    assert timers.sleeps == [0.5] * 9
 
 
 # meiva:note
 # A path below a regular file fails with NotADirectoryError, which is no cold-start race.
-async def test_dial_computer_non_retryable_error_passes_through(
-    retry_waits: list[float], short_dir: Path
-) -> None:
+async def test_dial_computer_non_retryable_error_passes_through(short_dir: Path) -> None:
+    timers = ManualTimers()
     a_file = short_dir / "plain"
     a_file.write_text("x")
     with pytest.raises(NotADirectoryError):
-        await computer_mod.dial_computer_mcp(str(a_file / "svc.sock"))
-    assert retry_waits == []
+        await computer_mod.dial_computer_mcp(str(a_file / "svc.sock"), asleep=timers.asleep)
+    assert timers.sleeps == []

@@ -11,6 +11,7 @@ import asyncio
 from typing import assert_never
 
 from base.clock import Timers
+from base.host.net.resilience import Policy
 from meiva import security
 from meiva.sdk_surface.batch import run_batch
 from meiva.sdk_surface.pure.media.finding_plan import (
@@ -22,6 +23,7 @@ from meiva.sdk_surface.pure.media.finding_plan import (
 from meiva.web import brave, deepseek, reader
 from meiva.web.deps import FetchDeps, SearchDeps, SearchProvider
 from meiva.web.plans import FetchPlan, SearchPlan
+from meiva.web.policy import WEB_READ_POLICY
 from meiva.web.transport import RateLimiter
 from meiva.web.wire import Hit
 
@@ -34,15 +36,16 @@ def run_search(
     delivery: FindingDelivery,
     *,
     timers: Timers | None = None,
+    policy: Policy = WEB_READ_POLICY,
 ) -> list[list[Hit]]:
     pacer = RateLimiter(deps.deepseek.qps, timers=timers)
 
     def search_one(query: str) -> Scanned[list[Hit]]:
         match deps.provider:
             case SearchProvider.BRAVE:
-                return brave.search_one(query, plan.count, deps)
+                return brave.search_one(query, plan.count, deps, policy=policy)
             case SearchProvider.DEEPSEEK:
-                return deepseek.search_one(query, plan.count, deps, pacer)
+                return deepseek.search_one(query, plan.count, deps, pacer, policy=policy)
             case _:
                 assert_never(deps.provider)
 
@@ -61,6 +64,7 @@ def run_fetch(
     delivery: FindingDelivery,
     *,
     timers: Timers | None = None,
+    policy: Policy = WEB_READ_POLICY,
 ) -> list[str]:
     pacer = RateLimiter(deps.deepseek.qps, timers=timers)
     try:
@@ -69,7 +73,13 @@ def run_fetch(
                 run_batch(
                     plan.targets,
                     lambda pair: reader.fetch_one(
-                        pair[0], pair[1], plan.max_chars, plan.effort, deps, pacer
+                        pair[0],
+                        pair[1],
+                        plan.max_chars,
+                        plan.effort,
+                        deps,
+                        pacer,
+                        policy=policy,
                     ),
                     plan.max_concurrent,
                 )
