@@ -765,7 +765,6 @@ def test_okf_test_data_and_operational_markdown_are_not_documentation(tmp_path: 
 def test_the_registry_tests_of_the_real_repository_are_pinned() -> None:
     pinned = test_selector.tree_scan_tests(Path(__file__).resolve().parents[2])
     assert {
-        "base/cluster/machine/tests/test_ambient_callers.py",
         "base/events/tests/test_emit_sites_declared.py",
         "gateway/inspect/tests/test_persisted_events_cover_readers.py",
         "tests/components/cli/test_main_dispatch_contract.py",

@@ -756,10 +756,6 @@ def boot_state() -> dict[str, Any]:
     return _state.boot_state()
 
 
-def process_launch_facts() -> LaunchFacts:
-    return _state.launch_facts()
-
-
 def settings_view() -> _SettingsView:
     return _state.view
 

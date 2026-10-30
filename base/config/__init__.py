@@ -368,14 +368,6 @@ def refresh_data_plane_settings() -> None:
     _lite.refresh_data_plane_settings()
 
 
-# meiva:note
-# The process-wide owner's launch facts: its machine token, launcher profile and
-# whether it serves the gateway. For a caller that has no `ConfigBoot` of its own yet
-# (`base.cluster.machine.ambient`).
-def launch_facts() -> LaunchFacts:
-    return _lite.process_launch_facts()
-
-
 # Private acceptance/test hook: the boot-lite state machine snapshot
 # ({mode, reason, upgrades, pending_count, prepared}).
 boot_state = _lite.boot_state

@@ -32,9 +32,10 @@ from base.cluster.machine import (
     accepted_digests,
     gateway_auth_headers,
 )
-from base.cluster.machine.ambient import gateway_access_from_settings
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import get_field, set_field, settings
+from base.config.tests.configuration import snapshot_process_config
 from base.daemon.http_transport import start_daemon_http
 from base.host.db_authority import api, delivery, ledger, model, unit
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
@@ -56,9 +57,9 @@ _ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
 # meiva:note
 # A test has no composition root, so it stands in for the ops daemon's root the way that root
 # does: `agent_ops/daemon.py` hands `ops_acceptance` the access it builds from its boot, and here
-# the fixture-patched process settings describe the same gateway and secret.
+# a boot built from the fixture-patched settings view describes the same gateway and secret.
 def _ops_access() -> GatewayAccess:
-    return gateway_access_from_settings()
+    return gateway_access_from_boot(snapshot_process_config())
 
 
 def _tokens(home: Path) -> model.GenerationSecret:

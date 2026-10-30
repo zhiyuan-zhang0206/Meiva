@@ -9,7 +9,6 @@ from dataclasses import dataclass, replace
 from itertools import pairwise
 
 from scripts.content_lint.code_comments.directives import (
-    ambient_call_lines,
     comment_kind,
     comment_text,
     link_target,
@@ -229,7 +228,6 @@ class Block:
 def _note_body(
     comments: list[tuple[int, int, str]],
     index: int,
-    ambient: frozenset[int],
     column: int,
     raw: list[str],
 ) -> tuple[list[str], int, int]:
@@ -243,7 +241,7 @@ def _note_body(
             or next_line != last + 1
             or note_header(next_text)
             or link_target(next_text) is not None
-            or comment_kind(next_text, next_line, ambient) != NoteKind.COMMENT
+            or comment_kind(next_text) != NoteKind.COMMENT
         ):
             break
         body.append(comment_text(next_text))
@@ -277,14 +275,13 @@ def _note_links(
 def _note_block(
     comments: list[tuple[int, int, str]],
     index: int,
-    ambient: frozenset[int],
     *,
     with_body: bool,
 ) -> tuple[Block, int]:
     line, column, text = comments[index]
     raw = [text]
     if with_body:
-        body, cursor, last = _note_body(comments, index, ambient, column, raw)
+        body, cursor, last = _note_body(comments, index, column, raw)
         seed: list[str] = []
     else:
         body, cursor, last = [], index + 1, line
@@ -297,17 +294,17 @@ def _note_block(
     return block, cursor
 
 
-def comment_blocks(comments: list[tuple[int, int, str]], ambient: frozenset[int]) -> list[Block]:
+def comment_blocks(comments: list[tuple[int, int, str]]) -> list[Block]:
     blocks: list[Block] = []
     index = 0
     while index < len(comments):
         line, column, text = comments[index]
         if note_header(text):
-            block, index = _note_block(comments, index, ambient, with_body=True)
+            block, index = _note_block(comments, index, with_body=True)
             blocks.append(block)
             continue
         if link_target(text) is not None:
-            block, index = _note_block(comments, index, ambient, with_body=False)
+            block, index = _note_block(comments, index, with_body=False)
             blocks.append(block)
             continue
         blocks.append(
@@ -315,7 +312,7 @@ def comment_blocks(comments: list[tuple[int, int, str]], ambient: frozenset[int]
                 line,
                 line,
                 column,
-                comment_kind(text, line, ambient),
+                comment_kind(text),
                 comment_text(text),
                 (),
                 text,
@@ -339,7 +336,6 @@ def parse_python(path: str, text: str) -> Source:
         )
         for note in collector.notes
     ]
-    ambient = ambient_call_lines(path, tree)
     comments: list[tuple[int, int, str]] = []
     for item in tokenize.generate_tokens(io.StringIO(text).readline):
         if item.type != tokenize.COMMENT:
@@ -349,7 +345,7 @@ def parse_python(path: str, text: str) -> Source:
         ):
             continue
         comments.append((item.start[0], item.start[1], item.string))
-    for block in comment_blocks(comments, ambient):
+    for block in comment_blocks(comments):
         machine = block.kind in {NoteKind.LINT_DIRECTIVE, NoteKind.MACHINE}
         standalone = not collector.lines[block.line - 1][: block.column].strip()
         anchor = block.end_line

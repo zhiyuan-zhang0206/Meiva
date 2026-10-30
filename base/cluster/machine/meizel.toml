@@ -1,8 +1,7 @@
-exports = ["ambient.py", "boot.py", "configured.py", "tests"]
+exports = ["boot.py", "configured.py", "tests"]
 
 [uses]
 "__init__.py" = ["gateway_access.py", "identity.py"]
-"ambient.py" = ["__init__.py"]
 "boot.py" = ["__init__.py"]
 "configured.py" = ["identity.py"]
 "tests" = ["__init__.py", "configured.py"]
@@ -13,9 +12,5 @@ exports = ["ambient.py", "boot.py", "configured.py", "tests"]
 "gateway_access.py" = "strict"
 "identity.py" = "strict"
 
-[debt.ambient-read]
-"ambient.py#settings base.config.settings" = 1
-
 [debt.impure-edge]
-"ambient.py#base/config/__init__.py" = 1
 "boot.py#base/config/__init__.py" = 1
