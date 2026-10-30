@@ -1,55 +1,27 @@
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { type ReactElement } from "react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TaskRow } from "@/lib/contracts/types";
-import type { TasksResult } from "@/lib/notifications/use-tasks";
-import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
+import type { TaskListResponse, TaskRow, UserSettingRow } from "@/lib/contracts/types";
 
 import { FORCE_DEFAULTS, FORCE_GROUPS, TASK_FORCE_GROUPS, type ForceGroup } from "../force-controls";
 import { STATUS_TO_LANE } from "../task-kanban";
 import { STATUS_FILL, TASK_LEGEND_ENTRIES } from "../presentation/task-palette";
 import { TASK_FORCE_KEY } from "../task-graph-chrome";
 import { TaskGraph } from "../task-graph";
-import { renderWithApi as render } from "@/test-support/render";
-import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
-beforeEach(() => {
-  resetTransport();
-  transport.getTask.mockImplementation((id: number) => getTask(id));
-});
-
+import { renderWithProviders } from "@/test-support/render";
 
 // meiva:note
-// The hover card reads its one row through TanStack Query, so the hover tests
-// wrap their render in a client; the other tests never mount the card.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-// meiva:note
-// Lower-case helper (not a component): the hover tests need the Query client the
-// card's one-row read runs in and the page's clock it ages its rows on; the rest
-// never mount the card.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-const wrapGraph = (ui: ReactElement) => (
-  <WallClockProvider wallNow={() => Date.now()}>
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-  </WallClockProvider>
-);
-
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
+// The one replacement left in this file: the board navigates through Next's router, which needs a
+// mounted app router. It leaves with the third-party-patch family.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
-
-const useTasks = vi.fn<(...args: string[]) => TasksResult>();
-vi.mock("@/lib/notifications/use-tasks", () => ({
-  useTasks: (...args: string[]) => useTasks(...args),
-}));
 
 function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
   return {
@@ -79,20 +51,63 @@ function sampleTasks(): TaskRow[] {
   ];
 }
 
-function ok(tasks: TaskRow[]): TasksResult {
-  return { tasks, loading: false, error: false };
+const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+
+// meiva:note
+// The one door this file renders through: the rows the gateway would return are answered on the
+// fake transport AND pre-seeded in the query cache, so the board paints them on the first frame and
+// its mount refetch agrees. Preferences come from the same settings cache the app fills, so a test
+// states the stored mode/toggles/window instead of replacing the hook that reads them.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function renderGraph(
+  tasks: readonly TaskRow[],
+  {
+    props,
+    settings,
+  }: {
+    props?: Partial<ComponentProps<typeof TaskGraph>>;
+    settings?: Record<string, unknown>;
+  } = {},
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  for (const window of TASK_WINDOWS) {
+    queryClient.setQueryData<TaskListResponse>(["tasks", "graph", window], { tasks });
+  }
+  transport.getTasks.mockResolvedValue({ tasks });
+  // meiva:note
+  // The fake gateway's settings surface: a read returns what the test stated and a write is stored
+  // there, so the hook's optimistic update is reconciled by a fetch that agrees with it — the round
+  // trip the app makes. Without it a clicked toggle rolls back on the failed refetch.
+  const stored = new Map<string, unknown>(Object.entries(settings ?? {}));
+  const row = (key: string, value: unknown): UserSettingRow => ({
+    key,
+    value,
+    updated_at: "2026-01-01T00:00:00Z",
+  });
+  transport.getSettings.mockImplementation(() =>
+    Promise.resolve({ settings: [...stored].map(([key, value]) => row(key, value)) }),
+  );
+  transport.putSetting.mockImplementation((key: string, value: unknown) => {
+    stored.set(key, value);
+    return Promise.resolve(row(key, value));
+  });
+  return renderWithProviders(
+    <TaskGraph
+      selectedAgentId={null}
+      onSelectAgent={vi.fn()}
+      selectedTaskId={null}
+      onSelectTask={vi.fn()}
+      {...props}
+    />,
+    { queryClient, settings, wallNow: () => Date.now() },
+  );
 }
 
 beforeEach(() => {
-  queryClient.clear();
-  useTasks.mockReset();
+  resetTransport();
   getTask.mockReset();
   getTask.mockResolvedValue(task(0));
-  // meiva:note
-  // Reset persisted graph/kanban mode + toggle state (now DB-backed user
-  // settings) so a previous test's mode switch or toggle doesn't leak.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-  resetMockSettings();
+  transport.getTask.mockImplementation((id: number) => getTask(id));
 });
 
 afterEach(cleanup);
@@ -104,16 +119,16 @@ it("maps each task status into its Kanban lane", () => {
 });
 
 describe("TaskGraph (graph mode)", () => {
-  it("uses full rows so graph and kanban retain task text", () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+  it("uses full rows so graph and kanban retain task text", async () => {
+    renderGraph(sampleTasks());
 
-    expect(useTasks.mock.calls[0]?.slice(0, 2)).toEqual(["24h", "graph"]);
+    await waitFor(() =>
+      expect(transport.getTasks).toHaveBeenCalledWith({ window: "24h", fields: "graph" }),
+    );
   });
 
   it("legend lists only the categories the canvas renders", () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
 
     const legend = screen.getByLabelText("Task graph legend");
     expect(legend.textContent).toContain("In progress");
@@ -136,8 +151,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("renders the root violet, active tasks slate — and no toggle-hidden category by default", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(document.querySelectorAll("rect.text-violet-500").length).toBe(1);
@@ -147,8 +161,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("renders only in-progress cards by default", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.getAllByText(/#3/).length).toBeGreaterThan(0);
@@ -158,8 +171,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("has no swimlane band labels in graph mode", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     for (const lane of ["Backlog", "In progress", "Done"]) {
@@ -170,16 +182,14 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("shows Graph/Kanban mode toggle", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.getByText("Kanban")).toBeTruthy();
     expect(screen.getByText("Graph")).toBeTruthy();
   });
 
   it("switches to Kanban mode and shows only visible columns", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     fireEvent.click(screen.getByText("Kanban"));
@@ -194,8 +204,7 @@ describe("TaskGraph (graph mode)", () => {
       task(2, { title: "child", status: "in_progress", parent_id: 1 }),
       task(3, { title: "done-child", status: "done", parent_id: 1 }),
     ];
-    useTasks.mockReturnValue(ok(tasks));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(tasks);
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     fireEvent.click(screen.getByText("Kanban"));
@@ -206,8 +215,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("shows Done tasks when the Done toggle is clicked (graph mode)", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText(/#4/)).toBeNull();
@@ -217,8 +225,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("shows Canceled tasks when the Canceled toggle is clicked (graph mode)", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    renderGraph(sampleTasks());
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText(/#5/)).toBeNull();
@@ -229,8 +236,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("selects a card on single click", async () => {
     const onSelect = vi.fn();
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={onSelect} />);
+    renderGraph(sampleTasks(), { props: { onSelectTask: onSelect } });
 
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const text = texts[0];
@@ -242,8 +248,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("clicking an already-selected card is a no-op (does not deselect)", async () => {
     const onSelect = vi.fn();
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={2} onSelectTask={onSelect} />);
+    renderGraph(sampleTasks(), { props: { selectedTaskId: 2, onSelectTask: onSelect } });
 
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const text = texts[0];
@@ -253,42 +258,24 @@ describe("TaskGraph (graph mode)", () => {
 
   it("propagates the owner of an externally selected task (route jump, task #2909)", async () => {
     const onSelectAgent = vi.fn();
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
-      ]),
-    );
-    render(
-      <TaskGraph
-        selectedAgentId={null}
-        onSelectAgent={onSelectAgent}
-        selectedTaskId={2}
-        onSelectTask={vi.fn()}
-      />,
-    );
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "in_progress" }),
+      task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+    ];
+    renderGraph(tasks, { props: { onSelectAgent, selectedTaskId: 2 } });
 
     await waitFor(() => expect(onSelectAgent).toHaveBeenCalledWith(7));
   });
 
   it("does not re-propagate the owner when the agent is already selected", async () => {
     const onSelectAgent = vi.fn();
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
-      ]),
-    );
-    render(
-      <TaskGraph
-        selectedAgentId={7}
-        onSelectAgent={onSelectAgent}
-        selectedTaskId={2}
-        onSelectTask={vi.fn()}
-      />,
-    );
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "in_progress" }),
+      task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+    ];
+    renderGraph(tasks, { props: { selectedAgentId: 7, onSelectAgent, selectedTaskId: 2 } });
 
-    await waitFor(() => expect(useTasks).toHaveBeenCalled());
+    await waitFor(() => expect(transport.getTasks).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(onSelectAgent).not.toHaveBeenCalled();
   });
@@ -330,32 +317,25 @@ describe("TaskGraph layout controls", () => {
   });
 
   it("square size follows the single Size setting (own key, ruling 2026-08-10 #1127)", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rect = container.querySelector("svg[role='img'] rect")!;
     expect(rect.getAttribute("width")).toBe("36");
 
     cleanup();
-    resetMockSettings({
-      "display.task_force_params.v2": { ...FORCE_DEFAULTS, nodeSizeMin: 36 },
+    // meiva:note
+    // The second render states the stored tuning as a setting value: the sliders read it through the
+    // settings cache, so no module is replaced to change one number.
+    const { container: c2 } = renderGraph(sampleTasks(), {
+      settings: { "display.task_force_params.v2": { ...FORCE_DEFAULTS, nodeSizeMin: 36 } },
     });
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container: c2 } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rect2 = c2.querySelector("svg[role='img'] rect")!;
     expect(rect2.getAttribute("width")).toBe("72");
   });
 
   it("task nodes are uniform size regardless of subtree size (user ruling 2026-08-09 #1070)", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
-    );
+    const { container } = renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rects = [...container.querySelectorAll("svg[role='img'] rect")];
     expect(rects.length).toBeGreaterThanOrEqual(3);
@@ -365,8 +345,7 @@ describe("TaskGraph layout controls", () => {
   });
 
   it("insets the layout gear from the canvas edge", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const wrapper = screen.getByLabelText("Graph layout settings").parentElement!;
     expect([...wrapper.classList]).toEqual(expect.arrayContaining(["absolute", "left-3", "top-3"]));
@@ -375,8 +354,7 @@ describe("TaskGraph layout controls", () => {
 describe("TaskGraph time filter (Task #1969)", () => {
 
   it("defaults to the 24h window", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const sel = screen.getByLabelText<HTMLSelectElement>("Time window");
     expect(sel.value).toBe("24h");
@@ -384,17 +362,16 @@ describe("TaskGraph time filter (Task #1969)", () => {
   });
 
   it("persists the window choice as a user setting", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    renderGraph(sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     fireEvent.change(screen.getByLabelText("Time window"), { target: { value: "30d" } });
-    expect(mockSetSettingCalls()).toContainEqual({ key: "display.task_window", value: "30d" });
+    await waitFor(() =>
+      expect(transport.putSetting).toHaveBeenCalledWith("display.task_window", "30d"),
+    );
   });
 
   it("falls back to 24h when the stored window is garbage", async () => {
-    resetMockSettings({ "display.task_window": "banana" });
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    renderGraph(sampleTasks(), { settings: { "display.task_window": "banana" } });
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.getByLabelText<HTMLSelectElement>("Time window").value).toBe("24h");
   });
@@ -405,8 +382,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
       task(1815, { title: "old-parent", status: "done", parent_id: 1, ghost: true }),
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
-    useTasks.mockReturnValue(ok(tasks));
-    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    renderGraph(tasks);
     await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
     const ghostG = screen.getAllByText(/#1815/)[0].closest("g")!;
     expect(ghostG.classList.contains("opacity-40")).toBe(true);
@@ -419,8 +395,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
       task(1815, { title: "old-parent", status: "done", parent_id: 1, ghost: true }),
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
-    useTasks.mockReturnValue(ok(tasks));
-    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    renderGraph(tasks);
     await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
     fireEvent.click(screen.getByText("Kanban"));
     await screen.findByText(/child/);
