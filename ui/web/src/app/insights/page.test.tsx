@@ -11,22 +11,33 @@ import { renderWithBrowser } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Stubs carry the section element ids (their bodies are covered by each
-// page's own test file) so the nav's sub-anchor jumps have a real target.
-vi.mock("@/app/insights/status/page", () => ({
-  default: () => (
+import { INSIGHTS_SECTIONS } from "@/app/control/sections";
+
+import { InsightsShell } from "./page";
+
+// meiva:note
+// The section bodies are stand-ins: the shell takes each one as a required prop. They carry the
+// section element ids (their bodies are covered by each page's own test file) so the nav's
+// sub-anchor jumps have a real target.
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+function StatusBody() {
+  return (
     <div id="status-services">
       STATUS_BODY
       <div id="status-gateway" />
     </div>
-  ),
-}));
-vi.mock("@/app/insights/ops/page", () => ({ default: () => <div id="ops-metrics">OPS_BODY</div> }));
-vi.mock("@/components/ops/alerts-section", () => ({ default: () => <div id="alerts-section">ALERTS_BODY</div> }));
+  );
+}
+function OpsBody() {
+  return <div id="ops-metrics">OPS_BODY</div>;
+}
+function AlertsBody() {
+  return <div id="alerts-section">ALERTS_BODY</div>;
+}
 
-import { INSIGHTS_SECTIONS } from "@/app/control/sections";
-
-import InsightsPage from "./page";
+function InsightsPage() {
+  return <InsightsShell Status={StatusBody} Ops={OpsBody} Alerts={AlertsBody} />;
+}
 
 afterEach(cleanup);
 
