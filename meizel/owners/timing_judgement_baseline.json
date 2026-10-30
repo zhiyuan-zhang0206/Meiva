@@ -247,6 +247,11 @@
       "comparison": "waited < N"
     },
     {
+      "path": "scripts/tests/test_test_selector.py",
+      "function": "test_real_repository_map_covers_the_tree_and_stays_fine_grained",
+      "comparison": "elapsed < N"
+    },
+    {
       "path": "services/agent_runner/agent_ops/tests/test_process_exit.py",
       "function": "test_a_wedged_arm_does_not_hold_the_process_exit",
       "comparison": "elapsed < N"
@@ -325,6 +330,21 @@
       "path": "services/redis_bridge/tests/test_relay_lifecycle.py",
       "function": "test_one_stop_budget_retains_blocked_dns_then_reaps_late_backend",
       "comparison": "time.monotonic() - before < N"
+    },
+    {
+      "path": "services/supervision/meiva_root/tests/test_meiva_root_stop_window.py",
+      "function": "test_force_kills_without_waiting_the_declared_window",
+      "comparison": "monotonic() - began < N"
+    },
+    {
+      "path": "services/supervision/meiva_root/tests/test_meiva_root_stop_window.py",
+      "function": "test_window_expiry_kills_once_and_reports_it",
+      "comparison": "monotonic() - began >= N"
+    },
+    {
+      "path": "services/supervision/meiva_root_glue/tests/test_diagnostic_work_ownership.py",
+      "function": "test_stop_keeps_an_admitted_report_in_its_worker_without_waiting_for_it",
+      "comparison": "monotonic() - started < N"
     },
     {
       "path": "services/supervision/roster/tests/test_service_graceful_stop.py",

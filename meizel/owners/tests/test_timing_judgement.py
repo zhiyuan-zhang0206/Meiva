@@ -39,6 +39,51 @@ def test_a_lower_bound_on_a_measured_duration_is_a_finding() -> None:
     assert len(_findings(src)) == 1
 
 
+# meiva:note
+# The same read imported by name: `from time import monotonic` is `time.monotonic()` with the owner
+# dropped, and it must be judged the same way — 2026-10-30, a 30 s settle deadline spelled this way
+# was invisible to the rule.
+def test_a_clock_imported_by_name_is_a_wall_clock() -> None:
+    src = (
+        "from time import monotonic\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    started = monotonic()\n"
+        "    assert monotonic() - started < 2.0\n"
+    )
+    assert len(_findings(src)) == 1
+
+
+def test_a_clock_imported_under_another_name_is_a_wall_clock() -> None:
+    src = (
+        "from time import monotonic as now\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    started = now()\n"
+        "    assert now() - started < 2.0\n"
+    )
+    assert len(_findings(src)) == 1
+
+
+# meiva:note
+# Negative controls for the import read: a name from `time` that is not a clock, and a local function
+# that merely shares a clock's name, are not judged.
+def test_a_name_imported_from_time_that_is_not_a_clock_is_ignored() -> None:
+    src = "from time import sleep\n\ndef test_wait() -> None:\n    sleep(0.1)\n    assert 1 == 1\n"
+    assert _findings(src) == []
+
+
+def test_a_local_function_named_like_a_clock_is_ignored() -> None:
+    src = (
+        "def monotonic() -> float:\n"
+        "    return 0.0\n"
+        "\n"
+        "def test_wait() -> None:\n"
+        "    assert monotonic() < 2.0\n"
+    )
+    assert _findings(src) == []
+
+
 def test_a_clock_read_inside_the_assert_is_a_finding() -> None:
     src = (
         "import time\n"
