@@ -11,8 +11,6 @@ beforeEach(() => {
   resetTransport();
 });
 
-
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 const props = {
   activeId: null,
   onSelect: vi.fn(),
@@ -63,7 +61,7 @@ describe("bounded agent archive", () => {
     transport.listAgents.mockImplementation(({ beforeId } = {}) => Promise.resolve(beforeId == null ? { agents: [row(10)], next_cursor: 10 } : { agents: [row(9)], next_cursor: null }));
     mount();
     await waitFor(() => expect(screen.getByText("#10")).toBeTruthy());
-    fireEvent.click(screen.getByText("archiveOlder"));
+    fireEvent.click(screen.getByText("Older"));
     await waitFor(() => expect(screen.getByText("#9")).toBeTruthy());
     expect(screen.queryByText("#10")).toBeNull();
     await waitFor(() => expect(client.getQueryCache().findAll({ queryKey: ["agent-directory"] })).toHaveLength(1));
@@ -80,7 +78,7 @@ describe("bounded agent archive", () => {
     });
     mount();
     await waitFor(() => expect(signal).toBeDefined());
-    fireEvent.change(screen.getByLabelText("archiveSearch"), { target: { value: "target" } });
+    fireEvent.change(screen.getByLabelText("Search agent history"), { target: { value: "target" } });
     await waitFor(() => expect(screen.getByText("#22")).toBeTruthy());
     expect(signal?.aborted).toBe(true);
     await act(async () => { finish({ agents: [row(99)], next_cursor: null }); await Promise.resolve(); });

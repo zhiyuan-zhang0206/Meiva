@@ -8,7 +8,6 @@ import type { ToUserDocument } from "@/lib/contracts/types";
 import { ApiError } from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 import { preloadChatMarkdown } from "@/components/content/markdown";
 import { BAR_DIVIDER_CLASS, BAR_MIN_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { ToUserDocumentView } from "./to-user-document";
@@ -123,7 +122,7 @@ describe("To user Markdown", () => {
   });
   it("shows migration guidance when only a legacy HTML document remains", () => {
     show({ content: null, version: null, modified_at: null, legacy_html: true });
-    expect(screen.getByText("legacyHtml")).toBeTruthy();
+    expect(screen.getByText("Awaiting Markdown.")).toBeTruthy();
   });
 });
 
@@ -163,13 +162,13 @@ describe("To user navigation history", () => {
   it("walks browser history from the panel's back control, falling back to the parent", () => {
     const { browser } = show(root(), { linked: nested() });
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
-    fireEvent.click(screen.getByRole("button", { name: "back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(browser.actions.backs).toBe(1);
 
     cleanup();
     const deep = fakeBrowser({ href: `http://fake.local/?agent_id=7&reference=${linkId}` });
     show(root(), { linked: nested(), browser: deep });
-    fireEvent.click(screen.getByRole("button", { name: "back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(deep.actions.backs).toBe(0);
     expect(chain(deep)).toEqual([]);
     expect(screen.getByRole("link", { name: "Details" })).toBeTruthy();
@@ -181,10 +180,10 @@ describe("To user document bar", () => {
     show(document("# Status", "2026-10-17T06:00:00Z"), { onInspect: vi.fn() });
     const status = screen.getByTestId("document-status");
     const bar = screen.getByTestId("document-bar");
-    expect(bar.firstElementChild?.getAttribute("aria-label")).toBe("home");
-    expect(screen.getByText("sharedContext").nextElementSibling).toBe(status);
-    expect(within(status).getByText("updated")).toBeTruthy();
-    expect(within(status).getByRole("button", { name: "refresh" })).toBeTruthy();
+    expect(bar.firstElementChild?.getAttribute("aria-label")).toBe("Home");
+    expect(screen.getByText("Shared context").nextElementSibling).toBe(status);
+    expect(within(status).getByText(/^Updated /)).toBeTruthy();
+    expect(within(status).getByRole("button", { name: "Refresh" })).toBeTruthy();
     const trigger = screen.getByTestId("open-inspector");
     expect(trigger.parentElement?.className).toContain("ml-auto");
     expect(bar.lastElementChild).toBe(trigger.parentElement);
@@ -197,11 +196,11 @@ describe("To user document bar", () => {
     // 2026-10-20), instead of a second close control inside the panel.
     // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
     show(document("# Status"), { onInspect: vi.fn(), inspecting: true });
-    expect(screen.getByText("title")).toBeTruthy();
-    expect(screen.queryByText("sharedContext")).toBeNull();
+    expect(screen.getByText("Inspector")).toBeTruthy();
+    expect(screen.queryByText("Shared context")).toBeNull();
     const trigger = screen.getByTestId("open-inspector");
     expect(trigger.getAttribute("aria-pressed")).toBe("true");
-    expect(trigger.getAttribute("aria-label")).toBe("closeInspector");
+    expect(trigger.getAttribute("aria-label")).toBe("Close inspector");
   });
 
   it("leaves only the mode's own controls in the bar while the inspector is on", () => {
@@ -243,7 +242,7 @@ describe("To user document bar", () => {
 
   it("labels the document section in the mobile reading view", () => {
     show(document("# Status"), { mobile: true });
-    expect(within(screen.getByTestId("document-bar")).getByText("sharedContext")).toBeTruthy();
+    expect(within(screen.getByTestId("document-bar")).getByText("Shared context")).toBeTruthy();
     expect(screen.getByTestId("document-status")).toBeTruthy();
   });
 });
@@ -298,8 +297,8 @@ describe("To user refusals", () => {
     });
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
     const refused = (await screen.findByTestId("document-failure")).textContent;
-    expect(refused).toContain("tooLarge");
-    expect(screen.getByRole("link", { name: "openRaw" }).getAttribute("href")).toContain(
+    expect(refused).toContain("too large to show here");
+    expect(screen.getByRole("link", { name: "Open the file itself" }).getAttribute("href")).toContain(
       `/api/agents/7/to-user/resource?reference=${linkId}`,
     );
 
@@ -311,7 +310,7 @@ describe("To user refusals", () => {
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
     const retryable = (await screen.findByTestId("document-failure")).textContent;
     expect(retryable).toContain("unavailable");
-    expect(retryable).not.toContain("tooLarge");
-    expect(screen.queryByRole("link", { name: "openRaw" })).toBeNull();
+    expect(retryable).not.toContain("too large to show here");
+    expect(screen.queryByRole("link", { name: "Open the file itself" })).toBeNull();
   });
 });
