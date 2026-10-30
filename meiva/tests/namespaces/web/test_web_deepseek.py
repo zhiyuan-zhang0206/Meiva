@@ -16,13 +16,11 @@ from pydantic import SecretStr
 
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from meiva.tests.namespaces.web._web_helpers import Received, Reply, WebHarness
+from meiva.tests.namespaces.web._web_helpers import WAITED_ATTEMPTS, Received, Reply, WebHarness
 from meiva.tests.namespaces.web._web_helpers import loopback as loopback
 from meiva.tests.namespaces.web._web_helpers import web_harness as web_harness
 from meiva.web import FetchError, SearchError, wiring
 from meiva.web.deps import ReaderProvider, SearchProvider, reader_provider, search_provider
-
-pytestmark = pytest.mark.usefixtures("retry_waits")
 
 _RATE_LIMITED = b'{"error": {"message": "rate limited"}}'
 
@@ -128,11 +126,15 @@ def test_transient_429_is_retried(web_harness: WebHarness) -> None:
 def test_persistent_429_exhausts_the_retry_budget(web_harness: WebHarness) -> None:
     _use_deepseek_search(web_harness)
     web_harness.loopback.answer(_RATE_LIMITED, status=429)
+    waited_before = len(WAITED_ATTEMPTS)
 
     with pytest.raises(SearchError, match="429"):
         web_harness.search(["q"])
 
     assert len(web_harness.loopback.received) == 3
+    # meiva:note
+    # The reads ran on the policy the harness handed them, so their waits are that policy's zero.
+    assert WAITED_ATTEMPTS[waited_before:] == [0, 1]
 
 
 # meiva:note

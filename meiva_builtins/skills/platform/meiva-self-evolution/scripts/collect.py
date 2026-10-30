@@ -28,7 +28,7 @@ import contextlib
 import json
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -84,7 +84,7 @@ from window_records import (
 
 from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
-from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
+from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry, retry_sleep
 from base.telemetry.audit_events import SkillInvokedPayload
 
 _HTTP_TIMEOUT_S = 120.0
@@ -155,7 +155,12 @@ _EVENTS_RETRY_POLICY = Policy(
 
 
 def _events_page(
-    client: httpx.Client, url: str, headers: dict[str, str], params: dict[str, str | int]
+    client: httpx.Client,
+    url: str,
+    headers: dict[str, str],
+    params: dict[str, str | int],
+    *,
+    sleep: Callable[[float], None] = retry_sleep,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """One /api/events page (offset always 0). Returns (items, meta).
 
@@ -170,7 +175,7 @@ def _events_page(
         payload = resp.json()
         return payload.get("items", []), payload.get("meta", {})
 
-    return retry(_EVENTS_RETRY_POLICY)(fetch)
+    return retry(_EVENTS_RETRY_POLICY, sleep=sleep)(fetch)
 
 
 # meiva:note
@@ -182,6 +187,7 @@ def fetch_events_window(
     *,
     gateway: GatewayAccess,
     agent_id: int | None = None,
+    sleep: Callable[[float], None] = retry_sleep,
 ) -> list[Mapping[str, object]]:
     url = gateway_api_base(gateway.gateway_url) + _EVENTS_PATH
     headers = gateway_auth_headers(gateway)
@@ -193,7 +199,11 @@ def fetch_events_window(
             if start >= end:
                 return
             batch, meta = _events_page(
-                client, url, headers, page_params(category, start, end, agent_id)
+                client,
+                url,
+                headers,
+                page_params(category, start, end, agent_id),
+                sleep=sleep,
             )
             step = slice_step(batch, meta, start, end)
             if isinstance(step, Take):

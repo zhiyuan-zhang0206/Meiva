@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperError
 from services.desktop.computer.mcp_wrapper import Link, ReconnectingSocketLink
@@ -143,7 +144,6 @@ async def test_request_preserves_unknown_delivery_error(fail_stage: str) -> None
 _SOCK = "/nonexistent-wrapper-test.sock"
 
 
-@pytest.mark.usefixtures("retry_waits")
 async def test_reconnecting_link_redials_on_connection_error() -> None:
     attempts = 0
     writer = FakeWriter()
@@ -167,7 +167,6 @@ async def test_reconnecting_link_redials_on_connection_error() -> None:
     assert len(writer.written) == 1
 
 
-@pytest.mark.usefixtures("retry_waits")
 async def test_reconnecting_link_never_retries_delivered_call() -> None:
     """A request whose response never arrives may have executed on the desktop —
     retrying could double-click. The error surfaces and the link reconnects."""
@@ -198,7 +197,6 @@ async def test_reconnecting_link_never_retries_delivered_call() -> None:
     assert attempts == 2
 
 
-@pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("fail_stage", ["write", "drain"])
 async def test_reconnecting_link_does_not_retry_write_or_drain_failure(fail_stage: str) -> None:
     attempts = 0
@@ -303,45 +301,42 @@ async def test_the_reconnecting_link_dials_the_socket_it_is_given() -> None:
 # The computer MCP daemon uses this helper; pin its nested connection budgets here.
 
 
-def test_connect_exhaustion_closes_every_socket_without_trailing_sleep(
-    retry_waits: list[float],
-) -> None:
+def test_connect_exhaustion_closes_every_socket_without_trailing_sleep() -> None:
+    timers = ManualTimers()
     d, absent, cleanup = short_sock_dir()
     try:
         with pytest.raises(PermissionsHelperError) as error:
-            client.connect(str(absent))
+            client.connect(str(absent), sleep=timers.sleep)
         assert f"permissions helper not reachable at {absent}:" in str(error.value)
         assert error.value.__context__ is None
-        assert retry_waits == [0.2] * 4
+        assert timers.sleeps == [0.2] * 4
     finally:
         cleanup(d)
 
 
-def test_helper_connect_non_retryable_error_passes_through(
-    retry_waits: list[float],
-) -> None:
+def test_helper_connect_non_retryable_error_passes_through() -> None:
+    timers = ManualTimers()
     d, _, cleanup = short_sock_dir()
     locked = d / "locked"
     locked.mkdir(mode=0o700)
     locked.chmod(0o000)
     try:
         with pytest.raises(PermissionError):
-            client.connect(str(locked / "test.sock"))
+            client.connect(str(locked / "test.sock"), sleep=timers.sleep)
     finally:
         locked.chmod(0o700)
         cleanup(d)
-    assert retry_waits == []
+    assert timers.sleeps == []
 
 
-def test_helper_unclassified_connect_failure_is_not_retried(
-    retry_waits: list[float],
-) -> None:
+def test_helper_unclassified_connect_failure_is_not_retried() -> None:
+    timers = ManualTimers()
     d, _, cleanup = short_sock_dir()
     try:
         not_a_dir = d / "regular-file"
         not_a_dir.write_text("x")
         with pytest.raises(PermissionsHelperError, match="not reachable"):
-            client.connect(str(not_a_dir / "test.sock"))
-        assert retry_waits == []
+            client.connect(str(not_a_dir / "test.sock"), sleep=timers.sleep)
+        assert timers.sleeps == []
     finally:
         cleanup(d)

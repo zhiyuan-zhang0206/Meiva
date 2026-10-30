@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane import runtime_binaries as rb
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
@@ -59,82 +60,90 @@ def _opener_for(
     return opener
 
 
-def test_download_retries_transient_answers_then_succeeds(
-    retry_waits: list[float],
-) -> None:
+def test_download_retries_transient_answers_then_succeeds() -> None:
     """429/5xx from the mirror and socket-level failures back off and retry; the
     sha256 pin makes the eventual bytes trustworthy regardless of which attempt won."""
+    timers = ManualTimers()
     opener = _opener_for(
         _http_error(429),
         _http_error(503),
         urllib.error.URLError("reset"),
         Answer(body=b"jar"),
     )
-    assert rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener) == b"jar"
+    assert (
+        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener, sleep=timers.sleep)
+        == b"jar"
+    )
     assert len(opener.urls) == 4
-    assert retry_waits == [2, 4, 8]
+    assert timers.sleeps == [2, 4, 8]
 
 
 @pytest.mark.parametrize("status", [403, 404, 429, 500, 502, 503, 504])
-def test_download_retries_transient_http_then_succeeds(
-    retry_waits: list[float], status: int
-) -> None:
+def test_download_retries_transient_http_then_succeeds(status: int) -> None:
+    timers = ManualTimers()
     opener = _opener_for(_http_error(status), Answer(body=b"jar"))
-    assert rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener) == b"jar"
+    assert (
+        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener, sleep=timers.sleep)
+        == b"jar"
+    )
     assert len(opener.urls) == 2
-    assert retry_waits == [2]
+    assert timers.sleeps == [2]
 
 
-def test_download_ignores_retry_after(
-    retry_waits: list[float],
-) -> None:
+def test_download_ignores_retry_after() -> None:
+    timers = ManualTimers()
     error = _http_error(429)
     error.headers["Retry-After"] = "60"
     opener = _opener_for(error, Answer(body=b"jar"))
-    assert rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener) == b"jar"
-    assert retry_waits == [2]
+    assert (
+        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener, sleep=timers.sleep)
+        == b"jar"
+    )
+    assert timers.sleeps == [2]
 
 
 @pytest.mark.parametrize("status", [400, 401])
 def test_download_fails_fast_on_a_permanent_http_answer(
-    retry_waits: list[float],
     status: int,
 ) -> None:
     """A non-transient 4xx (bad request) fails without retry."""
+    timers = ManualTimers()
     error = _http_error(status)
     opener = _opener_for(error)
     with pytest.raises(RuntimeError) as caught:
-        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener)
+        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener, sleep=timers.sleep)
     assert (
         str(caught.value)
         == f"failed to download vendored Postgres from https://repo1.invalid/x.jar: {error}"
     )
     assert caught.value.__cause__ is error
     assert len(opener.urls) == 1
-    assert retry_waits == []
+    assert timers.sleeps == []
 
 
 @pytest.mark.parametrize("status", [403, 404, 429])
-def test_download_gives_up_after_bounded_retries(retry_waits: list[float], status: int) -> None:
+def test_download_gives_up_after_bounded_retries(status: int) -> None:
+    timers = ManualTimers()
     opener = _opener_for(*([_http_error(status)] * rb.DOWNLOAD_ATTEMPTS))
     with pytest.raises(RuntimeError, match=str(status)):
-        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener)
+        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener, sleep=timers.sleep)
     assert len(opener.urls) == rb.DOWNLOAD_ATTEMPTS
-    assert retry_waits == [2, 4, 8]
+    assert timers.sleeps == [2, 4, 8]
 
 
 def test_download_preserves_transient_warning_and_final_error(
-    retry_waits: list[float], loguru_records: LogRecords
+    loguru_records: LogRecords,
 ) -> None:
+    timers = ManualTimers()
     url = "https://repo1.invalid/x.jar"
     errors = [urllib.error.URLError(f"reset {i}") for i in range(1, 5)]
     opener = _opener_for(*errors)
 
     with pytest.raises(RuntimeError) as caught:
-        rb.download_with_opener(url, open_url=opener)
+        rb.download_with_opener(url, open_url=opener, sleep=timers.sleep)
 
     assert opener.urls == [url] * 4
-    assert retry_waits == [2, 4, 8]
+    assert timers.sleeps == [2, 4, 8]
     assert loguru_records.messages("WARNING") == [
         f"[runtime] transient error fetching {url} (<urlopen error reset {i}>); "
         f"retry {i}/3 in {2**i}s"
