@@ -21,7 +21,7 @@ from pathlib import Path
 # web-sources skill (not an importable package; PYTHONSAFEPATH=1 keeps a script's own directory
 # off sys.path). Structure Rule 6 recognizes this exact __file__-derived, within-skill shape as
 # the endorsed guard.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
 from webscrape import main
 
