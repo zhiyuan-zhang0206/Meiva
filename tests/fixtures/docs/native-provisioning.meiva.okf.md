@@ -24,7 +24,10 @@ exemptions belong to that audit. `cluster_defaults_unset` snapshots and restores
 the seeded default instead of truncating it.
 
 Before database cleanup, the telemetry barrier drains both its queued and held
-batch. TRUNCATE keeps sequences advancing: a late writer then targets a dead ID,
+batch. Quiescing reads each sink through `loaded_attribute`: `sys.modules.get`
+returns a module another thread may still be executing, whose attributes are not
+there yet, and a module that has not finished importing has created no sink to
+close (task #5860). TRUNCATE keeps sequences advancing: a late writer then targets a dead ID,
 not the next test's reused ID. Conflicting relation locks can require a bounded
 deadlock retry. The test database owner disables append-only triggers only for
 that cleanup transaction. Redis consumers flush only their admitted instance.
