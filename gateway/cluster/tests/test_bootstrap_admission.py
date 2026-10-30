@@ -95,7 +95,7 @@ def gateway_client(
         placeholder_config(),
         cluster_secret=_SECRET,
         memory_root=gateway_home / "memory",
-        upload_home=gateway_home,
+        user_home=gateway_home,
     )
     app.include_router(router)
     with TestClient(app) as client:

@@ -85,7 +85,7 @@ def ops(
             home=unit_home,
             receiver=ReceiverConfig(
                 unit=UnitIdentity(machine=machine_identity.name(), home=str(unit_home.resolve())),
-                user_home=unit_home / "user",
+                upload_dir_name="uploads",
                 access=GatewayAccess(
                     gateway_url="http://127.0.0.1:1",
                     cluster_secret="ops-test-secret",  # noqa: S106

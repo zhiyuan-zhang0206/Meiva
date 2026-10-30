@@ -29,13 +29,14 @@ and the `otel_collector_*` paths) derives a path from the home it is handed: it 
 environment and creates nothing, so a test hands in `tmp_path` and the process that binds a
 socket, takes a lock or writes a file creates the directory.
 
-The nine helpers that make a directory or sit on the home itself (`plugins_dir`, `logs_dir`,
+The ten helpers that make a directory or sit on the home itself (`plugins_dir`, `logs_dir`,
 `permissions_helper_app_dir`, `memory_dir`, `gateway_memory_dir`, `workspaces_root`,
-`workspace_dir`, `harness_sessions_dir`, `harness_registrations_dir`) take a required **keyword
-form** `H(*, home)`: the absolute home is created owner-only (0700, as `meiva_home()` creates the
+`workspace_dir`, `uploads_dir`, `harness_sessions_dir`, `harness_registrations_dir`) take a
+required **keyword form** `H(*, home)`: the absolute home is created owner-only (0700, as `meiva_home()` creates the
 ambient one) and the helper derives from it, reading no environment; a relative home is refused,
-and a call without `home=` is a `TypeError`. `workspace_dir`, `plugins_dir` and `logs_dir` also
-create their own directory. `workspace_path(home, agent_id)` is the pure form of the workspace
+and a call without `home=` is a `TypeError`. `workspace_dir`, `plugins_dir`, `logs_dir` and
+`uploads_dir` also create their own directory (`uploads_dir` is the staging root the gateway
+receives uploads into; `uploads_path` is its pure form). `workspace_path(home, agent_id)` is the pure form of the workspace
 derivation, for a reader of another agent's workspace.
 
 `base/paths/expand.py` owns what a leading `~` in a path a person typed means: `expand_home(path,
@@ -63,7 +64,8 @@ $MEIVA_HOME/
 ├── backups/db/                 # daily pg_dump --format=custom, UTC-stamped, newest 7 kept
 ├── backups/env/                # .env snapshot taken before each config write
 ├── memory/                     # the memory pool git repo
-├── workspaces/<agent_id>/      # per-agent working dir
+├── workspaces/<agent_id>/      # per-agent working dir (delivered uploads land here)
+├── uploads/<agent_id>/         # gateway staging of received upload bytes (never the agent's copy)
 ├── chrome-profile/             # the shared headed Chrome's dedicated profile
 ├── plugins_config.json         # per-machine plugin enable state
 ├── installed.json              # install registry (skills / plugins / MCP packages)

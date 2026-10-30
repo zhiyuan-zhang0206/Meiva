@@ -56,11 +56,11 @@ def _spawn_agent() -> int:
 # meiva:note
 # A gateway whose uploads live under `home` and whose upload limits are `limits`.
 def _upload_client(home: Path, **limits: int) -> AbstractContextManager[GatewayTestClient]:
-    return gateway_test_client(config=gateway_test_config(upload_home=home, **limits))
+    return gateway_test_client(config=gateway_test_config(upload_staging_root=home, **limits))
 
 
 def _agent_dir(home: Path, agent_id: int) -> Path:
-    return home / "Downloads" / f"MeivaAgent-{agent_id}"
+    return home / str(agent_id)
 
 
 def _stored_files(directory: Path) -> list[Path]:

@@ -1,17 +1,22 @@
-"""Shared helpers for agent file uploads.
-
-An uploaded file for agent N lives at ``~/Downloads/MeivaAgent-N/<name>`` and is
-addressed over HTTP as ``/api/agents/N/uploads/<name>``. Three call sites must
-agree on that mapping: the gateway upload endpoint (writes the file + serves it
-back), the gateway message endpoint (validates that an image referenced in a
-multimodal message really is one of this agent's uploads), and the agent claim
-node (reads image uploads to inline them as native model content). Centralizing
-the path <-> url mapping keeps those three in lockstep.
-
-Path resolution is traversal-safe: `resolve_upload_path` refuses any name that
-escapes the agent's upload directory, so a crafted url / filename cannot reach
-an arbitrary file.
-"""
+# meiva:note
+# Shared helpers for agent file uploads. An upload moves through two directories, and the
+# difference is the point:
+#
+# - the staging directory (`<MEIVA_HOME>/uploads/<agent_id>`, overridable) is where the gateway
+#   writes the raw bytes it received and serves them back from;
+# - the delivered directory (`<MEIVA_HOME>/workspaces/<agent_id>/<name>`) is on the machine that
+#   runs the agent, inside that agent's own workspace — the place the agent can read.
+#
+# The staging root is the same on every gateway; the delivered root is the target machine's own
+# home (`UnitIdentity.home`), so a copy that crosses machines lands in the receiver's workspace,
+# not in a directory on the sender. Silent native-image uploads
+# (`/api/agents/N/uploads/<name>`) stay in staging: the claim node fetches them over HTTP instead
+# of reading the gateway's disk, so they have no delivered copy.
+#
+# Three call sites must agree on the mapping: the gateway upload endpoint (writes and serves), the
+# gateway message endpoint (validates a referenced image is this agent's), and the claim node
+# (fetches an upload to inline it). Centralizing the path <-> url mapping keeps those three in
+# lockstep.
 
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ from pathlib import Path
 from typing import Protocol
 
 from base.agents.messages.inbound_images import image_mime_for
+from base.paths import workspace_path
 from base.paths.private_dir import ensure_private_dir
 
 
@@ -35,9 +41,18 @@ class UploadClient(Protocol):
     def get(self, url: str, *, timeout: float) -> UploadResponse: ...
 
 
-def agent_upload_dir(agent_id: int, *, home: Path, create: bool = True) -> Path:
-    """Directory holding agent uploads; receipt lookup can omit filesystem creation."""
-    directory = home / "Downloads" / f"MeivaAgent-{agent_id}"
+def agent_upload_dir(agent_id: int, *, root: Path, create: bool = True) -> Path:
+    directory = root / str(agent_id)
+    return ensure_private_dir(directory) if create else directory
+
+
+# meiva:note
+# The delivered copy lives in the agent's own workspace, derived from the home of the
+# machine that runs it (`UnitIdentity.home`), never from the sender's. `workspace_path` is
+# the pure derivation there; this function only adds the per-cluster directory name the
+# upload owner is configured with.
+def delivered_upload_dir(agent_id: int, *, home: Path, name: str, create: bool = True) -> Path:
+    directory = workspace_path(home, agent_id) / name
     return ensure_private_dir(directory) if create else directory
 
 
@@ -51,17 +66,15 @@ def upload_url(agent_id: int, name: str) -> str:
     return f"/api/agents/{agent_id}/uploads/{name}"
 
 
-def resolve_upload_path(agent_id: int, name: str, *, home: Path) -> Path:
-    """Resolve an upload name to its on-disk path, guarding against traversal.
-
-    Raises:
-        ValueError: `name` escapes the agent's upload directory (``..`` / an
-            absolute path / a separator that survived).
-    """
-    base = agent_upload_dir(agent_id, home=home).resolve()
+# meiva:note
+# Traversal-safe resolution of an upload name inside one directory: a name that escapes it
+# (`..`, an absolute path, a separator that survived) raises `ValueError`, so a crafted url or
+# filename cannot reach an arbitrary file.
+def resolve_upload_path(directory: Path, name: str) -> Path:
+    base = directory.resolve()
     target = (base / name).resolve()
     if target == base or not target.is_relative_to(base):
-        raise ValueError(f"upload name {name!r} escapes agent {agent_id} upload dir")
+        raise ValueError(f"upload name {name!r} escapes the upload directory {base}")
     return target
 
 

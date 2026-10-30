@@ -51,12 +51,19 @@ replaces it with its own backoff, and a worker that dies mid-copy delays only th
 by one window.
 Source placement is checked before copy and again under locks before inbound.
 
-The worker takes its two environment facts as values from the lifespan: the claim window
-and the account `home` under which the same-unit shortcut verifies the source objects
-(`GatewayConfig.upload_home`, read once by the root). What a failed copy means (held for
-good, or retried under backoff) is the pure verdict of `failure_plan.py`; the worker only
-records it. `GatewayConfig.upload_recovery_enabled` turns the background loop off for a test
-that drives the rounds itself.
+The worker takes its one environment fact as a value from the lifespan: the claim window.
+It reads no home of its own, because every delivery is the receiver's copy: the staging
+directory the source published into is this unit's internal state, not the agent's
+workspace, so even a batch that stays on one machine goes through `upload-receive-v1`.
+The receiving unit derives the delivered directory from its own home
+(`GatewayConfig.upload_staging_root` names the source side;
+`gateway.upload_dir_name` = `MEIVA_UPLOAD_DIR_NAME` names the delivered directory inside
+`<MEIVA_HOME>/workspaces/<agent id>`). What a failed copy means (held for good, or retried
+under backoff) is the pure verdict of `failure_plan.py`; the worker only records it. `GatewayConfig.upload_recovery_enabled` turns the background loop off for a test
+that drives the rounds itself. With no shortcut there is no path that skips the receiver:
+a gateway whose own machine runs no Ops daemon holds every delivery after the retry
+budget, and the staged bytes stay in staging so a person's re-upload of the same files
+finds them.
 
 The independently known Ops kind `upload-receive-v1` requires explicit integer
 protocol 1 (missing/bool/float/unknown refused), exact target unit and strict
@@ -71,8 +78,10 @@ copy. Conflicting finals never get replaced. Missing ready objects require quota
 reservation again before fill; wrong home, different manifest, source unavailable
 or incompatible protocol cannot become a usable copy proof. Native readiness
 requires the supported version, unit, manifest digest and absolute batch namespace.
-A same-unit shortcut also verifies actual source objects; machine name alone is
-insufficient. No promise survives operator deletion of irreplaceable bytes.
+There is no same-unit shortcut: a copy that never leaves the machine is verified,
+quota-reserved and published create-only exactly like a remote one, so its storage is
+accounted in the agent's workspace. No promise survives operator deletion of
+irreplaceable bytes.
 
 ## One inbound and honest status
 

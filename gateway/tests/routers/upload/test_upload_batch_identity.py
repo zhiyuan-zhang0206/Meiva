@@ -41,7 +41,7 @@ def _post(
 def uploaded_agent(
     db_conn: psycopg.Connection, gateway_local_runner: RunnerOps, tmp_path: Path
 ) -> Iterator[tuple[GatewayTestClient, int]]:
-    with gateway_test_client(config=gateway_test_config(upload_home=tmp_path)) as client:
+    with gateway_test_client(config=gateway_test_config(upload_staging_root=tmp_path)) as client:
         agent = spawn_via_http(client, {}).json()["id"]
         yield client, agent
 

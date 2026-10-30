@@ -24,9 +24,7 @@ from base.agents.upload_delivery.models import (
     ReceiveRequest,
     UploadDeliveryConflictError,
 )
-from base.agents.upload_delivery.paths import (
-    agent_upload_dir,
-)
+from base.agents.upload_delivery.paths import delivered_upload_dir
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
@@ -47,15 +45,15 @@ __all__ = ["ReceiverConfig", "copy_batch"]
 # meiva:note
 # Everything a receiver reads from its environment, read once by its caller.
 #
-# `unit` is this receiver's native machine and resolved `MEIVA_HOME`; `user_home` is the OS
-# user's home, under which `Downloads/MeivaAgent-N` lives independently of `MEIVA_HOME`;
+# `unit` is this receiver's native machine and resolved `MEIVA_HOME`, and the delivered copy
+# lands in the agent's own workspace under it (`<unit.home>/workspaces/<agent_id>/<name>`);
 # `access` reaches the gateway; the quota is what one agent may hold on the native root. The
 # network round of one batch is bounded by `fetch_round_s`, and a single request by
 # `fetch_request_cap_s`.
 @dataclass(frozen=True)
 class ReceiverConfig:
     unit: UnitIdentity
-    user_home: Path
+    upload_dir_name: str
     access: GatewayAccess
     quota_bytes: int
     quota_files: int
@@ -75,8 +73,15 @@ def copy_batch(
     if request.target != config.unit:
         raise UploadDeliveryConflictError("copy targets a different native machine/home")
     manifest = request.manifest
-    directory = agent_upload_dir(manifest.agent_id, create=False, home=config.user_home).resolve()
-    _reserve(pool, request, config, directory)
+    directory = delivered_upload_dir(
+        manifest.agent_id, home=Path(config.unit.home), name=config.upload_dir_name
+    )
+    # meiva:note
+    # Two forms of one directory, each with an owner: the reservation and the quota inventory key
+    # on the resolved path (a symlinked home is the same storage, and `storage.check_quota` looks
+    # rows up resolved), while the proof keeps the lexical path under the unit's own home, because
+    # the gateway checks that prefix against the home it froze for this batch.
+    _reserve(pool, request, config, directory.resolve())
     contents = _gather(manifest, directory, config)
     storage.publish(directory, manifest, contents)
     storage.verify_all(directory, manifest)

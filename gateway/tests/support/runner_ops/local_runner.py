@@ -98,11 +98,12 @@ class _Daemon:
 
 # meiva:note
 # The upload receiver of a stack whose tests never receive an upload: its gateway is a closed local
-# port, so a request that did reach it would fail loudly.
+# port, so a request that did reach it would fail loudly, and the delivered-directory name is the
+# configured default nobody reads.
 def _unreachable_receiver(machine: str, home: Path) -> ReceiverConfig:
     return ReceiverConfig(
         unit=UnitIdentity(machine=machine, home=str(home.resolve())),
-        user_home=home / "user",
+        upload_dir_name="uploads",
         access=GatewayAccess(
             gateway_url="http://127.0.0.1:1",
             cluster_secret="local-runner-secret",  # noqa: S106

@@ -193,10 +193,28 @@ def mcps_dir(home: Path) -> Path:
 
 
 # meiva:note
+# Staging root for the uploads a gateway received (`<home>/uploads`): internal state, one directory
+# per agent below it, never a user-visible folder. The delivered copy an agent reads lives in its
+# workspace (`base.agents.upload_delivery.paths.delivered_upload_dir`), not here.
+def uploads_path(home: Path) -> Path:
+    return home / "uploads"
+
+
+def uploads_dir(*, home: Path) -> Path:
+    return ensure_private_dir(uploads_path(_root(home)))
+
+
+# meiva:note
 # Directory holding every agent's workspace (`<home>/workspaces`). Pure: `workspaces_root` ensures
 # it under a home it creates, and owns this path segment with `workspace_path`.
+# meiva:note
+# The one owner of the workspace segment name: a reader that only has a path (a receiver proof on
+# another home) checks this name, and every derivation above writes it.
+WORKSPACES_DIR_NAME = "workspaces"
+
+
 def workspaces_path(home: Path) -> Path:
-    return home / "workspaces"
+    return home / WORKSPACES_DIR_NAME
 
 
 def workspaces_root(*, home: Path) -> Path:

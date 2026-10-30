@@ -22,6 +22,7 @@ def _config(owner: ConfigBoot) -> GatewayConfig:
     return gateway_config_from_boot(
         owner,
         user_home=Path("/nonexistent/browser-origin-home"),
+        home=Path("/nonexistent/browser-origin-meiva-home"),
         memory_root=Path("/nonexistent/browser-origin-memory"),
         rng=_rng(),
     )
