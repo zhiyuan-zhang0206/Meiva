@@ -6,8 +6,6 @@ import os
 import random
 import sys
 import urllib.error
-from collections.abc import Callable
-from typing import Any
 
 import click
 
@@ -62,7 +60,6 @@ def retry_jitter(mode: str) -> dict[str, object]:
     random.seed(seed)
     expected_noise = random.Random(seed).uniform(-0.5, 0.5)  # noqa: S311
     attempts = 0
-    waits: list[float] = []
 
     def flaky() -> str:
         nonlocal attempts
@@ -72,24 +69,14 @@ def retry_jitter(mode: str) -> dict[str, object]:
         return "ok"
 
     span = 5.0 if mode == "phase" else 0.5
+    waits: list[float] = []
     result = retry(Policy(max_attempts=2, jitter=mode, jitter_span=span), sleep=waits.append)(flaky)
-    return {"result": result, "waits": waits, "phase": agent_phase(span), "noise": expected_noise}
-
-
-class RecordingLoop(asyncio.SelectorEventLoop):
-    def __init__(self) -> None:
-        super().__init__()
-        self.waits: list[float] = []
-
-    def call_later(
-        self,
-        delay: float,
-        callback: Callable[..., object],
-        *args: object,
-        context: Any = None,
-    ) -> asyncio.TimerHandle:
-        self.waits.append(delay)
-        return super().call_later(0.0, callback, *args, context=context)
+    return {
+        "result": result,
+        "waits": waits,
+        "phase": agent_phase(span),
+        "noise": expected_noise,
+    }
 
 
 def async_waits() -> dict[str, object]:
@@ -101,25 +88,26 @@ def async_waits() -> dict[str, object]:
         attempts += 1
         raise failure
 
-    run = aretry(Policy(max_attempts=3, backoff=ExponentialBackoff(1, 2, 8), jitter="none"))
-    loop = RecordingLoop()
+    waits: list[float] = []
+
+    async def record(seconds: float) -> None:
+        waits.append(seconds)
+
+    run = aretry(
+        Policy(max_attempts=3, backoff=ExponentialBackoff(1, 2, 8), jitter="none"),
+        asleep=record,
+    )
 
     async def drive() -> None:
         await run(flaky)
 
     try:
-        with asyncio.Runner(loop_factory=lambda: loop) as runner:
-            runner.run(drive())
+        asyncio.run(drive())
     except urllib.error.URLError as error:
         same_error = error is failure
     else:
         raise AssertionError("retry exhaustion did not propagate")
-    return {
-        "attempts": attempts,
-        "waits": loop.waits,
-        "closed": loop.is_closed(),
-        "same_error": same_error,
-    }
+    return {"attempts": attempts, "waits": waits, "same_error": same_error}
 
 
 def main(case: str) -> dict[str, object]:
