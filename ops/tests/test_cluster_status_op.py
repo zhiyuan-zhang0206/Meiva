@@ -39,7 +39,12 @@ def test_cluster_status_op_returns_this_hosts_snapshot(
     image = LoadedCommit(source_root=tmp_path, sha="abc1234")
 
     status = cluster.cluster_status_op(
-        database, pool, image=image, local_machine=machine_identity, home=unit_home
+        database,
+        pool,
+        image=image,
+        local_machine=machine_identity,
+        home=unit_home,
+        agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
     )
 
     assert status.machine_name == "runner-a"
@@ -61,7 +66,11 @@ def test_cluster_status_op_without_a_pool_reads_through_a_direct_connection(
     image = LoadedCommit(source_root=tmp_path, sha=None)
 
     status = cluster.cluster_status_op(
-        database, image=image, local_machine=machine_identity, home=unit_home
+        database,
+        image=image,
+        local_machine=machine_identity,
+        home=unit_home,
+        agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
     )
 
     assert (status.machine_name, status.running_sha) == ("runner-a", None)

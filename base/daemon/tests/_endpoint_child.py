@@ -9,7 +9,9 @@ from base.paths import meiva_home, run_dir
 
 
 def main() -> None:
-    table = ServiceEndpoints.from_settings()
+    # meiva:note
+    # The reader is named here, at the process's own entry: the table module holds no default.
+    table = ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
     sys.stdout.write(
         json.dumps(
             {

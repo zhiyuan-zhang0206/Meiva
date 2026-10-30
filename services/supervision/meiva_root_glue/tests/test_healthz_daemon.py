@@ -21,6 +21,7 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
+from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe
 from base.daemon.tests.fakes import pin_endpoints
@@ -28,7 +29,7 @@ from base.host.env.health_ports import DEFAULT_PORTS
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S, STOP_MARGIN_S
 from base.packages.plugin_config_admin import update_all_disk_images
 from base.packages.plugins.enable_config import discover_plugins
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from services.supervision import roster
 from services.supervision.meiva_root_glue import manifests as gen
 from services.supervision.roster import composition
@@ -61,6 +62,12 @@ def _module(spec: ServiceSpec) -> str:
     return spec.cmd.removeprefix(_PYTHON_M)
 
 
+# meiva:note
+# The table these cases build: the roster's reader and this test's home, as `build_services` does.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+
+
 def _daemon_probe(spec: ServiceSpec) -> partial[DaemonProbe]:
     """The standard daemon declares its protocol probe directly."""
     return cast("partial[DaemonProbe]", spec.identity_probe)
@@ -73,6 +80,7 @@ def test_the_factory_derives_command_url_probe_and_health_name() -> None:
     spec = healthz_daemon(
         "delivery-watchdog",
         home=meiva_home(),
+        endpoints=_table(),
         module="services.x.daemon",
         capabilities=_GATEWAY,
         requires_db=True,
@@ -81,15 +89,13 @@ def test_the_factory_derives_command_url_probe_and_health_name() -> None:
     assert spec.session == "delivery-watchdog"
     assert spec.health_name == "delivery_watchdog"
     assert spec.cmd == ".venv/bin/python -m services.x.daemon"
-    assert (
-        spec.curl_url
-        == f"http://localhost:{ServiceEndpoints.from_settings().of('delivery_watchdog').health_port}/healthz"
-    )
+    table = _table()
+    assert spec.curl_url == f"http://localhost:{table.of('delivery_watchdog').health_port}/healthz"
     probe = cast("partial[DaemonProbe]", spec.identity_probe)
     assert probe.func.__name__ == "probe_daemon"
     assert probe.args == ("delivery_watchdog", spec.curl_url)
     assert probe.keywords == {
-        "pidfile": ServiceEndpoints.from_settings().of("delivery_watchdog").pidfile,
+        "pidfile": table.of("delivery_watchdog").pidfile,
         "expected_home": meiva_home(),
     }
 
@@ -101,6 +107,7 @@ def test_the_factory_passes_the_optional_declarations_through() -> None:
     spec = healthz_daemon(
         "labeler",
         home=meiva_home(),
+        endpoints=_table(),
         module="services.derived.labeler.daemon",
         capabilities=_GATEWAY,
         requires_db=False,
@@ -122,9 +129,14 @@ def test_the_url_follows_the_endpoint_table_resolved_when_the_roster_is_built(
         return 18111
 
     pin_endpoints(monkeypatch, port=_fake_health_port)
-    assert healthz_url("im_bridge") == "http://localhost:18111/healthz"
+    assert healthz_url("im_bridge", _table()) == "http://localhost:18111/healthz"
     spec = healthz_daemon(
-        "im-bridge", home=meiva_home(), module="a.b", capabilities=_GATEWAY, requires_db=True
+        "im-bridge",
+        home=meiva_home(),
+        endpoints=_table(),
+        module="a.b",
+        capabilities=_GATEWAY,
+        requires_db=True,
     )
     assert spec.curl_url == "http://localhost:18111/healthz"
 
@@ -143,14 +155,24 @@ def test_a_session_that_is_not_lowercase_kebab_is_refused(session: str) -> None:
 def test_a_module_that_is_not_a_dotted_path_is_refused(module: str) -> None:
     with pytest.raises(ValueError, match="dotted module path"):
         healthz_daemon(
-            "heartbeat", home=meiva_home(), module=module, capabilities=_GATEWAY, requires_db=True
+            "heartbeat",
+            home=meiva_home(),
+            endpoints=_table(),
+            module=module,
+            capabilities=_GATEWAY,
+            requires_db=True,
         )
 
 
 def test_a_service_without_a_port_slot_is_refused_by_name() -> None:
     with pytest.raises(ValueError, match="no port slot") as raised:
         healthz_daemon(
-            "not-a-daemon", home=meiva_home(), module="a.b", capabilities=_GATEWAY, requires_db=True
+            "not-a-daemon",
+            home=meiva_home(),
+            endpoints=_table(),
+            module="a.b",
+            capabilities=_GATEWAY,
+            requires_db=True,
         )
     assert "not_a_daemon" in str(raised.value)
 
@@ -285,7 +307,7 @@ def test_a_healthz_endpoint_is_declared_not_left_to_its_url() -> None:
 def test_a_standard_daemons_session_derives_its_health_name() -> None:
     for session, spec in _healthz_specs().items():
         assert spec.health_name == health_name_of(session)
-        assert spec.curl_url == healthz_url(health_name_of(session))
+        assert spec.curl_url == healthz_url(health_name_of(session), _table())
 
 
 # ── the daemon side agrees with the roster ──

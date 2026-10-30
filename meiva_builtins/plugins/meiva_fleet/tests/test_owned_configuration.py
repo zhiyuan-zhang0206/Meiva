@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from base.config import get_field
+from base.daemon.endpoints import ServiceEndpoints
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, SERVICE_PLUGIN_CONFIG_ENV
 from base.host.env.tests.env_files import unit_env_path
 from base.host.proc import run_bounded
@@ -16,7 +18,7 @@ from base.packages.plugins.config_registration import (
     service_config_packet,
 )
 from base.packages.plugins.flags import UndeclaredFlag, read_declared_flag
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
 from meiva_builtins.plugins.meiva_fleet.services import services
 
@@ -70,6 +72,12 @@ def preserve_env_file() -> Generator[None]:
             env.unlink(missing_ok=True)
         else:
             env.write_bytes(previous)
+
+
+# meiva:note
+# The health-endpoint table a plugin's `services()` hook is handed: this checkout's reader and home.
+def _table() -> ServiceEndpoints:
+    return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
 
 
 def write_image(config: FleetConfig) -> Path:
@@ -148,7 +156,7 @@ def test_gateway_truth_is_authoritative_and_projection_has_exact_scope() -> None
 
 def test_gate_and_daemon_birth_share_one_captured_image() -> None:
     image = write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=7))
-    service = services(home=meiva_home())[0]
+    service = services(home=meiva_home(), endpoints=_table())[0]
     assert service.config_inputs == (image,)
     assert service.gate is not None and "disabled" in str(service.gate())
     assert service.plugin_config is not None

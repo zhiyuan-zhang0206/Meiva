@@ -25,7 +25,9 @@ from redis.client import PubSub
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
+from base.config import get_field
 from base.config.service_read import ConfigAuthority
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env import dotenv_file
@@ -33,6 +35,7 @@ from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import file_lock
+from base.paths import meiva_home, run_dir
 from ops.env_audit import read_env_write_records
 from ops.rpc_schemas import OpStatus
 from ops.upload_delivery import ReceiverConfig
@@ -76,6 +79,14 @@ class Ops:
     host: Host
     home: Path
     receiver: ReceiverConfig
+    # meiva:note
+    # The agent-host row this invocation's dispatch answers for: the test's own settings name the
+    # port and the home names the runtime directory, exactly as the daemon's entry builds it.
+    agent_host: ServiceEndpoint = field(
+        default_factory=lambda: ServiceEndpoints.from_fields(
+            get_field, runtime=run_dir(meiva_home())
+        ).of("agent_host")
+    )
     active_ops: daemon.ActiveOps = field(default_factory=dict)
     workers: in_flight.WorkerFutures = field(default_factory=set)
     requests: in_flight.RequestTokens = field(default_factory=set)
@@ -99,6 +110,7 @@ class Ops:
             rng=seeded_rng(),
             home=self.home,
             receiver=self.receiver,
+            agent_host=self.agent_host,
         )
 
     async def run_arm(
@@ -119,6 +131,7 @@ class Ops:
             rng=seeded_rng(),
             home=self.home,
             receiver=self.receiver,
+            agent_host=self.agent_host,
         )
 
     async def idempotent(
@@ -156,6 +169,7 @@ class Ops:
             rng=seeded_rng(),
             home=self.home,
             receiver=self.receiver,
+            agent_host=self.agent_host,
             **tunables,
         )
 
@@ -186,6 +200,7 @@ class Ops:
             rng=seeded_rng(),
             home=self.home,
             receiver=self.receiver,
+            agent_host=self.agent_host,
         )
 
 

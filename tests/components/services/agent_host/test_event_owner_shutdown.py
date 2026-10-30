@@ -14,14 +14,14 @@ from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineFacts
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import ConfigBoot
+from base.config import ConfigBoot, get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
@@ -127,10 +127,16 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     closed_pools: list[str] = []
-    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile = (
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+        .of("agent_host")
+        .pidfile
+    )
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text("999999999\n", encoding="utf-8")
-    assert not daemon.is_running()
+    assert not daemon.is_running(
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home())).of("agent_host")
+    )
     try:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError):
@@ -145,6 +151,7 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
                 None,
                 None,
                 clients=clients,
+                pidfile=pidfile,
             )
         assert observed.value is original
         assert closed_pools == ["agent-host-control", "agent-host"]
@@ -161,7 +168,11 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     boot_error = ValueError("original plugin bootstrap defect")
     writer_error = TypeError("boot event writer defect")
     closed_pools: list[str] = []
-    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile = (
+        ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
+        .of("agent_host")
+        .pidfile
+    )
 
     def writer(batch: list[Event]) -> None:
         raise writer_error

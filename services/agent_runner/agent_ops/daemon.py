@@ -42,6 +42,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.transport_encryption import verify_transport_encryption_declaration
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
+from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -105,6 +106,7 @@ async def run_arm(
     rng: random.Random,
     home: Path,
     receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     loop = asyncio.get_running_loop()
@@ -126,6 +128,7 @@ async def run_arm(
                 rng=rng,
                 home=home,
                 receiver=receiver,
+                agent_host=agent_host,
             ),
         )
         in_flight.track_worker(future, workers=workers)
@@ -148,6 +151,7 @@ def _dispatch_in_thread(
     rng: random.Random,
     home: Path,
     receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     return dispatch_sync(
@@ -163,6 +167,7 @@ def _dispatch_in_thread(
         host=host,
         home=home,
         receiver=receiver,
+        agent_host=agent_host,
     )
 
 
@@ -183,6 +188,7 @@ async def dispatch(
     rng: random.Random,
     home: Path,
     receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
@@ -234,6 +240,7 @@ async def dispatch(
                     trigger_inbound_kind=lc.trigger_inbound_kind,
                     catalog=catalog,
                     home=home,
+                    agent_host_port=agent_host.health_port,
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
@@ -252,6 +259,7 @@ async def dispatch(
                     rng=rng,
                     home=home,
                     receiver=receiver,
+                    agent_host=agent_host,
                 )
     except (
         MeivaAgentError,
@@ -281,6 +289,7 @@ async def dispatch_idempotent(
     rng: random.Random,
     home: Path,
     receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
     retry_backoff_s: float = DISPATCH_RETRY_BACKOFF_S,
@@ -308,6 +317,7 @@ async def dispatch_idempotent(
                 rng=rng,
                 home=home,
                 receiver=receiver,
+                agent_host=agent_host,
                 dedup_wait_attempts=dedup_wait_attempts,
                 dedup_wait_step_s=dedup_wait_step_s,
             )
@@ -341,6 +351,7 @@ async def dispatch_idempotent_pass(
     rng: random.Random,
     home: Path,
     receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
 ) -> tuple[OpStatus, dict[str, object]]:
@@ -371,6 +382,7 @@ async def dispatch_idempotent_pass(
             rng=rng,
             home=home,
             receiver=receiver,
+            agent_host=agent_host,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -420,6 +432,7 @@ async def ops_route(
     rng: random.Random,
     home: Path,
     receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
 ) -> tuple[int, bytes, str]:
 
     request = ops_plan.read_request(body)
@@ -451,6 +464,7 @@ async def ops_route(
                         rng=rng,
                         home=home,
                         receiver=receiver,
+                        agent_host=agent_host,
                     )
                 else:
                     status, result = await dispatch(
@@ -469,6 +483,7 @@ async def ops_route(
                         rng=rng,
                         home=home,
                         receiver=receiver,
+                        agent_host=agent_host,
                     )
             except Exception as exc:
                 _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -574,6 +589,7 @@ async def serve_ops_daemon(
                     rng=rng,
                     home=home,
                     receiver=receiver,
+                    agent_host=boot.agent_host_row(config, runtime=runtime_dir),
                 ),
                 ("POST", "/to-user/resource"): functools.partial(
                     resource_route,
