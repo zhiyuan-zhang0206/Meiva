@@ -229,17 +229,19 @@ def test_watcher_child_dies_when_the_pty_service_dies(
 
         # The guard exits within its 5s interval; 20s is generous CI slack.
         deadline = time.time() + 20
-        while time.time() < deadline and psutil.pid_exists(child_pid):
+        # meiva:note
+        # The status read is the judgement: a child that exits between a pid_exists()
+        # sample and the read, or lingers as a zombie awaiting init, is gone either way.
+        survived = True
+        while time.time() < deadline:
             try:
-                if psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE:
-                    break  # dead, waiting for init to reap
+                survived = psutil.Process(child_pid).status() != psutil.STATUS_ZOMBIE
             except psutil.NoSuchProcess:
+                survived = False
+            if not survived:
                 break
             time.sleep(0.2)
-        assert (
-            not psutil.pid_exists(child_pid)
-            or psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE
-        ), "watcher child survived its host"
+        assert not survived, "watcher child survived its host"
     finally:
         # A failed assertion must not leak the sleeper (the session record is
         # gone with the host, so fixture teardown cannot reach it).
