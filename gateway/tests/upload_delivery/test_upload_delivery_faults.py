@@ -1,10 +1,6 @@
 """Remote copy and transactional inbound response-loss fault boundaries."""
 
-import threading
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -12,24 +8,24 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 from starlette.datastructures import State
 
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import (
+    NAMESPACE,
     CopyProof,
     ReceiveRequest,
     UploadDeliveryConflictError,
     current_unit,
 )
+from base.agents.upload_delivery.paths import delivered_upload_dir
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import get_field
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.db.tests.lost_ack import LostAckPool
-from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
 from base.paths import resolve_meiva_home, run_dir
 from gateway.app import cluster_auth_middleware
@@ -37,12 +33,17 @@ from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_cl
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 from gateway.tests.support.db_faults.update_fault import failing_update
 from gateway.tests.support.runner_ops.ops_stub import (
-    OpsCall,
-    OpsReply,
-    completed,
     failed,
-    refused,
     runner_ops,
+)
+from gateway.tests.upload_delivery.support import (
+    receiver_for as receiver_for,
+)
+from gateway.tests.upload_delivery.support import (
+    receiver_op as receiver_op,
+)
+from gateway.tests.upload_delivery.support import (
+    serving_gateway as serving_gateway,
 )
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     SECRET,
@@ -122,7 +123,7 @@ def _request_and_proof(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    return request, proof_for(request)
+    return request, proof_for(client, request)
 
 
 def _assert_one_system_notice(db_conn: psycopg.Connection[Any], agent: int, iid: int) -> None:
@@ -195,7 +196,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
     )
     for model, payload in (
         (ReceiveRequest, request.model_dump()),
-        (CopyProof, proof_for(request).model_dump()),
+        (CopyProof, proof_for(client, request).model_dump()),
     ):
         if version is None:
             del payload["version"]
@@ -219,7 +220,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
             local_machine=machine_identity,
             host=fake_host(),
             home=resolve_meiva_home(),
-            receiver=_receiver_config(client, request.target),
+            receiver=receiver_for(client, request.target),
             agent_host=_agent_host(),
         )
 
@@ -229,75 +230,6 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
 def _agent_host() -> ServiceEndpoint:
     home = resolve_meiva_home()
     return ServiceEndpoints.from_fields(get_field, runtime=run_dir(home)).of("agent_host")
-
-
-def _receiver_config(client: GatewayTestClient, unit: UnitIdentity) -> receiver.ReceiverConfig:
-    return receiver.ReceiverConfig(
-        unit=unit,
-        user_home=client.app.state.gateway_config.upload_home,
-        access=client.app.state.gateway_access,
-        quota_bytes=client.app.state.gateway_config.max_agent_upload_bytes,
-        quota_files=client.app.state.gateway_config.max_agent_upload_files,
-    )
-
-
-@contextmanager
-def _source_gateway(
-    client: GatewayTestClient, pool: ConnectionPool, *, timeout: float
-) -> Generator[str]:
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-        def do_GET(self) -> None:
-            with pool.connection(timeout=timeout) as conn:
-                assert conn.execute("SELECT 1").fetchone() == (1,)
-            result = client.get(self.path)
-            self.send_response(result.status_code)
-            self.send_header("Content-Length", str(len(result.content)))
-            self.end_headers()
-            self.wfile.write(result.content)
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    server.daemon_threads = True
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
-
-
-# meiva:note
-# The receiver runner's `upload-receive-v1` op: the real receive code, in this process.
-#
-# With `lose_first_response` the first call completes its work (the bytes are published and
-# the ready marker committed) and the caller then sees the connection answer 404.
-def _receiver_op(
-    client: GatewayTestClient,
-    config: receiver.ReceiverConfig,
-    *,
-    lose_first_response: bool = False,
-):
-    calls = 0
-
-    def receive(call: OpsCall) -> OpsReply:
-        nonlocal calls
-        calls += 1
-        assert call.idempotency_key is None
-        assert call.kind == "upload-receive-v1"
-        proof = receiver.copy_batch(
-            client.app.state.db_pool,
-            ReceiveRequest.model_validate(call.payload),
-            config,
-        ).model_dump(mode="json")
-        if lose_first_response and calls == 1:
-            return refused(404, "remote fsync/ready succeeded but response lost")
-        return completed(proof)
-
-    return receive
 
 
 @pytest.mark.asyncio
@@ -310,20 +242,20 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
 ):
     client, agent = uploaded_agent
     source_unit = current_unit(local_machine=machine_identity.name())
-    target = source_unit.model_copy(update={"machine": "remote", "home": "/remote/unit"})
-    remote_home = tmp_path / "remote-disk"
-    with _source_gateway(client, client.app.state.db_pool, timeout=1.0) as source_url:
+    target = source_unit.model_copy(
+        update={"machine": "remote", "home": str(tmp_path / "remote-unit")}
+    )
+    with serving_gateway(client, client.app.state.db_pool, timeout=1.0) as source_url:
         config = replace(
-            _receiver_config(client, target),
-            user_home=remote_home,
+            receiver_for(client, target),
             access=replace(client.app.state.gateway_access, gateway_url=source_url),
         )
-        receive = _receiver_op(client, config, lose_first_response=True)
+        receive = receiver_op(client, config, lose_first_response=True)
         with runner_ops(db_conn, "remote", {"upload-receive-v1": receive}) as runner:
             db_conn.execute(
                 "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
-                "VALUES ('remote','/remote/unit',true,%s)",
-                (runner.url,),
+                "VALUES ('remote',%s,true,%s)",
+                (target.home, runner.url),
             )
             db_conn.execute("UPDATE agents_meta SET machine='remote' WHERE id=%s", (agent,))
             db_conn.commit()
@@ -350,7 +282,9 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
-    remote_dir = source.agent_upload_dir(agent, create=False, home=remote_home).resolve()
+    remote_dir = delivered_upload_dir(
+        agent, home=Path(target.home), name=config.upload_dir_name, create=False
+    ).resolve()
     assert (
         remote_dir / ".delivered-v1" / request.manifest.batch_id / request.manifest.objects[0].name
     ).read_bytes() == b"bytes"
@@ -388,7 +322,7 @@ def _receive_twice_after_failure(
     db_conn: psycopg.Connection[Any],
     request: ReceiveRequest,
 ) -> None:
-    config = _receiver_config(client, request.target)
+    config = receiver_for(client, request.target)
     proof = receiver.copy_batch(client.app.state.db_pool, request, config)
     assert proof == receiver.copy_batch(client.app.state.db_pool, request, config)
     assert db_conn.execute(
@@ -408,7 +342,7 @@ def test_receiver_ready_commit_failure_recovers_without_second_copy(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    config = _receiver_config(client, request.target)
+    config = receiver_for(client, request.target)
     with (
         failing_update(db_conn, "upload_delivery_copies", message="receiver ready rollback"),
         pytest.raises(psycopg.errors.RaiseException),
@@ -432,7 +366,7 @@ def test_receiver_ready_lost_commit_ack_recovers_without_second_copy(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    config = _receiver_config(client, request.target)
+    config = receiver_for(client, request.target)
     lossy = LostAckPool(client.app.state.db_pool, lose_on=2, message="receiver ready ack lost")
     with pytest.raises(psycopg.OperationalError):
         receiver.copy_batch(lossy, request, config)
@@ -453,7 +387,7 @@ def test_concurrent_receivers_and_inbound_acceptance_one_identity(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    config = _receiver_config(client, request.target)
+    config = receiver_for(client, request.target)
 
     def copied(_index: int) -> CopyProof:
         return receiver.copy_batch(client.app.state.db_pool, request, config)
@@ -484,7 +418,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    config = _receiver_config(client, request.target)
+    config = receiver_for(client, request.target)
     proof = receiver.copy_batch(
         client.app.state.db_pool,
         request,
@@ -501,10 +435,22 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
 
     with pytest.raises(UploadDeliveryConflictError):
         receiver.copy_batch(client.app.state.db_pool, changed, config)
-    path = Path(proof.directory) / item.name
-    path.unlink()
+    # meiva:note
+    # The gateway loses its staged object and the agent's workspace has no copy: a re-receive
+    # has to pull, and must not mark ready anything it could not fetch.
+    staged = (
+        source.agent_upload_dir(
+            agent, create=False, root=client.app.state.gateway_config.upload_staging_root
+        )
+        / NAMESPACE
+        / request.manifest.batch_id
+        / item.name
+    )
+    staged.unlink()
+    delivered = Path(proof.directory) / item.name
+    delivered.unlink()
 
-    with _source_gateway(client, client.app.state.db_pool, timeout=5.0) as source_url:
+    with serving_gateway(client, client.app.state.db_pool, timeout=5.0) as source_url:
         status, result = dispatch_sync(
             "upload-receive-v1",
             request.model_dump(),
@@ -521,7 +467,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
             agent_host=_agent_host(),
         )
     assert status == OpStatus.FAILED and result["reason"] == "upload-source-unavailable-v1"
-    assert not path.exists()
+    assert not delivered.exists()
 
 
 def test_actual_old_gateway_has_no_guarded_upload_admission(
@@ -542,7 +488,6 @@ def test_actual_old_gateway_has_no_guarded_upload_admission(
 
 def test_single_connection_receiver_releases_pool_across_http(
     uploaded_agent: tuple[GatewayTestClient, int],
-    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
 ):
@@ -554,14 +499,11 @@ def test_single_connection_receiver_releases_pool_across_http(
     )
     with (
         client.app.state.db.pool(min_size=1, max_size=1) as pool,
-        _source_gateway(client, pool, timeout=0.5) as source_url,
+        serving_gateway(client, pool, timeout=0.5) as source_url,
     ):
-        config = receiver.ReceiverConfig(
-            unit=request.target,
-            user_home=tmp_path / "single-native",
+        config = replace(
+            receiver_for(client, request.target),
             access=replace(client.app.state.gateway_access, gateway_url=source_url),
-            quota_bytes=client.app.state.gateway_config.max_agent_upload_bytes,
-            quota_files=client.app.state.gateway_config.max_agent_upload_files,
         )
         proof = receiver.copy_batch(pool, request, config)
     assert (Path(proof.directory) / request.manifest.objects[0].name).read_bytes() == b"bytes"
@@ -598,8 +540,8 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     client, agent = uploaded_agent
     unit = current_unit(local_machine=machine_identity.name())
     target = unit.model_copy(update={"home": unit.home + "-second"})
-    config = replace(_receiver_config(client, target), quota_bytes=5)
-    receive = _receiver_op(client, config)
+    config = replace(receiver_for(client, target), quota_bytes=5)
+    receive = receiver_op(client, config)
     with runner_ops(db_conn, unit.machine, {"upload-receive-v1": receive}) as runner:
         assert register_second_home(db_conn, unit, url=runner.url) == target
         response = post(client, agent)

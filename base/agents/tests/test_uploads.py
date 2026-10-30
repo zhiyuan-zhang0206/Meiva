@@ -30,27 +30,49 @@ class TestParseUploadUrl:
         assert parse_upload_url("/api/agents/7/uploads/../secret") == (7, "../secret")
 
 
-class TestResolveUploadPath:
-    def test_upload_dir_is_owner_only(self, tmp_path: Path) -> None:
-        """Upload directories repair a lax mode before files are read or written."""
-        directory = tmp_path / "Downloads" / "MeivaAgent-7"
+class TestUploadDirectories:
+    # meiva:note
+    # A staging directory left group-readable is repaired before files are read or written.
+    def test_staging_dir_is_owner_only(self, tmp_path: Path) -> None:
+        staging = tmp_path / "uploads"
+        directory = staging / "7"
         directory.mkdir(parents=True)
         directory.chmod(0o755)
 
-        assert paths.agent_upload_dir(7, home=tmp_path) == directory
+        assert paths.agent_upload_dir(7, root=staging) == directory
         assert directory.stat().st_mode & 0o777 == 0o700
 
+    def test_staging_dir_is_per_agent_below_the_root(self, tmp_path: Path) -> None:
+        assert paths.agent_upload_dir(7, root=tmp_path, create=False) == tmp_path / "7"
+
+    def test_delivered_copy_lands_in_the_agent_workspace(self, tmp_path: Path) -> None:
+        assert paths.delivered_upload_dir(7, home=tmp_path, name="uploads") == (
+            tmp_path / "workspaces" / "7" / "uploads"
+        )
+
+    def test_delivered_copy_honours_the_configured_name(self, tmp_path: Path) -> None:
+        assert paths.delivered_upload_dir(7, home=tmp_path, name="inbox") == (
+            tmp_path / "workspaces" / "7" / "inbox"
+        )
+
+    def test_delivered_copy_is_created_owner_only(self, tmp_path: Path) -> None:
+        directory = paths.delivered_upload_dir(7, home=tmp_path, name="uploads")
+        assert directory.is_dir()
+        assert directory.stat().st_mode & 0o777 == 0o700
+
+
+class TestResolveUploadPath:
     def test_resolves_inside_dir(self, tmp_path: Path) -> None:
-        p = paths.resolve_upload_path(7, "foo.png", home=tmp_path)
-        assert p == (tmp_path / "Downloads" / "MeivaAgent-7" / "foo.png").resolve()
+        p = paths.resolve_upload_path(tmp_path, "foo.png")
+        assert p == (tmp_path / "foo.png").resolve()
 
     def test_rejects_parent_traversal(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="escapes"):
-            paths.resolve_upload_path(7, "../../etc/passwd", home=tmp_path)
+            paths.resolve_upload_path(tmp_path, "../../etc/passwd")
 
     def test_rejects_absolute(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="escapes"):
-            paths.resolve_upload_path(7, "/etc/passwd", home=tmp_path)
+            paths.resolve_upload_path(tmp_path, "/etc/passwd")
 
 
 class TestImageMime:

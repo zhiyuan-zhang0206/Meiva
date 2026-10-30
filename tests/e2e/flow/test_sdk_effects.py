@@ -3,13 +3,13 @@ from __future__ import annotations
 import shutil
 import uuid
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import httpx
 import psutil
 import pytest
 
+from base.agents.upload_delivery.paths import delivered_upload_dir
 from base.paths import meiva_home
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import chat_and_wait
@@ -111,7 +111,9 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
     spawned_agent: int, clean_world: None
 ) -> None:
     agent = spawned_agent
-    saved_dir = Path.home() / "Downloads" / f"MeivaAgent-{agent}"
+    saved_dir = delivered_upload_dir(
+        agent, home=meiva_home(), name=world.UPLOAD_DIR_NAME, create=False
+    )
     try:
         resp = httpx.post(
             f"{GATEWAY_URL}/api/keyed/v1/agents/{agent}/uploads",

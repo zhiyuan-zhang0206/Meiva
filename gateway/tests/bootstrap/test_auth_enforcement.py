@@ -573,14 +573,14 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         allowed_origins=("https://alpha.example",),
         browser_origin="https://alpha.example",
         memory_root=Path("/nonexistent/alpha-memory"),
-        upload_home=Path("/nonexistent/alpha-home"),
+        upload_staging_root=Path("/nonexistent/alpha-home"),
     )
     config_beta = gateway_test_config(
         cluster_secret="secret-beta",  # noqa: S106
         session_ttl_seconds=300,
         allowed_origins=("http://beta.example:3000",),
         memory_root=Path("/nonexistent/beta-memory"),
-        upload_home=Path("/nonexistent/beta-home"),
+        upload_staging_root=Path("/nonexistent/beta-home"),
     )
 
     with gateway_test_process(machine=machine_identity) as process:

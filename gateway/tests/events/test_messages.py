@@ -322,7 +322,7 @@ class TestMultimodalMessage:
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(
             machine=machine_identity,
-            config=gateway_test_config(upload_home=tmp_path),
+            config=gateway_test_config(upload_staging_root=tmp_path),
         ) as client:
             up = client.post(
                 f"/api/agents/{tid}/uploads",
@@ -382,7 +382,7 @@ class TestMultimodalMessage:
         tid = _seed_vision_agent(db_conn, model=model, local_machine=machine_identity)
         with gateway_test_client(
             machine=machine_identity,
-            config=gateway_test_config(upload_home=tmp_path),
+            config=gateway_test_config(upload_staging_root=tmp_path),
             catalog=catalog,
         ) as client:
             up = client.post(
@@ -417,7 +417,7 @@ class TestMultimodalMessage:
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(
             machine=machine_identity,
-            config=gateway_test_config(upload_home=tmp_path),
+            config=gateway_test_config(upload_staging_root=tmp_path),
         ) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -445,7 +445,7 @@ class TestMultimodalMessage:
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(
             machine=machine_identity,
-            config=gateway_test_config(upload_home=tmp_path),
+            config=gateway_test_config(upload_staging_root=tmp_path),
         ) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",

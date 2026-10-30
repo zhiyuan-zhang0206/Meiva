@@ -24,10 +24,13 @@ Ready receipts replay after target deletion: acceptance does not prove that the
 historical URL is currently accessible. Fresh missing targets return 404.
 
 The directory the files live in and the limits are values of the app's `GatewayConfig`:
-`upload_home` (the account home, read once by the root), `max_upload_bytes`,
-`max_agent_upload_bytes` and `max_agent_upload_files` (defaults are the constants owned by
+`upload_staging_root` (the staging root — `<MEIVA_HOME>/uploads` unless
+`MEIVA_UPLOAD_STAGING_ROOT` names another, resolved once by the root through
+`base.paths.uploads_path`), `max_upload_bytes`, `max_agent_upload_bytes` and
+`max_agent_upload_files` (defaults are the constants owned by
 `base.agents.upload_delivery.paths`; the root never reads them from settings, so a cluster
-cannot tune a limit away). No handler reads `Path.home()` or an app-state resolver. The
+cannot tune a limit away). A silent save's bytes stay in staging: the agent fetches them
+by URL, and the copy it reads on disk is the delivered one in its own workspace. No handler reads `Path.home()` or an app-state resolver. The
 decisions that need no effect, the manifest fingerprint and the object names (or the suffix
 refusal), are `upload_plan.py`, strict and asserted by value; `batches.py` is the shell:
 `claim_batch` commits the receiving identity, `publish_files` links the objects, and

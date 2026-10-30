@@ -18,7 +18,13 @@ def test_the_receiver_takes_the_access_the_entry_built(tmp_path: Path) -> None:
     # not pass it.
     access = cast(GatewayAccess, object())
 
-    built = receiver_config(machine="ops-entry", home=tmp_path, access=access)
+    # meiva:note
+    # A value nothing else uses: the point is that the entry's configured name reaches the receiver
+    # as a value, so a receiver that resolved one itself could not pass it.
+    built = receiver_config(
+        machine="ops-entry", home=tmp_path, access=access, upload_dir_name="inbox"
+    )
 
     assert built.access is access
     assert built.unit.machine == "ops-entry"
+    assert built.upload_dir_name == "inbox"

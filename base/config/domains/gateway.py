@@ -154,6 +154,42 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    upload_staging_root: str = Field(
+        default="",
+        alias="MEIVA_UPLOAD_STAGING_ROOT",
+        description=(
+            "Directory under which the gateway keeps the raw bytes it received, one "
+            "`<agent_id>` below it. Empty means `<MEIVA_HOME>/uploads`. It is internal state, "
+            "never a user-visible folder such as ~/Downloads: what an agent reads is the "
+            "delivered copy in its own workspace, named by MEIVA_UPLOAD_DIR_NAME."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    upload_dir_name: str = Field(
+        default="uploads",
+        pattern=r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$",
+        alias="MEIVA_UPLOAD_DIR_NAME",
+        description=(
+            "Directory inside each agent's workspace that holds its delivered uploads "
+            "(`<MEIVA_HOME>/workspaces/<agent_id>/<name>`). One value because two writers name "
+            "that place: the gateway's same-machine copy and the receiving runner's remote copy. "
+            "One path segment: a separator would move the agent's own directory out of the "
+            "workspace the delivery proof pins, and `..` would put uploads beside it."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     notification_outbox_batch: int = Field(
         default=100,
         ge=1,

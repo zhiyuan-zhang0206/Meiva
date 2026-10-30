@@ -28,7 +28,7 @@ from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import image_mime_for, inbound_image_urls, parse_upload_url
 from base.agents.model.model_overrides import agent_overrides
-from base.agents.upload_delivery.paths import resolve_upload_path
+from base.agents.upload_delivery.paths import agent_upload_dir, resolve_upload_path
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
@@ -62,7 +62,7 @@ _log = logging.getLogger(__name__)
 _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 
 
-def _validate_image_ref(agent_id: int, url: str, *, upload_home: Path) -> None:
+def _validate_image_ref(agent_id: int, url: str, *, upload_root: Path) -> None:
 
     parsed = parse_upload_url(url)
     if parsed is None:
@@ -73,7 +73,7 @@ def _validate_image_ref(agent_id: int, url: str, *, upload_home: Path) -> None:
     if image_mime_for(name) is None:
         raise HTTPException(422, f"image_url {url!r} is not a recognized image type")
     try:
-        path = resolve_upload_path(agent_id, name, home=upload_home)
+        path = resolve_upload_path(agent_upload_dir(agent_id, create=False, root=upload_root), name)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     if not path.is_file():
@@ -105,10 +105,10 @@ def _prepare_message_content(
                 "switch it to a vision-capable model "
                 f"({', '.join(vision_capable_provider_names(catalog=catalog))})",
             )
-        upload_home = request.app.state.gateway_config.upload_home
+        upload_root = request.app.state.gateway_config.upload_staging_root
         for b in blocks:
             if isinstance(b, ImageUrlContentBlock):
-                _validate_image_ref(agent_id, b.image_url.url, upload_home=upload_home)
+                _validate_image_ref(agent_id, b.image_url.url, upload_root=upload_root)
 
     return _normalize_message_content(content)
 

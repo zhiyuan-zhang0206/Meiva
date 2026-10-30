@@ -9,7 +9,6 @@ import logging
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -18,14 +17,12 @@ from pydantic import ValidationError
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
-from base.agents.upload_delivery import source, storage
+from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import (
-    NAMESPACE,
     CopyProof,
     ReceiveRequest,
     UploadDeliveryConflictError,
 )
-from base.agents.upload_delivery.paths import agent_upload_dir
 from base.api_contracts.agent_contract import AgentNotFound
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
@@ -48,14 +45,12 @@ class UploadRecovery:
         bus: EventBus,
         *,
         machine: MachineIdentityReader,
-        home: Path,
         claim_seconds: float,
         rpc: RpcClient,
     ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
         self.rpc = rpc
         self.machine = machine
-        self.home = home
         self.claim_seconds = claim_seconds
         self.stopped = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
@@ -173,18 +168,13 @@ class UploadRecovery:
         else:
             await self.wake(request.manifest.agent_id, inbound_id)
 
+    # meiva:note
+    # Every delivery is the receiver's copy, including one that stays on this machine: the
+    # staging directory an accepted batch lives in is not the agent's workspace, so "same unit"
+    # no longer means "already in place". The receiver reserves quota against the workspace
+    # directory and publishes create-only, so a local delivery is accounted for exactly like a
+    # remote one.
     async def copy_proof(self, request: ReceiveRequest) -> CopyProof:
-        if request.source == request.target:
-            directory = agent_upload_dir(
-                request.manifest.agent_id, create=False, home=self.home
-            ).resolve()
-            await self.native(storage.verify_all, directory, request.manifest)
-            return CopyProof(
-                version=1,
-                target=request.target,
-                manifest_hash=request.manifest.fingerprint(),
-                directory=str(directory / NAMESPACE / request.manifest.batch_id),
-            )
         result = await self.rpc.dispatch_to_machine(
             self.db,
             request.target.machine,

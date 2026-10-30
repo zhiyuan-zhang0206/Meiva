@@ -304,7 +304,7 @@ async def test_the_lifespan_registers_the_health_probe_for_its_home_checkout_and
         machine=machine_identity,
         host=fake_host(crontab, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"}),
     )
-    config = replace(gateway_config_of(boot), human_auth="required", upload_home=account)
+    config = replace(gateway_config_of(boot), human_auth="required", user_home=account)
     app = gateway_test_app(process=process, config=config, process_ownership="owned")
 
     async with asyncio.timeout(10), app.router.lifespan_context(app):

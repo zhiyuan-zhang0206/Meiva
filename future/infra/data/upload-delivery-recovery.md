@@ -91,7 +91,9 @@ file phase runs without a borrowed DB connection, publishes only create-only
 files, verifies existing bytes, and fsyncs. Its ready transaction records copy
 acceptance. Repeated requests verify/fill actual files before issuing the typed
 matching-manifest proof; cached RPC success alone is not present-file proof.
-A local shortcut requires the exact same source/target unit, not just same name.
+There is no local shortcut: staging is the source unit's own state, so a copy that never
+crosses machines still goes through this kind, reserved and published create-only like a
+remote one.
 
 The source requires an exact supported proof version and validates the new
 receiver result against frozen unit/hash/size and

@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack
-from pathlib import Path
 
 import psycopg
 import pytest
@@ -108,8 +107,9 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
 ) -> None:
     from base.agents.upload_delivery.paths import agent_upload_dir
 
-    upload_dir = agent_upload_dir(agent_id, home=Path.home())
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    upload_dir = agent_upload_dir(
+        agent_id, root=client.app.state.gateway_config.upload_staging_root
+    )
     image = upload_dir / "gone.png"
     image.write_bytes(b"test image")
     _set_model(db_conn, agent_id, _VISION_MODEL)

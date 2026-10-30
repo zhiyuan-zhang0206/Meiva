@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
+from base import paths
 from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_BYTES,
     MAX_AGENT_UPLOAD_FILES,
@@ -166,9 +167,16 @@ class GatewayConfig:
     session_cookie_secure: bool
     memory_root: Path
     # meiva:note
-    # The account home under which uploads live (`Downloads/MeivaAgent-<id>`): the root reads
-    # it once, so a handler and a test hand the same directory around as a value.
-    upload_home: Path
+    # The account home (its `Downloads`, `Desktop` and `Documents` a permission grant names):
+    # the root reads it once, so a handler and a test hand the same directory around as a value.
+    user_home: Path
+    # meiva:note
+    # The staging root for received uploads (`<MEIVA_HOME>/uploads` unless configured) and the
+    # directory name a delivered copy takes inside an agent's workspace. Two values, because the
+    # first is this unit's internal state and the second is a name both writers of the delivered
+    # copy must agree on.
+    upload_staging_root: Path
+    upload_dir_name: str
     human_auth: Literal["required", "trusted_network"]
     # meiva:note
     # The settings the request handlers read, grouped by what they tune. The root reads each
@@ -254,10 +262,11 @@ class GatewayConfig:
 
 
 # meiva:note
-# The root reads the account home and the memory directory under it and builds the entropy source;
-# this function only records them beside the settings it snapshots.
+# The root reads the account home, the Meiva home and the memory directory under it and builds the
+# entropy source; this function only records them beside the settings it snapshots. The upload
+# staging root defaults under the Meiva home and is overridable, never the account's `Downloads`.
 def gateway_config_from_boot(
-    config: ConfigBoot, *, user_home: Path, memory_root: Path, rng: random.Random
+    config: ConfigBoot, *, user_home: Path, home: Path, memory_root: Path, rng: random.Random
 ) -> GatewayConfig:
     """Snapshot HTTP policy without creating or booting another config owner."""
     view = config.view
@@ -296,7 +305,13 @@ def gateway_config_from_boot(
             else urlsplit(gateway_url).scheme == "https"
         ),
         memory_root=memory_root,
-        upload_home=user_home,
+        user_home=user_home,
+        upload_staging_root=(
+            Path(gateway.upload_staging_root)
+            if gateway.upload_staging_root
+            else paths.uploads_path(home)
+        ),
+        upload_dir_name=gateway.upload_dir_name,
         human_auth=gateway.human_auth,
         display=DisplayDefaults(
             shell_capture_default_lines=display.shell_capture_default_lines,
@@ -424,7 +439,9 @@ def placeholder_config() -> GatewayConfig:
         session_cookie_secure=False,
         human_auth="required",
         memory_root=Path("/nonexistent/memory"),
-        upload_home=Path("/nonexistent/home"),
+        user_home=Path("/nonexistent/home"),
+        upload_staging_root=Path("/nonexistent/uploads"),
+        upload_dir_name="uploads",
         display=_placeholders(DisplayDefaults),
         models=_placeholders(ModelDefaults),
         understanding=_placeholders(UnderstandingDomain),
