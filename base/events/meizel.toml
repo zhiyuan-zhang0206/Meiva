@@ -1,4 +1,14 @@
-exports = ["alarms", "contract.py", "declarations", "live", "reads", "scan_kinds.py", "tests", "notifications"]
+exports = [
+    "alarms",
+    "contract.py",
+    "declarations",
+    "live",
+    "reads",
+    "scan_kinds.py",
+    "signals",
+    "tests",
+    "notifications",
+]
 
 [purity]
 "__init__.py" = "strict"

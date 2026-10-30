@@ -16,6 +16,7 @@ from base.api_contracts.agent_contract import (
     TerminationSource,
 )
 from base.cluster.machine import MachineRole
+from base.events.signals import SignalSeverity
 from base.packages.extensions.install_registry import TrustTier
 from base.packages.extensions.registry import ExtensionKind
 
@@ -36,6 +37,7 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("extensions", "kind"): set(get_args(ExtensionKind)),
     ("extensions", "trust"): set(get_args(TrustTier)),
     ("agent_tasks", "status"): {s.value for s in TaskStatus},
+    ("signal_state", "severity"): {s.value for s in SignalSeverity},
 }
 
 
