@@ -2,7 +2,7 @@ exports = ["admission_floor.py", "check_worktree_remove.py", "onboarding", "rele
 
 [uses]
 "admission_run.py" = ["admission_floor.py", "admission_ledger.py"]
-"tests" = ["admission_floor.py", "admission_run.py", "guard_editable_venv.py", "host_memory_sample.py", "run_with_token.py", "update_schedule_script.py"]
+"tests" = ["admission_floor.py", "admission_run.py", "guard_editable_venv.py", "host_memory_sample.py", "run_with_env.py", "run_with_token.py", "update_schedule_script.py"]
 
 [external]
 "update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"
@@ -12,5 +12,6 @@ exports = ["admission_floor.py", "check_worktree_remove.py", "onboarding", "rele
 "check_worktree_remove.py" = { kinds = ["home", "pid"], why = "Entry point of the pre-removal guard: it names itself by its pid and process group for the process scan and resolves the home whose pty-sessions socket it asks" }
 "guard_editable_venv.py" = { kinds = ["cwd", "environ", "home"], why = "Dependency-free pre-uv preflight entry: main() reads the inherited VIRTUAL_ENV, defaults to the current checkout directory before Settings can import, and expands the `~` the operator names in the checkout and VIRTUAL_ENV exactly once, then hands both values down" }
 "host_memory_sample.py" = { kinds = ["clock", "home", "pid"], why = "host memory sampler CLI reads the current user slice by UID, timestamps the sample, and appends to ~/.meiva/logs/host-memory.jsonl" }
+"run_with_env.py" = { kinds = ["environ", "home"], why = "Run-with-env CLI entry: it reads its own process environment to build the child's, the home's installed capability for the database login and the home's .env line for the cache URL, then execs the caller's command with those values in the child environment only" }
 "run_with_token.py" = { kinds = ["environ", "home"], why = "Run-with-token CLI entry: it reads its own process environment to build the child's and resolves the home whose installed capability supplies the bearer, then execs the caller's command with that token in the child environment only" }
 "update_schedule_script.py" = { kinds = ["db", "environ", "home", "pid"], why = "Operator maintenance CLI entry: it reads its own process environment and home to admit the installed runtime, opens the target home's database pool after verifying the agent host is stopped, and names itself by its pid in the lifecycle lock" }

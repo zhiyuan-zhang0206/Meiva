@@ -61,18 +61,22 @@ _SESSION_DELIVERY_KEYS = frozenset({"PATH", "MEIVA_HARNESS_HANDLE", "CLAUDE_CONF
 # supplies the machine token that way, and `schedules/jobs/self_evolution_weekly.py` reads the
 # cluster secret out of the `.env` text itself.
 #
-# `MEIVA_DB_URL` and `MEIVA_REDIS_URL` are deliberately NOT here: they also carry a password, but
-# they are the operator's psql/redis-cli channel for a live session, and stripping them would
-# break diagnosis on every host. They are the first candidates of the second step.
+# `MEIVA_DB_URL` and `MEIVA_REDIS_URL` joined this set in the second step (task #5866). They carry
+# the unit's database password and the cache password - the highest-value pair of the batch - so
+# they cannot stay resident in every session's environment. The diagnosis channel they used to
+# provide (`psql "$MEIVA_DB_URL"`) moves to `scripts/host_ops/run_with_env.py`, which reads each
+# value fresh and pins it into one child's environment.
 SESSION_CREDENTIAL_KEYS = frozenset(
     {
         "MEIVA_ALERTS_WEBHOOK_TOKEN",
         "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
         "MEIVA_CF_API_TOKEN",
         "MEIVA_CLUSTER_SECRET",
+        "MEIVA_DB_URL",
         "MEIVA_FEISHU_APP_SECRET",
         "MEIVA_REDIS_ADMIN_PASSWORD",
         "MEIVA_REDIS_PASSWORD",
+        "MEIVA_REDIS_URL",
         "MEIVA_TELEGRAM_BOT_TOKEN",
     }
 )

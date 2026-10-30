@@ -10,6 +10,11 @@
 # capability once, pins the token into the CHILD environment, and execs. The token is not in
 # argv and never reaches this script's stdout; the child sees it exactly as it would after a
 # normal boot.
+#
+# This entry works only inside the home's admitted runtime (its `~/.meiva/source` checkout):
+# `consume_unit` refuses any other tree, so the same file run from a worktree answers
+# `TOKEN_PRESENT False` and exits 1. That is the property - an arbitrary checkout must not read the
+# machine token - not a defect to route around.
 from __future__ import annotations
 
 import argparse
