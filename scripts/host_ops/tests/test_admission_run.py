@@ -100,6 +100,23 @@ class TestCommandReading:
         assert admission.requested_jobs(argv) == expected
 
 
+class _Sequence:
+    # meiva:note
+    # A budget reader that answers with a chosen sequence: the last value repeats, so a test
+    # states only the readings that matter and `calls` proves how many the gate took.
+    def __init__(self, values: Sequence[float], source: str = "disk") -> None:
+        self.remaining = list(values)
+        self.source = source
+        self.calls: list[float] = []
+
+    def __call__(self) -> admission.Reading:
+        chosen = self.remaining.pop(0) if len(self.remaining) > 1 else self.remaining[0]
+        self.calls.append(chosen)
+        return admission.Reading(
+            free_gib=chosen, source=self.source, unstable=False, detail="df 84.0%"
+        )
+
+
 def _run(
     argv: list[str],
     *,
@@ -108,9 +125,13 @@ def _run(
     unstable: bool = False,
     source: str = "disk",
     tmp_path: Path,
+    readings: Sequence[float] | None = None,
 ) -> tuple[int, _Recorder]:
     recorder = _Recorder()
-    disk, pressure_reader = _collect(free_gib, pressure, unstable, source)
+    if readings is None:
+        disk, pressure_reader = _collect(free_gib, pressure, unstable, source)
+    else:
+        disk, pressure_reader = _Sequence(readings, source), lambda: pressure
     code = admission.main(
         argv,
         budget_reader=disk,
@@ -119,6 +140,7 @@ def _run(
         gpu_reader=lambda: None,
         executor=recorder,
         home=tmp_path,
+        sleeper=lambda _seconds: None,
     )
     return code, recorder
 
@@ -630,20 +652,111 @@ class TestDiskFloor:
         assert "would start" in capsys.readouterr().out
         assert recorder.calls == []
 
-    @pytest.mark.parametrize(
-        ("free_gib", "refuse_gib", "warn_gib", "expected"),
-        [
-            (22.9, 23.0, 24.0, "refuse"),
-            (23.0, 23.0, 24.0, "warn"),
-            (23.9, 23.0, 24.0, "warn"),
-            (24.0, 23.0, 24.0, "ok"),
-            (0.0, 0.0, 0.0, "ok"),
-        ],
-    )
-    def test_the_verdict_is_the_line_itself(
-        self, free_gib: float, refuse_gib: float, warn_gib: float, expected: str
+    def test_three_consecutive_low_readings_refuse(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        assert (
-            admission_floor.disk_floor(free_gib, refuse_gib=refuse_gib, warn_gib=warn_gib)
-            == expected
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            readings=[22.4, 22.2, 22.0],
+            tmp_path=tmp_path,
         )
+
+        assert code == 3
+        assert "refusing to start eval.py" in capsys.readouterr().err
+        assert recorder.calls == []
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["kind"] == "refused"
+        assert event["readings"] == 3
+        assert event["lowest_gib"] == pytest.approx(22.0)
+        state = json.loads((tmp_path / "disk-floor-state.json").read_text())
+        assert state["refused"] is True
+
+    # meiva:note
+    # The negative control for the rule: the same three readings that refused would have let
+    # the same host start under the old single-sample verdict, so this test would pass on a
+    # build that ignored the second and third readings.
+    def test_one_low_reading_followed_by_two_above_the_line_only_warns(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            readings=[22.4, 23.6, 23.8],
+            tmp_path=tmp_path,
+        )
+
+        assert code == 0
+        assert "warning eval.py" in capsys.readouterr().err
+        assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["kind"] == "warned"
+        assert event["readings"] == 3
+
+    def test_a_refused_host_stays_refused_inside_the_band(self, tmp_path: Path) -> None:
+        (tmp_path / "disk-floor-state.json").write_text('{"refused": true}')
+
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            readings=[23.6, 23.8, 24.1],
+            tmp_path=tmp_path,
+        )
+
+        assert code == 3
+        assert recorder.calls == []
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["refused_before"] is True
+
+    def test_a_reading_at_the_reset_line_clears_the_refusal(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "disk-floor-state.json").write_text('{"refused": true}')
+
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            readings=[24.6, 24.7, 24.9],
+            tmp_path=tmp_path,
+        )
+
+        assert code == 0
+        assert "refusing" not in capsys.readouterr().err
+        assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
+        state = json.loads((tmp_path / "disk-floor-state.json").read_text())
+        assert state["refused"] is False
+
+    # meiva:note
+    # The knob that turns the new rule off: one sample is the old verdict, so a host that
+    # wants the previous behaviour can have it without a release.
+    def test_one_sample_is_the_old_verdict(self, tmp_path: Path) -> None:
+        code, recorder = _run(
+            [
+                "--peak-mb",
+                "600",
+                "--disk-samples",
+                "1",
+                "--",
+                "python",
+                "eval.py",
+                "--jobs",
+                "8",
+            ],
+            readings=[22.0],
+            tmp_path=tmp_path,
+        )
+
+        assert code == 3
+        assert recorder.calls == []
+
+    def test_a_comfortable_host_costs_one_reading(self, tmp_path: Path) -> None:
+        disk = _Sequence([26.1])
+
+        admission.main(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            budget_reader=disk,
+            pressure_reader=lambda: 1,
+            psi_reader=lambda: None,
+            gpu_reader=lambda: None,
+            executor=_Recorder(),
+            home=tmp_path,
+            sleeper=lambda _seconds: None,
+        )
+
+        assert disk.calls == [26.1]

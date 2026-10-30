@@ -18,10 +18,21 @@ Two lines, both configurable (`--disk-floor-gib` 23, `--disk-warn-gib` 24), read
 data volume's free space — the same statvfs/`df` reading the plan uses, never the snapshot's
 `disk_pct`, which differs by 1-1.5 points and would fabricate a drop that never happened:
 
-- **below 23 GiB** — refuse: one line naming the machine, free space, swap, kernel pressure
-  and the floor, a `refused` event, and exit **3**. Nothing starts.
+- **below 23 GiB on three consecutive readings** — refuse: one line naming the machine, free
+  space, swap, kernel pressure and the floor, a `refused` event, and exit **3**. Nothing
+  starts. Three readings, ten seconds apart, because the swap pool moves a gigabyte at a time
+  and a single sample near the line is a coin flip: on 2026-10-30 the macmini crossed this
+  line 127 times in one day of ten-second samples while nothing about the machine changed.
 - **below 24 GiB** — warn: the same line, a `warned` event, and the job starts. Two lines
   rather than one because a warning and a refusal in the same second leaves no room to react.
+- **the refusal is a state** — once refused, the host stays refused until one reading reaches
+  24.5 GiB (`--disk-reset-margin-gib` 1.5 above the line, wider than one swapfile) and that
+  state is kept in `disk-floor-state.json` under the admission home, so the next invocation
+  cannot reopen on the same wobble that closed it. Three readings plus this margin took the
+  same 127 crossings down to 7.
+- a host already above the reset line is not near the edge: it costs one reading and no
+  waiting, and `--disk-samples`/`--disk-sample-interval` tune the probe (1 restores the old
+  single-sample verdict).
 - `--dry-run` is never refused (it starts nothing), and a Linux reading is `MemAvailable`, not
   a data volume, so the floor does not apply there.
 - `--no-admission <reason>` remains the only way past it, recorded as `bypassed`.
