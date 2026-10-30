@@ -102,76 +102,41 @@ function renderGraph(
   );
 }
 
-function mockCardSize(width: number, height: number): () => void {
-  const proto = HTMLElement.prototype;
-  const widthDesc = Object.getOwnPropertyDescriptor({ offsetWidth: 0 }, "offsetWidth");
-  const heightDesc = Object.getOwnPropertyDescriptor({ offsetHeight: 0 }, "offsetHeight");
-  const isCard = function (this: HTMLElement) {
-    return this.getAttribute("role") === "tooltip";
-  };
-  Object.defineProperty(proto, "offsetWidth", {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (isCard.call(this)) return width;
-      const real: unknown = widthDesc?.get?.call(this);
-      return typeof real === "number" ? real : 0;
-    },
-  });
-  Object.defineProperty(proto, "offsetHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (isCard.call(this)) return height;
-      const real: unknown = heightDesc?.get?.call(this);
-      return typeof real === "number" ? real : 0;
-    },
-  });
-  return () => {
-    if (widthDesc) Object.defineProperty(proto, "offsetWidth", widthDesc);
-    if (heightDesc) Object.defineProperty(proto, "offsetHeight", heightDesc);
-  };
+// meiva:note
+// jsdom reports a zero-size canvas and node, so the placement caps the card — and a capped card is
+// exactly the state these pointer tests need: its body scrolls and it takes pointer events. Assert
+// the state instead of faking the boxes the placement reads.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function expectCappedCard(card: HTMLElement) {
+  expect(card.style.maxHeight).not.toBe("");
+  expect(card.style.overflowY).toBe("auto");
+  expect(card.className).toContain("pointer-events-auto");
 }
 
 describe("TaskGraph hover card grace window and states", () => {
   it("keeps the capped card open when the pointer moves from the node onto it", async () => {
-    const { container } = renderGraph(sampleTasks());
+    renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
-    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
-    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
-    );
-    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
-    );
-    const restore = mockCardSize(200, 300);
-    try {
-      fireEvent.mouseEnter(group);
-      const card = screen.getByRole("tooltip");
-      fireEvent.mouseLeave(group, { relatedTarget: card.firstElementChild });
-      expect(screen.getByRole("tooltip")).toBeTruthy();
-      fireEvent.mouseLeave(card);
-      expect(screen.queryByRole("tooltip")).toBeNull();
-    } finally {
-      restore();
-    }
+
+    fireEvent.mouseEnter(group);
+    const card = screen.getByRole("tooltip");
+    expectCappedCard(card);
+    fireEvent.mouseLeave(group, { relatedTarget: card.firstElementChild });
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    fireEvent.mouseLeave(card);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("gives the pointer a grace window to reach the capped card, then hides", async () => {
-    const { container } = renderGraph(sampleTasks());
+    renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
-    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
-    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
-    );
-    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
-    );
-    const restore = mockCardSize(200, 300);
     vi.useFakeTimers();
     try {
       fireEvent.mouseEnter(group);
       const card = screen.getByRole("tooltip");
+      expectCappedCard(card);
       fireEvent.mouseLeave(group);
       expect(screen.getByRole("tooltip")).toBeTruthy();
       fireEvent.mouseEnter(card);
@@ -183,25 +148,17 @@ describe("TaskGraph hover card grace window and states", () => {
       expect(screen.queryByRole("tooltip")).toBeNull();
     } finally {
       vi.useRealTimers();
-      restore();
     }
   });
 
   it("hides the capped card when the grace window expires without reaching it", async () => {
-    const { container } = renderGraph(sampleTasks());
+    renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
-    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
-    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 0, y: 0, width: 320, height: 390 }),
-    );
-    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 130, y: 180, width: 36, height: 36 }),
-    );
-    const restore = mockCardSize(200, 300);
     vi.useFakeTimers();
     try {
       fireEvent.mouseEnter(group);
+      expectCappedCard(screen.getByRole("tooltip"));
       fireEvent.mouseLeave(group);
       expect(screen.getByRole("tooltip")).toBeTruthy();
       act(() => {
@@ -210,7 +167,6 @@ describe("TaskGraph hover card grace window and states", () => {
       expect(screen.queryByRole("tooltip")).toBeNull();
     } finally {
       vi.useRealTimers();
-      restore();
     }
   });
 

@@ -15,7 +15,7 @@ exports = ["fleet-view.tsx"]
 "task-graph-forces.test.ts" = ["force-controls.tsx"]
 "task-graph.test.tsx" = ["task-graph.tsx"]
 "task-graph.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx", "presentation", "task-graph-chrome.tsx", "task-kanban.tsx"]
-"tests" = ["force-controls.tsx", "graph-view.tsx", "presentation", "task-graph-chrome.tsx", "task-graph.tsx", "task-kanban.tsx"]
+"tests" = ["force-controls.tsx", "force-graph-geometry.ts", "graph-view.tsx", "presentation", "task-graph-chrome.tsx", "task-graph.tsx", "task-kanban.tsx"]
 
 [debt.third-party-patch]
 "fleet-route-jump.test.tsx#vi.mock next/link" = 1
@@ -24,8 +24,3 @@ exports = ["fleet-view.tsx"]
 "fleet-view.test.tsx#vi.mock next/navigation" = 1
 "graph-view.test.tsx#vi.mock next/navigation" = 1
 "task-graph.test.tsx#vi.mock next/navigation" = 1
-
-[debt.unresolved-patch]
-"task-graph.test.tsx#vi.spyOn canvas.\"getBoundingClientRect\"" = 6
-"task-graph.test.tsx#vi.spyOn group.\"getBoundingClientRect\"" = 6
-"task-graph.test.tsx#vi.spyOn legend.\"getBoundingClientRect\"" = 1

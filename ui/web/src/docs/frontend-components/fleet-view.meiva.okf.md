@@ -29,6 +29,13 @@ Label sizing/wrapping and its direct contracts use `fleet/presentation/labels.ts
 Task canvas/chrome/contracts share the records and legend in `presentation/task-palette.ts`.
 `layoutOptions` remains owned by the actual ForceGraph renderer.
 
+The hover card's two decisions are pure functions of the boxes involved:
+`placeHoverCard` (beside the node, flipped to its left edge, centred above on a
+narrow canvas, lifted over the legend, height-capped when neither side holds
+it) and `hoverCardLeave` (drop at once, wait out the grace window a capped card
+needs to be reached, or hold while the pointer rests on it). `force-graph.tsx`
+only measures those boxes and applies the answer.
+
 A graph of 200 nodes or more (`layoutOptions` in `force-graph.tsx`) settles in
 manual, time-budgeted slices instead of the live d3 timer: the simulation steps
 under a per-frame budget and commits positions explicitly, twice early and then
