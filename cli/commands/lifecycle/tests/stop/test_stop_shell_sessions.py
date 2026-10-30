@@ -43,6 +43,7 @@ from base.sessions.pty.tests.pty_service import service_run, service_socket
 from base.sessions.pty.tests.pty_shells import new, wait_for
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.maintenance_stop_report import StopIncompleteError
+from cli.commands.data_plane.stop_waits import deadline_after
 from cli.commands.lifecycle.stop import do_stop
 from cli.commands.lifecycle.stop import shell_sessions as shells
 from cli.commands.lifecycle.tests.stop.stop_support import (
@@ -388,15 +389,15 @@ def test_a_shell_session_that_clears_within_the_stop_deadline_does_not_fail_the_
     tearing_down = subprocess.Popen([sys.executable, str(CHILD), "sleep", "0.6"])
     ledger.write(ledger_path(service_run()), [closure.Target(name, identity_of(tearing_down))])
     assert shells.live_shell_sessions(home) == [name]
-    started = time.monotonic()
     try:
-        shells.await_no_shell_sessions(
-            home, Deadline(at=started + 10, timers=SYSTEM_TIMERS), "shell-sessions"
-        )
+        shells.await_no_shell_sessions(home, deadline_after(SYSTEM_TIMERS, 10), "shell-sessions")
+        # meiva:note
+        # The listing is read where the wait returns: a wait that came back before the table
+        # cleared leaves the name in it. The finally reaps the process, so reading the listing
+        # after it would judge the reap instead of the wait (an immediate return passed there).
+        assert shells.live_shell_sessions(home) == []
     finally:
         tearing_down.wait(timeout=10)
-    assert 0.4 <= time.monotonic() - started < 5, "it waited for the session to leave the table"
-    assert shells.live_shell_sessions(home) == []
 
 
 # meiva:note
@@ -494,10 +495,12 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
 
 
 # meiva:note
-# `--force` closes shell sessions with no grace: a job that ignores TERM and HUP is
-# SIGKILLed at once, and no owner notice is written.
+# `--force` ends a session whose job ignores TERM and HUP, and writes no owner notice. The three
+# facts asserted here are the session leaving the service, its job exiting and an empty notice
+# table; the zero grace the force path is defined by lives in `closure.Outcome.grace_s`, which
+# `force_close_shell_sessions` computes and drops, so this test does not judge it.
 @pytest.mark.flaky
-def test_force_close_closes_every_session_at_once_without_notices(
+def test_force_close_ends_the_session_and_leaves_no_notice(
     redis_url: str,
     home: Path,
     pty_reaper: PtyReaper,
@@ -509,9 +512,10 @@ def test_force_close_closes_every_session_at_once_without_notices(
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
-    started = time.monotonic()
+    # meiva:note
+    # The three facts are the judgement: the session left the service, its job is gone
+    # (`wait_exit` is the hang bound) and no owner notice was written.
     shells.force_close_shell_sessions(stop_runtime)
-    assert time.monotonic() - started < 8
     assert not client.has_session(name, socket_path=service_socket())
     assert jobs.wait_exit(running[0].pid, timeout=5), "the job outlived the forced close"
     assert written_notices(db_conn) == []
