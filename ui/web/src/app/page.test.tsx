@@ -143,7 +143,7 @@ describe("HomePage reply suggestion", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     hooksState.timelineItems = agentSpoke;
-    hooksState.settings = { "display.timeline_width_ratio": 0.4, "behavior.replySuggestions": true };
+    hooksState.settings = { "display.timeline_width_px": 768, "behavior.replySuggestions": true };
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -189,7 +189,7 @@ describe("HomePage reply suggestion", () => {
     expect(transport.getReplySuggestion).not.toHaveBeenCalled();
   });
   it("never asks when the user turned the setting off", async () => {
-    hooksState.settings = { "display.timeline_width_ratio": 0.4, "behavior.replySuggestions": false };
+    hooksState.settings = { "display.timeline_width_px": 768, "behavior.replySuggestions": false };
     wrap(<HomePage />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -261,7 +261,7 @@ describe("HomePage top-level render", () => {
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
     hooksState.activeId = 5;
     hooksState.isLarge = true;
-    hooksState.settings = { "display.timeline_width_ratio": 0.4, "display.inspector_open": true };
+    hooksState.settings = { "display.timeline_width_px": 768, "display.inspector_open": true };
     hooksState.agents = [makeAgent({ agent_id: 5, label: "research", status: "idling" })];
     wrap(<HomePage />);
     const label = screen.getByTestId("header-bar").getAttribute("data-label");
@@ -274,19 +274,6 @@ describe("HomePage top-level render", () => {
     expect(screen.queryByText("Save failed: 500")).toBeNull();
   });
 
-  // Layout regression (task #714 + #715): the timeline+composer content
-  // column is width-capped and centered (mx-auto), so on wide screens the
-  // conversation leaves responsive gutters on both sides — Claude/Gemini
-  // style — instead of stretching full-width. The cap comes from the
-  // display.timeline_width_ratio user setting as an inline maxWidth
-  // (min(<ratio>vw, 1280px)).
-  // User ruling 2026-08-06: the timeline is the MAIN page — the scroll
-  // surface is full-bleed (scrollbar at the pane edge, gutters scrollable)
-  // and HeaderBar + the composer stack float above it (absolute + backdrop
-  // blur). The width cap now lives on the timeline's inner content column,
-  // the HeaderBar's inner wrapper, and the composer stack's inner wrappers
-  // (all mx-auto). jsdom can't measure layout, so assert the class +
-  // inline-style contract on the timeline surface and the floating bars.
   it("timeline surface is full-bleed; content column capped and centered", () => {
     wrap(<HomePage />);
     const surface = screen.getByTestId("timeline-surface");
@@ -310,7 +297,7 @@ describe("HomePage top-level render", () => {
     expect(surface.contains(screen.getByTestId("timeline"))).toBe(true);
     // Timeline content column: capped + centered inside the scroll viewport.
     const timeline = screen.getByTestId("timeline");
-    expect(timeline.style.maxWidth).toBe("min(40vw, 1280px)");
+    expect(timeline.style.maxWidth).toBe("768px");
     // Floating bars sit on top of the surface as direct children (their
     // absolute + backdrop-blur classes are asserted in header-bar.test.tsx).
     const header = screen.getByTestId("header-bar");
@@ -319,8 +306,6 @@ describe("HomePage top-level render", () => {
     expect(surface.contains(composer)).toBe(true);
   });
 
-  // Task #715: the column cap follows the display.timeline_width_ratio
-  // setting (viewport fraction, clamped by lib/timeline-width.ts).
   // R4 (Task #1024): the jsdom class-contract layer covers every timeline
   // invariant in LAYOUT_INVARIANTS (the shared checklist with the
   // Playwright layer). The timeline-surface classes asserted above are the
@@ -343,38 +328,29 @@ describe("HomePage top-level render", () => {
     // shared checklist cannot drift.
     expect(LAYOUT_VIEWPORT_TIERS).toEqual([320, 390, 768]);
   });
-  it("content column maxWidth follows display.timeline_width_ratio", () => {
-    hooksState.settings = { "display.timeline_width_ratio": 0.6 };
+  it("content column maxWidth follows display.timeline_width_px", () => {
+    hooksState.settings = { "display.timeline_width_px": 960 };
     wrap(<HomePage />);
-    expect(screen.getByTestId("timeline").style.maxWidth).toBe("min(60vw, 1280px)");
+    expect(screen.getByTestId("timeline").style.maxWidth).toBe("960px");
   });
 
-  // Task #805 (user ruling): the width ratio is a DESKTOP concept. On narrow
-  // viewports (<768px) the timeline content column renders FULL-WIDTH — no
-  // inline maxWidth at all — even when a ratio is stored in settings. The
-  // composer gets the same treatment via a falsy maxWidthCss (asserted in
-  // composer.test.tsx).
-  it("narrow viewport → content column full-width (no maxWidth, ratio ignored)", () => {
+  it("narrow viewport → content column full-width (no maxWidth, setting ignored)", () => {
     hooksState.isDesktop = false;
-    hooksState.settings = { "display.timeline_width_ratio": 0.2 };
+    hooksState.settings = { "display.timeline_width_px": 512 };
     wrap(<HomePage />);
     expect(screen.getByTestId("timeline").style.maxWidth).toBe("");
-    // One falsy convention (audit C2): the composer also gets undefined on
-    // narrow viewports — never "" — so a `!= null` check can't cap mobile.
     expect(screen.getByTestId("composer").getAttribute("data-max-width")).toBe("undefined");
-    // Floating bars stay direct children of the surface on narrow viewports.
     expect(screen.getByTestId("header-bar").parentElement).toBe(
       screen.getByTestId("timeline-surface"),
     );
   });
-  it("desktop viewport → content column keeps the ratio cap", () => {
+  it("desktop viewport → content column keeps the pixel cap", () => {
     hooksState.isDesktop = true;
-    hooksState.settings = { "display.timeline_width_ratio": 0.6 };
+    hooksState.settings = { "display.timeline_width_px": 960 };
     wrap(<HomePage />);
-    expect(screen.getByTestId("timeline").style.maxWidth).toBe("min(60vw, 1280px)");
-    // The composer rides the same cap as the timeline column (#723-⑧).
+    expect(screen.getByTestId("timeline").style.maxWidth).toBe("960px");
     expect(screen.getByTestId("composer").getAttribute("data-max-width")).toBe(
-      "min(60vw, 1280px)",
+      "960px",
     );
   });
 
@@ -399,7 +375,7 @@ describe("HomePage top-level render", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
     hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
+      "display.timeline_width_px": 768,
       "display.inspector_open": true,
     };
     wrap(<HomePage />);
@@ -421,7 +397,7 @@ describe("HomePage top-level render", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
     hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
+      "display.timeline_width_px": 768,
       "display.inspector_open": true,
     };
     const { rerender } = wrap(<HomePage />);
@@ -446,7 +422,7 @@ describe("HomePage top-level render", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
     hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
+      "display.timeline_width_px": 768,
       "display.inspector_open": true,
     };
     inspectorMockState.shouldThrow = true;
@@ -464,7 +440,7 @@ describe("HomePage top-level render", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
     hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
+      "display.timeline_width_px": 768,
       "display.inspector_open": true,
     };
     inspectorMockState.shouldThrow = true;

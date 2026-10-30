@@ -72,7 +72,7 @@ The turn header's timer reads ONE basis in both states — `summarizeTurn.worked
 ## Column geometry
 
 The scroll surface is full-bleed — the scrollbar sits at the pane edge and the
-gutters scroll — while the item column stays capped (`display.timeline_width_ratio`)
+gutters scroll — while the item column stays capped (`display.timeline_width_px`)
 and centered inside it. The column clears the floating HeaderBar with 52px
 (44px bar + 8px clearance, derived from `BAR_HEIGHT_PX`; user ruling 2026-08-06)
 so a bar-height change cannot slide the first row underneath it. The composer

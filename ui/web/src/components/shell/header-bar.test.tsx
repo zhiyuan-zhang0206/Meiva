@@ -53,10 +53,10 @@ describe("HeaderBar", () => {
 
   it("maxWidthCss centers the inner content with the timeline column", () => {
     const { container } = render(
-      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} maxWidthCss="min(40vw, 1280px)" />,
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} maxWidthCss="768px" />,
     );
     const inner = container.querySelector("header > div");
-    expect((inner as HTMLElement | null)?.style.maxWidth).toBe("min(40vw, 1280px)");
+    expect((inner as HTMLElement | null)?.style.maxWidth).toBe("768px");
     expect(inner?.className).toContain("mx-auto");
     // w-full: on narrow viewports (no maxWidthCss) the inner bar spans
     // the pane like every other bar instead of shrink-wrapping its

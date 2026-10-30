@@ -142,7 +142,7 @@ beforeEach(resetHomePageTestState);
 describe("sidebar app-entry reset", () => {
   it("resets a loaded collapsed preference when the home surface is entered", () => {
     hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
+      "display.timeline_width_px": 768,
       "display.sidebar_collapsed": true,
     };
     wrap(<HomePage />);
@@ -165,7 +165,7 @@ describe("sidebar app-entry reset", () => {
     );
     expect(hooksState.setSetting).not.toHaveBeenCalled();
     hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
+      "display.timeline_width_px": 768,
       "display.sidebar_collapsed": true,
     };
     view.rerender(

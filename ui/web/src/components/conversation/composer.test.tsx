@@ -265,12 +265,12 @@ describe("Composer reply suggestion", () => {
 
 describe("Composer button mode dispatch", () => {
   it("root is width-capped, centered, aligned with the timeline width", () => {
-    renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss="min(40vw, 1280px)" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss="768px" />);
     const root = screen.getByTestId("composer");
     expect(root.className).toContain("mx-auto");
     expect(root.className).toContain("w-full");
     expect(root.className).not.toContain("max-w-[45rem]");
-    expect(root.style.maxWidth).toBe("min(40vw, 1280px)");
+    expect(root.style.maxWidth).toBe("768px");
   });
   it("the tightened gap above the rule, unchanged textarea height", () => {
     // meiva:note
@@ -309,9 +309,9 @@ describe("Composer button mode dispatch", () => {
     expect(row.className).toContain(BOTTOM_BAND_ROW_CLASS);
   });
   it("root maxWidth follows the maxWidthCss prop (setting-derived)", () => {
-    renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss="min(60vw, 1280px)" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss="960px" />);
     const root = screen.getByTestId("composer");
-    expect(root.style.maxWidth).toBe("min(60vw, 1280px)");
+    expect(root.style.maxWidth).toBe("960px");
   });
   it("undefined maxWidthCss (mobile) → no inline maxWidth, full-width", () => {
     renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss={undefined} />);

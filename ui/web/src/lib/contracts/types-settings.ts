@@ -135,7 +135,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
 
   "display.context_meter_width": "comfortable",
 
-  "display.timeline_width_ratio": 0.4,
+  "display.timeline_width_px": 768,
   "display.expand_runs_mode": "none",
   "display.composer_context_meter": false,
 

@@ -240,7 +240,7 @@ describe("value sanitization", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.show_timestamp_weekday", value: false });
-    track("setting-change", { key: "display.timeline_width_ratio", value: 0.4 });
+    track("setting-change", { key: "display.timeline_width_px", value: 768 });
     expect(telemetryTestControl.flush()).toBe(2);
     const body = beaconBody(sendBeacon);
     const byKey = Object.fromEntries(
@@ -249,7 +249,7 @@ describe("value sanitization", () => {
         .map((e) => [e.key, e.value]),
     );
     expect(byKey["display.show_timestamp_weekday"]).toBe("false");
-    expect(byKey["display.timeline_width_ratio"]).toBe("0.4");
+    expect(byKey["display.timeline_width_px"]).toBe("768");
   });
 
   it("truncates long strings to 64 chars", () => {
