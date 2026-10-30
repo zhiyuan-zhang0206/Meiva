@@ -21,8 +21,5 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "sse-frames.ts" = "strict"
 "transport.ts" = "strict"
 
-[debt.ambient-read]
-"system-transport.ts#clock Date.now" = 1
-"system-transport.ts#platform navigator" = 1
-"system-transport.ts#random crypto.getRandomValues" = 1
-"system-transport.ts#random crypto.randomUUID" = 1
+[roots]
+"system-transport.ts" = { kinds = ["clock", "platform", "random"], why = "the transport capability port's system implementation: the one file that reads the page's wall clock, its crypto keys and its navigator locks, and hands them to every caller as HttpTransport/StreamTransport values" }
