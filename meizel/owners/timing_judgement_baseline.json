@@ -68,6 +68,31 @@
     },
     {
       "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_client_deadline_cuts_a_backend_that_never_answers",
+      "comparison": "elapsed < _DEADLINE_S + N"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_client_deadline_cuts_a_backend_that_never_answers",
+      "comparison": "elapsed >= _DEADLINE_S * N"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_client_deadline_cuts_a_sync_backend_that_never_answers",
+      "comparison": "elapsed < _CUT_FAILED_S"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_client_deadline_cuts_a_sync_backend_that_never_answers",
+      "comparison": "elapsed >= _DEADLINE_S * N"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
+      "function": "test_the_transaction_budget_interrupts_a_stalled_commit",
+      "comparison": "spent < _HANG_GUARD_S"
+    },
+    {
+      "path": "base/db/tests/test_restore_budget.py",
       "function": "test_the_transaction_budget_interrupts_a_stalled_commit",
       "comparison": "time.monotonic() - started >= N"
     },
@@ -75,6 +100,11 @@
       "path": "base/host/env/tests/test_port_lease.py",
       "function": "_lease_reports",
       "comparison": "remaining > N"
+    },
+    {
+      "path": "base/host/tests/daemon_shutdown.py",
+      "function": "wait_bounded_exit",
+      "comparison": "elapsed < EXIT_BOUND_S"
     },
     {
       "path": "base/sessions/pty/tests/test_client_connect_wait.py",
@@ -157,6 +187,11 @@
       "comparison": "time.monotonic() - started >= N"
     },
     {
+      "path": "cli/commands/lifecycle/tests/stop/test_data_plane_stop.py",
+      "function": "test_real_pgbouncer_stop_does_not_wait_for_idle_client",
+      "comparison": "time.monotonic() - started < _STOP_HANG_GUARD_S"
+    },
+    {
       "path": "cli/commands/lifecycle/tests/stop/test_stop_root_tree.py",
       "function": "test_a_force_stop_spends_the_operators_budget_on_the_root_as_well",
       "comparison": "time.monotonic() - started < N"
@@ -190,6 +225,11 @@
       "path": "cli/commands/observability/tests/lgtm/test_lgtm_download.py",
       "function": "test_the_backoff_is_a_real_wait_that_grows_by_one_step_per_attempt",
       "comparison": "time.monotonic() - started >= N + N"
+    },
+    {
+      "path": "cli/commands/tests/test_gateway_preflight_budget.py",
+      "function": "test_a_gateway_that_comes_back_inside_the_budget_is_not_declined",
+      "comparison": "time.monotonic() - started < BUDGET_S"
     },
     {
       "path": "cli/commands/tests/test_gateway_preflight_budget.py",
@@ -232,9 +272,39 @@
       "comparison": "elapsed < N"
     },
     {
+      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
+      "function": "test_the_app_server_wait_spends_its_window_on_the_timers_it_is_given",
+      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
+    },
+    {
+      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
+      "function": "test_the_claude_panel_wait_spends_its_window_on_the_timers_it_is_given",
+      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
+    },
+    {
+      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
+      "function": "test_the_codex_readiness_wait_spends_its_window_on_the_timers_it_is_given",
+      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
+    },
+    {
+      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
+      "function": "test_the_status_card_wait_spends_its_window_on_the_timers_it_is_given",
+      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
+    },
+    {
+      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
+      "function": "test_the_submission_check_spends_its_window_on_the_timers_it_is_given",
+      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
+    },
+    {
       "path": "meiva/tests/namespaces/web/test_web.py",
       "function": "test_fetch_batch_runs_concurrently",
       "comparison": "time.monotonic() - started < N"
+    },
+    {
+      "path": "meiva/tests/namespaces/web/test_web_deepseek.py",
+      "function": "test_batch_request_starts_stay_inside_the_configured_rate_window",
+      "comparison": "floor_elapsed >= N / N - _FLOOR_SLACK_S"
     },
     {
       "path": "meiva/tests/namespaces/web/test_web_search.py",
@@ -252,9 +322,19 @@
       "comparison": "elapsed < N"
     },
     {
+      "path": "services/agent_runner/agent_ops/tests/test_daemon_entry.py",
+      "function": "test_a_retried_stop_does_not_abort_the_bounded_exit",
+      "comparison": "elapsed < _STOP_WINDOW_S"
+    },
+    {
       "path": "services/agent_runner/agent_ops/tests/test_process_exit.py",
       "function": "test_a_wedged_arm_does_not_hold_the_process_exit",
       "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/agent_runner/pty_sessions/tests/test_close_all.py",
+      "function": "test_a_job_that_ignores_termination_is_killed_after_its_grace",
+      "comparison": "time.monotonic() - started < _STUBBORN_HANG_GUARD_S"
     },
     {
       "path": "services/backup/tests/backup/test_run_with_progress_without_a_sink_defers.py",
@@ -350,6 +430,11 @@
       "path": "services/supervision/roster/tests/test_service_graceful_stop.py",
       "function": "test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup",
       "comparison": "elapsed < N"
+    },
+    {
+      "path": "services/tests/test_daemon_shutdown_bound.py",
+      "function": "wait_bounded_exit",
+      "comparison": "elapsed < _EXIT_BOUND_S"
     },
     {
       "path": "services/upkeep/events_maintenance/tests/test_events_maintenance_failure_budget.py",

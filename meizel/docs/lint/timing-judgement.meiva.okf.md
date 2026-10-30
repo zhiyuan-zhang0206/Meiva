@@ -15,7 +15,9 @@ hook and over every pytest host in CI.
 
 A comparison inside `assert` that puts a wall-clock quantity against a number. The
 quantity is a clock read (`time.monotonic()`, `perf_counter()`, `process_time()`,
-`time.time()`, a loop's `.time()`), a name bound to one, or a difference of two of them.
+`time.time()`, a loop's `.time()`, or one imported by name — `from time import monotonic`),
+a name bound to one, or a difference of two of them. The bound is a numeric literal **or a
+module-level name bound to one**, resolved through `_B = _A * 2`.
 Both directions are reported — an upper bound flakes under load, a lower bound fails a
 correct implementation that got faster. The message names the enclosing function and
 quotes the comparison.
@@ -63,6 +65,32 @@ recorded. Two answers are legitimate, and they are different claims:
   entry while adding a comparison does not. Regenerate with `--write-baseline`; the diff
   is the review, and a regenerated file that grows without a matching repair is the
   signal that someone silenced the rule instead of answering it.
+
+  **The ledger only goes down.** When a gap in the rule is found, the answer is: widen the
+  rule, add the sites it now sees to the baseline, and say in the change why they were
+  invisible before — never edit the number by hand. Two such widenings on 2026-10-30
+  (`from time import monotonic`, then module-level numeric bounds) found `4` and `17` sites
+  that had been counted as governed. The uncomfortable part is that the same wave that
+  moved bounds into named constants (`hang_guard_s`, `_*_BOUND_S`) moved them into the
+  blind spot: a governance change can create invisible debt, which is why the ledger is
+  stated as "sites the rule can see", never as "sites that exist".
+
+## What the bound resolution does not do
+
+Written down because "the rule misses my site" is the report this will get, and the answer
+has to be the same both times:
+
+- **No cross-module names.** `assert elapsed < tests.support.BUDGET` is not resolved; the
+  name has to be bound in the module being scanned.
+- **No calls.** `assert elapsed < budget()` stays invisible. A bound computed at run time
+  is a decision about what the test controls, not something a scanner can read.
+- **No names bound inside a function.** `budget = 5` in the test body is not a bound.
+- **No clock against clock.** `deadline = monotonic() + 30; ... assert monotonic() < deadline`
+  is a timeout with a named deadline, not the claim `elapsed < 0.5`, and the rule leaves it
+  alone.
+
+Each of these is a widening of what the rule claims, so each needs its own decision and its
+own review — not an implementation detail slipped in beside a fix.
 
 ## What it does not judge
 

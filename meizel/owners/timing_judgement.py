@@ -111,17 +111,51 @@ def _is_clock_quantity(node: ast.AST, names: set[str], bare: frozenset[str]) -> 
     return False
 
 
-def _is_number(node: ast.AST) -> bool:
+def _module_numbers(tree: ast.Module) -> frozenset[str]:
+    # meiva:note
+    # Names bound to a number at module level, resolved to a fixed point so `_B = _A * 2` counts when
+    # `_A` does. A name bound to a clock read never enters — `deadline = monotonic() + 30` is a clock
+    # quantity, so `assert monotonic() < deadline` stays unjudged.
+    #
+    # What this deliberately does not do: follow an import from another module, evaluate a call
+    # (`assert elapsed < budget()` stays invisible), or resolve a name bound inside a function.
+    # Each of those widens what the rule claims; widening it is its own decision with its own
+    # review, not an implementation detail of this function.
+    names: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets, value = [node.target], node.value
+            else:
+                continue
+            if not _is_number(value, names):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in names:
+                    names.add(target.id)
+                    changed = True
+    return frozenset(names)
+
+
+def _is_number(node: ast.AST, numbers: frozenset[str] | set[str] = frozenset()) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in numbers
     if isinstance(node, ast.Constant):
         return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-        return _is_number(node.operand)
+        return _is_number(node.operand, numbers)
     if isinstance(node, ast.BinOp):
-        return _is_number(node.left) and _is_number(node.right)
+        return _is_number(node.left, numbers) and _is_number(node.right, numbers)
     return False
 
 
-def _judges_a_clock(node: ast.AST, names: set[str], bare: frozenset[str]) -> ast.Compare | None:
+def _judges_a_clock(
+    node: ast.AST, names: set[str], bare: frozenset[str], numbers: frozenset[str]
+) -> ast.Compare | None:
     # meiva:note
     # The first comparison under `node` that puts a clock quantity against a number.
     for sub in _own_nodes(node):
@@ -129,8 +163,8 @@ def _judges_a_clock(node: ast.AST, names: set[str], bare: frozenset[str]) -> ast
             continue
         sides = [sub.left, *sub.comparators]
         for left, right in pairwise(sides):
-            if (_is_number(right) and _is_clock_quantity(left, names, bare)) or (
-                _is_number(left) and _is_clock_quantity(right, names, bare)
+            if (_is_number(right, numbers) and _is_clock_quantity(left, names, bare)) or (
+                _is_number(left, numbers) and _is_clock_quantity(right, names, bare)
             ):
                 return sub
     return None
@@ -178,6 +212,7 @@ def _sites(src: str, rel_path: str) -> list[Site]:
         return []
     lines = src.splitlines()
     bare = _imported_clocks(tree)
+    numbers = _module_numbers(tree)
     sites: list[Site] = []
     for fn in _functions(tree):
         names = _clock_names(fn, bare)
@@ -186,7 +221,7 @@ def _sites(src: str, rel_path: str) -> list[Site]:
         for node in _own_nodes(fn):
             if not isinstance(node, ast.Assert) or _commented(lines, node.lineno):
                 continue
-            compare = _judges_a_clock(node.test, names, bare)
+            compare = _judges_a_clock(node.test, names, bare, numbers)
             if compare is not None:
                 sites.append((rel_path, node.lineno, compare, fn))
     return sites
