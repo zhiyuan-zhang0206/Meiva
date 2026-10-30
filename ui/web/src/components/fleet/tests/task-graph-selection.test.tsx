@@ -1,40 +1,22 @@
-
 import { QueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { type ReactElement, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TaskRow } from "@/lib/contracts/types";
-import type { TasksResult } from "@/lib/notifications/use-tasks";
-import { resetMockSettings } from "@/test-support/user-settings-mock";
+import type { TaskListResponse, TaskRow, UserSettingRow } from "@/lib/contracts/types";
 
 import { TaskGraph } from "../task-graph";
-import { renderWithApi as render } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
-beforeEach(() => {
-  resetTransport();
-  transport.getTask.mockImplementation((id: number) => getTask(id));
-});
-
+import { renderWithProviders } from "@/test-support/render";
 
 // meiva:note
-// The hover card reads its one row through TanStack Query, so the hover tests
-// wrap their render in a client; the other tests never mount the card.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
+// The one replacement left in this file: the board navigates through Next's router, which needs a
+// mounted app router. It leaves with the third-party-patch family.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
-
-const useTasks = vi.fn<(...args: string[]) => TasksResult>();
-vi.mock("@/lib/notifications/use-tasks", () => ({
-  useTasks: (...args: string[]) => useTasks(...args),
-}));
 
 function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
   return {
@@ -64,20 +46,49 @@ function sampleTasks(): TaskRow[] {
   ];
 }
 
-function ok(tasks: TaskRow[]): TasksResult {
-  return { tasks, loading: false, error: false };
+const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+
+// meiva:note
+// Every test here mounts the board on data it states: rows are cached under the keys the hook reads
+// and answered by the fake transport, preferences come from the settings cache, and the settings
+// surface answers reads and writes — the same providers the app mounts, no replaced module.
+// `cacheTasks` is the refetch a mounted board sees when the list arrives after it.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function cacheTasks(queryClient: QueryClient, tasks: readonly TaskRow[]): void {
+  for (const window of TASK_WINDOWS) {
+    queryClient.setQueryData<TaskListResponse>(["tasks", "graph", window], { tasks });
+  }
+  transport.getTasks.mockResolvedValue({ tasks });
+}
+
+function renderTasks(
+  ui: ReactElement,
+  tasks: readonly TaskRow[],
+  settings: Record<string, unknown> = {},
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cacheTasks(queryClient, tasks);
+  const stored = new Map<string, unknown>(Object.entries(settings));
+  const row = (key: string, value: unknown): UserSettingRow => ({
+    key,
+    value,
+    updated_at: "2026-01-01T00:00:00Z",
+  });
+  transport.getSettings.mockImplementation(() =>
+    Promise.resolve({ settings: [...stored].map(([key, value]) => row(key, value)) }),
+  );
+  transport.putSetting.mockImplementation((key: string, value: unknown) => {
+    stored.set(key, value);
+    return Promise.resolve(row(key, value));
+  });
+  return renderWithProviders(ui, { queryClient, settings, wallNow: () => Date.now() });
 }
 
 beforeEach(() => {
-  queryClient.clear();
-  useTasks.mockReset();
+  resetTransport();
   getTask.mockReset();
   getTask.mockResolvedValue(task(0));
-  // meiva:note
-  // Reset persisted graph/kanban mode + toggle state (now DB-backed user
-  // settings) so a previous test's mode switch or toggle doesn't leak.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-  resetMockSettings();
+  transport.getTask.mockImplementation((id: number) => getTask(id));
 });
 
 afterEach(cleanup);
@@ -108,16 +119,13 @@ describe("TaskGraph (graph mode)", () => {
   }
 
   it("settles on a crossed selection instead of oscillating between two cards (task #3300)", async () => {
-    resetMockSettings({ "display.task_graph_mode": "kanban" });
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
-        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-      ]),
-    );
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "in_progress" }),
+      task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+      task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+    ];
     harnessRenders = 0;
-    render(<SelectionHarness />);
+    renderTasks(<SelectionHarness />, tasks, { "display.task_graph_mode": "kanban" });
 
     await waitFor(() => expect(screen.getAllByText(/#20/).length).toBeGreaterThan(0), { timeout: 4000 });
 
@@ -141,14 +149,11 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("converges when mounted with a crossed selection (the Graph-tab swap path, task #3300)", async () => {
-    resetMockSettings({ "display.task_graph_mode": "kanban" });
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
-        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-      ]),
-    );
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "in_progress" }),
+      task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+      task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+    ];
 
     function CrossedMountHarness() {
       const [boardMounted, setBoardMounted] = useState(false);
@@ -177,7 +182,7 @@ describe("TaskGraph (graph mode)", () => {
     }
 
     harnessRenders = 0;
-    render(<CrossedMountHarness />);
+    renderTasks(<CrossedMountHarness />, tasks, { "display.task_graph_mode": "kanban" });
     fireEvent.click(screen.getByText("scratch-mount"));
 
     await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
@@ -215,23 +220,17 @@ describe("TaskGraph (graph mode)", () => {
   }
 
   it("converges when a crossed pair mounts while the task list is cold (kanban, QA #6177 round 2)", async () => {
-    resetMockSettings({ "display.task_graph_mode": "kanban" });
-    useTasks.mockReturnValue(ok([]));
-
     harnessRenders = 0;
-    const view = render(<ColdListHarness />);
+    const { queryClient } = renderTasks(<ColdListHarness />, [], { "display.task_graph_mode": "kanban" });
     fireEvent.click(screen.getByText("scratch-mount"));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));
     });
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
-        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-      ]),
-    );
-    view.rerender(<ColdListHarness />);
+    cacheTasks(queryClient, [
+      task(1, { title: "root", status: "in_progress" }),
+      task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+      task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+    ]);
 
     await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
     await act(async () => {
@@ -242,23 +241,17 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("converges when a crossed pair mounts while the task list is cold (graph, QA #6177 round 2)", async () => {
-    resetMockSettings({ "display.task_graph_mode": "graph" });
-    useTasks.mockReturnValue(ok([]));
-
     harnessRenders = 0;
-    const view = render(<ColdListHarness />);
+    const { queryClient } = renderTasks(<ColdListHarness />, [], { "display.task_graph_mode": "graph" });
     fireEvent.click(screen.getByText("scratch-mount"));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));
     });
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
-        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-      ]),
-    );
-    view.rerender(<ColdListHarness />);
+    cacheTasks(queryClient, [
+      task(1, { title: "root", status: "in_progress" }),
+      task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+      task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+    ]);
 
     await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
     await act(async () => {
@@ -269,14 +262,11 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("settles after one handler writes a crossed pair in a single commit (QA #6177 boundary)", async () => {
-    resetMockSettings({ "display.task_graph_mode": "kanban" });
-    useTasks.mockReturnValue(
-      ok([
+    const tasks: TaskRow[] = [
         task(1, { title: "root", status: "in_progress" }),
         task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-      ]),
-    );
+      ];
 
     function CrossedWriteHarness() {
       const [agent, setAgent] = useState<number | null>(null);
@@ -308,7 +298,7 @@ describe("TaskGraph (graph mode)", () => {
     }
 
     harnessRenders = 0;
-    render(<CrossedWriteHarness />);
+    renderTasks(<CrossedWriteHarness />, tasks, { "display.task_graph_mode": "kanban" });
     fireEvent.click(screen.getByText("scratch-cross"));
 
     await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
@@ -346,14 +336,7 @@ describe("TaskGraph (graph mode)", () => {
   it("keeps a route-carried task when an agent is already selected — the jump outranks the Inbox's default row (task #3500)", async () => {
     const onSelectTask = vi.fn();
     const onSelectAgent = vi.fn();
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
-        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-      ]),
-    );
-    render(
+    renderTasks(
       <TaskGraph
         selectedAgentId={9}
         onSelectAgent={onSelectAgent}
@@ -361,6 +344,11 @@ describe("TaskGraph (graph mode)", () => {
         routeTaskId={2}
         onSelectTask={onSelectTask}
       />,
+      [
+        task(1, { title: "root", status: "in_progress" }),
+        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ],
     );
 
     await waitFor(() => expect(onSelectAgent).toHaveBeenCalledWith(7), { timeout: 2000 });
@@ -368,16 +356,12 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("keeps a route-carried task pinned when an agent-only write lands after the jump settled (task #3500)", async () => {
-    resetMockSettings({ "display.task_graph_mode": "kanban" });
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
-        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-      ]),
-    );
     harnessRenders = 0;
-    render(<RouteCarriedHarness />);
+    renderTasks(<RouteCarriedHarness />, [
+      task(1, { title: "root", status: "in_progress" }),
+      task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+      task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+    ], { "display.task_graph_mode": "kanban" });
 
     await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("7:2"), { timeout: 4000 });
 
@@ -390,17 +374,13 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("releases the route pin once the task selection moves off the route (task #3500)", async () => {
-    resetMockSettings({ "display.task_graph_mode": "kanban" });
-    useTasks.mockReturnValue(
-      ok([
-        task(1, { title: "root", status: "in_progress" }),
-        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
-        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
-        task(30, { title: "agent-11-work", parent_id: 1, owner: 11 }),
-      ]),
-    );
     harnessRenders = 0;
-    render(<RouteCarriedHarness />);
+    renderTasks(<RouteCarriedHarness />, [
+      task(1, { title: "root", status: "in_progress" }),
+      task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+      task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      task(30, { title: "agent-11-work", parent_id: 1, owner: 11 }),
+    ], { "display.task_graph_mode": "kanban" });
     await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("7:2"), { timeout: 4000 });
     await waitFor(() => expect(screen.getAllByText(/#30/).length).toBeGreaterThan(0), { timeout: 4000 });
 
@@ -412,9 +392,9 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
+    const { container } = renderTasks(
       <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={2} onSelectTask={vi.fn()} />,
+      sampleTasks(),
     );
     await waitFor(() => {
       expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0);
@@ -432,8 +412,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("renders parent-child edges hanging under the root node", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#1/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     const mainSvg = container.querySelector("svg[role='img']");
@@ -447,10 +426,7 @@ describe("TaskGraph (graph mode)", () => {
       task(1815, { title: "done-parent", status: "done", parent_id: 1 }),
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
-    useTasks.mockReturnValue(ok(tasks));
-    const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, tasks);
     await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     const ghostTexts = screen.getAllByText(/#1815/);
@@ -472,10 +448,7 @@ describe("TaskGraph (graph mode)", () => {
       task(11, { title: "g-done", status: "done", parent_id: 10 }),
       task(12, { title: "leaf", status: "in_progress", parent_id: 11 }),
     ];
-    useTasks.mockReturnValue(ok(tasks));
-    const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, tasks);
     await waitFor(() => expect(screen.getAllByText(/#12/).length).toBeGreaterThan(0), { timeout: 4000 });
     for (const id of [10, 11]) {
       const g = screen.getAllByText(new RegExp(`#${String(id)}`))[0].closest("g")!;
@@ -486,10 +459,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("does not ghost a hidden done task with no visible children", async () => {
-    useTasks.mockReturnValue(ok(sampleTasks()));
-    const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
-    );
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText(/#4/)).toBeNull();
     expect(screen.queryByText(/#5/)).toBeNull();
