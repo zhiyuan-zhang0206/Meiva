@@ -157,11 +157,6 @@
       "comparison": "time.monotonic() - started >= N"
     },
     {
-      "path": "cli/commands/lifecycle/tests/stop/test_data_plane_stop.py",
-      "function": "test_a_wait_returns_as_soon_as_the_tracked_process_has_exited",
-      "comparison": "N <= time.monotonic() - started < N"
-    },
-    {
       "path": "cli/commands/lifecycle/tests/stop/test_stop_root_tree.py",
       "function": "test_a_force_stop_spends_the_operators_budget_on_the_root_as_well",
       "comparison": "time.monotonic() - started < N"
