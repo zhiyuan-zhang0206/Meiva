@@ -73,6 +73,21 @@ def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> Non
     assert jobs.wait_exit(shell.pid), "the restart loop shell must exit"
 
 
+# meiva:note
+# The grace and kill legs this test hands the closure, and the hang guard derived from them. The
+# guard only catches a closure that never returns; what the test judges is `escalated`, the fact
+# the closure reports about the leg it had to run.
+_STUBBORN_GRACE_S = 1.0
+_STUBBORN_KILL_S = 3.0
+_STUBBORN_HANG_GUARD_S = (_STUBBORN_GRACE_S + _STUBBORN_KILL_S) * 2
+
+
+def test_the_stubborn_hang_guard_leaves_room_for_both_legs() -> None:
+    assert _STUBBORN_HANG_GUARD_S > _STUBBORN_GRACE_S + _STUBBORN_KILL_S, (
+        "a guard inside the budget would judge the wait instead of a hang"
+    )
+
+
 def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Path) -> None:
     name = "meiva-agent-987-shell-2045-stubborn"
     shell = jobs.start(name, unit_home, jobs.STUBBORN)
@@ -81,9 +96,12 @@ def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Pat
     wait_for_foreground(job)
 
     started = time.monotonic()
-    outcome = client.close_all(grace_s=1.0, kill_s=3.0, socket_path=service_socket())
+    outcome = client.close_all(
+        grace_s=_STUBBORN_GRACE_S, kill_s=_STUBBORN_KILL_S, socket_path=service_socket()
+    )
 
-    assert time.monotonic() - started < 8, "the grace bounds the wait"
+    assert time.monotonic() - started < _STUBBORN_HANG_GUARD_S, "only a closure that never returns"
+    assert outcome.escalated is True, "the job ignored TERM, so the closure escalated"
     assert jobs.wait_exit(job.pid, timeout=5), "the job outlived the closure"
     assert _names(outcome) == [name], "a killed busy session still comes back for its notice"
     assert outcome.survivors == ()

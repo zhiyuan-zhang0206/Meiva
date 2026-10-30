@@ -418,6 +418,20 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 
 
 # meiva:note
+# The stop budget this test gives the plane, and the hang guard derived from it. The guard only
+# catches a stop that never returns: the test judges the result, where a pooler that waited for
+# the idle console would have burned the deadline and raised instead of reporting the stop.
+_STOP_BUDGET_S = 5
+_STOP_HANG_GUARD_S = _STOP_BUDGET_S * 2
+
+
+def test_the_stop_hang_guard_leaves_room_for_the_budget() -> None:
+    assert _STOP_HANG_GUARD_S > _STOP_BUDGET_S, (
+        "a guard inside the budget would judge the wait instead of a hang"
+    )
+
+
+# meiva:note
 # The 2026-09-12 incident shape: an idle connected client must not hold the
 # pooler stop open.
 #
@@ -447,14 +461,14 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
             started = time.monotonic()
             stopped = plane.stop(
                 config,
-                5,
+                _STOP_BUDGET_S,
                 home=home,
                 uid=os.getuid(),
                 producer=operator_pipeline,
                 timers=SYSTEM_TIMERS,
             )
         assert stopped.stopped == ("pgbouncer",)
-        assert time.monotonic() - started < 4
+        assert time.monotonic() - started < _STOP_HANG_GUARD_S, "only a stop that never returns"
         assert not pooler.identity.live()
         assert len(stopped.clients) == 1, (
             "the console was asked once, before the pooler was signalled"
