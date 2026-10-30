@@ -334,6 +334,10 @@ def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace
     else:
         lines, grew = diff(repo, ref)
         print("\n".join(lines))
+        print(
+            "meizel: totals only: this change edits no rule code, policy or declaration, "
+            f"so it has no rules/content split against {ref}"
+        )
     if args.by_target:
         print()
         print("\n".join(by_target(repo, ref, args.target_prefix, args.depth)))

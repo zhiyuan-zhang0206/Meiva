@@ -163,8 +163,8 @@ def test_editing_only_the_debt_tables_keeps_the_single_column(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "rules " not in out
-    assert "no growth" in out
+    assert "meizel: rules " not in out
+    assert "meizel: totals only:" in out
 
 
 # meiva:note
@@ -203,7 +203,7 @@ def test_editing_only_a_test_file_under_meizel_keeps_the_single_column(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "rules " not in out
+    assert "meizel: rules " not in out
     assert "no growth" in out
 
 
