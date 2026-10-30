@@ -154,3 +154,15 @@ def test_a_file_loader_is_still_a_site_even_with_an_in_skill_file_derived_argume
             3
         ]
     }
+
+
+# meiva:note
+# The site message is the rule's whole handover: the fact, the repair, why a path import is a
+# dependency nothing can see, what the site that loads a file now owns, and the rule's document.
+def test_a_path_import_message_carries_the_reason_the_owner_and_the_rule_document() -> None:
+    message = path_imports.site_message("sys.path")
+
+    assert message.startswith("imports by file path (`sys.path`) — move the shared code")
+    assert "invisible to the import graph" in message
+    assert "whoever loads it here owns that edge" in message
+    assert "docs/conventions/python-conventions.md" in message
