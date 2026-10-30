@@ -34,6 +34,7 @@ from typing import Any, TypeGuard
 import psutil
 
 from base.clock import Timers
+from base.host.env.registry import session_credential_keys
 from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
@@ -114,15 +115,19 @@ def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
 # `base_environ` is the environment this service was started with: its daemon reads it once and hands
 # it in, so a shell child gets that base plus the caller's overlay and never a fresh read of the
 # process's own environment (the service writes no variable after start).
-def _child_env(overlay: object, *, base_environ: Mapping[str, str]) -> dict[str, str]:
-    """The shell's environment: this service's, minus its own markers, then the caller's.
-
-    The service environment is the base (the creator's own variables, an
-    `SSH_AUTH_SOCK`, are not carried; the caller forwards what a shell needs);
-    a service-profile marker must never leak into a shell child (`import meiva`
-    under a runner profile fails fast), nor an activated virtualenv the caller
-    did not ask for. An explicit overlay entry for either wins.
-    """
+#
+# The shell's environment is this service's, minus its own markers and minus every credential
+# `session_credential_keys()` names, then the caller's overlay. The service environment is the base
+# (the creator's own variables, an `SSH_AUTH_SOCK`, are not carried; the caller forwards what a
+# shell needs); a service-profile marker must never leak into a shell child (`import meiva` under a
+# runner profile fails fast), nor an activated virtualenv the caller did not ask for. An explicit
+# overlay entry for either of those two wins.
+#
+# A credential is dropped even when the overlay names it: the rule is that a credential is read
+# from the file that holds it, never carried in a child's environment (task #5864). A caller that
+# needs one reads its home's `.env` or its installed capability, which is the route both the
+# machine token and the cluster secret already take.
+def child_env(overlay: object, *, base_environ: Mapping[str, str]) -> dict[str, str]:
     if not _is_object_dict(overlay):
         raise RequestError(protocol.BAD_REQUEST, "env must be an object of strings")
     env = dict(base_environ)
@@ -134,6 +139,8 @@ def _child_env(overlay: object, *, base_environ: Mapping[str, str]) -> dict[str,
         if not key or "=" in key or "\0" in key or "\0" in value:
             raise RequestError(protocol.BAD_REQUEST, f"env entry {key!r} cannot be forwarded")
         env[key] = value
+    for key in session_credential_keys():
+        env.pop(key, None)
     env.setdefault("TERM", "xterm-256color")
     env.setdefault("LANG", "en_US.UTF-8")
     return env
@@ -260,7 +267,7 @@ class PtyService:
         cmd = req.get("cmd")
         if cmd is not None and not isinstance(cmd, str):
             raise RequestError(protocol.BAD_REQUEST, "cmd must be a string")
-        env = _child_env(req.get("env", {}), base_environ=self._base_environ)
+        env = child_env(req.get("env", {}), base_environ=self._base_environ)
         # The allocation lock is held until the session is registered: once a
         # concurrent freeze returns, every earlier allocation is visible here
         # and every later one observes the marker.
