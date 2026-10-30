@@ -245,7 +245,10 @@ def test_mac_boot_tail_does_not_read_or_notify(short_tmp: Path) -> None:
     # meiva:note
     # A root read would raise: no root answers in this home.
     driver.complete_boot_start(
-        helper=refuse_helper, host=fake_host(platform=DARWIN_ARM64), home=short_tmp
+        helper=refuse_helper,
+        host=fake_host(platform=DARWIN_ARM64),
+        home=short_tmp,
+        control_pid=0,
     )
 
 

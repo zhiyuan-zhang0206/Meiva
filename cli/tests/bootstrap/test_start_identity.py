@@ -694,6 +694,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
             helper=None,
             host=fake_host(platform=LINUX_X86),
             home=inputs.home,
+            control_pid=os.getpid(),
             proc_root=proc,
         )
     assert not start_serving.state_path(inputs.home).exists(), (

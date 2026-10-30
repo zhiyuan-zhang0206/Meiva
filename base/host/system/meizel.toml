@@ -26,6 +26,5 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"boot_unit.py#pid base.native_process.os_platform.resolve_pid" = 2
 "hostport.py#pid base.native_process.root_control.client.current_uid" = 1
 "hostport.py#platform base.native_process.os_platform.Platform.current" = 1
