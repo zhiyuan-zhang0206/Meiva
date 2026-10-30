@@ -253,6 +253,25 @@ class TestWaitHooks:
         assert seen == [1.0]
         assert retry_waits == []
 
+    async def test_aretry_uses_the_callers_own_asleep(self, retry_waits: list[float]) -> None:
+        # meiva:link base/host/docs/host.meiva.okf.md
+        seen: list[float] = []
+        flaky = _Flaky(urllib.error.URLError("boom"), 1)
+
+        async def call() -> object:
+            return flaky()
+
+        async def asleep(seconds: float) -> None:
+            seen.append(seconds)
+
+        run = aretry(
+            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none"),
+            asleep=asleep,
+        )
+        assert await run(call) == "ok"
+        assert seen == [1.0]
+        assert retry_waits == []
+
     async def test_retry_waits_records_sync_and_async_waits_in_call_order(
         self, retry_waits: list[float]
     ) -> None:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import assert_never
 
+from base.host.net.resilience import Policy
 from base.lm import factory
 from base.lm.call import answer_text
 from base.lm.effort import ReasoningEffort
@@ -22,16 +23,24 @@ from meiva.sdk_surface.pure.media.injection.injection_plan import finding_source
 from meiva.web import deepseek, transport, wire
 from meiva.web.deps import FetchDeps, ReaderProvider
 from meiva.web.errors import FetchError
+from meiva.web.policy import WEB_READ_POLICY
 
 __all__ = ["fetch_one"]
 
 
 # meiva:note
 # Read the page at `url` as the configured reader returns it, cut to `max_chars`.
-def read_page(url: str, max_chars: int, deps: FetchDeps, pacer: transport.RateLimiter) -> wire.Page:
+def read_page(
+    url: str,
+    max_chars: int,
+    deps: FetchDeps,
+    pacer: transport.RateLimiter,
+    *,
+    policy: Policy = WEB_READ_POLICY,
+) -> wire.Page:
     match deps.reader:
         case ReaderProvider.DEEPSEEK:
-            return deepseek.read_page(url, max_chars, deps, pacer)
+            return deepseek.read_page(url, max_chars, deps, pacer, policy=policy)
         case ReaderProvider.JINA:
             data = transport.send_json(
                 wire.jina_request(deps.jina, url),
@@ -40,6 +49,7 @@ def read_page(url: str, max_chars: int, deps: FetchDeps, pacer: transport.RateLi
                 error_type=FetchError,
                 provider_json=False,
                 pacer=None,
+                policy=policy,
             )
             return wire.jina_page(data, url, max_chars)
         case _:
@@ -101,8 +111,10 @@ def fetch_one(
     effort: str | ReasoningEffort | None,
     deps: FetchDeps,
     pacer: transport.RateLimiter,
+    *,
+    policy: Policy = WEB_READ_POLICY,
 ) -> Scanned[str]:
-    page = read_page(url, max_chars, deps, pacer)
+    page = read_page(url, max_chars, deps, pacer, policy=policy)
     check = begin_check(url, page.title, page.content, inputs=deps.injection)
     try:
         answer = _answer(prompt, page, effort, deps)

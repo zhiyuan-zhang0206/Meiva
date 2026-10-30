@@ -18,13 +18,11 @@ import meiva
 from base.config import Settings, settings
 from base.config.service_read import ConfigAuthority
 from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
-from meiva.tests.namespaces.web._web_helpers import Received, Reply, WebHarness
+from meiva.tests.namespaces.web._web_helpers import WAITED_ATTEMPTS, Received, Reply, WebHarness
 from meiva.tests.namespaces.web._web_helpers import loopback as loopback
 from meiva.tests.namespaces.web._web_helpers import web_harness as web_harness
 from meiva.web import SearchError, WebError, wiring
 from meiva.web.wire import Hit
-
-pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
 def _answer(results: list[dict[str, str]]) -> bytes:
@@ -140,6 +138,18 @@ def test_network_error_raises(web_harness: WebHarness) -> None:
         web_harness.search(["query"])
 
 
+# meiva:note
+# The harness's read policy is the production shape with inert waits: same attempts, zero backoff,
+# no jitter. A policy that kept the default backoff would make these cases sleep for real.
+def test_the_harness_read_policy_does_not_wait() -> None:
+    from meiva.tests.namespaces.web._web_helpers import NO_WAIT_READ_POLICY
+    from meiva.web.policy import WEB_READ_POLICY
+
+    assert NO_WAIT_READ_POLICY.max_attempts == WEB_READ_POLICY.max_attempts
+    assert NO_WAIT_READ_POLICY.backoff(0) == 0.0
+    assert NO_WAIT_READ_POLICY.jitter == "none"
+
+
 def test_transient_429_retries_then_succeeds(web_harness: WebHarness) -> None:
     def flaky(request: Received) -> Reply:
         if len(web_harness.loopback.received) < 3:
@@ -156,11 +166,15 @@ def test_transient_429_retries_then_succeeds(web_harness: WebHarness) -> None:
 
 def test_persistent_429_exhausts_retries(web_harness: WebHarness) -> None:
     web_harness.loopback.answer(b'{"error": "rate limit exceeded"}', status=429)
+    waited_before = len(WAITED_ATTEMPTS)
 
     with pytest.raises(SearchError, match="Brave Search HTTP 429"):
         web_harness.search(["query"])
 
     assert len(web_harness.loopback.received) == 3
+    # meiva:note
+    # The reads ran on the policy the harness handed them, so their waits are that policy's zero.
+    assert WAITED_ATTEMPTS[waited_before:] == [0, 1]
 
 
 def test_malformed_json_raises(web_harness: WebHarness) -> None:

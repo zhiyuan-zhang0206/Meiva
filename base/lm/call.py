@@ -85,6 +85,7 @@ def invoke_response(
     usage_source: str | None = None,
     catalog: ModelCatalog,
     usage_agent_id: int | None = None,
+    sleep: Callable[[float], None] = resilience.retry_sleep,
 ) -> BaseMessage:
     """Invoke `runnable` on an already-built message list; return the response.
 
@@ -154,7 +155,7 @@ def invoke_response(
                     delay = max(delay, retry_after)
                 # Per-process deterministic phase + random ±1s (R2-D
                 # jittered) — de-phases retry waves across the fleet.
-                resilience.retry_sleep(jittered(delay, mode=retry_jitter))
+                sleep(jittered(delay, mode=retry_jitter))
                 continue
             raise error_type(
                 f"Model call ({desc}) failed after {attempt + 1} attempt(s): {type(e).__name__}: {e}"
@@ -196,6 +197,7 @@ def invoke_text(
     model: str | None = None,
     usage_source: str | None = None,
     catalog: ModelCatalog,
+    sleep: Callable[[float], None] = resilience.retry_sleep,
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
 
@@ -220,6 +222,7 @@ def invoke_text(
         model=model,
         usage_source=usage_source,
         catalog=catalog,
+        sleep=sleep,
     )
     text = extract_text(response)
     if not text:
@@ -249,6 +252,7 @@ def answer_text(
     llm_override: str,
     overrides: ModelOverrides,
     build_chat_model: Callable[..., Any],
+    sleep: Callable[[float], None] = resilience.retry_sleep,
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.
 
@@ -291,4 +295,5 @@ def answer_text(
         model=model,
         usage_source=usage_source,
         catalog=catalog,
+        sleep=sleep,
     )

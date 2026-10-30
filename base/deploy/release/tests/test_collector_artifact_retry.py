@@ -47,7 +47,6 @@ def _limits(**overrides: float | int) -> collector_plan.DownloadLimits:
 def test_download_with_retry_preserves_contract(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    retry_waits: list[float],
     failures: int,
 ) -> None:
     # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
@@ -75,7 +74,6 @@ def test_download_with_retry_preserves_contract(
         assert digest == hashlib.sha256(b"ok").hexdigest()
     calls = len(opener.calls)
     assert calls == min(failures + 1, 3)
-    assert retry_waits == []
     assert timers.sleeps == [5.0 * i for i in range(1, calls)]
     assert [call.timeout for call in opener.calls] == [LIMITS.socket_timeout_s] * calls
     expected = "".join(

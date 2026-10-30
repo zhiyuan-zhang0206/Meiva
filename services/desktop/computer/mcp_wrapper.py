@@ -20,7 +20,7 @@ resolves there:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mcp import types
@@ -29,6 +29,7 @@ from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
 from base.host.env.agent_env import AGENT_ID_ENV
+from base.host.net.resilience import retry_asleep
 from base.paths import computer_mcp_socket, meiva_home
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
@@ -68,16 +69,22 @@ class Link(SocketLink):
 
 class ReconnectingSocketLink(ReconnectingLink):
     def __init__(
-        self, *, sock: str, timeout_reader: Callable[[], float], agent_id: int | None
+        self,
+        *,
+        sock: str,
+        timeout_reader: Callable[[], float],
+        agent_id: int | None,
+        asleep: Callable[[float], Awaitable[None]] = retry_asleep,
     ) -> None:
         super().__init__(
-            lambda: dial_unix_socket(sock, service_label="computer MCP daemon"),
+            lambda: dial_unix_socket(sock, service_label="computer MCP daemon", asleep=asleep),
             lambda reader, writer: Link(
                 reader, writer, timeout_reader=timeout_reader, agent_id=agent_id
             ),
             max_attempts=6,
             base_delay=0.5,
             close_on_error=lambda _exc: True,
+            asleep=asleep,
         )
 
 

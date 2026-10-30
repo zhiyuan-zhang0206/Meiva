@@ -27,6 +27,17 @@ from base.packages.tests.lm.providers.lm_process import run_billing
 from base.packages.tests.model_catalog import inert_keys
 
 
+# meiva:note
+# The retry waits land in `sleeps` instead of sleeping. Local, because this package may not reach
+# the clock's manual timers, and the seam needs nothing more than a recorder.
+class _RecordingSleep:
+    def __init__(self) -> None:
+        self.sleeps: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+
 class _FakeResponse:
     def __init__(self, content: Any) -> None:
         self.content = content
@@ -310,11 +321,10 @@ def test_answer_text_build_failure_uses_build_error_when_given(
 # ─── invoke_text retry ────────────────────────────────────────────────────
 
 
-def test_invoke_text_retries_transient_then_succeeds(
-    retry_waits: list[float], *, model_catalog: ModelCatalog
-) -> None:
+def test_invoke_text_retries_transient_then_succeeds(*, model_catalog: ModelCatalog) -> None:
     """A TRANSIENT provider failure (transport class) is retried when
     `retry_attempts` allows, and a later success returns normally."""
+    timers = _RecordingSleep()
 
     calls = {"n": 0}
 
@@ -334,17 +344,17 @@ def test_invoke_text_retries_transient_then_succeeds(
         retry_delay_seconds=0.0,
         retry_jitter="none",
         catalog=model_catalog,
+        sleep=timers.sleep,
     )
     assert out == "answer"
     assert calls["n"] == 2
-    assert retry_waits == [0.0]
+    assert timers.sleeps == [0.0]
 
 
-def test_invoke_text_retry_exhausted_raises_error_type(
-    retry_waits: list[float], *, model_catalog: ModelCatalog
-) -> None:
+def test_invoke_text_retry_exhausted_raises_error_type(*, model_catalog: ModelCatalog) -> None:
     """A failure that persists past the retry budget raises the caller's
     error type with the attempt count in the message."""
+    timers = _RecordingSleep()
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -360,15 +370,15 @@ def test_invoke_text_retry_exhausted_raises_error_type(
             retry_delay_seconds=0.0,
             retry_jitter="none",
             catalog=model_catalog,
+            sleep=timers.sleep,
         )
-    assert retry_waits == [0.0]
+    assert timers.sleeps == [0.0]
 
 
-def test_invoke_text_retry_uses_exponential_backoff(
-    retry_waits: list[float], *, model_catalog: ModelCatalog
-) -> None:
+def test_invoke_text_retry_uses_exponential_backoff(*, model_catalog: ModelCatalog) -> None:
     """Retry waits double per attempt (base 2 → 4 → 8…) capped at
     retry_max_delay_seconds, plus jitter; the base itself is not re-added."""
+    timers = _RecordingSleep()
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -385,14 +395,14 @@ def test_invoke_text_retry_uses_exponential_backoff(
             retry_max_delay_seconds=30.0,
             retry_jitter="none",
             catalog=model_catalog,
+            sleep=timers.sleep,
         )
-    assert retry_waits == [2.0, 4.0, 8.0]
+    assert timers.sleeps == [2.0, 4.0, 8.0]
 
 
-def test_invoke_text_retry_backoff_capped(
-    retry_waits: list[float], *, model_catalog: ModelCatalog
-) -> None:
+def test_invoke_text_retry_backoff_capped(*, model_catalog: ModelCatalog) -> None:
     """The exponential sequence stops growing at retry_max_delay_seconds."""
+    timers = _RecordingSleep()
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -409,8 +419,9 @@ def test_invoke_text_retry_backoff_capped(
             retry_max_delay_seconds=5.0,
             retry_jitter="none",
             catalog=model_catalog,
+            sleep=timers.sleep,
         )
-    assert retry_waits == [2.0, 4.0, 5.0, 5.0]
+    assert timers.sleeps == [2.0, 4.0, 5.0, 5.0]
 
 
 class _RetryAfterLLM:
@@ -429,11 +440,10 @@ class _RetryAfterLLM:
         raise openai.RateLimitError("429 rate limited", response=response, body=None)
 
 
-def test_invoke_text_retry_respects_retry_after(
-    retry_waits: list[float], *, model_catalog: ModelCatalog
-) -> None:
+def test_invoke_text_retry_respects_retry_after(*, model_catalog: ModelCatalog) -> None:
     """A provider Retry-After header longer than the backoff wins (capped at
     120s), plus jitter — mirroring the SDKs' own header reading at our layer."""
+    timers = _RecordingSleep()
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -445,16 +455,16 @@ def test_invoke_text_retry_respects_retry_after(
             retry_delay_seconds=2.0,
             retry_jitter="none",
             catalog=model_catalog,
+            sleep=timers.sleep,
         )
     # attempt 1 backoff would be 2s, but Retry-After 45 wins; attempt 2 too.
-    assert retry_waits == [45.0, 45.0]
+    assert timers.sleeps == [45.0, 45.0]
 
 
-def test_invoke_text_retry_after_capped_at_120(
-    retry_waits: list[float], *, model_catalog: ModelCatalog
-) -> None:
+def test_invoke_text_retry_after_capped_at_120(*, model_catalog: ModelCatalog) -> None:
     """A Retry-After above 120s is ignored (treated as absent) — the backoff
     sequence applies instead."""
+    timers = _RecordingSleep()
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -466,14 +476,14 @@ def test_invoke_text_retry_after_capped_at_120(
             retry_delay_seconds=2.0,
             retry_jitter="none",
             catalog=model_catalog,
+            sleep=timers.sleep,
         )
-    assert retry_waits == [2.0, 4.0]  # Retry-After 300 ignored
+    assert timers.sleeps == [2.0, 4.0]  # Retry-After 300 ignored
 
 
-def test_invoke_text_retry_after_ms_header(
-    retry_waits: list[float], *, model_catalog: ModelCatalog
-) -> None:
+def test_invoke_text_retry_after_ms_header(*, model_catalog: ModelCatalog) -> None:
     """`retry-after-ms` (the SDKs' non-standard precision header) is honored."""
+    timers = _RecordingSleep()
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -485,8 +495,9 @@ def test_invoke_text_retry_after_ms_header(
             retry_delay_seconds=2.0,
             retry_jitter="none",
             catalog=model_catalog,
+            sleep=timers.sleep,
         )
-    assert retry_waits == [7.0]  # 7000ms → 7s, longer than the 2s backoff
+    assert timers.sleeps == [7.0]  # 7000ms → 7s, longer than the 2s backoff
 
 
 def test_invoke_text_does_not_retry_permanent(*, model_catalog: ModelCatalog) -> None:

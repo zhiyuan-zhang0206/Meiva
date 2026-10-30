@@ -302,7 +302,9 @@ def retry(
     return _run
 
 
-def aretry(policy: Policy) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
+def aretry(
+    policy: Policy, *, asleep: Callable[[float], Awaitable[None]] | None = None
+) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
     """Wrap an async ``fn`` in the one retry loop (async twin of ``retry``)."""
 
     def _run(fn: Callable[[], Awaitable[T]]) -> Awaitable[T]:
@@ -318,7 +320,11 @@ def aretry(policy: Policy) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T
                             retry_after = extract_retry_after(exc)
                             if retry_after is not None:
                                 delay = max(delay, retry_after)
-                        await retry_asleep(jittered(delay, policy.jitter_span, policy.jitter))
+                        seconds = jittered(delay, policy.jitter_span, policy.jitter)
+                        if asleep is None:
+                            await retry_asleep(seconds)
+                        else:
+                            await asleep(seconds)
                         continue
                     if policy.on_final_failure is not None:
                         policy.on_final_failure(exc)

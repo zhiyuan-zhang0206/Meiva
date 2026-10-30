@@ -6,16 +6,23 @@
 
 from __future__ import annotations
 
+from base.host.net.resilience import Policy
 from meiva.sdk_surface.pure.media.finding_plan import Scanned
 from meiva.web import deepseek_wire, transport, wire
 from meiva.web.deps import FetchDeps, SearchDeps
 from meiva.web.errors import FetchError, SearchError
+from meiva.web.policy import WEB_READ_POLICY
 
 __all__ = ["read_page", "search_one"]
 
 
 def search_one(
-    query: str, count: int, deps: SearchDeps, pacer: transport.RateLimiter
+    query: str,
+    count: int,
+    deps: SearchDeps,
+    pacer: transport.RateLimiter,
+    *,
+    policy: Policy = WEB_READ_POLICY,
 ) -> Scanned[list[wire.Hit]]:
     config = deps.deepseek
     data = transport.send_json(
@@ -25,12 +32,20 @@ def search_one(
         error_type=SearchError,
         provider_json=True,
         pacer=pacer,
+        policy=policy,
     )
     hits = deepseek_wire.deepseek_search_hits(data)
     return Scanned(hits, wire.hit_findings(hits))
 
 
-def read_page(url: str, max_chars: int, deps: FetchDeps, pacer: transport.RateLimiter) -> wire.Page:
+def read_page(
+    url: str,
+    max_chars: int,
+    deps: FetchDeps,
+    pacer: transport.RateLimiter,
+    *,
+    policy: Policy = WEB_READ_POLICY,
+) -> wire.Page:
     config = deps.deepseek
     data = transport.send_json(
         deepseek_wire.deepseek_fetch_request(config, url),
@@ -39,5 +54,6 @@ def read_page(url: str, max_chars: int, deps: FetchDeps, pacer: transport.RateLi
         error_type=FetchError,
         provider_json=True,
         pacer=pacer,
+        policy=policy,
     )
     return deepseek_wire.deepseek_page(data, url, max_chars)
