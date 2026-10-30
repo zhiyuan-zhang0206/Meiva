@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from threading import Event, Thread
 
@@ -242,3 +243,35 @@ def test_the_injected_fixture_gate_answers_the_callers_observe_keyword(
             assert allowed
     finally:
         clear_fixture_gate()
+
+
+# meiva:note
+# The fixture patches two module attributes for the whole process, so it owes them two things: the
+# same signature as the functions it replaces (a new keyword must not turn into a TypeError in a
+# later test) and the originals back when the gate is cleared. Both halves are asserted here
+# because nothing else in the suite can see them: a stand-in drifts, or a patch leaks, silently.
+def test_clearing_the_fixture_gate_puts_the_real_functions_back(tmp_path: Path) -> None:
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.lifecycle.tests.serving_entrypoint import (
+        clear_fixture_gate,
+        inject_fixture_gate,
+    )
+
+    original_is_serving = start_serving.is_serving
+    original_recovery = start_serving.recovery_permitted
+    try:
+        inject_fixture_gate(tmp_path / "gate")
+        assert inspect.signature(start_serving.is_serving) == inspect.signature(
+            original_is_serving
+        ), "the stand-in for is_serving must take exactly what the real function takes"
+        assert inspect.signature(start_serving.recovery_permitted) == inspect.signature(
+            original_recovery
+        ), "the stand-in for recovery_permitted must take exactly what the real function takes"
+    finally:
+        clear_fixture_gate()
+    assert start_serving.is_serving is original_is_serving, (
+        "clearing the gate must put the real is_serving back"
+    )
+    assert start_serving.recovery_permitted is original_recovery, (
+        "clearing the gate must put the real recovery_permitted back"
+    )

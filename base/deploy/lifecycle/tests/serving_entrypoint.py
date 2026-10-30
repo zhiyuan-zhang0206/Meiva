@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 from base.deploy.lifecycle import start_serving
@@ -19,8 +19,22 @@ _ORIG_RECOVERY = start_serving.recovery_permitted
 _gate: list[Path] = []
 
 
+# meiva:note
+# The one place that installs a pair on the module: injecting installs the stand-ins, clearing
+# installs the originals back. Before the clear only emptied the gate list, so a cleared gate left
+# the stand-ins in place for the rest of the process -- the next reader met a function that only
+# looks like the real one, and the failure landed in whichever test ran after the injection.
+def _install(
+    is_serving: Callable[..., bool],
+    recovery: Callable[..., AbstractContextManager[bool]],
+) -> None:
+    start_serving.is_serving = is_serving
+    start_serving.recovery_permitted = recovery
+
+
 def clear_fixture_gate() -> None:
     _gate.clear()
+    _install(_ORIG_IS_SERVING, _ORIG_RECOVERY)
 
 
 def inject_fixture_gate(gate: Path) -> None:
@@ -43,5 +57,4 @@ def inject_fixture_gate(gate: Path) -> None:
             return
         yield fixture_is_serving(home, observe=observe)
 
-    start_serving.is_serving = fixture_is_serving
-    start_serving.recovery_permitted = fixture_recovery
+    _install(fixture_is_serving, fixture_recovery)
