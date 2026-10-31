@@ -481,15 +481,11 @@ class ShellCapturePayload(BaseModel):
 
 
 class ScheduleCapturePayload(BaseModel):
-    """`schedule_capture` op payload: recent output of one schedule session on this host."""
-
     schedule_id: int
     lines: int = 200
 
 
 class ScheduleCaptureResult(BaseModel):
-    """`schedule_capture` op outcome: live terminal capture or file transcript."""
-
     captured: str | None = None
     transcript: list[str] | None = None
 

@@ -60,9 +60,7 @@ def _bind_schedule_actor(
     )
 
 
-def run(
-    schedule_id: int, revision: int | None = None, *, config: ConfigBoot | None = None
-) -> int:
+def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | None = None) -> int:
     if config is None:
         config = ConfigBoot()
         config.read_process_environment()

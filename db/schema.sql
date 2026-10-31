@@ -1308,6 +1308,8 @@ BEGIN
         GRANT SELECT, INSERT, UPDATE ON schedule_runs TO meiva_runner;
         GRANT SELECT, DELETE ON schedule_sync_requests TO meiva_runner;
         GRANT SELECT, INSERT ON schedule_fire_log TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE schedule_runs_id_seq TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE schedule_fire_log_id_seq TO meiva_runner;
     END IF;
 END $$;
 

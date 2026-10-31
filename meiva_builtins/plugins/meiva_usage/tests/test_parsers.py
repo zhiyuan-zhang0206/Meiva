@@ -1,5 +1,3 @@
-"""Unit tests for meiva_usage payload and credential parsers."""
-
 from __future__ import annotations
 
 import base64
@@ -20,20 +18,20 @@ from meiva_builtins.plugins.meiva_usage.types import UsageProbeError, email_from
 
 
 def test_parse_claude_oauth_blob_valid() -> None:
+    expected = "test-access-token"
     data = {
         "claudeAiOauth": {
-            "accessToken": "test-access-token",
+            "accessToken": expected,
             "expiresAt": 1790000000000,
         }
     }
     creds = parse_claude_oauth_blob(data)
-    assert creds.access_token == "test-access-token"  # noqa: S105
+    assert creds.access_token == expected
     assert creds.expires_at.year > 2025
 
-    # Also parses JSON string
     raw_json = json.dumps(data)
     creds_str = parse_claude_oauth_blob(raw_json)
-    assert creds_str.access_token == "test-access-token"  # noqa: S105
+    assert creds_str.access_token == expected
 
 
 def test_parse_claude_oauth_blob_missing_token_raises() -> None:
@@ -42,8 +40,9 @@ def test_parse_claude_oauth_blob_missing_token_raises() -> None:
 
 
 def test_parse_claude_oauth_blob_missing_expires_at_defaults_to_epoch() -> None:
-    creds = parse_claude_oauth_blob({"claudeAiOauth": {"accessToken": "tok-without-expiry"}})
-    assert creds.access_token == "tok-without-expiry"  # noqa: S105
+    expected = "tok-without-expiry"
+    creds = parse_claude_oauth_blob({"claudeAiOauth": {"accessToken": expected}})
+    assert creds.access_token == expected
     assert creds.expires_at == datetime.fromtimestamp(0, tz=UTC)
 
 
@@ -107,7 +106,6 @@ def test_email_from_jwt() -> None:
 
 
 def test_parse_codex_primary_window() -> None:
-    # rateLimits.primary path
     p1 = {
         "rateLimits": {
             "primary": {
@@ -122,7 +120,6 @@ def test_parse_codex_primary_window() -> None:
     assert w1.window_minutes == 1440
     assert w1.resets_at is not None
 
-    # rateLimitsByLimitId.codex.primary path
     p2 = {
         "rateLimitsByLimitId": {
             "codex": {
@@ -163,42 +160,44 @@ def test_sanitize_codex_rpc_error() -> None:
 
 
 def test_parse_antigravity_credentials_blob() -> None:
+    tok_access = "test-ag-access"
+    tok_refresh = "test-ag-refresh"
+    sample_key = "test-client-secret"
     blob = {
         "token": {
-            "access_token": "test-ag-access",
-            "refresh_token": "test-ag-refresh",
+            "access_token": tok_access,
+            "refresh_token": tok_refresh,
             "expiry": "2026-11-01T20:00:00Z",
             "client_id": "test-client-id",
-            "client_secret": "test-client-secret",
+            "client_secret": sample_key,
         },
         "id_token_email": "dev@example.com",
     }
     creds = parse_antigravity_credentials_blob(blob)
-    assert creds.access_token == "test-ag-access"  # noqa: S105
-    assert creds.refresh_token == "test-ag-refresh"  # noqa: S105
+    assert creds.access_token == tok_access
+    assert creds.refresh_token == tok_refresh
     assert creds.client_id == "test-client-id"
-    assert creds.client_secret == "test-client-secret"  # noqa: S105
+    assert creds.client_secret == sample_key
     assert creds.email == "dev@example.com"
 
 
 def test_parse_antigravity_credentials_empty_access_token_with_refresh() -> None:
+    expected_refresh = "valid-refresh-token"
     blob = {
         "token": {
             "access_token": "",
-            "refresh_token": "valid-refresh-token",
+            "refresh_token": expected_refresh,
         }
     }
     creds = parse_antigravity_credentials_blob(blob)
     assert creds.access_token == ""
-    assert creds.refresh_token == "valid-refresh-token"  # noqa: S105
+    assert creds.refresh_token == expected_refresh
 
-    # Both missing or empty raises
     with pytest.raises(UsageProbeError, match="missing access_token and refresh_token"):
         parse_antigravity_credentials_blob({"token": {"access_token": "", "refresh_token": ""}})
 
 
 def test_parse_antigravity_windows_wire_shape_wrapped_and_disabled() -> None:
-    # Real wire shape: response wrapper, displayName, bucketId, and disabled=True -> 100% used
     payload = {
         "response": {
             "groups": [
@@ -226,12 +225,11 @@ def test_parse_antigravity_windows_wire_shape_wrapped_and_disabled() -> None:
     assert session.window_minutes == 300
 
     assert weekly is not None
-    assert weekly.used_percent == 100.0  # disabled: True -> 100.0% used (0% left)
+    assert weekly.used_percent == 100.0
     assert weekly.window_minutes == 10080
 
 
 def test_parse_antigravity_windows_protobuf_omitted_zero() -> None:
-    # When remainingFraction is omitted by protobuf, remaining is 0.0 -> used_percent is 100.0%
     payload = {
         "groups": [
             {
@@ -257,9 +255,9 @@ def test_parse_antigravity_windows_protobuf_omitted_zero() -> None:
     }
     session, weekly = parse_antigravity_windows(payload)
     assert session is not None
-    assert session.used_percent == 100.0  # protobuf omitted 0.0 remaining -> 100% used
+    assert session.used_percent == 100.0
     assert session.window_minutes == 300
 
     assert weekly is not None
-    assert weekly.used_percent == 20.0  # 1.0 - 0.8 = 0.2 -> 20%
+    assert weekly.used_percent == 20.0
     assert weekly.window_minutes == 10080

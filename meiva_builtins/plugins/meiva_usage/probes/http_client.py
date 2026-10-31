@@ -1,4 +1,6 @@
-"""HTTP JSON client implementation using standard library urllib."""
+# meiva:note
+# HTTP JSON client implementation using standard library urllib.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -17,8 +19,11 @@ def _is_mapping(val: object) -> TypeGuard[Mapping[str, object]]:
     return isinstance(val, Mapping)
 
 
+# meiva:note
+# Execute an HTTP request and parse JSON response without leaking secrets.
+# Scheme is validated to http/https; urllib is used for zero third-party dependencies.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 def urllib_json_fetcher(req: HttpJsonRequest) -> Mapping[str, object]:
-    """Execute an HTTP request and parse JSON response without leaking secrets."""
     parsed_url = urllib.parse.urlparse(req.url)
     if parsed_url.scheme not in ("http", "https"):
         raise UsageProbeError(f"Unsupported URL scheme: {parsed_url.scheme}")

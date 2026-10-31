@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import NamedTuple
 
@@ -19,6 +20,7 @@ __all__ = [
     "Reclaim",
     "SyncAction",
     "launch_command",
+    "merge_launch_env",
     "plan_sync",
     "prepare_verdict",
     "reclaim_verdict",
@@ -36,6 +38,7 @@ class Desired(NamedTuple):
     revision: int
     applied: int
     launch_generation: str | None
+    secret_env_vars: tuple[str, ...] = ()
 
 
 class SyncAction(StrEnum):
@@ -182,3 +185,21 @@ def revision_in(initial_command: str | None) -> int | None:
         return None
     match = _REVISION.search(initial_command)
     return 0 if match is None else int(match.group(1))
+
+
+def merge_launch_env(
+    base_env: Mapping[str, str],
+    *,
+    schedule_id: int,
+    timezone: str,
+    secret_names: tuple[str, ...],
+    resolved_secrets: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    del schedule_id
+    env = dict(base_env)
+    env["MEIVA_TIMEZONE"] = timezone
+    if secret_names and resolved_secrets:
+        for k, v in resolved_secrets.items():
+            if k in secret_names and not k.startswith("MEIVA_"):
+                env[k] = v
+    return env

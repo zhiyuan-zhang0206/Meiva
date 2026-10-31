@@ -5168,6 +5168,66 @@
         }
       }
     },
+    "/api/schedules/{schedule_id}/launch-env": {
+      "get": {
+        "summary": "Get Schedule Launch Env",
+        "description": "Deliver process-scoped secret environment variables for a schedule session.",
+        "operationId": "get_schedule_launch_env_api_schedules__schedule_id__launch_env_get",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Schedule Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Schedule Launch Env Api Schedules  Schedule Id  Launch Env Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keyed/v1/guide/draft": {
       "post": {
         "summary": "Guarded Draft Guide",

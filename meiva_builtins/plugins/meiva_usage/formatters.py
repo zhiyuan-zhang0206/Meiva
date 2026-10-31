@@ -1,4 +1,6 @@
-"""Pure formatting functions for usage metric cards."""
+# meiva:note
+# Pure formatting functions for usage metric cards.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -29,7 +31,6 @@ def format_dual_window_card(
     *,
     display_tz: tzinfo = UTC,
 ) -> CardReading:
-    """Format dual window rate limits (e.g. 5h session and 7d weekly) into a card reading."""
     if session is None and weekly is None:
         raise UsageProbeError("Usage payload is missing rate-limit windows")
 
@@ -68,7 +69,6 @@ def format_codex_window_card(
     *,
     display_tz: tzinfo = UTC,
 ) -> CardReading:
-    """Format Codex primary rate limit window into a card reading."""
     remaining = max(0.0, min(100.0, 100.0 - window.used_percent))
     value = f"{remaining:.0f}% left"
 
@@ -97,42 +97,39 @@ def format_codex_window_card(
     return CardReading(value=value, detail=detail, status=status)
 
 
+def _select_deepseek_balance_entry(
+    infos: list[object],
+) -> tuple[Mapping[str, object], list[Mapping[str, object]]]:
+    mappings = [item for item in infos if _is_obj_mapping(item)]
+    if not mappings:
+        raise UsageProbeError("DeepSeek payload contains invalid balance entries")
+    chosen = next((m for m in mappings if m.get("currency") == "CNY"), mappings[0])
+    others = [m for m in mappings if m is not chosen]
+    return chosen, others
+
+
+def _format_other_balances(entries: list[Mapping[str, object]]) -> str:
+    balances: list[str] = []
+    for item in entries:
+        curr = str(item.get("currency", "")).strip()
+        total = str(item.get("total_balance", "")).strip()
+        if curr and total:
+            balances.append(f"{curr} {total}")
+    return " · ".join(balances) if balances else "platform.deepseek.com"
+
+
 def format_deepseek_balance_card(payload: Mapping[str, object]) -> CardReading:
-    """Format DeepSeek balance response payload into a card reading."""
     raw_infos = payload.get("balance_infos")
-    if not _is_obj_list(raw_infos) or len(raw_infos) == 0:
+    if not _is_obj_list(raw_infos) or not raw_infos:
         raise UsageProbeError("DeepSeek payload missing balance_infos")
 
-    chosen_entry: Mapping[str, object] | None = None
-    for item in raw_infos:
-        if _is_obj_mapping(item) and item.get("currency") == "CNY":
-            chosen_entry = item
-            break
-
-    if chosen_entry is None:
-        first = raw_infos[0]
-        if _is_obj_mapping(first):
-            chosen_entry = first
-
-    if chosen_entry is None:
-        raise UsageProbeError("DeepSeek payload contains invalid balance entries")
-
-    currency = str(chosen_entry.get("currency", "")).strip()
-    total = str(chosen_entry.get("total_balance", "")).strip()
+    chosen, others = _select_deepseek_balance_entry(raw_infos)
+    currency = str(chosen.get("currency", "")).strip()
+    total = str(chosen.get("total_balance", "")).strip()
     if not currency or not total:
         raise UsageProbeError("DeepSeek balance entry missing currency or total_balance")
 
     value = f"{currency} {total}"
-
-    other_balances: list[str] = []
-    for item in raw_infos:
-        if _is_obj_mapping(item) and item is not chosen_entry:
-            other_curr = str(item.get("currency", "")).strip()
-            other_total = str(item.get("total_balance", "")).strip()
-            if other_curr and other_total:
-                other_balances.append(f"{other_curr} {other_total}")
-
-    detail = " · ".join(other_balances) if other_balances else "platform.deepseek.com"
-
+    detail = _format_other_balances(others)
     status = "warn" if payload.get("is_available") is False else "ok"
     return CardReading(value=value, detail=detail, status=status)

@@ -307,9 +307,7 @@ def shell_capture_op(
     )
 
 
-def schedule_capture_op(
-    schedule_id: int, lines: int = 200, *, home: Path
-) -> ScheduleCaptureResult:
+def schedule_capture_op(schedule_id: int, lines: int = 200, *, home: Path) -> ScheduleCaptureResult:
     from base.cluster import session_name
     from base.sessions.backend import get_shell_backend
 

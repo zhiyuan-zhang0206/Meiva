@@ -131,6 +131,10 @@ from gateway.routers.proxies import grafana as grafana_router
 from gateway.routers.proxies import insights as insights_router
 from gateway.routers.upload import router as uploads_router
 from gateway.schedules import router as schedules_router
+from gateway.schedules.session_control import (
+    run_plugin_schedules_reconciler,
+    sync_startup_schedules,
+)
 from gateway.upload_delivery import router as upload_delivery_router
 from gateway.upload_delivery.worker import UploadRecovery
 from ops.cluster.rpc import RpcClient
@@ -260,17 +264,12 @@ async def lifespan(
 
             _build_request_resources(app, process, releases)
 
-            if config.view.gateway.provision_builtin_schedules:
-                from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
-
-                def _provision() -> None:
-                    with db_pool.connection() as conn:
-                        provision_builtin_schedules(conn, machine=process.machine.name())
-
-                try:
-                    await asyncio.to_thread(_provision)
-                except Exception:
-                    _log.warning("gateway built-in schedule provisioning failed", exc_info=True)
+            await sync_startup_schedules(
+                db_pool,
+                home=process.home,
+                machine=process.machine.name(),
+                provision_builtins=config.view.gateway.provision_builtin_schedules,
+            )
 
             grafana_client = grafana_router.build_proxy_client()
             app.state.grafana_client = grafana_client
@@ -353,6 +352,10 @@ async def _background_lifetime(
                 ),
                 name="gateway-notification-outbox",
             )
+            plugin_schedules_reconciler = background.create_task(
+                run_plugin_schedules_reconciler(app.state.db_pool, app.state.gateway_process.home),
+                name="gateway-plugin-schedules-reconciler",
+            )
             if config.upload_recovery_enabled:
                 upload_recovery.start(background)
             try:
@@ -365,6 +368,7 @@ async def _background_lifetime(
                 latency_flusher.cancel()
                 auth401_flusher.cancel()
                 outbox.cancel()
+                plugin_schedules_reconciler.cancel()
                 await upload_recovery.close()
     finally:
         app.state.mcp_manager = None

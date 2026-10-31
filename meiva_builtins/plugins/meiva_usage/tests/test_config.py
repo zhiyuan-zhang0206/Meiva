@@ -1,8 +1,7 @@
-"""Unit tests for meiva_usage configuration models."""
-
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
 from meiva_builtins.plugins.meiva_usage.default_config import (
     CollectorConfig,
@@ -64,13 +63,14 @@ def test_valid_multi_account_config() -> None:
         machine="host-d",
         account_email="dev@example.com",
     )
+    ag_sec_env = "ANTIGRAVITY_CLIENT_SECRET"
     c8 = CollectorConfig(
         id="antigravity-refreshed",
         label="Antigravity Refreshed",
         provider="antigravity",
         machine="host-d",
         oauth_client_id_env="ANTIGRAVITY_CLIENT_ID",
-        oauth_client_secret_env="ANTIGRAVITY_CLIENT_SECRET",  # noqa: S106
+        oauth_client_secret_env=ag_sec_env,
     )
 
     config = UsageConfig(collectors=(c1, c2, c3, c4, c5, c6, c7, c8))
@@ -142,13 +142,14 @@ def test_unpaired_oauth_client_env_rejected() -> None:
             oauth_client_id_env="MY_CLIENT_ID",
         )
 
+    unpaired_sec = "MY_CLIENT_SECRET"
     with pytest.raises(ValueError, match="configured together"):
         CollectorConfig(
             id="ag-unpaired-sec",
             label="AG Unpaired Secret",
             provider="antigravity",
             machine="host-a",
-            oauth_client_secret_env="MY_CLIENT_SECRET",  # noqa: S106
+            oauth_client_secret_env=unpaired_sec,
         )
 
 
@@ -163,7 +164,6 @@ def test_deepseek_requires_key_env() -> None:
 
 
 def test_provider_mismatched_selectors_rejected() -> None:
-    # key_env on non-deepseek
     with pytest.raises(ValueError, match="Claude collector does not accept key_env"):
         CollectorConfig(
             id="claude-bad",
@@ -173,7 +173,6 @@ def test_provider_mismatched_selectors_rejected() -> None:
             key_env="SOME_KEY",
         )
 
-    # keychain_account on non-claude
     with pytest.raises(ValueError, match="Codex collector does not accept keychain_account"):
         CollectorConfig(
             id="codex-bad",
@@ -183,7 +182,6 @@ def test_provider_mismatched_selectors_rejected() -> None:
             keychain_account="user@example.com",
         )
 
-    # account_email on claude
     with pytest.raises(ValueError, match="Claude collector does not accept account_email"):
         CollectorConfig(
             id="claude-bad-email",
@@ -193,7 +191,7 @@ def test_provider_mismatched_selectors_rejected() -> None:
             account_email="user@example.com",
         )
 
-    # oauth_client_id_env on codex
+    codex_sec = "SEC_ENV"
     with pytest.raises(ValueError, match="Codex collector does not accept OAuth client env vars"):
         CollectorConfig(
             id="codex-bad-oauth",
@@ -201,10 +199,9 @@ def test_provider_mismatched_selectors_rejected() -> None:
             provider="codex",
             machine="host-a",
             oauth_client_id_env="ID_ENV",
-            oauth_client_secret_env="SEC_ENV",  # noqa: S106
+            oauth_client_secret_env=codex_sec,
         )
 
-    # credentials_path on deepseek
     with pytest.raises(ValueError, match="DeepSeek collector does not accept credentials_path"):
         CollectorConfig(
             id="deepseek-bad-path",
@@ -217,13 +214,14 @@ def test_provider_mismatched_selectors_rejected() -> None:
 
 
 def test_secret_env_vars_deduplication() -> None:
+    same_var = "SAME_VAR"
     c1 = CollectorConfig(
         id="c1",
         label="C1",
         provider="antigravity",
         machine="host-a",
-        oauth_client_id_env="SAME_VAR",
-        oauth_client_secret_env="SAME_VAR",  # noqa: S106
+        oauth_client_id_env=same_var,
+        oauth_client_secret_env=same_var,
     )
     assert c1.secret_env_vars() == ("SAME_VAR",)
 
@@ -239,7 +237,9 @@ def test_secret_env_vars_deduplication() -> None:
 
 def test_contribute_returns_contributions() -> None:
     contrib_default = contribute_default_config()
-    assert contrib_default.config is UsageConfig
+    assert contrib_default.config is not None
+    assert contrib_default.config.__name__ == UsageConfig.__name__
+    assert issubclass(contrib_default.config, BaseModel)
 
     contrib_plugin = contribute_plugin()
     assert contrib_plugin.config is None

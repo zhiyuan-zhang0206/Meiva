@@ -1,0 +1,20 @@
+{
+  "apiVersion": 2,
+  "name": "meiva_usage",
+  "version": "1.0.0",
+  "description": "Scheduled multi-account usage and balance collectors for status panel cards.",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "config": {
+      "schema": "default_config.py"
+    },
+    "schedules": {
+      "face": "schedules.py"
+    },
+    "ui": {
+      "statsFace": "ui_stats.py"
+    }
+  }
+}

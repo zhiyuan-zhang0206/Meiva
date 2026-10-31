@@ -1,4 +1,6 @@
-"""Pure placement judgment for machine-placed schedules."""
+# meiva:note
+# Pure placement judgment for machine-placed schedules.
+# meiva:link gateway/schedules/docs/schedules.meiva.okf.md
 
 from __future__ import annotations
 
@@ -31,12 +33,6 @@ def judge_placement(
     machine: str,
     snapshot: MachineSnapshot,
 ) -> PlacementVerdict:
-    """Judge the execution readiness of a schedule placed on `machine`.
-
-    Returns status 'ok' when the machine is registered, not paused, not stopped,
-    and online. Returns 'unregistered', 'paused', 'stopped', or 'offline' with
-    an explanatory reason otherwise.
-    """
     if not snapshot.registered:
         return PlacementVerdict(
             status="unregistered",
@@ -53,7 +49,11 @@ def judge_placement(
             reason=snapshot.maintenance_reason or f"machine {machine!r} is stopped",
         )
     if snapshot.online is False:
-        suffix = f" ({snapshot.consecutive_failures} failed probes)" if snapshot.consecutive_failures > 0 else ""
+        suffix = (
+            f" ({snapshot.consecutive_failures} failed probes)"
+            if snapshot.consecutive_failures > 0
+            else ""
+        )
         return PlacementVerdict(
             status="offline",
             reason=f"machine {machine!r} is offline{suffix}",

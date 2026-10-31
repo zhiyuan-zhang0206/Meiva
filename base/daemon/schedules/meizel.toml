@@ -1,6 +1,7 @@
-exports = ["builtin_schedules.py", "completion_notices.py", "inputs.py", "watcher.py"]
+exports = ["builtin_schedules.py", "completion_notices.py", "inputs.py", "plugin_schedules.py", "watcher.py"]
 
 [uses]
+"plugin_schedules.py" = []
 "tests" = ["builtin_schedules.py", "completion_notices.py"]
 
 [purity]

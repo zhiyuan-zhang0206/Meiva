@@ -1,5 +1,3 @@
-"""Unit tests verifying repository and package hard invariants."""
-
 from __future__ import annotations
 
 import re
@@ -16,7 +14,6 @@ def test_default_config_empty() -> None:
 
 
 def test_zero_raw_cjk_characters() -> None:
-    # Match any CJK Unified Ideographs, Hiragana, Katakana, Hangul, or CJK symbols
     cjk_pattern = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\u3000-\u303f]")
 
     violations: list[str] = []

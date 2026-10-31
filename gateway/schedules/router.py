@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
@@ -16,6 +17,7 @@ from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_rpc
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
@@ -203,6 +205,66 @@ def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sq
     return assignments
 
 
+def _refuse_plugin_mutation(owner_plugin: str | None, changed: dict[str, Any]) -> None:
+    if owner_plugin is not None:
+        forbidden = set(changed) - {"enabled"}
+        if forbidden:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"schedule is owned by plugin '{owner_plugin}'; "
+                    "only enabled may be toggled directly"
+                ),
+            )
+
+
+def _apply_schedule_update(
+    cur: psycopg.Cursor[Any],
+    schedule_id: int,
+    previous: tuple[Any, ...],
+    changed: dict[str, Any],
+    fields: dict[str, Any],
+) -> None:
+    code_changed = "script" in changed or "command" in changed
+    assignments = _edit_assignments(changed, code_changed=code_changed)
+    cur.execute(
+        sql.SQL("UPDATE schedules SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments)),
+        (*changed.values(), schedule_id),
+    )
+    if code_changed:
+        cur.execute(
+            "INSERT INTO schedule_versions (schedule_id, script, command, note) "
+            "VALUES (%s, %s, %s, %s)",
+            (
+                schedule_id,
+                fields.get("script", previous[11]),
+                fields.get("command", previous[3]),
+                "edit",
+            ),
+        )
+
+
+def _sync_schedule_mutation(
+    conn: psycopg.Connection[Any],
+    schedule_id: int,
+    previous: tuple[Any, ...],
+    changed: dict[str, Any],
+) -> bool:
+    old_machine: str = str(previous[9]) if previous[9] else "gateway"
+    new_val = changed.get("machine")
+    new_machine: str = str(new_val) if new_val else old_machine
+    machine_moved = "machine" in changed and changed["machine"] != previous[9]
+    effective_enabled = changed.get("enabled", previous[4])
+    needs_sync = plans.edit_needs_sync(changed, enabled=bool(effective_enabled))
+    if needs_sync:
+        if machine_moved:
+            session_control.enqueue_in_transaction(conn, schedule_id, old_machine)
+            session_control.enqueue_in_transaction(conn, schedule_id, new_machine)
+        else:
+            session_control.enqueue_in_transaction(conn, schedule_id, new_machine)
+    return needs_sync
+
+
 # meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def update_blocking(
     pool: ConnectionPool[Any],
@@ -220,53 +282,29 @@ def update_blocking(
             if replay is not None:
                 return replay, False
             cur.execute(
-                f"SELECT {_SCHEDULE_STORE_COLS} FROM schedules WHERE id = %s FOR UPDATE",
+                sql.SQL("SELECT {} FROM schedules WHERE id = %s FOR UPDATE").format(
+                    sql.SQL(_SCHEDULE_STORE_COLS)
+                ),
                 (schedule_id,),
             )
             previous = cur.fetchone()
             if previous is None:
                 raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
             changed = plans.changed_fields(previous, fields)
+            _refuse_plugin_mutation(previous[10], changed)
             if not changed:
                 cur.execute(_FULL_QUERY, (schedule_id,))
                 full_row = cur.fetchone()
-                assert full_row is not None
+                if full_row is None:
+                    raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
                 receipts.finish(conn, key, full_row)
                 return full_row, False
-            code_changed = "script" in changed or "command" in changed
-            assignments = _edit_assignments(changed, code_changed=code_changed)
-            cur.execute(
-                sql.SQL("UPDATE schedules SET {} WHERE id = %s").format(
-                    sql.SQL(", ").join(assignments)
-                ),
-                (*changed.values(), schedule_id),
-            )
-            if code_changed:
-                cur.execute(
-                    "INSERT INTO schedule_versions (schedule_id, script, command, note) "
-                    "VALUES (%s, %s, %s, %s)",
-                    (
-                        schedule_id,
-                        fields.get("script", previous[11]),
-                        fields.get("command", previous[3]),
-                        "edit",
-                    ),
-                )
-            old_machine: str = str(previous[9]) if previous[9] else "gateway"
-            new_val = changed.get("machine")
-            new_machine: str = str(new_val) if new_val else old_machine
-            machine_moved = "machine" in changed and changed["machine"] != previous[9]
-            effective_enabled = changed["enabled"] if "enabled" in changed else previous[4]
-            needs_sync = plans.edit_needs_sync(changed, enabled=bool(effective_enabled))
-            if needs_sync:
-                if machine_moved:
-                    session_control.enqueue_in_transaction(conn, schedule_id, old_machine)
-                    session_control.enqueue_in_transaction(conn, schedule_id, new_machine)
-                else:
-                    session_control.enqueue_in_transaction(conn, schedule_id, new_machine)
+            _apply_schedule_update(cur, schedule_id, previous, changed, fields)
+            needs_sync = _sync_schedule_mutation(conn, schedule_id, previous, changed)
             cur.execute(_FULL_QUERY, (schedule_id,))
             row = cur.fetchone()
-            assert row is not None
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
             receipts.finish(conn, key, row)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
@@ -343,11 +381,7 @@ def create_blocking(
 )
 async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleView:
 
-    machine = (
-        request.app.state.machine.name()
-        if body.machine is None
-        else body.machine.strip()
-    )
+    machine = request.app.state.machine.name() if body.machine is None else body.machine.strip()
     if not machine:
         raise HTTPException(status_code=400, detail="machine cannot be empty")
 
@@ -402,18 +436,25 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
 def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> str:
 
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id, machine", (schedule_id,))
+        cur.execute("SELECT owner_plugin FROM schedules WHERE id = %s", (schedule_id,))
         row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-        machine = row[1]
+        if row[0] is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"cannot delete schedule: owned by plugin '{row[0]}'",
+            )
+        cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id, machine", (schedule_id,))
+        del_row = cur.fetchone()
+        if del_row is None:
+            raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+        machine = del_row[1]
         session_control.enqueue_in_transaction(conn, schedule_id, machine)
         return machine
 
 
-async def _wait_consumed(
-    request: Request, schedule_id: int, machine: str | None = None
-) -> None:
+async def _wait_consumed(request: Request, schedule_id: int, machine: str | None = None) -> None:
     config: GatewayConfig = request.app.state.gateway_config
     await session_control.wait_consumed(
         request.app.state.db_pool,
@@ -656,3 +697,100 @@ async def _control_and_sync(
     if needs_sync:
         await _wait_consumed(request, schedule_id)
     return _view(row)
+
+
+def _launch_env_blocking(
+    pool: ConnectionPool[Any], schedule_id: int
+) -> tuple[bool, tuple[str, ...]]:
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT enabled, secret_env_vars FROM schedules WHERE id = %s",
+            (schedule_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+    enabled = bool(row[0])
+    raw_secrets: object = row[1]
+    secrets_list: list[str] = []
+    if _is_sequence(raw_secrets):
+        for item in raw_secrets:
+            if isinstance(item, str):
+                secrets_list.append(item)
+    return enabled, tuple(secrets_list)
+
+
+def _is_sequence(val: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(val, (list, tuple))
+
+
+def _is_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _read_env_aliases_sync(config_authority: object) -> dict[str, str]:
+    read_fn = getattr(config_authority, "read_env_aliases", None)
+    if not callable(read_fn):
+        return {}
+    try:
+        raw_aliases: object = read_fn()
+    except OSError:
+        return {}
+    if not _is_dict(raw_aliases):
+        return {}
+    return {k: v for k, v in raw_aliases.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def _read_process_env(process: object) -> dict[str, str]:
+    config = getattr(process, "config", None)
+    if config is None:
+        return {}
+    proc_env_fn = getattr(config, "process_environment", None)
+    if not callable(proc_env_fn):
+        return {}
+    raw_env: object = proc_env_fn()
+    if not _is_dict(raw_env):
+        return {}
+    return {k: v for k, v in raw_env.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+async def _read_gateway_secret_sources(
+    request: Request,
+) -> tuple[dict[str, str], dict[str, str]]:
+    authority = getattr(request.app.state, "config_authority", None)
+    aliases: dict[str, str] = (
+        await asyncio.to_thread(_read_env_aliases_sync, authority) if authority is not None else {}
+    )
+    process = getattr(request.app.state, "gateway_process", None)
+    process_env = _read_process_env(process) if process is not None else {}
+    return aliases, process_env
+
+
+@router.get(
+    "/api/schedules/{schedule_id}/launch-env",
+    description="Deliver process-scoped secret environment variables for a schedule session.",
+)
+async def get_schedule_launch_env(
+    request: Request,
+    schedule_id: int,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    secret = request.app.state.gateway_config.cluster_secret
+    if (
+        cluster_credential(
+            authorization,
+            secret,
+            home=request.app.state.gateway_process.home,
+            cache=request.app.state.machine_token_acceptance,
+        )
+        is None
+    ):
+        raise HTTPException(status_code=401, detail="machine API token required")
+
+    pool = request.app.state.db_pool
+    enabled, secret_env_vars = await asyncio.to_thread(_launch_env_blocking, pool, schedule_id)
+    if not enabled or not secret_env_vars:
+        return {}
+
+    aliases, process_env = await _read_gateway_secret_sources(request)
+    return plans.select_declared_secrets(secret_env_vars, aliases, process_env)

@@ -105,6 +105,7 @@ CONTRIBUTION_KEYS = {
     "decisionProviders",
     "opsServices",
     "config",
+    "schedules",
     "skills",
     "commands",
     "mcpServers",
@@ -266,6 +267,26 @@ def _config_contribution(value: object, errors: list[str]) -> dict[str, object] 
     return cfg
 
 
+_FACE_RE = re.compile(r"^[A-Za-z0-9._~-]+\.py$")
+
+
+def _schedules_contribution(value: object, errors: list[str]) -> dict[str, object] | None:
+    if not _is_str_dict(value):
+        errors.append("contributions.schedules must be an object {face}")
+        return None
+    unknown = set(value) - {"face"}
+    if unknown:
+        errors.append(f"contributions.schedules: unknown field(s) {', '.join(sorted(unknown))!r}")
+        return None
+    face = value.get("face")
+    if not isinstance(face, str) or face.startswith(".") or "/" in face or not _FACE_RE.match(face):
+        errors.append(
+            "contributions.schedules.face must be a relative Python filename matching ^[A-Za-z0-9._~-]+\\.py$"
+        )
+        return None
+    return {"face": face}
+
+
 def _check_hook_points(hooks: list[str], errors: list[str]) -> None:
     for hook in hooks:
         if hook not in HOOK_POINTS:
@@ -288,6 +309,11 @@ def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str
             cfg = _config_contribution(value, errors)
             if cfg is not None:
                 parsed[key] = cfg
+            continue
+        if key == "schedules":
+            sched = _schedules_contribution(value, errors)
+            if sched is not None:
+                parsed[key] = sched
             continue
         if key == "ui":
             parsed[key] = validate_ui_contributions(value, errors)

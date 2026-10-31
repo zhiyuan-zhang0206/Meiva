@@ -1,4 +1,6 @@
-"""Probe for DeepSeek account balance."""
+# meiva:note
+# Probe for DeepSeek account balance.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -26,7 +28,6 @@ def probe_deepseek(
     http_fetch: HttpJsonFetcher,
     display_tz: tzinfo = UTC,
 ) -> CardReading:
-    """Probe DeepSeek user balance via balance endpoint."""
     del user_home, now, platform, display_tz
     env_name = collector.key_env or ""
     api_key = environ.get(env_name, "").strip()

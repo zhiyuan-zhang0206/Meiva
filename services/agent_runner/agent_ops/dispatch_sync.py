@@ -118,7 +118,9 @@ def dispatch_sync(
             return OpStatus.COMPLETED, cluster.harness_probe_op(local_machine.name()).model_dump(
                 mode="json"
             )
-        case "shell_probe" | "shell_kill" | "shell_capture" | "schedule_capture" | "agent_skill_view":
+        case (
+            "shell_probe" | "shell_kill" | "shell_capture" | "schedule_capture" | "agent_skill_view"
+        ):
             return OpStatus.COMPLETED, _agent_arm(kind, payload, pool, home=home, now=now)
         case (
             "workspace_transfer_prepare"
@@ -171,9 +173,9 @@ def _agent_arm(
             from ops.rpc_schemas import ScheduleCapturePayload
 
             scp = ScheduleCapturePayload.model_validate(payload)
-            return cluster.schedule_capture_op(
-                scp.schedule_id, scp.lines, home=home
-            ).model_dump(mode="json")
+            return cluster.schedule_capture_op(scp.schedule_id, scp.lines, home=home).model_dump(
+                mode="json"
+            )
         case _:
             raise ValueError(f"not an agent arm: {kind!r}")
 

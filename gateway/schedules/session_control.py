@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from psycopg import Connection
@@ -27,22 +29,12 @@ from base.sessions.protocol import SessionBackend
 _log = logging.getLogger(__name__)
 
 
-def enqueue_blocking(
-    pool: ConnectionPool[Any], schedule_id: int, machine: str = "gateway"
-) -> None:
-    """Queue (or refresh) the schedule's sync request for `machine`. The row has no foreign
-    key: a delete asks for the orphaned session to be killed after the schedule
-    row is already gone."""
+def enqueue_blocking(pool: ConnectionPool[Any], schedule_id: int, machine: str = "gateway") -> None:
     with write_transaction(pool) as conn:
         enqueue_in_transaction(conn, schedule_id, machine)
 
 
 def enqueue_in_transaction(conn: Connection[Any], schedule_id: int, machine: str) -> None:
-    """Persist convergence work in the transaction that changes desired state.
-
-    The caller owns commit/rollback; no schedule foreign key allows deletion
-    to leave a durable request to reap its orphaned session.
-    """
     conn.execute(
         "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
         "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
@@ -119,3 +111,81 @@ def capture_blocking(backend: SessionBackend, schedule_id: int, lines: int) -> s
     if not backend.has_session(name):
         return None
     return backend.capture_pane(name, lines)
+
+
+def plugin_schedules_stat_digest(home: Path) -> tuple[tuple[str, int, int], ...]:
+    entries: list[tuple[str, int, int]] = []
+    pcfg = home / "plugins_config.json"
+    try:
+        st = pcfg.stat()
+        entries.append(("plugins_config.json", st.st_mtime_ns, st.st_size))
+    except OSError:
+        entries.append(("plugins_config.json", 0, -1))
+    configs_dir = home / "configs"
+    if configs_dir.is_dir():
+        try:
+            children = sorted(configs_dir.iterdir())
+        except OSError:
+            return tuple(entries)
+        for child in children:
+            try:
+                st = (child / "config.json").stat()
+                entries.append((f"{child.name}/config.json", st.st_mtime_ns, st.st_size))
+            except OSError:
+                continue
+    return tuple(entries)
+
+
+def _run_with_conn(pool: ConnectionPool[Any], action: Callable[[Any], object]) -> None:
+    with pool.connection() as conn:
+        action(conn)
+
+
+async def sync_startup_schedules(
+    db_pool: ConnectionPool[Any],
+    *,
+    home: Path,
+    machine: str,
+    provision_builtins: bool,
+) -> None:
+    if provision_builtins:
+        from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
+
+        try:
+            await asyncio.to_thread(
+                _run_with_conn,
+                db_pool,
+                lambda conn: provision_builtin_schedules(conn, machine=machine),
+            )
+        except Exception:
+            _log.warning("gateway built-in schedule provisioning failed", exc_info=True)
+
+    from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
+
+    try:
+        await asyncio.to_thread(
+            _run_with_conn, db_pool, lambda conn: reconcile_plugin_schedules(conn, home=home)
+        )
+    except Exception:
+        _log.warning("gateway plugin schedule reconciliation failed", exc_info=True)
+
+
+async def run_plugin_schedules_reconciler(
+    pool: ConnectionPool[Any], home: Path, *, interval_seconds: float = 5.0
+) -> None:
+    from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
+
+    last_digest = plugin_schedules_stat_digest(home)
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            current_digest = plugin_schedules_stat_digest(home)
+            if current_digest != last_digest:
+                last_digest = current_digest
+                await asyncio.to_thread(
+                    _run_with_conn, pool, lambda conn: reconcile_plugin_schedules(conn, home=home)
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _log.warning("gateway plugin schedule background reconciler failed", exc_info=True)

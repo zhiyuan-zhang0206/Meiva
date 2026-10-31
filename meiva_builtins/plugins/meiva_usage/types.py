@@ -1,4 +1,6 @@
-"""Domain types, error classes, and pure path helpers for meiva_usage."""
+# meiva:note
+# Domain types, error classes, and pure path helpers for meiva_usage.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -17,13 +19,11 @@ def _is_dict_mapping(value: object) -> TypeGuard[dict[str, object]]:
 
 
 class UsageProbeError(RuntimeError):
-    """Sanitized, token-free probe failure reason suitable for card display."""
+    pass
 
 
 @dataclass(frozen=True)
 class RateWindow:
-    """Usage rate limit window."""
-
     used_percent: float
     resets_at: datetime | None = None
     window_minutes: int | None = None
@@ -31,8 +31,6 @@ class RateWindow:
 
 @dataclass(frozen=True)
 class CardReading:
-    """Formatted value and details for a stat card."""
-
     value: str
     detail: str
     status: Literal["ok", "warn", "error"]
@@ -40,16 +38,12 @@ class CardReading:
 
 @dataclass(frozen=True)
 class ClaudeOAuthCredentials:
-    """Parsed Claude Code OAuth credential payload."""
-
     access_token: str
     expires_at: datetime
 
 
 @dataclass(frozen=True)
 class AntigravityCredentials:
-    """Parsed Antigravity OAuth credentials."""
-
     access_token: str
     refresh_token: str | None = None
     expiry: datetime | None = None
@@ -65,7 +59,6 @@ def should_write_failure(
     *,
     max_age_s: float = ERROR_STALE_AFTER_S,
 ) -> bool:
-    """Return whether a probe failure should overwrite existing card data."""
     if existing_status is None or existing_status == "error":
         return True
     if existing_updated_at is None:
@@ -75,7 +68,6 @@ def should_write_failure(
 
 
 def resolve_user_path(raw: str, *, user_home: Path) -> Path:
-    """Resolve a path string relative to injected user_home without ambient calls."""
     cleaned = raw.strip()
     if not cleaned:
         raise ValueError("Path string must not be empty")
@@ -87,7 +79,6 @@ def resolve_user_path(raw: str, *, user_home: Path) -> Path:
 
 
 def parse_timestamp(raw: object) -> datetime:
-    """Parse an ISO 8601 string or numeric epoch timestamp into a UTC datetime."""
     if isinstance(raw, (int, float)):
         val = float(raw)
         if val > 1e11:
@@ -111,17 +102,15 @@ def parse_timestamp(raw: object) -> datetime:
 
 
 def parse_timestamp_opt(raw: object) -> datetime | None:
-    """Safely parse an optional timestamp, returning None on parse failure."""
     if raw is None:
         return None
     try:
         return parse_timestamp(raw)
-    except Exception:
+    except (UsageProbeError, ValueError, TypeError, OverflowError):
         return None
 
 
 def email_from_jwt(token: str) -> str | None:
-    """Extract email claim from an unverified JWT payload without leaking token material."""
     if not isinstance(token, str):
         return None
     parts = token.strip().split(".")
@@ -136,6 +125,6 @@ def email_from_jwt(token: str) -> str | None:
             email_val = raw.get("email")
             if isinstance(email_val, str) and email_val.strip():
                 return email_val.strip()
-    except Exception:
+    except (ValueError, TypeError):
         return None
     return None

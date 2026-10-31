@@ -26,6 +26,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.host.system.hostport import Host
+from base.log import logger
 from base.packages.plugin_config_admin import (
     panel_metadata,
     panel_overrides,
@@ -46,6 +47,7 @@ from ops.host_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 
 router = APIRouter()
+_log = logger
 
 
 def request_actor(request: Request) -> tuple[str | None, str | None]:
@@ -536,7 +538,12 @@ async def _write_cluster_fields(
 
 
 async def _put_plugin(
-    owner: PluginConfigOwner, plan: ConfigPatchPlan, metas: dict[str, ConfigFieldMeta]
+    owner: PluginConfigOwner,
+    plan: ConfigPatchPlan,
+    metas: dict[str, ConfigFieldMeta],
+    *,
+    db_pool: ConnectionPool[Any] | None = None,
+    home: Path | None = None,
 ) -> ConfigWriteResult:
 
     writes, removals = split_reducer_patch(plan.host_body, metas)
@@ -548,6 +555,21 @@ async def _put_plugin(
         raise HTTPException(status_code=400, detail=str(exc)) from None
     except PluginConfigChangedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    if db_pool is not None and home is not None:
+        from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
+
+        def _reconcile() -> None:
+            with db_pool.connection() as conn:
+                reconcile_plugin_schedules(conn, home=home)
+
+        try:
+            await asyncio.to_thread(_reconcile)
+        except Exception:
+            _log.opt(exception=True).warning(
+                "plugin schedules reconciliation after config write failed"
+            )
+
     restart = sorted(
         {metas[k].restart_required for k in set(writes) | removals if metas[k].restart_required}
     )
@@ -589,7 +611,13 @@ async def put_config(
     except InvalidConfigOverlay as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if owner is not None and machine is None:
-        return await _put_plugin(owner, plan, metas)
+        return await _put_plugin(
+            owner,
+            plan,
+            metas,
+            db_pool=request.app.state.db_pool,
+            home=request.app.state.gateway_process.home,
+        )
     has_cluster_patch = bool(plan.cluster_writes or plan.cluster_removals)
     if has_cluster_patch:
         _validate_cluster_candidate(plan, metas, local=machine is None)

@@ -7,7 +7,8 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.deploy.lifecycle import start_serving
-from base.deploy.lifecycle.tests.serving_root import observe, serving_root as serving_root
+from base.deploy.lifecycle.tests.serving_root import observe
+from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import requests
@@ -64,9 +65,7 @@ class _MultiMachineBackend(SessionBackend):
         return True, "missing"
 
 
-def _insert(
-    conn: psycopg.Connection, name: str, *, machine: str, enabled: bool = True
-) -> int:
+def _insert(conn: psycopg.Connection, name: str, *, machine: str, enabled: bool = True) -> int:
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO schedules (name, script, command, enabled, status, machine) "
@@ -125,17 +124,14 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
         sid_a = _insert(db_conn, "task-a", machine="machine-a", enabled=True)
         sid_b = _insert(db_conn, "task-b", machine="machine-b", enabled=True)
 
-        # Manager A reconcile launches sid_a, does not touch sid_b
         mgr_a.reconcile(now=NOW)
         assert backend_a.launched == [sid_a]
         assert backend_b.launched == []
 
-        # Manager B reconcile launches sid_b, does not touch sid_a
         mgr_b.reconcile(now=NOW)
         assert backend_a.launched == [sid_a]
         assert backend_b.launched == [sid_b]
 
-        # Queue sync requests for both
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s), (%s, %s)",
@@ -143,7 +139,6 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
             )
         db_conn.commit()
 
-        # Manager A only consumes requests for machine-a
         consumed_a = requests.consume_requests(pool, mgr_a, now=NOW)
         assert consumed_a == 1
         with db_conn.cursor() as cur:
@@ -151,7 +146,6 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
             remaining = cur.fetchall()
         assert remaining == [(sid_b, "machine-b")]
 
-        # Manager B consumes request for machine-b
         consumed_b = requests.consume_requests(pool, mgr_b, now=NOW)
         assert consumed_b == 1
         with db_conn.cursor() as cur:
@@ -218,15 +212,12 @@ def test_colocated_split_unit_tie_breaker(
 
         sid = _insert(db_conn, "shared-task", machine="shared-host", enabled=True)
 
-        # Unelected mgr_2 reconcile yields without launching
         mgr_2.reconcile(now=NOW)
         assert backend_2.launched == []
 
-        # Elected mgr_1 reconcile runs and launches
         mgr_1.reconcile(now=NOW)
         assert backend_1.launched == [sid]
 
-        # If home_1 stops, home_2 becomes elected
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE machine_units SET stopped_at = now() WHERE machine_name = 'shared-host' AND home = %s",

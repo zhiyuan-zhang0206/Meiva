@@ -127,18 +127,6 @@ def _digest(script: str, command: str) -> str:
 def provision_builtin_schedules(
     conn: psycopg.Connection[Any], *, machine: str, path: Path | None = None
 ) -> ProvisionResult:
-    """Create the manifest schedules that are missing and resync the ones that drifted.
-
-    Idempotent. A row whose ``name`` exists keeps its ``enabled`` state and
-    description; only its ``script`` and ``command`` follow the repo template, and
-    only when they differ from it (compared by content hash).
-
-    Args:
-        conn: an open psycopg connection (autocommit or not; the caller owns
-            the transaction).
-        machine: machine assigned to newly created built-in schedules.
-        path: manifest path override (tests inject a fixture manifest).
-    """
     manifest = load_manifest(path)
     manifest_path = (path or MANIFEST_PATH).parent
     result = ProvisionResult()

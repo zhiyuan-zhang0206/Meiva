@@ -21,6 +21,7 @@ __all__ = [
     "control_plan",
     "edit_needs_sync",
     "logs_view",
+    "select_declared_secrets",
 ]
 
 UPDATABLE = ("name", "description", "script", "command", "enabled", "machine")
@@ -122,3 +123,20 @@ def logs_view(
     if last_error:
         return "last_error", last_error.splitlines()
     return "none", []
+
+
+def select_declared_secrets(
+    secret_names: tuple[str, ...],
+    aliases: Mapping[str, str],
+    process_env: Mapping[str, str],
+) -> dict[str, str]:
+    res: dict[str, str] = {}
+    for k in secret_names:
+        if k.startswith("MEIVA_"):
+            continue
+        val = aliases.get(k)
+        if val is None:
+            val = process_env.get(k)
+        if val is not None:
+            res[k] = val
+    return res

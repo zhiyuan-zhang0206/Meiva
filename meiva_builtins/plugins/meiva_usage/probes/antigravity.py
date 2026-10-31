@@ -1,4 +1,6 @@
-"""Probe for Antigravity (Gemini CLI / Cloud Code) usage metrics."""
+# meiva:note
+# Probe for Antigravity (Gemini CLI / Cloud Code) usage metrics.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -21,7 +23,9 @@ from meiva_builtins.plugins.meiva_usage.probes.transport import (
 )
 from meiva_builtins.plugins.meiva_usage.types import CardReading, UsageProbeError, resolve_user_path
 
-_MIN_TIMESTAMP = datetime.min.replace(tzinfo=UTC)
+
+def _epoch_utc() -> datetime:
+    return datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _resolve_candidate_credentials(
@@ -66,7 +70,7 @@ def _resolve_candidate_credentials(
 
     _chosen_path, chosen_creds = max(
         valid_candidates,
-        key=lambda item: (item[1].expiry or _MIN_TIMESTAMP, item[0] == cli_path),
+        key=lambda item: (item[1].expiry or _epoch_utc(), item[0] == cli_path),
     )
     return chosen_creds
 
@@ -131,7 +135,6 @@ def probe_antigravity(
     http_fetch: HttpJsonFetcher,
     display_tz: tzinfo = UTC,
 ) -> CardReading:
-    """Probe Antigravity quota metrics via Cloud Code internal quota API."""
     del platform
     chosen_creds = _resolve_candidate_credentials(collector, user_home=user_home)
 

@@ -1,4 +1,6 @@
-"""Probe dispatchers and implementations for supported LLM providers."""
+# meiva:note
+# Probe dispatchers and implementations for supported LLM providers.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -57,7 +59,6 @@ def probe_collector(
     display_tz: tzinfo = UTC,
     timeout_s: float = 10.0,
 ) -> CardReading:
-    """Probe a single collector according to its configured provider."""
     fetcher = http_fetch if http_fetch is not None else urllib_json_fetcher
 
     if collector.provider == "claude":

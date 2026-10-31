@@ -19,6 +19,7 @@ SurfaceId = Literal[
     "inspectWidgets",
     "providers",
     "decisionProviders",
+    "schedules",
 ]
 
 

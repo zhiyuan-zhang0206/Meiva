@@ -265,6 +265,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/schedules"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}"): RouteContract(),
+    ("GET", "/api/schedules/{schedule_id}/launch-env"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}/logs"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}/runs"): RouteContract(),
     ("POST", "/api/schedules"): RouteContract(

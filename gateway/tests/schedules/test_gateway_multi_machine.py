@@ -7,11 +7,9 @@ from gateway.tests.schedules.api_support import schedule_client
 
 def test_schedule_placement_in_api(db_conn: psycopg.Connection) -> None:
     with schedule_client() as client:
-        # Register a machine in machines and machine_probe
         with db_conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO machines (name) VALUES ('test-box') "
-                "ON CONFLICT (name) DO NOTHING"
+                "INSERT INTO machines (name) VALUES ('test-box') ON CONFLICT (name) DO NOTHING"
             )
             cur.execute(
                 "INSERT INTO machine_probe (machine_name, online, consecutive_failures) "
@@ -20,7 +18,6 @@ def test_schedule_placement_in_api(db_conn: psycopg.Connection) -> None:
             )
         db_conn.commit()
 
-        # Create schedule placed on test-box
         resp = client.post(
             "/api/schedules",
             json={
@@ -36,7 +33,6 @@ def test_schedule_placement_in_api(db_conn: psycopg.Connection) -> None:
         assert data["placement_status"] == "ok"
         assert data["placement_reason"] is None
 
-        # Create schedule placed on missing-box
         resp2 = client.post(
             "/api/schedules",
             json={
@@ -55,7 +51,6 @@ def test_schedule_placement_in_api(db_conn: psycopg.Connection) -> None:
 
 def test_schedule_machine_move_sync_requests(db_conn: psycopg.Connection) -> None:
     with schedule_client() as client:
-        # Create schedule on box-a
         created = client.post(
             "/api/schedules",
             json={
@@ -67,20 +62,19 @@ def test_schedule_machine_move_sync_requests(db_conn: psycopg.Connection) -> Non
         ).json()
         sid = created["id"]
 
-        # Clear initial sync requests
         with db_conn.cursor() as cur:
             cur.execute("DELETE FROM schedule_sync_requests WHERE schedule_id = %s", (sid,))
         db_conn.commit()
 
-        # Move schedule from box-a to box-b
         updated = client.put(f"/api/schedules/{sid}", json={"machine": "box-b"})
         assert updated.status_code == 200
         view = updated.json()
         assert view["machine"] == "box-b"
 
-        # Check DB state: launch_generation is reset, sync requests queued for both box-a and box-b
         with db_conn.cursor() as cur:
-            cur.execute("SELECT launch_generation, launch_count FROM schedules WHERE id = %s", (sid,))
+            cur.execute(
+                "SELECT launch_generation, launch_count FROM schedules WHERE id = %s", (sid,)
+            )
             row = cur.fetchone()
             assert row is not None
             assert row[0] is None
@@ -95,7 +89,6 @@ def test_schedule_machine_move_sync_requests(db_conn: psycopg.Connection) -> Non
 
 
 def test_cross_machine_logs_rpc_dispatch(db_conn: psycopg.Connection) -> None:
-    # When schedule is on remote box, GET /api/schedules/{id}/logs tries to dispatch RPC
     with schedule_client() as client:
         created = client.post(
             "/api/schedules",
@@ -108,7 +101,6 @@ def test_cross_machine_logs_rpc_dispatch(db_conn: psycopg.Connection) -> None:
         ).json()
         sid = created["id"]
 
-        # Requesting logs for a schedule on an unreachable machine returns 503
         logs_resp = client.get(f"/api/schedules/{sid}/logs")
         assert logs_resp.status_code == 503
         assert "ops server unreachable" in logs_resp.json()["detail"]

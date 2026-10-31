@@ -57,10 +57,6 @@ def _mutation_headers(access: GatewayAccess, idempotency_key: str) -> dict[str, 
 
 
 def cmd_schedules_ls(access: GatewayAccess) -> int:
-    """`meiva schedules ls` — list every schedule (id / enabled / status / machine / placement / name).
-
-    Disabled schedules are listed too; `status` is the ScheduleManager's live
-    supervision state, `enabled` is the desired state stored on the row."""
     from base.host.net.http_dial import get as dial_get
 
     resp = dial_get(
@@ -376,7 +372,10 @@ def cmd_schedules_runs(access: GatewayAccess, identifier: str, limit: int) -> in
 
 
 def cmd_schedules_provision(
-    *, database_factory: DatabaseFactory, machine: str = "gateway"
+    *,
+    database_factory: DatabaseFactory,
+    machine: str = "gateway",
+    home: Path | None = None,
 ) -> int:
     """`meiva schedules provision` — bring the built-in schedules in line with this
     checkout's schedules/manifest.json: create the missing ones (product schedules —
@@ -392,15 +391,25 @@ def cmd_schedules_provision(
     existing schedule are never modified, and a schedule that is not in the manifest
     (an agent-created one) is never read."""
     from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
+    from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
+    from base.paths import meiva_home
 
+    resolved_home = home if home is not None else meiva_home()
     with database_factory().write_transaction() as conn:
         result = provision_builtin_schedules(conn, machine=machine)
+        plugin_result = reconcile_plugin_schedules(conn, home=resolved_home)
     if result.created:
         print(f"provisioned built-in schedules: {', '.join(result.created)}")
     if result.resynced:
         print(f"resynced built-in schedule scripts to this checkout: {', '.join(result.resynced)}")
     if not result.created and not result.resynced:
         print("(all built-in schedules already present and current)")
+    if plugin_result.created:
+        print(f"provisioned plugin schedules: {', '.join(plugin_result.created)}")
+    if plugin_result.updated:
+        print(f"resynced plugin schedules: {', '.join(plugin_result.updated)}")
+    if plugin_result.removed:
+        print(f"removed orphaned plugin schedules: {', '.join(plugin_result.removed)}")
     return 0
 
 
@@ -591,7 +600,9 @@ def h_schedules_provision(args: argparse.Namespace) -> int:
     machine = getattr(args, "machine", None)
     if machine is None and hasattr(args, "runtime") and hasattr(args.runtime, "machine"):
         machine = args.runtime.machine.name()
+    home = getattr(args.runtime, "home", None) if hasattr(args, "runtime") else None
     return cmd_schedules_provision(
         database_factory=args.database_factory,
         machine=machine or "gateway",
+        home=home,
     )

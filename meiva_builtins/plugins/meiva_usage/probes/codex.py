@@ -1,4 +1,6 @@
-"""Probe for OpenAI Codex rate limit metrics."""
+# meiva:note
+# Probe for OpenAI Codex rate limit metrics.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -27,7 +29,9 @@ from meiva_builtins.plugins.meiva_usage.types import (
     resolve_user_path,
 )
 
-_MIN_TIMESTAMP = datetime.min.replace(tzinfo=UTC)
+
+def _epoch_utc() -> datetime:
+    return datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _is_mapping(val: object) -> TypeGuard[Mapping[str, object]]:
@@ -42,7 +46,6 @@ def find_codex_binary(
     *,
     user_home: Path | None = None,
 ) -> str | None:
-    """Find the codex executable in PATH or standard system directories."""
     path_val = environ.get("PATH", "")
     for segment in path_val.split(":"):
         trimmed = segment.strip()
@@ -64,6 +67,22 @@ def find_codex_binary(
     return None
 
 
+def _parse_json_object(line: str) -> Mapping[str, object] | None:
+    try:
+        raw: object = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return raw if _is_mapping(raw) else None
+
+
+def _read_json_file(path: Path) -> Mapping[str, object] | None:
+    try:
+        raw: object = json.loads(path.read_text("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return raw if _is_mapping(raw) else None
+
+
 def _read_next_rpc_message(
     proc: subprocess.Popen[bytes],
     selector: selectors.BaseSelector,
@@ -78,12 +97,9 @@ def _read_next_rpc_message(
             line = line_bytes.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
-            try:
-                raw: object = json.loads(line)
-            except Exception:
-                continue
-            if _is_mapping(raw):
-                return raw
+            parsed = _parse_json_object(line)
+            if parsed is not None:
+                return parsed
             continue
 
         remaining = deadline - time.monotonic()
@@ -165,6 +181,10 @@ def _communicate_codex_rpc(
                 return raw_result
 
 
+# meiva:note
+# Execute initialize and rateLimits read over JSON-RPC with codex app-server.
+# Fixed argv runs the local codex app-server child process.
+# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
 def default_codex_rpc_runner(
     home: Path,
     environ: Mapping[str, str],
@@ -173,7 +193,6 @@ def default_codex_rpc_runner(
     user_home: Path | None = None,
     binary_finder: Callable[..., str | None] | None = None,
 ) -> Mapping[str, object]:
-    """Execute initialize and rateLimits read over JSON-RPC with codex app-server."""
     finder = binary_finder or find_codex_binary
     effective_home = (
         user_home
@@ -192,7 +211,7 @@ def default_codex_rpc_runner(
 
     proc: subprocess.Popen[bytes] | None = None
     try:
-        proc = subprocess.Popen(  # noqa: S603 — fixed argv for codex app-server
+        proc = subprocess.Popen(  # noqa: S603
             [codex_bin, "app-server"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -218,11 +237,8 @@ def _collect_matching_homes(
         auth_file = dir_path / "auth.json"
         if not auth_file.is_file():
             continue
-        try:
-            raw_auth: object = json.loads(auth_file.read_text("utf-8"))
-        except (OSError, UnicodeDecodeError, ValueError):
-            continue
-        if not _is_mapping(raw_auth):
+        raw_auth = _read_json_file(auth_file)
+        if raw_auth is None:
             continue
         tokens_raw = raw_auth.get("tokens")
         tokens = tokens_raw if _is_mapping(tokens_raw) else None
@@ -236,7 +252,7 @@ def _collect_matching_homes(
         last_refresh_raw = (
             tokens.get("last_refresh") if tokens is not None else None
         ) or raw_auth.get("last_refresh")
-        dt = parse_timestamp_opt(last_refresh_raw) or _MIN_TIMESTAMP
+        dt = parse_timestamp_opt(last_refresh_raw) or _epoch_utc()
         homes_with_meta.append((dir_path, dt))
     return homes_with_meta
 
@@ -285,7 +301,6 @@ def probe_codex(
     display_tz: tzinfo = UTC,
     timeout_s: float = 10.0,
 ) -> CardReading:
-    """Probe Codex rate limit metrics via candidate homes and JSON-RPC."""
     del now, platform
     candidate_homes = _resolve_candidate_homes(collector, user_home=user_home)
 

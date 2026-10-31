@@ -1,5 +1,3 @@
-"""Unit tests for meiva_usage card formatters."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -26,7 +24,6 @@ def test_format_dual_window_card_both_windows() -> None:
         resets_at=datetime(2026, 11, 7, 0, 0, tzinfo=UTC),
         window_minutes=10080,
     )
-    # session: 80% left; weekly: 40% left -> tightest is 40% left
     reading = format_dual_window_card(session, weekly)
     assert reading.value == "40% left"
     assert "5h 80% left" in reading.detail
@@ -38,7 +35,6 @@ def test_format_dual_window_card_both_windows() -> None:
 def test_format_dual_window_card_warn_threshold() -> None:
     session = RateWindow(used_percent=91.0)
     weekly = RateWindow(used_percent=20.0)
-    # tightest is session: 9% left <= 10.0% -> status="warn"
     reading = format_dual_window_card(session, weekly)
     assert reading.value == "9% left"
     assert reading.status == "warn"

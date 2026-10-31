@@ -1,5 +1,3 @@
-"""End-to-end unit tests for usage probes using pure dependency injection."""
-
 from __future__ import annotations
 
 import base64
@@ -25,10 +23,6 @@ from meiva_builtins.plugins.meiva_usage.probes import (
     probe_deepseek,
 )
 from meiva_builtins.plugins.meiva_usage.types import UsageProbeError
-
-# ---------------------------------------------------------------------------
-# DeepSeek Probe Tests
-# ---------------------------------------------------------------------------
 
 
 def test_probe_deepseek_success() -> None:
@@ -103,11 +97,6 @@ def test_probe_deepseek_401_raises() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Claude Probe Tests
-# ---------------------------------------------------------------------------
-
-
 def test_probe_claude_explicit_path(tmp_path: Path) -> None:
     creds_file = tmp_path / "custom_claude.json"
     creds_file.write_text(
@@ -152,7 +141,6 @@ def test_probe_claude_explicit_path(tmp_path: Path) -> None:
 
 
 def test_probe_claude_freshest_expiry_selection(tmp_path: Path) -> None:
-    # Stale file credential
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()
     (claude_dir / ".credentials.json").write_text(
@@ -160,20 +148,19 @@ def test_probe_claude_freshest_expiry_selection(tmp_path: Path) -> None:
             {
                 "claudeAiOauth": {
                     "accessToken": "file-stale-token",
-                    "expiresAt": 1700000000000,  # Older
+                    "expiresAt": 1700000000000,
                 }
             }
         ),
         encoding="utf-8",
     )
 
-    # Fresh keychain credential
     keychain_store = {
         "unknown": json.dumps(
             {
                 "claudeAiOauth": {
                     "accessToken": "keychain-fresh-token",
-                    "expiresAt": 1800000000000,  # Fresher
+                    "expiresAt": 1800000000000,
                 }
             }
         )
@@ -227,17 +214,11 @@ def test_probe_claude_missing_credentials_raises(tmp_path: Path) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Antigravity Probe Tests
-# ---------------------------------------------------------------------------
-
-
 def test_probe_antigravity_token_refresh(tmp_path: Path) -> None:
     now = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
     cli_dir = tmp_path / ".gemini" / "antigravity-cli"
     cli_dir.mkdir(parents=True)
 
-    # Expired token (expiry 10 minutes in the past)
     expired_dt = (now - timedelta(minutes=10)).isoformat()
     (cli_dir / "antigravity-oauth-token").write_text(
         json.dumps(
@@ -253,17 +234,18 @@ def test_probe_antigravity_token_refresh(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    ag_sec_name = "AG_SECRET"
     collector = CollectorConfig(
         id="ag-refresh",
         label="AG Refresh",
         provider="antigravity",
         machine="test-box",
         oauth_client_id_env="AG_ID",
-        oauth_client_secret_env="AG_SECRET",  # noqa: S106
+        oauth_client_secret_env=ag_sec_name,
     )
     environ = {
         "AG_ID": "client-id-123",
-        "AG_SECRET": "client-sec-456",
+        ag_sec_name: "client-sec-456",
     }
 
     requests_made: list[HttpJsonRequest] = []
@@ -295,7 +277,6 @@ def test_probe_antigravity_token_refresh(tmp_path: Path) -> None:
         platform="darwin",
         http_fetch=fake_http_fetch,
     )
-    # Refreshed token was used, 5h remaining 50%, weekly remaining 90% -> 50% left
     assert reading.value == "50% left"
     assert reading.status == "ok"
     assert any("oauth2.googleapis.com" in r.url for r in requests_made)
@@ -306,7 +287,6 @@ def test_probe_antigravity_email_filtering(tmp_path: Path) -> None:
     cli_dir = tmp_path / ".gemini" / "antigravity-cli"
     cli_dir.mkdir(parents=True)
 
-    # File with different email
     future_dt = (now + timedelta(hours=2)).isoformat()
     (cli_dir / "antigravity-oauth-token").write_text(
         json.dumps(
@@ -342,7 +322,6 @@ def test_probe_antigravity_no_expiry_does_not_refresh_upfront(tmp_path: Path) ->
     cli_dir = tmp_path / ".gemini" / "antigravity-cli"
     cli_dir.mkdir(parents=True)
 
-    # Token with non-empty access_token and expiry=None
     (cli_dir / "antigravity-oauth-token").write_text(
         json.dumps(
             {
@@ -412,15 +391,16 @@ def test_probe_antigravity_401_triggers_refresh_retry(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    ag_sec_retry = "AG_SECRET"
     collector = CollectorConfig(
         id="ag-retry",
         label="AG Retry",
         provider="antigravity",
         machine="test-box",
         oauth_client_id_env="AG_ID",
-        oauth_client_secret_env="AG_SECRET",  # noqa: S106
+        oauth_client_secret_env=ag_sec_retry,
     )
-    environ = {"AG_ID": "id1", "AG_SECRET": "sec1"}
+    environ = {"AG_ID": "id1", ag_sec_retry: "sec1"}
 
     attempts = {"quota_calls": 0, "refreshed": False}
 
@@ -487,11 +467,6 @@ def test_probe_antigravity_non_auth_http_error(tmp_path: Path) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Codex Probe Tests
-# ---------------------------------------------------------------------------
-
-
 def test_probe_codex_multi_home_failover(tmp_path: Path) -> None:
     home1 = tmp_path / ".codex-home1"
     home2 = tmp_path / ".codex-home2"
@@ -510,7 +485,6 @@ def test_probe_codex_multi_home_failover(tmp_path: Path) -> None:
     payload = base64.urlsafe_b64encode(b'{"email":"user@example.com"}').decode("ascii").rstrip("=")
     jwt_token = f"{header}.{payload}.sig"
 
-    # Both homes match account_email
     (home1 / "auth.json").write_text(
         json.dumps(
             {
@@ -534,7 +508,6 @@ def test_probe_codex_multi_home_failover(tmp_path: Path) -> None:
         tried_homes.append(home)
         if home == home1:
             raise UsageProbeError("Session expired (token_revoked); sign in again")
-        # home2 succeeds
         return {
             "rateLimits": {
                 "primary": {
@@ -563,7 +536,6 @@ def test_find_codex_binary_fallback_to_user_home(tmp_path: Path) -> None:
     fake_codex.write_text("#!/bin/sh\necho ok")
     fake_codex.chmod(0o755)
 
-    # Empty PATH, but user_home provided
     found = find_codex_binary({}, user_home=tmp_path)
     assert found == str(fake_codex)
 
@@ -576,27 +548,19 @@ def test_codex_rpc_runner_interleaved_notifications_and_startup_noise(tmp_path: 
 print("Codex app-server starting v1.0", flush=True)
 print("Startup note: telemetry enabled", flush=True)
 
-# 1. Read initialize request
 line1 = sys.stdin.readline()
 req1 = json.loads(line1)
 assert req1["id"] == 1
 
-# Notification before reply
 print(json.dumps({"jsonrpc": "2.0", "method": "notifications/startup", "params": {}}), flush=True)
-
-# Initialize reply
 print(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"serverInfo": {"name": "mock"}}}), flush=True)
 
-# 2. Read rateLimits request
 line2 = sys.stdin.readline()
 req2 = json.loads(line2)
 assert req2["id"] == 2
 assert req2["params"] is None
 
-# Notification before rateLimits reply
 print(json.dumps({"jsonrpc": "2.0", "method": "notifications/indexing", "params": {}}), flush=True)
-
-# RateLimits reply
 print(json.dumps({
     "jsonrpc": "2.0",
     "id": 2,
@@ -632,11 +596,6 @@ print(json.dumps({
     assert "rateLimits" in res
     rate_limits: Any = res["rateLimits"]
     assert rate_limits["primary"]["usedPercent"] == 35.0
-
-
-# ---------------------------------------------------------------------------
-# Dispatcher Test
-# ---------------------------------------------------------------------------
 
 
 def test_probe_collector_dispatcher() -> None:

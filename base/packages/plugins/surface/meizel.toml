@@ -1,4 +1,4 @@
-exports = ["inspector.py", "notification_contributions.py", "stats.py", "ui_contributions.py"]
+exports = ["inspector.py", "notification_contributions.py", "schedules.py", "stats.py", "ui_contributions.py"]
 
 [uses]
 "tests" = ["stats.py"]
@@ -7,6 +7,7 @@ exports = ["inspector.py", "notification_contributions.py", "stats.py", "ui_cont
 "__init__.py" = "strict"
 "inspector.py" = "strict"
 "notification_contributions.py" = "strict"
+"schedules.py" = "strict"
 "ui_contributions.py" = "strict"
 
 [debt.ambient-read]
