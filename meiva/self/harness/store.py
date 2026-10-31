@@ -14,12 +14,6 @@ from meiva.self.harness.registration import (
     handle_digest,
 )
 
-_HANDLE_PREFIX = "hx_"
-
-
-def new_handle() -> str:
-    return _HANDLE_PREFIX + os.urandom(16).hex()
-
 
 # meiva:note
 # The file store behind `RegistrationStore`: one JSON document per agent under

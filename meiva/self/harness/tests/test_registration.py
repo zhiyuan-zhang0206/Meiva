@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import dataclasses
 import os
+import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,7 +15,7 @@ from meiva.self.harness.registration import (
     decode_registration,
     handle_digest,
 )
-from meiva.self.harness.store import FileRegistrationStore, new_handle, registration_store
+from meiva.self.harness.store import FileRegistrationStore, registration_store
 
 
 def registration(handle: str) -> HarnessRegistration:
@@ -30,7 +32,7 @@ def registration(handle: str) -> HarnessRegistration:
 
 def test_store_round_trips_a_registration(tmp_path: Path) -> None:
     store = FileRegistrationStore(tmp_path)
-    record = registration(new_handle())
+    record = registration(_handle())
     store.save(record)
     assert store.load(record.agent_id) == record
 
@@ -40,7 +42,7 @@ def test_store_round_trips_a_registration(tmp_path: Path) -> None:
 # environment points: a registration saved through one home is not visible through another.
 def test_the_registration_store_of_a_home_keeps_its_rows_under_that_home(tmp_path: Path) -> None:
     first, second = tmp_path / "first", tmp_path / "second"
-    record = registration(new_handle())
+    record = registration(_handle())
     registration_store(first).save(record)
 
     assert any((first / "harness" / "registrations").glob("*.json"))
@@ -50,16 +52,16 @@ def test_the_registration_store_of_a_home_keeps_its_rows_under_that_home(tmp_pat
 
 def test_store_finds_a_registration_by_its_handle(tmp_path: Path) -> None:
     store = FileRegistrationStore(tmp_path)
-    handle = new_handle()
+    handle = _handle()
     record = registration(handle)
     store.save(record)
     assert store.find_by_handle(handle) == record
-    assert store.find_by_handle(new_handle()) is None
+    assert store.find_by_handle(_handle()) is None
 
 
 def test_a_registration_records_the_digest_not_the_handle(tmp_path: Path) -> None:
     store = FileRegistrationStore(tmp_path)
-    handle = new_handle()
+    handle = _handle()
     store.save(registration(handle))
     text = store.path(41).read_text(encoding="utf-8")
     assert handle not in text
@@ -70,7 +72,7 @@ def test_expiry_is_read_from_an_iso_timestamp() -> None:
     now = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
     past = (now - timedelta(minutes=1)).isoformat(timespec="seconds")
     future = (now + timedelta(minutes=1)).isoformat(timespec="seconds")
-    base = registration(new_handle())
+    base = registration(_handle())
     assert dataclasses.replace(base, expires_at=past).expired(now) is True
     assert dataclasses.replace(base, expires_at=future).expired(now) is False
     assert dataclasses.replace(base, expires_at=None).expired(now) is False
@@ -78,15 +80,22 @@ def test_expiry_is_read_from_an_iso_timestamp() -> None:
 
 def test_a_naive_expiry_is_read_as_utc() -> None:
     now = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
-    naive = dataclasses.replace(registration(new_handle()), expires_at="2026-10-19T11:59:00")
+    naive = dataclasses.replace(registration(_handle()), expires_at="2026-10-19T11:59:00")
     assert naive.expired(now) is True
 
 
 def test_a_document_with_unknown_or_missing_fields_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "41.json"
-    document = dataclasses.asdict(registration(new_handle()))
+    document = dataclasses.asdict(registration(_handle()))
     with pytest.raises(RegistrationError, match=r"unknown fields \['surprise'\]"):
         decode_registration({**document, "surprise": 1}, path)
     document.pop("machine")
     with pytest.raises(RegistrationError, match=r"misses \['machine'\]"):
         decode_registration(document, path)
+
+
+# meiva:note
+# A handle shaped like the one the bridge mints: 32 random bytes, URL-safe base64. The store keeps
+# only its digest, so the value itself is the test's to choose.
+def _handle() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()

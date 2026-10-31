@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import secrets
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -22,7 +24,7 @@ from typing import Any
 import pytest
 
 from meiva.self.harness.registration import HarnessRegistration, handle_digest
-from meiva.self.harness.store import FileRegistrationStore, new_handle
+from meiva.self.harness.store import FileRegistrationStore
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -110,7 +112,7 @@ def test_a_live_registration_attaches_on_the_first_identity_read(
         (Path(os.environ["MEIVA_HOME"]) / ".env").read_text(encoding="utf-8"), encoding="utf-8"
     )
     store = FileRegistrationStore(home / "harness" / "registrations")
-    handle = new_handle()
+    handle = _handle()
     store.save(
         HarnessRegistration(
             agent_id=4242,
@@ -137,3 +139,10 @@ def test_attach_without_a_handle_says_how_to_get_one(marker: Path) -> None:
 
     assert report["attach"]["error"] == "RegistrationError"
     assert "MEIVA_HARNESS_HANDLE" in report["attach"]["message"]
+
+
+# meiva:note
+# A handle shaped like the one the bridge mints: 32 random bytes, URL-safe base64. The store keeps
+# only its digest, so the value itself is the test's to choose.
+def _handle() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
