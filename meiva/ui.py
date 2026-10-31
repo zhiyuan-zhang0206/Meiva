@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Timers
 from base.log import logger
 from meiva import boot, gateway_client
 from meiva.sdk_surface import agent_identity, process_context
@@ -140,17 +140,16 @@ class PageHost:
 
     host: str
     agent_id: int
+    # meiva:note
+    # The clock the ready window is measured and its poll sleeps on, handed in by the caller that
+    # built the host: the SDK entry reads its own, and a test drives the wait without real seconds.
+    timers: Timers
     # How long serve() waits for the page_server daemon to bring the server up
     # before failing. The daemon's fast path adopts a new row within one poll
     # (~2s); this window is the fallback for a cold daemon restart or a slow pass
     # under load — long enough to cover the slowest observed pass (~30s,
     # 2026-08-28) while still failing loudly when the daemon is genuinely down.
     ready_timeout_s: float = 60.0
-    # meiva:note
-    # The clock the ready window is measured and its poll sleeps on, handed in by a caller that
-    # owns one (a test drives the wait without real seconds); a host built without one falls back
-    # to the process timers.
-    timers: Timers | None = None
 
     def _page_is_serving(self, port: int) -> bool:
         """Whether an HTTP server answers on (host, port) — the daemon's server
@@ -214,7 +213,7 @@ class PageHost:
 
     def wait_until_serving(self, port: int) -> bool:
         """Poll until the page server answers on (host, port) or the ready timeout passes."""
-        timers = self.timers or SYSTEM_TIMERS
+        timers = self.timers
         deadline = timers.monotonic() + self.ready_timeout_s
         while timers.monotonic() < deadline:
             if self._page_is_serving(port):
@@ -351,9 +350,12 @@ def close_request(name: str) -> str:
 def page_host() -> PageHost:
     """The page host this agent's `meiva.ui` calls run against: this machine's reachable host and
     the agent's identity (RuntimeError when the process has none), read per call."""
+    from meiva.sdk_surface import settings as sdk_settings
+
     return PageHost(
         host=process_context.current_context().require_machine().host(),
         agent_id=agent_identity.require_agent_id(),
+        timers=sdk_settings.clock(),
     )
 
 
