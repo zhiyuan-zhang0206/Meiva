@@ -61,6 +61,14 @@ added afterwards. Check it mechanically:
 `.venv/bin/python scripts/hooks/diff_checks_receipt.py --receipt-file <line> --body-file <body>`
 must exit 0. A receipt added after the merge is a record, not a gate.
 
+The gate is audited after the fact by
+`.venv/bin/python scripts/hooks/audit_merge_receipts.py --last <n>` (default: every
+commit after the gate itself). Each landed commit is judged by the receipt checker
+**its own tree carried**, so a vocabulary that grew later cannot turn honest history into
+a violation. It reports `passed`, `no-receipt` and `rejected` as violations, and
+`no-pull-request`, `not-gated` (commits the cluster did not push) and `unverified` as
+classes that are not; a commit it cannot judge exits 2 rather than passing silently.
+
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from
 the branch's commits; a trailer with no email, like the `Meiva #<id>` convention, is
