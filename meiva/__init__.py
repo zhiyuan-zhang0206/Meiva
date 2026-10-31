@@ -319,7 +319,9 @@ __all_for_meiva__ = [
 # bound context (the harness, whether an SDK capture handle makes this an external attach) and the
 # live settings (the catalog, the model). `settings.py` already reaches `process_context.py`, so a
 # sibling module reading both would close a cycle, and `meiva/sdk_surface` is at its directory
-# entry cap. The settings import stays inside the call, so `import meiva` pulls no settings.
+# entry cap. The settings import stays inside the call, so this entry adds no import-time
+# dependency on settings (`import meiva` reaches settings through `meiva.self`, which reads them
+# for its own facade; that is pre-existing and not this entry's).
 def help(*targets: object) -> None:
     """Print documentation for one or more SDK targets, e.g. `meiva.shell.run`.
 
