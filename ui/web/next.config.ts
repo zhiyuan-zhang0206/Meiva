@@ -37,7 +37,7 @@ const nextConfig: NextConfig = {
     .filter(Boolean),
 
   // -- Security response headers --
-  async headers() {
+  headers() {
     return [
       {
         // all routes
