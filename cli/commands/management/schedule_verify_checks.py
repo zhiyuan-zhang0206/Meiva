@@ -2,7 +2,9 @@
 # The three checks `meiva schedules verify` runs on one schedule script, decided over the parsed
 # source and the names the script's own imports bound. Nothing here reads the filesystem or the
 # process: `call_site_problems` takes the "is this callee repository code" predicate from its
-# caller, and the child that does the reading (`schedule_verify_child.py`) supplies it.
+# caller, and the child that does the reading (`schedule_verify_child.py`) supplies it -- the
+# filesystem read is the child's, the rule that turns that read into an answer is `is_repo_source`
+# here.
 #
 # 1. **Names** (`undefined_name_problems`) — every `Name` the script reads (any scope) must be one
 #    it binds, a builtin, or an implicit module global. After the `shared` -> `base` rename,
@@ -23,9 +25,10 @@ import builtins
 import inspect
 import types
 from collections.abc import Callable, Iterator, Mapping
+from pathlib import Path
 from typing import Any
 
-__all__ = ["call_site_problems", "undefined_name_problems"]
+__all__ = ["call_site_problems", "is_repo_source", "undefined_name_problems"]
 
 
 # meiva:note
@@ -141,6 +144,22 @@ def _problem(
 
 # meiva:note
 # One `L<line> <callee>(): <why>` per call whose arguments the callee cannot bind.
+# meiva:note
+# What counts as repository code for the call-site check: a callee defined in a file of this
+# checkout, never one from a virtualenv or an installed package, and never one from the `meiva`
+# SDK package (plugins install its namespaces and wrap its functions at load time, so the static
+# module is neither the set of names nor the call contract). `source` is the file the process
+# entry found for the callee and already resolved -- resolving a path is a filesystem read and
+# stays in the entry; the classification it feeds is decided here. `None` (no file at all, or an
+# object the filesystem cannot place) is never repository code.
+def is_repo_source(source: Path | None, *, root: Path) -> bool:
+    if source is None:
+        return False
+    if not source.is_relative_to(root) or {".venv", "site-packages"} & set(source.parts):
+        return False
+    return source.relative_to(root).parts[0] != "meiva"
+
+
 def call_site_problems(
     tree: ast.Module, namespace: Mapping[str, object], *, is_repo: Callable[[object], bool]
 ) -> list[str]:

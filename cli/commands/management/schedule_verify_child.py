@@ -50,17 +50,13 @@ _DETAIL_MAX = 160
 
 
 def _is_repo_code(obj: object, root: Path) -> bool:
-    """Defined in the checkout (not the venv), and not in the plugin-wrapped `meiva` SDK package."""
     try:
         source = inspect.getsourcefile(inspect.unwrap(obj))  # pyright: ignore[reportArgumentType]
     except (TypeError, ValueError):
-        return False
-    if source is None:
-        return False
-    path = Path(source).resolve()
-    if not path.is_relative_to(root) or {".venv", "site-packages"} & set(path.parts):
-        return False
-    return path.relative_to(root).parts[0] != "meiva"
+        return schedule_verify_checks.is_repo_source(None, root=root)
+    return schedule_verify_checks.is_repo_source(
+        None if source is None else Path(source).resolve(), root=root
+    )
 
 
 def main() -> int:

@@ -20,5 +20,5 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "__init__.py" = "strict"
 "child_verdict.py" = "strict"
 "schedule_verify_checks.py" = "strict"
-"schedule_verify_child.py" = { mode = "none", why = "the schedule-verification process entry: it reads the script from stdin, resolves this checkout's root and asks the filesystem where a callee is defined, then prints one verdict line. Every check it reports is decided by the strict `schedule_verify_checks.py` over the parsed source and the names the script's own imports bound; this file only decides what a missing module, an exception and a red result print" }
+"schedule_verify_child.py" = { mode = "none", why = "the schedule-verification process entry: it reads the script from stdin, reads this checkout's root, asks the filesystem where a callee is defined and normalizes that path, then prints one verdict line. Every check it reports, including which files count as repository code, is decided by the strict `schedule_verify_checks.py` over the parsed source and the names the script's own imports bound (`is_repo_source` there holds the root, virtualenv and SDK-package rules); this file only starts the process, handles what the filesystem raises, and prints what a missing module, an exception and a red result print" }
 "sweep_outcome.py" = "strict"

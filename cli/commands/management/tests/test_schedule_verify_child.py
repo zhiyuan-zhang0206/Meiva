@@ -304,3 +304,20 @@ def test_the_strict_module_keeps_a_bound_name_green() -> None:
         "from pathlib import Path\n\nroot = Path(base.__file__)\n".replace("base", "Path")
     )
     assert schedule_verify_checks.undefined_name_problems(tree) == []
+
+
+# meiva:note
+# What counts as repository code is a rule of the strict module, not of the entry that reads the
+# filesystem: the entry keeps only "where is this callee defined" and the `resolve` that normalizes
+# it. Both wrong answers are silent -- a wrong `True` binds a signature that is not the one the
+# script calls, a wrong `False` skips a callee the check must bind -- so each reason to answer
+# either way is pinned here.
+def test_the_strict_module_decides_what_counts_as_repository_code(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    is_repo = schedule_verify_checks.is_repo_source
+    assert is_repo(root / "schedules/jobs/catchup.py", root=root) is True
+    assert is_repo(root / ".venv/lib/python3.12/site-packages/base/clock.py", root=root) is False
+    assert is_repo(root / "services/app/site-packages/vendor/mod.py", root=root) is False
+    assert is_repo(root / "meiva/sdk_surface/settings.py", root=root) is False
+    assert is_repo(tmp_path / "elsewhere/schedules/jobs/catchup.py", root=root) is False
+    assert is_repo(None, root=root) is False
