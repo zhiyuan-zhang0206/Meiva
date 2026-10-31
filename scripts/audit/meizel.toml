@@ -7,7 +7,9 @@ exports = ["analysis", "branch_protection.py"]
 "module_moves.py" = ["analysis"]
 "schema_drift.py" = ["analysis"]
 "sdk_usage.py" = ["sdk_usage_report.py"]
+"refusal_loss.py" = ["analysis"]
 "tests" = ["analysis", "branch_protection.py", "call_sites.py", "impact_census.py", "module_moves.py", "sdk_usage.py", "sdk_usage_report.py", "where_used.py"]
+"tests/refusal" = ["analysis", "refusal_loss.py"]
 "where_used.py" = ["analysis"]
 
 [external]
@@ -22,6 +24,7 @@ exports = ["analysis", "branch_protection.py"]
 "call_sites.py" = { mode = "none", why = "the command line shell: it walks and reads the Python sources of the checkout the operator names and prints the findings; what a spec means, which argument supplies a parameter and how a report reads are in analysis/calls.py" }
 "impact_census.py" = { mode = "none", why = "the command line shell: it builds the impact graph and the timing model of the checkout the operator names through the CI test-selection loaders, and prints the numbers; which source files every test reaches, which inputs nothing bounds and which tests pull them in are in analysis/reach.py" }
 "module_moves.py" = { mode = "none", why = "the command line shell: it reads the tracked text of the checkout the operator names (skipping frozen history, itself, symlinked contents and binaries), imports the new module to see which names it carries, and prints the findings; which lines still name the old path and which names a caller uses are in analysis/moves.py" }
+"refusal_loss.py" = { mode = "none", why = "the command line shell: it reads the pull request's commits with git (log, show, grep) and prints what the lenses find; which hunks lose a refusal, which of them block, and what the pull request body line says are in analysis/refusal_loss.py" }
 "schema_drift.py" = { mode = "none", why = "the command line shell: it reads db/schema.sql and the allowlist the operator names, opens the read-only Postgres connection (falling back to the deployment settings when --dsn is omitted) and writes the report; parsing the DDL, comparing it with the live columns and classifying what is left over are in analysis/schema.py" }
 "sdk_usage.py" = { mode = "none", why = "the command line shell: it reads the mirrors the operator names, hands their lines to the report module and prints the result; every decision is in sdk_usage_report.py" }
 "sdk_usage_report.py" = "strict"

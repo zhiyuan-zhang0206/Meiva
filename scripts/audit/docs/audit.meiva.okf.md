@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Audit scripts"
-description: "scripts/audit/ — read-only audits of state that lives outside the tree: GitHub branch protection, reference and move inventories, runtime impact, SDK usage and a live database's schema."
+description: "scripts/audit/ — read-only audits of state that lives outside the tree: GitHub branch protection, reference and move inventories, runtime impact, SDK usage, a live database's schema and the refusals a debt-reducing change removed."
 tags: [scripts, audit]
 ---
 
@@ -17,6 +17,10 @@ the repository, the database or the remote.
 Before changes, `where_used.py` groups importers, tests, strings, docs and baseline
 entries of symbols/modules/paths (`--json`).
 After moves, `module_moves.py` rejects remaining old references and missing names.
+For a change that pays recorded debt down, `refusal_loss.py` reports the `raise` statements it
+removed instead of moving: a hunk that deletes a refusal whose message no longer appears in the
+tree blocks the merge when it adds nothing in its place, and a hunk that deletes a refusal while
+adding a fallback is listed for the author to read.
 When a signature gains a required parameter, `call_sites.py` lists the calls that cannot
 supply it — [[scripts/audit/docs/call-sites.meiva.okf.md]].
 The CLI owners expose `main(argv, *, repo_root=None)` — `call_sites.py` takes the same
@@ -29,7 +33,8 @@ database and prints — and `analysis/` owns what it decides: `references.py` fi
 references behind `where_used.py`, `report.py` groups and renders them, `moves.py` answers
 what a move leaves behind, `protection.py` states the branch-protection contract,
 `schema.py` diffs the DDL against the live columns, `reach.py` measures the impact graph,
-and `frozen.py` names the history axes neither audit rewrites. `call_sites.py` keeps the same split one
+`refusal_loss.py` says which hunks lost a refusal and which of them block, and `frozen.py` names
+the history axes neither audit rewrites. `call_sites.py` keeps the same split one
 level up: `calls.py` decides whether a call can carry a parameter, and the shell decides
 nothing.
 

@@ -1,4 +1,4 @@
-exports = ["__init__.py", "calls.py", "frozen.py"]
+exports = ["__init__.py", "calls.py", "frozen.py", "refusal_loss.py"]
 
 [purity]
 "." = "strict"
