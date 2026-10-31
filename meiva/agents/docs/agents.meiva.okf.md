@@ -19,7 +19,7 @@ tags:
 ### Lifecycle
 - `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None, harness=None, *, idempotency_key) → int` — start a new agent, returns agent ID, non-blocking. `harness` selects the runtime loop ([[harness.meiva.okf.md|Harness]]); it is fixed for the agent's life. `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state as of the call — a fork taken while that agent is inside a tool call carries the call without its result, and the new agent sees it as already interrupted rather than still running; `machine` defaults to self. `config_overlay` carries per-agent config fields; keys it does not name follow the cluster default. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. `label` sets the new agent's role name, which peers and the fleet view show.
 - `terminate(agent_id, *, message=None, force=False) → TerminateOutcome` — agent exits after completing the current turn; `message` is retained without another response and is visible after resurrection; `force=True` requests interruption instead. An `enqueued` result confirms acceptance, not exit or completion of owned work. Use force only when a clean stop cannot progress. The outcome compares as the acceptance status string and carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first; None when none).
-- `restart(agent_id) → RestartResult` — agent restarts as a fresh process with the same ID after completing the current turn.
+- `restart(agent_id, *, message=None) → RestartResult` — agent restarts as a fresh process with the same ID after completing the current turn (or interrupting after grace if in flight); optional `message` explains why or who requested the restart.
 - `cancel(agent_id) → CancelResult` — cancel the agent's running turn without ending the agent (`cancelled` / `not_running`); its next input starts a fresh turn.
 - `compact(agent_id)` — queue a compaction of the agent's history for its next turn; returns once the request is durable.
 - `resurrect(agent_id, prompt) → ResurrectResult` — wake up a terminated agent, preserving its conversation state; `prompt` required.
@@ -63,14 +63,8 @@ a fork keeps its source's. Details, value set and the local availability probe:
 [[harness.meiva.okf.md|Harness]]. The column contract is
 [[base/agents/docs/harness/harness.meiva.okf.md|agent harness identity]].
 
-**Fork copy boundary.** A fork copies the source agent's newest saved conversation state, not its
-live turn. When the source is between a tool call and its result, the fork inherits the call
-without the result, and the new agent's next turn settles that pair as interrupted instead of
-re-running anything. The interrupted call is therefore not a task to finish: its effects may
-already exist, so the new agent inspects state before repeating it.
-
-The copy is the whole conversation, so the child carries that history and pays its size on every
-call; the parent's own history is unchanged.
+**Fork copy boundary.** What `fork_from` copies from the parent checkpoint and how an in-flight
+tool call settles in the child: [[meiva/agents/docs/fork-copy-boundary.meiva.okf.md|Fork copy boundary]].
 
 `get_launch_attempt(agent_id)` observes the current attempt UUID. Explicit guarded
 `retry_launch` retains that observation and a caller key; see [[launch-retry.meiva.okf.md]].

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -17,8 +18,15 @@ from pathlib import Path
 from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
+from base.agents.inbox.passive_lifecycle_note import insert_passive_host_lifecycle_notes
 from base.clock import Deadline
 from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.host_exit_message import (
+    HOST_RESTART_SOURCE,
+    clear_host_exit_message,
+    consume_host_exit_message,
+    write_host_exit_message,
+)
 from base.deploy.lifecycle.status_journal import phase as journal_phase
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop
@@ -126,6 +134,99 @@ def execute_plan(
 
 
 # meiva:note
+# When `agent-host` was already down before a smooth stop or restart, `GracefulExit` never ran to
+# consume the staged exit message. Write the passive lifecycle notes directly so live idle agents
+# on this runner still learn why the host stopped, without failing a completed stop if the DB is
+# unreachable.
+def flush_unconsumed_exit_notes(
+    command: CommandRuntime,
+    database_factory: DatabaseFactory,
+    message: str,
+) -> None:
+    roles = command.machine.role()
+    if "agent-runner" not in roles:
+        return
+    direct_db = "gateway" in roles
+    try:
+        conn = database_factory().connect(direct=direct_db)
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SET TRANSACTION READ WRITE")
+            insert_passive_host_lifecycle_notes(
+                conn,
+                machine=command.machine.name(),
+                source=HOST_RESTART_SOURCE,
+                message=message,
+            )
+            conn.commit()
+    except Exception as exc:
+        print(
+            f"lifecycle exit note for {command.machine.name()!r} could not be written: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+
+
+def _stop_services_step(step: StopServices, env: StopEnvironment, run: StopRun) -> None:
+    command = env.command
+    if step.phase == "services":
+        if step.force:
+            clear_host_exit_message(command.home)
+        else:
+            write_host_exit_message(command.home, step.message)
+    root_driver.stop_root_service_tree(
+        preserve=step.preserve,
+        timeout_s=remaining(run.deadline),
+        force=step.force,
+        helper=command.helper,
+        home=command.home,
+        facts=LaunchdFacts.of(command.host, user_home=command.session.user_home),
+        run=command.host.run,
+        timers=command.timers,
+        environ=command.config.process_environment(),
+    )
+    if step.phase == "services" and not step.force:
+        leftover = consume_host_exit_message(command.home)
+        if leftover:
+            flush_unconsumed_exit_notes(command, env.database_factory, leftover)
+
+
+def _stop_data_plane_step(
+    step: StopDataPlane,
+    env: StopEnvironment,
+    run: StopRun,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+) -> StopOutcome | None:
+    command = env.command
+    config = data_plane_config_from_boot(command.config)
+    if step.force:
+        failure = data_plane_failure(
+            stop_cluster_instance(
+                config,
+                home=command.home,
+                macos=command.host.platform.system == "darwin",
+                timers=command.timers,
+                environ=command.config.process_environment(),
+                retained_children=retained_children,
+                producer=env.producer,
+            )
+        )
+        if failure is not None:
+            raise DataPlaneStopError(failure)
+        return None
+    stopped = maintenance_stop.stop(
+        config,
+        remaining(run.deadline),
+        home=command.home,
+        uid=command.host.uid,
+        retained_children=retained_children,
+        producer=env.producer,
+        timers=command.timers,
+    )
+    return StopOutcome(stopped.notes, stopped.clients)
+
+
+# meiva:note
 # Perform one step, reading the time from the invocation's clock; only the data-plane stop has
 # something to report.
 def _perform(
@@ -142,23 +243,13 @@ def _perform(
             announce_stopping(command, window, now=command.clock.now())
         case RecordBrowserSession():
             browser.record_browser_session(command, now=command.clock.now())
-        case StopServices(preserve, force, _phase):
-            root_driver.stop_root_service_tree(
-                preserve=preserve,
-                timeout_s=remaining(run.deadline),
-                force=force,
-                helper=command.helper,
-                home=command.home,
-                facts=LaunchdFacts.of(command.host, user_home=command.session.user_home),
-                run=command.host.run,
-                timers=command.timers,
-                environ=command.config.process_environment(),
-            )
+        case StopServices():
+            _stop_services_step(step, env, run)
         case StopBrowser():
             browser.stop_browser(run.deadline, home=command.home)
         case ReapChrome():
             browser.reap_cluster_chrome(home=command.home)
-        case CloseShellSessions(direct_db, force):
+        case CloseShellSessions(direct_db, force, message):
             if force:
                 shell_sessions.force_close_shell_sessions(command)
             else:
@@ -168,36 +259,12 @@ def _perform(
                     database_factory=env.database_factory,
                     command=command,
                     cleanup_wait_s=env.shell_cleanup_wait_s,
+                    message=message,
                 )
         case StopExtras(retained):
             extras.stop_extras(command, run.deadline, retained=retained)
-        case StopDataPlane(force):
-            config = data_plane_config_from_boot(command.config)
-            if force:
-                failure = data_plane_failure(
-                    stop_cluster_instance(
-                        config,
-                        home=command.home,
-                        macos=command.host.platform.system == "darwin",
-                        timers=command.timers,
-                        environ=command.config.process_environment(),
-                        retained_children=retained_children,
-                        producer=env.producer,
-                    )
-                )
-                if failure is not None:
-                    raise DataPlaneStopError(failure)
-            else:
-                stopped = maintenance_stop.stop(
-                    config,
-                    remaining(run.deadline),
-                    home=command.home,
-                    uid=command.host.uid,
-                    retained_children=retained_children,
-                    producer=env.producer,
-                    timers=command.timers,
-                )
-                return StopOutcome(stopped.notes, stopped.clients)
+        case StopDataPlane():
+            return _stop_data_plane_step(step, env, run, retained_children)
         case SkipDataPlane(plane):
             print(data_plane_skip_line(plane))
         case _:

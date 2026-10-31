@@ -32,7 +32,7 @@ from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import MeivaMsgType
-from base.agents.messages.lifecycle_text import by_who
+from base.agents.messages.lifecycle_text import by_who, restart_accepted_text
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.api_contracts.agent_contract import Harness
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
@@ -408,14 +408,25 @@ async def handle_restart(
     st.restart_requested = True
     st.restart_preserves_idle = _turn_was_idle(state, item)
     if st.restart_preserves_idle:
+        finding = (
+            scan_inbound_content(
+                item.content,
+                source=f"inbound.restart:{item.source}",
+                enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
+            )
+            if item.content
+            else None
+        )
         now = ctx.require_clock().now()
-        st.new_msgs.append(
+        st.append_scanned(
             system_note_message(
-                content=f"{_ts_prefix(ctx)}Restart was accepted from {by_who(item.source)}",
+                content=f"{_ts_prefix(ctx)}{restart_accepted_text(item.source, item.content or None)}",
                 tag=NoteTag.LIFECYCLE_RESTART,
                 picked_up_at=now,
                 created_at=now,
-            )
+            ),
+            finding,
+            now=now,
         )
 
 

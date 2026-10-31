@@ -3,26 +3,32 @@
 from __future__ import annotations
 
 import psycopg
+from psycopg import sql as pgsql
 from psycopg_pool import AsyncConnectionPool
+
+from base.agents.messages.inbound import not_passive_inbound
 
 
 # meiva:note
-# Scan new inputs and explicit controls; never revive an expired turn.
+# Scan new inputs and explicit controls; never revive an expired turn, and never wake an idle
+# agent for a passive lifecycle note.
 async def scan_rows(pool: AsyncConnectionPool[psycopg.AsyncConnection], machine: str) -> list[int]:
     async with pool.connection() as conn:
         rows = await (
             await conn.execute(
-                "SELECT m.id FROM agents_meta m WHERE m.machine=%s "
-                "AND m.status IN ('idling','running') "
-                "AND (EXISTS (SELECT 1 FROM inbound_messages pending "
-                "WHERE pending.agent_id=m.id AND pending.status='pending') "
-                "OR EXISTS (SELECT 1 FROM inbound_messages claimed "
-                "WHERE claimed.agent_id=m.id AND claimed.kind IN ('restart','terminate') "
-                "AND claimed.status='claimed') "
-                "OR EXISTS (SELECT 1 FROM agent_impersonations lease "
-                "WHERE lease.agent_id=m.id AND m.harness='meiva' "
-                "AND (lease.status IN ('requested','accepted','active') "
-                "OR lease.delta_version>lease.applied_version OR lease.handoff_applied_at IS NULL)))",
+                pgsql.SQL(
+                    "SELECT m.id FROM agents_meta m WHERE m.machine=%s "
+                    "AND m.status IN ('idling','running') "
+                    "AND (EXISTS (SELECT 1 FROM inbound_messages pending "
+                    "WHERE pending.agent_id=m.id AND pending.status='pending' AND {not_passive}) "
+                    "OR EXISTS (SELECT 1 FROM inbound_messages claimed "
+                    "WHERE claimed.agent_id=m.id AND claimed.kind IN ('restart','terminate') "
+                    "AND claimed.status='claimed') "
+                    "OR EXISTS (SELECT 1 FROM agent_impersonations lease "
+                    "WHERE lease.agent_id=m.id AND m.harness='meiva' "
+                    "AND (lease.status IN ('requested','accepted','active') "
+                    "OR lease.delta_version>lease.applied_version OR lease.handoff_applied_at IS NULL)))"
+                ).format(not_passive=pgsql.SQL(not_passive_inbound("pending"))),
                 (machine,),
             )
         ).fetchall()

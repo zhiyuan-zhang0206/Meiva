@@ -64,21 +64,22 @@ meiva init ...  # once per home: record its identity (see `meiva init --help`); 
 meiva start --all-services   # provision owned storage on the first start, and wait for the
               # selected root services to become ready (or --only-service NAME… /
               # --disable-service NAME…; the selection is never remembered)
-meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message
               # normal drain, then a full local stop; durable data and agent IDs survive.
               # Every choice is explicit (a missing one exits 2, all listed): keep or close
               # shell sessions, keep or stop the browser and extras, --keep-service NAME…
-              # or --keep-no-services, --mode smooth|force, --timeout, --yes|--prompt.
+              # or --keep-no-services, --mode smooth|force, --timeout, --message TEXT|--no-message,
+              # --yes|--prompt.
               # --keep-infra instead of --stop-infra retains pg/redis; a pure runner takes
               # neither (drop it there). A stop also leaves a stand-down: the OS boot job
               # will not start this home again until an explicit `meiva start`, or until
               # --maintenance-for T runs out. Something that must come back at boot also
               # needs a recorded window (cli/commands/lifecycle/docs/stand-down)
 meiva start --all-services   # after a stop, restore services and resume after readiness
-meiva restart --all-services --close-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300
+meiva restart --all-services --close-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300 --no-message
               # stop then start in one command; pg+redis always stay up; the keep/restart
-              # choices for shell sessions, browser and extras are explicit.
-              # `meiva restart --only agent-host --mode smooth --timeout 300` bounces agent-host alone
+              # choices for shell sessions, browser and extras plus --message|--no-message are explicit.
+              # `meiva restart --only agent-host --mode smooth --timeout 300 --no-message` bounces agent-host alone
 meiva status    # check status (includes the pg/redis view)
 ```
 

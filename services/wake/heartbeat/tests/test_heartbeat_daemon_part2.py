@@ -482,3 +482,58 @@ class TestNudgeBackoffB7:
             assert row is not None
             assert row[0] == 2
         assert _poll_mirror(aid, "heartbeat_backoff_reset", timeout_s=0.5) is None
+
+    @pytest.mark.usefixtures("event_pipeline")
+    def test_passive_lifecycle_note_neither_blocks_checkin_nor_resets_backoff(
+        self,
+        redis_url: str,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=3600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET heartbeat_backoff_level = 2, "
+                "last_heartbeat_at = now() - make_interval(secs => 3600) WHERE id = %s",
+                (aid,),
+            )
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+                "VALUES (%s, 'host restart note', 'system_note', 'system:restart', "
+                '\'{"note_tag": "lifecycle_restart", "passive": true}\'::jsonb)',
+                (aid,),
+            )
+        db_conn.commit()
+
+        assert aid in _selected(pool)
+
+        noop: dict[int, int] = {aid: 2}
+        reconcile_checkin_outcomes(
+            pool,
+            pending_checkin={},
+            failure_streak={},
+            idle_threshold_s=_THRESHOLD_S,
+            noop_streak=noop,
+            heartbeat_interval_s=_THRESHOLD_S,
+            noop_nudges_threshold=3,
+        )
+        assert noop == {aid: 2}
+
+        sweep_backoff_resets(pool)
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
+            row = cur.fetchone()
+            assert row == (2,)
+        assert _poll_mirror(aid, "heartbeat_backoff_reset", timeout_s=0.5) is None

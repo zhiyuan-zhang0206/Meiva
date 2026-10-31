@@ -20,15 +20,27 @@ signal ignored, so a retry cannot abort the exit it started.
    stops a finished turn from looping into another, and returns the agents whose
    turn task still runs. The dispatcher and its sibling loops are cancelled.
    A refused wake loses nothing: its inbound stays pending in Postgres.
-2. **One lifecycle command per running turn.** For each of those agents the exit
-   writes a `kind='restart'`, `source='system:restart'` inbound through
-   `base.agents.inbox.insert`, the same row a gateway restart writes, under the
-   agent row lock a gateway restart or terminate also takes. An agent that
-   already has an unfinished restart or terminate (an operator's) keeps that one
-   and gets no second: the next host would
-   apply both. An idle agent has no turn task and gets nothing. A turn task that
-   has not started running, or not yet been admitted, is owed one too; its
-   restart is durable, so counting it loses nothing.
+2. **One lifecycle command per running turn (and passive notes when explained).**
+   `serve_until_exit` consumes `$MEIVA_HOME/run/host-exit-message.json` once
+   (`base/deploy/lifecycle/host_exit_message.py`; staged by `meiva stop`/`restart`
+   or by `watch_plugins_for_restart`'s `PLUGINS_RESTART_MESSAGE`, with any stale
+   file cleared at daemon boot). For each running turn the exit writes a
+   `kind='restart'`, `source='system:restart'` inbound carrying that optional
+   `message` in `content` through `base.agents.inbox.insert`, the same row a
+   gateway restart writes, under the agent row lock a gateway restart or
+   terminate also takes. An agent that already has an unfinished restart or
+   terminate (an operator's) keeps that one and gets no second: the next host
+   would apply both. When `message` is absent (`--no-message`), an idle agent has
+   no turn task and gets nothing. When `message` is non-empty, `write_exit_idle_notes`
+   inserts one passive `system_note` (`payload={"note_tag": "lifecycle_restart", "passive": true}`,
+   `source='system:restart'`) for each eligible local live agent outside the
+   in-flight turn set inside the same drain deadline: passive rows are excluded
+   from `pending_wakes.scan_rows`, heartbeat selection and backoff resets,
+   inspect's `pending_inbound`, and terminated-owner dead-lettering, so idle
+   agents are not woken by the rollout and read the explanation in `created_at`
+   FIFO order on their next ordinary wake. A turn task that has not started
+   running, or not yet been admitted, is owed a `restart` too; its restart is
+   durable, so counting it loses nothing.
 3. **Drain.** The writes and the wait share one `HOST_GRACEFUL_EXIT_DRAIN_S`
    deadline, so a slow database cannot spend the stop ceiling before the turns
    are waited for. The restart takes effect where the turn is. A turn that

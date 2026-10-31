@@ -4,8 +4,10 @@
 # through the ordinary inbound writer, wait for those turns to end at it, then let the
 # ordinary shutdown run. The restart takes effect at the turn's next boundary, or interrupts
 # the call or code run in flight once it has waited its grace; the host's apply then queues
-# the note that continues an unfinished turn, which the next host's pending scan wakes. Idle
-# agents get nothing; a turn past the budget is named and cancelled, and not resumed.
+# the note that continues an unfinished turn, which the next host's pending scan wakes. When
+# an exit message was staged, idle agents receive a passive lifecycle note without being
+# woken; an unannotated exit leaves idle agents untouched. A turn past the budget is named
+# and cancelled, and not resumed.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 
 from __future__ import annotations
@@ -16,9 +18,11 @@ from collections.abc import Awaitable, Callable, Coroutine
 from typing import NamedTuple, Protocol
 
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.inbox.passive_lifecycle_note import insert_passive_host_lifecycle_notes
 from base.agents.observation.turn_progress import TurnProgress
 from base.daemon.shutdown import sigterm_requests_exit
 from base.db import Database
+from base.deploy.lifecycle.host_exit_message import HOST_RESTART_SOURCE
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.stop_timing import HOST_GRACEFUL_EXIT_DRAIN_S
@@ -29,10 +33,11 @@ __all__ = [
     "OwedRestart",
     "TurnTasks",
     "serve_until_exit",
+    "write_exit_idle_notes",
     "write_exit_restart",
 ]
 
-RESTART_SOURCE = "system:restart"
+RESTART_SOURCE = HOST_RESTART_SOURCE
 
 
 class TurnTasks(Protocol):
@@ -59,20 +64,47 @@ _OPEN_LIFECYCLE = (
 )
 
 
-def _insert_restart(db: Database, bus: EventBus, agent_id: int) -> OwedRestart:
+def _insert_restart(
+    db: Database, bus: EventBus, agent_id: int, message: str | None = None
+) -> OwedRestart:
     with db.write_transaction() as conn:
         conn.execute("SELECT 1 FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
         existing = conn.execute(_OPEN_LIFECYCLE, (agent_id,)).fetchone()
         if existing is not None:
             return OwedRestart(existing[0], written=False)
         inbound_id = insert_inbound_message(
-            conn, agent_id, "", source=RESTART_SOURCE, kind="restart", database=db, bus=bus
+            conn,
+            agent_id,
+            message or "",
+            source=RESTART_SOURCE,
+            kind="restart",
+            database=db,
+            bus=bus,
         )
         return OwedRestart(inbound_id, written=True)
 
 
-async def write_exit_restart(db: Database, bus: EventBus, agent_id: int) -> OwedRestart:
-    return await asyncio.to_thread(_insert_restart, db, bus, agent_id)
+async def write_exit_restart(
+    db: Database, bus: EventBus, agent_id: int, message: str | None = None
+) -> OwedRestart:
+    return await asyncio.to_thread(_insert_restart, db, bus, agent_id, message)
+
+
+def _insert_idle_notes(db: Database, machine: str, message: str, owed: frozenset[int]) -> int:
+    with db.write_transaction() as conn:
+        return insert_passive_host_lifecycle_notes(
+            conn,
+            machine=machine,
+            source=RESTART_SOURCE,
+            message=message,
+            exclude_agent_ids=owed,
+        )
+
+
+async def write_exit_idle_notes(
+    db: Database, machine: str, message: str, owed: frozenset[int]
+) -> int:
+    return await asyncio.to_thread(_insert_idle_notes, db, machine, message, owed)
 
 
 class GracefulExit:
@@ -81,13 +113,17 @@ class GracefulExit:
         *,
         turns: TurnTasks,
         progress: TurnProgress,
-        write_restart: Callable[[int], Awaitable[OwedRestart]],
+        write_restart: Callable[[int, str | None], Awaitable[OwedRestart]],
         drain_s: float,
+        read_exit_message: Callable[[], str | None],
+        write_idle_notes: Callable[[str, frozenset[int]], Awaitable[int]] | None,
     ) -> None:
         self._turns = turns
         self._progress = progress
         self._write_restart = write_restart
         self._drain_s = drain_s
+        self._read_exit_message = read_exit_message
+        self._write_idle_notes = write_idle_notes
         self._serving: asyncio.Task[object] | None = None
         self._requested = False
         self._owed: frozenset[int] = frozenset()
@@ -137,7 +173,8 @@ class GracefulExit:
     async def drain(self) -> None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._drain_s
-        restarts = await self._write_restarts(deadline)
+        message = self._read_exit_message()
+        restarts, idle_notes = await self._write_exit_records(deadline, message)
         tasks = {
             agent_id: task
             for agent_id in sorted(self._owed)
@@ -145,10 +182,12 @@ class GracefulExit:
         }
         logger.info(
             "graceful exit: {written} restart(s) written, {reused} unfinished lifecycle "
-            "command(s) reused, waiting up to {budget:g}s for {turns} turn(s)",
+            "command(s) reused, {idle_notes} idle note(s) written, waiting up to {budget:g}s "
+            "for {turns} turn(s)",
             event="host_exit_draining",
             written=sum(owed.written for owed in restarts.values()),
             reused=sum(not owed.written for owed in restarts.values()),
+            idle_notes=idle_notes,
             budget=self._drain_s,
             turns=len(tasks),
         )
@@ -179,16 +218,27 @@ class GracefulExit:
                 turns=len(tasks),
             )
 
-    async def _write_restarts(self, deadline: float) -> dict[int, OwedRestart]:
+    async def _write_exit_records(
+        self, deadline: float, message: str | None
+    ) -> tuple[dict[int, OwedRestart], int]:
         restarts: dict[int, OwedRestart] = {}
         failures: dict[int, str] = {}
+        idle_notes = 0
+        idle_notes_done = not (message and self._write_idle_notes is not None)
+        idle_notes_failure: str | None = None
         with contextlib.suppress(TimeoutError):
             async with asyncio.timeout_at(deadline):
                 for agent_id in sorted(self._owed):
                     try:
-                        restarts[agent_id] = await self._write_restart(agent_id)
+                        restarts[agent_id] = await self._write_restart(agent_id, message)
                     except Exception as exc:
                         failures[agent_id] = repr(exc)
+                if message and self._write_idle_notes is not None:
+                    try:
+                        idle_notes = await self._write_idle_notes(message, self._owed)
+                        idle_notes_done = True
+                    except Exception as exc:
+                        idle_notes_failure = repr(exc)
         for agent_id in sorted(self._owed - restarts.keys()):
             logger.error(
                 "graceful exit wrote no restart for agent {agent_id} ({reason}); its turn is "
@@ -197,7 +247,13 @@ class GracefulExit:
                 agent_id=agent_id,
                 reason=failures.get(agent_id, "the drain deadline passed first"),
             )
-        return restarts
+        if not idle_notes_done:
+            logger.error(
+                "graceful exit wrote no passive lifecycle notes for idle agents ({reason})",
+                event="host_exit_idle_notes_failed",
+                reason=idle_notes_failure or "the drain deadline passed first",
+            )
+        return restarts, idle_notes
 
 
 def _rounded(seconds: float | None) -> float | None:
@@ -209,13 +265,17 @@ async def serve_until_exit(
     *,
     turns: TurnTasks,
     progress: TurnProgress,
-    write_restart: Callable[[int], Awaitable[OwedRestart]],
+    write_restart: Callable[[int, str | None], Awaitable[OwedRestart]],
+    read_exit_message: Callable[[], str | None],
+    write_idle_notes: Callable[[str, frozenset[int]], Awaitable[int]] | None,
 ) -> None:
     graceful = GracefulExit(
         turns=turns,
         progress=progress,
         write_restart=write_restart,
         drain_s=HOST_GRACEFUL_EXIT_DRAIN_S,
+        read_exit_message=read_exit_message,
+        write_idle_notes=write_idle_notes,
     )
     with sigterm_requests_exit("agent_host", graceful.request):
         await graceful.serve(dispatch)

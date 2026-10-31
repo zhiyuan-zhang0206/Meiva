@@ -62,7 +62,9 @@ restart cut short. The claim that takes the restart (`handle_restart`) calls the
 agent idle only if it is halted without the mark, or has no history, and the
 restart is not the agent's own; `meiva.self.restart()` ends its exec halted with the
 turn unfinished, so it never counts as idle. After the claim `halted` is that
-verdict: set, the agent was idle and reads "Restart was accepted from ..."; clear,
+verdict: set, the agent was idle and reads `restart_accepted_text(source, message)`
+("Restart was accepted from ..." plus `: {message}` when the restart row carried
+a non-empty `content`, scanned for prompt injection); clear,
 the turn was unfinished and claim adds no marker. The claim clears the mark, and
 every invocation's input does.
 
@@ -70,7 +72,8 @@ The host reads the verdict when it applies the restart
 (`finish_completed_invocation`: `restart_requested` and not `halted`).
 `apply_hosted_lifecycle` then queues, in the transaction that executes the restart,
 one pending `system_note` (`lifecycle_restart`, the restart's own source) from
-`restart_resume_note`: who asked, that running code was terminated with its result in
+`restart_resume_note(source, message)`: who asked (and the optional explanation from
+the restart row's `content`), that running code was terminated with its result in
 the matching tool message, that shell sessions may not have survived. Nothing else is
 asserted, because the writer does not know it. Once the apply has committed, the host
 wakes the agent through its own scheduler (`AgentHost.bind_wake`), so the next turn

@@ -92,3 +92,12 @@ def test_the_record_lists_survivors_only_when_there_are_some() -> None:
         "reason": STOP_REASON,
         "closed_at": "2026-10-24T00:00:00+00:00",
     }
+
+
+def test_the_record_includes_message_only_when_set_and_dedup_key_ignores_it() -> None:
+    plain = _notice()
+    explained = replace(plain, message="Zhiyuan closing shells for maintenance")
+
+    assert "message" not in plain.as_dict()
+    assert explained.as_dict()["message"] == "Zhiyuan closing shells for maintenance"
+    assert plain.dedup_key() == explained.dedup_key()

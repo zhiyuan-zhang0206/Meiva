@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import assert_never
 
 from base.deploy.lifecycle import status_journal
+from base.deploy.lifecycle.host_exit_message import (
+    clear_host_exit_message,
+    consume_host_exit_message,
+    write_host_exit_message,
+)
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.host.proc import hosting_exec_domain
 from base.native_process.root_control.client import RootClient
@@ -28,7 +33,7 @@ from cli.commands.lifecycle import root_driver, root_readiness, start
 from cli.commands.lifecycle.root_control.snapshot import root_units
 from cli.commands.lifecycle.start import readiness_preflight
 from cli.commands.lifecycle.stop import do_stop, refuse_hosted_stop
-from cli.commands.lifecycle.stop.execute import StopEnvironment
+from cli.commands.lifecycle.stop.execute import StopEnvironment, flush_unconsumed_exit_notes
 from cli.commands.lifecycle.stop.restart_plan import (
     AGENT_HOST,
     NO_ROOT_REFUSAL,
@@ -207,6 +212,7 @@ def cmd_restart(
     force: bool,
     timeout: float,
     start_timeout: float,
+    message: str | None = None,
     runtime: StartRuntime,
     retained_children: list[subprocess.Popen[bytes]],
     database_factory: OperatorDatabaseFactory,
@@ -228,6 +234,7 @@ def cmd_restart(
         force=force,
         timeout=timeout,
         start_timeout=start_timeout,
+        message=message,
     )
     with operator_lifecycle_audit(
         database_factory=database_factory,
@@ -295,12 +302,22 @@ def restart_agent_host(
     force: bool,
     timeout: float,
     start_timeout: float,
+    database_factory: OperatorDatabaseFactory | None,
+    message: str | None = None,
 ) -> int:
+    if force:
+        clear_host_exit_message(command.home)
+    else:
+        write_host_exit_message(command.home, message)
     record_lifecycle_request("force-down" if force else "down", [AGENT_HOST])
     _require_ok(
         client.force_down(AGENT_HOST) if force else client.down(AGENT_HOST),
         f"down {AGENT_HOST}",
     )
+    if not force:
+        leftover = consume_host_exit_message(command.home)
+        if leftover and database_factory is not None:
+            flush_unconsumed_exit_notes(command, database_factory, leftover)
     print(f"  ✓ {AGENT_HOST} stopped")
     record_lifecycle_request("up", [AGENT_HOST])
     fresh = root_driver.root_client(
@@ -326,6 +343,7 @@ def cmd_restart_agent_host(
     force: bool,
     timeout: float,
     start_timeout: float,
+    message: str | None = None,
     database_factory: OperatorDatabaseFactory,
     command: CommandRuntime,
 ) -> int:
@@ -347,7 +365,14 @@ def cmd_restart_agent_host(
                     spec for spec in build_services(home=command.home) if spec.session == AGENT_HOST
                 )
                 code = restart_agent_host(
-                    command, client, spec, force=force, timeout=timeout, start_timeout=start_timeout
+                    command,
+                    client,
+                    spec,
+                    force=force,
+                    timeout=timeout,
+                    start_timeout=start_timeout,
+                    message=message,
+                    database_factory=database_factory,
                 )
         except (RuntimeError, OSError) as exc:
             print(f"  ✗ restart of {AGENT_HOST} incomplete: {exc}", file=sys.stderr)

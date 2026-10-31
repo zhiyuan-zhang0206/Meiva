@@ -158,6 +158,7 @@ def stop_argv(
         meiva_executable,
         "stop",
         "--yes",
+        "--no-message",
         "--close-shell-sessions",
         "--stop-browser",
         "--stop-extras",

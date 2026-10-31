@@ -30,10 +30,16 @@ def test_a_restart_that_ended_an_unfinished_turn_queues_the_continuing_note() ->
     assert resume_note("agent:7", resume_turn=True) == ResumeNote(
         content=restart_resume_note("agent:7"), source="agent:7", note_tag="lifecycle_restart"
     )
+    assert resume_note("system:restart", resume_turn=True, message="Zhiyuan update") == ResumeNote(
+        content=restart_resume_note("system:restart", "Zhiyuan update"),
+        source="system:restart",
+        note_tag="lifecycle_restart",
+    )
 
 
 def test_a_restart_of_an_idle_agent_queues_no_note() -> None:
     assert resume_note("user", resume_turn=False) is None
+    assert resume_note("user", resume_turn=False, message="ignored when idle") is None
 
 
 @pytest.mark.parametrize(

@@ -172,3 +172,71 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     assert rc == 0
     err = capsys.readouterr().err
     assert name in err and "agent 987" in err and "could not be written" in err
+
+
+def test_stop_message_reaches_closed_shell_notice_and_flushes_idle_note_without_live_agent_host(
+    redis_url: str,
+    home: Path,
+    pty_reaper: PtyReaper,
+    pty_service: PtyServiceProcess,
+    db_conn: psycopg.Connection,
+    operator_database: OperatorDatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+    stop_runtime: CommandRuntime,
+) -> None:
+    from base.deploy.lifecycle.host_exit_message import (
+        consume_host_exit_message,
+        write_host_exit_message,
+    )
+
+    reason = "Zhiyuan maintenance window"
+    busy_owner = create_agent(db_conn)
+    idle_owner = create_agent(db_conn)
+    machine = stop_runtime.machine.name()
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status, machine) VALUES "
+            "(%s, 'user', 'running', %s), (%s, 'user', 'idling', %s)",
+            (busy_owner, machine, idle_owner, machine),
+        )
+    db_conn.commit()
+    name = f"meiva-agent-{busy_owner}-shell-2044-explained"
+    busy_session(home, name, jobs.TERM_OK, pty_reaper)
+
+    rc = do_stop(
+        stop_request(timeout=15, message=reason),
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
+    )
+    assert rc == 0
+    assert consume_host_exit_message(home) is None
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT content, payload->'closure'->>'message' FROM inbound_messages "
+            "WHERE agent_id = %s AND payload ? 'closure'",
+            (busy_owner,),
+        )
+        closure_rows = cur.fetchall()
+        cur.execute(
+            "SELECT source, content, payload FROM inbound_messages WHERE agent_id = %s",
+            (idle_owner,),
+        )
+        idle_rows = cur.fetchall()
+    assert len(closure_rows) == 1
+    closure_content, closure_msg = closure_rows[0]
+    assert closure_msg == reason and f"Message: {reason}" in closure_content
+    assert len(idle_rows) == 1
+    idle_source, idle_content, idle_payload = idle_rows[0]
+    assert idle_source == "system:restart"
+    assert reason in idle_content
+    assert idle_payload == {"note_tag": "lifecycle_restart", "passive": True}
+
+    write_host_exit_message(home, "stale note before force stop")
+    forced = do_stop(
+        stop_request(timeout=5, force=True, keep_shell_sessions=True),
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
+    )
+    assert forced == 0
+    assert consume_host_exit_message(home) is None

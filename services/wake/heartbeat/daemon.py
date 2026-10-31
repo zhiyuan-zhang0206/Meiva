@@ -31,10 +31,12 @@ from functools import partial
 from pathlib import Path
 
 import psycopg
+from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.messages.inbound import not_passive_inbound
 from base.clock import Clock, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
@@ -238,17 +240,20 @@ def _reconcile_agent(
 ) -> None:
     """Judge one tracked agent's last check-in: update its failure and no-op streaks."""
     cur.execute(
-        "SELECT status, "
-        "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, "
-        "heartbeat_backoff_level, "
-        "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
-        "(last_heartbeat_at IS NOT NULL AND EXISTS ("
-        "  SELECT 1 FROM inbound_messages im "
-        "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
-        "    AND im.created_at > agents_meta.last_heartbeat_at)) "
-        ", EXISTS (SELECT 1 FROM agent_impersonations lease "
-        "WHERE lease.agent_id=agents_meta.id AND lease.status='active') "
-        "FROM agents_meta WHERE id = %s",
+        pgsql.SQL(
+            "SELECT status, "
+            "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, "
+            "heartbeat_backoff_level, "
+            "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+            "(last_heartbeat_at IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM inbound_messages im "
+            "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
+            "    AND {not_passive} "
+            "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+            ", EXISTS (SELECT 1 FROM agent_impersonations lease "
+            "WHERE lease.agent_id=agents_meta.id AND lease.status='active') "
+            "FROM agents_meta WHERE id = %s"
+        ).format(not_passive=pgsql.SQL(not_passive_inbound("im"))),
         (agent_id,),
     )
     row = cur.fetchone()
@@ -390,13 +395,16 @@ def _raise_backoff_level(
 def sweep_backoff_resets(pool: ConnectionPool) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, heartbeat_backoff_level, "
-            "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
-            "(last_heartbeat_at IS NOT NULL AND EXISTS ("
-            "  SELECT 1 FROM inbound_messages im "
-            "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
-            "    AND im.created_at > agents_meta.last_heartbeat_at)) "
-            "FROM agents_meta WHERE heartbeat_backoff_level > 0"
+            pgsql.SQL(
+                "SELECT id, heartbeat_backoff_level, "
+                "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+                "(last_heartbeat_at IS NOT NULL AND EXISTS ("
+                "  SELECT 1 FROM inbound_messages im "
+                "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
+                "    AND {not_passive} "
+                "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+                "FROM agents_meta WHERE heartbeat_backoff_level > 0"
+            ).format(not_passive=pgsql.SQL(not_passive_inbound("im")))
         )
         rows = cur.fetchall()
     for agent_id, level, paused, real_inbound in rows:

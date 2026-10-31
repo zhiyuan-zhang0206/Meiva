@@ -150,10 +150,10 @@ _HANDLERS: tuple[tuple[list[str], types.ModuleType, str], ...] = (
     (["plugins", "verify"], _plugins, "_h_plugins_verify"),
     (["agents", "ls"], _agents, "_h_agents_ls"),
     (["agents", "cancel", "1"], _agents, "_h_agents_cancel"),
-    (["agents", "restart", "1"], _agents, "_h_agents_restart"),
-    (["agents", "terminate", "1"], _agents, "_h_agents_terminate"),
-    (["agents", "kill", "1"], _agents, "h_agents_kill"),
-    (["agents", "resurrect", "1"], _agents, "_h_agents_resurrect"),
+    (["agents", "restart", "1", "--no-message"], _agents, "_h_agents_restart"),
+    (["agents", "terminate", "1", "--no-message"], _agents, "_h_agents_terminate"),
+    (["agents", "kill", "1", "--no-message"], _agents, "h_agents_kill"),
+    (["agents", "resurrect", "1", "--no-message"], _agents, "_h_agents_resurrect"),
     (["agents", "send", "1", "hi", "--source", "user"], _agents, "h_agents_send"),
     (["memory", "search", "context"], _mcp, "h_memory_search"),
     (["logs", "retention"], _logs, "_h_logs_retention"),
@@ -206,7 +206,7 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
 ) -> None:
     """The restart parser keeps the JSON string intact for its HTTP command."""
     args = _main.parse_command_args(
-        ["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}']
+        ["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}', "--no-message"]
     )
     assert args.agent_id == 8
     assert args.config == '{"llm_model":"gpt-5.6-sol"}'

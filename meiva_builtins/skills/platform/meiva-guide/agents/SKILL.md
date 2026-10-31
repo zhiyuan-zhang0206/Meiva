@@ -124,7 +124,8 @@ Per-agent config is snapshotted into the agent row at spawn; a later
 cluster-default change does not affect agents already spawned.
 
 To change an agent's config after spawn: restart it with a new `config_overlay`
-(`meiva.agents.restart(agent_id)` in SDK, or `meiva agents restart <id>` in CLI —
+(`meiva.agents.restart(agent_id, message=...)` in SDK, or
+`meiva agents restart <id> --message "..."` / `--no-message` in CLI —
 the restart path accepts a config_overlay).
 
 #### User settings

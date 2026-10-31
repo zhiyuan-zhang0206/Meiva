@@ -180,7 +180,7 @@ class _SchedulerRecorder:
         self._events.append("turns_drained")
 
 
-async def _noop_restart(agent_id: int) -> OwedRestart:
+async def _noop_restart(agent_id: int, _message: str | None = None) -> OwedRestart:
     _ = agent_id
     return OwedRestart(0, written=False)
 
@@ -258,6 +258,8 @@ def _run_shutdown(failure: str, *, home: Path) -> None:
                     open_health=_open_health_recorder(events),
                     serve_dispatch=serve_dispatch(home / "plugins"),
                     write_restart=_noop_restart,
+                    read_exit_message=lambda: None,
+                    write_idle_notes=None,
                     pidfile=pidfile,
                 )
             )

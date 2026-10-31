@@ -205,7 +205,7 @@ def test_main_hands_stop_the_explicit_caller_child_owner(tmp_path: Path) -> None
     full_stop = ["--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras"]
     # meiva:note
     # a runner home
-    full_stop += ["--keep-no-services", "--mode", "smooth", "--timeout", "60"]
+    full_stop += ["--keep-no-services", "--mode", "smooth", "--timeout", "60", "--no-message"]
     argv = ["stop", *full_stop]
     args = _main.parse_command_args(argv, retained_children=shared)
     bound_retained = args.func.keywords["retained_children"]

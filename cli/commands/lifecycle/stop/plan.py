@@ -163,11 +163,20 @@ def _selected_steps(
     steps: list[StopStep] = [*_record_browser(choices), ClearServing()]
     if choices.announce:
         steps.append(Announce(window))
-    steps.append(StopServices(preserved | {host.pty_unit}, force=False, phase="services"))
+    host_message = None if "agent-host" in preserved else choices.message
+    steps.append(
+        StopServices(
+            preserved | {host.pty_unit}, force=False, phase="services", message=host_message
+        )
+    )
     if not choices.keep_browser:
         steps.append(StopBrowser())
     if not choices.keep_shell_sessions:
-        steps.append(CloseShellSessions(direct_db="gateway" in host.roles, force=False))
+        steps.append(
+            CloseShellSessions(
+                direct_db="gateway" in host.roles, force=False, message=choices.message
+            )
+        )
         steps.append(StopServices(preserved, force=False, phase="pty-sessions"))
     if choices.teardown_extras:
         steps.append(StopExtras(preserved))

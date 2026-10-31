@@ -52,6 +52,7 @@ def choices(
     announce: bool = False,
     teardown_extras: bool = False,
     force: bool = False,
+    message: str | None = None,
 ) -> StopChoices:
     return StopChoices(
         keep_infra=keep_infra,
@@ -61,6 +62,7 @@ def choices(
         announce=announce,
         teardown_extras=teardown_extras,
         force=force,
+        message=message,
     )
 
 
@@ -84,8 +86,13 @@ def steps(chosen: StopChoices, host: StopHost = RUNNER, window: StopWindow = WIN
     return plan_stop(chosen, host, window).steps
 
 
-def services(*preserve: str, force: bool = False, phase: str = "services") -> StopServices:
-    return StopServices(frozenset(preserve), force=force, phase=phase)
+def services(
+    *preserve: str,
+    force: bool = False,
+    phase: str = "services",
+    message: str | None = None,
+) -> StopServices:
+    return StopServices(frozenset(preserve), force=force, phase=phase, message=message)
 
 
 # meiva:note
@@ -167,6 +174,29 @@ def test_a_kept_service_stays_up_through_both_service_stops() -> None:
         services("frontend", PTY),
         CloseShellSessions(direct_db=False, force=False),
         services("frontend", phase="pty-sessions"),
+    )
+
+
+def test_a_stop_message_travels_to_stopped_agent_host_and_smooth_shell_closure() -> None:
+    reason = "Zhiyuan rolling out #9999"
+    assert steps(choices(message=reason)) == (
+        ClearServing(),
+        services(PTY, message=reason),
+        CloseShellSessions(direct_db=False, force=False, message=reason),
+        services(phase="pty-sessions"),
+    )
+    assert steps(choices(preserve=frozenset({"agent-host"}), message=reason)) == (
+        ClearServing(),
+        services("agent-host", PTY),
+        CloseShellSessions(direct_db=False, force=False, message=reason),
+        services("agent-host", phase="pty-sessions"),
+    )
+    assert steps(choices(force=True, message=reason)) == (
+        ClearServing(),
+        services(PTY, force=True),
+        CloseShellSessions(direct_db=False, force=True),
+        services(force=True, phase="pty-sessions"),
+        SkipDataPlane(DataPlane.NONE),
     )
 
 

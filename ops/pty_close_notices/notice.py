@@ -41,6 +41,7 @@ class ClosureNotice:
     reason: str
     closed_at: str
     survivors: tuple[tuple[int, str], ...] = ()
+    message: str | None = None
 
     def dedup_key(self) -> str:
         raw = f"{self.machine}|{self.agent_id}|{self.session_id}|{self.shell_birth}"
@@ -57,6 +58,8 @@ class ClosureNotice:
             "reason": self.reason,
             "closed_at": self.closed_at,
         }
+        if self.message:
+            record["message"] = self.message
         if self.survivors:
             record["survivors"] = [{"pid": pid, "name": name} for pid, name in self.survivors]
         return record

@@ -637,15 +637,15 @@ def terminate(
     )
 
 
-def restart(agent_id: int) -> RestartResult:
-    """The agent comes back up as a fresh process under the same id and
-    continues a turn that was in progress.
+def restart(agent_id: int, *, message: str | None = None) -> RestartResult:
+    """Restart an agent under the same id and continue any turn in progress.
 
-    A running step gets 10 seconds to finish. After that a model call is
-    dropped and running code is terminated, and the agent is told so when it
-    continues."""
+    `message` is shown to the agent with the restart notice. A running step
+    gets 10 seconds to finish; after that a model call is dropped and running
+    code is terminated, and the agent is told so when it continues."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return RestartResult(gateway_client.restart(agent_id))
+    message = coerce_str(message, "message", allow_none=True)
+    return RestartResult(gateway_client.restart(agent_id, message=message))
 
 
 def cancel(agent_id: int) -> CancelResult:

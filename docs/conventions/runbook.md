@@ -307,9 +307,9 @@ persisted: every start names it (`--all-services`, `--only-service NAME…` or
 ```bash
 meiva start --all-services
 meiva status
-meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
-meiva restart --all-services --close-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300
-meiva restart --only agent-host --mode smooth --timeout 300
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message
+meiva restart --all-services --close-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300 --no-message
+meiva restart --only agent-host --mode smooth --timeout 300 --no-message
 meiva cluster status
 meiva cluster destroy --stop-mode smooth --stop-timeout 300 [--drop-db]
 ```
@@ -317,14 +317,16 @@ meiva cluster destroy --stop-mode smooth --stop-timeout 300 [--drop-db]
 `stop` takes every choice as an explicit argument (the example above is the full stop;
 a missing choice exits 2 and lists all of them): `--keep-shell-sessions|--close-shell-sessions`,
 `--keep-browser|--stop-browser`, `--keep-extras|--stop-extras`, repeated `--keep-service NAME`
-or `--keep-no-services`, `--mode`, `--timeout`, `--yes|--prompt`, and on a gateway-capable
+or `--keep-no-services`, `--mode`, `--timeout`, `--message TEXT|--no-message` (explains to live
+agents and closed busy shells why the stop happened; blank `--message` exits 2), `--yes|--prompt`,
+and on a gateway-capable
 host `--keep-infra|--stop-infra` (a pure runner refuses it; drop it there). A stop that will
 outlast a normal restart says so: `--maintenance-for 45m --reason "..."` records when the host
 is expected back, and the `meiva-ops-machine-stopped-too-long` alert then stays quiet until
 that window expires instead of reporting the host 20 minutes in (task #5464). `restart` is the
 ordinary local stop/start path: it needs a scope (`--only agent-host`, or a start selection
 with `--keep-shell-sessions|--close-shell-sessions`, `--keep-browser|--restart-browser`,
-`--keep-extras|--restart-extras`, `--mode`, `--timeout`) and always keeps infrastructure; with
+`--keep-extras|--restart-extras`), `--mode`, `--timeout` and `--message TEXT|--no-message`, and always keeps infrastructure; with
 `--close-shell-sessions` the pty-sessions service restarts with the new code. Destroy decommissions this host's cluster: it stops it, retires the host's
 native jobs (launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
 detached, so `meiva start` refuses it until `destroy-intent.json` is deleted by hand;
@@ -472,7 +474,7 @@ not compare your choices with the diff. A complete command:
 .venv/bin/python -m cli.fleet_update run --new NEW_SHA \
   --gateway GATEWAY --runner RUNNER --runner RUNNER2 --log-dir DIR --execute \
   --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
-  --mode smooth --stop-timeout 600 \
+  --mode smooth --stop-timeout 600 --message "Operator rolling out #PR: reason" \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
   --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
 ```
@@ -480,7 +482,8 @@ not compare your choices with the diff. A complete command:
 Alternatives per choice: `--no-runners` instead of `--runner`; `--dry-run` instead
 of `--execute`; `--close-shell-sessions`, `--stop-browser`, `--stop-extras`,
 `--stop-infra`; `--keep-service NAME` (repeatable) instead of `--keep-no-services`;
-`--mode force`; `--allow-python-change`, `--allow-red-schedules`;
+`--mode force`; `--no-message` instead of `--message TEXT`; `--allow-python-change`,
+`--allow-red-schedules`;
 `--only-service NAME` or `--disable-service NAME` (repeatable) instead of
 `--all-services`.
 
@@ -497,7 +500,7 @@ half, use the separate commands:
 .venv/bin/python -m cli.fleet_update down --new NEW_SHA \
   --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
   --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
-  --mode smooth --stop-timeout 600 \
+  --mode smooth --stop-timeout 600 --message "Operator rolling out #PR: reason" \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
   --all-services --start-timeout 1800
 # manual release steps, if any
@@ -652,7 +655,7 @@ See [component operations](../../services/backup/walg/docs/operations.md).
 
 One permanent provider rejection suppresses background wakes. Fix the provider
 account or configuration, then send the affected agent a fresh message. An
-explicit `meiva agents resurrect <id>` is also available when the row is terminated.
+explicit `meiva agents resurrect <id> --message "..."` (or `--no-message`) is also available when the row is terminated.
 There is no balance-gated billing batch command or permanent-error restart loop.
 Unknown code execution is never automatically replayed. Interrupted strong
 cancel, compact or restart receipts may remain held and require inspection.

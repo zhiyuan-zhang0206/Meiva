@@ -30,6 +30,7 @@ from services.wake.delivery_watchdog.daemon import (
     scan_once,
     select_stale_pending,
 )
+from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
@@ -522,3 +523,51 @@ class TestScanOnce:
         attributes = ev["attributes"]
         assert isinstance(attributes, dict)
         assert attributes["inbound_id"] == iid
+
+
+def test_dead_letter_stale_pending_terminated_preserves_passive_lifecycle_notes(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    aid = terminated_agent(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) "
+            "VALUES (%s, 'plain note', 'system_note', 'system', now() - make_interval(secs => %s)) "
+            "RETURNING id",
+            (aid, _THRESHOLD_S + 60),
+        )
+        plain_row = cur.fetchone()
+        assert plain_row is not None
+        plain_id = int(plain_row[0])
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload, created_at) "
+            "VALUES (%s, 'passive restart note', 'system_note', 'system:restart', "
+            '\'{"note_tag": "lifecycle_restart", "passive": true}\'::jsonb, '
+            "now() - make_interval(secs => %s)) RETURNING id",
+            (aid, _THRESHOLD_S + 60),
+        )
+        passive_row = cur.fetchone()
+        assert passive_row is not None
+        passive_id = int(passive_row[0])
+    db_conn.commit()
+
+    assert dead_letter_stale_pending_terminated(pool, _THRESHOLD_S) == 1
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, status FROM inbound_messages WHERE id = ANY(%s) ORDER BY id",
+            ([plain_id, passive_id],),
+        )
+        assert cur.fetchall() == [(plain_id, "done"), (passive_id, "pending")]

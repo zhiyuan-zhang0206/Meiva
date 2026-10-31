@@ -49,7 +49,7 @@ prefix). Then:
 
 ```bash
 meiva config set MEIVA_WALG_CONFIG_FILE=<path of the JSON>
-meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 \
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message \
   && meiva start --all-services   # archive_mode is read only when Postgres is launched
 meiva backup walg status         # archive_mode=on, failing_now=False, health: ok
 meiva backup walg run            # the first base backup, supervised (see "The daily tick")

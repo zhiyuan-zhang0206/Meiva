@@ -80,11 +80,13 @@ def test_the_stop_leg_forwards_the_operators_choices_and_adds_none_of_its_own() 
         restart_extras=True,
         force=True,
         timeout=42.0,
+        message="Zhiyuan restarting host",
     )
     stop = restart_stop_request(chosen, roles=frozenset({"gateway"}))
     choices = stop.choices
     assert (choices.keep_browser, choices.keep_shell_sessions) == (False, True)
     assert (choices.teardown_extras, choices.force) == (True, True)
+    assert choices.message == "Zhiyuan restarting host"
     assert choices.preserve_sessions == frozenset(), "a restart preserves no extra service"
     assert choices.announce is False, "a restart announces no stop: the host comes straight back"
     assert stop.timeout == 42.0, "the stop leg is bounded by --timeout, not --start-timeout"

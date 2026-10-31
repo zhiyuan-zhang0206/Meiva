@@ -84,6 +84,7 @@ def closure_notice(
     reason: str,
     closed_at: str,
     survivors: Sequence[tuple[int, str]] = (),
+    message: str | None = None,
 ) -> ClosureNotice | None:
     match = AGENT_SHELL_RE.search(name)
     if match is None:
@@ -98,6 +99,7 @@ def closure_notice(
         reason=reason,
         closed_at=closed_at,
         survivors=tuple(survivors),
+        message=message,
     )
 
 
@@ -117,6 +119,7 @@ def notices_for(
     reason: str,
     local_machine: str,
     closed_at: str,
+    message: str | None = None,
 ) -> list[ClosureNotice]:
     built = (
         closure_notice(
@@ -127,6 +130,7 @@ def notices_for(
             reason=reason,
             closed_at=closed_at,
             survivors=session.left,
+            message=message,
         )
         for session in closed
     )
@@ -154,6 +158,8 @@ def content(notice: ClosureNotice) -> str:
             "Inspect their ownership and current work before taking action; shell-session "
             "closure does not prove that all background or detached processes ended."
         )
+    if notice.message:
+        text += f"\nMessage: {notice.message}"
     return text
 
 

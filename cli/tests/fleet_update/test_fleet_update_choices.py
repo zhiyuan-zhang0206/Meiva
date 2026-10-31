@@ -85,6 +85,8 @@ def test_disabled_services_and_keeping_infra_are_forwarded_too(
         (["--roster-timeout", "-1"], "--roster-timeout -1: not a number > 0"),
         (["--lease-confirm-seconds", "-1"], "'-1' is not a number of seconds >= 0"),
         (["--mode", "gentle"], "--mode smooth|force"),
+        (["--message", ""], "--message: cannot be empty; pass --no-message instead"),
+        (["--message", "   \n "], "--message: cannot be empty; pass --no-message instead"),
     ],
 )
 def test_a_value_a_host_would_refuse_is_refused_before_any_host(
@@ -138,6 +140,7 @@ _ONE_EACH = [
     (["--refuse-red-schedules"], "--allow-red-schedules | --refuse-red-schedules"),
     (["--silence-hours", "4"], "--silence-hours"),
     (["--lease-confirm-seconds", "0"], "--lease-confirm-seconds"),
+    (["--no-message"], "--message | --no-message"),
     (["--smoke-timeout", "300"], "--smoke-timeout"),
     (["--roster-timeout", "90"], "--roster-timeout"),
 ]
@@ -201,6 +204,7 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
             "--allow-red-schedules | --refuse-red-schedules",
             "--silence-hours",
             "--lease-confirm-seconds",
+            "--message | --no-message",
         ]
     if half != "down":
         expected += ["--smoke-timeout", "--roster-timeout"]
@@ -214,9 +218,39 @@ def test_conflicting_choices_are_refused_before_any_host(
 ) -> None:
     cluster, run = env
     with pytest.raises(SystemExit) as exc:
-        run("down", "--keep-browser", "--stop-browser", "--no-runners", "--runner", "mac")
+        run(
+            "down",
+            "--keep-browser",
+            "--stop-browser",
+            "--no-runners",
+            "--runner",
+            "mac",
+            "--message",
+            "rolling out #1",
+            "--no-message",
+        )
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "exactly one of --keep-browser | --stop-browser" in err
     assert "--runner ALIAS... | --no-runners" in err
+    assert "exactly one of --message | --no-message" in err
     assert cluster.commands == []
+
+
+def test_message_is_shell_quoted_to_every_host_and_recorded_in_silence_comment(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    import shlex
+
+    cluster, run = env
+    note = "Zhiyuan's rollout: deploy lifecycle explanations (#9999)"
+    assert run("run", "--message", note) == 0
+    stops = {a: shlex.split(c)[2] for a, c in cluster.commands if 'meiva" stop' in c}
+    expected_flag = f"--message {shlex.quote(note)}"
+    assert set(stops) == {"gw", "mac", "lin"}
+    assert all(expected_flag in script for script in stops.values())
+    for script in stops.values():
+        tokens = shlex.split(script)
+        idx = tokens.index("--message")
+        assert tokens[idx + 1] == note
+    assert f"({note})" in cluster.silence_comment

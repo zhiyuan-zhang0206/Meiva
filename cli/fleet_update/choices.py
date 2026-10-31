@@ -70,6 +70,7 @@ _PAIRS: dict[str, tuple[str, ...]] = {
     "extras": ("--keep-extras", "--stop-extras"),
     "infra": ("--keep-infra", "--stop-infra"),
     "kept": ("--keep-service", "--keep-no-services"),
+    "message": ("--message", "--no-message"),
     "python": ("--allow-python-change", "--refuse-python-change"),
     "red": ("--allow-red-schedules", "--refuse-red-schedules"),
 }
@@ -77,7 +78,7 @@ _PAIRS: dict[str, tuple[str, ...]] = {
 # Every half names the start selection and deadline: `up` and a failed `down`'s recovery use them.
 _HALF_PAIRS: dict[str, list[str]] = {
     "both": ["execution", "selection"],
-    "down": ["shell", "browser", "extras", "infra", "kept", "python", "red"],
+    "down": ["shell", "browser", "extras", "infra", "kept", "message", "python", "red"],
     "up": [],
 }
 _HALF_VALUES: dict[str, tuple[tuple[str, Callable[[str], object]], ...]] = {
@@ -125,6 +126,16 @@ def _parser() -> argparse.ArgumentParser:
                 for flag in _PAIRS[dest]:
                     if flag in _NAMED:
                         p.add_argument(flag, action="append", default=None, metavar="NAME")
+                    elif flag == "--message":
+                        p.add_argument(
+                            flag,
+                            dest="message_values",
+                            action="append",
+                            default=None,
+                            metavar="TEXT",
+                            help="natural-language explanation delivered to live agents on every "
+                            "host (who is updating and why)",
+                        )
                     else:
                         p.add_argument(flag, dest=dest, action="append_const", const=flag)
             for flag, kind in _HALF_VALUES[scope]:
@@ -151,16 +162,43 @@ def _value_problems(args: argparse.Namespace, scope: str) -> list[str]:
     return problems
 
 
+def _resolve_message_choice(args: argparse.Namespace) -> str | None:
+    raw_texts: object = getattr(args, "message_values", None)
+    texts = raw_texts if _is_object_list(raw_texts) else []
+    raw_flags: object = getattr(args, "message", None)
+    flag_items = [str(item) for item in raw_flags] if _is_object_list(raw_flags) else []
+    given = (["--message"] * len(texts)) + flag_items
+    if len(given) != 1:
+        return "exactly one of " + " | ".join(_PAIRS["message"])
+    if given[0] == "--no-message":
+        args.message = "--no-message"
+        return None
+    stripped = str(texts[0]).strip()
+    if not stripped:
+        return "--message: cannot be empty; pass --no-message instead"
+    args.message = "--message"
+    args.message_text = stripped
+    return None
+
+
+def _resolve_pair_choice(args: argparse.Namespace, dest: str) -> str | None:
+    if dest == "message":
+        return _resolve_message_choice(args)
+    given = [f for f in _PAIRS[dest] if f in _NAMED and _value(args, f)]
+    given += getattr(args, dest, None) or []
+    if len(given) != 1:
+        return "exactly one of " + " | ".join(_PAIRS[dest])
+    setattr(args, dest, given[0])
+    return None
+
+
 def _missing_choices(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
     problems = [] if bool(args.runner) != args.no_runners else ["--runner ALIAS... | --no-runners"]
+    args.message_text = None
     for scope in _SCOPES[args.half]:
         for dest in _HALF_PAIRS[scope]:
-            given = [f for f in _PAIRS[dest] if f in _NAMED and _value(args, f)]
-            given += getattr(args, dest, None) or []
-            if len(given) != 1:
-                problems.append("exactly one of " + " | ".join(_PAIRS[dest]))
-            else:
-                setattr(args, dest, given[0])
+            if problem := _resolve_pair_choice(args, dest):
+                problems.append(problem)
         problems += _value_problems(args, scope)
     if args.half != "up" and args.mode not in (None, "smooth", "force"):
         problems.append("--mode smooth|force")
@@ -173,6 +211,12 @@ def forwarded_flags(args: argparse.Namespace, chosen: str) -> list[str]:
         items = values if _is_object_list(values) else []
         return [f"{chosen} {shlex.quote(str(name))}" for name in items]
     return [chosen]
+
+
+def message_flag(args: argparse.Namespace) -> str:
+    if args.message_text is not None:
+        return f"--message {shlex.quote(args.message_text)}"
+    return "--no-message"
 
 
 def start_flags(args: argparse.Namespace) -> str:

@@ -30,7 +30,7 @@ from cli.commands.cluster.plans.destroy_plan import (
     stop_argv,
 )
 
-_COMMON = ("--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras")
+_COMMON = ("--yes", "--no-message", "--close-shell-sessions", "--stop-browser", "--stop-extras")
 
 
 def _facts(**changes: Any) -> DestroyFacts:

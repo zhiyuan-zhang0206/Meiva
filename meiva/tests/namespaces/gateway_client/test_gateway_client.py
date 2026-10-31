@@ -336,13 +336,25 @@ class TestLifecycle:
         assert result == {"status": "enqueued", "open_tasks": hint}
 
     def test_restart_returns_status(self, bound_wire: GatewayWire):
+        from dataclasses import replace
+
+        from meiva import agents
         from meiva.gateway_client import restart
+        from meiva.sdk_surface import process_context
 
         bound_wire.stub.reply("POST", "/api/agents/42/restart", {"status": "idling"})
+        bound_wire.stub.reply("POST", "/api/agents/43/restart", {"status": "enqueued"})
 
         status = restart(42, source="agent:1")
         assert status == "idling"
         assert bound_wire.sent[0].body == {"source": "agent:1"}
+
+        process_context.bind_context(replace(bound_wire.context, identity=AgentIdentity(1, True)))
+        assert agents.restart(43, message="Zhiyuan reloading skill") == "enqueued"
+        assert bound_wire.sent[1].body == {
+            "source": "agent:1",
+            "message": "Zhiyuan reloading skill",
+        }
 
 
 # meiva:note

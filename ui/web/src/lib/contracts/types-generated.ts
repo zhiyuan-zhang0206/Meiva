@@ -3521,6 +3521,7 @@ export interface components {
         };
         RestartAgentRequest: {
             source: string;
+            message?: string | null;
             config_overlay?: {
                 [key: string]: unknown;
             } | null;

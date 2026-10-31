@@ -16,7 +16,7 @@ a dev cluster's `&<prefix>:*` redis ACL grant.
 """
 
 from enum import StrEnum
-from typing import Literal, get_args
+from typing import Literal, LiteralString, get_args
 
 
 class InterruptReason(StrEnum):
@@ -63,3 +63,15 @@ def validate_wake_trigger_kind(value: str) -> WakeTriggerKind:
         if kind is allowed:
             return allowed
     raise ValueError(f"inbound kind cannot trigger resurrection: {value!r}")
+
+
+# meiva:note
+# Payload flag marking a passive system_note (e.g., host update/stop/restart explanation
+# recorded for idle agents): delivered on the agent's next real wake without triggering a
+# wake scan, suppressing heartbeats, or resetting heartbeat backoff.
+PASSIVE_INBOUND_KEY = "passive"
+
+
+def not_passive_inbound(table_alias: LiteralString = "") -> LiteralString:
+    prefix = f"{table_alias}." if table_alias else ""
+    return f"NOT COALESCE(({prefix}payload -> 'passive') = 'true'::jsonb, false)"

@@ -50,6 +50,7 @@ class RestartRequest:
     force: bool
     timeout: float
     start_timeout: float
+    message: str | None = None
 
 
 # meiva:note
@@ -134,6 +135,7 @@ def restart_stop_request(request: RestartRequest, *, roles: frozenset[str]) -> S
         teardown_extras=request.restart_extras,
         force=request.force,
         keep_browser_unit=request.keep_browser,
+        message=request.message,
     )
     return StopRequest(
         choices,

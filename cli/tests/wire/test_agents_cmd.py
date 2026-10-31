@@ -139,7 +139,7 @@ def test_agents_cancel_posts_to_cancel_route(
 
 def test_agents_restart_posts(wire: PublicGateway, capsys: pytest.CaptureFixture[str]) -> None:
     seen = wire.respond("post", {"status": "enqueued"})
-    assert wire.run("agents", "restart", str(9)) == 0
+    assert wire.run("agents", "restart", str(9), "--no-message") == 0
     assert seen["url"] == f"{wire.url}/api/agents/9/restart"
     assert seen["json"] is None
     assert wire.requests[-1]["body"] == b""
@@ -150,7 +150,12 @@ def test_agents_restart_posts_config_overlay(
     wire: PublicGateway, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seen = wire.respond("post", {"status": "enqueued"})
-    assert wire.run("agents", "restart", str(9), "--config", '{"llm_model":"gpt-5.6-sol"}') == 0
+    assert (
+        wire.run(
+            "agents", "restart", str(9), "--config", '{"llm_model":"gpt-5.6-sol"}', "--no-message"
+        )
+        == 0
+    )
     assert seen["url"] == f"{wire.url}/api/agents/9/restart"
     assert seen["json"] == {"config_overlay": {"llm_model": "gpt-5.6-sol"}}
     assert "enqueued" in capsys.readouterr().out
@@ -169,7 +174,7 @@ def test_agents_terminate_is_graceful(
     wire: PublicGateway, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seen = wire.respond("post", {"status": "enqueued"})
-    assert wire.run("agents", "terminate", str(7)) == 0
+    assert wire.run("agents", "terminate", str(7), "--no-message") == 0
     assert seen["url"] == f"{wire.url}/api/agents/7/terminate"
     assert seen["json"] == {"force": False}
     assert "terminate" in capsys.readouterr().out
@@ -181,7 +186,7 @@ def test_agents_terminate_kill_all_shell_sessions_sends_the_option(
     seen = wire.respond(
         "post", {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}}
     )
-    assert wire.run("agents", "terminate", str(7), "--kill-all-shell-sessions") == 0
+    assert wire.run("agents", "terminate", str(7), "--kill-all-shell-sessions", "--no-message") == 0
     assert seen["url"] == f"{wire.url}/api/agents/7/terminate"
     assert seen["json"] == {"force": False, "kill_all_shell_sessions": True}
     assert "shell sessions are killed when it exits" in capsys.readouterr().out
@@ -193,7 +198,7 @@ def test_agents_kill_kill_all_shell_sessions_sends_the_option(
     seen = wire.respond(
         "post", {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 3]}}
     )
-    assert wire.run("agents", "kill", str(7), "--kill-all-shell-sessions") == 0
+    assert wire.run("agents", "kill", str(7), "--kill-all-shell-sessions", "--no-message") == 0
     assert seen["url"] == f"{wire.url}/api/agents/7/terminate"
     assert seen["json"] == {"force": True, "kill_all_shell_sessions": True}
     assert "killed 2 shell session(s): 0, 3" in capsys.readouterr().out
@@ -202,9 +207,9 @@ def test_agents_kill_kill_all_shell_sessions_sends_the_option(
 def test_agents_parser_wires_kill_all_shell_sessions(wire: PublicGateway) -> None:
     wire.respond("post", {"status": "enqueued"})
     for argv in (
-        ["agents", "terminate", "7", "--kill-all-shell-sessions"],
-        ["agents", "kill", "8", "--kill-all-shell-sessions"],
-        ["agents", "terminate", "9"],
+        ["agents", "terminate", "7", "--kill-all-shell-sessions", "--no-message"],
+        ["agents", "kill", "8", "--kill-all-shell-sessions", "--no-message"],
+        ["agents", "terminate", "9", "--no-message"],
     ):
         assert wire.run(*argv) == 0
     seen = {
@@ -217,12 +222,49 @@ def test_agents_parser_wires_kill_all_shell_sessions(wire: PublicGateway) -> Non
 
 def test_agents_kill_forces(wire: PublicGateway, capsys: pytest.CaptureFixture[str]) -> None:
     seen = wire.respond("post", {"status": "enqueued"})
-    assert wire.run("agents", "kill", str(7)) == 0
+    assert wire.run("agents", "kill", str(7), "--no-message") == 0
     assert seen["url"] == f"{wire.url}/api/agents/7/terminate"
     assert seen["json"] == {"force": True}
     out = capsys.readouterr().out
     assert "kill" in out and "enqueued" in out
     assert "force_killed" not in out
+
+
+def test_agents_lifecycle_verbs_forward_message(wire: PublicGateway) -> None:
+    wire.respond("post", {"status": "enqueued"})
+    assert wire.run("agents", "restart", "9", "--message", "Zhiyuan switching model") == 0
+    assert wire.requests[-1]["json"] == {"message": "Zhiyuan switching model"}
+
+    assert wire.run("agents", "terminate", "9", "--message", "Task #42 complete") == 0
+    assert wire.requests[-1]["json"] == {"force": False, "message": "Task #42 complete"}
+
+    assert wire.run("agents", "kill", "9", "--message", "Hung subprocess") == 0
+    assert wire.requests[-1]["json"] == {"force": True, "message": "Hung subprocess"}
+
+    wire.respond("post", {"resurrected": True})
+    assert wire.run("agents", "resurrect", "9", "--message", "Resume audit") == 0
+    assert wire.requests[-1]["json"] == {"prompt": "Resume audit"}
+
+
+@pytest.mark.parametrize("verb", ["restart", "resurrect", "terminate", "kill"])
+def test_agents_lifecycle_verbs_require_nonblank_message_choice(
+    verb: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.parsers import build_parser
+
+    for bad in (
+        ["agents", verb, "9"],
+        ["agents", verb, "9", "--message", ""],
+        ["agents", verb, "9", "--message", "   "],
+        ["agents", verb, "9", "--message", "reason", "--no-message"],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            build_parser().parse_args(bad)
+        assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "one of the arguments --message --no-message is required" in err
+    assert "--message cannot be empty" in err
+    assert "not allowed with argument" in err
 
 
 def test_agents_send_posts_content_and_source(
@@ -334,15 +376,15 @@ def test_agents_terminate_renders_the_shell_session_kill(
     wire.respond(
         "post", {"status": "already_terminated", "shell_sessions": {"when": "now", "killed": []}}
     )
-    assert wire.run("agents", "terminate", str(7), "--kill-all-shell-sessions") == 0
+    assert wire.run("agents", "terminate", str(7), "--kill-all-shell-sessions", "--no-message") == 0
     assert "no shell sessions to kill" in capsys.readouterr().out
 
     wire.respond("post", {"status": "enqueued"})
-    assert wire.run("agents", "terminate", str(7), "--kill-all-shell-sessions") == 0
+    assert wire.run("agents", "terminate", str(7), "--kill-all-shell-sessions", "--no-message") == 0
     assert "shell sessions NOT killed" in capsys.readouterr().out
 
     wire.respond("post", {"status": "enqueued", "shell_sessions": None})
-    assert wire.run("agents", "terminate", str(7)) == 0
+    assert wire.run("agents", "terminate", str(7), "--no-message") == 0
     assert "shell" not in capsys.readouterr().out
 
 

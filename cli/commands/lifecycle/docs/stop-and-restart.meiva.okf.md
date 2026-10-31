@@ -11,12 +11,14 @@ tags:
 # Stop and restart
 
 `stop/` is a plan and a shell. The operator's answers (`choices.StopChoices`: shell
-sessions, browser, extras, data plane, other services, whether to announce, force) and the
+sessions, browser, extras, data plane, other services, whether to announce, force, and
+`--message TEXT | --no-message`) and the
 host facts the shell read once (`choices.StopHost`: the capability set, the service roster,
 which units need the database, the pty-sessions unit, whether the home is a proven
 unstarted attempt) go into `plan.plan_stop`, which returns the ordered steps
-(`steps.StopStep`) and the scope the confirm gate shows. Every keep-or-stop choice, the mode
-and the budget are explicit values with no default. Every contradiction is a `ValueError`
+(`steps.StopStep`) and the scope the confirm gate shows. Every keep-or-stop choice, `--message`
+vs `--no-message`, the mode and the budget are explicit values with no default (blank `--message`
+is refused at parse). Every contradiction is a `ValueError`
 raised by the plan before one unit is signalled: a data-plane choice the host's capabilities
 do not match, `--keep-service` naming the shell-session or browser unit (they have their own
 choices), an unknown or database-dependent kept service while the data plane stops, and
@@ -54,6 +56,14 @@ it and brings it back (`restart.restart_agent_host`), touching nothing else.
 The stop does not drain agents itself: root stops agent-host first and waits for it,
 and its own SIGTERM exit settles the running turns
 ([[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md]]).
+When `--message TEXT` is given on a smooth stop or restart (both `--only agent-host` and
+service-tree scopes) that stops `agent-host`, `execute` stages `$MEIVA_HOME/run/host-exit-message.json`
+before signalling services and passes `message` into `CloseShellSessions` for busy shell closure
+notices; if `agent-host` was already down and left the file unconsumed, `execute.flush_unconsumed_exit_notes`
+writes the passive idle notes best-effort before any data-plane stop. `--mode force` clears any
+staged exit message without writing notices.
+
+Test harness details live in [[cli/commands/lifecycle/docs/stop-test-harness.meiva.okf.md]].
 `stop/shell_sessions` and `data_plane/maintenance_stop` verify
 resource exits (`data_plane/maintenance_stop_report` names survivors). What the shell-session
 closure's outcome means (owner notices first, then the leftover jobs, then a failing shell or the
@@ -91,17 +101,3 @@ A stop keeps no state that gates anything: `stop` clears the home's serving gate
 serving after readiness, and `run/lifecycle-op.json` records how a stop or restart
 ended for the fleet update and the operator.
 See [the coordinated operator procedure](../../../../docs/conventions/operations/graceful-maintenance.md).
-
-The native stop tests create fresh PTY sessions and wait for the requested job's bare readiness
-output (`job-ready`, or `stubborn-ready` once a stubborn job has installed its handlers) before
-treating a shell session as busy: a login-profile child can exist before the initial command runs,
-so child presence is not readiness. `cli/commands/lifecycle/tests/stop/stop_support.py:busy_session` keeps cleanup custody. The plan tests assert the order of the steps, the real-shell tests assert
-the closure, and the notices a stop wrote are read back from the suite's Postgres, as are audit
-rows (`cli/database/tests/lifecycle_rows.py`). A gateway's cold preparation runs in a fresh
-interpreter (`tests/start_storage/test_gateway_cold_start.py`), because its birth adopts a database
-login into the process environment.
-
-The stop tests' private non-PTY sessions run `tests/stop/_child.py`, which takes only SIGTERM
-behavior, an optional ignored SIGHUP and an optional armed-marker path, as argv data. The ready marker follows signal setup, and the fixture records the native session
-identity before returning and closes that exact private group and pipes when the test exits,
-assertion failure included.

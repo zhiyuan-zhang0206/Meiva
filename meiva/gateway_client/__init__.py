@@ -336,13 +336,18 @@ def terminate(
     return _transport.json_object(_run(plan, _ctx(None)))
 
 
-def restart(agent_id: int, *, source: str | None = None) -> str:
+def restart(
+    agent_id: int,
+    *,
+    source: str | None = None,
+    message: str | None = None,
+) -> str:
     """POST /api/agents/{id}/restart → status string.
 
     An omitted source requires the established actor identity. Callers without
     an agent or system identity must supply an explicit source.
     """
-    plan = agent_plans.restart_request(agent_id, _actor_or(source))
+    plan = agent_plans.restart_request(agent_id, _actor_or(source), message=message)
     return _transport.json_object(_run(plan, _ctx(None)))["status"]
 
 

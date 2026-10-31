@@ -477,6 +477,24 @@ def test_inspect_heartbeat_pending_inbound_marks_heartbeat_pending(
     assert hb["next_at"] is None
 
 
+def test_inspect_heartbeat_passive_lifecycle_note_does_not_mark_pending(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, 'host restart note', 'system_note', 'system:restart', "
+            '\'{"note_tag": "lifecycle_restart", "passive": true}\'::jsonb)',
+            (aid,),
+        )
+    db_conn.commit()
+    with gateway_test_client() as client:
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
+    assert hb["heartbeat_pending"] is False
+    assert hb["next_at"] is not None
+
+
 def test_inspect_heartbeat_no_pending_projects_from_last_active(
     db_conn: psycopg.Connection,
 ) -> None:

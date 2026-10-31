@@ -21,6 +21,7 @@ STOP_GROUPS = (
     ["--mode", "smooth"],
     ["--timeout", "300"],
     ["--yes"],
+    ["--no-message"],
 )
 FULL_STOP = [arg for group in STOP_GROUPS for arg in group]
 STOP_FORMS = (
@@ -31,6 +32,7 @@ STOP_FORMS = (
     "--mode smooth|force",
     "--timeout SECONDS",
     "--yes | --prompt",
+    "--message TEXT | --no-message",
 )
 
 
@@ -106,6 +108,7 @@ def test_bare_restart_names_the_scope_and_every_choice(
         "--mode smooth|force",
         "--timeout SECONDS",
         "--start-timeout SECONDS",
+        "--message TEXT | --no-message",
         "--keep-shell-sessions | --close-shell-sessions",
         "--keep-browser | --restart-browser",
         "--keep-extras | --restart-extras",
@@ -115,7 +118,7 @@ def test_bare_restart_names_the_scope_and_every_choice(
 
 def test_restart_only_agent_host_takes_no_tree_choice(capsys: pytest.CaptureFixture[str]) -> None:
     argv = ["restart", "--only", "agent-host", "--mode", "smooth", "--timeout", "60"]
-    argv += ["--start-timeout", "120"]
+    argv += ["--start-timeout", "120", "--no-message"]
     assert (
         host_parsers.refuse_usage(
             "restart", host_parsers.restart_problems(_parsed([*argv, "--keep-browser"]))
@@ -152,10 +155,19 @@ def test_complete_answers_leave_no_problem() -> None:
     assert host_parsers.stop_problems(_parsed(["stop", *FULL_STOP, "--stop-infra"]), GATEWAY) == []
     assert host_parsers.stop_problems(_parsed(["stop", *FULL_STOP]), RUNNER) == []
     only = ["restart", "--only", "agent-host", "--mode", "force", "--timeout", "60"]
-    only += ["--start-timeout", "120"]
+    only += ["--start-timeout", "120", "--message", "Zhiyuan reloading plugins"]
     assert host_parsers.restart_problems(_parsed(only)) == []
     tree = ["restart", "--only-service", "gateway", "--keep-shell-sessions", "--keep-browser"]
-    tree += ["--restart-extras", "--mode", "smooth", "--timeout", "200", "--start-timeout", "600"]
+    tree += [
+        "--restart-extras",
+        "--mode",
+        "smooth",
+        "--timeout",
+        "200",
+        "--start-timeout",
+        "600",
+        "--no-message",
+    ]
     assert host_parsers.restart_problems(_parsed(tree)) == []
 
 
@@ -170,6 +182,7 @@ RESTART_GROUPS = (
     (["--mode", "smooth"], "--mode smooth|force"),
     (["--timeout", "300"], "--timeout SECONDS"),
     (["--start-timeout", "600"], "--start-timeout SECONDS"),
+    (["--no-message"], "--message TEXT | --no-message"),
 )
 
 
@@ -185,12 +198,34 @@ def test_each_missing_restart_choice_is_refused_alone(index: int) -> None:
         assert problems == [RESTART_GROUPS[index][1]]
 
 
-@pytest.mark.parametrize("dropped", ["--mode", "--timeout", "--start-timeout"])
+@pytest.mark.parametrize("dropped", ["--mode", "--timeout", "--start-timeout", "--message"])
 def test_each_missing_agent_host_restart_choice_is_refused_alone(dropped: str) -> None:
-    values = {"--mode": "force", "--timeout": "60", "--start-timeout": "120"}
-    argv = [token for flag, value in values.items() if flag != dropped for token in (flag, value)]
+    groups = {
+        "--mode": ["--mode", "force"],
+        "--timeout": ["--timeout", "60"],
+        "--start-timeout": ["--start-timeout", "120"],
+        "--message": ["--no-message"],
+    }
+    argv = [token for flag, tokens in groups.items() if flag != dropped for token in tokens]
     problems = host_parsers.restart_problems(_parsed(["restart", "--only", "agent-host", *argv]))
     assert len(problems) == 1 and problems[0].startswith(dropped)
+
+
+@pytest.mark.parametrize("verb", ["stop", "restart"])
+def test_blank_or_conflicting_message_choice_is_refused_by_parser(
+    verb: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for bad in (
+        [verb, "--message", ""],
+        [verb, "--message", "  \t "],
+        [verb, "--message", "x", "--no-message"],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            build_parser().parse_args(bad)
+        assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "--message cannot be empty" in err
+    assert "not allowed with argument" in err
 
 
 class _Machine:
@@ -287,6 +322,7 @@ def test_a_contradictory_stop_answers_the_operator_in_one_line(
             "--timeout",
             "60",
             "--yes",
+            "--no-message",
         ],
         tmp_path,
     )
@@ -315,6 +351,7 @@ def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
             "--timeout",
             "60",
             "--yes",
+            "--no-message",
             "--keep-service",
             "browser",
         ],
@@ -344,6 +381,7 @@ def test_a_caller_contract_error_still_surfaces_as_a_traceback(tmp_path: Path) -
             "60",
             "--start-timeout",
             "120",
+            "--no-message",
         ]
     )
     args.runtime = _Runtime(GATEWAY, tmp_path)

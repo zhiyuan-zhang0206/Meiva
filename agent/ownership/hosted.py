@@ -93,7 +93,7 @@ async def apply_hosted_lifecycle(
         if row is None:
             return None
         cursor = await conn.execute(
-            "SELECT id,kind,source FROM inbound_messages WHERE agent_id=%s "
+            "SELECT id,kind,source,content FROM inbound_messages WHERE agent_id=%s "
             "AND kind IN ('restart','terminate') AND status='claimed' "
             "ORDER BY id LIMIT 1 FOR UPDATE",
             (incarnation.agent_id,),
@@ -101,7 +101,7 @@ async def apply_hosted_lifecycle(
         command = await cursor.fetchone()
         if command is None:
             return None
-        command_id, command_kind, command_source = command
+        command_id, command_kind, command_source, command_content = command
         kind = lifecycle_kind(command_kind)
         match kind:
             case "restart":
@@ -119,7 +119,11 @@ async def apply_hosted_lifecycle(
                     "WHERE id=%s",
                     (command_id,),
                 )
-                note = resume_note(command_source, resume_turn=resume_turn)
+                note = resume_note(
+                    command_source,
+                    resume_turn=resume_turn,
+                    message=command_content or None,
+                )
                 if note is not None:
                     await conn.execute(
                         "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "

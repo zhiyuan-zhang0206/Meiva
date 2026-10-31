@@ -68,6 +68,7 @@ class StopServices:
     preserve: frozenset[str]
     force: bool
     phase: str
+    message: str | None = None
 
 
 # meiva:note
@@ -88,6 +89,7 @@ class ReapChrome: ...
 class CloseShellSessions:
     direct_db: bool
     force: bool
+    message: str | None = None
 
 
 # meiva:note
@@ -151,7 +153,7 @@ def phase_label(step: StopStep) -> str | None:
     match step:
         case RecordBrowserSession():
             return "browser-session"
-        case StopServices(_, _, phase):
+        case StopServices(phase=phase):
             return phase
         case StopBrowser():
             return "browser"

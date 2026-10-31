@@ -29,8 +29,11 @@ both halves' effects; it is not a successful deployment.
 
 ## Submit from the agent's shell
 
-Replace the checkout, fixed target SHA and SSH aliases below. Repeat runner
-aliases as needed, or omit them for a gateway-only roster. The operator checkout
+Replace the checkout, fixed target SHA, natural-language `--message` (who is
+updating and why, delivered to running and idle agents on affected hosts; or
+`--no-message`) and SSH aliases below, along with all required stop/start flags
+from `python -m cli.fleet_update run --help`. Repeat runner
+aliases as needed, or use `--no-runners` for a gateway-only roster. The operator checkout
 must already contain the target commit. The Python below uses only the standard
 library; it generates a private job directory, runner and plist without importing
 Meiva or copying the agent's environment into the job.

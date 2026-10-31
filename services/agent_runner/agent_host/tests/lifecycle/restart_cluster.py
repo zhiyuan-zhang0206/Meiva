@@ -30,6 +30,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.deploy.lifecycle.host_exit_message import consume_host_exit_message
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
@@ -41,6 +42,7 @@ from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.lifecycle.graceful_exit import (
     GracefulExit,
+    write_exit_idle_notes,
     write_exit_restart,
 )
 from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
@@ -171,7 +173,13 @@ class Cluster:
     # started by that wake. Without it the host runs only the turns a test starts directly,
     # and the resumed turn waits for the next host's scan. No dispatcher or scan loop runs in
     # this cluster either way.
-    async def host(self, *, drain_s: float = 30, wakes: bool = False) -> Host:
+    async def host(
+        self,
+        *,
+        drain_s: float = 30,
+        wakes: bool = False,
+        exit_message: str | None = None,
+    ) -> Host:
         checkpointer = await build_checkpointer(self.pool, checkpoint_interval=1)
         host = AgentHost(
             runtime_owner=uuid4(),
@@ -202,6 +210,12 @@ class Cluster:
             progress=host.turn_progress,
             write_restart=partial(write_exit_restart, self.database, self.bus),
             drain_s=drain_s,
+            read_exit_message=(
+                (lambda: exit_message)
+                if exit_message is not None
+                else partial(consume_host_exit_message, meiva_home())
+            ),
+            write_idle_notes=partial(write_exit_idle_notes, self.database, self.machine.name()),
         )
         return Host(host, scheduler, graceful, checkpointer)
 

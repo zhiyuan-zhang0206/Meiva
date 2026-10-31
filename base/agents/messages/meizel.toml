@@ -5,7 +5,7 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identit
 "guard.py" = ["identity.py"]
 "identity.py" = ["kwargs.py"]
 "injection_scan.py" = ["security_finding.py"]
-"tests" = ["envelope.py", "external_caller.py", "injection_scan.py", "kwargs.py", "security_finding.py", "timestamp_policy.py", "token_estimate.py"]
+"tests" = ["envelope.py", "external_caller.py", "injection_scan.py", "kwargs.py", "lifecycle_text.py", "security_finding.py", "timestamp_policy.py", "token_estimate.py"]
 
 [purity]
 "__init__.py" = "strict"

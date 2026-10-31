@@ -6,8 +6,10 @@ from datetime import datetime
 from typing import Any, NamedTuple
 
 from fastapi import HTTPException
+from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
+from base.agents.messages.inbound import not_passive_inbound
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
@@ -64,9 +66,12 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
         if row is None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
         cur.execute(
-            "SELECT EXISTS (SELECT 1 FROM inbound_messages "
-            "WHERE agent_id = %s AND status = 'pending' "
-            "AND created_at >= now() - make_interval(secs => %s))",
+            pgsql.SQL(
+                "SELECT EXISTS (SELECT 1 FROM inbound_messages "
+                "WHERE agent_id = %s AND status = 'pending' "
+                "AND {not_passive} "
+                "AND created_at >= now() - make_interval(secs => %s))"
+            ).format(not_passive=pgsql.SQL(not_passive_inbound())),
             (agent_id, STALE_PENDING_S),
         )
         pending_row = cur.fetchone()

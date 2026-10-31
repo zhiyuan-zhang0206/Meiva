@@ -15852,6 +15852,19 @@
             "title": "Source",
             "default": "user"
           },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
           "config_overlay": {
             "anyOf": [
               {
