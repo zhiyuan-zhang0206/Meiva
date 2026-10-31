@@ -440,17 +440,19 @@ def build_services(
     from base.telemetry.lgtm_local import (
         BACKENDS,
         HEALTH_PATHS,
+        LgtmSettings,
         backend_urls,
         service_argv,
         service_input_paths,
     )
     from services.supervision.healthchecks.lgtm import probe_backend
 
-    urls = backend_urls()
+    observability = LgtmSettings.from_fields(get_field)
+    urls = backend_urls(observability)
     observability_services = tuple(
         ServiceSpec(
             session=name,
-            cmd=shlex.join(service_argv(home, name)),
+            cmd=shlex.join(service_argv(home, name, observability)),
             config_inputs=service_input_paths(home, name),
             capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
             requires_db=False,
