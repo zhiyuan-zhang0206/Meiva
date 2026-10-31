@@ -37,11 +37,12 @@ def launched_imports_share_boot() -> None:
     # This proves the launched SDK retains its original configuration delivery across later
     # imports. It observes the real environment snapshot, not the number of internal method calls.
     def _assert_captured_timezone(context: MeivaContext, installation: Installation) -> None:
+        from meiva.sdk_surface.settings import config_authority
+
         assert not installation.faces
         assert context.catalog is installation.catalog
         assert installation.clock is not None
-        assert installation.authority is not None
-        assert installation.authority.service_field_value("timezone") == "UTC"
+        assert config_authority().service_field_value("timezone") == "UTC"
         assert installation.clock.authoritative_timezone == "UTC"
         assert context.require_clock().authoritative_timezone == "UTC"
 

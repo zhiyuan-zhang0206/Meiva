@@ -33,6 +33,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "discovery.py" = "strict-to-be"
 "extensions.py" = { mode = "none", why = "the plugin load: it imports the enabled plugins' faces, uninstalls the replaced surface and runs the install, in that order; what a replacing load carries over is decided by the pure pure/plans/installation/lifecycle_plan.py" }
 "help.py" = "strict"
+"installation.py" = "strict"
 "injection_check.py" = { mode = "none", why = "the shell of the model-based injection check: it asks the decision model one question per piece of the page on a worker thread and logs the failures; the gates, the cut points, the piece budget, the fold of the answers and the refusal text are decided by the pure pure/media/injection/injection_plan.py and injection_pieces.py" }
 "install.py" = { mode = "none", why = "the one writer of the meiva module: it applies each plugin's declaration, keeps the reversal ledger, rolls back a failed piece and swaps the installation slot; the slot values come from the pure pure/plans/installation/slot_plan.py and the path rule from wrap_plan.py" }
 "metering.py" = { mode = "none", why = "the wrapping half of SDK usage metering: it walks the live namespace, decides from the live attributes whether a target still needs a recorder, writes the recorders over the public routines and runs every call through the telemetry owner with the caller's provenance; what makes a callable a recorder, what stripping or restoring one leaves, how the walk tells members apart, the MCP call name and the identity stamped on a call are decided by the pure pure/plans/metering/recorder_plan.py and meter_plan.py" }
@@ -50,9 +51,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [debt.impure-call]
 "discovery.py#inspect.getsource" = 1
-
-[debt.impure-edge]
-"installation.py#base/config/service_read.py" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
