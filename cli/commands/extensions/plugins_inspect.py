@@ -18,6 +18,7 @@ from agent.extensions.catalog import (
     entry_point_signature,
 )
 from base.agents.sdk.call_policy import SamplingPolicyOwner, process_sampling_owner
+from base.packages.plugins.enable_config import RETIRED_BUILTIN_PLUGINS, DanglingPlugin
 
 
 # meiva:note
@@ -211,9 +212,20 @@ def cmd_plugins_verify(*, rng: random.Random, home: Path) -> int:
         print("RESULT enabled=0 failed=0 rc=2")
         print(f"TOOL-ERROR {type(exc).__name__}: {str(exc)[:200]}")
         return 2
+    retired = [(n, e) for n, e in failures if _is_retired_dangling(n, e)]
+    failures = [item for item in failures if item not in retired]
     enabled = sum(1 for entry in loaded.config.plugins.values() if entry.enabled)
     rc = 1 if failures else 0
     print(f"RESULT enabled={enabled} failed={len(failures)} rc={rc}")
+    for name in sorted({name for name, _ in retired}):
+        print(f"WARN plugin={name} retired built-in plugin still named in the plugins config")
     for name, exc in failures:
         print(f"RED plugin={name} {type(exc).__name__}: {exc}{_where(exc)}".replace("\n", " "))
     return rc
+
+
+# meiva:note
+# A config entry for a built-in plugin this tree retired (`RETIRED_BUILTIN_PLUGINS`): a warning, not
+# a failure. Any other dangling name, and every other load failure, stays one.
+def _is_retired_dangling(name: str, exc: BaseException) -> bool:
+    return isinstance(exc, DanglingPlugin) and name in RETIRED_BUILTIN_PLUGINS
