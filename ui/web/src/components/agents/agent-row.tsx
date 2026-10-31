@@ -48,6 +48,7 @@ import { formatRelativeTime } from "@/lib/agents/sidebar";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import type { AgentRow, PublicAgentStatus } from "@/lib/contracts/types";
+import type { PendingAction } from "@/lib/agents/use-agents";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { RowActions } from "./row-actions";
@@ -58,8 +59,6 @@ const LazyPromptDialog = dynamic(() =>
   import("@/components/agents/agent-prompt-dialog").then((module) => module.PromptDialog),
   { loading: () => null },
 );
-
-export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
 
 // Public status semantics: sky = actively running, emerald = idling/waiting,
 // indigo = impersonated (an external tool has taken the agent over — calm
