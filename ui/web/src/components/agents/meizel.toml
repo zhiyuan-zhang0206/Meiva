@@ -10,6 +10,3 @@ exports = ["agent-row.tsx", "spawn-form.tsx", "window-select.tsx"]
 "spawn-form.test.tsx" = ["spawn-form.tsx"]
 "spawn-form.tsx" = ["spawn-table.tsx"]
 "window-select.test.tsx" = ["window-select.tsx"]
-
-[debt.undeclared-edge]
-"row-actions.tsx -> agent-row.tsx" = 1

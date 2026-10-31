@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl";
 
 import type { AgentRow } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import type { PendingAction } from "./agent-row";
+import type { PendingAction } from "@/lib/agents/use-agents";
 
 export function RowActions({
   agent,
