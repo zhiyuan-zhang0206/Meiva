@@ -27,7 +27,7 @@ restored by task #3689). All sections are **expanded by default**
 (`collapsed: false`, 2026-08-23 #382):
 
 1. **`core`** — the user's daily first screen: twelve stat tiles cover the
-   entire Statistics popover (LLM calls / Warning / Error / Unresolved Warning /
+   entire Status popover (LLM calls / Warning / Error / Unresolved Warning /
    Unresolved Error / Live agents / LLM cost /
    Tokens / LLM input tokens / LLM output tokens / Cache hit / Avg turn
    duration). It then shows Event health,

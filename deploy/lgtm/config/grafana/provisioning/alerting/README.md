@@ -69,7 +69,7 @@ The rules are split between `meiva-ops` (evaluated every minute) and
 `meiva-ops-slow` (evaluated every five minutes). Each rule retains its own
 `for` window and threshold. `rules.yml` is the condition catalog: events without a
 matching rule do not create an alert of their own (aggregate rules may still count
-them). The Warning / Error statistics card counts events separately.
+them). The Warning / Error status card counts events separately.
 The table below names the configured conditions.
 
 ## Episode recovery and grouping

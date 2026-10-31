@@ -29,13 +29,14 @@ row leaves with the rail when it collapses; the count then rides `HeaderBar`'s
 restore button (desktop) or its menu button (phone drawer) instead of vanishing
 ([[ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md|Home Shell Chrome]]).
 
-## Statistics popover
+## Status popover
 
-The chart icon at the head of the footer row opens a small panel rather than a
-toolbar: the 2×3 stats grid (live agents, tokens, cache hit, cost, average turn
-time, warnings/errors) and the window selector live there, so the closed sidebar
-spends no height on numbers a reader checks occasionally (the old inline bar
-occupied a row permanently).
+The chart icon at the head of the footer row opens the Status popover: a quick
+status of the whole cluster, not a statistics report. It is a small panel rather
+than a toolbar: the 2×3 status grid (live agents, tokens, cache hit, cost,
+average turn time, warnings/errors), the window selector and the plugin-declared
+status cards live there, so the closed sidebar spends no height on numbers a
+reader checks occasionally (the old inline bar occupied a row permanently).
 
 ## Display settings popover
 

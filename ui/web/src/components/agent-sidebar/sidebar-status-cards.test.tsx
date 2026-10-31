@@ -7,17 +7,17 @@ import { AgentSidebar } from "./index";
 afterEach(cleanup);
 beforeEach(resetSidebarTestState);
 
-function openStats() {
-  fireEvent.click(screen.getByLabelText("Statistics"));
+function openStatus() {
+  fireEvent.click(screen.getByLabelText("Status"));
 }
 
-describe("StatsCards tri-state (loading / data / error)", () => {
+describe("StatusCards tri-state (loading / data / error)", () => {
   it("fetching without data shows an updating spinner and six skeleton values", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsFetching = true;
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
-    expect(await screen.findByRole("status", { name: "Statistics are updating" })).toBeTruthy();
+    openStatus();
+    expect(await screen.findByRole("status", { name: "Status is updating" })).toBeTruthy();
     expect(document.querySelectorAll(".animate-pulse")).toHaveLength(6);
     expect(screen.queryByText("—")).toBeNull();
   });
@@ -36,7 +36,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("5")).toBeTruthy();
     expect(await screen.findByText("19.1k")).toBeTruthy();
     expect(await screen.findByText("80.00%")).toBeTruthy();
@@ -61,7 +61,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("N/A")).toBeTruthy();
     expect(await screen.findByText("6.0k")).toBeTruthy();
     expect(await screen.findByText("$3.00")).toBeTruthy();
@@ -82,7 +82,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("3 / 2")).toBeTruthy();
     expect(screen.queryByText("5 events")).toBeNull();
     expect(screen.queryByText("All clear")).toBeNull();
@@ -102,7 +102,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("10000 / 0")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Warnings \/ errors/ })).toBeNull();
     expect(screen.queryByText("disk_pressure")).toBeNull();
@@ -111,7 +111,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsError = new Error("stats endpoint 500");
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect((await screen.findAllByText("!")).length).toBeGreaterThanOrEqual(6);
     expect(document.querySelectorAll(".text-destructive").length).toBeGreaterThan(0);
     const retry = await screen.findByRole("button", { name: "Retry" });
@@ -138,7 +138,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     vi.useFakeTimers();
     try {
       wrap(<AgentSidebar {...handlers} />);
-      openStats();
+      openStatus();
       await vi.advanceTimersByTimeAsync(0);
       expect(screen.getAllByText("5").length).toBeGreaterThan(0);
       // meiva:note
@@ -172,7 +172,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("1.5M")).toBeTruthy();
   });
   it("avg_turn_seconds=null → shows placeholder, not 'NaNs'", () => {
@@ -190,12 +190,12 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(screen.queryByText(/NaN/)).toBeNull();
   });
 });
 
-describe("plugin stat cards", () => {
+describe("plugin status cards", () => {
   function statsWith(pluginStats: StatsDashboard["plugin_stats"]): StatsDashboard {
     return {
       live_count: 7,
@@ -225,7 +225,7 @@ describe("plugin stat cards", () => {
       },
     ]);
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("Codex A")).toBeTruthy();
     expect(await screen.findByText("Weekly reset 10-04 17:14 UTC+08:00")).toBeTruthy();
     expect(await screen.findByText("52% remaining · 0 resets available")).toBeTruthy();
@@ -247,7 +247,7 @@ describe("plugin stat cards", () => {
       },
     ]);
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("Codex · zhiyuan0206")).toBeTruthy();
     expect((await screen.findByText(/5h reset 09-29 02:00 UTC\+08:00/)).textContent).toBe(
       "5h reset 09-29 02:00 UTC+08:00\nWeekly reset 10-04 17:14 UTC+08:00",
@@ -283,7 +283,7 @@ describe("plugin stat cards", () => {
       },
     ]);
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("Codex B")).toBeTruthy();
     expect(await screen.findByText("71%")).toBeTruthy();
     expect(screen.queryByText("orphan-value")).toBeNull();
@@ -304,7 +304,7 @@ describe("plugin stat cards", () => {
       },
     ]);
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect((await screen.findByText("!")).className).toContain("text-destructive");
     expect(await screen.findByText("token revoked")).toBeTruthy();
   });
@@ -325,13 +325,13 @@ describe("plugin stat cards", () => {
       },
     ]);
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect((await screen.findByText("custom-42")).closest("div")?.className).toContain("opacity-60");
     expect(await screen.findByTitle("Updated 2h ago")).toBeTruthy();
   });
 });
 
-describe("StatsCards window selector", () => {
+describe("StatusCards window selector", () => {
   it("hides stale windowed values while retaining the live-agent count", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
@@ -348,7 +348,7 @@ describe("StatsCards window selector", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("5")).toBeTruthy();
     expect(await screen.findAllByText("…")).toHaveLength(5);
     expect(screen.queryByText("19.1k")).toBeNull();
@@ -362,8 +362,8 @@ describe("StatsCards window selector", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 72;
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
-    const select = await screen.findByLabelText<HTMLSelectElement>("Statistics window");
+    openStatus();
+    const select = await screen.findByLabelText<HTMLSelectElement>("Status time window");
     expect(select.value).toBe("72");
     const labels = Array.from(select.options).map((o) => o.text);
     expect(labels).toEqual(["5m", "1h", "6h", "24h", "3d", "7d"]);
@@ -385,16 +385,16 @@ describe("StatsCards window selector", () => {
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
-    const select = await screen.findByLabelText<HTMLSelectElement>("Statistics window");
+    openStatus();
+    const select = await screen.findByLabelText<HTMLSelectElement>("Status time window");
     await waitFor(() => expect(select.selectedOptions[0].text).toBe("7d · 84h"));
     expect(Array.from(select.options).find((option) => option.value === "72")?.text).toBe("3d");
   });
   it("changing the select calls setWindowHours with the numeric window value", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
-    const select = await screen.findByLabelText("Statistics window");
+    openStatus();
+    const select = await screen.findByLabelText("Status time window");
     fireEvent.change(select, { target: { value: "6" } });
     await waitFor(() =>
       expect(transport.putSetting).toHaveBeenCalledWith("display.stats_window_hours", 6),
@@ -404,7 +404,7 @@ describe("StatsCards window selector", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
     wrap(<AgentSidebar {...handlers} />);
-    openStats();
+    openStatus();
     expect(await screen.findByText("Warnings / errors")).toBeTruthy();
     expect(await screen.findByText("Live agents")).toBeTruthy();
     expect(await screen.findByText("Tokens")).toBeTruthy();

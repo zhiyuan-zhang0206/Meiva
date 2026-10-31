@@ -41,7 +41,7 @@ ships carry.
 
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
-| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 135 | `agent-sidebar.test.tsx` (34), `sidebar-stats-cards.test.tsx` (45), `sidebar-tree-and-search.test.tsx` (56) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
+| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 135 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (45), `sidebar-tree-and-search.test.tsx` (56) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
 | `ui/web/src/app/page-test-mock.tsx` | 101 | `page.test.tsx` (55), `page-dispatch.test.tsx` (46) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-notices.test.tsx` (1) | the inspector's `inspectorMockState` |
 

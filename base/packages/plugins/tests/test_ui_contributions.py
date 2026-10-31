@@ -133,7 +133,7 @@ def test_stat_card_id_keys_the_value_row() -> None:
 
 
 def test_stat_card_duplicate_and_fields() -> None:
-    _rejects("duplicate stat card", stats=[{"id": "a", "label": "x"}, {"id": "a", "label": "y"}])
+    _rejects("duplicate status card", stats=[{"id": "a", "label": "x"}, {"id": "a", "label": "y"}])
     _rejects("missing required field", stats=[{"id": "a"}])
     _rejects("unknown field", stats=[{"id": "a", "label": "x", "icon": "zap"}])
     _rejects("expected a list", stats={"id": "a"})

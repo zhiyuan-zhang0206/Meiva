@@ -33,7 +33,7 @@ const clients = new Set<QueryClient>();
 const navigation = fakeNavigation();
 
 // meiva:note
-// The footer's stat cards age on the page's clock; the real one keeps this file's strings as they
+// The footer's status cards age on the page's clock; the real one keeps this file's strings as they
 // were, since no case asserts a particular age.
 function renderFooter(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

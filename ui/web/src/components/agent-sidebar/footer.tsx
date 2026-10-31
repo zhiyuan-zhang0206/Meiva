@@ -49,12 +49,10 @@ import { fleetHref } from "./links";
 import { SidebarIconButton } from "./icon-button";
 
 /** Shared by the expanded footer and collapsed rail. */
-export const STATS_POPOVER_CLASS =
+export const STATUS_POPOVER_CLASS =
   "z-50 max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none";
 
-// ── Stats cards (unchanged 2×3 grid) ──
-
-export function StatsCards({
+export function StatusCards({
   stats,
   error,
   fetching,
@@ -85,7 +83,7 @@ export function StatsCards({
       ? stats.applied_window_hours
       : null;
   const windowedPlaceholder = windowMismatch ? "…" : placeholder;
-  const windowedTitle = windowMismatch ? t("statisticsUpdatingFor", { win }) : null;
+  const windowedTitle = windowMismatch ? t("statusPanelUpdatingFor", { win }) : null;
   const cards: (
     | { kind?: undefined; label: string; value: string; title?: string; windowed?: boolean }
     | { kind: "warnings"; title?: string; windowed?: boolean }
@@ -163,13 +161,13 @@ export function StatsCards({
       <div className={cn("items-center justify-between border-b border-border px-3 py-2", FLEX)}>
         <div className={cn("items-center gap-1.5", FLEX)}>
           <span className="text-[10px] tracking-wide text-muted-foreground">
-            {t("statistics")}
+            {t("statusPanel")}
           </span>
           {fetching ? (
             <span
               role="status"
-              aria-label={t("statisticsUpdating")}
-              title={t("statisticsUpdating")}
+              aria-label={t("statusPanelUpdating")}
+              title={t("statusPanelUpdating")}
             >
               <Loader2 className="size-3 animate-spin text-muted-foreground" aria-hidden />
             </span>
@@ -178,7 +176,7 @@ export function StatsCards({
             <button
               type="button"
               onClick={onRetry}
-              aria-label={t("statisticsRetry")}
+              aria-label={t("statusPanelRetry")}
               title={errMsg}
               className="rounded p-0.5 text-destructive hover:bg-sidebar-accent"
             >
@@ -207,7 +205,7 @@ export function StatsCards({
             const picked = STATS_WINDOWS.find((h) => String(h) === v);
             if (picked !== undefined) onWindowChange(picked);
           }}
-          ariaLabel={t("statisticsWindow")}
+          ariaLabel={t("statusPanelWindow")}
           className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
         />
       </div>
@@ -245,10 +243,12 @@ export function StatsCards({
         )}
       </div>
       {pluginCards.length > 0 ? (
+        // meiva:note
         // Plugin-declared cards (`contributions.ui.stats` + the values the
         // dashboard carried). Not windowed: a plugin value is a point in
         // time, so the window selector deliberately does not apply — the
         // section sits below the windowed grid precisely to say so.
+        // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
         <div className="divide-y divide-border/60 border-t border-border px-3">
           {pluginCards.map((card) => (
             <PluginStatCard key={card.key} card={card} />
@@ -259,8 +259,7 @@ export function StatsCards({
   );
 }
 
-// ── Plugin stat card (task #2911) ──
-
+// meiva:note
 // One declared plugin row: label + the plugin's primary value + optional
 // supporting text. Values and details wrap, preserving provider line breaks
 // so reset schedules remain readable without a hover. The empty state ("—")
@@ -268,6 +267,7 @@ export function StatsCards({
 // row exists yet (no credential, or no refresh has run); `stale` dims a value
 // whose last write is old, so a stopped refresh cannot pass for a fresh one —
 // the age itself rides the tooltip.
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
 function PluginStatCard({ card }: { card: PluginStatCardModel }) {
   const t = useTranslations("sidebar");
   const now = useWallDate();
@@ -310,13 +310,12 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
   );
 }
 
-// ── Sidebar footer: fixed bottom strip (user ruling 2026-08-05) ──
-//
-// The spot an app's avatar row would occupy: Statistics (a chart icon that
+// meiva:note
+// The spot an app's avatar row would occupy: Status (a chart icon that
 // opens a small popover panel) on the left, and the four nav shortcuts
 // (Memory Graph / Fleet / Insights / Control) on the right. These moved here
 // from the header bar; the collapsed rail keeps icon-only versions.
-
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
 export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null }) {
   const t = useTranslations("sidebar");
   const navT = useTranslations("nav");
@@ -343,7 +342,7 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
           <Popover.Trigger asChild>
             <button
               type="button"
-              aria-label={t("statistics")}
+              aria-label={t("statusPanel")}
               className="p-1.5 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
             >
               <BarChart3 className={ICON_SIZE_CLASS} />
@@ -353,9 +352,9 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
             <Popover.Content
               sideOffset={6}
               align="start"
-              className={STATS_POPOVER_CLASS}
+              className={STATUS_POPOVER_CLASS}
             >
-              <StatsCards
+              <StatusCards
                 stats={stats}
                 error={statsError}
                 fetching={isFetching}
@@ -417,8 +416,10 @@ function SidebarNavButton({
   );
 }
 
-/** Windowed Warning / Error event totals, presented like the other statistics.
- *  Formal Grafana alerts have their own header badge and history. */
+// meiva:note
+// Windowed Warning / Error event totals, presented like the other status cards.
+// Formal Grafana alerts have their own header badge and history.
+// meiva:link ui/web/src/docs/frontend-components/alert-classes.meiva.okf.md
 function WarningErrorCard({
   stats,
   placeholder,

@@ -1,23 +1,23 @@
-"""`plugin_stats` — the runtime values behind declared statistics-panel cards.
-
-A plugin's stat cards are declared in its manifest (`contributions.ui.stats`,
-validated by `base/packages/plugins/surface/ui_contributions.py`): identity and label only.
-The value is runtime data — written by the plugin's own code (an agent-process
-refresh hook, a daemon, a manual run) through `upsert()` here, keyed by
-`(plugin, id)`, and read into `GET /api/stats/dashboard`, where the console
-joins it against the declaration.
-
-Declared-but-valueless is a legitimate state: a declared card with no row
-renders as an explicit empty state, which is what lets the card exist before a
-credential or a first refresh does. Failure, by contrast, is not silence: a
-refresh that cannot read its source writes `status="error"` with the reason in
-`detail`, and a value that stops being refreshed keeps its row so `updated_at`
-ages visibly in the panel.
-
-Writers need INSERT/UPDATE/SELECT on the table (the runner grant lives in the
-plugin-stats migration and in `base/cluster/provision.py`); the gateway
-reads with its own (owner) connection.
-"""
+# meiva:note
+# `plugin_stats` — the runtime values behind declared status-panel cards.
+# A plugin's status cards are declared in its manifest (`contributions.ui.stats`,
+# validated by `base/packages/plugins/surface/ui_contributions.py`): identity and label only.
+# The value is runtime data — written by the plugin's own code (an agent-process
+# refresh hook, a daemon, a manual run) through `upsert()` here, keyed by
+# `(plugin, id)`, and read into `GET /api/stats/dashboard`, where the console
+# joins it against the declaration.
+#
+# Declared-but-valueless is a legitimate state: a declared card with no row
+# renders as an explicit empty state, which is what lets the card exist before a
+# credential or a first refresh does. Failure, by contrast, is not silence: a
+# refresh that cannot read its source writes `status="error"` with the reason in
+# `detail`, and a value that stops being refreshed keeps its row so `updated_at`
+# ages visibly in the panel.
+#
+# Writers need INSERT/UPDATE/SELECT on the table (the runner grant lives in the
+# plugin-stats migration and in `base/cluster/provision.py`); the gateway
+# reads with its own (owner) connection.
+# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
 
 from __future__ import annotations
 

@@ -1,17 +1,17 @@
 ---
 type: doc
 title: Warning and Error Counts
-description: The compact, windowed Warning / Error event totals in the sidebar statistics panel, separate from formal Grafana alerts.
+description: The compact, windowed Warning / Error event totals in the sidebar status panel, separate from formal Grafana alerts.
 tags:
 - frontend
 ---
 
 # Warning and Error Counts
 
-The Warnings / Errors card in the stats popover (`agent-sidebar/footer.tsx`) displays
-`warnings / errors` from `GET /api/stats/dashboard` over the selected statistics
+The Warnings / Errors card in the Status popover (`agent-sidebar/footer.tsx`) displays
+`warnings / errors` from `GET /api/stats/dashboard` over the selected
 window. These are event totals; `errors` includes critical events. The card is a
-compact cell like the other statistics, with no nested class/sample list.
+compact cell like the other status cards, with no nested class/sample list.
 Changing the window uses the same loading and mismatch placeholders as its peers.
 
 The event-class diagnostics and dismissal APIs remain available to operators;

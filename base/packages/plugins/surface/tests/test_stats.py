@@ -1,10 +1,10 @@
-"""`base.packages.plugins.surface.stats` — the value half of declared statistics-panel cards.
-
-Exercised against the session's real Postgres: the contract IS the upsert —
-last write wins on `(plugin, id)`, the status vocabulary is closed, and what a
-plugin's refresh wrote is exactly what the dashboard reads back for the
-console to join against the declaration.
-"""
+# meiva:note
+# `base.packages.plugins.surface.stats` — the value half of declared status-panel cards.
+# Exercised against the session's real Postgres: the contract IS the upsert —
+# last write wins on `(plugin, id)`, the status vocabulary is closed, and what a
+# plugin's refresh wrote is exactly what the dashboard reads back for the
+# console to join against the declaration.
+# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
