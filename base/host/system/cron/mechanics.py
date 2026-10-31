@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TextIO
 
@@ -125,6 +125,28 @@ def require_crontab(
     return None
 
 
+# meiva:note
+# One rule for which lines this entry owns: the caller's predicate when it has one, the marker
+# substring otherwise. Rewriting and removing ask it, so a line cannot be kept by one and replaced
+# by the other.
+def _owns(line: str, marker: str, owns_line: Callable[[str], bool] | None) -> bool:
+    return owns_line(line) if owns_line is not None else marker in line
+
+
+# meiva:note
+# The canonical entry, plus whatever an operator wrote after the marker on the line it replaces.
+#
+# `(restored 2026-10-30 by #7100)` and its kind are hand-written and are the only record of which
+# line was re-added and by whom; the canonical rewrite replaced the whole line and wiped them
+# (reported by 7100 on 2026-10-31). The command belongs to the caller's canonical entry, the note
+# does not -- it is carried over verbatim. Nothing is invented: owned lines that disagree about the
+# note, or carry none, leave the entry as the caller wrote it.
+def _with_carried_note(entry: str, owned: Sequence[str], marker: str) -> str:
+    tails = {line.partition(marker)[2].strip() for line in owned if marker in line}
+    tails.discard("")
+    return f"{entry} {tails.pop()}" if len(tails) == 1 else entry
+
+
 def replace_crontab_entry(
     marker: str,
     entry: str,
@@ -150,12 +172,10 @@ def replace_crontab_entry(
             )
             return 1
         current = result.stdout if result.returncode == 0 else ""
-        lines = [
-            line
-            for line in current.splitlines()
-            if not (owns_line(line) if owns_line is not None else marker in line)
-        ]
-        lines.append(entry)
+        present = current.splitlines()
+        owned = [line for line in present if _owns(line, marker, owns_line)]
+        lines = [line for line in present if not _owns(line, marker, owns_line)]
+        lines.append(_with_carried_note(entry, owned, marker))
         result = host.run(
             ["crontab", "-"],
             input="\n".join(lines) + "\n",
@@ -190,12 +210,9 @@ def remove_crontab_entry(
             if on_read_failed is not None:
                 on_read_failed()
             return 0
-        lines = [
-            line
-            for line in result.stdout.splitlines()
-            if not (owns_line(line) if owns_line is not None else marker in line)
-        ]
-        if len(lines) == len(result.stdout.splitlines()):
+        present = result.stdout.splitlines()
+        lines = [line for line in present if not _owns(line, marker, owns_line)]
+        if len(lines) == len(present):
             if on_absent is not None:
                 on_absent()
             return 0
