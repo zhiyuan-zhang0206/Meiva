@@ -182,24 +182,39 @@ def test_an_unreachable_database_never_fails_the_command() -> None:
 def test_a_sink_that_cannot_be_dialled_never_fails_an_attributable_command(
     command_runtime: CommandRuntime,
 ) -> None:
-    with operator_lifecycle_audit(
-        database_factory=refuse_database,
-        environ=command_runtime.config.process_environment(),
-        home=command_runtime.home,
-    ) as command:
-        record_lifecycle_request("down", ["gateway"])
-        command.exited(0)
+    try:
+        with operator_lifecycle_audit(
+            database_factory=refuse_database,
+            environ=command_runtime.config.process_environment(),
+            home=command_runtime.home,
+        ) as command:
+            record_lifecycle_request("down", ["gateway"])
+            command.exited(0)
+    except Exception as error:
+        pytest.fail(
+            "a sink that cannot be dialled must never fail an attributable command: the caller "
+            "block was readable, so the recorder is the only thing that broke, and the command "
+            "that repairs the host cannot depend on it. It raised "
+            f"{error!r}"
+        )
 
 
 def test_a_boot_start_is_not_attributed_to_an_operator(command_runtime: CommandRuntime) -> None:
-    with operator_lifecycle_audit(
-        database_factory=refuse_database,
-        environ=command_runtime.config.process_environment(),
-        home=command_runtime.home,
-        enabled=False,
-    ) as command:
-        record_lifecycle_request("up", ["gateway"])
-        command.exited(0)
+    try:
+        with operator_lifecycle_audit(
+            database_factory=refuse_database,
+            environ=command_runtime.config.process_environment(),
+            home=command_runtime.home,
+            enabled=False,
+        ) as command:
+            record_lifecycle_request("up", ["gateway"])
+            command.exited(0)
+    except Exception as error:
+        pytest.fail(
+            "a disabled scope must never dial the recorder: a boot start has no caller to "
+            "attribute, so the factory that refuses every call cannot fail it. It raised "
+            f"{error!r}"
+        )
 
 
 def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
@@ -261,11 +276,26 @@ def _run_without_cwd(scope: str, tmp_path: Path) -> subprocess.CompletedProcess[
 def test_a_command_that_cannot_name_its_caller_is_refused(tmp_path: Path) -> None:
     child = _run_without_cwd("operator", tmp_path)
 
-    assert child.returncode == 3, child.stderr
-    assert "command ran" not in child.stdout
+    assert child.returncode == 3, (
+        "a lifecycle command that cannot read its caller block must exit 3 rather than run: "
+        "that block is the only fact naming who asked, and an operator can remove it on "
+        "purpose (a deleted working directory), so proceeding hands out one unattributed "
+        f"execution per `rm -rf`. stderr={child.stderr!r}"
+    )
+    assert "command ran" not in child.stdout, (
+        "the command body must not run once the caller cannot be named: the refusal exists to "
+        "stop an unattributed lifecycle execution, not to record one after it happened. "
+        f"stdout={child.stdout!r}"
+    )
     [refusal] = child.stdout.splitlines()
-    assert refusal.startswith("refused: lifecycle audit cannot read the caller block")
-    assert refusal.endswith("rerun from a working directory")
+    assert refusal.startswith("refused: lifecycle audit cannot read the caller block"), (
+        "the one line a refused command prints must say what was missing and that nothing ran, "
+        f"so an operator who broke their shell learns why. stdout={child.stdout!r}"
+    )
+    assert refusal.endswith("rerun from a working directory"), (
+        "the refusal must carry the recovery step: the caller block is unreadable because this "
+        f"process has no working directory. stdout={child.stdout!r}"
+    )
 
 
 def test_a_boot_start_needs_no_caller_and_says_nothing_when_it_cannot_be_named(
@@ -273,9 +303,19 @@ def test_a_boot_start_needs_no_caller_and_says_nothing_when_it_cannot_be_named(
 ) -> None:
     child = _run_without_cwd("boot", tmp_path)
 
-    assert child.returncode == 0, child.stderr
-    assert child.stdout.splitlines() == ["command ran"]
-    assert child.stderr == ""
+    assert child.returncode == 0, (
+        "a boot start must still run without a caller block: it is the one lifecycle entry no "
+        "operator asked for, so refusing it would make a machine that lost its working directory "
+        f"unable to start. stderr={child.stderr!r}"
+    )
+    assert child.stdout.splitlines() == ["command ran"], (
+        "the boot start runs its body and prints only that, rather than a refusal it does not "
+        f"owe. stdout={child.stdout!r}"
+    )
+    assert child.stderr == "", (
+        "a boot start that cannot name a caller says nothing: there is no operator to warn and "
+        f"no audit row it could not write. stderr={child.stderr!r}"
+    )
 
 
 def test_the_outcome_is_recorded_once() -> None:
