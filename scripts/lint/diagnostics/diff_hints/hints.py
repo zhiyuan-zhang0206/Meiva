@@ -5,7 +5,7 @@
 #   hints.py commit-msg MSGFILE     the hook of the commit-msg stage: the staged diff must be
 #                                   answered by the `Hint-Ack` trailers of this message.
 #   hints.py branch                 the hook of the pre-push stage: the diff of merge-base
-#                                   (origin/main, HEAD)..HEAD must be answered by the
+#                                   (GitHub's main, HEAD)..HEAD must be answered by the
 #                                   trailers of any commit on the branch, or by the open pull
 #                                   request's body (the text a squash merge lands verbatim).
 #   hints.py report BASE HEAD       every site of a diff, answered or not, for calibration.
@@ -95,12 +95,15 @@ class GitError(RuntimeError):
 # meiva:note
 # Fixed argument vectors only: git from PATH, never a shell, never user text as a command.
 # meiva:note
-# The optional read of a pull request body: `gh` by name, one body, and a bound short enough that a
-# hanging network call costs a push seconds rather than a minute. Missing the bound only risks a
-# skipped answer, never a wrong verdict, so it is a constant here rather than a policy knob.
+# The optional network reads -- the open pull request's body, GitHub's main -- go through `gh` by
+# name, with a bound short enough that a hanging call costs a push seconds rather than a minute.
+# Missing the bound only risks a skipped read, never a wrong verdict, so it is a constant here
+# rather than a policy knob.
 _GH = "gh"
 _GH_PR_FIELDS = ("--json", "body", "--jq", '.[0].body // ""')
 _GH_TIMEOUT_S = 10.0
+_DEFAULT_BASE = "origin/main"
+_GITHUB_ORIGIN = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 
 
 def _git(*args: str) -> bytes:
@@ -469,34 +472,96 @@ def _commits(base: str, head: str) -> list[tuple[str, str]]:
 
 
 # meiva:note
+# The repository on GitHub this checkout pushes to, as `owner/name`, or "" when there is none.
+#
+# Both URLs of `origin` are read, the push one first: in this fleet a checkout fetches from a local
+# mirror and pushes to GitHub, so the fetch URL names no repository and reading it alone would report
+# every such checkout as having no GitHub origin. One rule decides what a GitHub checkout is -- an
+# origin URL that names github.com -- and both optional reads that need the repository ask here.
+def _github_slug() -> str:
+    for args in (("remote", "get-url", "--push", "origin"), ("remote", "get-url", "origin")):
+        try:
+            url = _git(*args).decode().strip()
+        except GitError:
+            continue
+        found = _GITHUB_ORIGIN.search(url)
+        if found:
+            return f"{found.group(1)}/{found.group(2)}"
+    return ""
+
+
+# meiva:note
+# One `gh` call, or "" when it cannot be made. Every failure -- no `gh`, a nonzero exit, a network
+# error, a timeout -- answers nothing: a read that only adds information must not fail a push, and an
+# unreadable answer is not a finding about the branch.
+def _gh(*args: str) -> str:
+    if shutil.which(_GH) is None:
+        return ""
+    try:
+        done = subprocess.run(  # noqa: S603
+            [_GH, *args], capture_output=True, text=True, check=False, timeout=_GH_TIMEOUT_S
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout if done.returncode == 0 else ""
+
+
+# meiva:note
 # The open pull request's body for this branch, or "" when there is none to read. A squash merge
 # lands the PR title and body as the commit message and drops the branch's own messages, so an
 # answer written in the body is the copy that survives; reading it here lets one copy satisfy the
-# push and the merged history at once. Every failure -- no `gh`, no GitHub origin, a detached head,
-# no open PR, no network -- answers nothing and never fails the check: an unreadable body is not a
-# finding about the branch.
+# push and the merged history at once. A detached head or an unreadable body answers nothing.
 #
 # Asked for only when the branch has a site to answer. With nothing to answer the body cannot
 # change the verdict, and a body nobody needed must not cost a network round trip or fail a push
 # over an `Hint-Ack`-shaped line quoted in prose.
 def _pr_body() -> str:
-    if shutil.which(_GH) is None:
+    slug = _github_slug()
+    if not slug:
         return ""
     try:
         branch = _git("rev-parse", "--abbrev-ref", "HEAD").decode().strip()
-        remote = _git("remote", "get-url", "origin").decode().strip()
     except GitError:
         return ""
-    if not branch or branch == "HEAD" or "github.com" not in remote:
+    if not branch or branch == "HEAD":
         return ""
-    done = subprocess.run(  # noqa: S603
-        [_GH, "pr", "list", "--head", branch, "--state", "open", "--limit", "1", *_GH_PR_FIELDS],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=_GH_TIMEOUT_S,
-    )
-    return done.stdout if done.returncode == 0 else ""
+    return _gh("pr", "list", "--head", branch, "--state", "open", "--limit", "1", *_GH_PR_FIELDS)
+
+
+# meiva:note
+# The `main` GitHub has, or "" when it cannot be read.
+def _github_main(slug: str) -> str:
+    if not slug:
+        return ""
+    return _gh("api", f"repos/{slug}/commits/main", "--jq", ".sha").strip()
+
+
+# meiva:note
+# The commit a branch push is judged against, and one line to print when it may not be main's newest.
+#
+# `origin` here is a mirror that resets every few minutes, and a checkout's tracking ref can be older
+# still, so `origin/main` is a guess about what main is. A range built from a stale base carries
+# other people's merged work, which is then reported as this branch's unanswered hints -- two pushes
+# on 2026-10-31 failed that way. GitHub's main is the fact; the tracking ref is used only when the
+# fact cannot be read, and then the output says so, because a silent false red is as bad as a silent
+# false green.
+#
+# An explicit `--base` is a statement about which commit to compare with, not a guess about main, so
+# it is left alone.
+def _judging_base(base_ref: str) -> tuple[str, str]:
+    if base_ref != _DEFAULT_BASE:
+        return base_ref, ""
+    slug = _github_slug()
+    if not slug:
+        return base_ref, f"base={base_ref} (no GitHub origin; main not checked)"
+    main = _github_main(slug)
+    if not main:
+        return base_ref, f"base={base_ref} (github main unknown; may lag)"
+    try:
+        _git("cat-file", "-e", f"{main}^{{commit}}")
+    except GitError:
+        return base_ref, f"base={base_ref} (github main {main[:9]} not in this checkout; may lag)"
+    return main, ""
 
 
 def _report_problems(errors: tuple[str, ...], notes: tuple[str, ...]) -> None:
@@ -541,6 +606,9 @@ def _commit_msg(message_file: str) -> int:
 
 
 def _branch(head: str, base_ref: str, summary: str | None) -> int:
+    base_ref, base_note = _judging_base(base_ref)
+    if base_note:
+        sys.stderr.write(f"diff hints: note: {base_note}\n")
     base = _merge_base(base_ref, head)
     answered: list[tuple[str, Ack]] = []
     errors: list[str] = []
