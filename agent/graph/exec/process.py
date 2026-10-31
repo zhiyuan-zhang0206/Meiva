@@ -66,7 +66,7 @@ class SubprocessExecProcess:
             code,
             context,
             cancel_event,
-            context.require_agent().read("sandbox", "exec_timeout_seconds"),
+            context.require_agent().sandbox.exec_timeout_seconds,
             chunks,
             accumulation_max_chars=context.require_agent().read(
                 "sandbox", "exec_output_accumulation_max_chars"

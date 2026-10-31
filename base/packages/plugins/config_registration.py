@@ -291,6 +291,7 @@ def _range_validator(
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "reasoning_effort": _validate_reasoning_effort_range,
+    "exec_timeout_seconds": _range_validator(gt=0),
     "heartbeat_pause_max_seconds": _range_validator(gt=0),
     "llm_stream_inter_chunk_timeout_seconds": _range_validator(gt=0),
     "llm_stream_total_timeout_seconds": _range_validator(gt=0),

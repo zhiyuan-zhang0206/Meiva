@@ -159,6 +159,38 @@ def test_a_key_no_config_owns_is_refused(tmp_path: Path, model_catalog: ModelCat
         restart_overlay({"no_such_field": 1}, configs=None, catalog=model_catalog, home=tmp_path)
 
 
+def test_exec_timeout_seconds_overlay_is_stored_and_restorable_by_explicit_value(
+    tmp_path: Path, model_catalog: ModelCatalog
+) -> None:
+    tightened = restart_overlay(
+        {"exec_timeout_seconds": 25.0}, configs=None, catalog=model_catalog, home=tmp_path
+    )
+    assert dict(tightened.overlay) == {"exec_timeout_seconds": 25.0}
+    assert tightened.receipt is None
+
+    restored = restart_overlay(
+        {"exec_timeout_seconds": 300.0}, configs=None, catalog=model_catalog, home=tmp_path
+    )
+    assert dict(restored.overlay) == {"exec_timeout_seconds": 300.0}
+    assert restored.receipt is None
+
+
+@pytest.mark.parametrize(
+    "bad_timeout",
+    [0, 0.0, -5.0, float("nan"), float("inf"), 1200.0, 1500.0, None, "25s"],
+)
+def test_exec_timeout_seconds_overlay_rejects_non_positive_unbounded_or_invalid_values(
+    tmp_path: Path, model_catalog: ModelCatalog, bad_timeout: object
+) -> None:
+    with pytest.raises(InvalidConfigOverlay, match="exec_timeout_seconds"):
+        restart_overlay(
+            {"exec_timeout_seconds": bad_timeout},
+            configs=None,
+            catalog=model_catalog,
+            home=tmp_path,
+        )
+
+
 # meiva:note
 # The plugin configs an overlay is checked against are the ones installed in the home the caller
 # passed: this test installs a probe plugin in its own home only, so an overlay of the field it

@@ -520,6 +520,11 @@ def test_validate_config_overlay_none_reasoning_effort_passes(
     ("field", "value"),
     [
         # durations / timeouts — must be > 0 and finite
+        ("exec_timeout_seconds", 0.0),
+        ("exec_timeout_seconds", -1.0),
+        ("exec_timeout_seconds", float("nan")),
+        ("exec_timeout_seconds", float("inf")),
+        ("exec_timeout_seconds", 1200.0),
         ("heartbeat_pause_max_seconds", float("inf")),
         ("llm_stream_ttft_timeout_seconds", 0.0),
         ("llm_stream_ttft_timeout_seconds", -1.0),
@@ -578,6 +583,8 @@ def test_validate_config_overlay_out_of_range_rejected(
         ("memory_recall_inject_threshold", 1.0),
         ("llm_stream_ttft_timeout_seconds", None),  # unset sentinel
         ("llm_stream_ttft_timeout_seconds", 0.1),
+        ("exec_timeout_seconds", 0.1),
+        ("exec_timeout_seconds", 25.0),
         ("llm_stream_total_timeout_seconds", None),
         ("llm_stream_total_timeout_seconds", 3600.0),
         ("memory_recall_deadline_seconds", 0.1),

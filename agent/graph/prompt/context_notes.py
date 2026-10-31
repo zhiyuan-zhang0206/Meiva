@@ -87,7 +87,7 @@ def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
         return None
     now = ctx.require_clock().now()
     return system_note_message(
-        content=exec_timeout_text(ctx.require_agent().read("sandbox", "exec_timeout_seconds")),
+        content=exec_timeout_text(ctx.require_agent().sandbox.exec_timeout_seconds),
         tag=NoteTag.EXEC_TIMEOUT,
         picked_up_at=now,
         created_at=now,
