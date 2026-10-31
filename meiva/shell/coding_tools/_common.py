@@ -79,7 +79,7 @@ def launch_site() -> LaunchSite:
         home=Path.home(),
         cluster=meiva_home(),
         session_cwd=agent_workspace(shell.agent_id),
-        host=sessions.session_host(),
+        host=sessions.session_host(sessions.process_environ()),
         timers=SYSTEM_TIMERS,
         now=datetime.now(UTC),
     )

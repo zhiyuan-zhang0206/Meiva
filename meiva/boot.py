@@ -265,6 +265,7 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
         bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
         user_home=Path.home(),
         meiva_home=resolve_meiva_home(),
+        environ=env,
         rng=rng,
     )
 

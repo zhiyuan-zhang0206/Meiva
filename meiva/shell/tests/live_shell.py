@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.db import Database
+from base.host.env.registry import process_environment
 from base.sessions.backend import PtySessionBackend
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
@@ -47,7 +48,7 @@ def live_shell(
 # meiva:note
 # The machine facts a test session starts from, with the session's HOME set to `home`. A session's login shell then reads the test home's profile and finds the programs installed there, never the developer's own profile or programs.
 def isolated_host(home: Path) -> SessionHost:
-    host = session_host()
+    host = session_host(process_environment())
     return SessionHost(checkout=host.checkout, forwarded={**host.forwarded, "HOME": str(home)})
 
 

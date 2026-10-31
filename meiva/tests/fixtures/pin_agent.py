@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 
@@ -83,6 +84,7 @@ def pin_agent(
             ),
             bus=bus if bus is not None else (None if bound is None else bound.bus),
             user_home=Path.home(),
+            environ=os.environ if bound is None else bound.environ,
         )
     )
 
@@ -109,4 +111,5 @@ def exec_context(
         clients=derived_clients(config, machine),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         user_home=Path.home(),
+        environ=os.environ,
     )

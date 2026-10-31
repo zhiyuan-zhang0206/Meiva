@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 from pathlib import Path
 
@@ -106,6 +107,7 @@ def test_an_attachment_context_builds_the_boots_one_event_bus_on_first_read() ->
     owned = boot_external.own_external_process(snapshot_process_config())
     try:
         context = owned.new_context()
+        assert context.require_environ() is os.environ
         assert context.bus is None
         bus = context.require_bus()
         assert isinstance(bus, EventBus)
@@ -126,6 +128,7 @@ def test_a_launched_context_carries_the_homes_and_the_generator_its_sampling_own
     assert context is not None
     assert context.require_user_home() == Path.home()
     assert context.require_meiva_home() == unit_home
+    assert context.require_environ() == {"MEIVA_AGENT_ID": "7"}
     assert not isinstance(context.require_rng(), random.SystemRandom)
     assert context.bus is None
     assert isinstance(context.require_bus(), EventBus)

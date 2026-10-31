@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import os
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
@@ -41,8 +43,9 @@ class BorrowedBoot:
 # What an external process needs before it can act as an agent, when nothing is bound yet and it
 # owns its roots: the prepared configuration, the machine, the database factory the clients share,
 # the clients themselves, the clock an independent attachment has no process clock to inherit, the
-# two homes it reads once (the account's and the Meiva home), the operating system's random
-# generator and the factory of the event bus over its configuration. An attachment is a separate process whose identifiers must stay unique across the
+# two homes it reads once (the account's and the Meiva home), the environment it was launched
+# with, the operating system's random generator and the factory of the event bus over its
+# configuration. An attachment is a separate process whose identifiers must stay unique across the
 # processes of one agent, so it draws from the system generator rather than a seeded-at-start one.
 @dataclass(frozen=True, slots=True)
 class OwnedBoot:
@@ -53,12 +56,14 @@ class OwnedBoot:
     clock: Clock
     user_home: Path
     meiva_home: Path
+    environ: Mapping[str, str]
     rng: random.SystemRandom
     bus_factory: BusFactory
 
     # meiva:note
     # The context an independent attachment binds before it has any: the owned clients, the clock,
-    # the machine, the homes, the random generator and the lazily built event bus of this boot.
+    # the machine, the homes, the environment this process was launched with, the random generator
+    # and the lazily built event bus of this boot.
     def new_context(self) -> MeivaContext:
         clock = self.clock
         return MeivaContext(
@@ -68,6 +73,7 @@ class OwnedBoot:
             machine=self.machine,
             user_home=self.user_home,
             meiva_home=self.meiva_home,
+            environ=self.environ,
             rng=self.rng,
         )
 
@@ -95,6 +101,7 @@ def own_external_process(config: ConfigBoot) -> OwnedBoot:
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         user_home=Path.home(),
         meiva_home=resolve_meiva_home(),
+        environ=os.environ,
         rng=rng,
         bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
     )

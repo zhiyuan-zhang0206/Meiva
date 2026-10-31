@@ -24,7 +24,9 @@ and a real resource.
 - `meiva/shell/sessions.py:ShellSessions` — one agent's sessions on the pty-sessions
   backend and the cluster database; its constructor and `create` take everything they use.
   `shell_sessions()` is the facade root (it refuses a process without an agent identity),
-  `open_sessions` builds one for a given agent id, `session_host` reads the machine facts.
+  `open_sessions` builds one for a given agent id, `process_environ` reads the environment
+  the bound context carries, and `session_host` builds the machine facts a session forwards
+  from that value and this checkout.
 - `meiva/shell/session_plan.py` (strict) — what a session may be called and live for
   (`validate_name`, `validate_ttl`) and how session ids map onto the names the backend
   lists (`match_session`, `session_table`).

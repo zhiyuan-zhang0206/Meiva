@@ -114,6 +114,7 @@ def test_agent_shell_session(
     children re-source them at their own boot), so the secret values appear
     NOWHERE in this launch path: not on an argv of the service or the shell, not in
     the shell's environment."""
+    from base.host.env.registry import process_environment
     from base.paths import workspace_dir
     from base.sessions.backend import PtySessionBackend, get_shell_backend
     from base.sessions.pty.client import PtyClientConfig
@@ -125,7 +126,12 @@ def test_agent_shell_session(
         backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket()), unit_home),
         database=database,
         agent_id=1,
-    ).create("probe", cwd=workspace_dir(1, home=unit_home), ttl=120, host=session_host())
+    ).create(
+        "probe",
+        cwd=workspace_dir(1, home=unit_home),
+        ttl=120,
+        host=session_host(process_environment()),
+    )
     name = "meiva-agent-1-shell-3-probe"
     assert get_shell_backend(home=unit_home).has_session(name)
 

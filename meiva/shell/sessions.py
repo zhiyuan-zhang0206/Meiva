@@ -4,12 +4,12 @@ __all_for_meiva__ = ["capture", "kill", "list", "new", "renew", "send", "send_ke
 
 import builtins
 import contextlib
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseHandle
 from base.cluster import session_name
-from base.host.env.registry import process_environment
 from base.log import logger
 from base.paths import repo_root
 from base.sessions.backend import PtySessionBackend, get_shell_backend
@@ -157,10 +157,21 @@ class ShellSessions:
 
 
 # meiva:note
-# The machine facts a new session starts from, read once per creation: this checkout and the environment the session forwards.
-def session_host() -> SessionHost:
+# The environment this process's bound context carries: the mapping its composition root read once
+# at its entry (`MeivaContext.require_environ()`), never a second read of `os.environ` here. A
+# session created in this process forwards exactly this, and a test drives it the way it drives
+# the clock or the home.
+def process_environ() -> Mapping[str, str]:
+    from meiva.sdk_surface import process_context
+
+    return process_context.current_context().require_environ()
+
+
+# meiva:note
+# The machine facts a new session starts from, read once per creation: this checkout and the environment the session forwards, handed in by the caller.
+def session_host(environ: Mapping[str, str]) -> SessionHost:
     return SessionHost(
-        checkout=repo_root(), forwarded=forward_env_dict(process_environment(), activate_venv=True)
+        checkout=repo_root(), forwarded=forward_env_dict(environ, activate_venv=True)
     )
 
 
@@ -210,7 +221,12 @@ def create_session(
     shell = shell_sessions()
     start = Path(cwd) if cwd is not None else agent_workspace(shell.agent_id)
     return shell.create(
-        name, cwd=start, ttl=ttl, system=system, env_overrides=env_overrides, host=session_host()
+        name,
+        cwd=start,
+        ttl=ttl,
+        system=system,
+        env_overrides=env_overrides,
+        host=session_host(process_environ()),
     )
 
 
@@ -231,7 +247,7 @@ def new(name: str, *, ttl: float) -> int:
         name,
         cwd=agent_workspace(shell.agent_id),
         ttl=ttl,
-        host=session_host(),
+        host=session_host(process_environ()),
     )
     return session_id
 
