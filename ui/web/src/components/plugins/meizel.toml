@@ -8,9 +8,6 @@ exports = ["package-draft-entry.tsx", "plugin-nav.tsx", "plugin-page-frame.tsx",
 "plugin-page-frame.test.tsx" = ["plugin-page-frame.tsx"]
 "theme-pack-tokens.test.tsx" = ["theme-pack-tokens.tsx"]
 
-[debt.third-party-patch]
-"theme-pack-tokens.test.tsx#vi.mock next-themes" = 1
-
 [debt.type-cast]
 "theme-pack-tokens.tsx#cast ThemePackTokens" = 1
 "theme-pack-tokens.tsx#cast ThemePackTokens.<lambda>" = 1

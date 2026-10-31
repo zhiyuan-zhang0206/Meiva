@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "next-themes";
+import { ThemeProvider, useTheme } from "next-themes";
 import { useCallback, useState } from "react";
 
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
@@ -204,8 +204,7 @@ export function Providers({
                   nonce={nonce}
                 >
                   <LanguageProvider>
-                    <ThemePackTokens />
-                    <ThemeColorSync />
+                    <ThemedSlots />
                     <NavTimingReporter />
                     <AppConnectionBanner />
                     {children}
@@ -219,6 +218,19 @@ export function Providers({
         </QueryClientProvider>
       </RootContexts>
     </NavigationRoot>
+  );
+}
+
+// meiva:note
+// The two surfaces that paint from the current scheme take it as a value: this is the one place that
+// reads the theme provider, so both components are driven by a prop a test can set.
+function ThemedSlots() {
+  const { resolvedTheme } = useTheme();
+  return (
+    <>
+      <ThemePackTokens resolvedTheme={resolvedTheme} />
+      <ThemeColorSync resolvedTheme={resolvedTheme} />
+    </>
   );
 }
 

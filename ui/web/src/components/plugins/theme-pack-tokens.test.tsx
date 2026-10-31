@@ -47,12 +47,10 @@ function setMockSetting(key: string, value: unknown) {
   });
 }
 
-// next-themes resolves "system" to a concrete mode; the component keys the
-// half it applies on that, so the tests drive it directly.
+// meiva:note
+// The provider resolves "system" to a concrete mode and the component keys the half it applies on
+// that mode; here it is the value the component takes, so a case drives it directly.
 let mockMode: string | undefined = "light";
-vi.mock("next-themes", () => ({
-  useTheme: () => ({ resolvedTheme: mockMode, theme: mockMode, setTheme: vi.fn() }),
-}));
 
 const SOLARIZED = {
   plugin: "skins",
@@ -89,7 +87,7 @@ function renderApplier() {
   // resolved mode would observe nothing. Each call makes a fresh element.
   const build = () => (
     <QueryClientProvider client={qc}>
-      <ThemePackTokens />
+      <ThemePackTokens resolvedTheme={mockMode} />
     </QueryClientProvider>
   );
   return { ...render(build()), build };

@@ -1,12 +1,12 @@
 import { act, cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ThemeColorSync } from "./theme-color-sync";
 
-let mockMode = "dark";
-vi.mock("next-themes", () => ({
-  useTheme: () => ({ resolvedTheme: mockMode, theme: mockMode, setTheme: vi.fn() }),
-}));
+// meiva:note
+// The scheme the page shows, handed in as the value the component takes; a case that changes it
+// re-renders with the new one instead of moving a module mock.
+let mockMode: string | undefined = "dark";
 
 // meiva:note
 // Next renders one media-scoped theme-color per scheme for the first paint; the
@@ -43,23 +43,23 @@ afterEach(() => {
 describe("ThemeColorSync", () => {
   it("copies the palette's chrome colour onto every theme-color meta", () => {
     palette("#222222");
-    render(<ThemeColorSync />);
+    render(<ThemeColorSync resolvedTheme={mockMode} />);
     expect(metas().map((m) => m.content)).toEqual(["#222222", "#222222"]);
   });
 
   it("follows an in-app theme override on the next theme change", () => {
     palette("#222222");
-    const { rerender } = render(<ThemeColorSync />);
+    const { rerender } = render(<ThemeColorSync resolvedTheme={mockMode} />);
     expect(metas()[0].content).toBe("#222222");
 
     mockMode = "light";
     palette("#ffffff");
-    act(() => rerender(<ThemeColorSync />));
+    act(() => rerender(<ThemeColorSync resolvedTheme={mockMode} />));
     expect(metas().map((m) => m.content)).toEqual(["#ffffff", "#ffffff"]);
   });
 
   it("leaves the metas alone when the palette declares no chrome colour", () => {
-    render(<ThemeColorSync />);
+    render(<ThemeColorSync resolvedTheme={mockMode} />);
     expect(metas().map((m) => m.content)).toEqual(["#ffffff", "#222222"]);
   });
 });
