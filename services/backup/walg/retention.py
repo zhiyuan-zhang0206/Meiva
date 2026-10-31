@@ -23,7 +23,7 @@ not used: its behavior has not been exercised against this bucket layout.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -137,7 +137,12 @@ def _sentinel(backup_name: str) -> str:
 
 
 def apply_retention(
-    backups: list[Backup], report: Callable[[str], None], *, path: Path | None, home: Path
+    backups: list[Backup],
+    report: Callable[[str], None],
+    *,
+    path: Path | None,
+    home: Path,
+    environ: Mapping[str, str],
 ) -> RetentionOutcome:
     """Delete what `retain FULL 3` expires, after auditing the dry run.
 
@@ -153,7 +158,7 @@ def apply_retention(
         return RetentionOutcome(marked=0, deleted=0)
     command = ["delete", "retain", "FULL", str(RETAIN_FULL_BACKUPS), "--use-sentinel-time"]
     planned = parse_marked(
-        run_walg_logged(command, timeout_s=DELETE_TIMEOUT_S, path=path, home=home),
+        run_walg_logged(command, timeout_s=DELETE_TIMEOUT_S, path=path, home=home, environ=environ),
         DRY_RUN_COUNT,
     )
     if not planned:
@@ -164,7 +169,13 @@ def apply_retention(
         report(f"  {key}")
     assert_invariants(planned, backups)
     deleted = parse_marked(
-        run_walg_logged([*command, "--confirm"], timeout_s=DELETE_TIMEOUT_S, path=path, home=home),
+        run_walg_logged(
+            [*command, "--confirm"],
+            timeout_s=DELETE_TIMEOUT_S,
+            path=path,
+            home=home,
+            environ=environ,
+        ),
         _DELETED_COUNT,
     )
     if sorted(deleted) != sorted(planned):

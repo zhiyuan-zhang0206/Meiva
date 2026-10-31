@@ -1,10 +1,11 @@
 # meiva:note
 # A fresh interpreter for the WAL-G tests that need their own process environment.
 #
-# `env` prints the environment `walg_env()` hands wal-g; `profile <walg path>` prints what a
+# `env` prints the environment `walg_env(, environ=sandbox.environ)` hands wal-g; `profile <walg path>` prints what a
 # `ConfigBoot` of this process's profile says about the `walg` domain.
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -41,7 +42,7 @@ def _profile(path: Path) -> dict[str, object]:
 
 if __name__ == "__main__":
     if sys.argv[1] == "env":
-        sys.stdout.write(json.dumps(runner.walg_env()))
+        sys.stdout.write(json.dumps(runner.walg_env(environ=os.environ)))
     elif sys.argv[1] == "profile":
         sys.stdout.write(json.dumps(_profile(Path(sys.argv[2]))))
     else:

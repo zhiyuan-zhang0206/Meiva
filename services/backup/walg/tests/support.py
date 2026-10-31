@@ -17,9 +17,9 @@ import signal
 import subprocess
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +53,11 @@ class Sandbox:
     config_file: Path
     key_file: Path
     enabled: bool = True
+
+    # meiva:note
+    # The environment the run helpers are handed: a deliberate mapping, not this test process's,
+    # so a test proves the value travelled from its caller (`filter_daemon_env` keeps these).
+    environ: Mapping[str, str] = field(default_factory=dict)
 
     # meiva:note
     # The configured WAL-G path as this sandbox holds it: its file, or None while off.
@@ -140,7 +145,19 @@ def make_sandbox(
     binary.chmod(0o755)
 
     point_home(monkeypatch, tmp_path / "environment-home")
-    sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)
+    sandbox = Sandbox(
+        home,
+        store_dir,
+        config_file,
+        key_file,
+        enabled,
+        environ={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(home),
+            "TMPDIR": str(tmp_path),
+            "LANG": "C.UTF-8",
+        },
+    )
     sandbox.write_config(valid_config(key_file))
     if enabled:
         (store_dir / "enabled").write_text("1")

@@ -128,6 +128,7 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
             path=sandbox.path,
             socket_root=socket_root,
             home=sandbox.home,
+            environ=sandbox.environ,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
             _assert_scratch_posture(instance, max_connections="150")
@@ -154,6 +155,7 @@ def test_recovers_to_a_target_time(
             keep_data=False,
             path=sandbox.path,
             home=sandbox.home,
+            environ=sandbox.environ,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
 
@@ -173,6 +175,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
             keep_data=False,
             path=sandbox.path,
             home=sandbox.home,
+            environ=sandbox.environ,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b", "B2"]
 
@@ -200,6 +203,7 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
                 keep_data=False,
                 path=sandbox.path,
                 home=sandbox.home,
+                environ=sandbox.environ,
             ) as instance,
             psycopg.connect(
                 host=str(instance.socket_dir), port=instance.port, user="meiva", dbname="postgres"
@@ -230,6 +234,7 @@ def test_a_missing_segment_between_backup_and_target_fails_recovery(
                 keep_data=False,
                 path=sandbox.path,
                 home=sandbox.home,
+                environ=sandbox.environ,
             ),
         ):
             pytest.fail("recovery must not reach a target behind a gap")
@@ -253,6 +258,7 @@ def test_refuses_a_directory_that_is_not_empty(
             keep_data=True,
             path=sandbox.path,
             home=sandbox.home,
+            environ=sandbox.environ,
         ),
     ):
         pytest.fail("must not fetch into an occupied directory")
@@ -272,6 +278,7 @@ def test_refuses_the_live_data_directory(tmp_path: Path, monkeypatch: pytest.Mon
                 keep_data=True,
                 path=sandbox.path,
                 home=sandbox.home,
+                environ=sandbox.environ,
             ),
         ):
             pytest.fail("must refuse")
@@ -294,6 +301,7 @@ def test_the_live_data_directory_is_the_one_of_the_home_it_is_handed(
             keep_data=True,
             path=sandbox.path,
             home=elsewhere,
+            environ=sandbox.environ,
         ),
     ):
         pytest.fail("must refuse")
@@ -313,6 +321,7 @@ def test_a_failed_fetch_is_a_restore_error(tmp_path: Path, monkeypatch: pytest.M
             keep_data=True,
             path=sandbox.path,
             home=sandbox.home,
+            environ=sandbox.environ,
         ),
     ):
         pytest.fail("must not start Postgres after a failed fetch")
@@ -388,7 +397,7 @@ def test_control_settings_reads_what_the_control_file_records(
         capture_output=True,
     )
 
-    settings = restore.control_settings(data, home=sandbox.home)
+    settings = restore.control_settings(data, home=sandbox.home, environ=sandbox.environ)
 
     assert settings["max_connections"] == "100"
     assert set(settings) == {
@@ -406,7 +415,7 @@ def test_control_settings_refuses_a_directory_without_a_control_file(
     empty = tmp_path / "empty"
     empty.mkdir()
     with pytest.raises(RestoreError, match="pg_controldata"):
-        restore.control_settings(empty, home=sandbox.home)
+        restore.control_settings(empty, home=sandbox.home, environ=sandbox.environ)
 
 
 def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
@@ -431,6 +440,7 @@ def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
                 path=sandbox.path,
                 socket_root=socket_root,
                 home=sandbox.home,
+                environ=sandbox.environ,
             ),
         ):
             pytest.fail("a restore as a missing role must not yield an instance")

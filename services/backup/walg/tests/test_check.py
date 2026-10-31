@@ -39,6 +39,7 @@ def _run_check(
         binary_problem=binary_problem,
         admin=probe.admin_connection_to(_REFUSED) if admin is None else admin,
         home=sandbox.home,
+        environ=sandbox.environ,
     )
 
 

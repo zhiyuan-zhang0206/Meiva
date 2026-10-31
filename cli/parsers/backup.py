@@ -10,6 +10,7 @@ def _h_backup_walg_check(args: argparse.Namespace) -> int:
         walg_plane(args.runtime.config),
         token=f"{args.runtime.rng.getrandbits(128):032x}",
         home=args.runtime.home,
+        environ=args.runtime.config.process_environment(),
         installed=args.installed,
     )
 
@@ -24,6 +25,7 @@ def _h_backup_walg_run(args: argparse.Namespace) -> int:
         database_for_url=args.database_factory.for_url,
         clock=args.runtime.clock,
         home=args.runtime.home,
+        environ=config.process_environment(),
     )
 
 
@@ -37,6 +39,7 @@ def _h_backup_walg_drill(args: argparse.Namespace) -> int:
         database_for_url=args.database_factory.for_url,
         clock=args.runtime.clock,
         home=args.runtime.home,
+        environ=config.process_environment(),
     )
 
 
@@ -52,6 +55,7 @@ def _h_backup_walg_restore(args: argparse.Namespace) -> int:
         user=args.user,
         clock=args.runtime.clock,
         home=args.runtime.home,
+        environ=args.runtime.config.process_environment(),
     )
 
 

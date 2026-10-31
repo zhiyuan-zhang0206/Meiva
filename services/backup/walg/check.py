@@ -16,7 +16,7 @@ takes that full name. Nothing printed here contains a credential or key value.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,13 +41,23 @@ class Step:
     ok: bool = field(default=True, kw_only=True)
 
 
-def _storage_round_trip(*, path: Path | None, token: str, home: Path) -> str:
+def _storage_round_trip(
+    *, path: Path | None, token: str, home: Path, environ: Mapping[str, str]
+) -> str:
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
     payload = f"meiva walg check {token}\n".encode()
 
     def call(*args: str) -> str:
-        return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S, path=path, home=home))
+        return str(
+            run_walg(
+                list(args),
+                timeout_s=_STORAGE_CALL_TIMEOUT_S,
+                path=path,
+                home=home,
+                environ=environ,
+            )
+        )
 
     with tempfile.TemporaryDirectory(prefix="meiva-walg-check-") as scratch:
         source, fetched = Path(scratch, "put"), Path(scratch, "get")
@@ -103,6 +113,7 @@ def run_check(
     path: Path | None,
     token: str,
     home: Path,
+    environ: Mapping[str, str],
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> list[Step]:
     return run_check_on(
@@ -111,6 +122,7 @@ def run_check(
         binary_problem=installed(home=home),
         admin=probe.admin_connection(home=home),
         home=home,
+        environ=environ,
     )
 
 
@@ -124,6 +136,7 @@ def run_check_on(
     binary_problem: str | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
     home: Path,
+    environ: Mapping[str, str],
 ) -> list[Step]:
     if not token:
         raise ValueError("the check names its probe object by a non-empty token")
@@ -156,7 +169,12 @@ def run_check_on(
     )
 
     try:
-        steps.append(Step("storage", _storage_round_trip(path=path, token=token, home=home)))
+        steps.append(
+            Step(
+                "storage",
+                _storage_round_trip(path=path, token=token, home=home, environ=environ),
+            )
+        )
     except WalgCommandError as exc:
         return [*steps, Step("storage", str(exc), ok=False)]
 

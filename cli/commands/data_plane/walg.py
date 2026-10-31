@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
@@ -55,10 +55,15 @@ def cmd_walg_check(
     *,
     token: str,
     home: Path,
+    environ: Mapping[str, str],
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     steps = check.run_check(
-        path=plane.walg_config_file, token=token, home=home, installed=installed
+        path=plane.walg_config_file,
+        token=token,
+        home=home,
+        environ=environ,
+        installed=installed,
     )
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
@@ -83,6 +88,7 @@ def cmd_walg_run(
     database_for_url: Callable[[str], Database],
     clock: Clock,
     home: Path,
+    environ: Mapping[str, str],
 ) -> int:
     return tick.run_tick(
         partial(_stamped, clock),
@@ -90,6 +96,7 @@ def cmd_walg_run(
         database_for_url=database_for_url,
         throwaway=throwaway,
         home=home,
+        environ=environ,
     )
 
 
@@ -105,6 +112,7 @@ def cmd_walg_drill(
     database_for_url: Callable[[str], Database],
     clock: Clock,
     home: Path,
+    environ: Mapping[str, str],
 ) -> int:
     return tick.run_drill_now(
         partial(_stamped, clock),
@@ -112,6 +120,7 @@ def cmd_walg_drill(
         database_for_url=database_for_url,
         throwaway=throwaway,
         home=home,
+        environ=environ,
     )
 
 
@@ -131,6 +140,7 @@ def cmd_walg_restore(
     user: str | None = None,
     clock: Clock,
     home: Path,
+    environ: Mapping[str, str],
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     path = plane.walg_config_file
@@ -157,6 +167,7 @@ def cmd_walg_restore(
             keep_data=True,
             path=path,
             home=home,
+            environ=environ,
         ):
             pass
     except RestoreError as exc:
