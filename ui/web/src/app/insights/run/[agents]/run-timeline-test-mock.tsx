@@ -159,3 +159,30 @@ export const cbdFixture: ContextBreakdownResponse = {
   sections: [{ name: "(preamble)", tokens: 100, estimated: true }],
   categories: [{ kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 }],
 };
+
+// meiva:note
+// jsdom has no layout: every element measures 0x0, and the timeline divides the cursor's offset
+// by the width of the row that carries `data-track`, so a wheel or a drag has nothing to divide
+// by. Give the geometry to the page this test rendered — 1000px wide for the rows, starting
+// 100px from the left edge — rather than to `Element.prototype`, which would hand the same
+// numbers to every element in the process for as long as the file is loaded.
+export function measureTheChart(chart: Element): void {
+  const rect = (width: number) => ({
+    left: 100,
+    top: 0,
+    width,
+    height: 0,
+    right: 100 + width,
+    bottom: 0,
+    x: 100,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  const give = (element: Element, width: number): void => {
+    Object.defineProperty(element, "getBoundingClientRect", { configurable: true, value: () => rect(width) });
+  };
+  give(chart, 0);
+  for (const element of chart.querySelectorAll("*")) {
+    give(element, element.hasAttribute("data-track") ? 1000 : 0);
+  }
+}
