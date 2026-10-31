@@ -60,14 +60,15 @@ def _always(selection: Selection) -> Callable[[ChangeSet], Selection]:
 
 
 # meiva:note
-# Red is the exit code, not the text: a run that prints the reassuring line and exits non-zero
-# must still fail.
-def test_a_blocking_run_that_fails_turns_the_receipt_red() -> None:
+# Red is the exit code, not the text: a lint that fails while printing a reassuring word still
+# reddens the receipt. The type check is the exception — its verdict is attribution, because a red
+# tree is not the same claim as a red tree this change can reach.
+def test_a_blocking_run_that_exits_non_zero_turns_the_receipt_red() -> None:
 
     def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
-        if "basedpyright" in str(argv[0]):
-            return 1, "0 errors, 0 warnings", 1.0
-        return 0, "12 passed", 1.0
+        if "ruff" in str(argv[0]):
+            return 1, "all good, promise", 1.0
+        return 0, "0 errors, 0 warnings", 1.0
 
     values, failed = check(
         _change("base/thing.py"),
@@ -77,7 +78,7 @@ def test_a_blocking_run_that_fails_turns_the_receipt_red() -> None:
     )
 
     assert failed is True
-    assert values["pyright"] == "0err(1s)"
+    assert values["ruff"].startswith("failed(1)")
 
 
 def test_a_green_run_reports_the_counts_its_tests_produced() -> None:
@@ -155,3 +156,48 @@ def test_a_change_that_cannot_cross_the_boundary_skips_the_build() -> None:
     lines = plan(_change("ui/web/src/lib/browser/browser.ts", "base/thing.py"), skip_tests=True)
 
     assert not any("next-build" in line for line in lines)
+
+
+# meiva:note
+# A red tree is attributed, not assumed: errors in files that cannot see the change are named so a
+# reader can check them, and the change stays green when none of them are its own.
+def test_errors_outside_the_closure_are_named_and_do_not_fail_the_change(tmp_path: Path) -> None:
+    (tmp_path / "changed.py").write_text("")
+    (tmp_path / "caller.py").write_text("from changed import thing\n")
+    (tmp_path / "unrelated.py").write_text("import json\n")
+    output = f"{tmp_path}/unrelated.py:3:1 - error: something else\n1 error, 0 warnings, 0 notes"
+
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        return (1, output, 2.0) if "basedpyright" in str(argv[0]) else (0, "ok", 1.0)
+
+    values, failed = check(
+        ChangeSet(root=tmp_path, base="origin/main", files=("changed.py",)),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+    )
+
+    assert failed is False, "an error the change cannot reach is not this change's"
+    assert "0in-closure" in values["pyright"]
+    assert "unrelated.py" in values["pyright"]
+
+
+def test_an_error_in_a_file_that_imports_the_change_fails_it(tmp_path: Path) -> None:
+    (tmp_path / "changed.py").write_text("")
+    (tmp_path / "caller.py").write_text("from changed import thing\n")
+    output = f"{tmp_path}/caller.py:3:1 - error: missing argument\n1 error, 0 warnings, 0 notes"
+
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        return (1, output, 2.0) if "basedpyright" in str(argv[0]) else (0, "ok", 1.0)
+
+    values, failed = check(
+        ChangeSet(root=tmp_path, base="origin/main", files=("changed.py",)),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+    )
+
+    assert failed is True, (
+        "a signature change breaks its callers, and those files are the ones it never touched"
+    )
+    assert "1in-closure" in values["pyright"]

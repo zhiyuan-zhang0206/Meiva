@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import shutil
@@ -63,6 +64,7 @@ class Trigger:
 FIELD_ORDER = (
     "pyright",
     "err_in_this_diff",
+    "closure",
     "ruff",
     "selector",
     "tests",
@@ -293,6 +295,98 @@ def _execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
     return result.returncode, result.stdout + result.stderr, time.monotonic() - started
 
 
+# meiva:note
+# Which files can see a change: a file that imports a changed module, or imports a file that does,
+# is inside the closure. A signature change breaks its *callers*, which are by definition files
+# the change did not touch — #7910's seven sites were all in a test file it never edited. The scan
+# costs a few seconds and runs only when the tree is already red.
+_SKIP_DIRS = frozenset({".git", ".venv", "node_modules", "__pycache__", ".worktrees", ".next"})
+
+
+def _module_name(path: Path, root: Path) -> str | None:
+    relative: Path | None = None
+    for candidate, anchor in ((path, root), (path.resolve(), root.resolve())):
+        try:
+            relative = candidate.relative_to(anchor)
+            break
+        except ValueError:
+            continue
+    if relative is None:
+        return None
+    if relative.suffix != ".py":
+        return None
+    parts = list(relative.with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def _imported_modules(tree: ast.AST) -> set[str]:
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return found
+
+
+# meiva:note
+# The reverse-reachability set of this change, or None when a file could not be read: a tool that
+# cannot prove the errors are outside the change must not report them as outside it.
+def _closure(change: ChangeSet) -> set[str] | None:
+    changed = _changed_modules(change)
+    if not changed:
+        return set()
+    importers = _importers(change.root, changed)
+    if importers is None:
+        return None
+    return {name.replace(".", "/") + ".py" for name in _reachable(importers)}
+
+
+def _changed_modules(change: ChangeSet) -> set[str]:
+    return {
+        name
+        for path in change.python_files()
+        if (name := _module_name(change.root / path, change.root)) is not None
+    }
+
+
+def _imports_changed(imported: str, changed: set[str]) -> bool:
+    return imported in changed or any(imported.startswith(f"{module}.") for module in changed)
+
+
+def _importers(root: Path, changed: set[str]) -> dict[str, set[str]] | None:
+    importers: dict[str, set[str]] = {}
+    for path in root.rglob("*.py"):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text())
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            return None
+        name = _module_name(path, root)
+        if name is None:
+            continue
+        if any(_imports_changed(imported, changed) for imported in _imported_modules(tree)):
+            importers[name] = _imported_modules(tree)
+    return importers
+
+
+def _reachable(importers: dict[str, set[str]]) -> set[str]:
+    reached = set(importers)
+    frontier = set(importers)
+    while frontier:
+        frontier = {
+            module
+            for module, imported in importers.items()
+            if module not in reached and imported & frontier
+        }
+        reached |= frontier
+    return reached
+
+
 def _pyright_errors(output: str) -> int:
     return int(found.group(1)) if (found := re.search(r"(\d+) errors?\b", output)) else 0
 
@@ -346,17 +440,55 @@ def _refusal_field(output: str) -> str:
     return f"hits={found.group(1)},blocking={found.group(2)},unreplaced={found.group(3)}"
 
 
+# meiva:note
+# A clean tree says so in one field and stops: no closure scan, no attribution. A red tree is
+# attributed to this change only when the errors sit in files that can see it; anything the scan
+# cannot prove stays inside, because "the tool could not tell" and "not my code" must not look
+# the same in a receipt a reader trusts.
+def _pyright_fields(output: str, seconds: float, change: ChangeSet) -> dict[str, str]:
+    errors = _pyright_errors(output)
+    if errors == 0:
+        return {"pyright": f"0err({_spell(seconds)})"}
+    closure = _closure(change)
+    if closure is None:
+        return {
+            "pyright": f"{errors}err({_spell(seconds)})",
+            "closure": "unknown",
+            "_over_baseline": "1",
+        }
+    inside: list[str] = []
+    outside: list[str] = []
+    changed = set(change.files)
+    root = str(change.root) + "/"
+    for line in output.splitlines():
+        found = _ERROR_LINE.match(line.strip())
+        if found is None:
+            continue
+        name = found.group("path").removeprefix(root)
+        matched = next((path for path in closure if name == path), None)
+        if matched is not None or name in changed:
+            inside.append(name)
+        else:
+            outside.append(name)
+    distinct = sorted(set(outside))
+    shown = ",".join(distinct[:3])
+    more = len(distinct) - 3
+    tail = f"{shown},+{more}more" if more > 0 else shown or "none"
+    return {
+        "pyright": (
+            f"{errors}err({len(inside)}in-closure,{len(outside)}elsewhere:{tail})"
+            f"({_spell(seconds)})"
+        ),
+        "err_in_this_diff": str(_errors_in_diff(output, change)),
+        "_over_baseline": "1" if inside else "0",
+    }
+
+
 def _fields_for(
     run: Run, code: int, output: str, seconds: float, change: ChangeSet
 ) -> dict[str, str]:
     if run.label == "pyright":
-        errors = _pyright_errors(output)
-        over_baseline = errors > PYRIGHT_ERROR_BASELINE or code != 0
-        return {
-            "pyright": f"{errors}err({_spell(seconds)})",
-            "err_in_this_diff": str(_errors_in_diff(output, change)),
-            "_over_baseline": "1" if over_baseline else "0",
-        }
+        return _pyright_fields(output, seconds, change)
     if run.label == "debt":
         return {"debt": _debt_field(output)}
     if run.label == "refusal-loss":
@@ -386,9 +518,10 @@ def check(
                 run.argv, change.root / run.cwd if run.cwd else change.root
             )
             fields = _fields_for(run, code, output, seconds, change)
-            over_baseline = fields.pop("_over_baseline", "0") == "1"
+            attributed = fields.pop("_over_baseline", "")
             values.update(fields)
-            failed = failed or (trigger.blocking and (code != 0 or over_baseline))
+            verdict = attributed == "1" if run.label == "pyright" else code != 0
+            failed = failed or (trigger.blocking and verdict)
     if skip_tests:
         values["tests"] = "SKIPPED(--skip-tests)"
         return values, failed
