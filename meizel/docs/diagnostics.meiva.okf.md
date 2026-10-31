@@ -17,7 +17,7 @@ than off the checker node, which owns the rules rather than the words they repor
 ## When it fails
 
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
-`cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.meiva.okf.md|patching]]),
+`cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching/patching.meiva.okf.md|patching]]),
 the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
 `ambient-read`, `legal-read-recorded`, `stale-root`, `stale-reader`, `stale-approval`,
 `approved-budget` ([[meizel/docs/checker/policy/policy.meiva.okf.md|the approved list's ceiling]]),

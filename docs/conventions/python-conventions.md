@@ -530,7 +530,7 @@ A test does not replace a name in another module (`monkeypatch.setattr`,
 control something, the production code takes it as a parameter, a constructor argument
 for a class or a required keyword for a function, and the test passes a fake or a
 value. Every patch is recorded meizel debt that may only shrink
-([patching](../../meizel/docs/checker/patching.meiva.okf.md)), and a new one fails the
+([patching](../../meizel/docs/checker/patching/patching.meiva.okf.md)), and a new one fails the
 check.
 
 Why:
@@ -661,7 +661,7 @@ patched thing injectable, convert the tests of that component in the same change
 it serves the debt that remains and is not a pattern for a new test.
 
 Three kinds of test-support file patch on purpose and are listed under `[approved-patches.files]`
-in `meizel.policy.toml` ([patching](../../meizel/docs/checker/patching.meiva.okf.md)): an autouse guard
+in `meizel.policy.toml` ([patching](../../meizel/docs/checker/patching/patching.meiva.okf.md)): an autouse guard
 that keeps the suite off the host, the entry of a subprocess a test starts, and the global setup of
 the test runner. A test module is never listed; adding an entry is a decision the reviewer reads in
 `policy diff`.
@@ -688,7 +688,7 @@ met:
 - asserting how a mock was called (`assert_called_once_with`, `call_args`,
   `call_count`): see form 2 above.
 
-Both codes are recorded debt like a patch ([patching](../../meizel/docs/checker/patching.meiva.okf.md)):
+Both codes are recorded debt like a patch ([patching](../../meizel/docs/checker/patching/patching.meiva.okf.md)):
 the existing sites stay until their component is converted, and a new one fails the check.
 A fault has two legitimate routes. A real resource makes it: revoke `INSERT` or `UPDATE`,
 a read-only transaction, a closed pool, a held lock, a trigger that raises, a renamed
