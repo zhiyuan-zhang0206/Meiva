@@ -57,6 +57,7 @@ import {
   cbdFixture,
   LIFETIME,
   lifetimeResponse,
+  measureTheChart,
   messagesResponse,
 } from "./run-timeline-test-mock";
 import { renderWithApi as rtlRender } from "@/test-support/render";
@@ -331,17 +332,12 @@ describe("no drill-in", () => {
 });
 
 describe("zoom and pan", () => {
-  beforeEach(() => {
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
-      const wide = this.hasAttribute("data-track");
-      return { left: 100, top: 0, width: wide ? 1000 : 0, height: 0, right: 1100, bottom: 0, x: 100, y: 0, toJSON: () => ({}) };
-    });
-  });
   afterEach(() => vi.restoreAllMocks());
 
   it("the wheel zooms around the cursor and the loaded data is not read again", async () => {
     renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     const whole = summaryText();
     await wheel(chart, { deltaY: -400, clientX: 100 });
     const zoomed = summaryText();
@@ -354,6 +350,7 @@ describe("zoom and pan", () => {
   it("wheel events that arrive before React renders compose instead of repeating the old view", async () => {
     renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     await wheel(chart, { deltaY: -300, clientX: 600 });
     await wheel(chart, { deltaY: -300, clientX: 600 });
     const sequential = summaryText();
@@ -365,6 +362,7 @@ describe("zoom and pan", () => {
   it("a horizontal scroll pans a zoomed view", async () => {
     renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     await wheel(chart, { deltaY: -600, clientX: 100 });
     const zoomed = summaryText();
     await wheel(chart, { deltaX: 300, deltaY: 0, clientX: 600 });
@@ -382,6 +380,7 @@ describe("zoom and pan", () => {
       }));
     renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     const status = screen.getByTestId("run-timeline-window-status-42");
     expect(status.textContent).toBe("");
     await wheel(chart, { deltaX: -400, clientX: 600 });
@@ -407,6 +406,7 @@ describe("zoom and pan", () => {
   it("a drag pans and its release does not select the block under the pointer", async () => {
     renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     chart.setPointerCapture = vi.fn();
     await wheel(chart, { deltaY: -600, clientX: 100 });
     const zoomed = summaryText();
@@ -423,6 +423,8 @@ describe("zoom and pan", () => {
 
   it("a press that barely moves is still a click", async () => {
     renderPage();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     const human = await unitOf("inbound");
     const unit = screen.getByTestId("run-timeline-canvas-units");
     fireEvent.pointerDown(unit, { clientX: 400, button: 0, pointerId: 1 });
@@ -434,6 +436,8 @@ describe("zoom and pan", () => {
 
   it("the buttons zoom and the fit button restores the whole lifetime", async () => {
     renderPage();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     await screen.findByTestId("run-timeline-chart");
     const whole = summaryText();
     expect(screen.getByRole("button", { name: "Reset zoom" }).hasAttribute("disabled")).toBe(true);

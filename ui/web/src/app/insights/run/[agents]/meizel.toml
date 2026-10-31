@@ -3,7 +3,3 @@ exports = ["page.tsx"]
 [uses]
 "page-interactions.test.tsx" = ["loading.tsx", "page.tsx", "run-timeline-test-mock.tsx"]
 "page.test.tsx" = ["page.tsx", "run-timeline-test-mock.tsx"]
-
-[debt.stdlib-patch]
-"page-interactions.test.tsx#vi.spyOn Element.prototype.getBoundingClientRect" = 1
-"page.test.tsx#vi.spyOn Element.prototype.getBoundingClientRect" = 1

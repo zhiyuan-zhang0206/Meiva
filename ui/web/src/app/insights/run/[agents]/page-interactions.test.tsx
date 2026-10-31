@@ -19,7 +19,7 @@ const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTim
 import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
 import RunTimelinePage from "./page";
 import Loading from "./loading";
-import { cbdFixture, lifetimeResponse, messagesResponse } from "./run-timeline-test-mock";
+import { cbdFixture, lifetimeResponse, measureTheChart, messagesResponse } from "./run-timeline-test-mock";
 import { renderWithApi as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -267,12 +267,9 @@ describe("legend highlight", () => {
     expect(await faded(await nodeOf("1"))).toBe(false);
   });
   it("keeps the highlight through a zoom", async () => {
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
-      const wide = this.hasAttribute("data-track");
-      return { left: 100, top: 0, width: wide ? 1000 : 0, height: 0, right: 1100, bottom: 0, x: 100, y: 0, toJSON: () => ({}) };
-    });
     renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
+    measureTheChart(chart);
     fireEvent.click(screen.getByTestId("run-timeline-legend-human"));
     wheel(chart, { deltaY: -400, clientX: 100 });
     await paintFrame();
