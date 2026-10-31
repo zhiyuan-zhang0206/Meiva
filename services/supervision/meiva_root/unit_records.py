@@ -44,6 +44,11 @@ class Generation:
     # Launched through the assembly's argv rewrite rather than the manifest, so an early
     # non-zero exit can be read as "the wrapper is unusable on this host".
     rewritten: bool = False
+    # meiva:note
+    # Where this generation's output starts in the unit's log file. A wrapper that refuses the
+    # launch writes its reason there and nowhere else, so the retirement warning reads it back
+    # from this offset instead of making the reader go looking in `logs/<unit>/output.log`.
+    log_offset: int = 0
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -79,6 +84,13 @@ class UnitRuntime:
     generation: Generation | None = None
     restart_count: int = 0
     spawn_seq: int = 0
+    # meiva:note
+    # Rewrite health, per unit. Failures are CONSECUTIVE early non-zero exits of a rewritten
+    # generation; a generation that outlives the startup window clears the count. Retirement is
+    # per unit so one unit's unusable wrapper does not take the cap away from its siblings
+    # (2026-10-31: agent-host retired the rewrite and exec-host lost its cap with it).
+    rewrite_failures: int = 0
+    rewrite_retired: bool = False
     last_exit: str | None = None
     last_error: str | None = None
     watch_task: asyncio.Task[None] | None = None
