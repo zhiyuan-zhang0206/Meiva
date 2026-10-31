@@ -15,7 +15,3 @@ exports = ["proxy.ts"]
 
 [debt.impure-call]
 "proxy.ts#proxy#crypto.randomUUID" = 1
-
-[debt.undeclared-edge]
-"components/run-timeline/agent-view/agent-view-links.test.tsx -> app/insights/run/[agents]/page.tsx" = 1
-"components/run-timeline/agent-view/agent-view.test.tsx -> app/insights/run/[agents]/page.tsx" = 1
