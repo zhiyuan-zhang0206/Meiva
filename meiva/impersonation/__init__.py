@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Any, Protocol, Self
+from typing import Protocol, Self
+
+from base.agents.context.external_attachment.state_schema import BaseAgentState
 
 __all_for_meiva__ = []
 
@@ -18,7 +20,7 @@ class _Attachment(Protocol):
 
     def close(self) -> None: ...
 
-    def native_snapshot(self) -> Any: ...
+    def native_snapshot(self) -> BaseAgentState: ...
 
     def __enter__(self) -> Self: ...
 

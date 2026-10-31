@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -256,7 +256,7 @@ def test_the_native_snapshot_is_the_checkpoint_the_attachment_never_writes(
     handle = state_module.PluginStateHandle(ExamplePlugin, "sample")
     with impersonation.attach(attached_runtime.lease_id) as attachment:
         handle.update({"seen": {"external"}})
-        assert attachment.native_snapshot().sample__seen == {"native"}
+        assert cast(Any, attachment.native_snapshot()).sample__seen == {"native"}
     stored, _, _ = load_snapshot(
         attached_runtime.agent_id, database=attached_runtime.cluster.database, home=meiva_home()
     )
