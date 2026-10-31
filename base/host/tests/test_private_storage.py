@@ -4,6 +4,7 @@ import os
 import shutil
 import socket
 import stat
+import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -23,7 +24,8 @@ def _format_summary(kwargs: dict[str, object]) -> str:
     return (
         f"private storage convergence skipped {kwargs['n']} node(s) under {kwargs['path']} "
         f"(symlink={kwargs['symlinks']}, foreign_owned={kwargs['foreign_owned']}, "
-        f"non_regular={kwargs['non_regular']}; node_modules dirs not descended={kwargs['node_modules']}) "
+        f"non_regular={kwargs['non_regular']}, permission_denied={kwargs['permission_denied']}; "
+        f"node_modules dirs not descended={kwargs['node_modules']}) "
         f"— first: {kwargs['examples']}"
     )
 
@@ -90,6 +92,60 @@ def test_converge_skips_foreign_nodes(request: pytest.FixtureRequest, tmp_path: 
     assert str(foreign_file) in examples and str(foreign_dir) in examples
 
 
+# meiva:note
+# Linux gives a file's owner no way to make its own chmod fail, so the refusal is made with
+# the macOS user-immutable flag, which answers `chmod` with EPERM as App Management does.
+# The subject exists only on a macOS host, hence the `requires_host` mark on its tests.
+def _make_chmod_refuse(path: Path, request: pytest.FixtureRequest) -> None:
+    subprocess.run(["chflags", "uchg", str(path)], check=True)  # noqa: S603
+    request.addfinalizer(
+        lambda: subprocess.run(["chflags", "nouchg", str(path)], check=True)  # noqa: S603
+    )
+
+
+@pytest.mark.requires_host("darwin")
+def test_converge_skips_a_node_the_os_refuses_to_chmod(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> None:
+    tree = tmp_path / "tree"
+    guarded = tree / "Bundle.app"
+    guarded.mkdir(parents=True)
+    guarded.chmod(0o755)
+    sibling = tree / "sibling"
+    sibling.mkdir()
+    sibling.chmod(0o755)
+    _make_chmod_refuse(guarded, request)
+    cap = _Captured(request.addfinalizer)
+
+    private_storage.converge_private_tree(tree, euid=os.geteuid())
+
+    assert _mode(guarded) == 0o755
+    assert _mode(sibling) == 0o700
+    assert _mode(tree) == 0o700
+    assert [message for message, _ in cap.debugs] == [
+        f"private storage convergence skipped permission-denied path {guarded}"
+    ]
+    assert len(cap.warnings) == 1
+    message, kwargs = cap.warnings[0]
+    assert message == _format_summary(kwargs)
+    assert kwargs["n"] == 1
+    assert kwargs["permission_denied"] == 1
+    assert f"{guarded} (permission-denied)" in str(kwargs["examples"])
+
+
+@pytest.mark.requires_host("darwin")
+def test_converge_still_raises_when_the_tree_root_refuses_chmod(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> None:
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    tree.chmod(0o755)
+    _make_chmod_refuse(tree, request)
+
+    with pytest.raises(PermissionError):
+        private_storage.converge_private_tree(tree, euid=os.geteuid())
+
+
 def test_private_file_repairs_mode_drift(tmp_path: Path) -> None:
     target = tmp_path / "secret"
     target.write_bytes(b"secret")
@@ -152,6 +208,7 @@ def test_private_tree_skips_nested_symlink(request: pytest.FixtureRequest, tmp_p
         "symlinks": 1,
         "foreign_owned": 0,
         "non_regular": 0,
+        "permission_denied": 0,
         "node_modules": 0,
         "examples": f"{link} (symlink)",
     }
@@ -243,6 +300,7 @@ def test_private_tree_skips_live_unix_socket(request: pytest.FixtureRequest) -> 
             "symlinks": 0,
             "foreign_owned": 0,
             "non_regular": 1,
+            "permission_denied": 0,
             "node_modules": 0,
             "examples": f"{socket_path} (non-regular)",
         }
@@ -277,6 +335,7 @@ def test_private_tree_skips_fifo(request: pytest.FixtureRequest, tmp_path: Path)
         "symlinks": 0,
         "foreign_owned": 0,
         "non_regular": 1,
+        "permission_denied": 0,
         "node_modules": 0,
         "examples": f"{fifo} (non-regular)",
     }

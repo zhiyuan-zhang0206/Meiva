@@ -72,11 +72,17 @@ class SkipReport:
     symlinks: list[Path] = field(default_factory=list[Path])
     foreign_owned: list[Path] = field(default_factory=list[Path])
     non_regular: list[Path] = field(default_factory=list[Path])
+    permission_denied: list[Path] = field(default_factory=list[Path])
     node_modules_dirs: int = 0
 
     @property
     def total(self) -> int:
-        return len(self.symlinks) + len(self.foreign_owned) + len(self.non_regular)
+        return (
+            len(self.symlinks)
+            + len(self.foreign_owned)
+            + len(self.non_regular)
+            + len(self.permission_denied)
+        )
 
     # meiva:note
     # The first few skipped paths, each tagged with its reason.
@@ -85,6 +91,7 @@ class SkipReport:
             [(path, "symlink") for path in self.symlinks]
             + [(path, "foreign-owned") for path in self.foreign_owned]
             + [(path, "non-regular") for path in self.non_regular]
+            + [(path, "permission-denied") for path in self.permission_denied]
         )
         shown = "; ".join(f"{path} ({reason})" for path, reason in tagged[:_SUMMARY_EXAMPLE_LIMIT])
         return f"{shown}; …" if len(tagged) > _SUMMARY_EXAMPLE_LIMIT else shown
@@ -122,13 +129,15 @@ def report_skips(path: Path, skips: SkipReport) -> None:
         logger.warning(
             "private storage convergence skipped {n} node(s) under {path} "
             "(symlink={symlinks}, foreign_owned={foreign_owned}, "
-            "non_regular={non_regular}; node_modules dirs not descended={node_modules}) "
+            "non_regular={non_regular}, permission_denied={permission_denied}; "
+            "node_modules dirs not descended={node_modules}) "
             "— first: {examples}",
             n=skips.total,
             path=path,
             symlinks=len(skips.symlinks),
             foreign_owned=len(skips.foreign_owned),
             non_regular=len(skips.non_regular),
+            permission_denied=len(skips.permission_denied),
             node_modules=skips.node_modules_dirs,
             examples=skips.examples(),
         )
@@ -163,6 +172,23 @@ def converge_child(child: Path, skips: SkipReport, *, euid: int) -> None:
         logger.debug("private storage convergence skipped foreign-owned path {path}", path=child)
         skips.foreign_owned.append(child)
         return
+    try:
+        _repair_child(child, current, skips, euid=euid)
+    except PermissionError:
+        # meiva:note
+        # The operating system refuses the repair: a macOS application bundle an agent
+        # built in its workspace answers a launchd job's `chmod` with EPERM (company-mini
+        # 2026-10-31), and a directory may not be listable. The node is not ours to fix
+        # from this process, so it is skipped like any other node converge has no repair
+        # for and named in the one summary. The tree root is not such a node: a root that
+        # cannot be repaired still raises.
+        logger.debug(
+            "private storage convergence skipped permission-denied path {path}", path=child
+        )
+        skips.permission_denied.append(child)
+
+
+def _repair_child(child: Path, current: os.stat_result, skips: SkipReport, *, euid: int) -> None:
     if stat.S_ISDIR(current.st_mode):
         if child.name == _NODE_MODULES_DIRNAME:
             ensure_private_dir(child, euid=euid)
