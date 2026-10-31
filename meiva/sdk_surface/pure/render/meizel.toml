@@ -1,4 +1,4 @@
-exports = ["const.py", "signature.py"]
+exports = ["const.py", "hidden.py", "signature.py"]
 
 [purity]
 "." = "strict"

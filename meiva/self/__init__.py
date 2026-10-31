@@ -9,7 +9,9 @@ from meiva.boot import maybe_load_plugins_for_missing
 from meiva.files import workspace_base_for
 from meiva.sdk_surface import attachment_transport, process_context
 from meiva.sdk_surface import settings as _settings
-from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS as HARNESS_HIDDEN_SELF_MEMBERS
+from meiva.sdk_surface.pure.render.hidden import (
+    HARNESS_HIDDEN_SELF_MEMBERS as HARNESS_HIDDEN_SELF_MEMBERS,
+)
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.self import lifecycle_plans, plans
 

@@ -36,6 +36,7 @@ from .pure.render.const import (
 from .pure.render.const import (
     is_documented_const,
 )
+from .pure.render.hidden import HARNESS_HIDDEN_SELF_MEMBERS
 from .pure.render.signature import format_signature as format_signature
 
 
@@ -63,14 +64,6 @@ class _Render:
 
 
 _DEFAULT_RENDER = _Render()
-
-HARNESS_HIDDEN_SELF_MEMBERS: frozenset[str] = frozenset(
-    {
-        "meiva.self.attach",
-        "meiva.self.compact",
-        "meiva.self.restart",
-    }
-)
 
 _HARNESS_SELF_SUMMARY = "Your own runtime: AGENT_ID, MACHINE_SPEC, pause_heartbeat, terminate."
 

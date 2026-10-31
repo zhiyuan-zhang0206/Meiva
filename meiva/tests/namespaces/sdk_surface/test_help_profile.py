@@ -131,7 +131,7 @@ def test_external_harness_profile_hides_attach_compact_and_restart_in_self(
 ) -> None:
     import meiva
     from base.api_contracts.agent_contract import Harness
-    from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS
+    from meiva.sdk_surface.pure.render.hidden import HARNESS_HIDDEN_SELF_MEMBERS
 
     first_model = sorted(model_catalog.models)[0]
     profile = ModelHelpProfile.for_model(
