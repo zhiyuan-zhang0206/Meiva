@@ -441,6 +441,12 @@ rule-inputs = [
 # patches is recorded. Only fixture infrastructure qualifies: a guard that keeps the suite off the host, the
 # entry of a subprocess the test starts, the global setup of the test runner. Production code and test modules
 # never do; a test that patches is converted. A file that patches nothing any more is `stale-approval`.
+# `max-files` is the list's budget: every entry hides every patch it holds from the baseline, so past the
+# ceiling the run fails as `approved-budget`. Repay an entry and lower the number, or raise it in the same
+# review and say what the new file hides.
+[approved-patches]
+"max-files" = ["6"]
+
 [approved-patches.files]
 "tests/fixtures/guards.py" = "Guards that keep every test off the host: autouse ones refuse process exec, the helper converge and the native Postgres and Redis drivers and keep the suite outside the exec domain, and the port guard a home requests gives it its own ports; stub_everywhere and stub_boundaries take their targets as arguments, so no fixed list of targets exists to inject."
 "tests/fixtures/provisioning.py" = "The runner's provisioning plugin, loaded once per pytest process by the root conftest: its function-scoped resource windows publish the throwaway data plane a test requested on the process-environment surface — the one every config boot reads and every descendant inherits — and put the unreachable sentinel back afterwards, so a test that requested no resource still cannot dial one. No parameter of the code under test reaches those readers; the settings field and the private .env cover only the readers this file can name."

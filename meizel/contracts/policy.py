@@ -52,9 +52,13 @@ def _site(manifest: Manifest, name: str) -> str:
     return f"{manifest.directory}/{name}" if manifest.directory else name
 
 
+# meiva:note
+# What the policy owes the tree it governs: no manifest runs code the policy does not list, and the
+# policy's own approved list stays inside the ceiling the policy sets for it.
 def check(manifests: dict[str, Manifest], policy: Policy) -> list[Diagnostic]:
     """Every `[external]` and `[loads]` site in a manifest that the policy does not list."""
     found: list[Diagnostic] = []
+    found.extend(_approved_budget(policy))
     for _, manifest in sorted(manifests.items()):
         for name in manifest.external:
             if _site(manifest, name) not in policy.external:
@@ -65,6 +69,44 @@ def check(manifests: dict[str, Manifest], policy: Policy) -> list[Diagnostic]:
             if missing:
                 found.append(_unlisted(manifest, name, "loads", ", ".join(missing)))
     return found
+
+
+# meiva:note
+# The approved list is a budget, not a door. Every file in it hides every patch it holds from the
+# baseline, so the list is paid down or grown by an edit a reviewer reads: `max-files` states the
+# ceiling, and a run that finds more entries than the ceiling refuses rather than recording one more
+# exemption. A ceiling the run cannot read as a count is a finding too - an allowance that cannot be
+# measured must not pass for an absent one.
+def _approved_budget(policy: Policy) -> list[Diagnostic]:
+    ceiling = policy.names("approved-patches", "max-files")
+    if not ceiling:
+        return []
+    line = policy.line_of("max-files", "approved-patches")
+    if not (len(ceiling) == 1 and ceiling[0].isdigit()):
+        return [
+            Diagnostic(
+                POLICY,
+                line,
+                Code.POLICY_SYNTAX,
+                f"[approved-patches] max-files must be one count, not {list(ceiling)!r}",
+                ('state the ceiling as a single number, e.g. max-files = ["6"]',),
+            )
+        ]
+    listed = policy.reasons("approved-patches", "files")
+    if len(listed) <= int(ceiling[0]):
+        return []
+    return [
+        Diagnostic(
+            POLICY,
+            line,
+            Code.APPROVED_BUDGET,
+            f"{len(listed)} files are approved to patch; [approved-patches] max-files is {ceiling[0]}",
+            (
+                "repay one approved file's patches and drop its entry, or raise the ceiling in "
+                "the same change and say in review what the new file hides",
+            ),
+        )
+    ]
 
 
 def _unlisted(manifest: Manifest, name: str, table: str, detail: str) -> Diagnostic:

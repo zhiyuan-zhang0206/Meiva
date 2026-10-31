@@ -80,7 +80,7 @@ RULES: dict[str, dict[str, str]] = {
         "plugin-mechanism-files": REASONS,
     },
     "type-checking": {"files": REASONS},
-    "approved-patches": {"files": REASONS},
+    "approved-patches": {"files": REASONS, "max-files": NAMES},
     "single-owner": {"postgres-dial-owners": NAMES},
     "purity": {
         "impure-imports": NAMES,
