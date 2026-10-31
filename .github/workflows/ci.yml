@@ -78,8 +78,12 @@
 name: CI
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  # Dispatch only (user ruling 2026-10-31 15:47): the pull-request face is off, because a run is
+  # 29 jobs of the shared runner pool and the gate that matters is the one before a cluster
+  # update. A dispatch carries no pull-request context, so `classify` defaults to a full run
+  # (`frontend=true`, `backend=true`) and the structure guard compares against the merge-base
+  # with origin/main. Jobs that only exist for a pull request — diff hints, the merged-tree
+  # preview and the selected backend subset — stay skipped by their own `event_name` guards.
   workflow_dispatch:
 
 permissions:
