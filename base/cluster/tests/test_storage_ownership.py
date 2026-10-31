@@ -9,6 +9,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import get_args
 
 import psutil
 import pytest
@@ -95,12 +96,13 @@ def test_postmaster_pidfile_cannot_supply_missing_native_receipt(pg_data: Path) 
 
 def _pg_receipt(data: Path, *, state: str = "captured", pid: int = 123) -> pg.Receipt:
     info = data.stat()
+    system = sys.platform
     values = {
         "data": str(data.resolve()),
         "directory": [info.st_dev, info.st_ino],
         "port": 15433,
-        "platform": sys.platform,
-        "boot_id": pg.boot_id(),
+        "platform": system,
+        "boot_id": pg.boot_id(system),
         "state": state,
         "owner": None
         if state in {"pending", "not-started"}
@@ -111,6 +113,35 @@ def _pg_receipt(data: Path, *, state: str = "captured", pid: int = 123) -> pg.Re
         },
     }
     return pg.Receipt.model_validate_json(json.dumps(values))
+
+
+def test_an_unsupported_system_is_refused_before_any_boot_scope_is_read() -> None:
+    with pytest.raises(RuntimeError) as refusal:
+        pg.boot_id("windows")
+    assert "requires a supported POSIX platform" in str(refusal.value), (
+        "custody binds a pidfile to one native birth inside one boot scope, and that model is "
+        "defined on macOS and Linux only: on any other system boot_id refuses instead of reading "
+        "an identity no receipt in this repository was ever validated against. If this returns, an "
+        "unsupported host adopts or rejects a postmaster on evidence nobody defined. "
+        f"refusal={refusal.value!r}"
+    )
+    assert "'windows'" in str(refusal.value), (
+        "the refusal names the system it rejected: an operator reading it is on a host this "
+        "repository does not support, and a message that only says the platform is unsupported "
+        "sends them looking for a bug in PostgreSQL instead of at the custody contract. "
+        f"refusal={refusal.value!r}"
+    )
+
+
+def test_the_systems_boot_id_accepts_are_the_ones_a_receipt_can_name() -> None:
+    receipt_systems = set(get_args(pg.Receipt.model_fields["platform"].annotation))
+    assert set(pg.SUPPORTED_SYSTEMS) == receipt_systems, (
+        "boot_id refuses a system outside SUPPORTED_SYSTEMS while Receipt.platform names the "
+        "systems a receipt may record: if the two drift, a receipt read_receipt accepts can never "
+        "be compared against a boot scope, and the failure surfaces at observe time on a host that "
+        "has already launched a postmaster. Widen both together. "
+        f"guard={sorted(pg.SUPPORTED_SYSTEMS)} receipt={sorted(receipt_systems)}"
+    )
 
 
 def test_pending_postgres_is_never_recovered_from_a_pidfile(pg_data: Path) -> None:

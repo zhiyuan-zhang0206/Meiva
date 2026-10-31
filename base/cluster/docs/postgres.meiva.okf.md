@@ -24,7 +24,7 @@ Returning from a CLI invocation does not stop a live data plane.
 `$MEIVA_HOME/run/postgres.json` records pending admission before spawn, then the
 captured native child before readiness. Linux identity is boot UUID, PID and
 mandatory kernel start ticks; macOS uses boot UUID and the exact stable kernel
-birth. The receipt also binds the canonical data path, directory device/inode,
+birth. Custody is defined on those two systems only: `boot_id` refuses any other system before it reads a boot scope, and its caller states the system rather than the module reading the host, so the launch door reads it once and a test can hand in an unsupported one. The receipt also binds the canonical data path, directory device/inode,
 port, and the ready server's pidfile device/inode and fixed header. Fresh and
 retained starts share one locked, bounded protocol-readiness completion. A warm
 start names its exact expected birth, reloads it, and admits a captured receipt
