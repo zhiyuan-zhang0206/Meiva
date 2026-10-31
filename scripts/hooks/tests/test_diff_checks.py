@@ -201,3 +201,24 @@ def test_an_error_in_a_file_that_imports_the_change_fails_it(tmp_path: Path) -> 
         "a signature change breaks its callers, and those files are the ones it never touched"
     )
     assert "1in-closure" in values["pyright"]
+
+
+# meiva:note
+# A bare `ok` cannot tell "read the whole tree" from "found nothing to read": the checker's claim
+# belongs in the receipt beside its verdict.
+def test_the_meizel_field_carries_what_the_checker_covered() -> None:
+    summary = "meizel: ok (76697 fact edges, 772 manifests; 217 recorded debts remain)"
+
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        if "meizel" in str(argv):
+            return 0, summary, 17.0
+        return 0, "0 errors, 0 warnings", 1.0
+
+    values, _ = check(
+        _change("scripts/thing.py"),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+    )
+
+    assert values["meizel"] == "ok(exit=0,772manifests,76697edges)(17s)"

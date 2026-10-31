@@ -408,6 +408,20 @@ def _errors_in_diff(output: str, change: ChangeSet) -> int:
     )
 
 
+# meiva:note
+# What the checker claimed: how many manifests and fact edges it read, and the exit code. A bare
+# `ok` hides the difference between "covered the tree" and "found nothing to look at".
+def _meizel_field(code: int, output: str, seconds: float) -> str:
+    edges = re.search(r"(\d+) fact edges", output)
+    manifests = re.search(r"(\d+) manifests", output)
+    parts = [f"exit={code}"]
+    if manifests is not None:
+        parts.append(f"{manifests.group(1)}manifests")
+    if edges is not None:
+        parts.append(f"{edges.group(1)}edges")
+    return f"{'ok' if code == 0 else 'failed'}({','.join(parts)})({_spell(seconds)})"
+
+
 def _debt_field(output: str) -> str:
     header: list[str] = []
     rows: dict[str, list[str]] = {}
@@ -448,7 +462,10 @@ def _refusal_field(output: str) -> str:
 def _pyright_fields(output: str, seconds: float, change: ChangeSet) -> dict[str, str]:
     errors = _pyright_errors(output)
     if errors == 0:
-        return {"pyright": f"0err({_spell(seconds)})"}
+        return {
+            "pyright": f"0err({_spell(seconds)})",
+            "err_in_this_diff": str(_errors_in_diff(output, change)),
+        }
     closure = _closure(change)
     if closure is None:
         return {
@@ -489,6 +506,8 @@ def _fields_for(
 ) -> dict[str, str]:
     if run.label == "pyright":
         return _pyright_fields(output, seconds, change)
+    if run.label == "meizel":
+        return {"meizel": _meizel_field(code, output, seconds)}
     if run.label == "debt":
         return {"debt": _debt_field(output)}
     if run.label == "refusal-loss":
