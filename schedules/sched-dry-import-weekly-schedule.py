@@ -38,8 +38,7 @@ import meiva
 from base.daemon.schedules.watcher import next_fire
 from base.paths import logs_dir
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.catchup import cluster_timezone
-from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.loop_plan import LoopTiming
 from schedules.plans.schedule_identity import parse_schedule_id

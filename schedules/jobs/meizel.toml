@@ -20,8 +20,5 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 "adversarial_batch.py" = { kinds = ["random"], why = "Adversarial batch shell generates per-case canary tokens and spawn idempotency keys" }
 "adversarial_workers.py" = { kinds = ["clock"], why = "Worker polling shell measures batch wait deadline against UTC wall clock" }
 "agent_directory.py" = { kinds = ["random"], why = "Agent directory shell generates a fresh UUID idempotency key when spawning a missing schedule worker" }
-"entry.py" = { kinds = ["clock", "home", "random", "settings"], why = "Schedule process entry boots configuration before assembling its runtime; it resolves the account home and builds the random generator once, for the SDK context it binds; builds the process clock from SYSTEM_TIMERS" }
+"entry.py" = { kinds = ["clock", "home", "random", "settings"], why = "Schedule process entry boots configuration before assembling its runtime; it resolves the account home and builds the random generator once, for the SDK context it binds; builds the process clock from SYSTEM_TIMERS; reads the cluster timezone every schedule fires in" }
 "loop.py" = { kinds = ["clock"], why = "Schedule runner loop polls current UTC time on each iteration" }
-
-[debt.ambient-read]
-"catchup.py#settings base.clock.Clock.from_settings" = 1

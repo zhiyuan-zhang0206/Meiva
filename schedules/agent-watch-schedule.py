@@ -25,8 +25,7 @@ from zoneinfo import ZoneInfo
 import meiva
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.agent_watch import EmitTally, run_round
-from schedules.jobs.catchup import cluster_timezone
-from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.schedule_identity import parse_schedule_id
 

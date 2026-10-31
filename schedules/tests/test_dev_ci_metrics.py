@@ -27,7 +27,7 @@ from base.host.proc import run_bounded
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.gateway_client import use_client
-from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.entry import cluster_timezone
 from schedules.jobs.ci_metrics import CiMetrics, alert_broken_workflows, collect_ci_metrics
 from schedules.plans.ci_workflows import (
     Alert,

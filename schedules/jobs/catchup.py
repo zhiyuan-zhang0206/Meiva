@@ -4,19 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from base.clock import Clock
 from base.db import Database
-
-
-# meiva:note
-# The cluster wall clock (`MEIVA_TIMEZONE`, cluster-pinned), never the host's OS timezone:
-# the fleet fires at one instant wherever each machine sits, and a weekly cron read
-# host-locally lands the run on the wrong calendar day, not merely at the wrong hour. The
-# entry reads it once and hands the value down, so a changed value waits for the schedule's
-# next restart.
-# meiva:link schedules/README.md
-def cluster_timezone() -> str:
-    return Clock.from_settings().timezone
 
 
 def _as_utc(value: datetime, *, field: str) -> datetime:

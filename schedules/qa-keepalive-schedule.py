@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.entry import cluster_timezone
 from schedules.jobs.qa_keepalive import Keepalive, run_keepalive
 
 HINT = (

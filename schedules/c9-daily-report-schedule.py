@@ -7,8 +7,7 @@ from functools import partial
 from base.host.system.hostport import Host
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.c9_report import C9Report, report_day
-from schedules.jobs.catchup import cluster_timezone
-from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.directory_plan import report_recipient
 from schedules.plans.schedule_identity import parse_schedule_id

@@ -22,7 +22,8 @@ _OLD_HIERARCHY = """\
 import time
 from datetime import UTC, datetime
 
-from schedules.jobs.catchup import cluster_timezone, fire_slot_once
+from schedules.jobs.catchup import fire_slot_once
+from schedules.jobs.entry import cluster_timezone
 from base.daemon.schedules.watcher import next_fire
 
 CRON = "* * * * *"
@@ -122,7 +123,7 @@ def test_check_file_prints_the_call_signature_verdict(
         )
         == 1
     )
-    assert "CHECK-RED missing=call-signature:L16 fire_slot_once()" in capsys.readouterr().out
+    assert "CHECK-RED missing=call-signature:L17 fire_slot_once()" in capsys.readouterr().out
 
 
 def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
