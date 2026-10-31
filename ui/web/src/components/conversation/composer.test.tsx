@@ -1,6 +1,5 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithBrowser } from "@/test-support/render";
+import { renderWithProviders } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
@@ -48,10 +47,8 @@ const baseProps = {
   onStop: vi.fn(),
 };
 
-function renderComposerTree(ui: React.ReactElement) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithBrowser(ui, { wrapper: ({ children }) =>
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
+function renderComposerTree(ui: React.ReactElement, wallNow: () => number = () => Date.now()) {
+  return renderWithProviders(ui, { wallNow });
 }
 
 describe("Composer placeholder", () => {
@@ -334,16 +331,15 @@ describe("Composer button mode dispatch", () => {
   });
   it("marks send latency at submit time before message delivery starts", () => {
     let now = 100;
-    vi.spyOn(performance, "now").mockImplementation(() => now);
     let latencyRecordedBeforeSendResolves = 0;
     const onSend = vi.fn(() => {
       telemetryTestControl.reset();
       now = 150;
-      noteTurnStart(42);
+      noteTurnStart(42, now);
       latencyRecordedBeforeSendResolves = telemetryTestControl.bufferSize();
       return new Promise<boolean>(() => undefined);
     });
-    renderComposerTree(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />, () => now);
     fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onSend).toHaveBeenCalledOnce();

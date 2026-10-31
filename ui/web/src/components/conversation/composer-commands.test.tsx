@@ -1,6 +1,5 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithBrowser } from "@/test-support/render";
+import { renderWithProviders } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "./composer";
@@ -46,10 +45,8 @@ const baseProps = {
   onStop: vi.fn(),
 };
 
-function renderComposerTree(ui: React.ReactElement) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithBrowser(ui, { wrapper: ({ children }) =>
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
+function renderComposerTree(ui: React.ReactElement, wallNow: () => number = () => Date.now()) {
+  return renderWithProviders(ui, { wallNow });
 }
 
 const renderComposer = renderComposerTree;

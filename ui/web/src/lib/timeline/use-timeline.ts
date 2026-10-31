@@ -283,7 +283,7 @@ export function useTimeline(
       // token state twice (R10 double-processing). It carries nothing the
       // timeline renders: applySystemEvent treats token_usage as a no-op.
       if (ev.role === "token_usage") return;
-      if (startsTurn(ev)) noteTurnStart(ev.agent_id);
+      if (startsTurn(ev)) noteTurnStart(ev.agent_id, wallNow());
 
       const apply = () => processSseEvent(ev, wallNow());
       if (isStreamingDelta(ev)) {
@@ -308,7 +308,7 @@ export function useTimeline(
       const filtered = events.filter((ev) => ev.role !== "token_usage");
       if (filtered.length === 0) return;
       for (const ev of filtered) {
-        if (startsTurn(ev)) noteTurnStart(ev.agent_id);
+        if (startsTurn(ev)) noteTurnStart(ev.agent_id, wallNow());
       }
       const hasStreaming = filtered.some((ev) => isStreamingDelta(ev));
       const apply = () => processSseEventBatch(filtered, wallNow());

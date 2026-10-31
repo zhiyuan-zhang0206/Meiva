@@ -29,7 +29,7 @@ import {
 import { SendButton } from "@/components/ui/send-button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
-import { useApi } from "@/lib/transport/transport-context";
+import { useApi, useWallNow } from "@/lib/transport/transport-context";
 import { errMsg } from "@/lib/contracts/errors";
 import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
 import { track } from "@/lib/telemetry/telemetry";
@@ -71,6 +71,7 @@ interface Props {
 
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
   const client = useApi();
+  const wallNow = useWallNow();
   const t = useTranslations("common");
   const browser = useBrowser();
   const session = browser.session;
@@ -275,7 +276,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       sendAttemptRef.current = attempt;
       if (sendingAgentId != null) {
         writeSession(session, sendAttemptKey(sendingAgentId), JSON.stringify(attempt));
-        markMessageSent(sendingAgentId);
+        markMessageSent(sendingAgentId, wallNow());
       }
       const ok = await onSend(content, imageUrls, attempt.clientMessageId);
       if (ok) {
