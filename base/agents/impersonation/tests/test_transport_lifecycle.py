@@ -379,6 +379,43 @@ def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
     assert session["id"] in body["content"]
 
 
+# meiva:note
+# A notice whose caller names no home cannot reach a recorded Antigravity destination, and that
+# is a reported outcome rather than a crash: the host that admits a runtime is mid-admission
+# when it sends the notice, so a missing argument raised here would stop the agent going down
+# instead of leaving one logged failure (2026-10-31, b656aa594's call site).
+def test_a_notice_with_no_home_names_the_missing_home_and_records_it(
+    active: tuple[dict[str, Any], RuntimeIncarnation],
+    database: Database,
+    event_bus: EventBus,
+    db_conn: psycopg.Connection,
+    loguru_records: list[dict[str, Any]],
+    *,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    session, owner = active
+    db_conn.execute(
+        "UPDATE agent_impersonations SET relay_provider='antigravity',relay_thread_id=%s,"
+        "relay_codex_remote=NULL WHERE id=%s",
+        (str(uuid4()), session["id"]),
+    )
+    db_conn.commit()
+    end(database, event_bus, session, local_machine=machine_identity.name())
+
+    reason = terminal_notices.send_ended_notice(database, session["id"], home=None)
+    assert reason == "the home holding the recorded Antigravity destination was not supplied"
+
+    terminal_notices.deliver_ended_notice(database, owner.agent_id, session["id"], home=None)
+    failures = [
+        record["extra"]
+        for record in loguru_records
+        if record["extra"].get("event") == "impersonation_terminal_notice_failed"
+    ]
+    assert failures, "the undelivered notice must be recorded, never dropped"
+    assert failures[-1]["error"] == reason
+    assert (failures[-1]["agent_id"], failures[-1]["lease_id"]) == (owner.agent_id, session["id"])
+
+
 def test_ended_antigravity_notice_without_a_record_names_the_record_it_looked_for(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
