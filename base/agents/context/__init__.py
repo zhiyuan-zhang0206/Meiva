@@ -255,7 +255,13 @@ class MeivaContext:
     # fallback to the process's own environment. Nothing on this path guesses a value for a child.
     def require_environ(self) -> Mapping[str, str]:
         if self.environ is None:
-            raise RuntimeError("this MeivaContext carries no process environment")
+            raise RuntimeError(
+                "this MeivaContext carries no process environment, and the caller is about to "
+                "hand one to a child process (a shell session, a watcher). Falling back to this "
+                "process's own environment would give the child the environment of whatever "
+                "started it — a test would inherit the developer's shell, a launched script the "
+                "wrong home or virtualenv — so the refusal names the missing value instead"
+            )
         return self.environ
 
     # meiva:note
