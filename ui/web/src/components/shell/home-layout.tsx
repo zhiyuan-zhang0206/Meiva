@@ -13,6 +13,22 @@ import { usePanelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 import { useClientReady } from "@/lib/layout/use-client-ready";
 import { cn } from "@/lib/format/utils";
 
+// meiva:note
+// The three layout pieces the frame is built from. They default to our wrappers over
+// react-resizable-panels; a test hands in its own, because the library measures a layout the test
+// document cannot produce — nothing replaces the package module.
+export interface LayoutParts {
+  PanelGroup: typeof ResizablePanelGroup;
+  Panel: typeof ResizablePanel;
+  Handle: typeof ResizableHandle;
+}
+
+const systemLayoutParts: LayoutParts = {
+  PanelGroup: ResizablePanelGroup,
+  Panel: ResizablePanel,
+  Handle: ResizableHandle,
+};
+
 // Panel sizes are written as explicit percent strings: v4 reads a bare number
 // as PIXELS and a unit-less string as percent (v3 read numbers as percent).
 interface ColumnFrame {
@@ -59,11 +75,13 @@ interface Props {
 // stopped above the composer and below the title bar, which read as a broken
 // line next to dividers that do run edge to edge (user report 2026-10-20).
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-function HomeDividerHandle() {
-  return <ResizableHandle />;
+function HomeDividerHandle({ parts }: { parts: LayoutParts }) {
+  const { Handle } = parts;
+  return <Handle />;
 }
 
-function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
+function DesktopMain({ main, inspector, parts }: Pick<Props, "main" | "inspector"> & { parts: LayoutParts }) {
+  const { PanelGroup, Panel } = parts;
   const splitStorage = usePanelLayoutStorage();
   const inspectorVisible = inspector !== null && inspector !== undefined && inspector !== false;
   const mainDefaultSize = inspectorVisible ? INSPECTOR_OPEN_SIZES[0] : "100%";
@@ -83,34 +101,34 @@ function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
     // Keep this group horizontal for its whole lifetime. Re-orienting (or
     // re-shaping) a mounted react-resizable-panels group can normalize and
     // commit a breakpoint frame over the user's saved desktop split.
-    <ResizablePanelGroup
+    <PanelGroup
       orientation="horizontal"
       defaultLayout={defaultLayout}
       onLayoutChanged={onLayoutChanged}
       className={cn(FLEX_1, MIN_H_0, MIN_W_0)}
     >
-      <ResizablePanel
+      <Panel
         id={PANEL_TIMELINE}
         defaultSize={mainDefaultSize}
         minSize={inspectorVisible ? "50%" : "100%"}
         className={cn(FLEX, MIN_H_0, MIN_W_0)}
       >
         {main}
-      </ResizablePanel>
+      </Panel>
       {inspectorVisible ? (
         <>
-          <HomeDividerHandle />
-          <ResizablePanel
+          <HomeDividerHandle parts={parts} />
+          <Panel
             id={PANEL_INSPECTOR}
             defaultSize={INSPECTOR_OPEN_SIZES[1]}
             minSize="25%"
             className={cn(FLEX, MIN_H_0, MIN_W_0)}
           >
             {inspector}
-          </ResizablePanel>
+          </Panel>
         </>
       ) : null}
-    </ResizablePanelGroup>
+    </PanelGroup>
   );
 }
 
@@ -121,7 +139,9 @@ export function HomeLayout({
   sidebar,
   main,
   inspector,
-}: Props) {
+  parts = systemLayoutParts,
+}: Props & { parts?: LayoutParts }) {
+  const { PanelGroup, Panel } = parts;
   // A hydrating load starts in the SSR-safe mobile frame; Delay PanelGroup
   // registration until the breakpoint values are the client's own — otherwise
   // the transient frame registers a group that immediately remounts onto the
@@ -183,7 +203,7 @@ export function HomeLayout({
     <>
       {/* Desktop and compact frames have different layout ids, so breakpoint
           transitions cannot overwrite each other's saved ratios. */}
-      <ResizablePanelGroup
+      <PanelGroup
         key={frame.layoutId}
         orientation="horizontal"
         defaultLayout={defaultLayout}
@@ -191,7 +211,7 @@ export function HomeLayout({
         className={cn(FLEX_1, MIN_H_0, MIN_W_0)}
       >
         {sidebarCollapsed ? null : (
-          <ResizablePanel
+          <Panel
             key={PANEL_SIDEBAR}
             id={PANEL_SIDEBAR}
             defaultSize={frame.expanded[0]}
@@ -200,19 +220,19 @@ export function HomeLayout({
             className={cn(FLEX, MIN_H_0, MIN_W_0)}
           >
             {sidebar}
-          </ResizablePanel>
+          </Panel>
         )}
-        {sidebarCollapsed ? null : <HomeDividerHandle key="home-divider" />}
-        <ResizablePanel
+        {sidebarCollapsed ? null : <HomeDividerHandle key="home-divider" parts={parts} />}
+        <Panel
           key={PANEL_MAIN}
           id={PANEL_MAIN}
           defaultSize={sidebarCollapsed ? "100%" : frame.expanded[1]}
           minSize={frame.expandedMinimums[1]}
           className={cn(FLEX, MIN_H_0, MIN_W_0)}
         >
-          {isLarge ? <DesktopMain main={main} inspector={inspector} /> : main}
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          {isLarge ? <DesktopMain main={main} inspector={inspector} parts={parts} /> : main}
+        </Panel>
+      </PanelGroup>
       {/* Below lg the inspector remains the existing fixed overlay. Keeping it
           outside the md-width split prevents a hidden panel from consuming
           timeline width and avoids clipping position:fixed under a panel. */}
