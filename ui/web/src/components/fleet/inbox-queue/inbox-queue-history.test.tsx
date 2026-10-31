@@ -6,62 +6,56 @@ import type { ComponentProps } from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
-import type { NoticesFeed } from "@/lib/notifications/use-notices";
+import {
+  NOTICES_QUERY_KEY,
+  NOTICES_RESOLVED_QUERY_KEY,
+  type NoticesFeedWire,
+} from "@/lib/notifications/use-notices";
 
-const resolveNotice = vi.fn<
-  (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
->();
+// meiva:note
+// What the queue is handed for one case: the rows the app would already hold in its caches, the
+// registry under its seven-day window, the open pages, and which endpoint the case needs to behave
+// badly. Every field is a value the real hooks turn into the answer the queue renders; no test
+// replaces a hook module. `resolved` with `nextCursor` is the history's first page and `nextPage`
+// the page that cursor reaches, `tasksWindow` the window those task rows answer under, `cold` an
+// empty cache, and the two pairs of `…Fails` / `…Pending` flags are the endpoints refusing or
+// never answering.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+interface QueueSeed {
+  open?: NoticeItem[];
+  awaiting?: NoticeItem[];
+  resolved?: NoticeItem[];
+  nextCursor?: { before_at: string; before_id: number } | null;
+  nextPage?: NoticeItem[];
+  tasks?: TaskSummaryRow[];
+  tasksWindow?: string;
+  pages?: PageRow[];
+  cold?: boolean;
+  openFails?: boolean;
+  openPending?: boolean;
+  historyFails?: boolean;
+  historyPending?: boolean;
+}
 
-const inboxFeedMock = vi.fn<() => NoticesFeed>();
-const dropOpenNotices = vi.fn<(queryClient: unknown, noticeIds: number[]) => void>();
-vi.mock("@/lib/notifications/use-notices", () => ({
-  useNotices: () => inboxFeedMock(),
-  dropOpenNotices: (qc: unknown, ids: number[]) => dropOpenNotices(qc, ids),
-}));
+let seed: QueueSeed = {};
 
-const useTasksMock = vi.fn<(window?: string, fields?: string) => { tasks: TaskSummaryRow[]; loading: boolean; error: boolean }>(
-  () => ({ tasks: [], loading: false, error: false }),
-);
-vi.mock("@/lib/notifications/use-tasks", () => ({
-  useTasks: (window?: string, fields?: string) => useTasksMock(window, fields),
-}));
-
-const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
-vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
+function setFeed(over: QueueSeed = {}) {
+  seed = { ...seed, ...over };
+}
 
 import { InboxQueue } from "../inbox-queue";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
-  transport.resolveNotice.mockImplementation((a: number, n: number, b: { action: string; reply?: string }) => resolveNotice(a, n, b));
   transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  inboxFeedMock.mockReturnValue(emptyFeed());
-  useTasksMock.mockReturnValue({ tasks: [], loading: false, error: false });
-  useAllPagesMock.mockReturnValue([]);
+  seed = {};
 });
-
-function emptyFeed(over: Partial<NoticesFeed> = {}): NoticesFeed {
-  return {
-    open: over.open ?? [],
-    awaiting: over.awaiting ?? [],
-    resolved: over.resolved ?? [],
-    fetchNextPage: over.fetchNextPage ?? vi.fn(),
-    hasNextPage: over.hasNextPage ?? false,
-    isFetchingNextPage: over.isFetchingNextPage ?? false,
-    error: over.error ?? false,
-    resolvedError: over.resolvedError ?? false,
-    isLoading: over.isLoading ?? false,
-  };
-}
-function setFeed(over: Partial<NoticesFeed> = {}) {
-  inboxFeedMock.mockReturnValue(emptyFeed(over));
-}
 
 function n(over: Partial<NoticeItem> & { id: number; title: string }): NoticeItem {
   return {
@@ -138,11 +132,56 @@ function agent(over: {
   };
 }
 
+// meiva:note
+// The endpoint that answers nothing: the case that needs a query still in flight (no rows, no
+// error) hands this in, so "loading" is the hook's own state rather than a stubbed one.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+function neverSettles<T>(): Promise<T> {
+  return new Promise<T>(() => undefined);
+}
+
+// meiva:note
+// The test door for this file: the cache carries the rows the app would have fetched, and the fake
+// transport answers the same endpoints so a refetch agrees with it. The two hook modules stay real,
+// so a case that reads a cursor or a failure is reading the hook's own answer.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 function renderQueue(
   agents: AgentRow[],
   props: Omit<ComponentProps<typeof InboxQueue>, "agents"> = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const firstPage: NoticesFeedWire = {
+    open: seed.open ?? [],
+    awaiting: seed.awaiting ?? [],
+    resolved_page: seed.cold ? [] : (seed.resolved ?? []),
+    next_cursor: seed.nextCursor ?? null,
+  };
+  if (!seed.cold) {
+    qc.setQueryData(NOTICES_QUERY_KEY, firstPage);
+    qc.setQueryData(NOTICES_RESOLVED_QUERY_KEY, {
+      pages: [{ resolved_page: firstPage.resolved_page, next_cursor: firstPage.next_cursor }],
+      pageParams: [undefined],
+    });
+  }
+  qc.setQueryData(["tasks", "summary", "7d"], { tasks: seed.tasksWindow === undefined || seed.tasksWindow === "7d" ? (seed.tasks ?? []) : [] });
+  qc.setQueryData(["all-pages"], seed.pages ?? []);
+  transport.getTasks.mockImplementation((opts?: { window?: string }) =>
+    Promise.resolve({ tasks: (opts?.window ?? "all") === (seed.tasksWindow ?? "7d") ? (seed.tasks ?? []) : [] }),
+  );
+  transport.listAllPages.mockImplementation(() => Promise.resolve(seed.pages ?? []));
+  transport.getNotices.mockImplementation((params?: { beforeAt?: string }) => {
+    // meiva:note
+    // The open feed asks with no cursor; the history asks with one, so the same endpoint answers
+    // both the way the gateway does. A case that makes it fail or hang says which of the two.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    const history = params !== undefined;
+    if (history ? seed.historyPending : seed.openPending) return neverSettles();
+    if (history ? seed.historyFails : seed.openFails) return Promise.reject(new Error("inbox unavailable"));
+    if (params?.beforeAt !== undefined) {
+      return Promise.resolve({ open: [], awaiting: [], resolved_page: seed.nextPage ?? [], next_cursor: null });
+    }
+    return Promise.resolve(firstPage);
+  });
   return renderWithBrowser(
     // meiva:note
     // The queue's rows age against the page's clock; the app's own answer (the system clock) is
@@ -252,14 +291,25 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
     expect(screen.getByText(/Expired/)).not.toBeNull();
   });
 
-  it("pages back with Show more once the disclosure is open", () => {
-    const fetchNextPage = vi.fn();
-    setFeed({ resolved: [ni({ id: 60, title: "r1" })], hasNextPage: true, fetchNextPage });
+  // meiva:note
+  // "Show more" is the history's own cursor: the first page says another follows, the endpoint
+  // answers that cursor with the second page, and the second page's row appears.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  it("pages back with Show more once the disclosure is open", async () => {
+    setFeed({
+      resolved: [ni({ id: 60, title: "r1" })],
+      nextCursor: { before_at: "2026-06-18T00:00:00Z", before_id: 60 },
+      nextPage: [ni({ id: 59, title: "r2" })],
+    });
     renderQueue([]);
     expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
     fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
-    expect(fetchNextPage).toHaveBeenCalled();
+    await screen.findByText("r2");
+    expect(screen.getByText("r1")).not.toBeNull();
+    expect(transport.getNotices).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeAt: "2026-06-18T00:00:00Z", beforeId: 60 }),
+    );
   });
 });
 
@@ -280,22 +330,33 @@ function tk(id: number, over: Partial<TaskSummaryRow> = {}): TaskSummaryRow {
 }
 
 describe("InboxQueue — task grouping", () => {
-  function withRegistry() {
-    useTasksMock.mockReturnValue({
+  function withRegistry(window = "7d") {
+    setFeed({
+      tasksWindow: window,
       tasks: [
         tk(1, { title: "root" }),
         tk(2, { parent_id: 1, title: "ship feature", owner: 30 }),
         tk(3, { parent_id: 2, title: "write tests", owner: 40 }),
       ],
-      loading: false,
-      error: false,
     });
   }
 
-  it("bounds task grouping to the seven-day registry window", () => {
+  // meiva:note
+  // The binding is the window the queue asks under, so the case states it as one: a registry that
+  // only answers under a different window reaches the queue empty, and the same rows under seven
+  // days group. A hook replaced by a test could not tell those two apart.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  it("reads the task registry under the seven-day window and under no other", () => {
+    withRegistry("30d");
+    setFeed({ awaiting: [n({ id: 1, title: "q-mgr", priority: "P2", agent_id: 30 })] });
+    const other = renderQueue([agent({ agent_id: 30, label: "mgr" })]);
+    expect(screen.queryByLabelText(/^Task #/)).toBeNull();
+    other.unmount();
+    setFeed({ tasksWindow: undefined });
     withRegistry();
-    renderQueue([]);
-    expect(useTasksMock).toHaveBeenCalledWith("7d", "summary");
+    setFeed({ awaiting: [n({ id: 1, title: "q-mgr", priority: "P2", agent_id: 30 })] });
+    renderQueue([agent({ agent_id: 30, label: "mgr" })]);
+    expect(screen.getByLabelText("Task #2: ship feature")).not.toBeNull();
   });
 
   it("groups entries under the top-level task subtree with a count", () => {
@@ -339,35 +400,39 @@ describe("InboxQueue — task grouping", () => {
 });
 
 describe("InboxQueue — error presentation (audit C3)", () => {
-  it("open feed failure with nothing loaded → failure screen, not the empty state", () => {
-    setFeed({ error: true });
+  it("open feed failure with nothing loaded → failure screen, not the empty state", async () => {
+    setFeed({ cold: true, openFails: true });
     renderQueue([agent({ agent_id: 1 })]);
+    await screen.findByText("Failed to load inbox.");
     expect(screen.getByText("Failed to load inbox.")).not.toBeNull();
     expect(screen.queryByText(/Nothing needs your attention/)).toBeNull();
   });
 
-  it("open feed failure with notices on screen → Stale badge, entries still shown", () => {
-    setFeed({ error: true, awaiting: [n({ id: 10, title: "dec-p2" })] });
+  it("open feed failure with notices on screen → Stale badge, entries still shown", async () => {
+    setFeed({ openFails: true, awaiting: [n({ id: 10, title: "dec-p2" })] });
     renderQueue([agent({ agent_id: 1, label: "a" })]);
+    await screen.findByText("Stale");
     expect(screen.getByText("Stale")).not.toBeNull();
     expect(listTitles()).toEqual(["dec-p2"]);
   });
 
-  it("resolved-history failure with open entries on screen → unavailable line", () => {
-    setFeed({ resolvedError: true, awaiting: [n({ id: 21, title: "question" })] });
+  it("resolved-history failure with open entries on screen → unavailable line", async () => {
+    setFeed({ historyFails: true, awaiting: [n({ id: 21, title: "question" })] });
     renderQueue([agent({ agent_id: 1 })]);
+    await screen.findByText("Resolved history unavailable.");
     expect(screen.getByText("Resolved history unavailable.")).not.toBeNull();
     expect(listTitles()).toEqual(["question"]);
   });
 
-  it("any cold failure with nothing at all loaded → failure screen", () => {
-    setFeed({ resolvedError: true });
+  it("any cold failure with nothing at all loaded → failure screen", async () => {
+    setFeed({ cold: true, historyFails: true });
     renderQueue([agent({ agent_id: 1 })]);
+    await screen.findByText("Failed to load inbox.");
     expect(screen.getByText("Failed to load inbox.")).not.toBeNull();
   });
 
   it("first load in flight → Loading, not the empty state", () => {
-    setFeed({ isLoading: true });
+    setFeed({ cold: true, openPending: true, historyPending: true });
     renderQueue([agent({ agent_id: 1 })]);
     expect(screen.getByText("Loading…")).not.toBeNull();
     expect(screen.queryByText(/Nothing needs your attention/)).toBeNull();
@@ -385,8 +450,7 @@ describe("InboxQueue — terminated agent", () => {
 
 describe("InboxQueue — agent live-page entry", () => {
   it("a queue row links to the agent's live page (fleet-wide, no per-row fetch)", () => {
-    useAllPagesMock.mockReturnValue([mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })]);
-    setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
+    setFeed({ pages: [mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })], awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
     const list = screen.getByRole("list", { name: /inbox queue/i });
     const link = within(list).getByRole("link", { name: /open live page/i });
@@ -395,7 +459,7 @@ describe("InboxQueue — agent live-page entry", () => {
   });
 
   it("no page link on a row whose agent has no open page", () => {
-    useAllPagesMock.mockReturnValue([mkPage({ agent_id: 2, name: "other" })]);
+    setFeed({ pages: [mkPage({ agent_id: 2, name: "other" })] });
     setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
     const list = screen.getByRole("list", { name: /inbox queue/i });
@@ -403,8 +467,7 @@ describe("InboxQueue — agent live-page entry", () => {
   });
 
   it("the detail header also links the selected agent's live page", () => {
-    useAllPagesMock.mockReturnValue([mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })]);
-    setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
+    setFeed({ pages: [mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })], awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
     const links = screen.getAllByRole("link", { name: /open live page/i });
     expect(links.length).toBe(2);
