@@ -278,6 +278,7 @@ APPROVED_PATCH_SITES = {
     "cli/tests/bootstrap/child_main_dispatch.py": 2,
     "tests/e2e/fakes/child_budget_writer.py": 2,
     "tests/fixtures/guards.py": 7,
+    "tests/fixtures/provisioning.py": 2,
     "tests/integration/child_schedule_runner.py": 2,
     "ui/web/tests/vitest.setup.ts": 1,
 }

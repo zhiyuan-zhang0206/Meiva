@@ -1,97 +1,97 @@
-"""Forbid a pytest fixture whose scope outlives the blast radius of the process
-global it mutates.
-
-Run: `.venv/bin/python scripts/lint/fixture_scope.py [path ...]` (defaults to
-scanning every `tests/` directory: the top-level `tests/` and each package's own
-`<pkg>/**/tests/` from pytest `testpaths`; an explicit path that does not exist
-is an error (stderr + exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
-
-## Why
-
-A session-scoped fixture's teardown fires at the end of the pytest *session*, not
-when pytest leaves the directory the fixture was written for. So a session-scoped
-fixture that reassigns a process global and puts it back in a `finally` does not
-restore anything on behalf of the tests that follow it — every test collected after
-its directory, in the same process, runs with the mutated value still installed. The
-`finally` reads as a cleanup and is one.
-
-That is not hypothetical. `tests/e2e/conftest.py:e2e_process_env` reassigns
-`MEIVA_HOME`, `MEIVA_GATEWAY_URL` and eight more, restores them in a `finally`, and was
-declared `scope="session"`. `tests/harness/test_home_isolation.py` — the file whose whole job
-is to notice the operator's real home leaking into the test process — sorts after
-`tests/e2e/` and failed two of its four assertions on every serial run, on `main`,
-for as long as the keyword said `session`. It stayed invisible because CI's backend
-job passes `--ignore=tests/e2e` (the two files never share a process there) and
-`-n auto` puts them in different workers regardless, so the only reader who ever saw
-the red had every reason to write it off as someone else's flake.
-
-Nothing caught it, and nothing would have caught the next one. Hence this lint.
-
-## Rule 1 — session scope outside the provisioning plugin may not mutate a process global
-
-`tests/fixtures/provisioning.py` is exempt, and it is the only exemption: the repo-root
-`conftest.py` loads it once per pytest process, so "the session" and "my directory" are
-the same blast radius. Its
-`provisioned_db` / `provisioned_redis` assign `MEIVA_DB_URL` / `MEIVA_REDIS_URL` and
-never put them back, which is correct — they establish the session's baseline rather
-than claim to clean up after themselves.
-
-Anywhere deeper, session scope plus a process-global mutation is a contradiction by
-construction: the fixture exists to serve one subtree and its teardown cannot fire
-when pytest leaves that subtree. Narrow the scope (`package` — see Rule 2 — or
-`module` / `function`), or hoist the value to `tests/fixtures/provisioning.py` if it
-really is session-wide.
-
-A session-scoped fixture that mutates nothing process-global is fine and is not
-reported: `tests/e2e/conftest.py`'s `frontend_proc` / `playwright_runtime` /
-`playwright_browser` own an expensive resource (a Next build, a browser) whose
-lifetime genuinely is the session, and they hand it back through the fixture return
-value rather than through a global. That is the shape this lint is careful not to
-tax, because a lint that has to be silenced on every legitimate case is worse than
-no lint.
-
-## Rule 2 — `scope="package"` requires an `__init__.py`
-
-`_pytest.fixtures.get_scope_package` walks the node's parents for a `Package` whose
-nodeid matches the fixture's and **returns `node.session` when it finds none** — no
-warning, no error. pytest builds a `Package` node only for a directory containing
-`__init__.py`. So in a package-less directory `scope="package"` is an exact synonym
-for `scope="session"`: the keyword reads correctly and does nothing.
-
-That is what made the first draft of the fix above a no-op, and it is invisible in
-review — the diff shows `session` -> `package` and looks complete. `tests/e2e/` is
-the only test directory in this repo with an `__init__.py`, and it has one for
-exactly this reason. Every other `scope="package"` in `tests/` is a lie until
-someone adds the file.
-
-## Polarity
-
-The default answer is "this is a finding". A `scope=` argument this script cannot
-read as a string literal is reported rather than assumed harmless, and the mutation
-check allow-lists the `os.environ` methods known to be read-only rather than
-deny-listing the ones known to mutate — so a dict mutator nobody thought of (or an
-`os.environ |= {...}`) is caught by default instead of waved through.
-
-## What it does NOT see
-
-A mutation the fixture makes by CALLING something else — the check is per-function,
-not interprocedural, so a fixture whose body is `_layer_env()` reads as clean. Worth
-knowing, but the shape it misses is the one a reviewer can see (a fixture that calls
-a helper named after what it changes), unlike the two rules above.
-
-Mutation of some other module's mutable container through a method call —
-`sys.path.append(...)`, `logging.root.setLevel(...)`. Those are not syntactic
-mutations and separating them from the ordinary `shutil.rmtree(...)` /
-`subprocess.run(...)` calls a fixture body is full of would take a deny-list of
-method names, which is the polarity this file argues against. The surface covered is
-the one this repo has declared its runtime-config surface — env vars and
-`base.config.settings` fields (see `scripts/lint/no_os_environ.py`) — plus every
-`Store` / `Del` target and `global` declaration, which is exhaustive over the
-syntactic forms.
-
-Error format `file:line: <reason>` + non-zero exit.
-"""
-
+# meiva:note
+# Forbid a pytest fixture whose scope outlives the blast radius of the process
+# global it mutates.
+#
+# Run: `.venv/bin/python scripts/lint/fixture_scope.py [path ...]` (defaults to
+# scanning every `tests/` directory: the top-level `tests/` and each package's own
+# `<pkg>/**/tests/` from pytest `testpaths`; an explicit path that does not exist
+# is an error (stderr + exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
+#
+# ## Why
+#
+# A session-scoped fixture's teardown fires at the end of the pytest *session*, not
+# when pytest leaves the directory the fixture was written for. So a session-scoped
+# fixture that reassigns a process global and puts it back in a `finally` does not
+# restore anything on behalf of the tests that follow it — every test collected after
+# its directory, in the same process, runs with the mutated value still installed. The
+# `finally` reads as a cleanup and is one.
+#
+# That is not hypothetical. `tests/e2e/conftest.py:e2e_process_env` reassigns
+# `MEIVA_HOME`, `MEIVA_GATEWAY_URL` and eight more, restores them in a `finally`, and was
+# declared `scope="session"`. `tests/harness/test_home_isolation.py` — the file whose whole job
+# is to notice the operator's real home leaking into the test process — sorts after
+# `tests/e2e/` and failed two of its four assertions on every serial run, on `main`,
+# for as long as the keyword said `session`. It stayed invisible because CI's backend
+# job passes `--ignore=tests/e2e` (the two files never share a process there) and
+# `-n auto` puts them in different workers regardless, so the only reader who ever saw
+# the red had every reason to write it off as someone else's flake.
+#
+# Nothing caught it, and nothing would have caught the next one. Hence this lint.
+#
+# ## Rule 1 — session scope outside the provisioning plugin may not mutate a process global
+#
+# `tests/fixtures/provisioning.py` is exempt, and it is the only exemption: the repo-root
+# `conftest.py` loads it once per pytest process, so "the session" and "my directory" are
+# the same blast radius. Its session-scoped fixtures establish the runner's own baseline
+# there — the catalog projection plants the plugin configuration and takes it back at the
+# end — while the data-plane delivery lives in its function-scoped windows: `provisioned_db`
+# / `provisioned_redis` enter `MEIVA_DB_URL` / `MEIVA_REDIS_URL` and the fixture's own
+# teardown restores the unreachable sentinel, which is where a per-test value belongs.
+#
+# Anywhere deeper, session scope plus a process-global mutation is a contradiction by
+# construction: the fixture exists to serve one subtree and its teardown cannot fire
+# when pytest leaves that subtree. Narrow the scope (`package` — see Rule 2 — or
+# `module` / `function`), or hoist the value to `tests/fixtures/provisioning.py` if it
+# really is session-wide.
+#
+# A session-scoped fixture that mutates nothing process-global is fine and is not
+# reported: `tests/e2e/conftest.py`'s `frontend_proc` / `playwright_runtime` /
+# `playwright_browser` own an expensive resource (a Next build, a browser) whose
+# lifetime genuinely is the session, and they hand it back through the fixture return
+# value rather than through a global. That is the shape this lint is careful not to
+# tax, because a lint that has to be silenced on every legitimate case is worse than
+# no lint.
+#
+# ## Rule 2 — `scope="package"` requires an `__init__.py`
+#
+# `_pytest.fixtures.get_scope_package` walks the node's parents for a `Package` whose
+# nodeid matches the fixture's and **returns `node.session` when it finds none** — no
+# warning, no error. pytest builds a `Package` node only for a directory containing
+# `__init__.py`. So in a package-less directory `scope="package"` is an exact synonym
+# for `scope="session"`: the keyword reads correctly and does nothing.
+#
+# That is what made the first draft of the fix above a no-op, and it is invisible in
+# review — the diff shows `session` -> `package` and looks complete. `tests/e2e/` is
+# the only test directory in this repo with an `__init__.py`, and it has one for
+# exactly this reason. Every other `scope="package"` in `tests/` is a lie until
+# someone adds the file.
+#
+# ## Polarity
+#
+# The default answer is "this is a finding". A `scope=` argument this script cannot
+# read as a string literal is reported rather than assumed harmless, and the mutation
+# check allow-lists the `os.environ` methods known to be read-only rather than
+# deny-listing the ones known to mutate — so a dict mutator nobody thought of (or an
+# `os.environ |= {...}`) is caught by default instead of waved through.
+#
+# ## What it does NOT see
+#
+# A mutation the fixture makes by CALLING something else — the check is per-function,
+# not interprocedural, so a fixture whose body is `_layer_env()` reads as clean. Worth
+# knowing, but the shape it misses is the one a reviewer can see (a fixture that calls
+# a helper named after what it changes), unlike the two rules above.
+#
+# Mutation of some other module's mutable container through a method call —
+# `sys.path.append(...)`, `logging.root.setLevel(...)`. Those are not syntactic
+# mutations and separating them from the ordinary `shutil.rmtree(...)` /
+# `subprocess.run(...)` calls a fixture body is full of would take a deny-list of
+# method names, which is the polarity this file argues against. The surface covered is
+# the one this repo has declared its runtime-config surface — env vars and
+# `base.config.settings` fields (see `scripts/lint/no_os_environ.py`) — plus every
+# `Store` / `Del` target and `global` declaration, which is exhaustive over the
+# syntactic forms.
+#
+# Error format `file:line: <reason>` + non-zero exit.
 from __future__ import annotations
 
 import ast
