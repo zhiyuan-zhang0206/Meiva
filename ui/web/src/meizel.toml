@@ -11,7 +11,7 @@ exports = ["proxy.ts"]
 "proxy.ts" = "strict-to-be"
 
 [roots]
-"proxy.ts" = { kinds = ["environ", "random"], why = "the Next middleware entry: it runs once per page request, reads the deployment's NEXT_PUBLIC_* settings from the build environment and draws the response's CSP nonce, then hands both to the pure policy builder in lib/auth/content-security-policy.ts" }
+"proxy.ts" = { kinds = ["environ", "random"], why = "the Next middleware entry: Next invokes it once per page request and it is the only code that runs when a request enters, so both the environment read and the nonce draw happen here. It reads the deployment NEXT_PUBLIC_* settings and draws the CSP nonce with crypto.randomUUID, then hands both to the pure policy builder in lib/auth/content-security-policy.ts. The same fact is why the recorded impure-call for that draw has no other home: middleware is called with the request alone, so there is no parameter to inject a nonce through and no second place that runs at request entry. Falsified if a legal path to produce the nonce outside the request entry ever appears - then this why is false and both the root and the impure-call record should go, not be kept." }
 
 [debt.impure-call]
 "proxy.ts#proxy#crypto.randomUUID" = 1
