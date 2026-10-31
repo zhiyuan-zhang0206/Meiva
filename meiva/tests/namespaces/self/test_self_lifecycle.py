@@ -258,6 +258,34 @@ def test_restart_checks_the_overlay_against_the_plugin_configs_of_the_contexts_h
     assert stored is not None and stored[0] == {"restart_probe": "x"}
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_restart_persists_and_overwrites_exec_timeout_seconds_overlay(
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
+
+    with pytest.raises(AgentRestart):
+        meiva.self.restart({"exec_timeout_seconds": 25.0})
+
+    stored = db_conn.execute(
+        "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert stored is not None and stored[0] == {"exec_timeout_seconds": 25.0}
+
+    with pytest.raises(AgentRestart):
+        meiva.self.restart({"exec_timeout_seconds": 300.0})
+
+    restored = db_conn.execute(
+        "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert restored is not None and restored[0] == {"exec_timeout_seconds": 300.0}
+
+
 # meiva:note
 # The live request a compaction publishes carries the text `compact_notice` decided: the summary's
 # length only, never its text. The wake of the same compaction travels on the agent's inbound

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
 
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
@@ -17,7 +18,7 @@ from base.packages.plugins.config_registration import (
     read_config_image,
     validate_config_overlay,
 )
-from base.packages.plugins.plugin_errors import SchemaDriftError
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay, SchemaDriftError
 from base.packages.tests.plugin_config.test_plugin_config import (
     FixtureConfig,
 )
@@ -36,6 +37,24 @@ def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog)
     validate_config_overlay(
         {"syntax_fix_ruff_format": False}, models=model_catalog.models, home=meiva_home()
     )
+
+
+def test_exec_timeout_seconds_overlay_is_accepted_and_bounded(
+    model_catalog: ModelCatalog,
+) -> None:
+    validate_config_overlay(
+        {"exec_timeout_seconds": 25.0}, models=model_catalog.models, home=meiva_home()
+    )
+    validate_config_overlay(
+        {"exec_timeout_seconds": 300.0}, models=model_catalog.models, home=meiva_home()
+    )
+    for bad in (0.0, -5.0, float("nan"), float("inf"), 1200.0, 1500.0, None, "25s"):
+        with pytest.raises(InvalidConfigOverlay, match="exec_timeout_seconds"):
+            validate_config_overlay(
+                {"exec_timeout_seconds": bad},
+                models=model_catalog.models,
+                home=meiva_home(),
+            )
 
 
 def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], unit_home: Path):

@@ -28,9 +28,19 @@ def gateway_overlay() -> None:
         validate_config_overlay(
             {"skills_to_expand_at_start": "a,b"}, configs={}, models=models, home=meiva_home()
         )
+        validate_config_overlay(
+            {"exec_timeout_seconds": 25.0}, configs={}, models=models, home=meiva_home()
+        )
         with pytest.raises(InvalidConfigOverlay, match="only accepts"):
             validate_config_overlay(
                 {"eval_network_allowlist": ["web", "shell"]},
+                configs={},
+                models=models,
+                home=meiva_home(),
+            )
+        with pytest.raises(InvalidConfigOverlay, match="exec_node_timeout_seconds"):
+            validate_config_overlay(
+                {"exec_timeout_seconds": 1200.0},
                 configs={},
                 models=models,
                 home=meiva_home(),

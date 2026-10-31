@@ -134,10 +134,12 @@ def test_list_settings_are_frozen_into_tuples() -> None:
 
 def test_read_serves_a_setting_no_slice_names_from_the_pin_else_the_live_default() -> None:
     assert AgentSlices.resolve(default_reader=_default_reader).read(
-        "sandbox", "exec_timeout_seconds"
-    ) == (settings.sandbox.exec_timeout_seconds)
-    pinned = AgentSlices.resolve({"exec_timeout_seconds": 123.5}, default_reader=_default_reader)
-    assert pinned.read("sandbox", "exec_timeout_seconds") == 123.5
+        "sandbox", "exec_node_timeout_seconds"
+    ) == (settings.sandbox.exec_node_timeout_seconds)
+    pinned = AgentSlices.resolve(
+        {"exec_node_timeout_seconds": 123.5}, default_reader=_default_reader
+    )
+    assert pinned.read("sandbox", "exec_node_timeout_seconds") == 123.5
 
 
 # meiva:note
@@ -167,6 +169,8 @@ def test_two_owner_defaults_keep_resolved_slices_frozen_and_unsliced_reads_live(
     second.set_field("history_dump_keep", 8)
     first.set_field("exec_timeout_seconds", 101.0)
     second.set_field("exec_timeout_seconds", 202.0)
+    first.set_field("exec_node_timeout_seconds", 501.0)
+    second.set_field("exec_node_timeout_seconds", 602.0)
 
     def one(domain: str, field: str) -> Any:
         return getattr(getattr(first.view, domain), field)
@@ -176,16 +180,24 @@ def test_two_owner_defaults_keep_resolved_slices_frozen_and_unsliced_reads_live(
 
     a = AgentSlices.resolve(default_reader=one)
     b = AgentSlices.resolve(default_reader=two)
-    pinned = AgentSlices.resolve({"exec_timeout_seconds": 303.0}, default_reader=one)
+    pinned = AgentSlices.resolve(
+        {"exec_timeout_seconds": 25.0, "exec_node_timeout_seconds": 703.0},
+        default_reader=one,
+    )
     assert (a.brain.llm_model, b.brain.llm_model) == ("first-model", "second-model")
     assert (a.history_dump.history_dump_keep, b.history_dump.history_dump_keep) == (4, 8)
+    assert (a.sandbox.exec_timeout_seconds, b.sandbox.exec_timeout_seconds) == (101.0, 202.0)
+    assert pinned.sandbox.exec_timeout_seconds == 25.0
     first.set_field("history_dump_keep", 12)
     first.set_field("exec_timeout_seconds", 404.0)
+    first.set_field("exec_node_timeout_seconds", 804.0)
     assert a.history_dump.history_dump_keep == 4
+    assert a.sandbox.exec_timeout_seconds == 101.0
     assert AgentSlices.resolve(default_reader=one).history_dump.history_dump_keep == 12
-    assert a.read("sandbox", "exec_timeout_seconds") == 404.0
-    assert b.read("sandbox", "exec_timeout_seconds") == 202.0
-    assert pinned.read("sandbox", "exec_timeout_seconds") == 303.0
+    assert AgentSlices.resolve(default_reader=one).sandbox.exec_timeout_seconds == 404.0
+    assert a.read("sandbox", "exec_node_timeout_seconds") == 804.0
+    assert b.read("sandbox", "exec_node_timeout_seconds") == 602.0
+    assert pinned.read("sandbox", "exec_node_timeout_seconds") == 703.0
     assert agent_setting("exec_timeout_seconds", default_reader=one) == 404.0
 
 

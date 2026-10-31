@@ -348,7 +348,7 @@ def _output_limits(agent: AgentSlices, agent_id: int, *, home: Path) -> OutputLi
         crop=CropLimits(
             **{field.name: agent.read("sandbox", field.name) for field in fields(CropLimits)}
         ),
-        timeout_seconds=agent.read("sandbox", "exec_timeout_seconds"),
+        timeout_seconds=agent.sandbox.exec_timeout_seconds,
         max_chars=agent.read("sandbox", "exec_output_max_chars"),
     )
 

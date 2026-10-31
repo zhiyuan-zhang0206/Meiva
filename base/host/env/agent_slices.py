@@ -85,6 +85,7 @@ class LlmCallPolicy:
 class Sandbox:
     eval_isolation: bool
     eval_network_allowlist: tuple[str, ...]
+    exec_timeout_seconds: float
     syntax_fix_ruff_format: bool
 
 
