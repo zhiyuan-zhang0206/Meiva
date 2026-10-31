@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,37 @@ def commit(repo: Path, message: str) -> None:
 def run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
         [sys.executable, str(HINTS), *args], cwd=repo, capture_output=True, text=True, check=False
+    )
+
+
+# meiva:note
+# A stand-in for `gh` on PATH: the branch check reads the open pull request's body through it, and
+# the answer has to come from something a test controls. The script prints one body, ignores argv,
+# and leaves a `called` marker beside itself so a test can tell an unread body from an empty one.
+def fake_gh(tmp_path: Path, body: str) -> str:
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    script = directory / "gh"
+    script.write_text(
+        f"#!/bin/sh\n: > \"{directory / 'called'}\"\ncat <<'BODY'\n{body}\nBODY\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return str(directory)
+
+
+# meiva:note
+# The same child process as `run`, with the stand-in `gh` first on PATH.
+def run_with_gh(repo: Path, gh_dir: str, *args: str) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment["PATH"] = gh_dir + ":" + environment.get("PATH", "")
+    return subprocess.run(  # noqa: S603
+        [sys.executable, str(HINTS), *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
     )
 
 
@@ -122,6 +154,65 @@ def test_the_branch_check_judges_the_final_diff_not_each_commit(repo: Path) -> N
     (repo / "cli" / "x.py").write_text("VALUE = 1\n", encoding="utf-8")
     commit(repo, "Take it back out")
     assert run(repo, "branch").returncode == 0
+
+
+# meiva:note
+# The squash merge keeps the PR body and drops the branch's commit messages, so an answer written
+# in the body is the one that survives into `main`; the push has to read it there or the answer
+# only works after the fact.
+def test_the_branch_check_reads_an_answer_from_the_pull_request_body(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    answered = fake_gh(
+        tmp_path, "Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
+    )
+    assert run_with_gh(repo, answered, "branch").returncode == 0
+
+
+# meiva:note
+# A body that does not answer the site answers nothing: reading the body must not become a way to
+# pass the check by having any PR at all.
+def test_a_pull_request_body_without_the_answer_still_blocks(repo: Path, tmp_path: Path) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    unrelated = fake_gh(tmp_path, "A pull request that says nothing about the site.")
+    assert run_with_gh(repo, unrelated, "branch").returncode == 1
+
+
+# meiva:note
+# Outside a GitHub checkout there is no pull request to read, and no `gh` call to make: a checkout
+# with no GitHub origin answers from its commits alone.
+def test_a_checkout_without_a_github_origin_never_asks_for_a_body(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    answering = fake_gh(
+        tmp_path, "Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
+    )
+    assert run_with_gh(repo, answering, "branch").returncode == 1
+
+
+# meiva:note
+# Nothing to answer means nothing the body could change, so a clean branch does not ask for one: the
+# reading is a network round trip, and a body nobody needs must not make a push wait or fail.
+def test_a_branch_with_no_open_site_never_asks_for_a_body(repo: Path, tmp_path: Path) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "README.md").write_text("unrelated\n", encoding="utf-8")
+    commit(repo, "Unrelated change")
+    answering = fake_gh(
+        tmp_path, "Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
+    )
+    assert run_with_gh(repo, answering, "branch").returncode == 0
+    assert not (Path(answering) / "called").exists()
 
 
 def test_the_branch_check_needs_origin_main(repo: Path) -> None:

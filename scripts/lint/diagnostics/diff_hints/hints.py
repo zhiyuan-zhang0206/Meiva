@@ -6,7 +6,8 @@
 #                                   answered by the `Hint-Ack` trailers of this message.
 #   hints.py branch                 the hook of the pre-push stage: the diff of merge-base
 #                                   (origin/main, HEAD)..HEAD must be answered by the
-#                                   trailers of any commit on the branch.
+#                                   trailers of any commit on the branch, or by the open pull
+#                                   request's body (the text a squash merge lands verbatim).
 #   hints.py report BASE HEAD       every site of a diff, answered or not, for calibration.
 #   hints.py stats [BASE HEAD]      the counted shapes (stats.py) of a diff or, with --tree, of the tree.
 #
@@ -20,6 +21,7 @@ import ast
 import collections
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -92,6 +94,15 @@ class GitError(RuntimeError):
 
 # meiva:note
 # Fixed argument vectors only: git from PATH, never a shell, never user text as a command.
+# meiva:note
+# The optional read of a pull request body: `gh` by name, one body, and a bound short enough that a
+# hanging network call costs a push seconds rather than a minute. Missing the bound only risks a
+# skipped answer, never a wrong verdict, so it is a constant here rather than a policy knob.
+_GH = "gh"
+_GH_PR_FIELDS = ("--json", "body", "--jq", '.[0].body // ""')
+_GH_TIMEOUT_S = 10.0
+
+
 def _git(*args: str) -> bytes:
     done = subprocess.run(  # noqa: S603
         ["git", "-c", "core.quotePath=false", "-c", "diff.renameLimit=5000", *args],
@@ -457,11 +468,58 @@ def _commits(base: str, head: str) -> list[tuple[str, str]]:
     return [(sha[:9], message) for sha, _, message in (e.partition("\x1f") for e in entries)]
 
 
+# meiva:note
+# The open pull request's body for this branch, or "" when there is none to read. A squash merge
+# lands the PR title and body as the commit message and drops the branch's own messages, so an
+# answer written in the body is the copy that survives; reading it here lets one copy satisfy the
+# push and the merged history at once. Every failure -- no `gh`, no GitHub origin, a detached head,
+# no open PR, no network -- answers nothing and never fails the check: an unreadable body is not a
+# finding about the branch.
+#
+# Asked for only when the branch has a site to answer. With nothing to answer the body cannot
+# change the verdict, and a body nobody needed must not cost a network round trip or fail a push
+# over an `Hint-Ack`-shaped line quoted in prose.
+def _pr_body() -> str:
+    if shutil.which(_GH) is None:
+        return ""
+    try:
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD").decode().strip()
+        remote = _git("remote", "get-url", "origin").decode().strip()
+    except GitError:
+        return ""
+    if not branch or branch == "HEAD" or "github.com" not in remote:
+        return ""
+    done = subprocess.run(  # noqa: S603
+        [_GH, "pr", "list", "--head", branch, "--state", "open", "--limit", "1", *_GH_PR_FIELDS],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_GH_TIMEOUT_S,
+    )
+    return done.stdout if done.returncode == 0 else ""
+
+
 def _report_problems(errors: tuple[str, ...], notes: tuple[str, ...]) -> None:
     for note in notes:
         sys.stderr.write(f"diff hints: note: {note}\n")
     if errors:
         sys.stderr.write(render_errors(errors) + "\n")
+
+
+# meiva:note
+# The answers the open pull request's body carries, and what is wrong with them. Nothing is read
+# when the branch has no site to answer: with nothing to answer the body cannot change the verdict,
+# and a body nobody needed must not cost a network round trip or fail a push over an
+# `Hint-Ack`-shaped line quoted in prose.
+def _body_answers(sites: Sequence[Site]) -> tuple[list[tuple[str, Ack]], list[str]]:
+    if not sites:
+        return [], []
+    body = _pr_body()
+    if not body:
+        return [], []
+    found, problems, notes = parse_acks(body)
+    _report_problems((), tuple(f"pr-body: {note}" for note in notes))
+    return [("pr-body", ack) for ack in found], [f"pr-body: {problem}" for problem in problems]
 
 
 def _verdict(sites: list[Site], acks: tuple[Ack, ...], *, branch: bool) -> list[Site]:
@@ -491,8 +549,11 @@ def _branch(head: str, base_ref: str, summary: str | None) -> int:
         answered.extend((sha, ack) for ack in found)
         errors.extend(f"{sha}: {problem}" for problem in problems)
         _report_problems((), tuple(f"{sha}: {note}" for note in notes))
-    _report_problems(tuple(errors), ())
     sites = _sites([base, head], head)
+    body_answered, body_errors = _body_answers(sites)
+    answered.extend(body_answered)
+    errors.extend(body_errors)
+    _report_problems(tuple(errors), ())
     open_sites = _verdict(sites, tuple(ack for _, ack in answered), branch=True)
     if summary is not None:
         entries = [(sha, ack, answers(ack, sites)) for sha, ack in answered]
