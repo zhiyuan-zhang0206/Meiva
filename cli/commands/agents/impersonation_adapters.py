@@ -90,10 +90,14 @@ RelayAdapter = ClaudeStdout | DshStdout | CodexSteer | AntigravitySend
 # the same lookup (its own host-provided environment, then that record). Neither path guesses
 # at a language_server process, which a standalone `agy` CLI never produces.
 def _antigravity_server(
-    thread_id: UUID, endpoint_record: str | None, *, injected: AntigravityServer | None
+    thread_id: UUID,
+    endpoint_record: str | None,
+    *,
+    home: Path,
+    injected: AntigravityServer | None,
 ) -> AntigravityServer:
     if endpoint_record is None:
-        return resolve_antigravity_endpoint(str(thread_id), antigravity_server=injected)
+        return resolve_antigravity_endpoint(str(thread_id), home=home, antigravity_server=injected)
     path = Path(endpoint_record)
     server = read_antigravity_endpoint_file(path)
     if server is None:
@@ -123,6 +127,7 @@ def bind_adapter(
     *,
     codex_home: str | None,
     user_home: Path,
+    home: Path,
     antigravity_server: AntigravityServer | None,
     stdout: TextIO,
 ) -> RelayAdapter:
@@ -137,7 +142,8 @@ def bind_adapter(
             )
         case AntigravityConversation(thread_id=thread_id, endpoint_record=record):
             return AntigravitySend(
-                thread_id, _antigravity_server(thread_id, record, injected=antigravity_server)
+                thread_id,
+                _antigravity_server(thread_id, record, home=home, injected=antigravity_server),
             )
         case _:
             assert_never(destination)

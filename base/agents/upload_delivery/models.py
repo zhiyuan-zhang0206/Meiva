@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from base.agents.upload_delivery.paths import FILENAME_PATTERN, MAX_UPLOAD_BYTES
 from base.host.db_authority.unit import UnitIdentity
-from base.paths import meiva_home
 
 NAMESPACE = ".delivered-v1"
 BATCH_ID_PATTERN = r"^[0-9a-f]{32}$"
@@ -120,8 +119,9 @@ class DeliveryStatus(Record):
 def current_unit(
     *,
     local_machine: str,
+    home: Path,
 ) -> UnitIdentity:
-    return UnitIdentity(machine=local_machine, home=str(meiva_home().resolve()))
+    return UnitIdentity(machine=local_machine, home=str(home.resolve()))
 
 
 def make_manifest(

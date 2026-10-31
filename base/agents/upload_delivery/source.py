@@ -80,12 +80,11 @@ def _claim(
     provenance: InboundProvenance,
     *,
     local_machine: str,
+    home: Path,
     upload_root: Path,
 ) -> tuple[Any, ...]:
     fingerprint = request_hash(names, batch)
-    source = current_unit(
-        local_machine=local_machine,
-    )
+    source = current_unit(local_machine=local_machine, home=home)
     directory = agent_upload_dir(agent_id, create=False, root=upload_root).resolve()
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, agent_id)
@@ -145,6 +144,7 @@ def accept(
     provenance: InboundProvenance,
     *,
     local_machine: str,
+    home: Path,
     upload_root: Path,
 ) -> Acceptance:
     claimed = _claim(
@@ -155,12 +155,13 @@ def accept(
         batch,
         provenance,
         local_machine=local_machine,
+        home=home,
         upload_root=upload_root,
     )
     if claimed[4] is not None:
         return Acceptance.model_validate(claimed[4])
     if UnitIdentity.model_validate(claimed[2]) != current_unit(
-        local_machine=local_machine,
+        local_machine=local_machine, home=home
     ):
         raise UploadDeliveryConflictError("receiving source belongs to another native unit")
     manifest = Manifest.model_validate(claimed[1])
@@ -219,6 +220,7 @@ def served_object(
     ordinal: int,
     *,
     local_machine: str,
+    home: Path,
 ) -> tuple[Path, Object]:
     with pool.connection() as conn:
         row = conn.execute(
@@ -227,7 +229,7 @@ def served_object(
             (agent_id, batch_id),
         ).fetchone()
     if row is None or UnitIdentity.model_validate(row[1]) != current_unit(
-        local_machine=local_machine,
+        local_machine=local_machine, home=home
     ):
         raise UploadDeliveryConflictError("source object is not ready on this native unit")
     manifest = Manifest.model_validate(row[0])
@@ -252,6 +254,7 @@ def due(
     limit: int = 8,
     *,
     local_machine: str,
+    home: Path,
     claim_seconds: float,
 ) -> list[ReceiveRequest]:
     with write_transaction(pool) as conn:
@@ -264,11 +267,7 @@ def due(
             ") RETURNING manifest, source_unit, target_unit",
             (
                 claim_seconds,
-                Jsonb(
-                    current_unit(
-                        local_machine=local_machine,
-                    ).model_dump()
-                ),
+                Jsonb(current_unit(local_machine=local_machine, home=home).model_dump()),
                 limit,
             ),
         ).fetchall()

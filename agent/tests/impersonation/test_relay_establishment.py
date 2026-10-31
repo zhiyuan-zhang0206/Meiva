@@ -298,7 +298,7 @@ def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
     accepted = cluster.lease(owner, provider="antigravity")
     session = cluster.status(owner)
     assert session is not None
-    record = antigravity_endpoint_path(session["relay_thread_id"])
+    record = antigravity_endpoint_path(session["relay_thread_id"], home=tmp_path)
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text("not json", encoding="utf-8")
     relays = RelaySupervision()

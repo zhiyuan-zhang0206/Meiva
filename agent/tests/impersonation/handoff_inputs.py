@@ -109,6 +109,7 @@ def handoff_timestamps() -> TimestampSource:
 def takeover_host(tmp_path: Path, machine: MachineIdentityReader) -> TakeoverHost:
     return TakeoverHost(
         local_machine=machine.name(),
+        home=tmp_path,
         workspaces_root=tmp_path / "workspaces",
         relay_program=relay_program(tmp_path / "relay", "exit:9"),
         environ=dict(os.environ),

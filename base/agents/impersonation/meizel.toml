@@ -25,6 +25,3 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 
 [purity]
 "status.py" = "strict"
-
-[debt.ambient-read]
-"host_transport.py#home base.paths.meiva_home" = 1

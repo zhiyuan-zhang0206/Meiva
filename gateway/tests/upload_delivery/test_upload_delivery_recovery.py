@@ -26,7 +26,7 @@ from base.agents.upload_delivery.models import (
 from base.agents.upload_delivery.paths import delivered_upload_dir, fetch_upload_b64
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.paths import WORKSPACES_DIR_NAME
+from base.paths import WORKSPACES_DIR_NAME, resolve_meiva_home
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
@@ -58,7 +58,7 @@ def uploaded_agent(
     *,
     machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
-    unit = current_unit(local_machine=machine_identity.name())
+    unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     agent = seed_agent(db_conn)
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()
@@ -121,6 +121,7 @@ def recovery_for(client: GatewayTestClient, machine: MachineIdentityReader) -> U
         client.app.state.db,
         client.app.state.bus,
         machine=machine,
+        home=resolve_meiva_home(),
         claim_seconds=CLAIM_SECONDS,
         rpc=client.app.state.rpc,
     )
@@ -151,7 +152,12 @@ _NO_CLAIM = 0.0
 def request_for(pool: ConnectionPool, batch_id: str, *, local_machine: str) -> ReceiveRequest:
     return next(
         item
-        for item in source.due(pool, local_machine=local_machine, claim_seconds=_NO_CLAIM)
+        for item in source.due(
+            pool,
+            local_machine=local_machine,
+            home=resolve_meiva_home(),
+            claim_seconds=_NO_CLAIM,
+        )
         if item.manifest.batch_id == batch_id
     )
 
@@ -254,6 +260,7 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
             [("f.png", b"native", "image/png")],
             InboundProvenance("cluster_bearer", "http"),
             local_machine=machine_identity.name(),
+            home=resolve_meiva_home(),
             upload_root=client.app.state.gateway_config.upload_staging_root,
         )
 
@@ -463,8 +470,12 @@ def test_due_claims_a_batch_once(
     assert response.status_code == 202, response.text
     batch_id = response.json()["batch_id"]
     pool = client.app.state.db_pool
-    first = source.due(pool, local_machine=machine_identity.name(), claim_seconds=300)
-    second = source.due(pool, local_machine=machine_identity.name(), claim_seconds=300)
+    first = source.due(
+        pool, local_machine=machine_identity.name(), home=resolve_meiva_home(), claim_seconds=300
+    )
+    second = source.due(
+        pool, local_machine=machine_identity.name(), home=resolve_meiva_home(), claim_seconds=300
+    )
     assert batch_id in [item.manifest.batch_id for item in first]
     assert batch_id not in [item.manifest.batch_id for item in second]
 
@@ -611,5 +622,5 @@ def test_a_silent_image_upload_is_served_from_its_url_and_not_delivered(
 
     assert mime == "image/png"
     assert base64.standard_b64decode(b64) == image
-    unit = current_unit(local_machine=machine_identity.name())
+    unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     assert not delivered_copy(client, unit, agent).exists()
