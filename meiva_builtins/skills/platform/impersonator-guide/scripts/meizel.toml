@@ -1,2 +1,2 @@
 [purity]
-"read_instructions.py" = "strict"
+"read_instructions.py" = { mode = "none", why = "the shipped command line shell: it opens and closes the impersonation attachment and prints what the borrowed agent's saved messages carry. The selection rule above it, instruction_text, decides which messages are the inherited instructions and refuses a missing, empty or non-text system prompt; it stays in this file because a shipped skill script is loaded by path, and a sibling import would need the sys.path juggling these scripts no longer do" }
