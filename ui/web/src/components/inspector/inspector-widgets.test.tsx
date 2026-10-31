@@ -4,15 +4,7 @@
 // are skipped, and an empty payload renders nothing.
 
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  ),
-}));
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { InspectWidget } from "@/lib/contracts/types";
 

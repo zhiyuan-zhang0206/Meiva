@@ -17,15 +17,5 @@ exports = ["context-breakdown-body.tsx", "context-breakdown.tsx", "context-meter
 "inspector-widgets.test.tsx" = ["inspector-widgets.tsx"]
 "inspector-widgets.tsx" = ["inspector-section.tsx"]
 
-[debt.third-party-patch]
-"inspector-widgets.test.tsx#vi.mock next/link" = 1
-
-[debt.type-cast]
-"context-breakdown-body.tsx#cast BreakdownContent.categoryName" = 1
-"context-breakdown-body.tsx#cast httpStatus" = 1
-"context-breakdown.tsx#cast ContextButton.<lambda>.onPointerDown" = 1
-"inspector-cost-section.tsx#cast CostActivitySection.<lambda>" = 1
-"inspector-live-sections.tsx#cast LivenessSection" = 1
-
 [debt.unresolved-patch]
 "inspector-panel-notices.test.tsx#vi.spyOn queryClient.\"invalidateQueries\"" = 1

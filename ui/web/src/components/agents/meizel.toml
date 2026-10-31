@@ -14,8 +14,5 @@ exports = ["agent-row.tsx", "spawn-form.tsx", "window-select.tsx"]
 [debt.stdlib-patch]
 "agent-row-menu.test.tsx#vi.stubGlobal confirm" = 4
 
-[debt.type-cast]
-"spawn-form.tsx#cast SpawnForm" = 5
-
 [debt.undeclared-edge]
 "row-actions.tsx -> agent-row.tsx" = 1

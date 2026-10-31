@@ -16,7 +16,13 @@ import { FLEX, FLEX_1, FLEX_COL } from "@/lib/layout/layout";
 import { SectionRows } from "./context-sections";
 import { useApi } from "@/lib/transport/transport-context";
 
-const CATEGORY_MESSAGE_KEY: Record<string, string> = {
+// meiva:note
+// The map's values are the translator's own keys, so a missing or misspelled message key is a type
+// error at this table instead of a cast at the call site.
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+type ContextBreakdownKey = Parameters<ReturnType<typeof useTranslations<"contextBreakdown">>>[0];
+
+const CATEGORY_MESSAGE_KEY: Readonly<Record<string, ContextBreakdownKey | undefined>> = {
   system_prompt: "categories.system_prompt",
   compact_summary: "categories.compact_summary",
   cluster_memory: "categories.cluster_memory",
@@ -40,9 +46,16 @@ export interface CategoryHighlight {
   onToggle: (category: string) => void;
 }
 
+// meiva:note
+// A transport failure may carry the gateway's HTTP status. The guard is what makes reading it safe:
+// the value is an Error, the property exists, and it is a number; anything else answers null.
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+function isStatusError(value: unknown): value is Error & { readonly status: number } {
+  return value instanceof Error && "status" in value && typeof value.status === "number";
+}
+
 function httpStatus(error: unknown): number | null {
-  const status = error instanceof Error ? (error as { status?: unknown }).status : undefined;
-  return typeof status === "number" ? status : null;
+  return isStatusError(error) ? error.status : null;
 }
 
 // meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
@@ -181,7 +194,7 @@ function BreakdownContent({
   const total = data.total_input_tokens;
   const categoryName = (kind: string) => {
     const messageKey = CATEGORY_MESSAGE_KEY[kind];
-    return messageKey ? t(messageKey as Parameters<typeof t>[0]) : kind;
+    return messageKey ? t(messageKey) : kind;
   };
 
   const categories: { key: string; tokens: number; estimated: boolean }[] = [];

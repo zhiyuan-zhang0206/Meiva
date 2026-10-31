@@ -9,6 +9,3 @@ exports = ["paint-key.ts", "resolve-color.ts", "run-timeline-axis.tsx", "run-tim
 
 [debt.stdlib-patch]
 "run-timeline-canvas-test-mock.ts#vi.spyOn HTMLCanvasElement.prototype.getContext" = 1
-
-[debt.type-cast]
-"run-timeline-paint.ts#cast paintBars" = 1

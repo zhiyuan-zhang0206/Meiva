@@ -68,8 +68,13 @@ export function ContextButton(props: ContextButtonProps) {
       if (e.key === "Escape" && !e.defaultPrevented) onOpenChange(false);
     };
     const onPointerDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (panelRef.current?.contains(t) || buttonRef.current?.contains(t)) return;
+      // meiva:note
+      // The listener sits on the document, so the target is whatever node was pressed: a target that
+      // is not a Node belongs to no element and cannot be inside either box.
+      // meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
       onOpenChange(false);
     };
     document.addEventListener("keydown", onKeyDown);

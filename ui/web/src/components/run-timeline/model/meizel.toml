@@ -15,6 +15,3 @@ exports = ["links", "object-identity.ts", "render-stats.ts", "run-timeline-reado
 "timeline-nav-items.ts" = ["timeline-model-axis.ts", "timeline-model-context.ts", "timeline-model-selection.ts", "timeline-model-viewport.ts", "timeline-nav-rows.ts"]
 "timeline-nav-rows.ts" = ["timeline-model-axis.ts", "timeline-model-context.ts", "timeline-model-selection.ts"]
 "timeline-nav.ts" = ["timeline-model-axis.ts", "timeline-model-selection.ts", "timeline-model-viewport.ts", "timeline-nav-items.ts", "timeline-nav-rows.ts"]
-
-[debt.type-cast]
-"timeline-canvas-hit.ts#cast aggregateColumns" = 1

@@ -210,7 +210,13 @@ export function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive })
   );
 }
 
-const STATUS_LABEL_KEY: Record<string, string> = {
+// meiva:note
+// The values are keys of the agent-row catalog this section renders with, so the table is checked
+// against that catalog instead of cast at the call site.
+// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
+type AgentRowKey = Parameters<ReturnType<typeof useTranslations<"agentRow">>>[0];
+
+const STATUS_LABEL_KEY: Readonly<Record<string, AgentRowKey | undefined>> = {
   running: "statusRunning",
   idling: "statusIdling",
   impersonated: "statusImpersonated",
@@ -270,7 +276,7 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
         <Metric label={t("metricMachine")} value={inspect.machine} />
         <Metric
           label={t("metricStatus")}
-          value={statusKey ? tStatus(statusKey as Parameters<typeof tStatus>[0]) : status}
+          value={statusKey ? tStatus(statusKey) : status}
         />
       </div>
     </Section>
