@@ -546,18 +546,24 @@ def test_dialog_filter_keeps_only_user_and_agent_text() -> None:
     code, reasoning and system rows are all dropped."""
     from services.entrypoints.im_bridge.core import is_dialog_item
 
-    items = [
+    items: list[dict[str, Any]] = [
         {"kind": "inbound_chat", "source": "user", "payload": "hi"},
         {"kind": "inbound_chat", "source": "agent:1818", "payload": "peer msg"},
         {"kind": "inbound_chat", "source": "watcher:3", "payload": "wake"},
         {"kind": "agent_chat", "payload": "answer"},
+        {"kind": "agent_chat", "payload": "explicitly user facing", "user_facing": True},
+        {"kind": "agent_chat", "payload": "internal background log", "user_facing": False},
         {"kind": "agent_code", "payload": "code"},
         {"kind": "code_output", "payload": "out"},
         {"kind": "agent_reasoning", "payload": "think"},
         {"kind": "system_prompt", "payload": "sys"},
     ]
-    kept = [it["kind"] + ":" + str(it.get("source")) for it in items if is_dialog_item(it)]
-    assert kept == ["inbound_chat:user", "agent_chat:None"]
+    kept = [f"{it['kind']}:{it.get('payload')}" for it in items if is_dialog_item(it)]
+    assert kept == [
+        "inbound_chat:hi",
+        "agent_chat:answer",
+        "agent_chat:explicitly user facing",
+    ]
 
 
 async def test_switch_summary_uses_strict_filter(make_core: CoreFactory) -> None:

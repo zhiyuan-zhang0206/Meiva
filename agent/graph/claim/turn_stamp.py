@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from base.agents.context import MeivaContext
+from base.agents.messages.reply_intent import normalize_last_message_text
 from base.agents.recovery.breaker import clear_permanent_reject_halt
 from base.db.transaction import async_write_transaction
 from base.log import logger
@@ -18,6 +19,7 @@ async def persist_last_active(ctx: MeivaContext, agent_id: int, text: str) -> No
     ctx.turn_progress.mark(agent_id)
     if ctx.ops_pool is None:
         return
+    clean_text = normalize_last_message_text(text)
     try:
         async with async_write_transaction(ctx.ops_pool) as conn, conn.cursor() as cur:
             # meiva:note
@@ -25,11 +27,11 @@ async def persist_last_active(ctx: MeivaContext, agent_id: int, text: str) -> No
             # clear_permanent_reject_halt`), so the streak, its reason and the "until human"
             # window leave together — a cleared streak beside a 3650-day window is exactly the
             # residue #5667 removes.
-            if text:
+            if clean_text:
                 await cur.execute(
                     "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s, "
                     "last_turn_fatal_at = NULL WHERE id = %s",
-                    (text, agent_id),
+                    (clean_text, agent_id),
                 )
             else:
                 await cur.execute(

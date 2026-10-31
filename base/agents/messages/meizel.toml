@@ -1,11 +1,11 @@
-exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identity.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "injection_scan.py", "kwargs.py", "lifecycle_text.py", "security_finding.py", "timestamp_policy.py", "token_estimate.py"]
+exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identity.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "injection_scan.py", "kwargs.py", "lifecycle_text.py", "reply_intent.py", "security_finding.py", "timestamp_policy.py", "token_estimate.py"]
 
 [uses]
 "envelope.py" = ["timestamp_policy.py"]
 "guard.py" = ["identity.py"]
 "identity.py" = ["kwargs.py"]
 "injection_scan.py" = ["security_finding.py"]
-"tests" = ["envelope.py", "external_caller.py", "injection_scan.py", "kwargs.py", "lifecycle_text.py", "security_finding.py", "timestamp_policy.py", "token_estimate.py"]
+"tests" = ["envelope.py", "external_caller.py", "injection_scan.py", "kwargs.py", "lifecycle_text.py", "reply_intent.py", "security_finding.py", "timestamp_policy.py", "token_estimate.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -19,6 +19,7 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identit
 "injection_scan.py" = "strict"
 "kwargs.py" = "strict"
 "lifecycle_text.py" = "strict"
+"reply_intent.py" = "strict"
 "security_finding.py" = "strict"
 "timestamp_policy.py" = "strict"
 "token_estimate.py" = "strict"

@@ -83,3 +83,26 @@ async def test_turn_end_ok_true_record_no_exception(
     assert rec["extra"]["ok"] is True
     assert rec["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]
     assert rec["exception"] is None
+    assert "meiva_non_human_wake" not in result.update["messages"][0].additional_kwargs
+
+
+async def test_llm_node_stamps_meiva_non_human_wake_only_when_state_non_human_wake(
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    model = ScriptedModel(scripts=[[end_turn_chunk("internal ack")]])
+    bg_state = AgentState(
+        messages=[HumanMessage(content="[agent:8] done")],
+        halted=False,
+        non_human_wake=True,
+    )
+
+    result = await llm_node(
+        bg_state,
+        llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
+        _config_with_thread(),
+        rng=_rng(),
+    )
+
+    assert result.update is not None
+    ai_msg = result.update["messages"][0]
+    assert ai_msg.additional_kwargs.get("meiva_non_human_wake") is True

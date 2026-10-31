@@ -363,3 +363,53 @@ class TestAiMessageItems:
 
         items = self._items(AIMessage(content=[]))
         assert items == []
+
+    def test_legacy_and_human_wake_ai_messages_are_user_facing_by_default(self):
+        items = self._items(AIMessage(content="hello human"))
+        assert len(items) == 1
+        assert items[0].user_facing is True
+        assert items[0].payload == "hello human"
+
+        prefixed = self._items(AIMessage(content="Meiva agent to user: hello human"))
+        assert len(prefixed) == 1
+        assert prefixed[0].user_facing is True
+        assert prefixed[0].payload == "hello human"
+
+    def test_non_human_wake_requires_prefix_for_user_facing_projection(self):
+        unprefixed = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "check worker", "index": 0},
+                {"type": "text", "text": "Ack, checking worker.", "index": 1},
+            ],
+            additional_kwargs={"meiva_non_human_wake": True},
+        )
+        items = self._items(unprefixed)
+        assert [(it.kind, it.payload, it.user_facing, it.item_id) for it in items] == [
+            ("agent_reasoning", "check worker", True, "5.0"),
+            ("agent_chat", "Ack, checking worker.", False, "5.1"),
+        ]
+
+        prefixed = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "notify user", "index": 0},
+                {"type": "text", "text": "Meiva agent to user: Worker finished.", "index": 1},
+            ],
+            additional_kwargs={"meiva_non_human_wake": True},
+        )
+        prefixed_items = self._items(prefixed)
+        assert [(it.kind, it.payload, it.user_facing, it.item_id) for it in prefixed_items] == [
+            ("agent_reasoning", "notify user", True, "5.0"),
+            ("agent_chat", "Worker finished.", True, "5.1"),
+        ]
+
+    def test_empty_after_prefix_strip_demotes_without_shifting_tool_call_offset(self):
+        msg = AIMessage(
+            content=[{"type": "text", "text": "Meiva agent to user:   ", "index": 0}],
+            tool_calls=[{"name": "execute_code", "args": {"code": "print(1)"}, "id": "c0"}],
+            additional_kwargs={"meiva_non_human_wake": True},
+        )
+        items = self._items(msg)
+        assert [(it.kind, it.payload, it.user_facing, it.item_id) for it in items] == [
+            ("agent_chat", "Meiva agent to user:   ", False, "5.0"),
+            ("agent_code", "print(1)", True, "5.1"),
+        ]

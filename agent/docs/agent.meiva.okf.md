@@ -61,6 +61,7 @@ Overview of the Agent subsystem.
 - [[agent/docs/process-lifecycle/process-lifecycle.meiva.okf.md|Process Lifecycle]]
 - [[agent/startup/docs/startup.meiva.okf.md|Startup]]
 - [[agent/docs/state.meiva.okf.md|State]]
+- [[agent/docs/state-checkpoint-storage.meiva.okf.md|State Checkpoint Storage]]
 - [[agent/docs/sessions.meiva.okf.md|Sessions]]
 - [[agent/graph/docs/graph.meiva.okf.md|Agent Graph]]
 - [[agent/hooks/docs/hooks.meiva.okf.md|Hooks]]

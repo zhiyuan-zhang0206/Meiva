@@ -266,6 +266,15 @@ describe("useReplySuggestion", () => {
     ["there is no agent", { agentId: null }],
     ["the last item is not the agent's message", { items: [item("inbound_chat", "1.0", { source: "user" })] }],
     ["the agent's message is still streaming", { items: [item("agent_chat", "2.0", { partial: true })] }],
+    [
+      "the agent's last message is not user-facing",
+      {
+        items: [
+          item("inbound_chat", "1.0", { source: "agent:5" }),
+          item("agent_chat", "2.0", { user_facing: false }),
+        ],
+      },
+    ],
     ["the agent ended on code output", { items: [...AGENT_SAYS, item("code_output", "3.0")] }],
     ["the timeline is empty", { items: [] }],
   ])("sends nothing when %s", async (_name, override) => {

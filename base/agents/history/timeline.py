@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from langchain_core.messages import (
@@ -20,6 +21,7 @@ from base.agents.messages.kwargs import (
     kwargs_read_time,
     read_meiva_kwargs,
 )
+from base.agents.messages.reply_intent import resolve_agent_reply
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.sdk.tally import SdkCall, sdk_calls_by_tool_call_id
 from base.lm.content import message_addl_kwargs, message_content
@@ -380,6 +382,7 @@ def ai_message_items(
     out: list[TimelineItem] = []
     kwargs = read_meiva_kwargs(msg)
     created_at = kwargs_read_time(kwargs)
+    non_human_wake = bool(kwargs.get("meiva_non_human_wake"))
     reasoning_ms_by_block = kwargs.get("meiva_reasoning_ms_by_block")
     code_ms_by_block = kwargs.get("meiva_code_ms_by_block")
     from base.lm.reasoning import extract_reasoning_tokens, to_canonical_reasoning
@@ -393,16 +396,21 @@ def ai_message_items(
     content = _fold_addl_reasoning_into_content(content, message_addl_kwargs(msg))
     if isinstance(content, str):
         if content:
-            out.append(_chat_item(msg_idx, 0, content, created_at))
+            out.append(_chat_item(msg_idx, 0, content, created_at, non_human_wake=non_human_wake))
             content_indices.add(0)
     elif isinstance(content, list):
+        block_ctx = _AiBlockContext(
+            msg_idx=msg_idx,
+            created_at=created_at,
+            reasoning_ms_by_block=reasoning_ms_by_block,
+            reasoning_tokens=reasoning_tokens,
+            non_human_wake=non_human_wake,
+        )
         for pos, block in enumerate(content):
             item, block_idx, reasoning_attached = _content_block_item(
                 block,
-                (pos, msg_idx),
-                created_at,
-                reasoning_ms_by_block,
-                reasoning_tokens,
+                pos,
+                block_ctx,
                 reasoning_attached=reasoning_attached,
             )
             if block_idx is not None:
@@ -418,7 +426,24 @@ def ai_message_items(
     return out
 
 
-def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | None) -> TimelineItem:
+@dataclass(frozen=True)
+class _AiBlockContext:
+    msg_idx: int
+    created_at: str | None
+    reasoning_ms_by_block: Mapping[str, int] | None
+    reasoning_tokens: int | None
+    non_human_wake: bool
+
+
+def _chat_item(
+    msg_idx: int,
+    block_idx: int,
+    raw_text: str,
+    created_at: str | None,
+    *,
+    non_human_wake: bool = False,
+) -> TimelineItem:
+    payload, user_facing = resolve_agent_reply(raw_text, non_human_wake=non_human_wake)
     return TimelineItem(
         item_id=f"{msg_idx}.{block_idx}",
         kind="agent_chat",
@@ -426,20 +451,18 @@ def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | Non
         payload=payload,
         created_at=created_at,
         inbound_id=None,
+        user_facing=user_facing,
     )
 
 
 # meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _content_block_item(
     block: str | dict[str, Any],
-    coords: tuple[int, int],
-    created_at: str | None,
-    reasoning_ms_by_block: Mapping[str, int] | None,
-    reasoning_tokens: int | None,
+    pos: int,
+    ctx: _AiBlockContext,
     *,
     reasoning_attached: bool,
 ) -> tuple[TimelineItem | None, int | None, bool]:
-    pos, msg_idx = coords
     if not isinstance(block, dict):
         return None, None, reasoning_attached
     block_type = block.get("type")
@@ -452,23 +475,35 @@ def _content_block_item(
         if not (isinstance(t, str) and t):
             return None, block_idx, reasoning_attached
         block_reasoning_ms = (
-            None if reasoning_ms_by_block is None else reasoning_ms_by_block.get(str(block_idx))
+            None
+            if ctx.reasoning_ms_by_block is None
+            else ctx.reasoning_ms_by_block.get(str(block_idx))
         )
         item = TimelineItem(
-            item_id=f"{msg_idx}.{block_idx}",
+            item_id=f"{ctx.msg_idx}.{block_idx}",
             kind="agent_reasoning",
             source=None,
             payload=t,
-            created_at=created_at,
+            created_at=ctx.created_at,
             inbound_id=None,
             reasoning_ms=block_reasoning_ms,
-            reasoning_tokens=None if reasoning_attached else reasoning_tokens,
+            reasoning_tokens=None if reasoning_attached else ctx.reasoning_tokens,
         )
         return item, block_idx, True
     t = block.get("text")
     if not (isinstance(t, str) and t):
         return None, block_idx, reasoning_attached
-    return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
+    return (
+        _chat_item(
+            ctx.msg_idx,
+            block_idx,
+            t,
+            ctx.created_at,
+            non_human_wake=ctx.non_human_wake,
+        ),
+        block_idx,
+        reasoning_attached,
+    )
 
 
 def _tool_call_code_and_source(

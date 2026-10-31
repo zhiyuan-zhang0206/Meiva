@@ -13,6 +13,8 @@ def item(
     index: int,
     source: str | None = None,
     source_message_id: str | None = None,
+    *,
+    user_facing: bool = True,
 ) -> TimelineItem:
     return TimelineItem.model_validate(
         {
@@ -22,6 +24,7 @@ def item(
             "source": source,
             "created_at": "2026-10-11T00:00:00+00:00",
             "source_message_id": source_message_id,
+            "user_facing": user_facing,
         }
     )
 
@@ -86,6 +89,25 @@ def test_no_agent_text_in_the_last_turn_means_no_excerpt() -> None:
     ]
 
     assert build_excerpt(items, 1500) is None
+
+
+def test_non_user_facing_agent_chat_is_excluded_from_excerpt() -> None:
+    only_internal = [
+        item("inbound_chat", "watch worker", 1, "user"),
+        item("agent_chat", "Watching.", 2),
+        item("inbound_chat", "worker heartbeat", 3, "agent:9"),
+        item("agent_chat", "Internal monologue for Details only.", 4, user_facing=False),
+    ]
+    assert build_excerpt(only_internal, 1500) is None
+
+    mixed_turn = [
+        *only_internal,
+        item("agent_chat", "Worker finished cleanly. Merge?", 5, source_message_id="ai-u"),
+    ]
+    excerpt = build_excerpt(mixed_turn, 1500)
+    assert excerpt is not None
+    assert excerpt.text == "[User]\nwatch worker\n\n[Assistant]\nWorker finished cleanly. Merge?"
+    assert excerpt.last_message_id == "ai-u"
 
 
 def test_without_a_human_message_only_the_agent_text_remains() -> None:

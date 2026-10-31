@@ -78,6 +78,8 @@ def _finalize_turn_observability(
 ) -> None:
     kw = read_meiva_kwargs(final_msg)
     kw["meiva_created_at"] = now.isoformat()
+    if handler.non_human_wake:
+        kw["meiva_non_human_wake"] = True
     reasoning_ms_by_block = handler.reasoning_ms_by_block
     if reasoning_ms_by_block:
         kw["meiva_reasoning_ms_by_block"] = {
@@ -268,6 +270,7 @@ async def _llm_node_impl(
         agent_id,
         msg_idx=len(state.messages),
         turn_progress=ctx.turn_progress,
+        non_human_wake=state.non_human_wake,
     )
 
     chunks: list[AIMessageChunk] = []
@@ -290,7 +293,11 @@ async def _llm_node_impl(
         return cancelled_cmd
 
     if not chunks:
-        return Command[LlmGoto](update={"messages": [AIMessage(content="")]}, goto=BEFORE_EXEC)
+        empty_kw = {"meiva_non_human_wake": True} if state.non_human_wake else {}
+        return Command[LlmGoto](
+            update={"messages": [AIMessage(content="", additional_kwargs=empty_kw)]},
+            goto=BEFORE_EXEC,
+        )
     final_msg = assemble_final_message(chunks, catalog=ctx.require_catalog())
 
     text = final_msg.text

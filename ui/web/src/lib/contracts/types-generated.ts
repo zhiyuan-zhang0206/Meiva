@@ -4016,6 +4016,7 @@ export interface components {
             reasoning_tokens?: number | null;
             exec_ms?: number | null;
             show_timestamp: boolean;
+            user_facing: boolean;
             images?: string[] | null;
             image_captions?: string[] | null;
             sdk_calls?: components["schemas"]["SdkCall"][] | null;

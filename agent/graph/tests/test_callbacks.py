@@ -579,3 +579,26 @@ async def test_without_reset_streaming_duplicates_content(live_events: LiveEvent
     assert await live_events.typed() == [
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="Hello"),
     ]
+
+
+async def test_non_human_wake_carries_polarity_on_chat_events_and_survives_reset(
+    live_events: LiveEvents,
+):
+    pub = live_events.publisher
+    h = RedisStreamHandler(pub, 42, MSG_IDX, turn_progress=TurnProgress(), non_human_wake=True)
+    assert h.non_human_wake is True
+
+    _process(h, _text_chunk("Internal note"))
+    _flush(h)
+    assert await live_events.typed() == [
+        ChatStart(agent_id=42, item_id=TEXT_ID, non_human_wake=True),
+        ChatDelta(agent_id=42, item_id=TEXT_ID, content="Internal note", non_human_wake=True),
+    ]
+
+    h.reset()
+    _process(h, AIMessageChunk(content="Retry note"))
+    _flush(h)
+    assert await live_events.typed() == [
+        ChatStart(agent_id=42, item_id=TEXT_ID, non_human_wake=True),
+        ChatDelta(agent_id=42, item_id=TEXT_ID, content="Retry note", non_human_wake=True),
+    ]

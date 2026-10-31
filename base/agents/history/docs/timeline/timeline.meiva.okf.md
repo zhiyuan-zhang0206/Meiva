@@ -30,6 +30,10 @@ wall-clock ts when the timestamp policy is on and carries the producing run as
 
 Code items come from the normalized tool_calls view — one provider-agnostic rule (anthropic tool_use content blocks; gemini / openai tool_calls-only shapes). block_idx = <distinct text/thinking block indices> + <ordinal in tool_calls>: a set, so a signature-only thinking block sharing a sibling's index does not inflate the offset. The streaming side computes the same offset (agent/graph/_callbacks.py); SSE ids equal committed snapshot ids.
 
+## User-facing polarity (`user_facing`)
+
+Every `TimelineItem` carries `user_facing: bool = True`. For `agent_chat` items, `ai_message_items` resolves `(payload, user_facing)` via `base.agents.messages.reply_intent.resolve_agent_reply(raw_text, non_human_wake=bool(kwargs.get("meiva_non_human_wake")))`: human-triggered runs (and legacy `AIMessage`s without `meiva_non_human_wake`) default to `user_facing=True` while defensively stripping any redundant `Meiva agent to user:` header; non-human wakes default to `user_facing=False` unless the block opens with `Meiva agent to user:` followed by non-blank content, in which case the header is stripped and `user_facing=True`. A header-only block with empty stripped body demotes to `(raw_text, False)` rather than omitting the item so `item_id` block alignment with streamed `chat_start` and subsequent `agent_code` items stays intact. Downstream surfaces (`runs.classifyItem`, `im_bridge.is_dialog_item`, reply-suggestion excerpt/trigger) gate user-visible reply behavior on `user_facing`.
+
 ## Reasoning timing
 
 Each thinking block carries its own per-block duration (meiva_reasoning_ms_by_block, keyed by block_idx); the turn-level reasoning tokens attach to the FIRST thinking item only; historical messages keep None rather than an invented value. Provider-native reasoning is folded to canonical thinking blocks on a copy — the stored message stays native.

@@ -147,7 +147,7 @@ export function messageCardConfig(
         titleValues: chatTitle.titleValues,
         border: colors.agent_chat.border,
         bg: "bg-card",
-        fixedDefault: true,
+        fixedDefault: item.user_facing !== false,
         showTimestamp: true,
         copy: true,
       };

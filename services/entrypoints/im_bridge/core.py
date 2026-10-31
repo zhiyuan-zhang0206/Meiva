@@ -67,19 +67,18 @@ def _display_status(status: str) -> str:
     return status
 
 
+# meiva:note
+# Default IM push filter: user-originated messages (`inbound_chat` with `source == "user"`) plus
+# user-facing `agent_chat` items. Watcher/schedule/peer-agent inbounds and unprefixed background
+# `agent_chat` items (`user_facing=False`) stay internal.
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def is_dialog_item(it: dict[str, Any]) -> bool:
-    """The default push filter: user-originated messages + agent text output.
-
-    ``inbound_chat`` rows carry their envelope ``source`` — only the human's
-    own (``user``) passes; watcher/schedule/peer-agent inbounds are dropped.
-    """
-
     kind = it.get("kind")
     if kind not in _DIALOG_KINDS:
         return False
     if kind == "inbound_chat":
         return it.get("source") == _USER_SOURCE
-    return True
+    return it.get("user_facing") is not False
 
 
 # meiva:note

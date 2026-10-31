@@ -57,8 +57,10 @@ describe("classifyItem", () => {
     expect(summarizeTurn([waiting]).thinking).toBe(0);
   });
 
-  it("agent_chat and human inbound are primary", () => {
+  it("agent_chat and human inbound are primary; non-user-facing agent_chat is secondary", () => {
     expect(classifyItem(item("agent_chat"))).toBe("primary");
+    expect(classifyItem(item("agent_chat", null, undefined, { user_facing: true }))).toBe("primary");
+    expect(classifyItem(item("agent_chat", null, undefined, { user_facing: false }))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "user"))).toBe("primary");
     expect(classifyItem(item("inbound_chat", "ui:page:board"))).toBe("primary");
   });

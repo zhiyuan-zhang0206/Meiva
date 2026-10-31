@@ -1,5 +1,7 @@
 # meiva:note
 # Core reply routing, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
+from base.agents.messages.reply_intent import USER_REPLY_PREFIX
+
 from .live import SectionInputs
 
 
@@ -31,7 +33,14 @@ def user_reply_section(_inputs: SectionInputs) -> str:
         "or silent; the style can further limit progress narration. Peer messages, "
         "watcher events, scheduled wakes and system notes do not require courtesy "
         "replies or automatic closing summaries. Follow their delivery and "
-        "acknowledgment protocols separately.\n\n"
+        "acknowledgment protocols separately. On a run woken solely by non-human "
+        "inputs (peer agents, watchers, background shells, schedules, heartbeats "
+        "or system notes), ordinary assistant text folds into the collapsed work "
+        "log rather than appearing in the main user conversation; end the turn "
+        "with no assistant text when nothing needs to reach the human, or begin "
+        f"the message with `{USER_REPLY_PREFIX}` when proactively speaking to the "
+        f"human in this conversation (omit `{USER_REPLY_PREFIX}` on human-triggered "
+        "runs).\n\n"
         "## Communication language\n\n"
         "Use the human's explicitly requested communication language for ordinary "
         "assistant text, including text alongside tool calls, progress updates "
@@ -138,7 +147,14 @@ def harness_user_reply_section(_inputs: SectionInputs) -> str:
         "or silent; the style can further limit progress narration. Peer messages, "
         "watcher events, scheduled wakes and system notes do not require courtesy "
         "replies or automatic closing summaries. Follow their delivery and "
-        "acknowledgment protocols separately.\n\n"
+        "acknowledgment protocols separately. On a run woken solely by non-human "
+        "inputs (peer agents, watchers, background shells, schedules, heartbeats "
+        "or system notes), ordinary assistant text folds into the collapsed work "
+        "log rather than appearing in the main user conversation; end the turn "
+        "with no assistant text when nothing needs to reach the human, or begin "
+        f"the message with `{USER_REPLY_PREFIX}` when proactively speaking to the "
+        f"human in this conversation (omit `{USER_REPLY_PREFIX}` on human-triggered "
+        "runs).\n\n"
         "## Communication language\n\n"
         "Use the human's explicitly requested communication language for ordinary "
         "assistant text, including text alongside tool calls, progress updates "

@@ -31,7 +31,7 @@ simply not useful.
 1. The agent must exist and be idle; the cluster switch must be on.
 2. `load_current_messages` reads the checkpoint and the shared timeline renderer turns it
    into items. The excerpt is the newest human message (`user` or `ui:page:*`) and the
-   text of the last turn (everything after the newest inbound), cut to
+   user-facing text (`user_facing=True`) of the last turn (everything after the newest inbound), cut to
    `reply_suggestion_max_input_tokens`. The user's message has the budget's first claim:
    a long agent turn cannot evict the message the suggestion answers, and whichever part
    must be cut keeps its newest words. `excerpt.py`'s `is_human_source` mirrors

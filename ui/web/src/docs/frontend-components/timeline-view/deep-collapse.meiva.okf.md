@@ -8,7 +8,7 @@ tags:
 
 # Timeline deep collapse
 
-`runs.classifyItem` classifies items as primary (agent replies + human inbound, always visible) / secondary (thinking / code / output, inter-agent messages, system inbound, compact, system_prompt, note marker) / bare (ephemeral marker). Adjacent secondary items form a `TurnBlock`; Details All/Last/None controls its default expansion, with Last opening the active final turn. In None mode an opened turn keeps its nested blocks collapsed (each opens on its
+`runs.classifyItem` classifies items as primary (user-facing agent replies + human inbound, always visible) / secondary (thinking / code / output, non-user-facing `agent_chat` with `user_facing === false` from background wakes, inter-agent messages, system inbound, compact, system_prompt, note marker) / bare (ephemeral marker). Non-user-facing `agent_chat` items carry `fixedDefault: false` inside `TurnBlock` so expanding `Details` in `None` mode keeps them collapsed until clicked, while still offering `Copy` when expanded. Adjacent secondary items form a `TurnBlock`; Details All/Last/None controls its default expansion, with Last opening the active final turn. In None mode an opened turn keeps its nested blocks collapsed (each opens on its
 own click); All/Last cascade the expansion into them (task #4780). The
 in-progress step stays visible while the turn is active (the last streaming
 item is peeled out of turn-collapse). While the settings query is in flight the

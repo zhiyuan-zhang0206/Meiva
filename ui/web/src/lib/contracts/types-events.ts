@@ -4,11 +4,12 @@ type Schemas = components["schemas"];
 
 export type BackendTimelineItem = Omit<
   Schemas["TimelineItem"],
-  "source" | "created_at" | "inbound_id"
+  "source" | "created_at" | "inbound_id" | "user_facing"
 > & {
   readonly source: string | null;
   readonly created_at: string | null;
   readonly inbound_id: number | null;
+  readonly user_facing?: boolean;
   readonly partial?: boolean;
   readonly llmWaiting?: boolean;
   readonly interrupted?: boolean;
@@ -23,6 +24,8 @@ export type BackendTimelineItem = Omit<
 
   readonly execStartedAt?: number;
   readonly execElapsedMs?: number;
+  readonly rawChatPayload?: string;
+  readonly nonHumanWake?: boolean;
 };
 
 export interface TimelineResponse {
@@ -46,11 +49,13 @@ interface BaseEvent {
 export interface ChatStartEvent extends BaseEvent {
   readonly role: "chat_start";
   readonly item_id: string;
+  readonly non_human_wake?: boolean;
 }
 export interface ChatDeltaEvent extends BaseEvent {
   readonly role: "chat_delta";
   readonly item_id: string;
   readonly content: string;
+  readonly non_human_wake?: boolean;
 }
 export interface CompactRequestEvent extends BaseEvent {
   readonly role: "compact_request";

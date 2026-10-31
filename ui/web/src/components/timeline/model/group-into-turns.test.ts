@@ -193,6 +193,29 @@ describe("groupIntoTurns", () => {
     expect(formatTurnSummary(turn.summary)).toBe("1 turn · 1 system note");
   });
 
+  it("folds consecutive non-human wakes and non-user-facing agent_chat into one contiguous turn until user-facing reply", () => {
+    const items = [
+      item("inbound_chat", "user"),
+      item("inbound_chat", "agent:10"),
+      item("agent_reasoning"),
+      item("agent_chat", null, undefined, { user_facing: false, payload: "internal ack" }),
+      item("inbound_chat", "agent:11"),
+      item("agent_chat", null, undefined, { user_facing: false, payload: "still internal" }),
+      item("agent_chat", null, undefined, { user_facing: true, payload: "All workers done." }),
+    ];
+    const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+    expect(kinds(groups)).toEqual([
+      "single(inbound_chat@0)",
+      "turn(5@1)",
+      "single(agent_chat@6)",
+    ]);
+    const turn = groups[1];
+    if (turn.kind !== "turn") throw new Error("expected turn");
+    expect(turn.summary.agentMessages).toBe(2);
+    expect(turn.summary.systemNotes).toBe(2);
+    expect(formatTurnSummary(turn.summary)).toBe("1 turn · 2 system notes · 2 agent messages");
+  });
+
   it("summarizeTurn keeps an earlier concurrent live execution clock when a later tool finishes", () => {
     const items = [
       { ...item("agent_code"), item_id: "6.0", code_elapsed_ms: 10 },

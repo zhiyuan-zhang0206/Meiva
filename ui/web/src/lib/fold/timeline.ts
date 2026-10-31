@@ -57,10 +57,50 @@
 // re-exports the helpers for its historical importers, so nothing here may
 // import ../timeline (cycle).
 
+import { USER_REPLY_HEADER } from "../contracts/constants-generated";
 import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
 import { parseItemId, sortByItemId } from "./item-id";
 
 export { parseItemId, parseItemIdParts, sortByItemId, type ItemIdParts } from "./item-id";
+
+// meiva:link base/agents/messages/reply_intent.py
+function stripUserReplyPrefix(text: string): {
+  readonly matched: boolean;
+  readonly body: string;
+} {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith(USER_REPLY_HEADER)) {
+    return { matched: false, body: text };
+  }
+  const rest = trimmed.slice(USER_REPLY_HEADER.length);
+  let idx = 0;
+  while (idx < rest.length && (rest[idx] === " " || rest[idx] === "\t")) {
+    idx += 1;
+  }
+  if (idx < rest.length && rest[idx] === "\r") {
+    idx += 1;
+    if (idx < rest.length && rest[idx] === "\n") {
+      idx += 1;
+    }
+  } else if (idx < rest.length && rest[idx] === "\n") {
+    idx += 1;
+  }
+  return { matched: true, body: rest.slice(idx) };
+}
+
+function resolveStreamingChat(
+  rawText: string,
+  nonHumanWake: boolean,
+): { readonly payload: string; readonly user_facing: boolean } {
+  const { matched, body } = stripUserReplyPrefix(rawText);
+  if (nonHumanWake) {
+    if (matched && body.trim().length > 0) {
+      return { payload: body, user_facing: true };
+    }
+    return { payload: rawText, user_facing: false };
+  }
+  return { payload: matched ? body : rawText, user_facing: true };
+}
 
 /**
  * Stable insert for a NEW item by its numeric item_id — used by the
@@ -108,26 +148,61 @@ function appendDeltaById(
   kind: "agent_chat" | "agent_code" | "agent_reasoning" | "code_output",
   delta: string,
   nowMs = 1,
+  eventNonHumanWake?: boolean,
 ): BackendTimelineItem[] {
   const idx = items.findIndex((it) => it.item_id === itemId);
   if (idx >= 0) {
+    const prev = items[idx];
+    if (kind === "agent_chat") {
+      const raw = (prev.rawChatPayload ?? prev.payload) + delta;
+      const nonHumanWake = Boolean(prev.nonHumanWake ?? eventNonHumanWake);
+      const resolved = resolveStreamingChat(raw, nonHumanWake);
+      const updated: BackendTimelineItem = {
+        ...prev,
+        payload: resolved.payload,
+        user_facing: resolved.user_facing,
+        rawChatPayload: raw,
+        nonHumanWake,
+      };
+      return [...items.slice(0, idx), updated, ...items.slice(idx + 1)];
+    }
     const updated: BackendTimelineItem = {
-      ...items[idx],
-      payload: items[idx].payload + delta,
+      ...prev,
+      payload: prev.payload + delta,
     };
     return [...items.slice(0, idx), updated, ...items.slice(idx + 1)];
   }
+  const chatState =
+    kind === "agent_chat"
+      ? (() => {
+          const nonHumanWake = Boolean(eventNonHumanWake);
+          const resolved = resolveStreamingChat(delta, nonHumanWake);
+          return {
+            payload: resolved.payload,
+            user_facing: resolved.user_facing,
+            rawChatPayload: delta,
+            nonHumanWake,
+          };
+        })()
+      : null;
   const newItem: BackendTimelineItem = {
     item_id: itemId,
     kind,
     source: null,
-    payload: delta,
+    payload: chatState ? chatState.payload : delta,
     created_at: new Date(nowMs).toISOString(),
     inbound_id: null,
     // Streaming items are never system-note markers, so the flag is unused by
     // their renderers; true keeps the honest "always present" contract.
     show_timestamp: true,
     partial: true,
+    ...(chatState
+      ? {
+          user_facing: chatState.user_facing,
+          rawChatPayload: chatState.rawChatPayload,
+          nonHumanWake: chatState.nonHumanWake,
+        }
+      : {}),
     // Start the live "Thinking for Xs" clock the moment the first reasoning
     // fragment lands (used when this delta arrives before its start event).
     ...(kind === "agent_reasoning" ? { reasoningStartedAt: nowMs } : {}),
@@ -155,6 +230,7 @@ function createStartItem(
   itemId: string,
   kind: "agent_chat" | "agent_code" | "agent_reasoning",
   nowMs = 1,
+  nonHumanWake = false,
 ): BackendTimelineItem[] {
   if (items.some((it) => it.item_id === itemId)) return items;
   return insertItemById(items, {
@@ -165,6 +241,9 @@ function createStartItem(
     created_at: new Date(nowMs).toISOString(),
     inbound_id: null,
     show_timestamp: true,
+    ...(kind === "agent_chat"
+      ? { user_facing: !nonHumanWake, rawChatPayload: "", nonHumanWake }
+      : {}),
     // reasoning_start: anchor the live "Thinking for Xs" clock now.
     ...(kind === "agent_reasoning" ? { reasoningStartedAt: nowMs } : {}),
     // code_start: anchor the live "writing code for Xs" clock now.
@@ -260,11 +339,14 @@ export function applySystemEvent(
       // the frozen duration rather than clocks that keep ticking through
       // later phases.
       return freezeReasoningClocks(
-        clearCodeClocks(createStartItem(items, ev.item_id, "agent_chat", nowMs), nowMs),
+        clearCodeClocks(
+          createStartItem(items, ev.item_id, "agent_chat", nowMs, Boolean(ev.non_human_wake)),
+          nowMs,
+        ),
         nowMs,
       );
     case "chat_delta":
-      return appendDeltaById(items, ev.item_id, "agent_chat", ev.content, nowMs);
+      return appendDeltaById(items, ev.item_id, "agent_chat", ev.content, nowMs, ev.non_human_wake);
     case "code_start":
       // Code content begins → reasoning phase is over (same as chat_start),
       // and any previous code block's clock (multi-code turn) is stale.

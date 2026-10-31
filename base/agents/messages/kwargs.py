@@ -102,6 +102,7 @@ class MeivaMessageKwargs(TypedDict, total=False):
     sdk_calls: list[dict[str, Any]] | None
     meiva_reasoning_ms_by_block: dict[str, int]
     meiva_code_ms_by_block: dict[str, int]
+    meiva_non_human_wake: bool
     meiva_usage: MeivaUsage
 
 

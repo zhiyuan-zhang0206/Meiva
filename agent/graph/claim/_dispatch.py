@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TypeGuard
@@ -29,6 +30,7 @@ from agent.hooks.compact_events import emit_compact_finished, emit_compact_start
 from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from base.agents.context import MeivaContext
+from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import MeivaMsgType
@@ -580,3 +582,57 @@ async def dispatch_batch(
         if kind in ROUTING_KINDS and not routing.is_winner(item):
             continue
         await _dispatch_item(ctx, state, agent_id, item, st, latest_resurrect_id)
+
+
+def _is_continuation_item(item: ClaimedInbound) -> bool:
+    if item.kind in (
+        InboundKind.COMPACT_SUMMARY,
+        InboundKind.COMPACT_REQUEST,
+        InboundKind.CANCEL,
+    ):
+        return True
+    if item.kind == InboundKind.SYSTEM_NOTE and isinstance(item.payload, dict):
+        return item.payload.get("note_tag") == NoteTag.LIFECYCLE_RESTART.value
+    return False
+
+
+def _is_human_wake_item(item: ClaimedInbound) -> bool:
+    return item.kind in (InboundKind.CHAT, InboundKind.RESURRECT) and (
+        sender_class(item.source) == "user"
+    )
+
+
+def _is_dispatched_for_polarity(
+    item: ClaimedInbound, routing: Routing, *, has_compact: bool
+) -> bool:
+    if item.kind in ROUTING_KINDS and not routing.is_winner(item):
+        return False
+    return not (has_compact and item.kind in (InboundKind.CHAT, InboundKind.REMINDER))
+
+
+# meiva:note
+# Any human-sourced chat or manual resurrect (`user` or `ui:page:*`) flips `non_human_wake`
+# to `False` for the remainder of the run. Mid-run continuation/control mechanics
+# (`COMPACT_SUMMARY`, `COMPACT_REQUEST`, `CANCEL`, interrupted-turn restart resume) and
+# mid-run secondary arrivals preserve the active run's polarity; waking from idle on purely
+# non-human inbounds sets `True`.
+# meiva:link agent/docs/state.meiva.okf.md
+def resolve_non_human_wake(
+    state: _state.AgentState,
+    batch: Sequence[ClaimedInbound],
+    routing: Routing,
+    st: BatchState,
+) -> bool:
+    if st.restart_requested:
+        return False if st.restart_preserves_idle else state.non_human_wake
+    has_compact = st.compact_payload is not None
+    dispatched = [
+        item
+        for item in batch
+        if _is_dispatched_for_polarity(item, routing, has_compact=has_compact)
+    ]
+    if any(_is_human_wake_item(item) for item in dispatched):
+        return False
+    if dispatched and all(_is_continuation_item(item) for item in dispatched):
+        return state.non_human_wake
+    return state.non_human_wake if (state.turn_active and not state.halted) else True
