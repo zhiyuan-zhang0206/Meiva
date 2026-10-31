@@ -60,9 +60,6 @@ function mockScrollableGeometry() {
   }
 
   globalThis.ResizeObserver = ControlledResizeObserver;
-  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(100);
-  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(200);
 
   return () => {
     act(() => {
@@ -72,6 +69,22 @@ function mockScrollableGeometry() {
       vi.advanceTimersByTime(30);
     });
   };
+}
+
+// meiva:note
+// jsdom has no layout: every element reports 0 for its own geometry, so Radix never
+// sees overflow and never mounts a thumb. Give the elements this test rendered the
+// numbers a 100px viewport over 400px of content has — on the elements themselves,
+// not on a prototype shared with the rest of the process.
+function defineScrollableGeometry() {
+  const viewport = document.querySelector('[data-slot="scroll-area-viewport"]');
+  const track = document.querySelector('[data-slot="scroll-area-scrollbar"]');
+  expect(viewport).toBeInstanceOf(HTMLElement);
+  expect(track).toBeInstanceOf(HTMLElement);
+  Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 400 });
+  Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 100 });
+  Object.defineProperty(viewport, "offsetHeight", { configurable: true, value: 100 });
+  Object.defineProperty(track, "clientHeight", { configurable: true, value: 100 });
 }
 
 describe("ScrollArea", () => {
@@ -175,6 +188,7 @@ describe("ScrollArea", () => {
     vi.useFakeTimers();
     const flushResizeObservers = mockScrollableGeometry();
     renderScrollArea();
+    defineScrollableGeometry();
     flushResizeObservers();
     const scrollbar = getScrollbar();
     const thumb = document.querySelector('[data-slot="scroll-area-thumb"]');
@@ -211,19 +225,14 @@ describe("ScrollArea", () => {
     renderScrollArea();
 
     const viewport = document.querySelector('[data-slot="scroll-area-viewport"]');
-    const track = document.querySelector('[data-slot="scroll-area-scrollbar"]');
-    expect(viewport).toBeInstanceOf(HTMLElement);
-    expect(track).toBeInstanceOf(HTMLElement);
 
     // Element-level metrics (set BEFORE the resize flush so Radix's own size
     // measurement agrees with ours): content 400 over a 100px viewport on a
     // 100px track. Radix derives a 25px thumb (100 * 100/400); mirror that in
     // the thumb's own offsetHeight below so every writer computes the same
     // travel (100 - 25 = 75) and the same translate.
-    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 400 });
-    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 100 });
+    defineScrollableGeometry();
     Object.defineProperty(viewport, "scrollTop", { configurable: true, writable: true, value: 0 });
-    Object.defineProperty(track, "clientHeight", { configurable: true, value: 100 });
     flushResizeObservers();
 
     const thumb = document.querySelector('[data-slot="scroll-area-thumb"]');
