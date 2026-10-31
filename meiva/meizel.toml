@@ -1,24 +1,26 @@
-exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "tests", "ui.py", "understand", "watcher"]
+exports = ["agents", "boot.py", "boot_external.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "tests", "ui.py", "understand", "watcher"]
 
 [uses]
 "__init__.py" = ["agents", "boot.py", "files.py", "impersonation", "mcps", "sdk_surface", "self", "shell", "skills", "ui.py", "understand", "watcher", "web"]
 "agents" = ["gateway_client", "sdk_surface", "security.py", "skills"]
 "boot.py" = ["mcps", "sdk_surface"]
+"boot_external.py" = ["boot.py"]
 "files.py" = ["sdk_surface", "security.py", "skills"]
 "gateway_client" = ["sdk_surface"]
-"impersonation" = ["boot.py", "sdk_surface"]
+"impersonation" = ["boot_external.py", "sdk_surface"]
 "mcps" = ["sdk_surface", "security.py"]
 "security.py" = ["sdk_surface"]
-"self" = ["boot.py", "files.py", "sdk_surface"]
+"self" = ["boot.py", "boot_external.py", "files.py", "sdk_surface"]
 "shell" = ["agents", "files.py", "sdk_surface", "security.py"]
 "skills" = ["sdk_surface"]
-"tests" = ["__init__.py", "agents", "boot.py", "files.py", "gateway_client", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand", "watcher", "web"]
+"tests" = ["__init__.py", "agents", "boot.py", "boot_external.py", "files.py", "gateway_client", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand", "watcher", "web"]
 "ui.py" = ["boot.py", "gateway_client", "sdk_surface"]
 "understand" = ["files.py", "sdk_surface", "security.py"]
 "watcher" = ["sdk_surface", "shell"]
 "web" = ["sdk_surface", "security.py"]
 
 [roots]
+"boot_external.py" = { kinds = ["clock", "home", "random"], why = "An external process's boot reads the account home and the system generator once and builds the clock over SYSTEM_TIMERS, for the attachment context it then binds; the takeover and the harness must not differ in how that process around them is built" }
 "boot.py" = { kinds = ["clock", "environ", "home", "random", "settings"], why = "SDK process bootstrap: reads the launch environment (MEIVA_AGENT_ID is the only channel by which a child process, such as a shell session or a watcher, discovers its parent agent), reads the account's home and the Meiva home once for the contexts it builds, builds the process's random generator that the sampling owner draws from, and constructs and binds the process-owned configuration owner and context; builds the process clock from SYSTEM_TIMERS" }
 "files.py" = { kinds = ["home", "random"], why = "workspace_base() reads Path.home() as the documented pre-bootstrap fallback for relative paths when no agent identity is bound, and _new_file_mode() generates a random UUID suffix for its temporary umask probe file" }
 "__init__.py" = { kinds = ["environ"], why = "The package import is the SDK process's own entry boundary: a bare `python x.py` inside an agent shell has no bootstrap to hook, so whether this process is an agent-launched child can only be decided while `meiva` imports, before the caller's first attribute access — deferring it would leave the plugin wrappers of that first access unloaded. The read is one shot, through `boot.is_launched_process`, and nothing else in this file reads the world" }

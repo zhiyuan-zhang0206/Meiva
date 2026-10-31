@@ -26,7 +26,7 @@ from base.host.proc import run_bounded
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
 from meiva import impersonation
-from meiva.boot import OwnedBoot
+from meiva.boot_external import OwnedBoot
 from meiva.impersonation.admission import lease_target
 from meiva.impersonation.attachment import AttachInputs, Attachment
 from meiva.sdk_surface import install, process_context

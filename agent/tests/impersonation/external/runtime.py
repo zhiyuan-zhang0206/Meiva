@@ -44,7 +44,8 @@ from base.packages.plugins.extensions import ExtensionRegistry
 from base.packages.plugins.loading import registry as plugin_registry
 from base.paths import meiva_home
 from meiva import impersonation
-from meiva.boot import OwnedBoot, derived_clients, own_external_process
+from meiva.boot import derived_clients
+from meiva.boot_external import OwnedBoot, own_external_process
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface import settings as _settings
 from meiva.tests.fixtures.pin_agent import pin_agent
