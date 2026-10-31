@@ -385,6 +385,16 @@ def test_ensure_user_runtime_dir_leaves_an_existing_value_alone() -> None:
     assert environ["XDG_RUNTIME_DIR"] == "/run/user/1000"
 
 
+# meiva:note
+# The complaint about a missing runtime dir is conditional on someone wanting a cap on a
+# platform that has one. Without the guard a healthy macOS machine logs an error naming a
+# Linux mechanism on every assembly, which is how a real alert gets trained into noise.
+def test_memory_cap_wanted_only_on_linux_with_a_budget() -> None:
+    assert glue.memory_cap_wanted(max_mb=18432, platform="linux") is True
+    assert glue.memory_cap_wanted(max_mb=18432, platform="darwin") is False
+    assert glue.memory_cap_wanted(max_mb=0, platform="linux") is False
+
+
 def test_agent_host_cap_is_off_by_default() -> None:
     assert (
         glue.agent_host_memory_caps(

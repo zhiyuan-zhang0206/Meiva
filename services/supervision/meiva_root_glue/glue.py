@@ -214,15 +214,26 @@ def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
 # to be restored before anything asks whether scoping is possible -- and restoring it in the
 # process environment is the point, because the later `systemd-run --user` launch inherits it
 # too. Repairing only the probe would leave that second hop failing for the same reason.
+def memory_cap_wanted(*, max_mb: int, platform: str) -> bool:
+    return max_mb > 0 and platform == "linux"
+
+
+# meiva:note
+# The repair runs unconditionally -- writing a runtime dir that already exists costs nothing
+# and the launch below may need it on platforms that never cap. The complaint does not: an
+# alert on a healthy macOS developer machine, naming a Linux mechanism that does not apply
+# there, is how an alert becomes noise.
 def bind_memory_budget(supervisor: Supervisor, *, host: Host) -> None:
-    if ensure_user_runtime_dir(os.environ, uid=host.uid, isdir=os.path.isdir) is None:
+    runtime_dir = ensure_user_runtime_dir(os.environ, uid=host.uid, isdir=os.path.isdir)
+    max_mb = settings.agent.agent_host_memory_max_mb
+    if runtime_dir is None and memory_cap_wanted(max_mb=max_mb, platform=host.platform.system):
         _log.error(
             "no user runtime dir: XDG_RUNTIME_DIR is unset and /run/user/%d does not exist; "
             "systemd-run --user cannot reach the user manager, so unit memory caps will not apply",
             host.uid,
         )
     caps = agent_host_memory_caps(
-        max_mb=settings.agent.agent_host_memory_max_mb,
+        max_mb=max_mb,
         swap_max_mb=settings.agent.agent_host_memory_swap_max_mb,
         platform=host.platform.system,
     )
