@@ -2,4 +2,7 @@ exports = ["diff_checks.py", "diff_checks_receipt.py", "tests"]
 
 [uses]
 "diff_checks.py" = ["diff_closure.py"]
-"tests" = ["diff_checks.py", "diff_checks_receipt.py"]
+"tests" = ["audit_merge_receipts.py", "diff_checks.py", "diff_checks_receipt.py"]
+
+[loads]
+"audit_merge_receipts.py" = ["scripts/hooks"]

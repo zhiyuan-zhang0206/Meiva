@@ -119,7 +119,7 @@ def test_snapshot_decoder_rejects_every_other_unknown_or_malformed_input(text: s
 def test_repo_policy_allowance_counts_are_pinned() -> None:
     policy = allowances.load(ROOT)
     assert len(policy.external) == 43
-    assert len(policy.loads) == 26
+    assert len(policy.loads) == 27
 
 
 # meiva:note
