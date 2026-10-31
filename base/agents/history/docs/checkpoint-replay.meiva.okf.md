@@ -13,6 +13,15 @@ message reset raises a reconstruction error. A delta channel version with
 neither a seed nor writes is also unavailable. These failures never become
 an empty conversation or a guessed chronological chain.
 
+Both savers are built only over the private checkpoint-postgres surface this
+reader uses: the `_DeltaStage2Row` it constructs, `writes_sort_key`, the
+`_get_overwrite` detector and the three `BasePostgresSaver` methods it drives.
+Construction verifies that surface (`read_private_surface` /
+`verify_private_surface`) and raises when a release renames or reshapes any of
+it, so a changed dependency fails where the saver is built rather than as a
+mis-cut message reset during a replay. `pyproject.toml` caps the package at the
+minor this adapter was written against.
+
 An explicit empty snapshot, an empty write and a fresh non-delta checkpoint
 remain valid empty states. Read-side detection neither repairs nor writes
 checkpoint storage. A real reset permits replay without its older prefix;

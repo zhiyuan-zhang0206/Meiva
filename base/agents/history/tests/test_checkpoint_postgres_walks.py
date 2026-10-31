@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, cast
+from dataclasses import replace
+from typing import Any, TypedDict, cast
 from uuid import uuid4
 
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.base import CheckpointMetadata, CheckpointTuple, DeltaChannelHistory
+from langgraph.channels.binop import _get_overwrite
+from langgraph.checkpoint.base import (
+    CheckpointMetadata,
+    CheckpointTuple,
+    DeltaChannelHistory,
+    writes_sort_key,
+)
 from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.postgres import PostgresSaver as UpstreamPostgresSaver
+from langgraph.checkpoint.postgres.base import BasePostgresSaver, _DeltaStage2Row
 from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
@@ -25,6 +33,12 @@ from base.agents.history.checkpoint_postgres_walks import (
     HistoryAsyncPostgresSaver as AsyncPostgresSaver,
 )
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+from base.agents.history.checkpoint_postgres_walks import (
+    PrivateSurface,
+    installed_private_surface,
+    surface_of,
+    verify_private_surface,
+)
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database
@@ -358,3 +372,76 @@ async def test_checkpoint_reads_leave_shared_serializer_unchanged(
     assert spans[0]["failed_phase"] == "history_read"
     assert spans[0]["error_type"] == "ValueError"
     assert shared_serde.loads_typed == decode
+
+
+# meiva:note
+# The adapter reads checkpoint-postgres's private extension surface, and a saver refuses to be
+# built over a surface this file was not written against. Each case states one shape a release
+# could change and builds a saver with it: the refusal must come at construction, before any
+# connection is used, and never as a mis-cut reset during a replay.
+def test_the_installed_private_surface_is_the_one_this_adapter_reads() -> None:
+    verify_private_surface(installed_private_surface())
+
+
+def test_a_renamed_stage2_row_field_refuses_the_sync_saver_construction() -> None:
+    class RenamedRow(TypedDict):
+        _kind: str
+        checkpoint_id: str | None
+        channel: str | None
+        type: str | None
+        blob: bytes | None
+        task_id: str | None
+        task_path: str | None
+        write_idx: int | None
+        version: str | None
+
+    surface = surface_of(
+        stage2_row=RenamedRow,
+        sort_key=writes_sort_key,
+        overwrite_reader=_get_overwrite,
+        base_saver=BasePostgresSaver,
+    )
+    assert surface.stage2_row_fields == (
+        "_kind",
+        "checkpoint_id",
+        "channel",
+        "type",
+        "blob",
+        "task_id",
+        "task_path",
+        "write_idx",
+        "version",
+    )
+    with pytest.raises(RuntimeError, match="stage-2 row changed"):
+        PostgresSaver(cast(Any, object()), surface=surface)
+
+
+def test_a_changed_writes_sort_key_refuses_the_async_saver_construction() -> None:
+    def sort_by_task_id(task_id: str, task_path: str, idx: int = 0) -> tuple[str, str, int]:
+        return task_path, task_id, idx
+
+    surface = surface_of(
+        stage2_row=_DeltaStage2Row,
+        sort_key=sort_by_task_id,
+        overwrite_reader=_get_overwrite,
+        base_saver=BasePostgresSaver,
+    )
+    with pytest.raises(RuntimeError, match="writes_sort_key changed"):
+        AsyncPostgresSaver(cast(Any, object()), surface=surface)
+
+
+def test_a_changed_advance_walks_signature_refuses_the_saver_construction() -> None:
+    surface: PrivateSurface = replace(
+        installed_private_surface(), advance_walks_parameters=("target_id",)
+    )
+    with pytest.raises(RuntimeError, match="_try_advance_walks changed"):
+        PostgresSaver(cast(Any, object()), surface=surface)
+
+
+def test_a_refusal_names_the_shape_it_found() -> None:
+    surface: PrivateSurface = replace(
+        installed_private_surface(), stage2_row_fields=("idx", "version")
+    )
+    with pytest.raises(RuntimeError) as refused:
+        verify_private_surface(surface)
+    assert "['idx', 'version']" in str(refused.value)

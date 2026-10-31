@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
+from dataclasses import dataclass
+from inspect import signature
 from typing import Any, LiteralString
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
@@ -14,7 +16,11 @@ from langgraph.checkpoint.base import DeltaChannelHistory, get_checkpoint_id, wr
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.postgres.base import BasePostgresSaver, _DeltaStage2Row
+from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from psycopg import AsyncConnection, AsyncPipeline, Connection, Pipeline
+from psycopg.rows import DictRow
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.log import logger
 
@@ -75,6 +81,144 @@ WHERE thread_id = %s AND checkpoint_ns = %s AND channel = 'messages' AND version
 
 _Query = tuple[LiteralString, Sequence[Any]]
 _Rows = list[dict[str, Any]]
+
+
+# meiva:note
+# The connections the savers accept: a psycopg connection, or a pool that lends one per cursor.
+# Those are the shapes `_internal.Conn` names upstream, stated from psycopg's own types.
+SyncSaverConnection = Connection[DictRow] | ConnectionPool[Connection[DictRow]]
+AsyncSaverConnection = AsyncConnection[DictRow] | AsyncConnectionPool[AsyncConnection[DictRow]]
+
+
+# meiva:note
+# What this adapter reads from checkpoint-postgres's private extension surface: the stage-2 row
+# it builds, the key order it sorts one checkpoint's writes by, the overwrite detector it asks,
+# and the three base-saver methods it drives. Upstream reshapes those inside a minor release --
+# 3.1.3 itself changed the stage-2 row -- so a saver verifies the surface when it is built
+# instead of meeting the change as a mis-cut message reset during a replay.
+@dataclass(frozen=True, slots=True)
+class PrivateSurface:
+    stage2_row_fields: tuple[str, ...]
+    writes_sort_key_parameters: tuple[str, ...]
+    overwrite_reader_parameters: tuple[str, ...]
+    ingest_page_parameters: tuple[str, ...]
+    advance_walks_parameters: tuple[str, ...]
+    build_history_keywords: tuple[str, ...]
+
+
+_EXPECTED_STAGE2_FIELDS = (
+    "_kind",
+    "checkpoint_id",
+    "channel",
+    "type",
+    "blob",
+    "task_id",
+    "task_path",
+    "idx",
+    "version",
+)
+_EXPECTED_WRITES_SORT_KEY = ("task_path", "task_id", "idx")
+_EXPECTED_OVERWRITE_READER = ("value",)
+_EXPECTED_INGEST_PAGE = (
+    "stage1_rows",
+    "channels",
+    "parent_of",
+    "ver_by_i_by_cid",
+    "hb_by_i_by_cid",
+    "inline_by_i_by_cid",
+)
+_EXPECTED_ADVANCE_WALKS = (
+    "target_id",
+    "channels",
+    "parent_of",
+    "ver_by_i_by_cid",
+    "hb_by_i_by_cid",
+    "inline_by_i_by_cid",
+    "chain_by_ch",
+    "seed_ver_by_ch",
+    "seed_inline_by_ch",
+    "walk_cursor_by_ch",
+    "seeded",
+)
+_EXPECTED_BUILD_HISTORY = (
+    "channels",
+    "chain_by_ch",
+    "seed_ver_by_ch",
+    "seed_inline_by_ch",
+    "stage2_rows",
+)
+
+
+# meiva:note
+# Refuse a checkpoint-postgres release whose private extension surface this adapter lost.
+def verify_private_surface(surface: PrivateSurface) -> None:
+    for name, expected, found in (
+        ("stage-2 row", _EXPECTED_STAGE2_FIELDS, surface.stage2_row_fields),
+        ("writes_sort_key", _EXPECTED_WRITES_SORT_KEY, surface.writes_sort_key_parameters),
+        ("_get_overwrite", _EXPECTED_OVERWRITE_READER, surface.overwrite_reader_parameters),
+        ("_ingest_stage1_page", _EXPECTED_INGEST_PAGE, surface.ingest_page_parameters),
+        ("_try_advance_walks", _EXPECTED_ADVANCE_WALKS, surface.advance_walks_parameters),
+        (
+            "_build_delta_channels_writes_history",
+            _EXPECTED_BUILD_HISTORY,
+            surface.build_history_keywords,
+        ),
+    ):
+        if found != expected:
+            raise RuntimeError(
+                f"checkpoint-postgres {name} changed: this adapter reads it, expected "
+                f"{list(expected)} and found {list(found)}. Pin the release this adapter was "
+                "written against (pyproject.toml) and re-check the reset reader against it."
+            )
+
+
+# meiva:note
+# The surface those objects present. A caller names the objects to read; the savers below name
+# the installed dependency, and a test names a stand-in to state what a changed release looks
+# like.
+def surface_of(
+    *,
+    stage2_row: object,
+    sort_key: Callable[..., object],
+    overwrite_reader: Callable[..., object],
+    base_saver: type,
+) -> PrivateSurface:
+    return PrivateSurface(
+        stage2_row_fields=tuple(getattr(stage2_row, "__annotations__", {})),
+        writes_sort_key_parameters=_parameters(sort_key),
+        overwrite_reader_parameters=_parameters(overwrite_reader),
+        ingest_page_parameters=_entry_parameters(base_saver, "_ingest_stage1_page"),
+        advance_walks_parameters=_entry_parameters(base_saver, "_try_advance_walks"),
+        build_history_keywords=_without_self(
+            _entry_parameters(base_saver, "_build_delta_channels_writes_history")
+        ),
+    )
+
+
+# meiva:note
+# The surface the installed dependency presents: what a saver verifies itself against.
+def installed_private_surface() -> PrivateSurface:
+    return surface_of(
+        stage2_row=_DeltaStage2Row,
+        sort_key=writes_sort_key,
+        overwrite_reader=_get_overwrite,
+        base_saver=BasePostgresSaver,
+    )
+
+
+# meiva:note
+# One method as the class holds it: `vars` keeps a staticmethod descriptor, which `signature`
+# unwraps to the parameters the class presents.
+def _entry_parameters(base_saver: type, name: str) -> tuple[str, ...]:
+    return _parameters(vars(base_saver)[name])
+
+
+def _parameters(target: Callable[..., object]) -> tuple[str, ...]:
+    return tuple(signature(target).parameters)
+
+
+def _without_self(parameters: tuple[str, ...]) -> tuple[str, ...]:
+    return parameters[1:] if parameters[:1] == ("self",) else parameters
 
 
 def body_key_batches(keys: _Rows) -> Generator[_Rows]:
@@ -230,6 +374,20 @@ def _history_queries(
 
 
 class HistoryPostgresSaver(PostgresSaver):
+    # meiva:note
+    # Verified before the saver exists: a dependency release that reshapes the private surface
+    # above must fail at construction, never as a mis-cut message reset during a replay.
+    def __init__(
+        self,
+        conn: SyncSaverConnection,
+        pipe: Pipeline | None = None,
+        serde: SerializerProtocol | None = None,
+        *,
+        surface: PrivateSurface | None = None,
+    ) -> None:
+        verify_private_surface(installed_private_surface() if surface is None else surface)
+        super().__init__(conn, pipe, serde)
+
     def get_delta_channel_history(
         self, *, config: RunnableConfig, channels: Sequence[str]
     ) -> Mapping[str, DeltaChannelHistory]:
@@ -250,6 +408,20 @@ class HistoryPostgresSaver(PostgresSaver):
 
 
 class HistoryAsyncPostgresSaver(AsyncPostgresSaver):
+    # meiva:note
+    # Verified before the saver exists: a dependency release that reshapes the private surface
+    # above must fail at construction, never as a mis-cut message reset during a replay.
+    def __init__(
+        self,
+        conn: AsyncSaverConnection,
+        pipe: AsyncPipeline | None = None,
+        serde: SerializerProtocol | None = None,
+        *,
+        surface: PrivateSurface | None = None,
+    ) -> None:
+        verify_private_surface(installed_private_surface() if surface is None else surface)
+        super().__init__(conn, pipe, serde)
+
     async def aget_delta_channel_history(
         self, *, config: RunnableConfig, channels: Sequence[str]
     ) -> Mapping[str, DeltaChannelHistory]:
