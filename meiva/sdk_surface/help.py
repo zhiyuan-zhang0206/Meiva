@@ -8,6 +8,12 @@ meiva.help(...)` is unchanged. Children discovery lives in
 `meiva/sdk_surface/discovery.py`; this module imports it (one-way — discovery never
 imports help).
 """
+# meiva:note
+# `meiva.help` itself is defined in the package root, and it is the door: it resolves what this
+# process runs as (the bound context's harness and SDK capture handle, the catalog and the model
+# setting) and hands the result here as a profile. This module reads neither, so it stays strict;
+# `ModelHelpProfile.for_process` decides what the facts mean, and `HelpRouter` renders through
+# whichever public entry the caller injected.
 
 import dataclasses as _dataclasses
 import enum as _enum
@@ -19,7 +25,7 @@ from typing import Any
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.catalog import ModelCatalog
-from meiva.sdk_surface import meiva_module, process_context
+from meiva.sdk_surface import meiva_module
 
 from .discovery import (
     Constant,
@@ -147,55 +153,48 @@ class ModelHelpProfile:
         )
 
     # meiva:note
-    # The profile of the model this process runs as; empty when no agent context is bound,
-    # which is what a bare `import meiva` sees.
+    # The profile of a process that reports this harness and model. Reading those facts is the
+    # caller's job (`help_entry.current_profile`); what they mean is decided here: an SDK capture
+    # handle under the native harness is an external attach too, a process that cannot name its
+    # model hides the harness-gated members rather than guessing one, and no facts at all is the
+    # empty profile a bare `import meiva` sees.
     @classmethod
-    def current(cls) -> "ModelHelpProfile":
-        ctx = process_context.ambient_context()
-        if ctx is None:
-            return cls()
-        is_external = ctx.harness is not Harness.MEIVA or (
-            ctx.sdk_capture is not None and getattr(ctx.sdk_capture, "handle", None) is not None
-        )
-        harness = (
-            ctx.harness
-            if ctx.harness is not Harness.MEIVA
+    def for_process(
+        cls,
+        *,
+        harness: Harness,
+        external_attach: bool,
+        model_setting: str | None,
+        catalog: ModelCatalog | None,
+    ) -> "ModelHelpProfile":
+        is_external = external_attach or harness is not Harness.MEIVA
+        if model_setting is None or catalog is None:
+            return cls(hidden_members=HARNESS_HIDDEN_SELF_MEMBERS if is_external else frozenset())
+        resolved = (
+            harness
+            if harness is not Harness.MEIVA
             else (Harness.CLAUDE_CODE if is_external else Harness.MEIVA)
         )
-        from meiva.sdk_surface import settings as sdk_settings
-
-        try:
-            catalog = sdk_settings.model_catalog()
-            model = running_model(sdk_settings.agent_setting("llm_model"), catalog=catalog)
-        except RuntimeError:
-            return cls(hidden_members=HARNESS_HIDDEN_SELF_MEMBERS if is_external else frozenset())
-        return cls.for_model(model, catalog=catalog, harness=harness)
-
-
-def help(*targets: object) -> None:
-    """Print documentation for one or more SDK targets, e.g. `meiva.help(meiva.shell)`.
-
-    With no targets, show the SDK overview. Members unavailable to your model
-    are hidden automatically."""
-    render(*targets)
+        return cls.for_model(
+            running_model(model_setting, catalog=catalog), catalog=catalog, harness=resolved
+        )
 
 
 # meiva:note
-# Framework-internal render entry behind `meiva.help`, not part of the SDK: the system prompt
-# builder passes the render parameters `meiva.help` deliberately does not take. An empty
-# profile renders the surface model-independently, which is what the static overview wants.
+# The render entry every caller uses, `meiva.help` included. The profile is required: what a
+# process runs as is a fact its door reads (`help_entry.current_profile`), and an empty profile
+# renders the surface model-independently, which is what the static overview wants.
 def render(
     *targets: object,
     compact_classes: bool = False,
-    profile: ModelHelpProfile | None = None,
+    profile: ModelHelpProfile,
 ) -> None:
     _meiva = meiva_module()
 
-    resolved = profile if profile is not None else ModelHelpProfile.current()
     render = _Render(
         compact_classes=compact_classes,
-        hidden_members=resolved.hidden_members,
-        doc_style=resolved.doc_style,
+        hidden_members=profile.hidden_members,
+        doc_style=profile.doc_style,
     )
     if not targets:
         targets = (_meiva,)
@@ -231,8 +230,17 @@ def _is_meiva_module_name(name: object) -> bool:
 class HelpRouter:
     """Route Meiva targets to curated SDK help without changing builtin help."""
 
-    def __init__(self, original_help: Callable[..., Any]) -> None:
+    # meiva:note
+    # `meiva_help` is `meiva.help` itself, injected rather than imported: that public entry is the
+    # door that knows what this process runs as, and this strict module must not reach for it.
+    def __init__(
+        self,
+        original_help: Callable[..., Any],
+        *,
+        meiva_help: Callable[[object], None],
+    ) -> None:
         self._original_help = original_help
+        self._meiva_help = meiva_help
 
     def __call__(self, *args: object, **kwds: object) -> object:
         if not args or kwds:
@@ -241,7 +249,7 @@ class HelpRouter:
             if index:
                 print()
             if is_meiva_target(target):
-                help(target)
+                self._meiva_help(target)
             else:
                 self._original_help(target)
         return None

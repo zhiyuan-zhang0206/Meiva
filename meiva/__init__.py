@@ -33,7 +33,8 @@ from base.packages.plugins.loading import StateGate
 
 from .sdk_surface import process_context
 from .sdk_surface.discovery import agent_visible_names as agent_visible_names
-from .sdk_surface.help import help as help
+from .sdk_surface.help import ModelHelpProfile as _ModelHelpProfile
+from .sdk_surface.help import render as _render_help
 from .sdk_surface.plugins import FrameworkNamespaceConflictError as FrameworkNamespaceConflictError
 from .sdk_surface.plugins import InvalidNamespaceMemberError as InvalidNamespaceMemberError
 from .sdk_surface.plugins import InvalidNamespaceModuleError as InvalidNamespaceModuleError
@@ -311,6 +312,48 @@ __all_for_meiva__ = [
     "watcher",
     "web",
 ]
+
+
+# meiva:note
+# The SDK help entry lives here because this is the only module above both facts it needs: the
+# bound context (the harness, whether an SDK capture handle makes this an external attach) and the
+# live settings (the catalog, the model). `settings.py` already reaches `process_context.py`, so a
+# sibling module reading both would close a cycle, and `meiva/sdk_surface` is at its directory
+# entry cap. The settings import stays inside the call, so `import meiva` pulls no settings.
+def help(*targets: object) -> None:
+    """Print documentation for one or more SDK targets, e.g. `meiva.shell.run`.
+
+    With no targets, show the SDK overview. Members unavailable to your model
+    are hidden automatically."""
+    _render_help(*targets, profile=_current_help_profile())
+
+
+# meiva:note
+# The facts `ModelHelpProfile.for_process` decides over. A process that cannot read settings hides
+# the harness-gated members rather than guessing a model, and no context at all is the empty
+# profile `import meiva` sees.
+def _current_help_profile() -> _ModelHelpProfile:
+    context = process_context.ambient_context()
+    if context is None:
+        return _ModelHelpProfile()
+    external_attach = context.sdk_capture is not None and (
+        getattr(context.sdk_capture, "handle", None) is not None
+    )
+    from .sdk_surface import settings as sdk_settings
+
+    try:
+        catalog = sdk_settings.model_catalog()
+        model_setting: str | None = sdk_settings.agent_setting("llm_model")
+    except RuntimeError:
+        catalog = None
+        model_setting = None
+    return _ModelHelpProfile.for_process(
+        harness=context.harness,
+        external_attach=external_attach,
+        model_setting=model_setting,
+        catalog=catalog,
+    )
+
 
 # The agent-facing FQN a help() heading shows comes from `fn.__module__`
 # (`meiva.help` → `# meiva.help`). The implementations live in `meiva/sdk_surface/`

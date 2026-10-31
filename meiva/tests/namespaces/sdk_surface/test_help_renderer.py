@@ -33,6 +33,7 @@ from meiva.sdk_surface.discovery import (
     resolve_child,
 )
 from meiva.sdk_surface.help import (
+    ModelHelpProfile,
     format_docstring,
     format_documented_const_stub,
     format_signature,
@@ -76,7 +77,7 @@ def _render(target: object, *, compact_classes: bool = False) -> str:
     targets = cast("list[object]", target) if isinstance(target, list) else [target]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        render(*targets, compact_classes=compact_classes)
+        render(*targets, compact_classes=compact_classes, profile=ModelHelpProfile())
     return buf.getvalue()
 
 
