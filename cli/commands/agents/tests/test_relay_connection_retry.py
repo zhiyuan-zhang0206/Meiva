@@ -32,6 +32,7 @@ from cli.commands.agents.tests.lease_support import ActiveSession
 from cli.commands.agents.tests.lease_support import active as active
 from cli.commands.agents.tests.relay_harness import REAL_CLOCK
 from cli.database import OperatorDatabaseFactory
+from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 
 USER_HOME = Path("/nonexistent-relay-user-home")
@@ -57,13 +58,14 @@ def _relay_args(lease: dict[str, Any]) -> argparse.Namespace:
 
 
 def _inputs(
-    lease: dict[str, Any], *, redis_url: str, bus: EventBus, stdout: io.StringIO
+    lease: dict[str, Any], *, home: Path, redis_url: str, bus: EventBus, stdout: io.StringIO
 ) -> RelayInputs:
     return RelayInputs(
         token=lease["relay_token"],
         redis_url=redis_url,
         codex_home=None,
         user_home=USER_HOME,
+        home=home,
         antigravity_server=None,
         stdout=stdout,
         bus=bus,
@@ -95,6 +97,7 @@ def test_a_pool_that_refuses_then_recovers_runs_the_relay_to_its_end(
     event_bus: EventBus,
     operator_database: OperatorDatabaseFactory,
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
@@ -109,7 +112,9 @@ def test_a_pool_that_refuses_then_recovers_runs_the_relay_to_its_end(
     db_conn.commit()
     pool = _RefusedPool(operator_database, refusals=2)
     stdout = io.StringIO()
-    inputs = _inputs(lease, redis_url=redis_url, bus=event_bus, stdout=stdout)
+    inputs = _inputs(
+        lease, home=command_runtime.home, redis_url=redis_url, bus=event_bus, stdout=stdout
+    )
     code = cmd_relay(
         _relay_args(lease), inputs=inputs, database_factory=pool, machine=machine_identity
     )
@@ -125,6 +130,7 @@ def test_a_revoked_credential_ends_the_relay_instead_of_retrying(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, owner, _ = active
@@ -135,7 +141,13 @@ def test_a_revoked_credential_ends_the_relay_instead_of_retrying(
     pool = _RefusedPool(operator_database, refusals=1)
     code = cmd_relay(
         _relay_args(lease),
-        inputs=_inputs(lease, redis_url=redis_url, bus=event_bus, stdout=io.StringIO()),
+        inputs=_inputs(
+            lease,
+            home=command_runtime.home,
+            redis_url=redis_url,
+            bus=event_bus,
+            stdout=io.StringIO(),
+        ),
         database_factory=pool,
         machine=machine_identity,
     )
@@ -151,13 +163,20 @@ def test_a_spent_retry_budget_names_the_failure_and_exits_temporary(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     pool = _RefusedPool(operator_database, refusals=99)
     code = cmd_relay(
         _relay_args(lease),
-        inputs=_inputs(lease, redis_url=redis_url, bus=event_bus, stdout=io.StringIO()),
+        inputs=_inputs(
+            lease,
+            home=command_runtime.home,
+            redis_url=redis_url,
+            bus=event_bus,
+            stdout=io.StringIO(),
+        ),
         database_factory=pool,
         machine=machine_identity,
     )

@@ -44,6 +44,7 @@ from cli.commands.agents.tests.lease_support import lease_at as lease_at
 from cli.commands.agents.tests.loopback_hosts import codex_app_server, short_socket_path
 from cli.commands.agents.tests.relay_harness import REAL_CLOCK, THREAD
 from cli.database import OperatorDatabaseFactory
+from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -80,6 +81,7 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
@@ -97,6 +99,7 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
             redis_url=redis_url,
             codex_home=None,
             user_home=USER_HOME,
+            home=command_runtime.home,
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
@@ -124,6 +127,7 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
@@ -136,6 +140,7 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
                 redis_url=redis_url,
                 codex_home=None,
                 user_home=USER_HOME,
+                home=command_runtime.home,
                 antigravity_server=None,
                 stdout=stdout,
                 bus=event_bus,
@@ -161,6 +166,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
@@ -178,6 +184,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             redis_url=redis_url,
             codex_home=None,
             user_home=USER_HOME,
+            home=command_runtime.home,
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
@@ -200,6 +207,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
@@ -211,6 +219,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
             redis_url=redis_url,
             codex_home=None,
             user_home=USER_HOME,
+            home=command_runtime.home,
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
@@ -231,6 +240,7 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
+    command_runtime: CommandRuntime,
     machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
@@ -241,6 +251,7 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
             redis_url=redis_url,
             codex_home=None,
             user_home=USER_HOME,
+            home=command_runtime.home,
             antigravity_server=None,
             stdout=io.StringIO(),
             bus=event_bus,
