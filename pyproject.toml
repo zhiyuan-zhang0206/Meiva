@@ -419,6 +419,12 @@ check-typed-exception = true
 # an integer parsed out of the batch's own pull request body, and no shell is involved,
 # so S603 (untrusted subprocess input) has nothing to flag.
 "scripts/lint/policy_removal.py" = ["S603"]
+# The change-scoped check runner drives the repository's own tools — git, basedpyright,
+# ruff, pytest and the test selector — through argv lists with no shell anywhere. Two sites
+# take the changed paths as arguments, which are the diff's own file names, so S603 has
+# nothing to flag here.
+"scripts/hooks/diff_checks.py" = ["S603"]
+"scripts/hooks/diff_checks_receipt.py" = ["S603"]
 "meizel/**" = ["ANN", "T20"]
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
@@ -1609,6 +1615,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/entrypoints/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/hooks/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

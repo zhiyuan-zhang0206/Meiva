@@ -1,0 +1,4 @@
+exports = ["diff_checks.py", "diff_checks_receipt.py", "tests"]
+
+[uses]
+"tests" = ["diff_checks.py", "diff_checks_receipt.py"]

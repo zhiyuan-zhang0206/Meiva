@@ -138,10 +138,11 @@ The body of this arm is `#7230`'s checklist (2026-10-31), rendered in English he
 no-CJK rule; the checklist's own text is the authority and its structure, numbers and decisions are
 reproduced, not summarised.
 
-**Status (2026-10-31 16:58)**: the runner described below is not in the tree yet — `#7230` is landing
-it, and `main` carries no `scripts/ci/diff_checks.py` or receipt checker as of this writing. Until it
-does, this section is the specification to build against and the gate under "The refusal-loss
-trigger" is the manual stopgap; the two never coexist once the runner lands.
+**Status (2026-10-31 19:44)**: the runner and its receipt checker are in the tree —
+`scripts/hooks/diff_checks.py` and `scripts/hooks/diff_checks_receipt.py`, landed by `#7230`. This
+section is the specification they were built against; where the build moved a decision (the location,
+the refusal-loss red rule, the type-check attribution), the text says so in place. The manual gate
+under "The refusal-loss trigger" is superseded by the `debt-reduced` trigger and retires with it.
 
 #### 0. The finding: the mapper exists, what is missing is somebody running it
 
@@ -183,34 +184,41 @@ that constructs the relay command with the argument `#7910` added). Both are ord
 selections. That is the point: the selector already includes them, so the answer is *run it*, never
 *detect the shape*.
 
-#### 2. Where it lives: `scripts/ci/diff_checks.py`, not inside meizel
+#### 2. Where it lives: `scripts/hooks/diff_checks.py`, not inside meizel
 
 The runner is named for what it decides — which checks this diff owes — and deliberately **not**
 `preflight`: the repository already has a `cli/preflight.py`, the guard that decides which checkout may
 operate on a home on every `meiva` invocation. One name for two jobs invites the wrong reader (405,
 2026-10-31).
 
-- **Why `scripts/ci/` and not inside meizel**: meizel is a static checker (it reads the tree); the
-  runner is an orchestrator (derive layers → call pyright/ruff/pytest/meizel). Putting it inside
-  meizel mixes two jobs, and meizel is itself called by the runner (L4) — a cycle.
+- **Why not inside meizel**: meizel is a static checker (it reads the tree); the runner is an
+  orchestrator (derive layers → call pyright/ruff/pytest/meizel). Putting it inside meizel mixes two
+  jobs, and meizel is itself called by the runner (L4) — a cycle.
+- **Why `scripts/hooks/` and not `scripts/ci/`** (moved while building, 2026-10-31): two gates decide
+  this. `scripts/ci` may not reach `scripts/audit/refusal_loss.py` — `scripts/audit` already reaches
+  `scripts/ci` through `impact_census.py`, so that edge closes a cycle `meizel` refuses; and
+  `scripts/ci` already holds its twenty direct entries, the cap `lint-code-structure` enforces.
+  `scripts/hooks` is the pre-push family the runner unifies (`prepush-pyright-files.sh`,
+  `prepush-meizel.sh`), so the location the gates force is also the one that reads right.
 - **Hard constraint**: the runner depends only on meizel's *command-line contract* (`check`,
   `debt diff` output and exit codes) and never imports `meizel.*` internals; a change inside meizel
   must not be able to break the runner.
-- Same family as the existing `scripts/ci/*`; anyone can read it.
+- Same family as the pre-push hooks it replaces; anyone can read it.
 
 #### 3. The receipt (versioned, machine-checked)
 
 One line, in the PR body:
 
 ```
-diff-checks/v1 @<head-sha> pyright=0err(3m13s) ruff=ok selector=SELECTED:645 passed=645 failed=0 fallback=none blind=none vitest=skipped(no ui change) meizel=ok debt=ambient-read108->106,total308->306 refusal-loss=0/0/0 skipped=none generated=scripts/ci/diff_checks.py
+diff-checks/v1 @<head-sha> base=<base-sha> pyright=0err(1m28s) err_in_this_diff=0 ruff=ok(0s) selector=SELECTED:152 tests=RAN passed=3617(6m02s) failed=0 fallback=none blind=none vitest=none next-build=none meizel=ok(exit=0,772manifests,76697edges)(17s) debt=ambient-read96->96,total201->201 refusal-loss=none skipped=none generated=scripts/hooks/diff_checks.py
 ```
 
 `debt=` gives both the absolute numbers and the delta (405): the absolute numbers are what shows drift
 against main in a receipt pinned to a sha; the delta only says what this change did. With one half
 missing, every reader has to recompute.
 
-**A checker in `scripts/ci/`** (same family, named for the receipt it reads) compares three things: the
+**A checker beside it** (`scripts/hooks/diff_checks_receipt.py`, named for the receipt it reads)
+compares three things: the
 `sha` equals the PR head; the fields are all present
 (`pyright/ruff/selector/passed/vitest/meizel/debt/refusal-loss/skipped/generated`); and every layer
 named in `skipped` carries a reason — **the checker does not judge whether the reason is good**, which
@@ -255,7 +263,7 @@ selector cannot see at all).
 
 #### 5. Making people actually run it (without relying on discipline)
 
-1. `python scripts/ci/diff_checks.py` derives the layers from `git diff --name-only origin/main...HEAD`, runs
+1. `python scripts/hooks/diff_checks.py` derives the layers from `git diff --name-only origin/main...HEAD`, runs
    them and prints the receipt; `--dry-run` prints what would run, at zero cost.
 2. **The receipt goes into the PR body and a merger accepts only PRs that carry one**; skipped layers
    need a reason, and **a skip is not green**.
@@ -290,9 +298,9 @@ selector cannot see at all).
 
 #### 8. Decided (405, 2026-10-31 16:34)
 
-- The runner is `scripts/ci/diff_checks.py` and the receipt is `diff-checks/v1` (405, 16:50: the old
-  name `scripts/preflight.py` collides with `cli/preflight.py`, the home-ownership guard). The checker
-  is a `scripts/ci/` script in the same family as the existing `scripts/ci/*`, no new directory.
+- The runner is `scripts/hooks/diff_checks.py` and the receipt is `diff-checks/v1` (405, 16:50: the
+  old name `scripts/preflight.py` collides with `cli/preflight.py`, the home-ownership guard). The
+  checker sits beside it; the location moved from `scripts/ci/` for the two gates named in §2.
 - `debt=` carries both the absolute numbers and the delta.
 - The blind-spot loop is §4.5.
 
