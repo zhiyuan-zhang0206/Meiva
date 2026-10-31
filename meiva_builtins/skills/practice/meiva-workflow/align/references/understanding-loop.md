@@ -65,8 +65,12 @@ of it. The agent proposes the pieces where a prediction would settle something,
 and the human and agent choose among them together. Not every piece needs one,
 and a prediction nothing could contradict teaches nothing.
 
-While waiting on the human, the agent works the same question instead of
-filling the pause — the next piece, the model tested on an adjacent case.
+While the conversation moves or waits on the human, the agent works the same
+question in the background instead of filling the pause — preparing the next
+piece, testing the model on an adjacent case, or running a silent read-only
+tracer probe on an untested factual assumption. A background probe enters the
+dialogue only when it contradicts a working belief, resolves a split between
+models, or yields a concrete new piece; uneventful checks stay silent.
 
 Replaying a past case keeps the same shape, with the record standing in for the
 live question. What is observed is how the human's model, explanation and

@@ -102,8 +102,15 @@ queue behind your current one: fork when the child needs your context — it inh
 this conversation and starts already oriented — or spawn a fresh agent with a written
 brief when it does not. Forking does not shrink your own window, and the child pays
 this context's size on every call.
-Keep short or dependent steps with the current agent. Choose tools by demonstrated
-capability for the task, not fixed file-count thresholds.
+
+Delegate for latency isolation and context hygiene as well as concurrency. When
+the current agent carries an active live human interaction (such as
+`meiva-immersive-mode`) or coordinates multiple incoming streams, hand off slow
+execution and high-noise exploration even for a single serial heavy task, rather
+than blocking the responsive loop or flooding the coordinating context with
+verbose tool output. Otherwise, keep short or tightly coupled steps with the
+current agent. Choose tools by demonstrated capability for the task, not fixed
+file-count thresholds.
 For Meiva's external-worker launch, supervision, resume, or takeover mechanics,
 load the external-agents guide in Meiva Guide.
 
