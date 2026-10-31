@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import os
+import secrets
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -24,7 +26,7 @@ from meiva.self.harness.registration import (
     RegistrationError,
     handle_digest,
 )
-from meiva.self.harness.store import FileRegistrationStore, new_handle
+from meiva.self.harness.store import FileRegistrationStore
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 LINEAGE = ProcessLineage(pid=900, ancestors=frozenset({800, 4242}))
@@ -197,4 +199,11 @@ def test_a_handle_alone_resolves_without_naming_the_agent(tmp_path: Path) -> Non
 
 def test_an_unknown_handle_finds_no_registration(tmp_path: Path) -> None:
     with pytest.raises(RegistrationError, match="matches this handle"):
-        resolve_registration(new_handle(), store=FileRegistrationStore(tmp_path))
+        resolve_registration(_handle(), store=FileRegistrationStore(tmp_path))
+
+
+# meiva:note
+# A handle shaped like the one the bridge mints: 32 random bytes, URL-safe base64. The store keeps
+# only its digest, so the value itself is the test's to choose.
+def _handle() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()

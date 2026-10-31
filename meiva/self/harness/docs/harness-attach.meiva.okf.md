@@ -63,7 +63,7 @@ still admits a caller:
 - The row names a controller pid, not a start time; keeping the session short and
   the expiry no later than it keeps a recycled pid from reviving the authority.
 
-**The handle** is an opaque `hx_<random>` string. Only its SHA-256 is stored, so a
+**The handle** is an opaque random string. Only its SHA-256 is stored, so a
 leaked registration file does not yield a usable handle. The bridge hands the
 plain value to the child through `MEIVA_HARNESS_HANDLE`, deliberately **not** as a
 workspace file: a provider sandbox reads everything and writes only its workspace,
