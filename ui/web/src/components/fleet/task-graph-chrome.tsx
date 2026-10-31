@@ -11,7 +11,7 @@ import type { TaskSummaryRow } from "@/lib/contracts/types";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative, formatUptime } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
-import { FLEX, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import type { TaskWindow } from "@/lib/notifications/use-tasks";
 
@@ -73,7 +73,7 @@ export function TaskHoverCard({
           className={cn("mt-1 size-2 shrink-0 rounded-full bg-current", taskFill(task))}
         />
         <div className={cn(MIN_W_0, FLEX_1)}>
-          <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
+          <p className="break-words text-xs font-semibold leading-snug text-popover-foreground">
             {task.title}
           </p>
           <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
@@ -113,7 +113,7 @@ export function TaskHoverCard({
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.description")}
           </p>
-          <div className={cn("mt-0.5 max-h-24 break-words text-[11px] leading-snug text-popover-foreground/90", OVERFLOW_HIDDEN)}>
+          <div className="mt-0.5 break-words text-[11px] leading-snug text-popover-foreground/90">
             <ChatMarkdown content={full.data.description} />
           </div>
         </div>
@@ -123,7 +123,7 @@ export function TaskHoverCard({
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.result")}
           </p>
-          <div className={cn("mt-0.5 max-h-24 break-words text-[11px] leading-snug text-popover-foreground/90", OVERFLOW_HIDDEN)}>
+          <div className="mt-0.5 break-words text-[11px] leading-snug text-popover-foreground/90">
             <ChatMarkdown content={full.data.results} />
           </div>
         </div>

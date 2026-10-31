@@ -165,9 +165,10 @@ describe("TaskGraph hover detail card", () => {
     await waitFor(() => expect(screen.getByRole("tooltip").textContent).toContain("A longer description"));
     const fetched = screen.getByRole("tooltip");
     expect(fetched.textContent).toContain("Shipped in #1");
-    // Task description / results are Markdown-authored: rendered, not raw.
     expect(fetched.textContent).not.toContain("**");
     expect(card.querySelector("strong")?.textContent).toBe("description");
+    expect(card.querySelector(".max-h-24")).toBeNull();
+    expect(card.querySelector(".line-clamp-2")).toBeNull();
     expect(getTask).toHaveBeenCalledWith(2);
     expect(text).toContain("Double-click the node to open the owner");
   });
@@ -186,12 +187,26 @@ describe("TaskGraph hover detail card", () => {
     expect(screen.getByRole("tooltip").textContent).toContain("no-detail");
   });
 
-  // meiva:note
-  // A card the pointer cannot reach (not height-capped) hides the moment the pointer leaves the
-  // node, with no grace window; that decision is hoverCardLeave() in force-graph-geometry and is
-  // covered there. Its twin — the grace window a scrollable card waits out — is exercised in
-  // tests/task-graph-hover-cap.test.tsx.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  it("keeps non-highlighted task edges legible when another task node is selected", async () => {
+    const tasks: TaskRow[] = [
+      task(1, { title: "root", status: "in_progress" }),
+      task(2, { title: "branch-a", status: "in_progress", parent_id: 1 }),
+      task(3, { title: "leaf-a", status: "in_progress", parent_id: 2 }),
+      task(4, { title: "branch-b", status: "in_progress", parent_id: 1 }),
+    ];
+    const { container } = renderGraph(tasks, { props: { selectedTaskId: 3 } });
+    await waitFor(() => expect(screen.getAllByText(/#3/).length).toBeGreaterThan(0), { timeout: 4000 });
+
+    const lines = Array.from(container.querySelectorAll("svg line"));
+    expect(lines.length).toBe(3);
+    const opacities = lines.map((line) => Number(line.getAttribute("stroke-opacity"))).sort((a, b) => a - b);
+    const widths = lines.map((line) => Number(line.getAttribute("stroke-width"))).sort((a, b) => a - b);
+    expect(opacities[0]).toBeCloseTo(0.48);
+    expect(opacities[1]).toBeCloseTo(0.48);
+    expect(opacities[2]).toBeCloseTo(0.96);
+    expect(widths[0]).toBeGreaterThanOrEqual(3.3);
+    expect(widths[2]).toBeGreaterThan(widths[0]);
+  });
 
   it("keeps the card anchored to the node while the cursor moves (no following)", async () => {
     // User ruling 2026-08-29: the detail card shows on mouseenter and hides

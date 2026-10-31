@@ -147,12 +147,17 @@ describe("OpenNoticeDetail — require_response", () => {
     expect(send.hasAttribute("disabled")).toBe(false);
   });
 
-  it("dismiss: sends action=dismiss with no reply, then calls onResolved", async () => {
+  it("dismiss: renders below the reply input, sends action=dismiss with no reply, then calls onResolved", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     const onResolved = vi.fn();
     renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
+    const dismissButton = screen.getByRole("button", { name: "Close without answering" });
+    expect(
+      field().compareDocumentPosition(dismissButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(dismissButton);
 
     await waitFor(() =>
       expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "dismiss" }, expect.any(String)),

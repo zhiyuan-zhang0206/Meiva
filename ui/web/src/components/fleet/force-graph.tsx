@@ -29,8 +29,6 @@ import { cn } from "@/lib/format/utils";
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
 import {
   buildConnectedNodeIds,
-  HOVER_CARD_HIDE_GRACE_MS,
-  hoverCardLeave,
   useGraphFocus,
   useHoverCardState,
   type ForceGraphEdge,
@@ -128,11 +126,14 @@ export const ForceGraph = memo(function ForceGraph({
   const {
     hovered,
     setHovered,
-    cardScrollable,
-    hideTimerRef,
+    clearHideTimer,
+    leaveHoverTarget,
     hoveredCard,
     containerRef,
     hoverCardRef,
+    hoverBridgeRef,
+    hoverScrollRef,
+    hoverContentRef,
     legendRef,
   } = useHoverCardState(nodeById, hoverCard);
 
@@ -168,6 +169,8 @@ export const ForceGraph = memo(function ForceGraph({
     w: 0,
     h: 0,
   };
+  const viewSpan = Math.max(w, h);
+  const viewScale = viewSpan > 900 ? Math.min(Math.sqrt(viewSpan / 900), 2) : 1;
 
   return (
     <div ref={containerRef} className={cn("relative h-full w-full", OVERFLOW_HIDDEN)}>
@@ -183,9 +186,6 @@ export const ForceGraph = memo(function ForceGraph({
           if (ev.target === ev.currentTarget) onSelect(null);
         }}
       >
-        {/* All graph content lives in one zoom/pan layer: the user transform
-            (translate + scale) applies here. CSS-animated only for programmatic
-            focus/reset (animateZoom); instant for interactive wheel/drag. */}
         <g
           transform={transform.toString()}
           style={{ transition: animateZoom ? "transform 0.4s ease" : "none" }}
@@ -193,7 +193,6 @@ export const ForceGraph = memo(function ForceGraph({
             endZoomTransition(ev.propertyName);
           }}
         >
-          {/* Edges. */}
           <g>
             {edges.map((e, i) => {
               const a = positions.get(e.from);
@@ -206,16 +205,19 @@ export const ForceGraph = memo(function ForceGraph({
               const isDimmed = connectedNodeIds != null && !isIncident;
               const normalizedWeight = Math.min(Math.max(e.weight / maxEdgeWeight, 0), 1);
               const opacity = isIncident
-                ? 0.92
+                ? 0.96
                 : isDimmed
-                  ? 0.08
+                  ? isMessage
+                    ? 0.2
+                    : 0.48
                   : isMessage
                     ? 0.24 + 0.61 * normalizedWeight
-                    : 0.72;
+                    : 0.86;
               const weightSw = Math.sqrt(e.weight) * 1.2;
-              const sw = isIncident
-                ? (isMessage ? 2.0 : 2.8) + weightSw
-                : (isMessage ? 0.6 : 1.2) + weightSw;
+              const baseSw = isIncident
+                ? (isMessage ? 2.2 : 3.6) + weightSw
+                : (isMessage ? 0.8 : 2.1) + weightSw;
+              const sw = baseSw * viewScale;
               return (
                 <line
                   key={`${e.from}-${e.to}-${e.kind}-${i}`}
@@ -232,7 +234,6 @@ export const ForceGraph = memo(function ForceGraph({
             })}
           </g>
 
-          {/* Nodes. */}
           <g>
             {placed.map(({ node: sim, p }) => {
               // meiva:note
@@ -253,6 +254,7 @@ export const ForceGraph = memo(function ForceGraph({
               return (
                 <g
                   key={n.id}
+                  data-node-id={n.id}
                   transform={`translate(${p.x},${p.y})`}
                   className={cn("cursor-pointer", isGhost && !isHovered && "opacity-40")}
                   onPointerDown={(ev) => {
@@ -269,33 +271,25 @@ export const ForceGraph = memo(function ForceGraph({
                     onOpen(n.id);
                   }}
                   onMouseEnter={(ev) => {
-                    if (hideTimerRef.current) {
-                      clearTimeout(hideTimerRef.current);
-                      hideTimerRef.current = null;
-                    }
-                    const box = ev.currentTarget.getBoundingClientRect();
-                    setHovered({ id: n.id, x: box.right, y: box.top, flipX: box.left, h: box.height });
+                    clearHideTimer();
+                    const shapeEl = ev.currentTarget.querySelector("[data-node-shape]") ?? ev.currentTarget;
+                    const box = shapeEl.getBoundingClientRect();
+                    setHovered((cur) =>
+                      cur !== null &&
+                      cur.id === n.id &&
+                      cur.x === box.right &&
+                      cur.y === box.top &&
+                      cur.flipX === box.left &&
+                      cur.h === box.height
+                        ? cur
+                        : { id: n.id, x: box.right, y: box.top, flipX: box.left, h: box.height },
+                    );
                   }}
                   onMouseLeave={(ev) => {
                     const card = hoverCardRef.current;
-                    const leave = hoverCardLeave({
-                      scrollable: cardScrollable,
-                      pointerOnCard:
-                        card !== null && ev.relatedTarget instanceof Node && card.contains(ev.relatedTarget),
-                    });
-                    if (leave === "hold") return;
-                    if (hideTimerRef.current) {
-                      clearTimeout(hideTimerRef.current);
-                      hideTimerRef.current = null;
-                    }
-                    if (leave === "hide") {
-                      setHovered((cur) => (cur?.id === n.id ? null : cur));
-                      return;
-                    }
-                    hideTimerRef.current = setTimeout(
-                      () => setHovered((cur) => (cur?.id === n.id ? null : cur)),
-                      HOVER_CARD_HIDE_GRACE_MS,
-                    );
+                    const pointerOnPartner =
+                      card !== null && ev.relatedTarget instanceof Node && card.contains(ev.relatedTarget);
+                    leaveHoverTarget(n.id, pointerOnPartner);
                   }}
                 >
                   {hoverCard == null ? (
@@ -311,6 +305,7 @@ export const ForceGraph = memo(function ForceGraph({
                         strokeOpacity={0.7}
                         strokeWidth={2}
                         strokeDasharray="4 3"
+                        pointerEvents="none"
                       />
                     ) : (
                       <rect
@@ -325,11 +320,13 @@ export const ForceGraph = memo(function ForceGraph({
                         strokeOpacity={0.7}
                         strokeWidth={2}
                         strokeDasharray="4 3"
+                        pointerEvents="none"
                       />
                     )
                   ) : null}
                   {shape === "circle" ? (
                     <circle
+                      data-node-shape=""
                       r={r}
                       className={cn(fill, n.pulse && "animate-pulse")}
                       fill="currentColor"
@@ -340,6 +337,7 @@ export const ForceGraph = memo(function ForceGraph({
                     />
                   ) : (
                     <rect
+                      data-node-shape=""
                       x={-r}
                       y={-r}
                       width={2 * r}
@@ -398,33 +396,26 @@ export const ForceGraph = memo(function ForceGraph({
         </div>
       ) : null}
 
-      {/* Instant hover detail card — pointer-events-none in the normal
-          states so it never steals the cursor from the nodes beneath; in the
-          height-capped state the card body scrolls, so the card flips to
-          pointer-events-auto to stay reachable (its mouseenter cancels the
-          pending grace hide, its mouseleave unmounts). Position is set by
-          the layout effect above (flip-at-edge, before paint). */}
-      {hoveredCard != null ? (
+      {hoveredCard != null && hovered != null ? (
         <div
           ref={hoverCardRef}
           role="tooltip"
-          className={cn("absolute z-20", cardScrollable ? "pointer-events-auto" : "pointer-events-none")}
+          className="pointer-events-auto absolute z-20"
           style={{ left: 0, top: 0 }}
           onMouseEnter={() => {
-            if (hideTimerRef.current) {
-              clearTimeout(hideTimerRef.current);
-              hideTimerRef.current = null;
-            }
+            clearHideTimer();
           }}
-          onMouseLeave={() => {
-            if (hideTimerRef.current) {
-              clearTimeout(hideTimerRef.current);
-              hideTimerRef.current = null;
-            }
-            setHovered(null);
+          onMouseLeave={(ev) => {
+            const anchorNode = containerRef.current?.querySelector(`[data-node-id="${hovered.id}"]`) ?? null;
+            const pointerOnPartner =
+              anchorNode !== null && ev.relatedTarget instanceof Node && anchorNode.contains(ev.relatedTarget);
+            leaveHoverTarget(hovered.id, pointerOnPartner);
           }}
         >
-          {hoveredCard}
+          <div ref={hoverBridgeRef} data-testid="hover-card-bridge" aria-hidden className="absolute" />
+          <div key={hovered.id} ref={hoverScrollRef} data-hover-card-scroll className="overscroll-contain rounded-lg">
+            <div ref={hoverContentRef}>{hoveredCard}</div>
+          </div>
         </div>
       ) : null}
 

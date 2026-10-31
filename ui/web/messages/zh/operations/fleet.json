@@ -115,8 +115,6 @@
     "expired": "已到期",
     "withdrawn": "已撤回",
     "superseded": "已替换",
-    "yourAnswer": "你的回复",
-    "decision": "需要决策",
-    "fyi": "供参考"
+    "yourAnswer": "你的回复"
   }
 }

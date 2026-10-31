@@ -218,9 +218,9 @@ describe("GraphView lineage, hover, and empty states", () => {
     const lines = container.querySelectorAll('svg[aria-label="Fleet relationship graph"] line');
     expect(lines.length).toBe(1);
     expect(lines[0].getAttribute("stroke-dasharray")).toBeNull();
-    expect(Number(lines[0].getAttribute("stroke-opacity"))).toBeCloseTo(0.72);
+    expect(Number(lines[0].getAttribute("stroke-opacity"))).toBeCloseTo(0.86);
     expect(Number(lines[0].getAttribute("stroke-width"))).toBeCloseTo(
-      1.2 + Math.sqrt(withTelemetry ? 4 : 2) * 1.2,
+      2.1 + Math.sqrt(withTelemetry ? 4 : 2) * 1.2,
     );
   });
 
@@ -339,9 +339,7 @@ describe("GraphView lineage, hover, and empty states", () => {
     expect(card.textContent).toContain("Activity score: 12.35M");
 
     // meiva:note
-    // jsdom reports a zero-size canvas, so the card is height-capped and holds through the grace
-    // window before it goes. A card the pointer cannot reach drops at once — hoverCardLeave() in
-    // force-graph-geometry, covered there.
+    // Leaving the node without crossing onto the card waits out the grace window and then hides.
     // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     fireEvent.mouseLeave(group);
     await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());

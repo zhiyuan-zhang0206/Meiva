@@ -115,8 +115,6 @@
     "expired": "Expired",
     "withdrawn": "Withdrawn",
     "superseded": "Superseded",
-    "yourAnswer": "Your answer",
-    "decision": "Decision",
-    "fyi": "FYI"
+    "yourAnswer": "Your answer"
   }
 }

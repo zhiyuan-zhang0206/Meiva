@@ -138,18 +138,6 @@ export function OpenNoticeDetail({
               </span>
             </>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={dismiss}
-            disabled={pending || unavailable}
-            aria-label={t("closeQuestion")}
-            title={t("closeQuestion")}
-            className="ml-auto text-muted-foreground"
-          >
-            {t("dismiss")}
-          </Button>
         </div>
         <h4 className="text-[13px] font-semibold leading-snug break-words"><ChatMarkdown content={notice.title} inline /></h4>
         {notice.content && (
@@ -159,52 +147,65 @@ export function OpenNoticeDetail({
         )}
       </div>
 
-      {notice.question ? (
-        <NoticeQuestionForm
-          question={notice.question}
-          pending={pending || unavailable}
-          focusAnswer={autoFocus}
-          onAnswerChange={setStructuredAnswer}
-          onSubmit={submitAnswer}
-          submitAction={
+      <div className="space-y-1.5">
+        {notice.question ? (
+          <NoticeQuestionForm
+            question={notice.question}
+            pending={pending || unavailable}
+            focusAnswer={autoFocus}
+            onAnswerChange={setStructuredAnswer}
+            onSubmit={submitAnswer}
+            submitAction={
+              <SendButton
+                state={pending ? "sending" : "send"}
+                onClick={answer}
+                disabled={pending || unavailable || !structuredAnswer}
+                aria-label={t("submitAnswer")}
+                title={t("submitAnswer")}
+              />
+            }
+          />
+        ) : (
+          <div className={cn("items-end gap-2", FLEX)}>
+            <AutoExpandTextarea
+              ref={textareaRef}
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              onSend={answer}
+              onKeyDown={(e) => {
+                if (onCycle && !reply.trim() && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+                  e.preventDefault();
+                  onCycle(e.key === "ArrowUp" ? -1 : 1);
+                }
+              }}
+              placeholder={t("answerPlaceholder")}
+              disabled={pending}
+              aria-label={t("replyTo", { title: notice.title })}
+              className={cn("min-h-[3.25rem] rounded border border-input bg-background px-2 py-1.5 font-mono text-xs focus:border-primary disabled:opacity-50", FLEX_1)}
+            />
             <SendButton
               state={pending ? "sending" : "send"}
               onClick={answer}
-              disabled={pending || unavailable || !structuredAnswer}
-              aria-label={t("submitAnswer")}
-              title={t("submitAnswer")}
+              disabled={pending || !reply.trim()}
+              aria-label={t("sendAnswer")}
             />
-          }
-        />
-      ) : (
-        <div className={cn("items-end gap-2", FLEX)}>
-          <AutoExpandTextarea
-            ref={textareaRef}
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            onSend={answer}
-            onKeyDown={(e) => {
-              // With an empty reply box, Up/Down cycles the caller's open list to
-              // the previous/next notice (the inbox's arrow-key navigation). A
-              // non-empty box owns those keys for cursor movement.
-              if (onCycle && !reply.trim() && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-                e.preventDefault();
-                onCycle(e.key === "ArrowUp" ? -1 : 1);
-              }
-            }}
-            placeholder={t("answerPlaceholder")}
-            disabled={pending}
-            aria-label={t("replyTo", { title: notice.title })}
-            className={cn("min-h-[3.25rem] rounded border border-input bg-background px-2 py-1.5 font-mono text-xs focus:border-primary disabled:opacity-50", FLEX_1)}
-          />
-          <SendButton
-            state={pending ? "sending" : "send"}
-            onClick={answer}
-            disabled={pending || !reply.trim()}
-            aria-label={t("sendAnswer")}
-          />
+          </div>
+        )}
+        <div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={dismiss}
+            disabled={pending || unavailable}
+            aria-label={t("closeQuestion")}
+            title={t("closeQuestion")}
+            className="-ml-2 text-muted-foreground"
+          >
+            {t("dismiss")}
+          </Button>
         </div>
-      )}
+      </div>
 
       {error && <p role="alert" className="text-[13px] text-destructive">{error}</p>}
     </div>
