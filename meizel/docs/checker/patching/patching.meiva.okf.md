@@ -93,21 +93,16 @@ lives in tests are not recorded.
 
 Both targets are zero, not a long-term debt: the recorded sites are there so that none is
 added. What to do instead is in
-[test seams in another shape](../../../docs/conventions/python-conventions.md#test-seams-in-another-shape).
+[test seams in another shape](../../../../docs/conventions/python-conventions.md#test-seams-in-another-shape).
 
 ## Approved files
 
-A few test-support files patch on purpose, because their job is to keep the suite off the host or
-to put a child process in a state no parameter reaches. `[approved-patches.files]` in
-[[meizel/docs/checker/policy/policy.meiva.okf.md|the policy]] lists such a file with its reason, and none of its patches is
-recorded or judged. Three purposes qualify: an autouse guard, the entry of a subprocess a test starts,
-and the global setup of the test runner. Production code and test modules (`test_*.py`, `*_test.py`,
-`*.test.ts`, `*.spec.ts`) cannot be listed (`policy-syntax`): a test that patches is converted. No baseline
-counts an approved file's patches, so `meizel/tests/languages/test_parity.py` pins them (`python -m meizel debt
-approved` prints them): one more patch or file is an edit a reviewer reads, as is every `policy diff` entry. An
-entry whose file is gone or patches nothing is `stale-approval`; `missing-patch-target` is a hard error even there.
-The rule comparison keeps the base's table: approving a file drops the record, and removing an approval
-may record the patches it hid.
+A few test-support files patch on purpose — an autouse guard, the entry of a subprocess a test
+starts, or the global setup of the test runner — and the policy lists each with its reason, so none of
+its patches is recorded or judged. Which files qualify, what the count budget on the list is, and what
+a stale or refused entry fails as: [[meizel/docs/checker/patching/approved-files.meiva.okf.md|files
+approved to patch]].
+
 
 ## Recording
 

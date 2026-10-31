@@ -56,7 +56,7 @@ When code reads `settings`, `os.environ`, the clock (`time.time`, `datetime.now`
 
 ### 4. Making code testable without monkeypatching (`first-party-patch`, `stdlib-patch`, `third-party-patch`)
 
-Tests never mutate module attributes, instance dictionaries, or environment variables ([patching](../../../meizel/docs/checker/patching.meiva.okf.md)). Follow the four-level hierarchy in [data in, decisions out](../python-conventions.md#data-in-decisions-out-the-forms-in-order):
+Tests never mutate module attributes, instance dictionaries, or environment variables ([patching](../../../meizel/docs/checker/patching/patching.meiva.okf.md)). Follow the four-level hierarchy in [data in, decisions out](../python-conventions.md#data-in-decisions-out-the-forms-in-order):
 
 1. **Pass a value** (config field, `tmp_path`, `now`, resolved binary path).
 2. **Call the pure decision function directly** and assert on the returned plan instead of spying on mock calls (`assert_called_once_with`).

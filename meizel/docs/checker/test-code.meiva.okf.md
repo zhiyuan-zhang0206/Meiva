@@ -61,4 +61,4 @@ and importing it from a production file brought the record back. `page-mock.tsx`
 `page-fixtures-mock.tsx` were exempt under that reading and are recorded now; neither holds a record
 today, which is why narrowing the suffix moved no count.
 
-Parent: [[meizel/docs/checker/patching.meiva.okf.md|patching]].
+Parent: [[meizel/docs/checker/patching/patching.meiva.okf.md|patching]].

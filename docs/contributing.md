@@ -146,7 +146,7 @@ violations pass, anything new fails, and the debt may only shrink
   patch-shaped codes `patch-raising-false` and `test-subclass-override` (a test class that
   overrides a method of production code). Do not add one;
   pass the dependency in as an explicit parameter
-  ([patching](../meizel/docs/checker/patching.meiva.okf.md)). When a symbol is renamed, `debt carry
+  ([patching](../meizel/docs/checker/patching/patching.meiva.okf.md)). When a symbol is renamed, `debt carry
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
   `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. A change that moves a top-level function
   or class between files also declares the move in its pull request body, one line per move
