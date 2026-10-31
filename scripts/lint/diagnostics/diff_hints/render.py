@@ -42,7 +42,7 @@ def _full_text(site: Site) -> list[str]:
         _field("why", spec.why),
         _field("instead", spec.instead),
         _field("see", spec.see),
-        f"  {'answer:':<{_LABEL}}change the code, or add to the commit message:",
+        f"  {'answer:':<{_LABEL}}change the code, or add to the pull request body:",
         f"{pad}{trailer}",
     ]
 
@@ -76,7 +76,8 @@ def render_open(sites: Iterable[Site], *, limit: int | None = _SITES_SHOWN) -> s
         lines.append("")
     lines.append(
         f"diff hints: {len(open_sites)} site(s) need an answer. Fix the code, or answer in the "
-        "commit message (a path without a line answers every site of that id in the file):"
+        "pull request body -- the copy a squash merge keeps -- or in a commit message (a path "
+        "without a line answers every site of that id in the file):"
     )
     lines.extend(f"  {template}" for template in suggestions(open_sites))
     return "\n".join(lines)

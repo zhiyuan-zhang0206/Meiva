@@ -93,16 +93,23 @@ The commit-msg and pre-push hooks ask about the shapes that reviews keep finding
 lines a commit adds: an unmediated clock or environment read, a callable with a default,
 a test that subclasses production code, a deleted test and the others in the
 [catalog](../scripts/lint/docs/diff-hints/catalog.meiva.okf.md). Each hint says why the shape is a
-problem and gives the recipe in order of preference. Change the code, or answer in the
-commit message with one line per site:
+problem and gives the recipe in order of preference. Change the code, or answer with one line
+per site **in the pull request body**:
 
 ```text
 Hint-Ack: service-locator cli/commands/x/runtime.py:42 -- composition root of the daemon
 ```
 
+The body is where the answer belongs because it is the text that survives: a squash merge lands
+the pull request's title and body as the commit message and drops the branch's own messages, so an
+answer written only in a commit message is gone from `main` the moment the pull request merges, and
+the next branch whose base predates that merge is asked the same question about code it did not
+touch. A commit message is still read (a branch's own pushes work either way), but it is not the
+copy to rely on.
+
 A path without a line answers every site of that id in the file, and a directory with a
 trailing slash every site below it. Answer with the reason the site is right, not with the
-rule's name; an unanswered hint also stops the push, whichever commit carries the answer.
+rule's name; an unanswered hint also stops the push.
 
 ### Locality gate (meizel)
 
