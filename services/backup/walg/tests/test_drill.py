@@ -242,6 +242,7 @@ def _run(
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(tmp_path, home=sandbox.home),
         home=sandbox.home,
+        environ=sandbox.environ,
     )
 
 
@@ -420,6 +421,7 @@ def _run_drill(
         home=sandbox.home,
         **({} if socket_root is None else {"socket_root": socket_root}),
         **space,
+        environ=sandbox.environ,
     )
     return record, lines
 

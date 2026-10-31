@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,18 +151,26 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _preflight(*, path: Path | None, binary_problem: str | None, home: Path) -> list[Backup]:
+def _preflight(
+    *, path: Path | None, binary_problem: str | None, home: Path, environ: Mapping[str, str]
+) -> list[Backup]:
     if binary_problem is not None:
         raise StepFailedError(STEP_PREFLIGHT, f"{binary_problem} (meiva converge installs it)")
     try:
         walg_config.load_walg_config(path=path, home=home)
     except walg_config.WalgConfigError as exc:
         raise StepFailedError(STEP_PREFLIGHT, str(exc)) from None
-    return list_backups(path=path, home=home)
+    return list_backups(path=path, home=home, environ=environ)
 
 
 def _backup(
-    target: PgTarget, before: list[Backup], report: Report, *, path: Path | None, home: Path
+    target: PgTarget,
+    before: list[Backup],
+    report: Report,
+    *,
+    path: Path | None,
+    home: Path,
+    environ: Mapping[str, str],
 ) -> list[Backup]:
     run_walg(
         ["backup-push", str(target.data_dir)],
@@ -171,8 +179,9 @@ def _backup(
         extra_env={"WALG_DELTA_MAX_STEPS": DELTA_MAX_STEPS},
         path=path,
         home=home,
+        environ=environ,
     )
-    after = list_backups(path=path, home=home)
+    after = list_backups(path=path, home=home, environ=environ)
     if not after or (before and after[-1].name == before[-1].name):
         raise StepFailedError(STEP_BACKUP, "backup-push finished but no new backup is listed")
     newest = after[-1]
@@ -200,6 +209,7 @@ def _drill(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> bool:
     """Drill the newest backup now; records the outcome. Returns whether it succeeded."""
     previous = state.read_state(home).drill
@@ -212,6 +222,7 @@ def _drill(
         path=path,
         database_for_url=database_for_url,
         home=home,
+        environ=environ,
     )
     state.update_state(home, drill=record)
     if record.ok:
@@ -232,6 +243,7 @@ def _weekly_drill(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> None:
     """The drill when one is due. Its failure is recorded and reported, never raised."""
     if drill.drill_due(state.read_state(home).drill, backups, _now()):
@@ -243,11 +255,14 @@ def _weekly_drill(
             database_for_url=database_for_url,
             throwaway=throwaway,
             home=home,
+            environ=environ,
         )
 
 
-def _verify(target: PgTarget, report: Report, *, path: Path | None, home: Path) -> str:
-    verdict = verify_chain(target.admin_url, path=path, home=home)
+def _verify(
+    target: PgTarget, report: Report, *, path: Path | None, home: Path, environ: Mapping[str, str]
+) -> str:
+    verdict = verify_chain(target.admin_url, path=path, home=home, environ=environ)
     state.update_state(
         home, verify=VerifyRecord(at=_now(), integrity=verdict.integrity, timeline=verdict.timeline)
     )
@@ -258,8 +273,15 @@ def _verify(target: PgTarget, report: Report, *, path: Path | None, home: Path) 
     return summary
 
 
-def _retention(backups: list[Backup], report: Report, *, path: Path | None, home: Path) -> int:
-    outcome = apply_retention(backups, report, path=path, home=home)
+def _retention(
+    backups: list[Backup],
+    report: Report,
+    *,
+    path: Path | None,
+    home: Path,
+    environ: Mapping[str, str],
+) -> int:
+    outcome = apply_retention(backups, report, path=path, home=home, environ=environ)
     state.update_state(
         home, retention=RetentionRecord(at=_now(), marked=outcome.marked, deleted=outcome.deleted)
     )
@@ -275,11 +297,12 @@ def _run_steps(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> str:
     """The steps in order; returns the one-line summary of a successful run."""
     current = STEP_PREFLIGHT
     try:
-        before = _preflight(path=path, binary_problem=binary_problem, home=home)
+        before = _preflight(path=path, binary_problem=binary_problem, home=home, environ=environ)
         report(f"preflight: ok, {len(before)} backups listed")
         _weekly_drill(
             target,
@@ -289,13 +312,14 @@ def _run_steps(
             database_for_url=database_for_url,
             throwaway=throwaway,
             home=home,
+            environ=environ,
         )
         current = STEP_BACKUP
-        after = _backup(target, before, report, path=path, home=home)
+        after = _backup(target, before, report, path=path, home=home, environ=environ)
         current = STEP_VERIFY
-        chain = _verify(target, report, path=path, home=home)
+        chain = _verify(target, report, path=path, home=home, environ=environ)
         current = STEP_RETENTION
-        deleted = _retention(after, report, path=path, home=home)
+        deleted = _retention(after, report, path=path, home=home, environ=environ)
     except StepFailedError:
         raise
     except _EXPECTED_FAILURES as exc:
@@ -331,6 +355,7 @@ def _locked_tick(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> int:
     started = _now()
     try:
@@ -359,6 +384,7 @@ def _locked_tick(
             database_for_url=database_for_url,
             throwaway=throwaway,
             home=home,
+            environ=environ,
         )
     except StepFailedError as failure:
         return _record_failure(started, failure, report, home=home)
@@ -382,6 +408,7 @@ def run_tick_on(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
@@ -396,6 +423,7 @@ def run_tick_on(
                 database_for_url=database_for_url,
                 throwaway=throwaway,
                 home=home,
+                environ=environ,
             )
     except LockTimeoutError:
         report("another WAL-G tick is still running; nothing to do")
@@ -411,6 +439,7 @@ def run_tick(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     if path is None:
@@ -423,6 +452,7 @@ def run_tick(
         database_for_url=database_for_url,
         path=path,
         home=home,
+        environ=environ,
     )
 
 
@@ -434,6 +464,7 @@ def _locked_drill(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> int:
     target = platform.target
     try:
@@ -444,7 +475,9 @@ def _locked_drill(
         if not platform.accepting:
             report("failed: postgres is not accepting connections")
             return 1
-        backups = _preflight(path=path, binary_problem=platform.binary_problem, home=home)
+        backups = _preflight(
+            path=path, binary_problem=platform.binary_problem, home=home, environ=environ
+        )
     except (state.StateError, RuntimeError, StepFailedError, *_EXPECTED_FAILURES) as exc:
         report(f"failed: {exc}")
         return 1
@@ -461,6 +494,7 @@ def _locked_drill(
             database_for_url=database_for_url,
             throwaway=throwaway,
             home=home,
+            environ=environ,
         )
         else 1
     )
@@ -478,6 +512,7 @@ def run_drill_now_on(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
@@ -492,6 +527,7 @@ def run_drill_now_on(
                 database_for_url=database_for_url,
                 throwaway=throwaway,
                 home=home,
+                environ=environ,
             )
     except LockTimeoutError:
         report("failed: a WAL-G tick or drill is still running")
@@ -509,6 +545,7 @@ def run_drill_now(
     database_for_url: Callable[[str], Database],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     if path is None:
@@ -521,4 +558,5 @@ def run_drill_now(
         database_for_url=database_for_url,
         path=path,
         home=home,
+        environ=environ,
     )

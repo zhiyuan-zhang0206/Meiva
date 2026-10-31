@@ -133,6 +133,7 @@ def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, 
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(None, home=sandbox.home),
         home=sandbox.home,
+        environ=sandbox.environ,
     )
     return code, lines
 
@@ -566,6 +567,7 @@ def _drill_now(sandbox: Sandbox, lines: list[str], platform: tick.Platform | Non
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(None, home=sandbox.home),
         home=sandbox.home,
+        environ=sandbox.environ,
     )
 
 

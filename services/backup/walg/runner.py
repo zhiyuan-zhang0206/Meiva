@@ -20,7 +20,7 @@ from typing import Literal, overload
 from urllib.parse import parse_qs, urlsplit
 
 from base.cluster.dataplane.walg_binary import walg_path
-from base.native_process.child_env import daemon_process_env
+from base.native_process.child_env import filter_daemon_env
 from services.backup.walg.config import WalgConfigError
 
 # meiva:note
@@ -45,9 +45,12 @@ def _pg_env(admin_url: str) -> dict[str, str]:
 
 
 def walg_env(
-    *, pg_admin_url: str | None = None, extra: Mapping[str, str] = _NO_EXTRA
+    *,
+    environ: Mapping[str, str],
+    pg_admin_url: str | None = None,
+    extra: Mapping[str, str] = _NO_EXTRA,
 ) -> dict[str, str]:
-    env = daemon_process_env()
+    env = filter_daemon_env(environ)
     if pg_admin_url is not None:
         env.update(_pg_env(pg_admin_url))
     env.update(extra)
@@ -70,6 +73,7 @@ def run_walg_logged(
     extra_env: Mapping[str, str] = _NO_EXTRA,
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> WalgOutput:
     """Run `wal-g --config <file> *args` and return both streams.
 
@@ -90,7 +94,7 @@ def run_walg_logged(
             text=True,
             check=False,
             timeout=timeout_s,
-            env=walg_env(pg_admin_url=pg_admin_url, extra=extra_env),
+            env=walg_env(environ=environ, pg_admin_url=pg_admin_url, extra=extra_env),
         )
     except subprocess.TimeoutExpired:
         raise WalgCommandError(f"wal-g {args[0]} did not finish within {timeout_s:g}s") from None
@@ -112,6 +116,7 @@ def run_walg(
     as_json: Literal[False] = False,
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> str: ...
 
 
@@ -125,6 +130,7 @@ def run_walg(
     as_json: Literal[True],
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> object: ...
 
 
@@ -140,6 +146,7 @@ def run_walg(
     as_json: bool = False,
     path: Path | None,
     home: Path,
+    environ: Mapping[str, str],
 ) -> object:
     output = run_walg_logged(
         args,
@@ -148,5 +155,6 @@ def run_walg(
         extra_env=extra_env,
         path=path,
         home=home,
+        environ=environ,
     )
     return json.loads(output.stdout) if as_json else output.stdout

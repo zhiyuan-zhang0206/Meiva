@@ -42,7 +42,7 @@ import shutil
 import tempfile
 import time
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -257,6 +257,7 @@ def _restore_and_verify(
     database_for_url: Callable[[str], Database],
     socket_root: Path,
     home: Path,
+    environ: Mapping[str, str],
     space_factor: float = SPACE_FACTOR,
     host_floor_bytes: int = HOST_FLOOR_BYTES,
 ) -> str:
@@ -297,6 +298,7 @@ def _restore_and_verify(
             path=path,
             socket_root=socket_root,
             home=home,
+            environ=environ,
         ) as instance:
             summary = _verify(
                 instance.url(target.database), reached, database_for_url=database_for_url
@@ -362,6 +364,7 @@ def run_drill(
     database_for_url: Callable[[str], Database],
     socket_root: Path = SOCKET_ROOT,
     home: Path,
+    environ: Mapping[str, str],
     space_factor: float = SPACE_FACTOR,
     host_floor_bytes: int = HOST_FLOOR_BYTES,
 ) -> DrillRecord:
@@ -385,6 +388,7 @@ def run_drill(
                 database_for_url=database_for_url,
                 socket_root=socket_root,
                 home=home,
+                environ=environ,
                 space_factor=space_factor,
                 host_floor_bytes=host_floor_bytes,
             ),
