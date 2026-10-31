@@ -68,6 +68,17 @@ class UnitMemoryCap:
 
 
 # meiva:note
+# One budget as configuration declares it: which unit gets it and the two numbers its
+# transient scope carries. The unit id is part of the budget because the launch rewrite is
+# keyed by it -- a budget that does not name its unit cannot be applied to anything.
+@dataclass(frozen=True, slots=True)
+class UnitBudget:
+    unit_id: str
+    max_mb: int
+    swap_max_mb: int = 0
+
+
+# meiva:note
 # How long the assembly waits for one `systemd-run --user --scope` round trip before
 # deciding the host cannot carry a scoped unit. It is a presence check, not a
 # measurement: a machine that answers slowly is still a machine that answers.
@@ -114,42 +125,52 @@ def ensure_user_runtime_dir(
 
 
 # meiva:note
-# Inputs are parameters, not ambient reads, so the decision is testable without patching.
-def agent_host_memory_caps(
+# Whether this host can scope a unit at all. Asked with the largest numbers configured, so a
+# value the host refuses (rather than the mechanism itself) fails at assembly rather than at
+# the launch that would have started the unit. One probe for the whole set: it answers for
+# the mechanism, not for a particular unit.
+def can_scope_units(*, budgets: Sequence[UnitBudget], platform: str) -> bool:
+    capped = [budget for budget in budgets if budget.max_mb > 0]
+    if not capped or platform != "linux":
+        return False
+    return _systemd_user_scope_available(
+        max(budget.max_mb for budget in capped),
+        max(budget.swap_max_mb for budget in capped),
+    )
+
+
+# meiva:note
+# Inputs are parameters, not ambient reads, so the decision is testable without patching: the
+# caller answers `scope_available` and this function only decides what that answer means for
+# a configured set of budgets.
+def unit_memory_caps(
     *,
-    max_mb: int,
-    swap_max_mb: int,
+    budgets: Sequence[UnitBudget],
     platform: str,
-    scope_available: bool | None = None,
+    scope_available: bool,
 ) -> dict[str, UnitMemoryCap]:
-    if max_mb <= 0:
+    capped = [budget for budget in budgets if budget.max_mb > 0]
+    if not capped:
         return {}
+    described = ", ".join(f"{budget.unit_id}={budget.max_mb} MiB" for budget in capped)
     if platform != "linux":
         _log.info(
-            "agent-host memory cap configured (%d MiB) but this platform has no cgroups; "
-            "the unit runs unbounded",
-            max_mb,
+            "unit memory caps configured (%s) but this platform has no cgroups; "
+            "the units run unbounded",
+            described,
         )
         return {}
-    supported = (
-        _systemd_user_scope_available(max_mb, swap_max_mb)
-        if scope_available is None
-        else scope_available
-    )
-    if not supported:
-        # meiva:note
-        # Error, not warning: a configured budget that silently degrades to unbounded leaves
-        # the operator believing the plane is capped. The likely cause is named so the next
-        # reader does not have to rediscover it by reading cgroup memory.max.
-        _log.error(
-            "agent-host memory cap configured (%d MiB) but this systemd cannot carry the "
-            "scope attributes it needs; the unit runs unbounded rather than failing to start "
-            "(check XDG_RUNTIME_DIR: systemd-run --user needs it, and a daemonized supervisor "
-            "inherits none)",
-            max_mb,
+    if not scope_available:
+        _log.warning(
+            "unit memory caps configured (%s) but this systemd cannot carry the scope "
+            "attributes they need; the units run unbounded rather than failing to start",
+            described,
         )
         return {}
-    return {"agent-host": UnitMemoryCap(max_mb=max_mb, swap_max_mb=swap_max_mb)}
+    return {
+        budget.unit_id: UnitMemoryCap(max_mb=budget.max_mb, swap_max_mb=budget.swap_max_mb)
+        for budget in capped
+    }
 
 
 # meiva:note
@@ -214,8 +235,29 @@ def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
 # to be restored before anything asks whether scoping is possible -- and restoring it in the
 # process environment is the point, because the later `systemd-run --user` launch inherits it
 # too. Repairing only the probe would leave that second hop failing for the same reason.
-def memory_cap_wanted(*, max_mb: int, platform: str) -> bool:
-    return max_mb > 0 and platform == "linux"
+def memory_cap_wanted(*, budgets: Sequence[UnitBudget], platform: str) -> bool:
+    return platform == "linux" and any(budget.max_mb > 0 for budget in budgets)
+
+
+# meiva:note
+# The two budgets as configuration declares them. They stay separate knobs because the two
+# trees hold different things: `agent-host` is one resident service process, while
+# `exec-host` is where a turn's jobs run -- an arithmetic or model job can legitimately ask
+# for many gigabytes there. One number for both would be wrong for one of them, and the
+# wrong one is discovered by an OOM kill rather than by a config check.
+def configured_memory_budgets() -> tuple[UnitBudget, ...]:
+    return (
+        UnitBudget(
+            unit_id="agent-host",
+            max_mb=settings.agent.agent_host_memory_max_mb,
+            swap_max_mb=settings.agent.agent_host_memory_swap_max_mb,
+        ),
+        UnitBudget(
+            unit_id="exec-host",
+            max_mb=settings.agent.exec_host_memory_max_mb,
+            swap_max_mb=settings.agent.exec_host_memory_swap_max_mb,
+        ),
+    )
 
 
 # meiva:note
@@ -225,17 +267,17 @@ def memory_cap_wanted(*, max_mb: int, platform: str) -> bool:
 # there, is how an alert becomes noise.
 def bind_memory_budget(supervisor: Supervisor, *, host: Host) -> None:
     runtime_dir = ensure_user_runtime_dir(os.environ, uid=host.uid, isdir=os.path.isdir)
-    max_mb = settings.agent.agent_host_memory_max_mb
-    if runtime_dir is None and memory_cap_wanted(max_mb=max_mb, platform=host.platform.system):
+    budgets = configured_memory_budgets()
+    if runtime_dir is None and memory_cap_wanted(budgets=budgets, platform=host.platform.system):
         _log.error(
             "no user runtime dir: XDG_RUNTIME_DIR is unset and /run/user/%d does not exist; "
             "systemd-run --user cannot reach the user manager, so unit memory caps will not apply",
             host.uid,
         )
-    caps = agent_host_memory_caps(
-        max_mb=max_mb,
-        swap_max_mb=settings.agent.agent_host_memory_swap_max_mb,
+    caps = unit_memory_caps(
+        budgets=budgets,
         platform=host.platform.system,
+        scope_available=can_scope_units(budgets=budgets, platform=host.platform.system),
     )
     supervisor.set_argv_transform(
         (lambda unit_id, argv: memory_scoped_argv(unit_id, argv, caps=caps)) if caps else None
