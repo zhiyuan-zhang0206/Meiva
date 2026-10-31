@@ -9,11 +9,15 @@ tags: [contracts]
 
 Each requested native resource has one session owner per pytest process;
 xdist workers own separate sessions. Function fixtures install its URL in
-settings, environment and the private .env, then restore them. Unrelated tests
-keep unreachable sentinels and driver refusal. Static processes refuse native
-resource requests but retain session safety hooks. Entry image resolution occurs
-before tests can replace subprocess behavior. Gateway clients receive only the
-test secret; authentication tests explicitly remove it.
+settings, environment and the private .env, then restore them. The
+environment write is approved runner setup (`[approved-patches.files]`), not a
+test reaching a collaborator: it is the surface every config boot reads and
+every descendant inherits, which the settings field and the private `.env` do
+not reach. Unrelated tests keep unreachable sentinels and driver refusal.
+Static processes refuse native resource requests but retain session safety
+hooks. Entry image resolution occurs before tests can replace subprocess
+behavior. Gateway clients receive only the test secret; authentication tests
+explicitly remove it.
 
 The session-start guard refuses a non-test database before fixtures or tests can
 run. The full-run guard resolves positional arguments against the invocation
