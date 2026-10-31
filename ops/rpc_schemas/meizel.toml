@@ -1,7 +1,7 @@
 purity = "strict"
-exports = ["content.py", "terminate.py"]
+exports = ["content.py", "terminate.py", "transfer.py"]
 
 [uses]
-"__init__.py" = ["content.py", "messages.py", "terminate.py"]
+"__init__.py" = ["content.py", "messages.py", "terminate.py", "transfer.py"]
 "terminate.py" = ["content.py"]
 "tests" = ["__init__.py"]

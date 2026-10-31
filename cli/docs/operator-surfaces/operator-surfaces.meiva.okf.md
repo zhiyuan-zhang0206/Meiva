@@ -24,12 +24,15 @@ tags:
   message/exit-1 handling and interrupt exit 130. A terminal or revoked lease
   stops the heartbeat normally; the heartbeat never renews executor authority.
 
-- `meiva agents ls/send/cancel/restart/resurrect/terminate/kill`: `ls` renders the
+- `meiva agents ls/send/cancel/restart/resurrect/terminate/kill/transfer`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
   label` columns. It does not expose runner-local workspace paths. `restart`,
-  `resurrect`, `terminate` and `kill` require `--message TEXT | --no-message`
-  (blank `--message` exits 2 at parse); `cancel` is an immediate turn
-  interruption and takes neither.
+  `resurrect`, `terminate`, `kill` and `transfer --to MACHINE` require
+  `--message TEXT | --no-message` (blank `--message` exits 2 at parse); `cancel`
+  is an immediate turn interruption and takes neither. `transfer` relocates an
+  `idling` or `terminated` native agent and its workspace across machines and
+  refuses running agents with 409
+  ([[gateway/agents/docs/agent-transfer.meiva.okf.md|agent transfer]]).
 - `meiva notices list/resolve/clear/audit`: `resolve` reports success only when the
   gateway accepts the action. A 409 conflict is an error, including an absent
   notice, an action-kind mismatch, or an already-resolved answer/dismissal.

@@ -1,0 +1,11 @@
+exports = ["__init__.py", "archive_io.py", "operations.py"]
+
+[uses]
+"__init__.py" = ["bundle_plan.py"]
+"archive_io.py" = ["bundle_plan.py"]
+"operations.py" = ["archive_io.py", "bundle_plan.py"]
+"tests" = ["archive_io.py", "bundle_plan.py"]
+
+[purity]
+"__init__.py" = "strict"
+"bundle_plan.py" = "strict"

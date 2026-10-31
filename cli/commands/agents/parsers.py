@@ -44,6 +44,15 @@ def _nonblank_message(value: str) -> str:
     return stripped
 
 
+# meiva:note
+# Argparse type for `--to`: reject empty or whitespace-only target machine names.
+def _nonblank_machine(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise argparse.ArgumentTypeError("--to cannot be empty")
+    return stripped
+
+
 def _h_agents_ls(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_ls
@@ -159,6 +168,25 @@ def h_agents_kill(args: argparse.Namespace) -> int:
             args.agent_id,
             source=args.source,
             kill_all_shell_sessions=args.kill_all_shell_sessions,
+            message=args.message,
+        )
+    except ProvenanceError as exc:
+        print(f"meiva: {exc}", file=sys.stderr)
+        return 2
+
+
+# meiva:note
+# Dispatch `meiva agents transfer` and translate provenance failures to exit code 2.
+def _h_agents_transfer(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.agents.control import ProvenanceError, cmd_agents_transfer
+
+    try:
+        return cmd_agents_transfer(
+            gateway_access_from_boot(args.runtime.config),
+            args.agent_id,
+            to_machine=args.to_machine,
+            source=args.source,
             message=args.message,
         )
     except ProvenanceError as exc:
@@ -332,7 +360,7 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(
         "agents",
-        help="observe + control agents: ls / cancel / compact / restart / terminate / kill",
+        help="observe + control agents: ls / cancel / compact / restart / resurrect / terminate / kill / transfer",
     )
     agents_sub = agents_p.add_subparsers(dest="agents_cmd", required=True)
 
@@ -380,6 +408,21 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     agents_kill_p.add_argument("agent_id", type=int, help="agent id to kill")
     agents_kill_p.set_defaults(func=h_agents_kill)
 
+    agents_transfer_p = agents_sub.add_parser(
+        "transfer",
+        help="transfer a quiescent native agent and its workspace to another machine",
+    )
+    agents_transfer_p.add_argument("agent_id", type=int, help="agent id to transfer")
+    agents_transfer_p.add_argument(
+        "--to",
+        dest="to_machine",
+        required=True,
+        type=_nonblank_machine,
+        metavar="MACHINE",
+        help="target machine name",
+    )
+    agents_transfer_p.set_defaults(func=_h_agents_transfer)
+
     for lifecycle_end_parser in (agents_terminate_p, agents_kill_p):
         lifecycle_end_parser.add_argument(
             "--kill-all-shell-sessions",
@@ -393,12 +436,14 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         agents_resurrect_p,
         agents_terminate_p,
         agents_kill_p,
+        agents_transfer_p,
     )
     _add_message_choice(
         agents_restart_p,
         agents_resurrect_p,
         agents_terminate_p,
         agents_kill_p,
+        agents_transfer_p,
     )
     _add_notices_parsers(sub)
 

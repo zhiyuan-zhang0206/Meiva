@@ -120,6 +120,19 @@ def dispatch_sync(
             )
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
             return OpStatus.COMPLETED, _agent_arm(kind, payload, pool, home=home, now=now)
+        case (
+            "workspace_transfer_prepare"
+            | "workspace_transfer_import"
+            | "workspace_transfer_finalize"
+            | "workspace_transfer_abort"
+        ):
+            return _transfer_arm(
+                kind,
+                payload,
+                local_machine=local_machine.name(),
+                home=home,
+                receiver=receiver,
+            )
         case _:
             return unknown_kind(kind)
 
@@ -191,4 +204,69 @@ def _upload_arm(
         return OpStatus.FAILED, {
             "error": "native quota exceeded",
             "reason": "upload-copy-quota-v1",
+        }
+
+
+def _transfer_arm(
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    local_machine: str,
+    home: Path,
+    receiver: ReceiverConfig,
+) -> tuple[OpStatus, dict[str, object]]:
+    from httpx import HTTPStatusError
+
+    from ops.agent_transfer import WorkspaceTransferError
+    from ops.agent_transfer.operations import (
+        abort_transfer_op,
+        finalize_transfer_op,
+        import_workspace_op,
+        prepare_target_op,
+    )
+    from ops.rpc_schemas import (
+        WorkspaceTransferAbortPayload,
+        WorkspaceTransferFinalizePayload,
+        WorkspaceTransferImportPayload,
+        WorkspaceTransferPreparePayload,
+    )
+
+    try:
+        match kind:
+            case "workspace_transfer_prepare":
+                prep = WorkspaceTransferPreparePayload.model_validate(payload)
+                return OpStatus.COMPLETED, prepare_target_op(
+                    prep, local_machine=local_machine, home=home
+                ).model_dump(mode="json")
+            case "workspace_transfer_import":
+                imp = WorkspaceTransferImportPayload.model_validate(payload)
+                return OpStatus.COMPLETED, import_workspace_op(
+                    imp,
+                    local_machine=local_machine,
+                    home=home,
+                    access=receiver.access,
+                ).model_dump(mode="json")
+            case "workspace_transfer_finalize":
+                fin = WorkspaceTransferFinalizePayload.model_validate(payload)
+                return OpStatus.COMPLETED, finalize_transfer_op(
+                    fin, local_machine=local_machine, home=home
+                ).model_dump(mode="json")
+            case "workspace_transfer_abort":
+                abt = WorkspaceTransferAbortPayload.model_validate(payload)
+                return OpStatus.COMPLETED, abort_transfer_op(
+                    abt, local_machine=local_machine, home=home
+                ).model_dump(mode="json")
+            case _:
+                raise ValueError(f"not a transfer arm: {kind!r}")
+    except HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403, 404, 409, 413}:
+            return OpStatus.FAILED, {
+                "error": f"gateway bundle fetch returned HTTP {exc.response.status_code}",
+                "reason": "transfer_bundle_unavailable",
+            }
+        raise
+    except WorkspaceTransferError as exc:
+        return OpStatus.FAILED, {
+            "error": str(exc),
+            "reason": exc.reason,
         }

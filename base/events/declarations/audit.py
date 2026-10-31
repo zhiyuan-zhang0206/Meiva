@@ -107,6 +107,17 @@ class TaskUpdate(TypedDict):
     status: str
 
 
+class AgentTransfer(TypedDict):
+    # meiva:note
+    # `transfer` payload — gateway/agents/transfer/router.py.
+    from_machine: str
+    to_machine: str
+    files_transferred: int
+    bytes_transferred: int
+    killed_shell_sessions: list[int]
+    closed_pages: list[str]
+
+
 EVENTS: dict[str, EventSpec] = {
     "spawn": audit_event(
         "spawn",
@@ -128,6 +139,11 @@ EVENTS: dict[str, EventSpec] = {
         "cancel", "in-flight turn cancelled", site="base/agents/inbox/insert.py:48 same as above"
     ),
     "resurrect": audit_event("resurrect", "terminated agent woken"),
+    "transfer": audit_event(
+        "transfer",
+        "agent transferred to another machine",
+        payload=AgentTransfer,
+    ),
     "compact": audit_event("compact", "agent context compacted"),
     "circuit_breaker": audit_event(
         "circuit_breaker",

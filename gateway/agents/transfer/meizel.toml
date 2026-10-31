@@ -1,0 +1,9 @@
+exports = ["bundle_store.py", "router.py", "transfer_plan.py"]
+
+[uses]
+"router.py" = ["bundle_store.py", "transfer_plan.py"]
+"tests" = ["bundle_store.py", "transfer_plan.py"]
+
+[purity]
+"__init__.py" = "strict"
+"transfer_plan.py" = "strict"

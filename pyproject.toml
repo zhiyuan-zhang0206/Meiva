@@ -1289,6 +1289,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "gateway/agents/transfer/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "gateway/cluster/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1515,6 +1520,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meizel/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/agent_transfer/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

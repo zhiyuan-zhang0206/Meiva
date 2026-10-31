@@ -1,4 +1,4 @@
-exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "launch", "launch_retry.py", "lifecycle.py", "notice_operations", "reply_suggestion", "router.py", "schemas.py", "state.py", "system_note.py", "task_assignment", "tests", "to_user"]
+exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "launch", "launch_retry.py", "lifecycle.py", "notice_operations", "reply_suggestion", "router.py", "schemas.py", "state.py", "system_note.py", "task_assignment", "tests", "to_user", "transfer"]
 
 [uses]
 "creation.py" = ["launch"]

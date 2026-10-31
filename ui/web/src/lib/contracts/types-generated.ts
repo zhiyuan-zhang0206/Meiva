@@ -367,6 +367,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["post_agent_transfer_api_agents__agent_id__transfer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/sessions": {
         parameters: {
             query?: never;
@@ -4059,6 +4075,22 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        TransferAgentRequest: {
+            to_machine: string;
+            source: string;
+            message?: string | null;
+        };
+        TransferAgentResponse: {
+            agent_id: number;
+            from_machine: string;
+            to_machine: string;
+            status: "transferred";
+            agent_status: "idling" | "terminated";
+            files_transferred: number;
+            bytes_transferred: number;
+            killed_shell_sessions?: number[];
+            closed_pages?: string[];
+        };
         UiContributionsResponse: {
             themes: components["schemas"]["UiThemeContribution"][];
             nav: components["schemas"]["UiNavContribution"][];
@@ -4793,6 +4825,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompactAgentResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_agent_transfer_api_agents__agent_id__transfer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferAgentRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferAgentResponse"];
                 };
             };
             422: {

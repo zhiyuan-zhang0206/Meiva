@@ -40,6 +40,35 @@ from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
 from ops.rpc_schemas.terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentResponse
+from ops.rpc_schemas.transfer import TransferAgentRequest as TransferAgentRequest
+from ops.rpc_schemas.transfer import TransferAgentResponse as TransferAgentResponse
+from ops.rpc_schemas.transfer import WorkspaceBundleManifest as WorkspaceBundleManifest
+from ops.rpc_schemas.transfer import WorkspaceExportRequest as WorkspaceExportRequest
+from ops.rpc_schemas.transfer import WorkspaceManifestEntry as WorkspaceManifestEntry
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferAbortPayload as WorkspaceTransferAbortPayload,
+)
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferAbortResult as WorkspaceTransferAbortResult,
+)
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferFinalizePayload as WorkspaceTransferFinalizePayload,
+)
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferFinalizeResult as WorkspaceTransferFinalizeResult,
+)
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferImportPayload as WorkspaceTransferImportPayload,
+)
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferImportResult as WorkspaceTransferImportResult,
+)
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferPreparePayload as WorkspaceTransferPreparePayload,
+)
+from ops.rpc_schemas.transfer import (
+    WorkspaceTransferPrepareResult as WorkspaceTransferPrepareResult,
+)
 
 
 class SpawnAgentRequest(BaseModel):
@@ -343,6 +372,10 @@ OpKind = Literal[
     "harness_probe",
     "upload-receive-v1",
     "to_user_read",
+    "workspace_transfer_prepare",
+    "workspace_transfer_import",
+    "workspace_transfer_finalize",
+    "workspace_transfer_abort",
 ]
 
 

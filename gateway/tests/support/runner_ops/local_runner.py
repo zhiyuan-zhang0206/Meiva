@@ -50,6 +50,7 @@ from gateway.tests.support.runner_ops.ops_stub import OpsCall, RunnerOps, regist
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, in_flight
 from services.agent_runner.agent_ops.daemon import ops_route
+from services.agent_runner.agent_ops.workspace_export import workspace_export_route
 
 __all__ = ["ExecutedOp", "executed_ops", "local_runner"]
 
@@ -117,6 +118,18 @@ def _unreachable_receiver(machine: str, home: Path) -> ReceiverConfig:
     )
 
 
+def _receiver_of(machine: str, home: Path, access: GatewayAccess | None) -> ReceiverConfig:
+    if access is None:
+        return _unreachable_receiver(machine, home)
+    return ReceiverConfig(
+        unit=UnitIdentity(machine=machine, home=str(home.resolve())),
+        upload_dir_name="uploads",
+        access=access,
+        quota_bytes=MAX_AGENT_UPLOAD_BYTES,
+        quota_files=MAX_AGENT_UPLOAD_FILES,
+    )
+
+
 # meiva:note
 # Bring up the daemon's serving stack on the running loop; every envelope is recorded on `runner`.
 async def _serve(
@@ -128,17 +141,20 @@ async def _serve(
     machine: MachineIdentityReader,
     host: Host,
     image: LoadedCommit,
+    unit_home: Path | None = None,
+    gateway_access: GatewayAccess | None = None,
 ) -> _Daemon:
     requests: in_flight.RequestTokens = set()
     workers: in_flight.WorkerFutures = set()
     pool = boot.open_db_pool(database=lambda: database, authority=authority)
     executor = boot.op_thread_pool(authority=authority)
-    home = resolve_meiva_home()
+    home = resolve_meiva_home() if unit_home is None else unit_home.resolve()
+    sem = asyncio.Semaphore(authority.service_field_value("ops_concurrency"))
     route = functools.partial(
         ops_route,
         active_ops={},
         workers=workers,
-        dispatch_sem=asyncio.Semaphore(authority.service_field_value("ops_concurrency")),
+        dispatch_sem=sem,
         requests=requests,
         pool=pool,
         executor=executor,
@@ -150,8 +166,18 @@ async def _serve(
         host=host,
         rng=seeded_rng(),
         home=home,
-        receiver=_unreachable_receiver(machine.name(), home),
+        receiver=_receiver_of(machine.name(), home, gateway_access),
         agent_host=ServiceEndpoints.from_fields(get_field, runtime=run_dir(home)).of("agent_host"),
+    )
+    export_route = functools.partial(
+        workspace_export_route,
+        pool=pool,
+        machine=machine.name(),
+        home=home,
+        executor=executor,
+        dispatch_sem=sem,
+        requests=requests,
+        workers=workers,
     )
 
     async def recorded(body: bytes) -> tuple[int, bytes, str]:
@@ -170,7 +196,14 @@ async def _serve(
             raise
 
     server = await start_health_server(
-        "ops", 0, home=meiva_home(), extra_routes={("POST", "/ops"): recorded}, image=image
+        "ops",
+        0,
+        home=home if unit_home is not None else meiva_home(),
+        extra_routes={
+            ("POST", "/ops"): recorded,
+            ("POST", "/workspace/export"): export_route,
+        },
+        image=image,
     )
     return _Daemon(
         server=server,
@@ -223,6 +256,8 @@ def local_runner(
     machine: MachineIdentityReader,
     host: Host,
     image: LoadedCommit,
+    unit_home: Path | None = None,
+    gateway_access: GatewayAccess | None = None,
 ) -> Generator[RunnerOps]:
     runner = RunnerOps(name=machine.name(), url="")
     with _event_loop() as loop:
@@ -235,6 +270,8 @@ def local_runner(
                 machine=machine,
                 host=host,
                 image=image,
+                unit_home=unit_home,
+                gateway_access=gateway_access,
             ),
             loop,
         ).result(timeout=_SETUP_TIMEOUT_S)

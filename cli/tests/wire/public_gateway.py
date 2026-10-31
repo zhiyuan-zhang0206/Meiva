@@ -22,7 +22,7 @@ WIRE_CREDENTIAL = "cli-wire-fixture"
 _CHILD = Path(__file__).with_name("child_public_commands.py")
 _ROUTES = {
     "GET": r"/api/(agents|schedules(?:/\d+(?:/(?:logs|runs))?)?)",
-    "POST": r"/api/(agents/\d+/(?:messages|restart|resurrect|terminate|cancel|compact)|schedules(?:/\d+/(?:start|stop|restart))?)",
+    "POST": r"/api/(agents/\d+/(?:messages|restart|resurrect|terminate|cancel|compact|transfer)|schedules(?:/\d+/(?:start|stop|restart))?)",
     "PUT": r"/api/schedules/\d+",
     "DELETE": r"/api/schedules/\d+",
 }
