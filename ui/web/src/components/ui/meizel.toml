@@ -5,8 +5,3 @@ exports = ["auto-expand-textarea.tsx", "button.tsx", "context-menu.tsx", "dialog
 "auto-expand-textarea.tsx" = ["textarea.tsx"]
 "resizable.test.tsx" = ["resizable.tsx"]
 "scroll-area.test.tsx" = ["scroll-area.tsx"]
-
-[debt.stdlib-patch]
-"scroll-area.test.tsx#vi.spyOn HTMLElement.prototype.clientHeight" = 1
-"scroll-area.test.tsx#vi.spyOn HTMLElement.prototype.offsetHeight" = 1
-"scroll-area.test.tsx#vi.spyOn HTMLElement.prototype.scrollHeight" = 1
