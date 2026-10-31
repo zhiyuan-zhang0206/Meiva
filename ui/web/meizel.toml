@@ -3,10 +3,7 @@
 "tests" = ["messages", "next.config.ts", "src"]
 
 [purity]
-"next.config.ts" = "strict-to-be"
+"next.config.ts" = "strict"
 
-[debt.ambient-read]
-"next.config.ts#environ process.env" = 2
-
-[debt.impure-call]
-"next.config.ts#headers#async" = 1
+[roots]
+"next.config.ts" = { kinds = ["environ"], why = "the build's configuration entry: the Next build imports this module to learn the config, and it is the only place in ui/web that reads the build-time environment. It reads MEIVA_DEV_ORIGINS (only `next dev` acts on it) and ANALYZE (only `build:analyze` acts on it); both are switches the build sets, and no caller exists that could hand them in. A second file that needs the build environment goes through this module instead of opening its own root" }
