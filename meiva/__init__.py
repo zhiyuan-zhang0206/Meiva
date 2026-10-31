@@ -209,12 +209,14 @@ def ensure_plugins_loaded(
     )
 
 
-# PEP 562 module-level `__getattr__`. Plugins set runtime attributes via
-# the SDK install (a real setattr), so this fall-through is
-# only hit for genuinely unknown names — we want fail-fast there.
-# Its presence tells pyright the module supports dynamic attributes, so test
-# files that reference plugin-registered names (e.g. `meiva.cwd` from the
-# meiva_code plugin) don't trip `reportAttributeAccessIssue`.
+# meiva:note
+# PEP 562 module-level `__getattr__`. Plugins set runtime attributes via the SDK install (a real
+# setattr), so this fall-through is only hit for genuinely unknown names — we want fail-fast there.
+# Its presence tells pyright the module supports dynamic attributes, so test files that reference
+# plugin-registered names (e.g. `meiva.cwd` from the meiva_code plugin) don't trip
+# `reportAttributeAccessIssue`; the return stays `Any` for that reason. Those names are only known
+# at runtime, and typing them `object` moved the error from "unknown attribute" to "attribute
+# access on object" in 15 files (259 errors) without making any of them checkable.
 #
 # DB_URL / REDIS_URL / GATEWAY_URL forward to meiva.sdk_surface.settings (which in turn
 # reads the live `settings.X`). Putting the forward here rather than copying

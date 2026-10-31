@@ -11,6 +11,3 @@ exports = ["admission.py", "attachment.py"]
 
 [roots]
 "attachment.py" = { kinds = ["pid", "random", "settings"], why = "External controller attachment owns process bootstrap, its own pid and session UUID generation when no SDK context is bound" }
-
-[debt.any-collaborator]
-"__init__.py#any _Attachment.native_snapshot.return" = 1
