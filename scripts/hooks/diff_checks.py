@@ -73,6 +73,7 @@ FIELD_ORDER = (
     "fallback",
     "blind",
     "vitest",
+    "vitest-app",
     "next-build",
     "meizel",
     "debt",
@@ -192,6 +193,37 @@ _FRONTEND_RUNS = (
 
 
 # meiva:note
+# The selector never chooses every file: two page tests under `src/app` sat red from 2026-10-27 to
+# 10-31 because no run ever picked them. Any change to the web tree runs the whole app router test
+# tree (331 tests, 6.9s measured on the MacBook Air), so a file no selector names still gets one
+# run. It is wider than `frontend-rsc` on purpose: the build decides whether code crosses a
+# boundary, this decides whether the pages that already exist still pass.
+_WEB_TREE = ("ui/web/",)
+
+
+def _touches_web_tree(change: ChangeSet) -> bool:
+    return any(name.startswith(_WEB_TREE) for name in change.files)
+
+
+_APP_TEST_RUNS = (
+    Run(
+        "vitest-app",
+        (
+            shutil.which("npx") or "npx",
+            "vitest",
+            "run",
+            "--config",
+            "tests/vitest.config.mts",
+            "--dir",
+            "src/app",
+        ),
+        "exit code; every test under src/app, which the selector never chooses whole",
+        cwd="ui/web",
+    ),
+)
+
+
+# meiva:note
 # The change shapes this script knows. `python-change` is the one every Python edit takes;
 # other owners add theirs here (a net debt reduction's refusal-loss scan, for example) and the
 # runner below only schedules what a trigger names.
@@ -206,6 +238,12 @@ TRIGGERS: tuple[Trigger, ...] = (
         name="frontend-rsc",
         matches=_touches_rsc_boundary,
         runs=lambda _change: _FRONTEND_RUNS,
+        blocking=True,
+    ),
+    Trigger(
+        name="frontend-app",
+        matches=_touches_web_tree,
+        runs=lambda _change: _APP_TEST_RUNS,
         blocking=True,
     ),
     Trigger(
@@ -501,6 +539,23 @@ def _pyright_fields(output: str, seconds: float, change: ChangeSet) -> dict[str,
     }
 
 
+# meiva:note
+# Vitest prints two counts: the files it read and the tests it answered. Only the second says how
+# many assertions ran — `Test Files 34 passed` above `Tests 331 passed` is why a first-match regex
+# would have reported 34. Its colour codes sit between the indent and the word `Tests`, so a run
+# with colour on has to be stripped before the line can be read at all.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_VITEST_TESTS = re.compile(r"^\s*Tests\s+(?:(\d+) failed \| )?(\d+) passed", re.MULTILINE)
+
+
+def _vitest_tests(output: str) -> int:
+    found = _VITEST_TESTS.search(_ANSI.sub("", output))
+    if found is None:
+        return 0
+    failed = int(found.group(1)) if found.group(1) else 0
+    return failed + int(found.group(2))
+
+
 def _fields_for(
     run: Run, code: int, output: str, seconds: float, change: ChangeSet
 ) -> dict[str, str]:
@@ -508,6 +563,10 @@ def _fields_for(
         return _pyright_fields(output, seconds, change)
     if run.label == "meizel":
         return {"meizel": _meizel_field(code, output, seconds)}
+    if run.label == "vitest-app":
+        ran = _vitest_tests(output)
+        verdict = "ok" if code == 0 else f"failed({code})"
+        return {"vitest-app": f"{verdict}:{ran}({_spell(seconds)})"}
     if run.label == "debt":
         return {"debt": _debt_field(output)}
     if run.label == "refusal-loss":

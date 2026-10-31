@@ -222,3 +222,90 @@ def test_the_meizel_field_carries_what_the_checker_covered() -> None:
     )
 
     assert values["meizel"] == "ok(exit=0,772manifests,76697edges)(17s)"
+
+
+# meiva:note
+# A green exit code is not the same fact as "the tests ran": the selector never chooses the app
+# tree whole, so a page test can sit red for days while every run it received was green.
+def test_a_change_anywhere_in_the_web_tree_runs_the_whole_app_test_tree() -> None:
+    lines = plan(_change("ui/web/src/lib/browser/browser.ts"), skip_tests=True)
+
+    assert any("vitest-app" in line for line in lines), (
+        "a change under ui/web/ can break a page no selector names; only the whole app tree "
+        "answers for it"
+    )
+    assert any("src/app" in line for line in lines), (
+        "the plan has to name which tests it means, not only that the package runs something"
+    )
+    assert any("(in ui/web)" in line for line in lines)
+
+
+def test_a_change_outside_the_web_tree_runs_no_app_tests() -> None:
+    lines = plan(_change("base/thing.py"), skip_tests=True)
+
+    assert not any("vitest-app" in line for line in lines)
+
+
+def test_the_app_tree_field_reports_the_denominator_and_not_only_the_verdict() -> None:
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        if "vitest" in str(argv):
+            return 0, " Test Files  34 passed (34)\n      Tests  331 passed (331)\n", 11.0
+        return 0, "0 errors, 0 warnings", 96.0
+
+    values, failed = check(
+        _change("ui/web/src/lib/browser/browser.ts"),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+    )
+
+    assert failed is False
+    assert values["vitest-app"] == "ok:331(11s)", (
+        "a run that answered no test must not read like one that answered 331"
+    )
+
+
+def test_the_app_tree_still_fails_the_receipt_when_its_tests_do() -> None:
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        if "vitest" in str(argv):
+            return 1, "      Tests  2 failed | 329 passed (331)\n", 11.0
+        return 0, "0 errors, 0 warnings", 96.0
+
+    values, failed = check(
+        _change("ui/web/src/lib/browser/browser.ts"),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+    )
+
+    assert failed is True
+    assert values["vitest-app"] == "failed(1):331(11s)"
+
+
+# meiva:note
+# Vitest colours its summary, and the escape sequences land between the indent and the word
+# `Tests`: a parser that only matched uncoloured output reported zero tests for a green run. The
+# 2026-10-31 check against the real tree answered `Test Files 34 passed (34)` while this parser
+# said 0.
+def test_the_app_tree_parser_reads_a_coloured_summary() -> None:
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        if "vitest" in str(argv):
+            return (
+                0,
+                (
+                    "\x1b[2m Test Files \x1b[22m \x1b[1m\x1b[32m34 passed\x1b[39m\x1b[22m\x1b[90m (34)\x1b[39m\n"
+                    "\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m331 passed\x1b[39m\x1b[22m\x1b[90m (331)\x1b[39m\n"
+                ),
+                6.0,
+            )
+        return 0, "0 errors, 0 warnings", 96.0
+
+    values, failed = check(
+        _change("ui/web/src/lib/browser/browser.ts"),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+    )
+
+    assert failed is False
+    assert values["vitest-app"] == "ok:331(6s)"
