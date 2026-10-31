@@ -562,6 +562,45 @@ async def test_consecutive_early_failures_retire_the_rewrite(tmp_path: Path) -> 
         await owner.shutdown()
 
 
+# meiva:note
+# The collateral-damage rule: retirement belongs to the unit whose wrapper failed, not to the
+# process. On 2026-10-31 a process-wide flag took exec-host's cap away because agent-host's wrapper
+# refused its launch.
+async def test_retirement_is_per_unit(tmp_path: Path) -> None:
+    failing = (sys.executable, "-u", str(_CHILD), "code_gate_exit", str(tmp_path / "gate"))
+    healthy = (sys.executable, "-u", str(_CHILD), "sleep")
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        target = failing if argv[0].endswith("broken") else healthy
+        return await asyncio.create_subprocess_exec(*target, **options)
+
+    broken = UnitManifest("broken", failing, RestartPolicy.ALWAYS, "root", ())
+    sibling = UnitManifest("sibling", healthy, RestartPolicy.ALWAYS, "root", ())
+    owner = Supervisor(
+        UnitRegistry([broken, sibling]),
+        environ=dict(os.environ),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2, rewrite_retire_after_failures=1),
+        spawn=launcher,
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
+    owner.set_argv_transform(lambda unit_id, argv: [f"wrapped:{unit_id}", *argv])
+    await owner.start()
+    try:
+        units: dict[str, dict[str, Any]] = {}
+        for _ in range(200):
+            snapshot = cast("list[dict[str, Any]]", (await owner.status())["units"])
+            units = {unit["id"]: unit for unit in snapshot}
+            if units["broken"]["state"] == "stopped":
+                break
+            await asyncio.sleep(0.02)
+        assert units["broken"]["launch_rewrite"] == "off(retired)"
+        assert units["sibling"]["launch_rewrite"] == "on"
+    finally:
+        await owner.shutdown()
+
+
 async def test_a_generation_that_outlives_the_window_clears_the_count(tmp_path: Path) -> None:
     seen: list[tuple[str, ...]] = []
     failing = (sys.executable, "-u", str(_CHILD), "code_gate_exit", str(tmp_path / "gate"))
