@@ -8,8 +8,10 @@ never an SDK identity source. Borrowed leases are validated on each identity use
 from __future__ import annotations
 
 from base.agents.context.identity import AgentIdentity
+from base.api_contracts.agent_contract import Harness
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.process_context import MeivaContext
+from meiva.sdk_surface.pure.caller.harness_plan import harness_name
 from meiva.sdk_surface.pure.caller.identity_plan import (
     ActorFacts,
     actor_after_external,
@@ -31,19 +33,22 @@ def _bound(context: MeivaContext | None = None) -> AgentIdentity | None:
     return None if context is None else context.identity
 
 
+# meiva:note
+# The harness this process runs under: read here, decided by `identity_plan.harness_name`, so the
+# rule stays under purity analysis while the read does not.
 def _harness_name() -> str:
     resolved = process_context.ambient_context()
     if resolved is None:
-        return "meiva"
-    if resolved.harness.value != "meiva":
-        return resolved.harness.value
-    if (
-        resolved.sdk_capture is not None
-        and getattr(resolved.sdk_capture, "handle", None) is not None
-    ):
-        reg = getattr(resolved.sdk_capture, "_registration", None)
-        return str(getattr(reg, "harness", None) or "external")
-    return resolved.harness.value
+        return Harness.MEIVA.value
+    capture = resolved.sdk_capture
+    registration = None if capture is None else getattr(capture, "_registration", None)
+    return harness_name(
+        resolved.harness,
+        capture_handle=None if capture is None else getattr(capture, "handle", None),
+        registration_harness=None
+        if registration is None
+        else getattr(registration, "harness", None),
+    )
 
 
 def validate_external_identity(context: MeivaContext | None = None) -> int | None:
