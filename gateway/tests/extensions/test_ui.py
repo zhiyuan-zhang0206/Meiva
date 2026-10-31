@@ -26,6 +26,7 @@ import pytest
 
 import meiva
 from base.agents.tests.units import spawn_agent
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -64,6 +65,7 @@ def _page_host(
     return meiva.ui.PageHost(
         host=local_machine.host(),
         agent_id=agent_identity.require_agent_id(),
+        timers=SYSTEM_TIMERS,
         ready_timeout_s=ready_timeout_s,
     )
 
@@ -746,7 +748,7 @@ class TestServe:
         window is the fallback for a slow pass / cold restart."""
         import meiva.ui as ui_mod
 
-        assert ui_mod.PageHost(host="h", agent_id=1).ready_timeout_s >= 60.0
+        assert ui_mod.PageHost(host="h", agent_id=1, timers=SYSTEM_TIMERS).ready_timeout_s >= 60.0
 
     # meiva:note
     # The ready window is measured and slept on the timers the host carries: a manual clock
