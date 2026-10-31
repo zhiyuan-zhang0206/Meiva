@@ -43,7 +43,7 @@ from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import PluginConfigView
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.telemetry import Event
-from meiva.boot import (
+from meiva.boot_external import (
     BorrowedBoot,
     ExternalBoot,
     OwnedBoot,

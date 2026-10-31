@@ -44,11 +44,11 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.paths.home import resolve_meiva_home
-from meiva.boot import (
+from meiva.boot import bind_launched_context
+from meiva.boot_external import (
     BorrowedBoot,
     ExternalBoot,
     OwnedBoot,
-    bind_launched_context,
     borrow_external_process,
     initialize_external,
     own_external_process,

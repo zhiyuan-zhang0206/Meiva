@@ -1,5 +1,6 @@
 # meiva:link meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
@@ -44,6 +45,7 @@ def sdk_environment(
         clock_factory=lambda: Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
         user_home=Path.home(),
         meiva_home=resolve_meiva_home(),
+        environ=os.environ,
     )
     process_context.bind_context(context)
     try:

@@ -627,6 +627,7 @@ class AgentHost:
             clock_factory=self._policy.clock_factory,
             meiva_home=self._home,
             user_home=self._policy.user_home,
+            environ=self._policy.environ,
             rng=self._policy.rng,
             bus=self._bus,
             agent=slices,

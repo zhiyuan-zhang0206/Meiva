@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.events.live.bus import EventBus
 from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
-from meiva import boot
+from meiva import boot, boot_external
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface.installation import Installation, Loading, installed, slot
 from meiva.sdk_surface.pure.plans.load_plan import LoadStep
@@ -74,9 +75,9 @@ def test_a_missing_name_on_an_installed_process_loads_nothing() -> None:
 
 def test_an_owned_boot_carries_the_roots_of_its_configuration() -> None:
     config = snapshot_process_config()
-    owned = boot.own_external_process(config)
+    owned = boot_external.own_external_process(config)
     try:
-        assert isinstance(owned, boot.OwnedBoot)
+        assert isinstance(owned, boot_external.OwnedBoot)
         assert owned.config is config
         assert owned.new_context().clients is owned.clients
         assert owned.new_context().require_machine() is owned.machine
@@ -89,7 +90,7 @@ def test_an_owned_boot_carries_the_roots_of_its_configuration() -> None:
 # An attachment draws its identifiers from the operating system's generator and carries the two
 # homes its boot read once, so nothing it runs reads them again.
 def test_an_attachment_context_carries_the_homes_and_the_system_generator_of_its_boot() -> None:
-    owned = boot.own_external_process(snapshot_process_config())
+    owned = boot_external.own_external_process(snapshot_process_config())
     try:
         context = owned.new_context()
         assert context.require_user_home() == Path.home()
@@ -103,9 +104,10 @@ def test_an_attachment_context_carries_the_homes_and_the_system_generator_of_its
 # An attachment's bus is built when its context first needs one, over the boot's configuration, and
 # every context of the boot answers that one bus.
 def test_an_attachment_context_builds_the_boots_one_event_bus_on_first_read() -> None:
-    owned = boot.own_external_process(snapshot_process_config())
+    owned = boot_external.own_external_process(snapshot_process_config())
     try:
         context = owned.new_context()
+        assert context.require_environ() is os.environ
         assert context.bus is None
         bus = context.require_bus()
         assert isinstance(bus, EventBus)
@@ -126,6 +128,7 @@ def test_a_launched_context_carries_the_homes_and_the_generator_its_sampling_own
     assert context is not None
     assert context.require_user_home() == Path.home()
     assert context.require_meiva_home() == unit_home
+    assert context.require_environ() == {"MEIVA_AGENT_ID": "7"}
     assert not isinstance(context.require_rng(), random.SystemRandom)
     assert context.bus is None
     assert isinstance(context.require_bus(), EventBus)
@@ -153,8 +156,8 @@ def test_a_borrowed_boot_takes_the_machine_and_database_of_the_bound_context(
     machine_identity: MachineIdentityReader,
 ) -> None:
     bound = MeivaContext(machine=machine_identity, clients=ClientSet())
-    borrowed = boot.borrow_external_process(bound)
-    assert isinstance(borrowed, boot.BorrowedBoot)
+    borrowed = boot_external.borrow_external_process(bound)
+    assert isinstance(borrowed, boot_external.BorrowedBoot)
     assert borrowed.machine is machine_identity
     assert borrowed.database == bound.clients.database
 
@@ -163,7 +166,7 @@ def test_an_attachment_is_dated_by_the_clock_of_what_it_boots_from(
     machine_identity: MachineIdentityReader,
 ) -> None:
     config = snapshot_process_config()
-    owned = boot.own_external_process(config)
+    owned = boot_external.own_external_process(config)
     try:
         assert attachment_clock(None, owned) is owned.clock
     finally:
@@ -172,14 +175,14 @@ def test_an_attachment_is_dated_by_the_clock_of_what_it_boots_from(
     bound = MeivaContext(
         machine=machine_identity, clients=ClientSet(), clock_factory=lambda: _CLOCK
     )
-    assert attachment_clock(bound, boot.borrow_external_process(bound)) is _CLOCK
+    assert attachment_clock(bound, boot_external.borrow_external_process(bound)) is _CLOCK
 
 
 def test_a_borrowed_context_without_a_clock_fails_before_an_attachment_exists(
     machine_identity: MachineIdentityReader,
 ) -> None:
     bound = MeivaContext(machine=machine_identity, clients=ClientSet())
-    borrowed = boot.borrow_external_process(bound)
+    borrowed = boot_external.borrow_external_process(bound)
     with pytest.raises(RuntimeError, match="no clock factory"):
         attachment_clock(bound, borrowed)
     with pytest.raises(RuntimeError, match="needs the context it borrows"):

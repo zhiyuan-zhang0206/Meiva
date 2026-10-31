@@ -21,9 +21,9 @@
 # - **`machine`**: the composition root's read-only machine identity, shared with its database,
 #   logger and event pipeline. It can be supplied without an agent or live clients;
 #   `require_machine()` rejects a context that did not receive one.
-# - **root values** (`user_home`, `meiva_home`, `rng`): what the process's composition root read or
-#   built once, for code below it to ask by `require_*()` instead of reading the account's home,
-#   resolving `MEIVA_HOME` or constructing a generator itself.
+# - **root values** (`user_home`, `meiva_home`, `environ`, `rng`): what the process's composition
+#   root read or built once, for code below it to ask by `require_*()` instead of reading the
+#   account's home, resolving `MEIVA_HOME`, reading `os.environ` or constructing a generator itself.
 # - **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`.
 #   The host builds each once and hands the same object to every turn it runs;
 #   a context built without them (the eval driver, a test) carries private ones.
@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import random
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
@@ -219,6 +219,14 @@ class MeivaContext:
     rng: random.Random | None = None
 
     # meiva:note
+    # The environment this process was launched with, which the root fills with the mapping it read
+    # at its entry (`meiva/boot.py`: the launch mapping for a launched child, `os.environ` for an
+    # owned external process). Code that forwards an environment to a child — a shell session, a
+    # watcher — asks `require_environ()` instead of reading `os.environ` itself, so a test drives
+    # what a child inherits the same way it drives the clock or the home.
+    environ: Mapping[str, str] | None = None
+
+    # meiva:note
     # Read the user home the root recorded; a partial context fails at first use, with no fallback
     # to the process's own home.
     def require_user_home(self) -> Path:
@@ -241,6 +249,14 @@ class MeivaContext:
         if self.rng is None:
             raise RuntimeError("this MeivaContext carries no random generator")
         return self.rng
+
+    # meiva:note
+    # Read the process environment the root recorded; a partial context fails at first use, with no
+    # fallback to the process's own environment. Nothing on this path guesses a value for a child.
+    def require_environ(self) -> Mapping[str, str]:
+        if self.environ is None:
+            raise RuntimeError("this MeivaContext carries no process environment")
+        return self.environ
 
     # meiva:note
     # Mint a fresh version-4 identifier from the root's generator, as the 32-character hex form

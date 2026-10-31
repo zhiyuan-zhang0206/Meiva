@@ -158,6 +158,6 @@ def run_background(
             agent_id=aid,
             cli=background.cli_path(),
             log_dir=log_ring.output_dir(workspace),
-            host=sessions.session_host(),
+            host=sessions.session_host(sessions.process_environ()),
         ),
     )
