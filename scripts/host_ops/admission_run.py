@@ -19,16 +19,28 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.host_ops.admission_floor import (
-    DEFAULT_DISK_REFUSE_GIB,
-    DEFAULT_DISK_WARN_GIB,
-    disk_floor,
-    floor_line,
+    add_arguments as add_floor_arguments,
+)
+from scripts.host_ops.admission_floor import (
+    floor_verdict,
     swap_line,
+)
+from scripts.host_ops.admission_floor import (
+    read_state as read_floor_state,
+)
+from scripts.host_ops.admission_floor import (
+    report as report_floor,
+)
+from scripts.host_ops.admission_floor import (
+    sample as sample_floor,
+)
+from scripts.host_ops.admission_floor import (
+    write_state as write_floor_state,
 )
 from scripts.host_ops.admission_ledger import (
     current_boot_id as _ledger_boot_id,
@@ -429,41 +441,6 @@ def run_measured(
     return code
 
 
-def _floor_report(
-    verdict: str,
-    *,
-    budget: Reading,
-    script: str,
-    floor_gib: float,
-    pressure: int,
-    events: Path,
-    platform_name: str,
-) -> None:
-    print(
-        floor_line(
-            verdict,
-            script=script,
-            free_gib=budget.free_gib,
-            detail=budget.detail,
-            swap=swap_line(platform_name),
-            pressure=pressure,
-            floor_gib=floor_gib,
-        ),
-        file=sys.stderr,
-        flush=True,
-    )
-    emit(
-        events,
-        "refused" if verdict == "refuse" else "warned",
-        script=script,
-        free_gib=round(budget.free_gib, 2),
-        source=budget.source,
-        detail=budget.detail,
-        floor_gib=floor_gib,
-        pressure=pressure,
-    )
-
-
 def _announce_gate(
     *,
     script: str,
@@ -602,6 +579,7 @@ def main(
     executor: Callable[[Sequence[str], dict[str, object]], int] | None = None,
     home: Path | None = None,
     platform_name: str = sys.platform,
+    sleeper: Callable[[float], None] = time.sleep,
 ) -> int:
     # meiva:note
     # Readers, the executor and the home are parameters so a test drives the decision with a
@@ -611,18 +589,7 @@ def main(
     parser.add_argument("--jobs", type=int, help="requested concurrency (else from the command)")
     parser.add_argument("--reserve-gib", type=float, default=DEFAULT_RESERVE_GIB)
     parser.add_argument("--swap-multiplier", type=float, default=DEFAULT_SWAP_MULTIPLIER)
-    parser.add_argument(
-        "--disk-floor-gib",
-        type=float,
-        default=DEFAULT_DISK_REFUSE_GIB,
-        help="refuse to start below this much free space on the data volume (0 disables)",
-    )
-    parser.add_argument(
-        "--disk-warn-gib",
-        type=float,
-        default=DEFAULT_DISK_WARN_GIB,
-        help="warn below this much free space, then start (0 disables)",
-    )
+    add_floor_arguments(parser)
     parser.add_argument("--no-admission", metavar="REASON", help="run unchanged and record why")
     parser.add_argument(
         "--max-wait",
@@ -651,22 +618,55 @@ def main(
     # meiva:note
     # The floor is read before the job's peak: a machine below the refuse line says no without
     # asking a caller to declare its memory first, and a dry run (which starts nothing) keeps
-    # printing its plan even there. The budget is read once and shared with the plan below, so
-    # one decision cannot see two different disks.
+    # printing its plan even there. The readings and the plan below share one budget, so one
+    # decision cannot see two different disks.
+    floor_state = resolved_home / "disk-floor-state.json"
     budget = budget_reader()
     if budget is not None and budget.source == "disk" and not args.dry_run:
-        verdict = disk_floor(
-            budget.free_gib, refuse_gib=args.disk_floor_gib, warn_gib=args.disk_warn_gib
+
+        def probe() -> float | None:
+            # meiva:note
+            # A probe that stops answering reads as no reading at all, so a Linux host can never
+            # look like a shrinking data volume.
+            following = budget_reader()
+            if following is None or following.source != "disk":
+                return None
+            return following.free_gib
+
+        readings, last_free = sample_floor(
+            budget.free_gib,
+            reader=probe,
+            refuse_gib=args.disk_floor_gib,
+            reset_gib=args.disk_floor_gib + args.disk_reset_margin_gib,
+            samples=args.disk_samples,
+            interval=args.disk_sample_interval,
+            sleeper=sleeper,
         )
+        budget = replace(budget, free_gib=last_free)
+        refused_before = read_floor_state(floor_state)
+        verdict = floor_verdict(
+            readings,
+            refuse_gib=args.disk_floor_gib,
+            warn_gib=args.disk_warn_gib,
+            reset_gib=args.disk_floor_gib + args.disk_reset_margin_gib,
+            refused_before=refused_before,
+            required_samples=args.disk_samples,
+        )
+        write_floor_state(floor_state, refused=verdict == "refuse", free_gib=last_free)
         if verdict != "ok":
-            _floor_report(
+            report_floor(
                 verdict,
-                budget=budget,
+                free_gib=last_free,
+                detail=budget.detail,
+                source=budget.source,
                 script=script,
                 floor_gib=args.disk_floor_gib if verdict == "refuse" else args.disk_warn_gib,
                 pressure=pressure_reader(),
-                events=events,
                 platform_name=platform_name,
+                readings=readings,
+                refused_before=refused_before,
+                events=events,
+                emit=emit,
             )
         if verdict == "refuse":
             return 3
