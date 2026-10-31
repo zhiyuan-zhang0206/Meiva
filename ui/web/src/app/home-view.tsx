@@ -530,6 +530,7 @@ function HomeContent({
               </p>
             )}
             <Composer
+              diagnostics={diagnostics}
               maxWidthCss={composerMaxWidth}
               mode={composerMode}
               onSend={handleSend}

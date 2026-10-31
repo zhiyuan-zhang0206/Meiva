@@ -12,8 +12,5 @@ exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
 "slash-autocomplete.test.tsx" = ["slash-autocomplete.tsx"]
 "upload-button.test.tsx" = ["upload-button.tsx"]
 
-[debt.stdlib-patch]
-"composer-commands.test.tsx#vi.spyOn console.warn" = 1
-
 [debt.unresolved-patch]
 "upload-button.test.tsx#vi.spyOn input.\"click\"" = 2
