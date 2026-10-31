@@ -41,7 +41,12 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+// meiva:note
+// The composer reports a failed command fetch to the sink the shell hands in, so every render in
+// this file states one; a test that cares reads what it collected.
+const diagnostics = { warn: vi.fn<(message: string) => void>(), error: vi.fn<(message: string, cause: unknown) => void>() };
 const baseProps = {
+  diagnostics,
   contextTokens: 0,
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),

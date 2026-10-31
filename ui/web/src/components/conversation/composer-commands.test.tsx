@@ -26,6 +26,8 @@ let commandList: { name: string; description: string; instruction_hint: string }
 const getCommandsMock = transport.getCommands;
 
 beforeEach(() => {
+  diagnostics.warn.mockClear();
+  diagnostics.error.mockClear();
   getCommandsMock.mockImplementation((_agentId?: number | null) =>
     Promise.resolve(commandList),
   );
@@ -39,7 +41,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// meiva:note
+// The composer reports a failed command fetch to the sink the shell hands in, so every render in
+// this file states one; a test that cares reads what it collected.
+const diagnostics = { warn: vi.fn<(message: string) => void>(), error: vi.fn<(message: string, cause: unknown) => void>() };
 const baseProps = {
+  diagnostics,
   contextTokens: 0,
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),
@@ -112,7 +119,6 @@ describe("Composer slash commands", () => {
   });
 
   it("logs an agent command fetch failure and retries it after switching back", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     getCommandsMock.mockImplementation((selectedAgentId?: number | null) =>
       selectedAgentId === 7
         ? Promise.reject(new Error("catalog unavailable"))
@@ -121,7 +127,7 @@ describe("Composer slash commands", () => {
     const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
 
     await waitFor(() =>
-      expect(warn).toHaveBeenCalledWith(
+      expect(diagnostics.warn).toHaveBeenCalledWith(
         "[composer] getCommands failed: catalog unavailable",
       ),
     );

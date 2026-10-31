@@ -30,6 +30,7 @@ import { SendButton } from "@/components/ui/send-button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { useApi, useWallNow } from "@/lib/transport/transport-context";
+import type { Diagnostics } from "@/lib/transport/transport";
 import { errMsg } from "@/lib/contracts/errors";
 import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
 import { track } from "@/lib/telemetry/telemetry";
@@ -49,6 +50,11 @@ import {
 export type ComposerMode = "disabled" | "idle" | "busy";
 
 interface Props {
+  // meiva:note
+  // Where a failed command-catalog fetch is reported: the page's sink, the same one a render
+  // crash and a stream failure reach. The shell hands it in; a test hands in its own instead
+  // of replacing the console.
+  diagnostics: Diagnostics;
   mode: ComposerMode;
   children?: React.ReactNode;
   onSend: (content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
@@ -69,7 +75,7 @@ interface Props {
   suggestions?: readonly string[] | null;
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
+export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
   const client = useApi();
   const wallNow = useWallNow();
   const t = useTranslations("common");
@@ -119,7 +125,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       try {
         return await (agentId == null ? client.getCommands() : client.getCommands(agentId));
       } catch (e) {
-        console.warn(`[composer] getCommands failed: ${errMsg(e)}`);
+        diagnostics.warn(`[composer] getCommands failed: ${errMsg(e)}`);
         throw new Error("command catalog unavailable", { cause: e });
       }
     },
