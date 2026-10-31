@@ -68,6 +68,54 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    exec_host_memory_max_mb: int = Field(
+        default=0,
+        alias="MEIVA_EXEC_HOST_MEMORY_MAX_MB",
+        description=(
+            "Aggregate memory cap in MiB for the exec-host unit's whole process tree on"
+            " Linux: 0 disables it. exec-host is where a turn's jobs run (agent.execution."
+            "child and everything it spawns), so this is the knob that bounds a runaway job;"
+            " the agent-host budget cannot, because that scope holds one resident service"
+            " process and none of the jobs. Size it above the largest single job that must"
+            " still finish: on the 31 GiB central node the largest measured job peak was"
+            " 14244 MiB (13.91 GiB, 2026-10-22, #5543), MemTotal is 31772 MiB, and"
+            " min(14244x1.5, 31772x0.6) = 19063 MiB, so the node sets 18944 (18.5 GiB). A"
+            " machine-independent default would be wrong on a 16 GiB host, which is why this"
+            " stays opt-in like the agent-host budget."
+        ),
+        ge=0,
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    exec_host_memory_swap_max_mb: int = Field(
+        default=0,
+        alias="MEIVA_EXEC_HOST_MEMORY_SWAP_MAX_MB",
+        description=(
+            "Swap allowance in MiB for the exec-host scope: 0 keeps the cap hard. The"
+            " 2026-10-29 failure this bounds was a swap storm (136 processes blocked, load"
+            " 170), so 0 is the point rather than a detail: a job that would previously page"
+            " for minutes and finish is instead killed at the cap, which is a worse outcome"
+            " for that one job and the reason to keep the cap above any job that must"
+            " complete."
+        ),
+        ge=0,
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     exec_memory_guard_floor_mb: int = Field(
         default=1024,
         alias="MEIVA_EXEC_MEMORY_GUARD_FLOOR_MB",

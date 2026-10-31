@@ -390,59 +390,54 @@ def test_ensure_user_runtime_dir_leaves_an_existing_value_alone() -> None:
 # platform that has one. Without the guard a healthy macOS machine logs an error naming a
 # Linux mechanism on every assembly, which is how a real alert gets trained into noise.
 def test_memory_cap_wanted_only_on_linux_with_a_budget() -> None:
-    assert glue.memory_cap_wanted(max_mb=18432, platform="linux") is True
-    assert glue.memory_cap_wanted(max_mb=18432, platform="darwin") is False
-    assert glue.memory_cap_wanted(max_mb=0, platform="linux") is False
+    agent = glue.UnitBudget(unit_id="agent-host", max_mb=18432, swap_max_mb=0)
+    exec_host = glue.UnitBudget(unit_id="exec-host", max_mb=0, swap_max_mb=0)
+    assert glue.memory_cap_wanted(budgets=[agent], platform="linux") is True
+    assert glue.memory_cap_wanted(budgets=[agent], platform="darwin") is False
+    assert glue.memory_cap_wanted(budgets=[exec_host], platform="linux") is False
 
 
-def test_agent_host_cap_is_off_by_default() -> None:
-    assert (
-        glue.agent_host_memory_caps(
-            max_mb=0,
-            swap_max_mb=0,
-            platform="linux",
-            scope_available=True,
-        )
-        == {}
-    )
+def test_unit_caps_are_off_by_default() -> None:
+    budget = glue.UnitBudget(unit_id="exec-host", max_mb=0, swap_max_mb=0)
+    assert glue.unit_memory_caps(budgets=[budget], platform="linux", scope_available=True) == {}
 
 
-def test_agent_host_cap_declines_where_cgroups_do_not_exist() -> None:
-    assert (
-        glue.agent_host_memory_caps(
-            max_mb=18432,
-            swap_max_mb=0,
-            platform="darwin",
-            scope_available=True,
-        )
-        == {}
-    )
+def test_unit_caps_decline_where_cgroups_do_not_exist() -> None:
+    budget = glue.UnitBudget(unit_id="exec-host", max_mb=18944, swap_max_mb=0)
+    assert glue.unit_memory_caps(budgets=[budget], platform="darwin", scope_available=True) == {}
 
 
-def test_agent_host_cap_declines_when_systemd_cannot_scope() -> None:
-    assert (
-        glue.agent_host_memory_caps(
-            max_mb=18432,
-            swap_max_mb=0,
-            platform="linux",
-            scope_available=False,
-        )
-        == {}
-    )
+def test_unit_caps_decline_when_systemd_cannot_scope() -> None:
+    budget = glue.UnitBudget(unit_id="exec-host", max_mb=18944, swap_max_mb=0)
+    assert glue.unit_memory_caps(budgets=[budget], platform="linux", scope_available=False) == {}
 
 
-def test_agent_host_cap_applies_when_every_precondition_holds() -> None:
-    caps = glue.agent_host_memory_caps(
-        max_mb=18432,
-        swap_max_mb=0,
-        platform="linux",
-        scope_available=True,
-    )
-    assert caps == {"agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0)}
+def test_each_capped_unit_keeps_its_own_budget() -> None:
+    budgets = [
+        glue.UnitBudget(unit_id="agent-host", max_mb=18432, swap_max_mb=0),
+        glue.UnitBudget(unit_id="exec-host", max_mb=18944, swap_max_mb=0),
+    ]
+    caps = glue.unit_memory_caps(budgets=budgets, platform="linux", scope_available=True)
+    assert caps == {
+        "agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0),
+        "exec-host": glue.UnitMemoryCap(max_mb=18944, swap_max_mb=0),
+    }
 
 
-def test_the_launch_rewrite_wraps_only_the_capped_unit() -> None:
-    caps = {"agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0)}
+def test_an_uncapped_unit_is_left_alone_and_does_not_need_the_probe() -> None:
+    budgets = [
+        glue.UnitBudget(unit_id="agent-host", max_mb=0, swap_max_mb=0),
+        glue.UnitBudget(unit_id="exec-host", max_mb=18944, swap_max_mb=0),
+    ]
+    caps = glue.unit_memory_caps(budgets=budgets, platform="linux", scope_available=True)
+    assert caps == {"exec-host": glue.UnitMemoryCap(max_mb=18944, swap_max_mb=0)}
+
+
+def test_the_launch_rewrite_wraps_only_the_capped_units() -> None:
+    caps = {
+        "agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0),
+        "exec-host": glue.UnitMemoryCap(max_mb=18944, swap_max_mb=0),
+    }
     argv = ["python", "-m", "services.agent_runner.agent_host"]
     assert glue.memory_scoped_argv("agent-host", argv, caps=caps) == [
         "systemd-run",
@@ -455,6 +450,19 @@ def test_the_launch_rewrite_wraps_only_the_capped_unit() -> None:
         "MemorySwapMax=0M",
         "--",
         *argv,
+    ]
+    exec_argv = ["python", "-m", "services.agent_runner.exec_host.daemon"]
+    assert glue.memory_scoped_argv("exec-host", exec_argv, caps=caps) == [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--collect",
+        "-p",
+        "MemoryMax=18944M",
+        "-p",
+        "MemorySwapMax=0M",
+        "--",
+        *exec_argv,
     ]
     assert glue.memory_scoped_argv("gateway", argv, caps=caps) == argv
 
