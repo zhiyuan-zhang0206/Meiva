@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import math
 import signal
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +59,20 @@ class SupervisorConfig:
     unit_log_max_bytes: int = UNIT_LOG_MAX_BYTES
     unit_log_backups: int = UNIT_LOG_BACKUPS
 
+    # meiva:note
+    # A refused wrapper is refused in milliseconds, so an early exit of a rewritten generation is
+    # read as "the wrapper is unusable here" only inside this window. A generation that outlives
+    # it worked, and its exit — however it ends — is not evidence about the wrapper.
+    rewrite_startup_window_s: float = 10.0
+    # meiva:note
+    # How many CONSECUTIVE early failures retire the rewrite. One is too few: the wrapper's own
+    # failure can be transient (2026-10-31: `Failed to connect to bus: No medium found` during the
+    # cluster's stop/start window retired the cap for the root's whole life, on a host that
+    # carried the same scope a minute later). The count is the loop bound the single
+    # failure tried to be: the restart policy replays the rewrite at most this many times before
+    # falling back to the manifest argv.
+    rewrite_retire_after_failures: int = 3
+
     def __post_init__(self) -> None:
         if self.unit_log_max_bytes <= 0:
             raise ValueError("unit_log_max_bytes must be positive")
@@ -67,6 +82,10 @@ class SupervisorConfig:
             raise ValueError("stop_timeout_s must be finite and positive")
         if not math.isfinite(self.watch_join_timeout_s) or self.watch_join_timeout_s < 0:
             raise ValueError("watch_join_timeout_s must be finite and nonnegative")
+        if not math.isfinite(self.rewrite_startup_window_s) or self.rewrite_startup_window_s <= 0:
+            raise ValueError("rewrite_startup_window_s must be finite and positive")
+        if self.rewrite_retire_after_failures < 1:
+            raise ValueError("rewrite_retire_after_failures must be at least 1")
         for name in ("stop_kill_reap_s",):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
@@ -279,3 +298,116 @@ def rotate_unit_log(log_path: Path, *, max_bytes: int, backups: int) -> bool:
         logger.warning("unit log rotation skipped for {}: {}", log_path, exc)
         return False
     return True
+
+
+# meiva:note
+# The launch-rewrite policy: when a rewritten launch is retired, and what the warning says.
+#
+# The supervisor applies one opaque argv rewrite the assembly installs; everything that is *about*
+# rewrites lives here and nothing about process control -- the state row, the count of early
+# failures, the retirement decision, the wrapper's own last words. Two of these rules exist
+# because of a measured failure (2026-10-31, #5905): the rewrite was retired on the FIRST early
+# non-zero exit, so one transient refusal cost a host its memory cap for the whole life of the
+# root process, and the warning named only the exit code while the reason sat unread in the unit's
+# log. Retirement is therefore per unit and needs consecutive failures, and the warning quotes
+# what the wrapper printed.
+
+
+# meiva:note
+# Enough of the wrapper's reason to identify it, short enough that one line in a log stays one
+# line: the messages this quotes are single sentences from a launcher or a bus client.
+_MAX_REASON_CHARS = 300
+
+
+# meiva:note
+# What one ended rewritten generation means for the rewrite.
+@dataclass(frozen=True, slots=True)
+class FailureOutcome:
+    failures: int
+    retired: bool
+    warning: str | None
+
+
+# meiva:note
+# Pure: the caller supplies the clock reading, the counters and the policy, so the rule is testable
+# without a process. A generation that outlived the window is evidence the wrapper WORKS, so it
+# clears the count -- that is what keeps an unrelated crash of a long-running unit from retiring a
+# cap that was never at fault. Signal deaths never count, so a plain `stop` cannot cost the cap.
+def note_early_exit(
+    *,
+    unit_id: str,
+    returncode: int,
+    elapsed_s: float,
+    window_s: float,
+    failures: int,
+    retire_after: int,
+    retired: bool,
+    reason: str,
+) -> FailureOutcome:
+    if elapsed_s > window_s:
+        return FailureOutcome(failures=0, retired=retired, warning=None)
+    if returncode <= 0 or retired:
+        return FailureOutcome(failures=failures, retired=retired, warning=None)
+    counted = failures + 1
+    if counted < retire_after:
+        return FailureOutcome(
+            failures=counted,
+            retired=False,
+            warning=(
+                f"unit {unit_id}: the rewritten launch exited {returncode} within {window_s:.0f}s "
+                f"({counted} in a row); retrying the rewrite, wrapper said: {reason}"
+            ),
+        )
+    return FailureOutcome(
+        failures=counted,
+        retired=True,
+        warning=(
+            f"unit {unit_id}: the rewritten launch exited {returncode} within {window_s:.0f}s, "
+            f"{counted} times in a row; memory cap not applied, the unit runs unbounded for the "
+            f"rest of this root's life. wrapper said: {reason}"
+        ),
+    )
+
+
+# meiva:note
+# The wrapper's own first words, read from where this generation's output started. Best effort:
+# the warning is already the failure report, so a missing or unreadable log must not raise.
+def first_output_line(path: Path, offset: int) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            raw = handle.read(8192)
+    except OSError:
+        return "(no output)"
+    for line in raw.decode("utf-8", "replace").splitlines():
+        text = line.strip()
+        if text:
+            return text[:_MAX_REASON_CHARS]
+    return "(no output)"
+
+
+# meiva:note
+# The status row's `launch_rewrite`: why this unit is or is not bounded.
+def rewrite_state(*, installed: bool, retired: bool) -> str:
+    return "off" if not installed else "off(retired)" if retired else "on"
+
+
+# meiva:note
+# The rewrite is a preference, not a requirement: a launcher that refuses the wrapped argv costs one
+# attempt, never a unit that cannot start.
+async def launch_with_fallback(
+    launcher: Callable[..., Awaitable[asyncio.subprocess.Process]],
+    argv: Sequence[str],
+    plain: Sequence[str],
+    **options: object,
+) -> asyncio.subprocess.Process:
+    if list(argv) == list(plain):
+        return await launcher(*plain, **options)
+    try:
+        return await launcher(*argv, **options)
+    except OSError as exc:
+        logger.warning(
+            "the rewritten launch never started ({}); memory cap not applied, the unit runs unbounded",
+            exc,
+        )
+        return await launcher(*plain, **options)

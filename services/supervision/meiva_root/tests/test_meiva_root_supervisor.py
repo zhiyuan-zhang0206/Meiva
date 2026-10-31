@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import signal
 import subprocess
@@ -468,45 +469,141 @@ async def test_a_stopped_unit_keeps_its_rewrite(tmp_path: Path) -> None:
 
 # meiva:note
 # The dangerous shape is not "the launcher refuses" but "the launcher starts, then exits
-# non-zero": that reads as an ordinary unit exit, so the restart policy would replay the
-# same wrapper forever and the unit would never come up. One early exit must retire the
-# rewrite and the next generation must launch the manifest argv.
-async def test_an_early_non_zero_exit_retires_the_rewrite(tmp_path: Path) -> None:
-    seen: list[tuple[str, ...]] = []
-    plain = (sys.executable, "-u", str(_CHILD), "code_gate_exit", str(tmp_path / "gate"))
-
-    async def launcher(*argv: str, **options: Any) -> Any:
-        seen.append(tuple(argv))
-        # meiva:note
-        # Record what was asked for, but always run the manifest argv: the point is a
-        # process that starts and then exits non-zero straight away.
-        return await asyncio.create_subprocess_exec(*plain, **options)
-
-    unit = UnitManifest("worker", plain, RestartPolicy.ALWAYS, "root", ())
+# non-zero": that reads as an ordinary unit exit, so the restart policy would replay the same
+# wrapper forever and the unit would never come up. Retirement bounds that loop -- but one early
+# exit is not evidence the wrapper is unusable, and on 2026-10-31 it retired the memory cap for a
+# whole root lifetime on a bus that answered again a minute later. These tests own the count, the
+# reset, and the evidence the warning must carry.
+def _rewrite_supervisor(
+    tmp_path: Path,
+    launcher: Any,
+    plain: Sequence[str],
+    *,
+    failures: int = 3,
+    window: float = 10.0,
+) -> Supervisor:
+    unit = UnitManifest("worker", tuple(plain), RestartPolicy.ALWAYS, "root", ())
     owner = Supervisor(
         UnitRegistry([unit]),
         environ=dict(os.environ),
         run_dir=tmp_path,
-        config=SupervisorConfig(stop_timeout_s=0.2),
+        config=SupervisorConfig(
+            stop_timeout_s=0.2,
+            rewrite_retire_after_failures=failures,
+            rewrite_startup_window_s=window,
+        ),
         spawn=launcher,
         clock=system_clock(),
         root_pid=os.getpid(),
     )
     owner.set_argv_transform(lambda unit_id, argv: [f"wrapped:{unit_id}", *argv])
+    return owner
+
+
+async def _settle(owner: Supervisor) -> None:
+    for _ in range(200):
+        if (await row(owner))["state"] == "stopped":
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("the unit never reached the stopped state")
+
+
+async def _wait_attempts(seen: list[tuple[str, ...]], count: int) -> None:
+    for _ in range(200):
+        if len(seen) >= count:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"only {len(seen)} launch attempt(s) were made")
+
+
+# meiva:note
+# Red proof for the retirements above: on the retire-on-first-failure rule this row reads
+# "off(retired)" and the second generation launches from the manifest argv.
+async def test_one_early_non_zero_exit_keeps_the_rewrite(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+    plain = (sys.executable, "-u", str(_CHILD), "code_gate_exit", str(tmp_path / "gate"))
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        return await asyncio.create_subprocess_exec(*plain, **options)
+
+    owner = _rewrite_supervisor(tmp_path, launcher, plain)
     await owner.start()
     try:
-        for _ in range(200):
-            if (await row(owner))["state"] == "stopped":
-                break
-            await asyncio.sleep(0.02)
+        await _settle(owner)
+        assert (await row(owner))["launch_rewrite"] == "on"
+        await owner.restart("worker")
+        await _wait_attempts(seen, 2)
+        assert seen[0][0] == "wrapped:worker"
+        assert seen[1][0] == "wrapped:worker"
+    finally:
+        await owner.shutdown()
+
+
+async def test_consecutive_early_failures_retire_the_rewrite(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+    plain = (sys.executable, "-u", str(_CHILD), "code_gate_exit", str(tmp_path / "gate"))
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        return await asyncio.create_subprocess_exec(*plain, **options)
+
+    owner = _rewrite_supervisor(tmp_path, launcher, plain, failures=2)
+    await owner.start()
+    try:
+        await _settle(owner)
+        await owner.restart("worker")
+        await _settle(owner)
         assert (await row(owner))["launch_rewrite"] == "off(retired)"
         await owner.restart("worker")
-        for _ in range(200):
-            if len(seen) >= 2:
-                break
-            await asyncio.sleep(0.02)
-        assert seen[0][0] == "wrapped:worker"
-        assert seen[1] == plain
+        await _wait_attempts(seen, 3)
+        assert seen[2] == plain
+    finally:
+        await owner.shutdown()
+
+
+async def test_a_generation_that_outlives_the_window_clears_the_count(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+    failing = (sys.executable, "-u", str(_CHILD), "code_gate_exit", str(tmp_path / "gate"))
+    healthy = (sys.executable, "-u", str(_CHILD), "sleep")
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        target = failing if len(seen) == 1 or len(seen) >= 3 else healthy
+        return await asyncio.create_subprocess_exec(*target, **options)
+
+    owner = _rewrite_supervisor(tmp_path, launcher, failing, failures=2, window=0.2)
+    await owner.start()
+    try:
+        await _settle(owner)
+        await owner.restart("worker")
+        await asyncio.sleep(0.4)
+        await owner.restart("worker")
+        await _settle(owner)
+        assert (await row(owner))["launch_rewrite"] == "on"
+    finally:
+        await owner.shutdown()
+
+
+async def test_the_retirement_warning_quotes_the_wrapper(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    seen: list[tuple[str, ...]] = []
+    reason = "Failed to connect to bus: No medium found"
+    plain = (sys.executable, "-u", str(_CHILD), "fail_loudly", reason)
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        return await asyncio.create_subprocess_exec(*plain, **options)
+
+    owner = _rewrite_supervisor(tmp_path, launcher, plain, failures=1)
+    caplog.set_level(logging.WARNING, logger="services.supervision.meiva_root.supervisor")
+    await owner.start()
+    try:
+        await _settle(owner)
+        assert (await row(owner))["launch_rewrite"] == "off(retired)"
+        assert reason in caplog.text
+        assert "1 times in a row" in caplog.text
     finally:
         await owner.shutdown()
 
