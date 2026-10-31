@@ -15,9 +15,5 @@ exports = ["agent-view", "canvas", "model", "run-timeline-detail.tsx", "run-time
 "use-timeline-row-interactions.ts" = ["agent-view", "canvas", "model", "viewport"]
 "viewport" = ["model"]
 
-[debt.stdlib-patch]
-"run-timeline-workspace.test.tsx#vi.spyOn Storage.prototype.getItem" = 1
-"run-timeline-workspace.test.tsx#vi.spyOn Storage.prototype.setItem" = 1
-
 [debt.type-cast]
 "run-timeline-rows.tsx#cast RunTimelineRows.<lambda>" = 1

@@ -90,6 +90,34 @@ export interface BrowserObjectUrls {
   revoke(url: string): void;
 }
 
+// meiva:note
+// Size notifications for one element. A section body above a deep link settles after the first
+// scroll, so the container's content grows and pushes the target down; whoever re-applies its work
+// asks to be told, and the returned function ends the watch. A frame with no page — or a browser
+// without ResizeObserver — watches nothing, and says so by doing nothing rather than by throwing.
+export interface BrowserSize {
+  observe(target: Element, onChange: () => void): () => void;
+}
+
+// meiva:note
+// When a caller's timing for `BrowserIdle.schedule` differs: `deadlineMs` is the idle deadline (the
+// work runs then even if the page never goes idle), `fallbackDelayMs` is the timer used by a
+// browser that has no requestIdleCallback at all (Safari). Both are the caller's, because the
+// deferred-mount queue releases one subtree per slice and must not wait, while the highlighter
+// prefetch may.
+export interface IdleTiming {
+  readonly deadlineMs: number;
+  readonly fallbackDelayMs: number;
+}
+
+// meiva:note
+// The page's spare time, as a value. `schedule` asks for a slice after paint and returns the
+// function that drops work which has not run yet; a frame with no page has no main thread to be
+// idle and never runs the work.
+export interface BrowserIdle {
+  schedule(work: () => void, timing: IdleTiming): () => void;
+}
+
 export interface Browser {
   readonly navigation: BrowserNavigation;
   readonly local: BrowserStorage;
@@ -99,6 +127,8 @@ export interface Browser {
   readonly beacon: BrowserBeacon;
   readonly view: BrowserView;
   readonly viewport: BrowserViewport;
+  readonly size: BrowserSize;
+  readonly idle: BrowserIdle;
 
   readonly objectUrls: BrowserObjectUrls;
 }

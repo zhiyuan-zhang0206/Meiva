@@ -8,9 +8,6 @@ exports = ["context-panel-toggle.tsx", "header-bar.tsx", "home-layout.tsx", "pag
 "theme-color-sync.test.tsx" = ["theme-color-sync.tsx"]
 "visual-viewport-height-sync.test.tsx" = ["visual-viewport-height-sync.tsx"]
 
-[debt.stdlib-patch]
-"providers.test.tsx#vi.spyOn globalThis.EventSource" = 1
-
 [debt.third-party-patch]
 "home-layout.test.tsx#vi.mock react-resizable-panels" = 1
 "providers.test.tsx#vi.mock next-themes" = 1

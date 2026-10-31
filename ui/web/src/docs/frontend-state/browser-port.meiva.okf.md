@@ -8,9 +8,10 @@ tags: [frontend, state, architecture]
 # Browser capability port
 
 A page's address, its two storage areas, its media queries, its clipboard, its
-unload-safe beacon, the view it scrolls, the viewport it is drawn into and the
-object URLs it holds a blob under are the world this frontend runs in. They are
-read once, at the composition root, and handed down as one value.
+unload-safe beacon, the view it scrolls, the viewport it is drawn into, the sizes
+it reports, the idle slices it offers and the object URLs it holds a blob under
+are the world this frontend runs in. They are read once, at the composition root,
+and handed down as one value.
 
 `lib/browser/browser.ts` declares the port. `lib/browser/system-browser.ts` is
 the only file that names `window`: it builds the port from the live page, and
@@ -73,6 +74,30 @@ applies the answer to the document. That decision is a pure function of the
 reading, so a test asserts it directly and never installs a stub on `innerHeight`
 or `visualViewport`.
 
+## A settling page reports the size that moved
+
+`browser.size.observe(target, onChange)` asks the page to report when an element's
+box changes, and answers the function that ends the watch; a frame with no page —
+or a browser without `ResizeObserver` — watches nothing and says so by doing
+nothing. `useSettledAnchorScroll` is the caller: the section bodies above a
+deep-linked target arrive after the first scroll, the content wrapper grows, and
+the hook re-applies the scroll until the height settles. A test fires
+`fakeBrowser().sizeWatches[0].fire()` instead of installing a fake
+`ResizeObserver` class on the global.
+
+## Idle time is a value, with the caller's timing
+
+`browser.idle.schedule(work, { deadlineMs, fallbackDelayMs })` runs `work` in an
+idle slice — no later than the deadline, and through a timer of `fallbackDelayMs`
+on a browser without `requestIdleCallback` (Safari) — and answers the function
+that drops work which has not run yet. Both numbers belong to the caller because
+they differ: the deferred-mount queue releases one subtree per slice and must not
+wait (`fallbackDelayMs: 0`), while the syntax-highlighter prefetch may
+(`fallbackDelayMs: 2000`). A test chooses the fake's mode: `idle: "manual"`
+records the slices it fires by hand, `idle: "immediate"` runs each at once for a
+page that must settle in one commit, and the default schedules on the page the
+test runs in.
+
 ## A preview lives in an object URL, and the port releases it
 
 `browser.objectUrls.create(file)` answers the URL a pending image preview renders
@@ -85,8 +110,8 @@ matching revoke, and no test replaces the URL API to see that.
 ## What a test does
 
 `lib/browser/testing.ts` is the fake: storage in two maps, an address the test
-moves, media answers it sets, and an `actions` record of everything the component
-asked for. A component test renders the provider around the component and reads
+moves, media answers it sets, size watchers in `sizeWatches`, idle slices in
+`idleRequests`, and an `actions` record of everything the component asked for. A component test renders the provider around the component and reads
 the same value the app reads:
 
 ```tsx

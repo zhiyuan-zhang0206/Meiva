@@ -41,6 +41,24 @@ export interface FakeStore {
   has(key: string): boolean;
 }
 
+// meiva:note
+// One element the fake watches: `fire` is what a browser reports when the element's box changes,
+// and `released` says whether the caller ended the watch.
+export interface FakeSizeWatch {
+  readonly target: Element;
+  readonly released: boolean;
+  fire(): void;
+}
+
+// meiva:note
+// One idle slice the fake was asked for: `fire` runs the work a real idle callback would run,
+// `cancelled` says whether the caller dropped it first, and `ran` whether the work happened.
+export interface FakeIdleRequest {
+  readonly ran: boolean;
+  readonly cancelled: boolean;
+  fire(): void;
+}
+
 export interface FakeBrowser extends Browser {
   href(): string;
   moveTo(href: string): void;
@@ -56,6 +74,13 @@ export interface FakeBrowser extends Browser {
   readonly localValues: FakeStore;
   readonly sessionValues: FakeStore;
   readonly actions: FakeActions;
+  // meiva:note
+  // Every element a caller asked to watch, in order; `fire` reports a size change and `released`
+  // says the watch ended.
+  readonly sizeWatches: FakeSizeWatch[];
+  // meiva:note
+  // Every idle slice asked for in `idle: "manual"` mode, in order.
+  readonly idleRequests: FakeIdleRequest[];
 }
 
 export interface FakeBrowserOptions {
@@ -64,6 +89,12 @@ export interface FakeBrowserOptions {
   readonly local?: Readonly<Record<string, string>>;
   readonly session?: Readonly<Record<string, string>>;
   readonly media?: Readonly<Record<string, boolean>>;
+  // meiva:note
+  // How the fake answers an idle request. `live` (the default) schedules on the page the test runs
+  // in, so a suite that does not care keeps the meaning it had; `manual` records the request for
+  // the test to fire; `immediate` runs the work at once, for a page whose deferred subtrees must
+  // mount in the same commit.
+  readonly idle?: "live" | "manual" | "immediate";
 }
 
 interface Backing {
@@ -134,6 +165,9 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
   );
   const traverseListeners = new Set<() => void>();
   const viewportListeners = new Set<() => void>();
+  const sizeWatches: FakeSizeWatch[] = [];
+  const idleRequests: FakeIdleRequest[] = [];
+  const idleMode = options.idle ?? "live";
   // meiva:note
   // Without an answer the fake is the page the test runs in, the same rule its storage and media
   // follow: a suite that does not care about the viewport keeps the meaning it had.
@@ -280,6 +314,68 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
       },
     },
     // meiva:note
+    // A watched element, reported on demand: the fake has no layout engine, so the test is the one
+    // that says the box changed, and the record shows whether the caller still listens.
+    size: {
+      observe(target, onChange) {
+        let released = false;
+        const watch: FakeSizeWatch = {
+          target,
+          get released() {
+            return released;
+          },
+          fire: () => {
+            if (!released) onChange();
+          },
+        };
+        sizeWatches.push(watch);
+        return () => {
+          released = true;
+        };
+      },
+    },
+    // meiva:note
+    // An idle slice, by the mode the test chose; `live` follows the page the test runs in, so a
+    // suite that moves timers keeps the meaning it had before the port.
+    idle: {
+      schedule(work, timing) {
+        switch (idleMode) {
+          case "immediate":
+            work();
+            return () => undefined;
+          case "manual": {
+            let ran = false;
+            let cancelled = false;
+            const request: FakeIdleRequest = {
+              get ran() {
+                return ran;
+              },
+              get cancelled() {
+                return cancelled;
+              },
+              fire: () => {
+                if (ran || cancelled) return;
+                ran = true;
+                work();
+              },
+            };
+            idleRequests.push(request);
+            return () => {
+              cancelled = true;
+            };
+          }
+          case "live": {
+            if (live !== null && typeof live.requestIdleCallback === "function") {
+              const handle = live.requestIdleCallback(work, { timeout: timing.deadlineMs });
+              return () => live.cancelIdleCallback(handle);
+            }
+            const timer = setTimeout(work, timing.fallbackDelayMs);
+            return () => clearTimeout(timer);
+          }
+        }
+      },
+    },
+    // meiva:note
     // Object URLs the fake hands out carry the same prefix a real page's do, so an assertion reads
     // like the value the DOM shows, and every create/revoke is recorded in `actions` — a preview
     // that is never revoked shows up as a created URL with no matching revoke.
@@ -327,6 +423,8 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     localValues: view(localValues),
     sessionValues: view(sessionValues),
     actions,
+    sizeWatches,
+    idleRequests,
   };
   return fake;
 }

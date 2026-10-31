@@ -18,23 +18,25 @@
 import { useEffect } from "react";
 
 import { usePythonCodeHighlighter } from "@/components/content/python-code";
+import { useBrowser } from "@/lib/browser/browser-provider";
 
 const IDLE_TIMEOUT_MS = 4000;
 const FALLBACK_DELAY_MS = 2000;
 
 export function CodeHighlighterPreloader() {
   const highlighter = usePythonCodeHighlighter();
-  useEffect(() => {
-    if (typeof window.requestIdleCallback === "function") {
-      const handle = window.requestIdleCallback(() => void highlighter.preload(), {
-        timeout: IDLE_TIMEOUT_MS,
-      });
-      return () => window.cancelIdleCallback(handle);
-    }
-
-    const timer = window.setTimeout(() => void highlighter.preload(), FALLBACK_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [highlighter]);
+  const browser = useBrowser();
+  // meiva:note
+  // The idle slice comes from the browser port: the page's own requestIdleCallback with the
+  // deadline above, and the page's timer on a browser that has none.
+  useEffect(
+    () =>
+      browser.idle.schedule(() => void highlighter.preload(), {
+        deadlineMs: IDLE_TIMEOUT_MS,
+        fallbackDelayMs: FALLBACK_DELAY_MS,
+      }),
+    [browser, highlighter],
+  );
 
   return null;
 }

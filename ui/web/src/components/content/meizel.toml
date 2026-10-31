@@ -15,7 +15,3 @@ exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "lazy-chunk.ts",
 
 [debt.first-party-patch]
 "markdown.test.tsx#vi.mock ui/web/src/components/content/python-code.tsx" = 1
-
-[debt.stdlib-patch]
-"code-highlighter-preloader.test.tsx#vi.stubGlobal cancelIdleCallback" = 1
-"code-highlighter-preloader.test.tsx#vi.stubGlobal requestIdleCallback" = 2

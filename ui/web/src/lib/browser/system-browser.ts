@@ -12,9 +12,11 @@ import type {
   Browser,
   BrowserBeacon,
   BrowserClipboard,
+  BrowserIdle,
   BrowserMedia,
   BrowserNavigation,
   BrowserObjectUrls,
+  BrowserSize,
   BrowserStorage,
   BrowserViewport,
   MediaQuery,
@@ -39,6 +41,14 @@ export interface LiveViewport {
   removeEventListener(type: "resize" | "scroll", listener: () => void): void;
 }
 
+// meiva:note
+// One size observer as the page hands it over: the port only ever attaches a listener to the target
+// and ends the watch, so this is the whole surface it needs from `ResizeObserver`.
+export interface LiveResizeObserver {
+  observe(target: Element): void;
+  disconnect(): void;
+}
+
 export interface LivePage {
   readonly location: { readonly href: string; assign(url: string): void };
   readonly history: {
@@ -58,6 +68,17 @@ export interface LivePage {
   readonly visualViewport: LiveViewport | null;
   readonly navigator: LiveNavigator;
   readonly document: LiveDocument;
+  // meiva:note
+  // Absent when the browser has no ResizeObserver; a page that has one builds it with the port's
+  // change callback.
+  readonly newResizeObserver?: ((onChange: () => void) => LiveResizeObserver) | undefined;
+  // meiva:note
+  // Present only where the browser has requestIdleCallback (Safari has none); `idleOver` reaches
+  // for the timer pair below when it is absent.
+  readonly requestIdleCallback?: ((work: () => void, options: { timeout: number }) => number) | undefined;
+  readonly cancelIdleCallback?: ((handle: number) => void) | undefined;
+  setTimeout(work: () => void, delayMs: number): number;
+  clearTimeout(handle: number): void;
 }
 
 // meiva:note
@@ -258,6 +279,40 @@ export function viewportOver(page: LivePage | null): BrowserViewport {
 }
 
 // meiva:note
+// Size notifications for one element. The page hands over its own observer factory, so the port
+// attaches and detaches without knowing which constructor built it; a frame with no page, or a
+// browser without ResizeObserver, has nothing to watch and ends the watch immediately.
+export function sizeOver(page: LivePage | null): BrowserSize {
+  return {
+    observe(target, onChange) {
+      const observer = page?.newResizeObserver?.(onChange);
+      if (observer === undefined) return () => undefined;
+      observer.observe(target);
+      return () => observer.disconnect();
+    },
+  };
+}
+
+// meiva:note
+// The page's spare time. The idle callback is the real one where the browser has it, with the
+// caller's deadline so starved work still runs; everywhere else the caller's timer delay stands in
+// (Safari), and cancelling releases whichever of the two was scheduled.
+export function idleOver(page: LivePage | null): BrowserIdle {
+  return {
+    schedule(work, { deadlineMs, fallbackDelayMs }) {
+      if (page === null) return () => undefined;
+      const idle = page.requestIdleCallback;
+      if (idle !== undefined) {
+        const handle = idle(work, { timeout: deadlineMs });
+        return () => page.cancelIdleCallback?.(handle);
+      }
+      const timer = page.setTimeout(work, fallbackDelayMs);
+      return () => page.clearTimeout(timer);
+    },
+  };
+}
+
+// meiva:note
 // Object URLs of the page. A frame with no page has none: only a browser holds a blob under a URL,
 // so a server render says so instead of inventing one.
 export function objectUrlsOver(page: LivePage | null): BrowserObjectUrls {
@@ -283,6 +338,8 @@ export function browserOver(page: LivePage | null, warn: (message: string) => vo
     beacon: beaconOver(page?.navigator ?? null),
     view: viewOver(page),
     viewport: viewportOver(page),
+    size: sizeOver(page),
+    idle: idleOver(page),
 
     objectUrls: objectUrlsOver(page),
   };
@@ -305,6 +362,27 @@ export const browser: Browser =
         matchMedia: (query) => window.matchMedia(query),
         innerHeight: window.innerHeight,
         visualViewport: window.visualViewport,
+
+        newResizeObserver:
+          typeof ResizeObserver === "undefined"
+            ? undefined
+            : (onChange) => {
+                const observer = new ResizeObserver(() => onChange());
+                return {
+                  observe: (target) => observer.observe(target),
+                  disconnect: () => observer.disconnect(),
+                };
+              },
+        requestIdleCallback:
+          typeof window.requestIdleCallback === "function"
+            ? (work, options) => window.requestIdleCallback(work, options)
+            : undefined,
+        cancelIdleCallback:
+          typeof window.cancelIdleCallback === "function"
+            ? (handle) => window.cancelIdleCallback(handle)
+            : undefined,
+        setTimeout: (work, delayMs) => window.setTimeout(work, delayMs),
+        clearTimeout: (handle) => window.clearTimeout(handle),
 
         createObjectUrl: (file) => URL.createObjectURL(file),
         revokeObjectUrl: (url) => URL.revokeObjectURL(url),

@@ -1,8 +1,14 @@
+// meiva:note
+// The preloader asks the page for an idle slice, so the suite hands in a page whose slices it fires
+// by hand: "not at mount, only when the page is idle — and dropped if the mount goes first" is a
+// value the test moves instead of a global it replaces. The timer a browser without
+// requestIdleCallback falls back to is `idleOver`'s behavior, tested in system-browser.test.ts.
 import { render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
+import { fakeBrowser, pageWrapper } from "@/lib/browser/testing";
 import { CodeHighlighterPreloader } from "./code-highlighter-preloader";
 
 function pendingChunk() {
@@ -21,46 +27,41 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it("prefetches the highlighter once requestIdleCallback fires, and cancels it on unmount", () => {
+it("prefetches the highlighter once the page goes idle, and drops it on unmount", () => {
   const { importModule, chunk } = pendingChunk();
-  let idleCallback: (() => void) | undefined;
-  const requestIdleCallback = vi.fn((cb: () => void) => {
-    idleCallback = cb;
-    return 7;
-  });
-  const cancelIdleCallback = vi.fn();
-  vi.stubGlobal("requestIdleCallback", requestIdleCallback);
-  vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
+  const page = fakeBrowser({ idle: "manual" });
 
   const { unmount } = render(
     <PythonCodeHighlighterProvider value={chunk}>
       <CodeHighlighterPreloader />
     </PythonCodeHighlighterProvider>,
+    { wrapper: pageWrapper(page) },
   );
-  expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+  expect(page.idleRequests).toHaveLength(1);
   expect(importModule).not.toHaveBeenCalled();
 
-  // Idle callback fires only once the browser actually goes idle — not at
-  // mount time.
-  idleCallback?.();
+  // meiva:note
+  // The work runs only when the page actually goes idle — not at mount.
+  page.idleRequests[0].fire();
   expect(importModule).toHaveBeenCalledTimes(1);
 
   unmount();
-  expect(cancelIdleCallback).toHaveBeenCalledWith(7);
+  expect(page.idleRequests[0].cancelled).toBe(true);
 });
 
-it("falls back to a setTimeout delay when requestIdleCallback doesn't exist", () => {
-  vi.useFakeTimers();
-  vi.stubGlobal("requestIdleCallback", undefined);
+it("drops the prefetch when the page leaves before the idle slice arrives", () => {
   const { importModule, chunk } = pendingChunk();
+  const page = fakeBrowser({ idle: "manual" });
 
-  render(
+  const { unmount } = render(
     <PythonCodeHighlighterProvider value={chunk}>
       <CodeHighlighterPreloader />
     </PythonCodeHighlighterProvider>,
+    { wrapper: pageWrapper(page) },
   );
-  expect(importModule).not.toHaveBeenCalled();
+  unmount();
 
-  vi.advanceTimersByTime(2000);
-  expect(importModule).toHaveBeenCalledTimes(1);
+  page.idleRequests[0].fire();
+  expect(page.idleRequests[0].ran).toBe(false);
+  expect(importModule).not.toHaveBeenCalled();
 });

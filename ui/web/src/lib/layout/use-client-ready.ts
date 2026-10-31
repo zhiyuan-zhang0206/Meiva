@@ -8,6 +8,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 
+import type { BrowserIdle, IdleTiming } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
 
 /** Nothing ever changes — the "store" is the client's own existence. */
@@ -49,28 +50,31 @@ export const DEFERRED_MOUNT_SLICE_TIMEOUT_MS = 50;
 
 const waiting: (() => void)[] = [];
 const pumpState = { scheduled: false };
+// meiva:note
+// One slice per release, and no wait when the page has no idle callback at all: a page that fills
+// in 380 rows must not spend two seconds on each of them.
+const SLICE_TIMING: IdleTiming = { deadlineMs: DEFERRED_MOUNT_SLICE_TIMEOUT_MS, fallbackDelayMs: 0 };
 
-function releaseOne(): void {
+function releaseOne(idle: BrowserIdle): void {
   pumpState.scheduled = false;
   const next = waiting.shift();
   if (next === undefined) return;
   next();
-  schedulePump();
+  schedulePump(idle);
 }
 
-function schedulePump(): void {
+// meiva:note
+// The queue is one per page, and the slices come from the port the page provides; whoever started
+// the pump carries it, so nothing here reaches for a module-level page.
+function schedulePump(idle: BrowserIdle): void {
   if (pumpState.scheduled || waiting.length === 0) return;
   pumpState.scheduled = true;
-  if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(releaseOne, { timeout: DEFERRED_MOUNT_SLICE_TIMEOUT_MS });
-  } else {
-    setTimeout(releaseOne, 0);
-  }
+  idle.schedule(() => releaseOne(idle), SLICE_TIMING);
 }
 
-function enqueueMount(release: () => void): () => void {
+function enqueueMount(idle: BrowserIdle, release: () => void): () => void {
   waiting.push(release);
-  schedulePump();
+  schedulePump(idle);
   return () => {
     const at = waiting.indexOf(release);
     if (at >= 0) waiting.splice(at, 1);
@@ -94,13 +98,13 @@ export function useDeferredMount(): boolean {
       if (!cancelled) setMounted(true);
     };
     const frame = requestAnimationFrame(() => {
-      if (!cancelled) drop = enqueueMount(mount);
+      if (!cancelled) drop = enqueueMount(browser.idle, mount);
     });
     return () => {
       cancelled = true;
       cancelAnimationFrame(frame);
       drop?.();
     };
-  }, []);
+  }, [browser]);
   return mounted;
 }

@@ -7,7 +7,3 @@ exports = ["page.tsx"]
 "page-editing.test.tsx" = ["config-test-mock.tsx", "page.tsx"]
 "page.test.tsx" = ["config-test-mock.tsx", "page.tsx"]
 "page.tsx" = ["_config_row.tsx", "_default_model.tsx", "_owner_writes.ts", "_per_model.tsx"]
-
-[debt.stdlib-patch]
-"config-test-mock.tsx#vi.stubGlobal cancelIdleCallback" = 1
-"config-test-mock.tsx#vi.stubGlobal requestIdleCallback" = 1
