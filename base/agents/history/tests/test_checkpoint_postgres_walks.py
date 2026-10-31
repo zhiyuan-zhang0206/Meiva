@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any, TypedDict, cast
 from uuid import uuid4
@@ -375,12 +375,31 @@ async def test_checkpoint_reads_leave_shared_serializer_unchanged(
 
 
 # meiva:note
-# The adapter reads checkpoint-postgres's private extension surface, and a saver refuses to be
+# The adapter reads checkpoint-postgres's private extension surface, so a saver refuses to be
 # built over a surface this file was not written against. Each case states one shape a release
-# could change and builds a saver with it: the refusal must come at construction, before any
-# connection is used, and never as a mis-cut reset during a replay.
+# could change, and its failure text says which behaviour the case protects.
+def _refusal(build: Callable[[], object], motive: str) -> str:
+    try:
+        build()
+    except RuntimeError as refusal:
+        return str(refusal)
+    pytest.fail(motive)
+
+
 def test_the_installed_private_surface_is_the_one_this_adapter_reads() -> None:
-    verify_private_surface(installed_private_surface())
+    try:
+        verify_private_surface(installed_private_surface())
+    except RuntimeError as refusal:
+        pytest.fail(
+            "the installed checkpoint-postgres no longer carries the private surface this adapter "
+            "reads: the message-reset reader builds _DeltaStage2Row, sorts a checkpoint's writes by "
+            "writes_sort_key, asks _get_overwrite and drives three BasePostgresSaver methods, so a "
+            "release that renames or reshapes any of them turns a replay into a mis-cut reset long "
+            "after the saver was built. A red run here means the dependency moved: re-derive "
+            "PrivateSurface in base/agents/history/checkpoint_postgres_walks.py and re-check the "
+            "pyproject cap on langgraph-checkpoint-postgres. "
+            f"refusal={refusal}"
+        )
 
 
 def test_a_renamed_stage2_row_field_refuses_the_sync_saver_construction() -> None:
@@ -411,9 +430,23 @@ def test_a_renamed_stage2_row_field_refuses_the_sync_saver_construction() -> Non
         "task_path",
         "write_idx",
         "version",
+    ), (
+        "surface_of reports the fields the row type carries: this case builds a row with a "
+        "renamed field to prove the comparison is field by field, so a mismatch here means the "
+        f"probe is broken, not that the saver is safe. found={surface.stage2_row_fields!r}"
     )
-    with pytest.raises(RuntimeError, match="stage-2 row changed"):
-        PostgresSaver(cast(Any, object()), surface=surface)
+    message = _refusal(
+        lambda: PostgresSaver(cast(Any, object()), surface=surface),
+        "a renamed stage-2 row field must refuse the saver at construction, not at replay: the "
+        "message-reset reader reads these fields while reconstructing history, so the surprise "
+        "would arrive as a mis-cut message reset far from the dependency that caused it - "
+        "checkpoint-postgres 3.1.3 already changed this row once. Building the saver here means "
+        "it accepted a surface it was not written against.",
+    )
+    assert "stage-2 row changed" in message, (
+        "the refusal names the row it could not read, so an operator who hits it knows which "
+        f"dependency entry moved. message={message!r}"
+    )
 
 
 def test_a_changed_writes_sort_key_refuses_the_async_saver_construction() -> None:
@@ -426,22 +459,48 @@ def test_a_changed_writes_sort_key_refuses_the_async_saver_construction() -> Non
         overwrite_reader=_get_overwrite,
         base_saver=BasePostgresSaver,
     )
-    with pytest.raises(RuntimeError, match="writes_sort_key changed"):
-        AsyncPostgresSaver(cast(Any, object()), surface=surface)
+    message = _refusal(
+        lambda: AsyncPostgresSaver(cast(Any, object()), surface=surface),
+        "a changed writes_sort_key must refuse the async saver at construction: the adapter "
+        "orders a checkpoint's writes with it before rebuilding a message, so a reordered key "
+        "silently reorders history - acceptance here means the adapter adopted an ordering it "
+        "never checked. checkpoint-postgres owns that key, and 3.1.3 moved internals once.",
+    )
+    assert "writes_sort_key changed" in message, (
+        "the refusal names the ordering function that moved, so a dependency bump that reorders "
+        f"writes is recognized instead of mistaken for a history bug. message={message!r}"
+    )
 
 
 def test_a_changed_advance_walks_signature_refuses_the_saver_construction() -> None:
     surface: PrivateSurface = replace(
         installed_private_surface(), advance_walks_parameters=("target_id",)
     )
-    with pytest.raises(RuntimeError, match="_try_advance_walks changed"):
-        PostgresSaver(cast(Any, object()), surface=surface)
+    message = _refusal(
+        lambda: PostgresSaver(cast(Any, object()), surface=surface),
+        "a changed _try_advance_walks signature must refuse the saver at construction: the "
+        "adapter calls it to advance a checkpoint's walks, so a renamed or dropped parameter "
+        "would raise inside a replay, where nothing points back at the dependency. Acceptance "
+        "here means the adapter drives a method it cannot call.",
+    )
+    assert "_try_advance_walks changed" in message, (
+        "the refusal names the method whose signature moved, so a dependency bump is diagnosable "
+        f"without reading the adapter's source. message={message!r}"
+    )
 
 
 def test_a_refusal_names_the_shape_it_found() -> None:
     surface: PrivateSurface = replace(
         installed_private_surface(), stage2_row_fields=("idx", "version")
     )
-    with pytest.raises(RuntimeError) as refused:
-        verify_private_surface(surface)
-    assert "['idx', 'version']" in str(refused.value)
+    message = _refusal(
+        lambda: verify_private_surface(surface),
+        "a surface this adapter was not written against must be refused: the check exists to "
+        "stop a saver from reading fields and method signatures it never validated, so silence "
+        "here means a bad dependency surface would reach a replay.",
+    )
+    assert "['idx', 'version']" in message, (
+        "the refusal prints what it found, not only that something differs: an operator reading "
+        "one line must see the fields the installed row carries, because the alternative is "
+        f"dumping a private type from site-packages by hand. message={message!r}"
+    )
