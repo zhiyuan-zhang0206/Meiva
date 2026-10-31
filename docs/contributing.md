@@ -48,6 +48,13 @@ one landed change carrying its own message. Read both when you trace history; wr
 for the new one. `git commit --amend` no longer writes the record: it only rewrites a
 local commit that never lands.
 
+When a pull request is merged by hand, do not pass `--subject` to `gh pr merge`: it
+replaces the title outright and GitHub then appends no ` (#<n>)`, so `git log` stops
+naming the pull request the commit came from (2026-10-31: `2308d918a` and
+`a6a219318b` landed that way). Read a landed subject with no ` (#<n>)` as "find the
+pull request" rather than as "pushed directly": `gh pr view <n> --json mergeCommit`,
+or `gh api repos/<owner>/<repo>/commits/<sha>/pulls`, answers it.
+
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from
 the branch's commits; a trailer with no email, like the `Meiva #<id>` convention, is
