@@ -315,9 +315,10 @@ def update(
     reminders_paused_until: datetime | str | None = None,
     operation_key: str,
 ) -> None:
-    """A write that changes the work moves `updated_at` and restarts the task's reminder
-    window; recording a note, or renaming the task, does neither. Owner changes notify both
-    owners; other updates tell the owner who changed it; a parent-only reparent stays silent.
+    """A write that is activity on the task moves `updated_at` and restarts the task's reminder
+    window: a change to the work, or a note. Renaming the task, or editing its description or
+    interval, does neither. Owner changes notify both owners; other updates tell the owner who
+    changed it; a parent-only reparent stays silent.
 
     Args:
         status: one of "in_progress", "done", "cancelled"; closing is rejected
@@ -695,8 +696,9 @@ def is_terminated(cur: psycopg.Cursor, agent_id: int) -> bool:
 def log(task_id: int, message: str, *, operation_key: str) -> None:
     """Append one timestamped line; reuse operation_key to replay without appending again.
 
-    The line records activity, not progress: it does not move `updated_at`, and it does not
-    restart the task's reminder window."""
+    The line is activity on the task, so it moves `updated_at` and restarts the task's reminder
+    window: answering a reminder with a line keeps the task from escalating. A replay appends
+    nothing and moves neither."""
     task_id = coerce_typed(task_id, "task_id", int)
     message = coerce_str(message, "message")
     update(task_id, note=message, operation_key=operation_key)

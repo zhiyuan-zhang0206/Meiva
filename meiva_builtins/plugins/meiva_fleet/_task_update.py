@@ -79,10 +79,10 @@ def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str) -> Non
     if current and not current.endswith("\n"):
         current += "\n"
     # meiva:note
-    # The line lands in `results`; the row's timestamps stay where they are. A note is the record
-    # of the work, not the work: `updated_at` is the reminder daemon's due clock
-    # (`task_maintenance/daemon.py` reads `now() - updated_at`), so moving it here let a daily
-    # annotation hold a frozen task below its interval and the ladder never climbed (task #5311).
+    # The line lands in `results`; the row's clock is not touched here. `updated_at` moves in the
+    # one branch that also clears the reminder ladder (`write_task_update` below), so a note moves
+    # it exactly when this home's policy counts a note — a clock that moved on its own would
+    # disagree with the counter the daemon escalates on.
     cur.execute(
         "UPDATE agent_tasks SET results = %s WHERE id = %s",
         (current + line, task_id),
@@ -223,7 +223,8 @@ def collect_update_fields(
 # meiva:note
 # Restarts the task's reminder window when this write changed something `reset_on` names, and only
 # then: the change set is measured against the row this function locks, so restating the current
-# value or appending a note cannot pass for progress (`base/agents/tasks/reminder_window.py`).
+# value cannot pass for progress. `updated_at` moves in the same branch, because the due clock and
+# the ladder are one fact (`base/agents/tasks/reminder_window.py`).
 # meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.meiva.okf.md
 def write_task_update(
     cur: psycopg.Cursor,
@@ -300,12 +301,13 @@ def write_task_update(
                 f"(task #{dup[0]} is {dup[1]}) — duplicate in_progress titles are not allowed"
             )
     # meiva:note
-    # Only a real change to the work restarts the ladder (Fleet `task_reminder_reset_on`); the
-    # counters and the delegator marker are cleared together so the fresh window can escalate on
-    # its own. `updated_at` moves in the same branch because it is the same fact: it is the
-    # reminder daemon's due clock (`task_maintenance/daemon.py` reads `now() - updated_at`), so a
-    # write that does not change the work must not move it either — a note-only write used to keep
-    # an annotated, frozen task below its interval forever (task #5311).
+    # Only a kind this home's policy names restarts the ladder (Fleet `task_reminder_reset_on`);
+    # the counters and the delegator marker are cleared together so the fresh window can escalate
+    # on its own. `updated_at` moves in the same branch because it is the same fact: it is the
+    # reminder daemon's due clock (`task_maintenance/daemon.py` reads `now() - updated_at`), so the
+    # window the counter measures and the window the daemon measures cannot disagree. The default
+    # policy names `note` (2026-10-31 user ruling): a note is someone still on the task. A home
+    # that leaves `note` out keeps the clock still on a note-only write.
     if resets_window(changed_kinds(snapshot, update), reset_on):
         sets.append("last_reminded_at = NULL")
         sets.append("reminder_count = 0")
@@ -313,9 +315,10 @@ def write_task_update(
         sets.append("updated_at = now()")
         payload["reminder_window_reset"] = True
     # meiva:note
-    # A note-only write has no row field to set: the note is appended into `results` below and the
-    # row keeps its timestamps. `sets` is empty exactly when nothing but the note changed, and an
-    # executed statement would then carry an empty SET list.
+    # A note has no row field of its own: the text is appended into `results` below. `sets` is
+    # empty exactly when nothing but the note changed and this home's policy leaves `note` out of
+    # the reset kinds, and an executed statement would then carry an empty SET list. Under the
+    # default policy the branch above has already put `updated_at` in `sets`.
     if sets:
         sql = f"UPDATE agent_tasks SET {', '.join(sets)} WHERE id = %s"  # noqa: S608
         # type: ignore[arg-type] — the SET clause is assembled at runtime from

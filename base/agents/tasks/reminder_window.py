@@ -2,8 +2,10 @@
 # Which task writes restart a task's reminder ladder — one vocabulary for every write surface.
 # `task_maintenance` counts consecutive unanswered reminders in `agent_tasks.reminder_count` and
 # escalates once the count reaches Fleet `task_escalate_n`; a write makes those reminders stale
-# only when it changes the work. Resetting on every write is what let the daily note stream (87%
-# of all task updates) hold the ladder at zero, so no task ever passed one reminder (task #5314).
+# only when it is activity on the task — a change to the work, or a note from someone still here.
+# Resetting on every write is what let the daily note stream (87% of all task updates) hold the
+# ladder at zero, so no task ever passed one reminder (task #5314); the 2026-10-31 ruling brought
+# notes back on purpose (see DEFAULT_RESET_ON).
 # meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.meiva.okf.md
 
 from __future__ import annotations
@@ -42,12 +44,20 @@ UPDATE_KINDS: frozenset[UpdateKind] = frozenset(
 )
 
 # meiva:note
-# The work itself, not the record of it: a fresh reminder window starts when one of these
-# changes. Title, description, interval and note restate or re-schedule the work, they do not
-# advance it, so the default policy leaves them out.
+# A fresh reminder window starts when one of these changes. The ladder answers "is anyone still
+# touching this task", so a note counts: it is the one signal that separates an agent working
+# quietly from a task nobody came back to (user ruling, 2026-10-31 — before it, answering a
+# reminder with a note read as silence and the ladder escalated anyway).
+#
+# This reverses the 2026-08 rule (task #5314) that left `note` out because the daily note stream
+# was 87% of all task updates and held every ladder at zero. The cost is accepted deliberately: an
+# agent that only writes notes keeps a task fresh forever, and the escalation then measures
+# "someone is here" rather than "progress was made" — progress is carried by status and results.
+# Title, description and interval still do not restart it: they restate or re-schedule the work.
 DEFAULT_RESET_ON: tuple[UpdateKind, ...] = (
     "status",
     "results",
+    "note",
     "owner",
     "priority",
     "parent",

@@ -265,10 +265,10 @@ class TestRemind:
         assert last_reminded_at is not None
 
     # meiva:note
-    # The due clock and the ladder are one criterion: a note written seconds ago must not hold a
-    # task that has not advanced for hours below its interval. Before task #5311 the SDK note write
-    # bumped `updated_at`, so this task was not due at all and no reminder was ever sent.
-    def test_a_note_does_not_postpone_an_overdue_task(
+    # The due clock and the ladder are one criterion, so a note restarts both: a task that was
+    # overdue an hour ago is not due the moment its owner answers with a log line (2026-10-31 user
+    # ruling — before it, the note was written and the escalation still counted the silence).
+    def test_a_note_restarts_the_window_so_no_reminder_follows(
         self,
         sdk_writer: None,
         emitted_events: EmittedEvents,
@@ -283,15 +283,12 @@ class TestRemind:
         pin_agent(owner)
         task_registry.log(tid, "still waiting on the draft", operation_key=str(uuid4()))
 
-        assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        delivered_owner, message = deliver.deliveries()[0]
-        assert delivered_owner == owner
-        assert f"#{tid}" in message
-        assert "no update for 2.0h" in message
+        assert run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert deliver.deliveries() == []
         row = _task_row(db_conn, tid)
         assert row is not None
-        assert row[2] == 1
-        assert "task_reminder_digest" in emitted_events.names()
+        assert row[2] == 0
+        assert "task_reminder_digest" not in emitted_events.names()
 
     def test_owner_receives_one_digest_for_all_overdue_tasks(
         self,

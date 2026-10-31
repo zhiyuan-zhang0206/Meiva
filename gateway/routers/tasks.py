@@ -328,11 +328,11 @@ def _patch_fields(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     # Reset the reminder counters on any update: the HTTP surface has no note channel, so every
     # field here is a deliberate edit and a fresh overdue window starts from it. The delegator
     # escalation marker is part of the bookkeeping — clearing it lets the fresh window escalate
-    # on its own. The SDK path narrows this to writes that change the work
-    # (`base/agents/tasks/reminder_window.py`, Fleet `task_reminder_reset_on`), because there an
-    # appended note is not an edit to the task's work. `updated_at` follows the same asymmetry
-    # (the UPDATE below always moves it, the SDK path only when the work changes), because it is
-    # the due clock the reminder daemon reads (task #5311).
+    # on its own. The SDK path instead asks this home's policy which kinds count
+    # (`base/agents/tasks/reminder_window.py`, Fleet `task_reminder_reset_on`), because there a
+    # write can be a note or a restatement of what the row already says. `updated_at` follows
+    # each surface's rule — always here, on the SDK path only when the window restarts — because
+    # it is the due clock the reminder daemon reads (task #5311).
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")

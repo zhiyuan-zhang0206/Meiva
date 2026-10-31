@@ -33,10 +33,12 @@ def _changed(write: UpdateWrite) -> set[str]:
 
 
 # meiva:note
-# A note is a log line; the ladder must survive it.
-def test_note_alone_is_not_a_change_to_the_work() -> None:
+# A note is a log line, and it is the one signal that says someone is still here: the ladder
+# restarts on it (user ruling, 2026-10-31). Before that ruling, answering a reminder with a note
+# counted as silence and the task escalated anyway.
+def test_a_note_alone_restarts_the_window() -> None:
     assert _changed(UpdateWrite(note="still blocked")) == {"note"}
-    assert not resets_window(frozenset({"note"}), DEFAULT_RESET_ON)
+    assert resets_window(frozenset({"note"}), DEFAULT_RESET_ON)
 
 
 @pytest.mark.parametrize(
@@ -84,10 +86,13 @@ def test_empty_text_never_counts_as_a_change(value: str) -> None:
     assert _changed(UpdateWrite(description=value)) == set()
 
 
-def test_default_policy_names_the_work_not_the_record_of_it() -> None:
-    assert set(DEFAULT_RESET_ON) == {"status", "results", "owner", "priority", "parent"}
-    assert not resets_window(frozenset({"note", "title"}), DEFAULT_RESET_ON)
-    assert resets_window(frozenset({"note", "status"}), DEFAULT_RESET_ON)
+def test_default_policy_counts_work_and_a_note_but_not_a_restatement() -> None:
+    assert set(DEFAULT_RESET_ON) == {"status", "results", "note", "owner", "priority", "parent"}
+    assert not resets_window(frozenset({"title"}), DEFAULT_RESET_ON)
+    assert not resets_window(
+        frozenset({"description", "remind_interval_seconds"}), DEFAULT_RESET_ON
+    )
+    assert resets_window(frozenset({"note", "title"}), DEFAULT_RESET_ON)
 
 
 def test_policy_rejects_an_unknown_kind() -> None:

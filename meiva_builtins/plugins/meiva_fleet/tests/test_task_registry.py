@@ -443,9 +443,9 @@ def test_log_preserves_replaced_results(
 
 
 # meiva:note
-# A log line records activity, not progress: it must not rewind the escalation ladder (task #5314
-# — resetting on it held every task at one reminder).
-def test_log_keeps_reminder_count(
+# A log line is activity on the task, so it restarts the escalation ladder (2026-10-31 user ruling:
+# an owner answering a reminder with a note was being escalated as if the task had been silent).
+def test_log_restarts_reminder_count(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     agent_id = seed_agent(db_conn)
@@ -470,16 +470,15 @@ def test_log_keeps_reminder_count(
         assert row is not None
         return row[0], row[1], row[2]
 
-    before = ladder()
     task_registry.log(task.id, "note", operation_key=str(uuid4()))
-    assert ladder() == before
+    assert ladder() == (0, None, None)
 
 
 # meiva:note
-# A log line is activity on the record, not on the work: `updated_at` is the reminder daemon's due
-# clock, so a note must not make an annotated, frozen task look freshly worked on (task #5311 —
-# this replaces the Task #1969 assertion that required the bump).
-def test_log_keeps_updated_at(
+# The same write moves the due clock: `updated_at` and the ladder are one criterion, so a note
+# measured from it cannot look overdue the moment the owner writes it (task #5311 made the clock
+# and the counter diverge; 2026-10-31 brought the note back on both).
+def test_log_moves_updated_at(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     agent_id = seed_agent(db_conn)
@@ -496,7 +495,7 @@ def test_log_keeps_updated_at(
     task_registry.log(task.id, "note", operation_key=str(uuid4()))
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT now() - updated_at > interval '29 days' FROM agent_tasks WHERE id = %s",
+            "SELECT now() - updated_at < interval '1 day' FROM agent_tasks WHERE id = %s",
             (task.id,),
         )
         row = cur.fetchone()

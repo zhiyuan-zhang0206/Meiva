@@ -969,12 +969,12 @@ CREATE TABLE agent_tasks (
     created_by  TEXT NOT NULL
                 CHECK (created_by ~ '^[0-9]+$' OR created_by IN ('system', 'user')),  -- original opener: an agent id, or 'system'/'user' for non-agent rows ('system' on the seeded root)
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the WORK last changed, and the reminder daemon's due clock (now() - updated_at); a note appended by log(), a rename or a description edit does not move it — only a write that changes the work does, by the same policy as the reminder window (Fleet task_reminder_reset_on). The HTTP PATCH surface has no note channel and always moves it (task #5311).
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the task last showed activity, and the reminder daemon's due clock (now() - updated_at); it moves on exactly the writes that restart the reminder window (Fleet task_reminder_reset_on: a change to the work, and by default a note), while a rename or a description edit leaves it (task #5311). The HTTP PATCH surface has no note channel and always moves it.
     is_root          BOOLEAN NOT NULL DEFAULT FALSE,  -- the immortal system root task; all tasks descend from it
     remind_interval_seconds  INTEGER DEFAULT 1800,  -- seconds until an idle task reminds its owner; default 30 min, capped at 24h. Reminders cannot be disabled: NULL only on the never-reminded root task.
     last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
     reminder_count      INTEGER NOT NULL DEFAULT 0,  -- reminders sent for the current overdue window
-    escalated_at        TIMESTAMPTZ,  -- delegator escalation marker: set by the daemon with the delivered digest; cleared with the counters by a write that changes the work, never by a note-only write (task #5314; the user leg marks itself via its notice)
+    escalated_at        TIMESTAMPTZ,  -- delegator escalation marker: set by the daemon with the delivered digest; cleared with the counters by any write the reminder-window policy counts, so by default a note clears it too (task #5314; the user leg marks itself via its notice)
     reminders_paused_until TIMESTAMPTZ,  -- deadline until which the reminder and escalation passes skip this task; set through update() under Fleet task_reminder_pause_max_seconds (unset = this home cannot pause). A deadline at or before now() means "not paused": no separate flag (task #5311).
     -- Retired task-cost columns: inactive; retained for expand-contract upgrades.
     token_budget        BIGINT CHECK (token_budget IS NULL OR token_budget > 0),

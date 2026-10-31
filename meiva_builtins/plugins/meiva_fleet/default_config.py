@@ -66,12 +66,14 @@ class FleetConfig(BaseModel):
         default=DEFAULT_RESET_ON,
         description=(
             "Which kinds of task update restart a task's reminder window, the counter the "
-            "task-maintenance daemon escalates on. The default names the work itself (status, "
-            "results, owner, priority, parent): recording a note or renaming a task says nothing "
-            "about progress, and resetting on it held every task's ladder at zero. Any kind an "
-            "update can change may be named — status, title, description, results, owner, "
-            "priority, parent, remind_interval_seconds, note — so naming 'note' restores the "
-            "older rule in which every write restarted the window."
+            "task-maintenance daemon escalates on. The default counts activity on the task: a "
+            "change to the work (status, results, owner, priority, parent) and a note. A note "
+            "counts because answering a reminder with one is an owner still on the task, and "
+            "reading it as silence escalated tasks nobody had abandoned; renaming a task or "
+            "editing its description is not activity on it. Any kind an update can change may be "
+            "named — status, title, description, results, owner, priority, parent, "
+            "remind_interval_seconds, note — so leaving 'note' out restores a window only "
+            "progress moves."
         ),
         json_schema_extra={
             "env_var": "MEIVA_TASK_REMINDER_RESET_ON",

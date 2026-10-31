@@ -207,7 +207,7 @@ class TestEscalate:
         assert delivered_owner == delegator
         assert (
             "Subtasks still open after repeated reminders — task state unchanged "
-            "(a tasks.log note is not a state change):"
+            "(a note or a change on the task would have restarted the reminders):"
         ) in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
         # _ESCALATE_SQL sorts nothing: row order is unspecified, and neither the
