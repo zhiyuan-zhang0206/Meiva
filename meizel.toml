@@ -37,5 +37,6 @@ frontend = ["ui"]
 # are base's own pty tests, which must run the real service the `services` package owns, so repaying
 # this needs a package move (the client's integration tests above both packages, or the daemon below
 # base), not a declaration. Kept as recorded debt.
+
 [debt.undeclared-edge]
 "base/sessions/pty/tests/pty_service.py -> services/agent_runner/pty_sessions/daemon.py" = 1

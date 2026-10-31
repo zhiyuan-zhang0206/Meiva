@@ -10,6 +10,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS
 from meiva.mcps._guards import socket_is_live
 from meiva.mcps._remote import RemoteMCPClient
 from meiva.mcps.tests.daemon.daemon_support import fixture_entry, write_servers
@@ -65,7 +66,9 @@ def test_the_daemon_serves_the_shared_socket_and_stops_on_sigterm(short_dir: Pat
 
     with running_daemon(home, short_dir) as proc:
         wait_until_live(socket_path, proc)
-        tools = RemoteMCPClient(socket_path).list_tools("fs", timeout_seconds=30.0, agent_id=None)
+        tools = RemoteMCPClient(socket_path, timers=SYSTEM_TIMERS).list_tools(
+            "fs", timeout_seconds=30.0, agent_id=None
+        )
         proc.send_signal(signal.SIGTERM)
         assert proc.wait(timeout=15) == 0
 

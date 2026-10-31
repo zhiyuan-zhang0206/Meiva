@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from base.clock import Timers
 from meiva.mcps.config import MCPConnectError, ToolInfo
 
 from ._remote import RemoteMCPClient, connect_remote
@@ -14,9 +15,10 @@ from ._remote import RemoteMCPClient, connect_remote
 # meiva:note
 # The context owns the daemon connection and the request timeout its composition root read. `socket_path` is where the machine's MCP daemon listens (`base.paths.mcp_daemon_shared_socket` of the home), given by the composition root; the socket is looked for when the first request dials, since the daemon may start after the context.
 class McpClients:
-    def __init__(self, socket_path: Path, timeout_seconds: float) -> None:
+    def __init__(self, socket_path: Path, timeout_seconds: float, *, timers: Timers) -> None:
         self.socket_path = socket_path
         self.timeout_seconds = timeout_seconds
+        self.timers = timers
         self._lock = threading.Lock()
         self._remote: RemoteMCPClient | None = None
 
@@ -26,7 +28,7 @@ class McpClients:
             raise MCPConnectError("MCP daemon unavailable; start the machine's mcp-daemon service")
         with self._lock:
             if self._remote is None:
-                self._remote = connect_remote(str(self.socket_path))
+                self._remote = connect_remote(str(self.socket_path), timers=self.timers)
             return self._remote
 
     # meiva:note

@@ -17,6 +17,7 @@ from typing import Any, cast
 import pytest
 from pydantic import SecretStr
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
@@ -148,6 +149,7 @@ class WebHarness:
     catalog: ModelCatalog
     search_deps: SearchDeps
     fetch_deps: FetchDeps
+    timers: Timers = SYSTEM_TIMERS
 
     def set_brave(self, **changes: Any) -> None:
         self.search_deps = dataclasses.replace(
@@ -226,6 +228,7 @@ class WebHarness:
             plans.plan_search(queries, count, max_concurrent),
             self.search_deps,
             self.delivery(),
+            timers=self.timers,
             policy=NO_WAIT_READ_POLICY,
         )
 
@@ -240,6 +243,7 @@ class WebHarness:
             plans.plan_fetch(targets, max_chars, effort, max_concurrent),
             self.fetch_deps,
             self.delivery(),
+            timers=self.timers,
             policy=NO_WAIT_READ_POLICY,
         )
 

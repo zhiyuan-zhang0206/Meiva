@@ -21,6 +21,3 @@ exports = ["configs.py", "deepseek_wire.py", "deps.py", "errors.py", "failures.p
 "pacing.py" = "strict"
 "plans.py" = "strict"
 "wire.py" = "strict"
-
-[debt.ambient-read]
-"transport.py#clock base.clock.SYSTEM_TIMERS" = 1

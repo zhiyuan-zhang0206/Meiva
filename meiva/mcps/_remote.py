@@ -17,7 +17,7 @@ import threading
 from contextlib import suppress
 from typing import Any
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Timers
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
 
 
@@ -26,9 +26,9 @@ class RemoteMCPClient:
 
     # meiva:note
     # `timers` is the clock this client measures a request's budget on, handed down by the
-    # composition root that builds the client (`boot.process_clients`); a client built without one
-    # falls back to the process timers.
-    def __init__(self, socket_path: str, *, timers: Timers | None = None) -> None:
+    # composition root that builds the client (`boot.process_clients`): a client that read the
+    # process clock itself would spend real seconds in a caller that brought its own.
+    def __init__(self, socket_path: str, *, timers: Timers) -> None:
         self._socket_path = socket_path
         self._timers = timers
         self._sock: socket.socket | None = None
@@ -118,7 +118,7 @@ class RemoteMCPClient:
         lines are skipped; the unread tail stays buffered. Bounded by the same
         timeout budget as the connect phase, supplied by the caller per request.
         """
-        timers = self._timers or SYSTEM_TIMERS
+        timers = self._timers
         buf: bytes = b""
         deadline = timers.monotonic() + timeout_seconds
         while True:
@@ -181,6 +181,6 @@ class RemoteMCPClient:
         return result
 
 
-def connect_remote(socket_path: str) -> RemoteMCPClient:
+def connect_remote(socket_path: str, *, timers: Timers) -> RemoteMCPClient:
     """A client of the MCP daemon listening on `socket_path` (it dials on its first request)."""
-    return RemoteMCPClient(socket_path)
+    return RemoteMCPClient(socket_path, timers=timers)
