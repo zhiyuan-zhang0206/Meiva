@@ -214,10 +214,11 @@ operate on a home on every `meiva` invocation. One name for two jobs invites the
 
 #### 3. The receipt (versioned, machine-checked)
 
-One line, in the PR body:
+One line, in the PR body. The example below is a real run at `3cd7ef34` — a documentation-only
+change, the shape that says why each layer does not apply instead of printing nothing about it:
 
 ```
-diff-checks/v1 @<head-sha> base=<base-sha> scope=python+manifests pyright=0err(1m50s) err_in_this_diff=0 closure=n/a(the-tree-was-green) ruff=ok(1s) selector=SELECTED:152files tests=RAN(152files) passed=3618tests(7m14s) failed=0tests blind=n/a(no-changed-file-was-invisible) fallback=n/a(the-selection-was-not-blind) vitest=n/a(no-app-tree-file) next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76749edges)(22s) debt=ok(ambient-read15->14,total187->186)(2m50s) refusal-loss=n/a(no-net-debt-reduction) docs-refs=n/a(no-doc-touched) docs-okf=n/a(no-doc-touched) generated=scripts/hooks/diff_checks.py
+diff-checks/v1 @3cd7ef3439056b6558e13b253734467b5c3902ae base=23bdc7ece90bcc13046cb4d301212718709e9a4b scope=docs pyright=n/a(no-python-touched) err_in_this_diff=n/a(no-python-touched) closure=n/a(no-python-touched) ruff=n/a(no-python-touched) selector=SELECTED:74files tests=skipped(--skip-tests) passed=n/a(no-test-ran) failed=n/a(no-test-ran) blind=n/a(no-changed-file-was-invisible) fallback=n/a(the-selection-was-not-blind) vitest-app=n/a(no-web-tree-file) next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76771edges)(16s) debt=n/a(no-manifest-changed) refusal-loss=n/a(no-net-debt-reduction) docs-refs=ok(1593docs,0dangling)(3s) docs-okf=ok(757files,0errors,4warnings)(2s) generated=scripts/hooks/diff_checks.py
 ```
 
 **The vocabulary is the whole contract** (405, 2026-10-31: a receipt of nothing but `none` proved
