@@ -11,8 +11,6 @@ import psycopg
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.events.notifications.notices import stage_notice_notification
-from base.packages.plugins.flags import read_declared_flag
-from meiva_builtins.plugins.meiva_fleet.default_config import contribute
 
 
 # meiva:note
@@ -74,6 +72,7 @@ def stage_human_notice(
     title: str,
     content: str,
     priority: str,
+    notice_ttl_limit_seconds: float,
 ) -> tuple[int, int | None] | None:
     cur.execute(
         "SELECT 1 FROM agent_notices WHERE agent_id=%s AND resolved_at IS NULL LIMIT 1",
@@ -93,7 +92,7 @@ def stage_human_notice(
             title,
             content,
             priority,
-            read_declared_flag("daemon.notice_ttl_limit_seconds", contribute().flags),
+            notice_ttl_limit_seconds,
         ),
     )
     row = cur.fetchone()
