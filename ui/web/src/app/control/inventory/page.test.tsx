@@ -11,6 +11,8 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { fakeNavigation, navigationWrapper } from "@/lib/browser/navigation/testing";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InventoryAggregate, InventoryWriteResult } from "@/lib/contracts/types";
@@ -23,8 +25,11 @@ beforeEach(() => {
 });
 
 
-const pushSpy = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
+// meiva:note
+// The page navigates through the app's navigation port, not Next's router: the moves it asked for
+// are read off the fake that stands in for the port.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+const navigation = fakeNavigation();
 
 afterEach(cleanup);
 // meiva:note
@@ -33,7 +38,7 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.restoreAllMocks();
   resetTransport();
-  pushSpy.mockReset();
+  navigation.moves.length = 0;
 });
 
 function makeQc() {
@@ -44,7 +49,18 @@ function makeQc() {
 
 function wrap(ui: React.ReactElement, qc?: QueryClient) {
   const client = qc ?? makeQc();
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  // meiva:note
+  // The page carries timeline cards, which age their stamps on the page's wall clock: the provider
+  // the app mounts is what `useWallNow` reads, and without it the render throws.
+  // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+  const Page = navigationWrapper(navigation);
+  return render(
+    <WallClockProvider wallNow={() => Date.now()}>
+      <Page>
+        <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+      </Page>
+    </WallClockProvider>,
+  );
 }
 
 const H1 = "h1";
@@ -266,7 +282,7 @@ describe("InventoryPage install entries", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find and install a plugin" }));
 
     await waitFor(() => expect(draft).toHaveBeenCalledWith("plugin", "review my PRs"));
-    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith("/"));
+    await waitFor(() => expect(navigation.moves).toContainEqual({ kind: "push", href: "/" }));
   });
 
   it("the MCP entry posts kind=mcp", async () => {
