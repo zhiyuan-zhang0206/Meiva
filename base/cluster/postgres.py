@@ -79,11 +79,21 @@ def _inode(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
-def boot_id() -> str:
+SUPPORTED_SYSTEMS = frozenset({"linux", "darwin"})
+
+
+def boot_id(system: str) -> str:
     # meiva:note
-    # No platform read stands here: `native_boot_id()` already refuses a platform whose boot scope
-    # it cannot name, and it reads afresh on every call. What this function adds is the boot-scope
-    # identity a receipt is compared against, so a launch from before a reboot is never adopted.
+    # Custody - a pidfile bound to one native birth inside one boot scope - is defined on macOS and
+    # Linux only, so another system is refused before a boot scope is read: an identity nobody
+    # defined there would adopt or reject a postmaster on evidence this module never validated.
+    # The caller states the system rather than this function reading the host, so the launch door
+    # reads it once (and a receipt carries the one its own read was checked against) and a test
+    # can hand in an unsupported one without patching the host.
+    if system not in SUPPORTED_SYSTEMS:
+        raise RuntimeError(
+            f"owned PostgreSQL custody requires a supported POSIX platform, not {system!r}"
+        )
     boot = native_boot_id()
     if boot is None:
         raise RuntimeError("cannot observe PostgreSQL native boot scope")
@@ -175,7 +185,9 @@ def require_closed(
     """A dead postmaster alone cannot prove that its old workers have closed."""
     session = (
         receipt.owner.pid
-        if receipt is not None and receipt.owner is not None and receipt.boot_id == boot_id()
+        if receipt is not None
+        and receipt.owner is not None
+        and receipt.boot_id == boot_id(receipt.platform)
         else None
     )
     for process in processes:
@@ -275,7 +287,11 @@ def observe(data: Path) -> OwnedProcess | None:
         return None
     if receipt.state == "pending":
         raise RuntimeError("PostgreSQL launch custody is unresolved; reconcile pending receipt")
-    if receipt.boot_id != boot_id() or receipt.owner is None or not receipt.process().live():
+    if (
+        receipt.boot_id != boot_id(receipt.platform)
+        or receipt.owner is None
+        or not receipt.process().live()
+    ):
         require_closed(data, receipt, processes=live_processes())
         return None
     owner = _require_process(data, receipt)
@@ -461,14 +477,15 @@ def start(
         if observe(data) is not None:
             raise RuntimeError("PostgreSQL is already running; startup cannot replace its birth")
         require_listener(None, port, required=False)
+        system = Platform.current().system
         captured = spawn_postgres(
             data,
             Receipt(
                 data=str(data),
                 directory=_inode(data),
                 port=port,
-                platform=Platform.current().system,
-                boot_id=boot_id(),
+                platform=system,
+                boot_id=boot_id(system),
                 state="pending",
             ),
             argv,

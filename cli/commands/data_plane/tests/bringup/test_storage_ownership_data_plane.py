@@ -57,7 +57,7 @@ def _assert_pg_birth(cluster: NativeCluster) -> tuple[OwnedProcess, bytes]:
     assert owner is not None
     receipt = pg.read_receipt(cluster.pg_data)
     assert receipt is not None
-    assert (receipt.state, receipt.boot_id) == ("ready", pg.boot_id())
+    assert (receipt.state, receipt.boot_id) == ("ready", pg.boot_id(receipt.platform))
     return owner, pg.receipt_path(cluster.pg_data).read_bytes()
 
 
