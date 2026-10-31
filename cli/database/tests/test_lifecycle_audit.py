@@ -175,6 +175,22 @@ def test_an_unreachable_database_never_fails_the_command() -> None:
         command.exited(0)
 
 
+# meiva:note
+# The sink layer stays best-effort end to end: an operator command whose caller is readable runs
+# to completion even when the database factory refuses every call, so a broken recorder cannot
+# block the command that repairs the host.
+def test_a_sink_that_cannot_be_dialled_never_fails_an_attributable_command(
+    command_runtime: CommandRuntime,
+) -> None:
+    with operator_lifecycle_audit(
+        database_factory=refuse_database,
+        environ=command_runtime.config.process_environment(),
+        home=command_runtime.home,
+    ) as command:
+        record_lifecycle_request("down", ["gateway"])
+        command.exited(0)
+
+
 def test_a_boot_start_is_not_attributed_to_an_operator(command_runtime: CommandRuntime) -> None:
     with operator_lifecycle_audit(
         database_factory=refuse_database,
@@ -238,19 +254,18 @@ def _run_without_cwd(scope: str, tmp_path: Path) -> subprocess.CompletedProcess[
 
 
 # meiva:note
-# The audit is a write-only sink: a command whose caller cannot be named still runs, with one
-# warning line saying it is unaudited, and the sink is never dialed. The working directory of the
-# process is removed, which is how a real shell loses it.
-def test_a_command_that_cannot_name_its_caller_runs_unaudited_with_one_warning(
-    tmp_path: Path,
-) -> None:
+# The caller block refuses the command: it is the only fact that says who asked, and an operator
+# can destroy it on purpose (a removed working directory), so accepting the failure would hand
+# out one unattributed execution per `rm -rf`. The sink is never dialed and the body never runs.
+# Ruling: memory pool `meiva/rulings/prod/audit-identity-unreadable-must-refuse-20261031.md`.
+def test_a_command_that_cannot_name_its_caller_is_refused(tmp_path: Path) -> None:
     child = _run_without_cwd("operator", tmp_path)
 
-    assert child.returncode == 0, child.stderr
-    assert child.stdout.splitlines() == ["command ran"]
-    [warning] = child.stderr.splitlines()
-    assert warning.startswith("meiva: warning: lifecycle audit could not identify its caller")
-    assert warning.endswith("this command runs unaudited")
+    assert child.returncode == 3, child.stderr
+    assert "command ran" not in child.stdout
+    [refusal] = child.stdout.splitlines()
+    assert refusal.startswith("refused: lifecycle audit cannot read the caller block")
+    assert refusal.endswith("rerun from a working directory")
 
 
 def test_a_boot_start_needs_no_caller_and_says_nothing_when_it_cannot_be_named(
