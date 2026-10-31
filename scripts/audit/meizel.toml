@@ -1,4 +1,4 @@
-exports = ["analysis", "branch_protection.py"]
+exports = ["analysis", "branch_protection.py", "refusal_loss.py"]
 
 [uses]
 "branch_protection.py" = ["analysis"]

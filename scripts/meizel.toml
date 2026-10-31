@@ -1,7 +1,8 @@
-exports = ["agent_surface.py", "audit", "ci", "codegen", "data_plane_ops", "host_ops", "lint", "model_registry", "post_deploy_visual", "provision", "structure", "verify"]
+exports = ["agent_surface.py", "hooks", "audit", "ci", "codegen", "data_plane_ops", "host_ops", "lint", "model_registry", "post_deploy_visual", "provision", "structure", "verify"]
 
 [uses]
 "audit" = ["ci"]
+"hooks" = ["audit", "ci"]
 "ci" = ["structure"]
 "codegen" = []
 "content_lint" = ["agent_surface.py", "audit", "codegen"]
