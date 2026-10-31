@@ -123,6 +123,49 @@ def _run(
     return code, recorder
 
 
+class TestLedgerRoot:
+    # meiva:note
+    # The rehearsal root exists so a host can try the gate without writing the machine's real
+    # verdict: the production table and event log are what an operator reads afterwards, and a
+    # test run that lands there is a decision nobody made. Precedence is the point of the first
+    # case -- an explicit `--home` beats the default a caller passed -- and the second pins the
+    # ambient default itself, which no case may exercise by writing to it.
+    def test_the_flag_beats_the_default_the_caller_passed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        default_root = tmp_path / "production"
+        rehearsal = tmp_path / "rehearsal"
+        disk, pressure_reader = _collect(26.1, 1, False, "disk")
+
+        code = admission.main(
+            [
+                "--home",
+                str(rehearsal),
+                "--peak-mb",
+                "2800",
+                "--",
+                "python",
+                "eval.py",
+                "--jobs",
+                "8",
+            ],
+            budget_reader=disk,
+            pressure_reader=pressure_reader,
+            psi_reader=lambda: None,
+            gpu_reader=lambda: None,
+            executor=_Recorder(),
+            home=default_root,
+        )
+
+        assert code == 0
+        assert capsys.readouterr().out.startswith("admission: jobs 8->2")
+        assert (rehearsal / "events.jsonl").exists()
+        assert not default_root.exists()
+
+    def test_the_ambient_default_is_the_host_admission_directory(self) -> None:
+        assert admission.admission_home() == Path.home() / ".meiva" / "admission"
+
+
 class TestStart:
     def test_a_lowered_start_prints_one_line_and_rewrites_the_flag(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

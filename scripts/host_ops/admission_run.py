@@ -632,12 +632,13 @@ def main(
     )
     parser.add_argument("--no-wait", action="store_true", help="do not wait for that job")
     parser.add_argument("--dry-run", action="store_true", help="print the plan, run nothing")
+    parser.add_argument("--home", type=Path, help="ledger root for this run, for a rehearsal")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
 
     command = _command(args, parser)
 
-    resolved_home = home if home is not None else admission_home()
+    resolved_home = args.home or home or admission_home()
     events = resolved_home / "events.jsonl"
     script = job_key(command)
 

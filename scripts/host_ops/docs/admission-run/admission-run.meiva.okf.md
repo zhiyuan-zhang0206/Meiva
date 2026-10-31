@@ -145,4 +145,4 @@ It prints and records; it raises no alert, signals no process and judges no mach
 health. The disk and agent-host guards own those decisions, and neither reads this tool's
 budget.
 
-Parent: [[scripts/docs/scripts.meiva.okf.md]].
+Parent: [[scripts/docs/scripts.meiva.okf.md]]. A rehearsal root: [[rehearsal]].
