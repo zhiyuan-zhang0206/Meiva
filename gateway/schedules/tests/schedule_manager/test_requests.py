@@ -47,9 +47,12 @@ def backend(serving_root: start_serving.RootBirth, unit_home: Path) -> Backend:
     return Backend()
 
 
-def _queue(conn: psycopg.Connection, *schedule_ids: int) -> None:
+def _queue(conn: psycopg.Connection, *schedule_ids: int, machine: str = "gateway") -> None:
     for sid in schedule_ids:
-        conn.execute("INSERT INTO schedule_sync_requests (schedule_id) VALUES (%s)", (sid,))
+        conn.execute(
+            "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s)",
+            (sid, machine),
+        )
     conn.commit()
 
 

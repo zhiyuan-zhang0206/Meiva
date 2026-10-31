@@ -1,8 +1,9 @@
 # Schedules
 
-Gateway-hosted schedules for cluster agents: a schedule is a persistent,
+Machine-placed schedules for cluster agents: a schedule is a persistent,
 supervised session (a `script` + the `command` that runs it) owned by the
-`schedule-manager` service's ScheduleManager — see `services/wake/schedule_manager/manager.py`. Manage them via
+`schedule-manager` service's ScheduleManager on the schedule's assigned machine —
+see `services/wake/schedule_manager/manager.py`. Manage them via
 `meiva schedules ...` (thin client over `/api/schedules`) or the
 `/control/schedules` page.
 
@@ -69,13 +70,12 @@ strict modules under `schedules/plans/` and their effects in shells under
 
 ### How built-ins get created
 
-`provision_builtin_schedules()` (`base/daemon/schedules/builtin_schedules.py`) creates every
+`provision_builtin_schedules(conn, machine=...)` (`base/daemon/schedules/builtin_schedules.py`) creates every
 manifest schedule missing from the `schedules` table, with `enabled` taken
-from the manifest's `default_enabled`. It runs:
+from the manifest's `default_enabled` and `machine` set to the gateway's machine. It runs:
 
-1. **at every `schedule-manager` start** (before its first reconcile) — a fresh
-   install comes up with its built-ins (enabled ones are launched by the
-   manager's reconcile loop within a poll tick), and
+1. **at gateway startup lifespan** (before serving traffic) — gated by
+   `settings.gateway.provision_builtin_schedules`, and
 2. **`meiva schedules provision`** — manual restore, works even while the
    gateway is down.
 
@@ -144,6 +144,22 @@ start; changed `default_enabled` / description only apply to rows that do not
 exist yet — an existing cluster's rows keep their operator-set state. To push a
 template into a running cluster without a restart of the manager, run
 `meiva schedules provision`.
+
+## Machine placement & Multi-machine operation
+
+Every schedule row records a target `machine` (defaulting to the gateway machine if omitted) and an optional `owner_plugin`.
+
+- **Per-machine schedule manager**: `schedule-manager` runs on all cluster nodes (`capabilities=Capabilities.BOTH`, `requires_db=True`, `db_access="runner"`). Each instance reconciles only rows where `machine = self._machine_name`.
+- **Split-unit tie-breaker**: On hosts with multiple units sharing a machine name (such as preview environments), `is_active_unit()` inspects `machine_units` and activates the instance on the serving gateway unit (or the lowest lexical home path). Inactive units yield reconcile and sync loops.
+- **Session reaping across moves and deletes**: When a schedule is deleted or reassigned to another machine, the old machine reaps its running PTY session without overwriting status or error on the database row.
+- **Machine migration**: Moving a schedule via `meiva schedules update <name> --machine <target>` resets `launch_generation = NULL, launch_count = 0, next_launch_at = NULL` and enqueues sync requests for both the old machine (to terminate the existing session) and the new machine (to launch it).
+- **Placement status API**: The gateway evaluates placement health via `judge_placement()`:
+  - `healthy`: machine is registered and reachable.
+  - `unplaced`: schedule row has no machine assigned (`NULL`).
+  - `unregistered`: assigned machine does not exist in the `machines` table.
+  - `unreachable`: assigned machine has no active heartbeats or units.
+  - `stalled`: machine is unreachable and the schedule is currently active or enabled.
+- **Cross-machine log capture RPC**: When reading logs (`GET /api/schedules/{id}/logs` or `meiva schedules logs <name>`), if the schedule is placed on a remote machine, the gateway routes a `schedule_capture` cluster operation via RPC to `agent_ops` on that machine to fetch live PTY output.
 
 ## Deployment notes
 

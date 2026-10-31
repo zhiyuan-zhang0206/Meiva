@@ -217,17 +217,6 @@ def build_services(
             capabilities=GATEWAY,
             requires_db=True,
         ),
-        # meiva:note
-        # Scheduling reads cluster rows but launches sessions from this gateway's own
-        # checkout. The daemon refuses to run from another checkout.
-        healthz_daemon(
-            "schedule-manager",
-            home=home,
-            endpoints=endpoints,
-            module="services.wake.schedule_manager.daemon",
-            capabilities=GATEWAY,
-            requires_db=True,
-        ),
         ServiceSpec(
             session="insights",
             cmd=".venv/bin/python -m services.derived.insights.daemon",
@@ -400,6 +389,15 @@ def build_services(
     )
 
     both_services: tuple[ServiceSpec, ...] = (
+        healthz_daemon(
+            "schedule-manager",
+            home=home,
+            endpoints=endpoints,
+            module="services.wake.schedule_manager.daemon",
+            capabilities=BOTH,
+            requires_db=True,
+            db_access="runner",
+        ),
         # meiva:note
         # A shell session outlives its agent, agent host and gateway. This local PTY
         # owner keeps sessions in a socket and ledger, independent of the database;

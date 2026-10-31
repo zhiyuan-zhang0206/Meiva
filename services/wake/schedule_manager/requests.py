@@ -38,11 +38,14 @@ _BATCH = 50
 #
 # ``now`` is the loop's monotonic reading for this pass, the clock of the manager's streak decisions.
 def consume_requests(pool: ConnectionPool, manager: ScheduleManager, *, now: float) -> int:
+    if not manager.is_active_unit():
+        return 0
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT schedule_id, requested_at FROM schedule_sync_requests "
+            "WHERE machine = %s "
             "ORDER BY requested_at, schedule_id LIMIT %s",
-            (_BATCH,),
+            (manager.machine_name, _BATCH),
         )
         queued = cur.fetchall()
     handled = 0
@@ -51,8 +54,8 @@ def consume_requests(pool: ConnectionPool, manager: ScheduleManager, *, now: flo
             continue  # leave held/uncertain work queued without blocking other schedules
         with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM schedule_sync_requests WHERE schedule_id = %s AND requested_at = %s",
-                (schedule_id, requested_at),
+                "DELETE FROM schedule_sync_requests WHERE schedule_id = %s AND machine = %s AND requested_at = %s",
+                (schedule_id, manager.machine_name, requested_at),
             )
         handled += 1
         _log.info("[schedule-manager] synced schedule %s on request", schedule_id)

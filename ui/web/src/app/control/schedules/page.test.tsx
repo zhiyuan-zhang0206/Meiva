@@ -43,6 +43,8 @@ const FULL: ScheduleView = {
   created_at: "2026-06-01T00:00:00Z",
   updated_at: "2026-06-29T09:00:00Z",
   script: "print('hi')",
+  machine: "gateway",
+  placement_status: "ok",
 };
 
 const pushSpy = vi.fn();
@@ -87,6 +89,8 @@ const SCHEDULE: ScheduleSummary = {
   last_error: null,
   created_at: "2026-06-01T00:00:00Z",
   updated_at: "2026-06-29T09:00:00Z",
+  machine: "gateway",
+  placement_status: "ok",
 };
 
 describe("SchedulesPage", () => {

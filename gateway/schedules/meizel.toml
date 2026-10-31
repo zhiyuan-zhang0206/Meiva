@@ -1,12 +1,13 @@
 exports = ["receipts.py", "router.py", "session_control.py", "tests"]
 
 [uses]
-"router.py" = ["plans.py", "receipts.py", "session_control.py"]
-"tests" = ["plans.py", "router.py", "session_control.py"]
+"router.py" = ["placement.py", "plans.py", "receipts.py", "session_control.py"]
+"tests" = ["placement.py", "plans.py", "router.py", "session_control.py"]
 
 [external]
 "router.py" = "compiles a user-written schedule script to reject syntax errors"
 
 [purity]
 "__init__.py" = "strict"
+"placement.py" = "strict"
 "plans.py" = "strict"

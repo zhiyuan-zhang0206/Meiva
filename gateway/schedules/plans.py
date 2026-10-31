@@ -23,7 +23,7 @@ __all__ = [
     "logs_view",
 ]
 
-UPDATABLE = ("name", "description", "script", "command", "enabled")
+UPDATABLE = ("name", "description", "script", "command", "enabled", "machine")
 
 # meiva:note
 # A logs request always asks the session for at least this many lines, so a small window still
@@ -48,13 +48,13 @@ class ControlPlan:
 
 
 # meiva:note
-# The requested fields that differ from the row (columns: name, description, command,
-# enabled, script, in the router's full-row order).
+# The requested fields that differ from the row (columns: name, description, script,
+# command, enabled, machine, in the router's full-row order).
 def changed_fields(previous: tuple[object, ...], fields: Mapping[str, object]) -> dict[str, object]:
     current = dict(
         zip(
             UPDATABLE,
-            (previous[1], previous[2], previous[9], previous[3], previous[4]),
+            (previous[1], previous[2], previous[11], previous[3], previous[4], previous[9]),
             strict=True,
         )
     )
@@ -62,11 +62,11 @@ def changed_fields(previous: tuple[object, ...], fields: Mapping[str, object]) -
 
 
 # meiva:note
-# Whether an edit must converge the session now: new code on an enabled schedule, or a
-# flipped enabled flag.
+# Whether an edit must converge the session now: new code on an enabled schedule, a
+# flipped enabled flag, or a reassigned machine.
 def edit_needs_sync(changed: Mapping[str, object], *, enabled: bool) -> bool:
     code_changed = "script" in changed or "command" in changed
-    return (code_changed and enabled) or "enabled" in changed
+    return (code_changed and enabled) or "enabled" in changed or "machine" in changed
 
 
 # meiva:note

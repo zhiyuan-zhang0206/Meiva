@@ -35,8 +35,8 @@ def test_schedule_launch(
     stub.chmod(0o755)
 
     row = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, enabled, desired_revision) "
-        "VALUES ('argv-security-probe', 'pass', 'python schedule.py', true, 1) RETURNING id"
+        "INSERT INTO schedules (name, script, command, enabled, desired_revision, machine) "
+        "VALUES ('argv-security-probe', 'pass', 'python schedule.py', true, 1, 'gateway') RETURNING id"
     ).fetchone()
     assert row is not None
     schedule_id = int(row[0])

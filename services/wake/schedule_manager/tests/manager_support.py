@@ -33,16 +33,21 @@ def schedule_manager(
     pool: ConnectionPool[Any],
     backend: SessionBackend,
     *,
+    machine_name: str = "gateway",
+    home: Path | None = None,
     policy: ManagerPolicy = POLICY,
     repo_root: Path = REPO_ROOT,
     launch_env: Mapping[str, str] = LAUNCH_ENV,
 ) -> ScheduleManager:
+    if home is None:
+        home = meiva_home()
     return ScheduleManager(
         pool,
         backend=backend,
         repo_root=repo_root,
-        home=meiva_home(),
+        home=home,
         policy=policy,
         launch_env=launch_env,
+        machine_name=machine_name,
         observe=observe,
     )

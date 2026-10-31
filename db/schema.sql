@@ -1215,11 +1215,22 @@ CREATE TABLE schedules (
     stall_alerted_at TIMESTAMPTZ,             -- the two-hour no-session alert fired for this outage
     desired_revision BIGINT NOT NULL DEFAULT 0,
     applied_revision BIGINT NOT NULL DEFAULT 0,
-    launch_generation     TEXT                     -- session-host generation the current attempt was launched into (NULL = unknown)
+    launch_generation     TEXT,                    -- session-host generation the current attempt was launched into (NULL = unknown)
+    machine               TEXT NOT NULL CONSTRAINT schedules_machine_nonempty CHECK (btrim(machine) <> ''),
+    owner_plugin          TEXT CONSTRAINT schedules_owner_plugin_nonempty CHECK (owner_plugin IS NULL OR btrim(owner_plugin) <> ''),
+    secret_env_vars       TEXT[] NOT NULL DEFAULT '{}'
 );
 COMMENT ON COLUMN schedules.launch_generation IS
     'Session-host generation (the pty-sessions service epoch) the current execution attempt was launched into; NULL when the attempt predates this column or the host could not name itself. A live epoch that differs from this value means the host was replaced and the attempt died with it, which authorizes one automatic relaunch (services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart).';
+COMMENT ON COLUMN schedules.machine IS
+    'Name of the machine assigned to execute this schedule. A machine''s local schedule-manager executes only schedules matching its machine name.';
+COMMENT ON COLUMN schedules.owner_plugin IS
+    'Plugin directory name that owns and declared this schedule; NULL for operator-created and core builtin schedules.';
+COMMENT ON COLUMN schedules.secret_env_vars IS
+    'Environment variable names injected into this schedule''s session at launch.';
 CREATE INDEX ON schedules (enabled);
+CREATE INDEX schedules_machine_enabled_idx ON schedules (machine, enabled);
+CREATE INDEX schedules_owner_plugin_idx ON schedules (owner_plugin) WHERE owner_plugin IS NOT NULL;
 
 CREATE TABLE resource_creation_receipts (
     operation_key TEXT PRIMARY KEY,
@@ -1242,12 +1253,16 @@ COMMENT ON TABLE schedule_operation_receipts IS
     'Immutable schedule mutation receipts, committed with desired state and sync work; retained without expiry so old retries cannot become new restart intents.';
 
 CREATE TABLE schedule_sync_requests (
-    schedule_id  BIGINT PRIMARY KEY,
-    requested_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+    schedule_id  BIGINT NOT NULL,
+    machine      TEXT NOT NULL CONSTRAINT schedule_sync_requests_machine_nonempty CHECK (btrim(machine) <> ''),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (schedule_id, machine)
 );
 
 COMMENT ON TABLE schedule_sync_requests IS
     'Pending desired-state convergence. Matching revision/session provenance is adopted. The consumer deletes a row after convergence, only if requested_at is unchanged.';
+COMMENT ON COLUMN schedule_sync_requests.machine IS
+    'Target machine where the schedule convergence or session reaping should be performed.';
 
 CREATE TABLE schedule_versions (
     id          BIGSERIAL PRIMARY KEY,
@@ -1284,6 +1299,17 @@ CREATE TABLE schedule_fire_log (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (schedule_id, slot_fire_at)
 );
+
+-- meiva_runner surface for schedules (Slice 1): schedule-manager runs as meiva_runner on every machine
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, UPDATE ON schedules TO meiva_runner;
+        GRANT SELECT, INSERT, UPDATE ON schedule_runs TO meiva_runner;
+        GRANT SELECT, DELETE ON schedule_sync_requests TO meiva_runner;
+        GRANT SELECT, INSERT ON schedule_fire_log TO meiva_runner;
+    END IF;
+END $$;
 
 -- ─────────────── extension registry ───────────────
 -- The cluster owns which extensions exist and their default enablement; the
@@ -2515,6 +2541,7 @@ INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');
 
 -- Current reset anchor: the previous 93 migration names are folded into this schema.
 INSERT INTO schema_migrations (name) VALUES ('20261026T091500_schema-baseline');
+INSERT INTO schema_migrations (name) VALUES ('20261031T172218_machine-placed-schedules');
 
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN

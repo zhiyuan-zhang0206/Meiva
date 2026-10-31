@@ -16943,6 +16943,17 @@
             "type": "boolean",
             "title": "Enabled",
             "default": true
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
           }
         },
         "type": "object",
@@ -17108,6 +17119,43 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "owner_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plugin"
+          },
+          "placement_status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unregistered",
+              "paused",
+              "stopped",
+              "offline"
+            ],
+            "title": "Placement Status"
+          },
+          "placement_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Reason"
           }
         },
         "type": "object",
@@ -17120,7 +17168,9 @@
           "status",
           "last_error",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "machine",
+          "placement_status"
         ],
         "title": "ScheduleSummary"
       },
@@ -17180,6 +17230,17 @@
               }
             ],
             "title": "Enabled"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
           }
         },
         "type": "object",
@@ -17239,6 +17300,43 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "owner_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plugin"
+          },
+          "placement_status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unregistered",
+              "paused",
+              "stopped",
+              "offline"
+            ],
+            "title": "Placement Status"
+          },
+          "placement_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Reason"
+          },
           "script": {
             "type": "string",
             "title": "Script"
@@ -17255,6 +17353,8 @@
           "last_error",
           "created_at",
           "updated_at",
+          "machine",
+          "placement_status",
           "script"
         ],
         "title": "ScheduleView"

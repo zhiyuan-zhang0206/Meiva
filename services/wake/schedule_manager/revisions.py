@@ -32,13 +32,22 @@ def claim_convergence(pool: ConnectionPool[Any], schedule_id: int) -> Generator[
         yield bool(row[0])
 
 
-def desired(pool: ConnectionPool[Any], schedule_id: int) -> Desired | None:
+def desired(
+    pool: ConnectionPool[Any], schedule_id: int, *, machine: str | None = None
+) -> Desired | None:
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT enabled, status, desired_revision, applied_revision, launch_generation "
-            "FROM schedules WHERE id = %s",
-            (schedule_id,),
-        ).fetchone()
+        if machine is not None:
+            row = conn.execute(
+                "SELECT enabled, status, desired_revision, applied_revision, launch_generation "
+                "FROM schedules WHERE id = %s AND machine = %s",
+                (schedule_id, machine),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT enabled, status, desired_revision, applied_revision, launch_generation "
+                "FROM schedules WHERE id = %s",
+                (schedule_id,),
+            ).fetchone()
     return None if row is None else Desired(*row)
 
 
@@ -55,9 +64,17 @@ def launched_revision(home: Path, schedule_id: int) -> int | None:
     return None if info is None else revision_in(info.initial_command)
 
 
-def mark_applied(pool: ConnectionPool[Any], schedule_id: int, revision: int) -> None:
+def mark_applied(
+    pool: ConnectionPool[Any], schedule_id: int, revision: int, *, machine: str | None = None
+) -> None:
     with write_transaction(pool) as conn:
-        conn.execute(
-            "UPDATE schedules SET applied_revision = %s WHERE id = %s AND desired_revision = %s",
-            (revision, schedule_id, revision),
-        )
+        if machine is not None:
+            conn.execute(
+                "UPDATE schedules SET applied_revision = %s WHERE id = %s AND machine = %s AND desired_revision = %s",
+                (revision, schedule_id, machine, revision),
+            )
+        else:
+            conn.execute(
+                "UPDATE schedules SET applied_revision = %s WHERE id = %s AND desired_revision = %s",
+                (revision, schedule_id, revision),
+            )

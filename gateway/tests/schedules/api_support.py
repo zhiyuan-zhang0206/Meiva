@@ -44,8 +44,14 @@ def schedule_client(
 # meiva:note
 # The manager's request loop, consuming requests while the test runs.
 @contextmanager
-def converging(pool: ConnectionPool[Any], backend: Backend) -> Generator[None]:
-    manager = schedule_manager(pool, backend)
+def converging(
+    pool: ConnectionPool[Any], backend: Backend, machine: str | None = None
+) -> Generator[None]:
+    if machine is None:
+        import os
+
+        machine = os.environ.get("MEIVA_MACHINE_NAME", "gateway")
+    manager = schedule_manager(pool, backend, machine_name=machine)
     stop = threading.Event()
 
     def loop() -> None:

@@ -3696,6 +3696,7 @@ export interface components {
             command: string;
             description?: string | null;
             enabled: boolean;
+            machine?: string | null;
         };
         ScheduleDraftRequest: {
             nl: string;
@@ -3724,6 +3725,10 @@ export interface components {
             last_error: string | null;
             created_at: string;
             updated_at: string;
+            machine: string;
+            owner_plugin?: string | null;
+            placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
+            placement_reason?: string | null;
         };
         ScheduleUpdate: {
             name?: string | null;
@@ -3731,6 +3736,7 @@ export interface components {
             command?: string | null;
             description?: string | null;
             enabled?: boolean | null;
+            machine?: string | null;
         };
         ScheduleView: {
             id: number;
@@ -3742,6 +3748,10 @@ export interface components {
             last_error: string | null;
             created_at: string;
             updated_at: string;
+            machine: string;
+            owner_plugin?: string | null;
+            placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
+            placement_reason?: string | null;
             script: string;
         };
         SchemaMismatchStatus: {

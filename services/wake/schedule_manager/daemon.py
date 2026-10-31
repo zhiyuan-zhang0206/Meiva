@@ -33,7 +33,6 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from psycopg_pool import ConnectionPool
 
@@ -86,36 +85,6 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     return pidfile_holds_daemon(
         _pidfile(config, runtime=runtime), "services.wake.schedule_manager.daemon"
     )
-
-
-# meiva:note
-# Seed missing built-in schedules and resync drifted ones when ``enabled``.
-#
-# Runs before the first reconcile, so a built-in launches on the checkout's template, not on
-# the snapshot its row was created with. Only ``script`` / ``command`` of an existing row move.
-async def provision_builtins(pool: ConnectionPool[Any], *, enabled: bool) -> None:
-    if not enabled:
-        return
-    from base.daemon.schedules.builtin_schedules import (
-        ProvisionResult,
-        provision_builtin_schedules,
-    )
-
-    def provision() -> ProvisionResult:
-        # Pool acquisition and provisioning both block; keep them off the event loop.
-        with pool.connection() as conn:
-            return provision_builtin_schedules(conn)
-
-    try:
-        result = await asyncio.to_thread(provision)
-        if result.created:
-            _log.info("provisioned built-in schedules: %s", ", ".join(result.created))
-        if result.resynced:
-            _log.info(
-                "resynced built-in schedule scripts to the checkout: %s", ", ".join(result.resynced)
-            )
-    except Exception:
-        _log.warning("built-in schedule provisioning failed", exc_info=True)
 
 
 def manager_policy(config: ConfigBoot) -> ManagerPolicy:
@@ -190,11 +159,7 @@ async def run(
 
     pool = database().pool(max_size=_POOL_MAX_SIZE)
     try:
-        # Automatic seeding is explicit configuration; unseeded previews still use
-        # the schedule APIs without launching background workloads.
-        await provision_builtins(
-            pool, enabled=process_config.view.gateway.provision_builtin_schedules
-        )
+        machine = ConfiguredMachineIdentity(process_config)
         manager = ScheduleManager(
             pool,
             backend=get_shell_backend(home=runtime.parent),
@@ -202,6 +167,7 @@ async def run(
             home=runtime.parent,
             policy=manager_policy(process_config),
             launch_env=forward_env_dict(process_config.process_environment()),
+            machine_name=machine.name(),
         )
         await run_loops(pool, manager, liveness)
     finally:

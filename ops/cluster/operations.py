@@ -42,6 +42,7 @@ from ops.rpc_schemas import (
     HarnessProbeResult,
     HarnessProbeRow,
     OpsCommandItem,
+    ScheduleCaptureResult,
     ShellCaptureResult,
     ShellKillResult,
     ShellProbeResult,
@@ -304,3 +305,24 @@ def shell_capture_op(
         created_at=created_at,
         uptime_seconds=uptime_seconds,
     )
+
+
+def schedule_capture_op(
+    schedule_id: int, lines: int = 200, *, home: Path
+) -> ScheduleCaptureResult:
+    from base.cluster import session_name
+    from base.sessions.backend import get_shell_backend
+
+    backend = get_shell_backend(home=home)
+    name = session_name(f"schedule-{schedule_id}")
+    captured: str | None = backend.capture_pane(name, lines) if backend.has_session(name) else None
+    transcript: list[str] | None = None
+    if captured is None:
+        log_path = backend.session_log_path(name)
+        if log_path is not None and log_path.exists():
+            try:
+                text = log_path.read_text(encoding="utf-8", errors="replace")
+                transcript = text.splitlines()[-lines:]
+            except OSError:
+                transcript = None
+    return ScheduleCaptureResult(captured=captured, transcript=transcript)

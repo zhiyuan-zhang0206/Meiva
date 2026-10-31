@@ -45,8 +45,11 @@ def pool(db_url: str, *, database_gate: ProcessDbGate) -> Generator[ConnectionPo
         p.close()
 
 
-def _queue(conn: psycopg.Connection, schedule_id: int) -> None:
-    conn.execute("INSERT INTO schedule_sync_requests (schedule_id) VALUES (%s)", (schedule_id,))
+def _queue(conn: psycopg.Connection, schedule_id: int, machine: str = "gateway") -> None:
+    conn.execute(
+        "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s)",
+        (schedule_id, machine),
+    )
     conn.commit()
 
 
@@ -131,9 +134,11 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     *,
     process_config: ConfigBoot,
 ) -> None:
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
+
     config = _no_builtins(process_config)
     endpoint = ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("schedule_manager")
-    _queue(db_conn, 4242)
+    _queue(db_conn, 4242, machine=ConfiguredMachineIdentity(config).name())
 
     with (
         failing_write(db_conn, table="schedule_sync_requests", events="DELETE"),

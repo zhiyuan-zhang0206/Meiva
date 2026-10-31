@@ -198,8 +198,8 @@ def test_runner_hard_exit_child_ownership(
     root.mkdir()
     complete = mode in ("complete", "blocked-completion")
     row = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, enabled, status) "
-        "VALUES ('cleanup', %s, 'python schedule.py', true, 'stopped') RETURNING id",
+        "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+        "VALUES ('cleanup', %s, 'python schedule.py', true, 'stopped', 'gateway') RETURNING id",
         (_scripts(root, complete=complete),),
     ).fetchone()
     db_conn.commit()
@@ -268,8 +268,8 @@ def _blocked_scenario(
 ) -> tuple[int, int]:
     (unit_home / ".env").write_text(f"MEIVA_DB_URL={db_url}\n")
     schedule = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, enabled, status) "
-        "VALUES ('bounded', %s, 'python schedule.py', true, 'stopped') RETURNING id",
+        "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+        "VALUES ('bounded', %s, 'python schedule.py', true, 'stopped', 'gateway') RETURNING id",
         (script,),
     ).fetchone()
     assert schedule is not None

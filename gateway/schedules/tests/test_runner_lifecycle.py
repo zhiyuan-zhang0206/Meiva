@@ -41,8 +41,8 @@ def test_a_finished_run_leaves_no_guard_thread(
     db_conn: psycopg.Connection, unit_home: object, *, machine_identity: MachineIdentityReader
 ) -> None:
     row = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, enabled, status) "
-        "VALUES ('guard-thread', 'pass', 'python schedule.py', true, 'stopped') RETURNING id"
+        "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+        "VALUES ('guard-thread', 'pass', 'python schedule.py', true, 'stopped', 'gateway') RETURNING id"
     ).fetchone()
     db_conn.commit()
     assert row is not None

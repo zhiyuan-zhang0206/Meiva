@@ -9,7 +9,7 @@ def test_stale_runner_revision_cannot_execute_newer_script(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     row = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, desired_revision) VALUES ('stale', 'raise RuntimeError()', 'python schedule.py', 2) RETURNING id"
+        "INSERT INTO schedules (name, script, command, desired_revision, machine) VALUES ('stale', 'raise RuntimeError()', 'python schedule.py', 2, 'gateway') RETURNING id"
     ).fetchone()
     assert row is not None
     db_conn.commit()
@@ -24,7 +24,7 @@ def test_current_revision_is_applied_before_clean_completion(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     row = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, desired_revision) VALUES ('current', 'pass', 'python schedule.py', 2) RETURNING id"
+        "INSERT INTO schedules (name, script, command, desired_revision, machine) VALUES ('current', 'pass', 'python schedule.py', 2, 'gateway') RETURNING id"
     ).fetchone()
     assert row is not None
     db_conn.commit()

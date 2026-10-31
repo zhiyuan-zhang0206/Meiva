@@ -85,12 +85,14 @@ def fake_session(
     return backend, backend.launched
 
 
-def _insert(conn: psycopg.Connection, name: str, *, enabled: bool = True) -> int:
+def _insert(
+    conn: psycopg.Connection, name: str, *, enabled: bool = True, machine: str = "gateway"
+) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status) "
-            "VALUES (%s, 'x', 'python schedule.py', %s, 'stopped') RETURNING id",
-            (name, enabled),
+            "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+            "VALUES (%s, 'x', 'python schedule.py', %s, 'stopped', %s) RETURNING id",
+            (name, enabled, machine),
         )
         row = cur.fetchone()
     conn.commit()
@@ -256,13 +258,15 @@ def test_a_launch_is_claimed_once(
     assert _backoff_state(db_conn, sid) == (1, False)
 
 
-def _insert_running(conn: psycopg.Connection, name: str, *, generation: str | None) -> int:
+def _insert_running(
+    conn: psycopg.Connection, name: str, *, generation: str | None, machine: str = "gateway"
+) -> int:
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO schedules (name, script, command, enabled, status, launch_count, "
-            "launch_generation) VALUES (%s, 'x', 'python schedule.py', true, 'running', 1, %s) "
+            "launch_generation, machine) VALUES (%s, 'x', 'python schedule.py', true, 'running', 1, %s, %s) "
             "RETURNING id",
-            (name, generation),
+            (name, generation, machine),
         )
         row = cur.fetchone()
     conn.commit()

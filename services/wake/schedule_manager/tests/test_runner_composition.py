@@ -15,8 +15,8 @@ from services.wake.schedule_manager import runner
 
 def _schedule(conn: psycopg.Connection, script: str = "pass") -> int:
     row = conn.execute(
-        "INSERT INTO schedules (name, script, command) "
-        "VALUES ('composition', %s, 'python schedule.py') RETURNING id",
+        "INSERT INTO schedules (name, script, command, machine) "
+        "VALUES ('composition', %s, 'python schedule.py', 'gateway') RETURNING id",
         (script,),
     ).fetchone()
     conn.commit()

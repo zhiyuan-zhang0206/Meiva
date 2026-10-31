@@ -62,12 +62,13 @@ def _h_schedules_update(args: argparse.Namespace) -> int:
         and args.script_file is None
         and args.command is None
         and args.description is None
+        and args.machine is None
         and not args.enable
         and not args.disable
     ):
         print(
             "meiva: pass at least one of --name / --script / --script-file / --command / "
-            "--description / --enable / --disable — a partial update needs at least one field",
+            "--description / --machine / --enable / --disable — a partial update needs at least one field",
             file=sys.stderr,
         )
         return 2
@@ -190,6 +191,9 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         help="create the built-in schedules missing from this cluster (per "
         "schedules/manifest.json; product enabled, operator disabled)",
     )
+    schedules_provision_p.add_argument(
+        "--machine", default=None, help="machine assigned to newly provisioned schedules"
+    )
     schedules_provision_p.set_defaults(func=_h_schedules_provision)
 
     schedules_verify_p = schedules_sub.add_parser(
@@ -225,6 +229,9 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     )
     schedules_create_p.add_argument("--description", default=None, help="what this schedule does")
     schedules_create_p.add_argument(
+        "--machine", default=None, help="host machine to run schedule on (default: gateway machine)"
+    )
+    schedules_create_p.add_argument(
         "--disabled",
         action="store_true",
         help="create without launching it (enabled by default)",
@@ -239,6 +246,9 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     _add_script_args(schedules_update_p)
     schedules_update_p.add_argument("--command", default=None, help="new run command")
     schedules_update_p.add_argument("--description", default=None, help="new description")
+    schedules_update_p.add_argument(
+        "--machine", default=None, help="reassign schedule to host machine"
+    )
     enabled_group = schedules_update_p.add_mutually_exclusive_group()
     enabled_group.add_argument(
         "--enable", action="store_true", help="set enabled=true (does not force a relaunch)"

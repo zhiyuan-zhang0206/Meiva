@@ -8,7 +8,7 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 "requests.py" = ["manager.py"]
 "revisions.py" = ["convergence.py"]
 "runner.py" = ["engine.py", "stall_policy.py"]
-"tests" = ["blocked_streak.py", "convergence.py", "daemon.py", "guard_admission.py", "manager.py", "manager_policy.py", "recovery_gate.py", "runner.py", "script_outcome.py", "stall_policy.py"]
+"tests" = ["blocked_streak.py", "convergence.py", "daemon.py", "guard_admission.py", "manager.py", "manager_policy.py", "recovery_gate.py", "requests.py", "runner.py", "script_outcome.py", "stall_policy.py"]
 
 [external]
 "engine.py" = "runs schedule scripts (the one materialized from the database under $MEIVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"

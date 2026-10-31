@@ -260,6 +260,18 @@ async def lifespan(
 
             _build_request_resources(app, process, releases)
 
+            if config.view.gateway.provision_builtin_schedules:
+                from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
+
+                def _provision() -> None:
+                    with db_pool.connection() as conn:
+                        provision_builtin_schedules(conn, machine=process.machine.name())
+
+                try:
+                    await asyncio.to_thread(_provision)
+                except Exception:
+                    _log.warning("gateway built-in schedule provisioning failed", exc_info=True)
+
             grafana_client = grafana_router.build_proxy_client()
             app.state.grafana_client = grafana_client
             releases.push_async_callback(grafana_client.aclose)

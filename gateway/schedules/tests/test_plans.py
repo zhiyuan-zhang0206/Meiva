@@ -20,11 +20,26 @@ def _row(
     description: str | None = None,
     command: str = "python schedule.py",
     enabled: bool = True,
+    machine: str = "gateway",
+    owner_plugin: str | None = None,
     script: str = "print(1)",
 ) -> tuple[object, ...]:
     # meiva:note
-    # id, name, description, command, enabled, status, last_error, created_at, updated_at, script
-    return (1, name, description, command, enabled, "stopped", None, None, None, script)
+    # id, name, description, command, enabled, status, last_error, created_at, updated_at, machine, owner_plugin, script
+    return (
+        1,
+        name,
+        description,
+        command,
+        enabled,
+        "stopped",
+        None,
+        None,
+        None,
+        machine,
+        owner_plugin,
+        script,
+    )
 
 
 def test_only_fields_that_differ_from_the_row_are_changes() -> None:
@@ -34,6 +49,7 @@ def test_only_fields_that_differ_from_the_row_are_changes() -> None:
         "script": "print(2)"
     }
     assert changed_fields(previous, {"enabled": True, "command": "python schedule.py"}) == {}
+    assert changed_fields(previous, {"machine": "host-b"}) == {"machine": "host-b"}
 
 
 def test_unknown_fields_are_ignored() -> None:
@@ -48,6 +64,8 @@ def test_unknown_fields_are_ignored() -> None:
         ({"script": "x"}, False, False),
         ({"enabled": False}, False, True),
         ({"enabled": True}, True, True),
+        ({"machine": "host-b"}, True, True),
+        ({"machine": "host-b"}, False, True),
         ({"name": "x", "description": "y"}, True, False),
         ({}, True, False),
     ],
