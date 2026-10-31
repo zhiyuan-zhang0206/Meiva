@@ -37,7 +37,7 @@ full Gmail client.
 | meiva-guide.pages | Compose page publishing and user input with reusable frontend resources | [[meiva_builtins/skills/platform/meiva-guide/pages/docs/pages.meiva.okf.md]] |
 | sms | Read SMS/iMessage verification codes via macOS Messages.app (on-demand script, not a daemon) | [[meiva_builtins/skills/integrations/sms/docs/sms.meiva.okf.md]] |
 | gmail | Full Gmail client (read/search/send/reply/forward/draft + newsletter, pure stdlib IMAP/SMTP) | [[meiva_builtins/skills/integrations/gmail/docs/gmail.meiva.okf.md]] |
-| meiva-immersive | Keep a live human conversation fed during an opt-in session while heavy work runs in parallel | [[meiva_builtins/skills/coordination/meiva-immersive/docs/meiva-immersive.meiva.okf.md]] |
+| meiva-immersive-mode | Run a tight-loop live session across a shared perceptual surface while heavy work runs in the background | [[meiva_builtins/skills/coordination/meiva-immersive-mode/docs/meiva-immersive-mode.meiva.okf.md]] |
 
 ## Ops, scheduling & lifecycle
 Operating and extending Meiva, scheduling timed tasks, background watchers, and

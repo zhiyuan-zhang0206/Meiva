@@ -84,6 +84,13 @@ knowledge, the agent's understanding of the learning objective, and the next
 lesson. A polished lesson outline alone cannot establish learning. Reuse the
 working path while revising it from evidence.
 
+When an unsettled factual assumption is testable through a read-only,
+side-effect-free check that cannot finish in one instant step, dispatch a
+**silent tracer probe** in the background without pausing the dialogue. Bring
+its result back only if it falsifies a working assumption, settles an open
+disagreement, or provides material new evidence; leave routine confirmations
+silent rather than interrupting the conversation.
+
 A request to discuss a pilot authorizes its design, not contacting participants
 or building it. Continue independent work while waiting for genuinely missing
 authority or preferences.

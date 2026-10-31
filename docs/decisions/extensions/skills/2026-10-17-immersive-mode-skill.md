@@ -52,4 +52,4 @@ interaction, with code, builds, and research delegated. Evaluation cases and
 measures ship with the skill; the change stays unmerged until the live
 session and requester review land.
 
-Current guidance lives in [Immersive Mode](../../../../meiva_builtins/skills/coordination/meiva-immersive/SKILL.md).
+Current guidance lives in [Immersive Mode](../../../../meiva_builtins/skills/coordination/meiva-immersive-mode/SKILL.md).

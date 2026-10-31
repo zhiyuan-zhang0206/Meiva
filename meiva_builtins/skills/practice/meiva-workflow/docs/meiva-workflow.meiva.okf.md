@@ -14,9 +14,11 @@ tags:
 `meiva-workflow` is the entry skill for choosing and adjusting how to work. Load it
 for non-trivial, ambiguous, consequential, sustained, or parallel tasks. Its
 selection dimensions are independent; loading it does not require an interview,
-a written plan or sustained goal supervision. Parallelize independent work;
-choose fork, fresh spawn or a suitable available peer by context. Short or
-dependent work can execute directly with appropriate evidence.
+a written plan or sustained goal supervision. Parallelize independent work, and delegate slow or high-noise steps even for a
+single serial task when keeping a live human session responsive or a
+coordinating context clean; choose fork, fresh spawn, or a suitable available
+peer by context. Short, tightly coupled work can execute directly with
+appropriate evidence.
 
 The user supplies intent, preferences, and authority. Both human and agent
 factual beliefs need calibration against evidence. Agents investigate and
@@ -36,8 +38,10 @@ These capabilities interleave; they are not sequential approval stages.
 
 Tracer bullets are a general Workflow principle: start with a small real path
 through outcome and feedback when a critical assumption or integration is
-untested. Engineering and research retain their domain methods and reference
-Workflow for shared alignment and evaluation. Simple tasks use direct checks.
+untested, and during alignment run longer read-only checks as silent background
+probes that surface only when they change a belief or settle a disagreement.
+Engineering and research retain their domain methods and reference Workflow for
+shared alignment and evaluation. Simple tasks use direct checks.
 
 `capability-timescale` is a first-class working dimension. It owns current
 AI/tool capability evidence and its implications for feasibility, scope,

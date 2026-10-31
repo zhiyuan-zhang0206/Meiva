@@ -65,8 +65,12 @@ of it. The agent proposes the pieces where a prediction would settle something,
 and the human and agent choose among them together. Not every piece needs one,
 and a prediction nothing could contradict teaches nothing.
 
-While waiting on the human, the agent works the same question instead of
-filling the pause — the next piece, the model tested on an adjacent case.
+While the conversation moves or waits on the human, the agent works the same
+question in the background instead of filling the pause — preparing the next
+piece, testing the model on an adjacent case, or running a silent read-only
+tracer probe on an untested factual assumption. A background probe enters the
+dialogue only when it contradicts a working belief, resolves a split between
+models, or yields a concrete new piece; uneventful checks stay silent.
 
 Replaying a past case keeps the same shape, with the record standing in for the
 live question. What is observed is how the human's model, explanation and
@@ -75,9 +79,9 @@ being one optional kind of evidence, not the measure of understanding.
 
 ## With Immersive
 
-In a live session the `meiva-immersive` skill
-(`meiva.help(meiva.skills.meiva_immersive)`) owns the cadence: the silence cap,
-the ledger, and what reverts at the end.
+In a live session the `meiva-immersive-mode` skill
+(`meiva.help(meiva.skills.meiva_immersive_mode)`) owns the cadence: the surface
+rhythm and silence watchdog cap, the ledger, and what reverts at the end.
 This guide owns what each piece of evidence feeds. Without a session the guide
 is unchanged — pieces and questions wait in notes for the human to return to —
 and only the cadence contract drops away.

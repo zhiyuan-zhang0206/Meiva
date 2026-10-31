@@ -1,0 +1,116 @@
+{
+  "skill_name": "meiva-immersive-mode",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "You are agent R running on the native Meiva harness (your context note states `exec_timeout_seconds` is 300 seconds, `exec_node_timeout_seconds` is 1200 seconds). The human writes: \"immersive on — I need to fix our onboarding doc before tomorrow. Check the repo copy first, then have the full lint suite run; it takes about four minutes.\" You are in a scratch workspace containing onboarding.md; a lint command (~4 minutes) and background execution (`meiva.shell.run_background` / `meiva.agents.spawn`) are available. Keep this live session per the meiva-immersive-mode skill. Describe your entry sequence (including ledger and lifecycle calls), your entry announcement, and your next messages and actions.",
+      "files": [],
+      "expected_output": "Writes the workspace ledger first (saving prior exec_timeout_seconds=300 and the session contract), announces the contract (chat primary surface, 60s silence watchdog cap, hot/cold split, tightened foreground exec timeout, exit rule), calls meiva.self.restart(config_overlay={\"exec_timeout_seconds\": 30}) (or 25-30s), then on resume reads onboarding.md inline without repeating the announcement and dispatches the 4-minute lint to the background with an explicit pre-notice/wait state.",
+      "assertions": [
+        "Persists the prior exec_timeout_seconds (300s) and session contract to a workspace ledger file before calling meiva.self.restart.",
+        "Tightens exec_timeout_seconds via meiva.self.restart(config_overlay=...) to a value <= 30s (at most half the 60s silence cap and below exec_node_timeout_seconds), and avoids duplicating the entry announcement after restart resumes.",
+        "The entry announcement names the primary surface, the silence watchdog cap (default 60s), the hot/cold inline-vs-delegate split, and how exit reverts.",
+        "Reads onboarding.md inline on the hot path while dispatching the 4-minute lint asynchronously to the background before it can block.",
+        "Claims no lint pass before the background job finishes, and keeps every message informative with zero filler."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "You are agent R on the native Meiva harness (`exec_timeout_seconds` = 300s). The human writes, without starting any live session and while away from the dialog: \"Can you fix the broken link in onboarding.md and tell me what you changed?\" You are in a scratch workspace with edit access. Handle the request and state what you send and whether you touch lifecycle config.",
+      "files": [],
+      "expected_output": "Follows default reduce-context-switch-for-human batch discipline: fixes the link, verifies it, sends one concise summary when done, does not enter immersive mode or call meiva.self.restart to tighten exec_timeout_seconds, and makes at most one non-insistent live-session offer (or none, since the task is trivial).",
+      "assertions": [
+        "Does not enter immersive mode, announce a session contract, or apply silence-cap pacing without human initiation.",
+        "Does not tighten exec_timeout_seconds or call meiva.self.restart.",
+        "Delivers the outcome as a single batched summary rather than a stream of live updates.",
+        "Makes at most one live-session offer (or none) with no follow-up nagging."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "You are mid-session in meiva-immersive-mode (chat primary surface, silence watchdog cap 60s, foreground exec_timeout_seconds tightened to 30s). You just dispatched a 6-minute backend build in the background. Two minutes in, while the build is still running, the human asks: \"does this touch the API schema?\" Describe what you sent when starting the build, how you handle the human's question now, and what happens when the build finishes.",
+      "files": [],
+      "expected_output": "Sent a pre-notice when backgrounding the 6-minute build naming the running job and expected signal; preempts on the human's question and answers within one fast inline read/check without waiting on the build; records wait state in the ledger; reports the verified build outcome when the completion wakeup lands.",
+      "assertions": [
+        "Covers the 6-minute background build with an explicit pre-notice and ledger wait entry rather than emitting mechanical 60-second filler pings.",
+        "Preempts immediately for the human's question and answers within one fast inline check.",
+        "Answers from a targeted local read/diff check rather than waiting on the 6-minute build.",
+        "Delivers the build result upon completion wakeup and updates the workspace ledger."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "End of a live session on the native Meiva harness: your workspace ledger records `prior_exec_timeout_seconds: 300`, two still-running background tasks with their owners, and the human's earlier choice of option B (rationale: keeps wire compatibility). The human says: \"ok, we're done for now.\" Describe your exact closing steps, message, and post-restart behavior.",
+      "files": [],
+      "expected_output": "Updates the workspace ledger marking the session closed (preserving option B with rationale and the two delegated tasks/owners), sends a concise closing handoff naming what changed, the delegated work + owners, the ledger path, and next steps under default batched reporting, calls meiva.self.restart(config_overlay={\"exec_timeout_seconds\": 300}) to restore the original timeout, and stops quietly when the post-restart turn resumes without sending a second close.",
+      "assertions": [
+        "Closing message states what changed, the two delegated tasks with owners, the workspace ledger path, and the next milestone.",
+        "Records the closed state and preserves the human's option B decision with its one-line rationale in the ledger before restarting.",
+        "Calls meiva.self.restart(config_overlay={\"exec_timeout_seconds\": 300}) to restore the saved timeout.",
+        "Explicitly resumes reduce-context-switch-for-human batched reporting and stays silent on the post-restart resume rather than duplicating the close."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "You are agent R running inside an attached external CLI harness session (`meiva.attach()` borrowed identity, where `meiva.self.restart` is refused by the harness boundary). The human writes: \"ok let's do this one live — dig into why the nightly report job keeps drifting, and keep me posted while you're at it.\" They did not say \"immersive on\". Logs are in your scratch directory; deep multi-day log correlation takes ~5 minutes and background execution is available. Handle the first minutes and list your actions and messages.",
+      "files": [],
+      "expected_output": "Activates meiva-immersive-mode from the natural-language live request without needing the literal phrase \"immersive on\"; writes the workspace ledger noting the attached harness boundary, skips meiva.self.restart cleanly without failing, announces the live contract (silence watchdog cap 60s, hot/cold split, exit), performs a quick initial log check inline, and dispatches the 5-minute correlation job to the background.",
+      "assertions": [
+        "Treats \"let's do this one live / keep me posted\" as explicit human entry without requiring the literal words \"immersive on\".",
+        "Skips meiva.self.restart cleanly because the session runs on an attached external CLI harness, recording the boundary in the workspace ledger.",
+        "Announces the session contract (silence watchdog cap, hot/cold split, exit) and runs a fast initial check inline.",
+        "Dispatches the 5-minute correlation analysis to the background rather than blocking the foreground turn."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "You are agent R. The human writes: \"I'm going heads-down — don't ping me about this; just fix the broken nightly report job and send me one summary when it's done.\" The work takes about 20 minutes. Handle it and state what you send and when.",
+      "files": [],
+      "expected_output": "Keeps reduce-context-switch-for-human batch discipline: executes and verifies the fix without entering immersive mode, announces no contract or cap, sends zero interim pings, and delivers one verified summary when finished.",
+      "assertions": [
+        "Does not enter meiva-immersive-mode, tighten exec_timeout_seconds, or announce a live contract.",
+        "Sends zero interim updates while the human is heads-down.",
+        "Delivers a single batched summary once the fix is complete and verified.",
+        "Treats the prompt as explicit attention protection (reduce-context-switch-for-human), not a live session."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "You are agent R on the native Meiva harness (`exec_timeout_seconds` = 300s). The human writes: \"immersive on — sit with me while we tune the pricing card spacing and contrast in our Vite app under app/. I want to watch each tweak live in the browser, and make sure we don't break the component test suite.\" Starting Vite on free port 5173 takes ~3 seconds (`meiva.ui.show` and `meiva.ui.serve` are available); running the full typecheck + vitest suite takes ~90 seconds. Describe your entry setup, how you stand up the preview, and how you execute the first CSS spacing tweak plus verification.",
+      "files": [],
+      "expected_output": "Persists ledger and tightens exec_timeout_seconds via meiva.self.restart; anchors the primary perceptual surface on the live browser preview with chat as brief cue & control; stands up the live feedback rig first by starting the Vite HMR server in a background/persistent session and registering port 5173 via meiva.ui.show; applies the small CSS spacing/contrast tweak inline on the hot path so HMR updates the page in seconds, sends a 1-2 sentence chat cue pointing to what changed visually and asking for aesthetic feedback, and dispatches the 90-second typecheck + vitest run to the background in parallel.",
+      "assertions": [
+        "Persists prior exec_timeout_seconds to the ledger and tightens exec_timeout_seconds via meiva.self.restart on entry.",
+        "Establishes the live visual feedback rig first by starting the Vite dev server and exposing it via meiva.ui.show on an explicit port (with meiva.ui.serve noted only if initial boot were slow).",
+        "Applies small reversible CSS/layout tweaks inline on the foreground hot path to trigger sub-second HMR observable deltas rather than delegating one-line visual edits to a slow worker.",
+        "Dispatches the ~90-second typecheck and test suite asynchronously in the background rather than running it inline.",
+        "Keeps chat messages to short 1-2 sentence cues directing the human's eyes on the live page rather than long prose explanations."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "You are agent R on the native Meiva harness (`exec_timeout_seconds` = 300s). The human writes: \"immersive on — I'm sitting in the sweet spot between the studio monitors. Help me dial in the 2.2 kHz crossover EQ gain and check left/right balance; play short test tones as we go, and also run the full room impulse sweep analyzer (~3 minutes) in the background.\" A CLI command can play a 1.5-second reference tone or apply an EQ parameter in <1 second; the impulse analyzer takes ~3 minutes. Describe your entry, first probe, and tuning loop.",
+      "files": [],
+      "expected_output": "Persists ledger and tightens exec_timeout_seconds via meiva.self.restart; identifies physical audio output as the primary perceptual surface; fires a short 1.5-second safe reference tone probe inline first to confirm L/R routing and level; dispatches the 3-minute impulse analyzer to the background with a ledger entry; runs fast EQ parameter tweaks + short listening tones inline on the hot path paired with crisp 1-2 sentence listening cues.",
+      "assertions": [
+        "Identifies the studio monitor audio output as the primary perceptual surface and tightens exec_timeout_seconds after saving the ledger.",
+        "Establishes the live audio feedback rig first with a short (~1.5s) inline tracer tone probe to verify output routing before sweeping EQ.",
+        "Executes fast EQ parameter tweaks and brief listening probes inline on the foreground hot path for tight perceptual iteration.",
+        "Offloads the ~3-minute room impulse analyzer to the background instead of blocking the live listening loop.",
+        "Uses concise chat cues asking for specific perceptual judgment (e.g., center image / harshness at 2.2 kHz) rather than long acoustic essays."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "You are mid-session in meiva-immersive-mode (silence watchdog cap 60s, foreground exec_timeout_seconds = 30s), walking through a release checklist live with the human. The human says: \"Keep walking me through the rollback steps right now, and in parallel kick off deep config audits across all four services — auth, billing, notifications, and search (each takes 3-5 minutes). Only interrupt our walkthrough if one finds a release blocker; otherwise give me one combined readout when all four finish.\" Describe how you structure the background delegation so your live walkthrough isn't spammed by worker wakeups.",
+      "files": [],
+      "expected_output": "Instead of spawning 4 leaf workers directly off the foreground agent (which would trigger 4 separate send_message turn wakeups mid-walkthrough), spawns a single background sub-orchestrator (or meiva-dynamic-workflow coordinator) to launch and collect the 4 service audits; instructs leaf workers to report only to that sub-orchestrator and instructs the sub-orchestrator to message the foreground early only on a release blocker and otherwise send one aggregated report when all four complete; logs the sub-orchestrator in the ledger and immediately continues the rollback walkthrough with the human.",
+      "assertions": [
+        "Does not attach 4 leaf workers directly reporting to the foreground immersive agent.",
+        "Spawns one background sub-orchestrator (or meiva-dynamic-workflow coordinator) that owns the 4 leaf service audits.",
+        "Configures leaf reports to terminate at the sub-orchestrator, forwarding to the foreground only release blockers or the single aggregated completion rollup.",
+        "Records the sub-orchestrator owner and wait condition in the workspace ledger and immediately continues the live rollback walkthrough with the human."
+      ]
+    }
+  ]
+}
