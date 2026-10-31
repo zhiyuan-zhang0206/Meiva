@@ -80,3 +80,8 @@ the human is present. Both regimes keep heavy work parallel; they differ only
 in when information reaches the human. The cap bounds silence while work is active; it is not a timer — a message still must carry information (rule 3), and an `oriented` communication style continues underneath with this session contract on top. Do not run immersive behavior outside
 an active session, and do not leave a session nominally open once the human
 is gone.
+
+When the session should leave the human able to judge the subject themselves,
+the depth target and the shape of each segment are in
+[Understanding Loop](../../practice/meiva-workflow/align/references/understanding-loop.md);
+pacing stays with this skill.
