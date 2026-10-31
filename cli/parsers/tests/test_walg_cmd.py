@@ -183,7 +183,13 @@ def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
     plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], sandbox: Sandbox
 ) -> None:
     assert (
-        walg_cmd.cmd_walg_check(plane, token="e" * 32, home=sandbox.home, installed=always_pinned)
+        walg_cmd.cmd_walg_check(
+            plane,
+            token="e" * 32,
+            home=sandbox.home,
+            environ=sandbox.environ,
+            installed=always_pinned,
+        )
         == 0
     )
 
@@ -204,7 +210,13 @@ def test_check_exits_non_zero_and_names_the_failing_step(
     sandbox.set_mode("nodelete")
 
     assert (
-        walg_cmd.cmd_walg_check(plane, token="f" * 32, home=sandbox.home, installed=always_pinned)
+        walg_cmd.cmd_walg_check(
+            plane,
+            token="f" * 32,
+            home=sandbox.home,
+            environ=sandbox.environ,
+            installed=always_pinned,
+        )
         == 1
     )
 
@@ -400,6 +412,7 @@ def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
             user="meiva",
             clock=_clock(),
             home=sandbox.home,
+            environ=sandbox.environ,
             installed=always_pinned,
         )
 
@@ -435,6 +448,7 @@ def test_restore_rejects_a_bad_target_before_fetching(
         backup="LATEST",
         clock=_clock(),
         home=sandbox.home,
+        environ=sandbox.environ,
         **kwargs,
         installed=always_pinned,
     )
@@ -457,6 +471,7 @@ def test_restore_reports_a_failed_fetch_and_exits_non_zero(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        environ=sandbox.environ,
         installed=always_pinned,
     )
 
@@ -481,6 +496,7 @@ def test_restore_refuses_a_directory_that_holds_something(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        environ=sandbox.environ,
         installed=always_pinned,
     )
 
@@ -501,6 +517,7 @@ def test_restore_while_wal_g_is_off_says_so(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        environ=sandbox.environ,
         installed=always_pinned,
     )
 
@@ -597,6 +614,7 @@ def test_restore_refuses_a_key_other_than_the_one_the_handed_home_pinned(
         lsn=None,
         clock=_clock(),
         home=sandbox.home,
+        environ=sandbox.environ,
         installed=always_pinned,
     )
 
