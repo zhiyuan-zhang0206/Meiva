@@ -5,6 +5,3 @@ exports = ["shared-context-panel.tsx"]
 "shared-context-panel.tsx" = ["to-user-document.tsx"]
 "to-user-document.test.tsx" = ["to-user-document.tsx"]
 "to-user-empty-state.test.tsx" = ["to-user-document.tsx"]
-
-[debt.first-party-patch]
-"shared-context-panel.test.tsx#vi.mock ui/web/src/components/inspector/inspector-panel.tsx" = 1
