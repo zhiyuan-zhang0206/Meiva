@@ -18,7 +18,13 @@ import { FLEX } from "@/lib/layout/layout";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { useApi } from "@/lib/transport/transport-context";
 
-const WINDOWS: { labelKey: string; value: number | null }[] = [
+// meiva:note
+// `labelKey` carries the translator's own key type: a window whose label key is missing fails at
+// this table, not at a cast on the render path.
+// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
+type InspectorKey = Parameters<ReturnType<typeof useTranslations<"inspector">>>[0];
+
+const WINDOWS: { labelKey: InspectorKey; value: number | null }[] = [
   { labelKey: "windowAll", value: null },
   { labelKey: "window5m", value: 0 },
   { labelKey: "window1h", value: 1 },
@@ -170,7 +176,7 @@ export function CostActivitySection({
           <WindowSelect
             value={hours == null ? "all" : String(hours)}
             options={WINDOWS.map((w) => {
-              const label = t(w.labelKey as Parameters<typeof t>[0]);
+              const label = t(w.labelKey);
               const appliedHours = inspect?.applied_window_hours;
               return {
                 value: String(w.value ?? "all"),

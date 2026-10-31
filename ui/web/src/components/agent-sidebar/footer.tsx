@@ -199,7 +199,14 @@ export function StatsCards({
                 ? `${STATS_WINDOW_LABELS[h]} · ${appliedWindowHours}h`
                 : STATS_WINDOW_LABELS[h],
           }))}
-          onChange={(v) => onWindowChange(Number(v) as StatsWindowHours)}
+          // meiva:note
+          // The select offers exactly the known windows, so the pick is looked up in that list: a
+          // value the list does not hold changes nothing rather than being asserted into the type.
+          // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+          onChange={(v) => {
+            const picked = STATS_WINDOWS.find((h) => String(h) === v);
+            if (picked !== undefined) onWindowChange(picked);
+          }}
           ariaLabel={t("statisticsWindow")}
           className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
         />

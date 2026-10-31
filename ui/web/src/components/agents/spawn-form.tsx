@@ -15,7 +15,7 @@ import { Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
+import { DEFAULT_HARNESS, HARNESSES, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine, useRefreshHarnessAvailability } from "@/lib/harness/use-harness-availability";
 import { SpawnStack, SpawnTable, type SpawnMachine } from "./spawn-table";
 import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
@@ -23,6 +23,25 @@ import { useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
+
+// meiva:note
+// The readers for a `Record<string, unknown>` settings row: each answers the value only when it is
+// the type the field is declared with, so no call site has to assert one.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+function readString(settings: Record<string, unknown>, key: string): string | undefined {
+  const value = settings[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readStringList(settings: Record<string, unknown>, key: string): string[] {
+  const value = settings[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readHarness(settings: Record<string, unknown>, key: string): Harness | undefined {
+  const value = settings[key];
+  return HARNESSES.find((harness) => harness === value);
+}
 
 interface SpawnOpts {
   machine?: string;
@@ -85,9 +104,14 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // that lands after mount still reaches the form because nothing copies it.
   // `null` in the DB means "no override"; exposed here as `undefined`.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-  const storedHarness = (settings["behavior.spawn_harness"] as Harness | null) ?? DEFAULT_HARNESS;
-  const storedModel = (settings["behavior.spawn_model"] as string | null) ?? undefined;
-  const storedEffort = (settings["behavior.spawn_reasoning_effort"] as string | null) ?? undefined;
+  // meiva:note
+  // `settings` is the user_settings row as it comes off the wire (`Record<string, unknown>`), so each
+  // field states the value it accepts and falls back when the stored one is not that: a harness the
+  // build does not know reads as the default, and a non-string model reads as "no override".
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+  const storedHarness = readHarness(settings, "behavior.spawn_harness") ?? DEFAULT_HARNESS;
+  const storedModel = readString(settings, "behavior.spawn_model");
+  const storedEffort = readString(settings, "behavior.spawn_reasoning_effort");
   const [picks, setPicks] = useState<SpawnPicks>({});
   const selectedModel = picks.model ?? storedModel;
   const selectedReasoningEffort = picks.effort ?? storedEffort;
@@ -157,8 +181,8 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // API visibility preferences apply to native execution. External CLI catalogs
   // remain selectable when their API providers or models are hidden.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-  const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
-  const hiddenProviders: string[] = (settings["models.hidden_providers"] as string[] | undefined) ?? [];
+  const hiddenModels = readStringList(settings, "models.hidden");
+  const hiddenProviders = readStringList(settings, "models.hidden_providers");
   const modelGroups = groupedModels(
     modelsData,
     (m) =>

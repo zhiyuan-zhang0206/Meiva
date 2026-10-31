@@ -14,6 +14,3 @@ exports = ["agent-view", "canvas", "model", "run-timeline-detail.tsx", "run-time
 "run-timeline-workspace.test.tsx" = ["run-timeline-workspace.tsx"]
 "use-timeline-row-interactions.ts" = ["agent-view", "canvas", "model", "viewport"]
 "viewport" = ["model"]
-
-[debt.type-cast]
-"run-timeline-rows.tsx#cast RunTimelineRows.<lambda>" = 1

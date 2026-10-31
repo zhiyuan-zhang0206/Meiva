@@ -259,10 +259,13 @@ export function RunTimelineRows({
     if (source.startsWith(EXTERNAL_AGENT_PREFIX)) return t("sourceFromExternalAgent", { name: externalAgentName(source) });
     return source;
   };
+  // meiva:note
+  // The narrowed class is taken out of the highlight before the callback runs: a property read does
+  // not keep its narrowing inside a closure, and naming the value is what makes the call safe.
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+  const sourceClass = highlight?.cls === "human" || highlight?.cls === "agent" ? highlight.cls : null;
   const sources =
-    highlight !== null && (highlight.cls === "human" || highlight.cls === "agent")
-      ? [...new Set(agents.flatMap((agent) => inboundSources(agent.data.units, highlight.cls as "human" | "agent")))].sort()
-      : [];
+    sourceClass === null ? [] : [...new Set(agents.flatMap((agent) => inboundSources(agent.data.units, sourceClass)))].sort();
 
   const describe = (target: AgentSelection | null) => {
     const owner = target === null ? undefined : byId.get(target.agent);

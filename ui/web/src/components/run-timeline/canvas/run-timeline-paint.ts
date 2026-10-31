@@ -5,7 +5,7 @@
 import { firstLine, unitKey } from "../model/timeline-model-selection";
 import { unitColor } from "../model/timeline-model-classes";
 import { type Highlight, matchesHighlight } from "../model/timeline-model-tree";
-import { snap, type Cell, type Place, type RowLayout } from "../model/timeline-canvas-hit";
+import { snap, type Place, type RowLayout } from "../model/timeline-canvas-hit";
 import { type Hover, type Selection } from "../model/timeline-model-selection";
 
 /** Resolves a CSS color (a variable, a `color-mix`) to an opaque canvas color. */
@@ -284,7 +284,7 @@ export function paintBars(p: PaintCtx, layout: RowLayout, top: number, state: Pa
     if (ring && s.hovered && !s.lifted) outline(p, rect, { css: mix(ACCENT, 0.35, "var(--card)"), lineWidth: 1, radius: 0 });
   };
   for (const place of layout.wide) draw(place.x0, place.x1, place.key, true);
-  for (const cell of layout.cells as readonly Cell[]) draw(cell.x0, cell.x1, cell.key, false);
+  for (const cell of layout.cells) draw(cell.x0, cell.x1, cell.key, false);
   // The selected and linked bars go on top again, so a hairline of another block inside their range does not cut them.
   for (const place of layout.wide) if (deco.primaryKey === place.key || deco.linkedKeys.has(place.key)) draw(place.x0, place.x1, place.key, true);
   // A frame reaches the top of the tallest bar it surrounds, and no higher.
