@@ -11,7 +11,8 @@ from scripts.hooks.diff_checks_receipt import absence_names_reason, findings, pa
 GOOD = (
     "diff-checks/v1 @abc123 base=def456 scope=python pyright=0err(1m50s) err_in_this_diff=0 "
     "closure=n/a(the-tree-was-green) ruff=ok(1s) selector=SELECTED:2files tests=RAN(2files) "
-    "passed=645tests(6m40s) failed=0tests blind=n/a(no-changed-file-was-invisible) "
+    "passed=645tests(6m40s) failed=0tests errors=0tests "
+    "blind=n/a(no-changed-file-was-invisible) "
     "fallback=n/a(the-selection-was-not-blind) vitest-app=n/a(no-web-tree-file) "
     "next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76750edges)(22s) "
     "debt=n/a(no-manifest-changed) refusal-loss=n/a(no-net-debt-reduction) "
@@ -23,6 +24,7 @@ SKIPPED = (
     GOOD.replace("tests=RAN(2files)", "tests=skipped(--skip-tests)")
     .replace("passed=645tests(6m40s)", "passed=n/a(no-test-ran)")
     .replace("failed=0tests", "failed=n/a(no-test-ran)")
+    .replace("errors=0tests", "errors=n/a(no-test-ran)")
 )
 
 
@@ -145,3 +147,44 @@ def test_unreplaced_refusals_need_the_reviewer_line_in_the_body() -> None:
 def test_a_line_that_is_not_a_receipt_is_refused() -> None:
     with pytest.raises(ValueError):
         parse("pyright=0err not a receipt")
+
+
+# meiva:note
+# Errors are their own count: pytest never calls a test that could not start a failure, so a run of
+# 31151 passed and 538 errors arrives as `failed=0` (#8001, 2026-11-01). A receipt that has no
+# `errors` field says nothing about them, and the checker refuses it rather than reading the
+# absence as zero.
+def test_a_run_must_account_for_errored_tests_separately() -> None:
+    missing = findings(parse(_line(drop="errors")), head="abc123", body="")
+    unwritten = findings(parse(_line(errors="3")), head="abc123", body="")
+
+    assert any("missing fields: errors" in problem for problem in missing)
+    assert any("errors=<n>tests" in problem for problem in unwritten)
+
+
+def test_a_green_run_needs_no_baseline_declaration() -> None:
+    assert findings(parse(GOOD), head="abc123", body="## What and why") == []
+
+
+# meiva:note
+# A red receipt is readable, not mergeable on its own word: the body names the reds and says why
+# they are not this change. The counts cannot tell "this change broke four" from "four were red
+# before it started", and a red the reader cannot attribute is the shape this gate exists to stop.
+def test_a_red_run_needs_the_baseline_line_in_the_body() -> None:
+    receipt = parse(_line(errors="538tests"))
+
+    assert any("baseline-red:" in problem for problem in findings(receipt, head="abc123", body=""))
+    assert (
+        findings(
+            receipt,
+            head="abc123",
+            body="baseline-red: tests/contracts/x.py::y -- red on main since #8006",
+        )
+        == []
+    )
+
+
+def test_a_failed_count_also_owes_the_baseline_line() -> None:
+    receipt = parse(_line(failed="2tests"))
+
+    assert any("baseline-red:" in problem for problem in findings(receipt, head="abc123", body=""))

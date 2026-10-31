@@ -171,9 +171,11 @@ def _checker_source(root: Path, commit: str) -> str | None:
 
 # meiva:note
 # Run one receipt line through one checker. The checker is written into a deep temporary directory
-# because it resolves the repository root from its own path; `--repo-root` and `--head` name the
-# two facts it cannot infer here.
-def evaluate(checker: str, line: str, head: str, root: Path) -> tuple[bool, str]:
+# because it resolves the repository root from its own path; `--repo-root`, `--head` and the body
+# name the facts it cannot infer here. The body travels because a checker may ask the author to
+# declare something in it (`baseline-red:`, the refusal-loss review line): a gate that read the
+# line without the body would refuse every receipt whose honesty lives in the prose beside it.
+def evaluate(checker: str, line: str, head: str, root: Path, body: str) -> tuple[bool, str]:
     with tempfile.TemporaryDirectory() as workspace:
         nested = Path(workspace) / "a" / "b" / "c"
         nested.mkdir(parents=True)
@@ -181,12 +183,20 @@ def evaluate(checker: str, line: str, head: str, root: Path) -> tuple[bool, str]
         script.write_text(checker)
         receipt = Path(workspace) / "receipt.txt"
         receipt.write_text(line + "\n")
+        body_file = Path(workspace) / "body.md"
+        body_file.write_text(body)
+        # meiva:note
+        # The body is offered, not imposed: a checker older than `--body-file` would exit on an
+        # unrecognised argument, and the audit judges every landed commit with the checker its own
+        # tree carried — so the flag is passed only to the checkers that name it.
+        body_arguments = ["--body-file", str(body_file)] if "--body-file" in checker else []
         result = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(script),
                 "--receipt-file",
                 str(receipt),
+                *body_arguments,
                 "--head",
                 head,
                 "--repo-root",
@@ -225,7 +235,7 @@ def judge_commit(root: Path, landed: Landed) -> Judgement:
         return Judgement(landed, "unverified", f"the commit's tree carries no {CHECKER_PATH}")
     detail = "no receipt line passed"
     for line in lines:
-        passed, detail = evaluate(checker, line, head, root)
+        passed, detail = evaluate(checker, line, head, root, body)
         if passed:
             return Judgement(landed, "passed", "")
     return Judgement(landed, "rejected", detail)

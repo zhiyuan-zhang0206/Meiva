@@ -33,6 +33,7 @@ REQUIRED_FIELDS = (
     "tests",
     "passed",
     "failed",
+    "errors",
     "blind",
     "fallback",
     "vitest-app",
@@ -49,6 +50,20 @@ _REFUSAL_LINE = re.compile(r"refusal-loss:.*reviewed:")
 _UNREPLACED = re.compile(r"unreplaced=(\d+)")
 _PASSED = re.compile(r"\d+tests\(")
 _FAILED = re.compile(r"\d+tests$")
+_COUNTED = re.compile(r"(\d+)tests$")
+# meiva:note
+# A red receipt states its reds, and the body says which of them were already there: counts alone
+# cannot separate "this change broke four tests" from "four tests were red before it started".
+# One line, the same shape the refusal-loss and policy-removal declarations already use.
+_BASELINE_RED = re.compile(r"(?m)^baseline-red:")
+
+
+# meiva:note
+# What a count field says, and 0 for a field that reports no count at all: `n/a(no-test-ran)` and
+# `unreadable(...)` are answered by their own rules, not by this one.
+def _counted(value: str) -> int:
+    found = _COUNTED.search(value)
+    return int(found.group(1)) if found else 0
 
 
 @dataclass(frozen=True)
@@ -125,10 +140,13 @@ def _run_claims(receipt: Receipt) -> list[str]:
     if tests.startswith("skipped") and not receipt.get("passed").startswith("n/a("):
         problems.append("a skipped run must not also report a passed count")
     if tests.startswith("RAN") and not (
-        _PASSED.search(receipt.get("passed")) and _FAILED.search(receipt.get("failed"))
+        _PASSED.search(receipt.get("passed"))
+        and _FAILED.search(receipt.get("failed"))
+        and _FAILED.search(receipt.get("errors"))
     ):
         problems.append(
-            "a run that executed tests must report `passed=<n>tests(<time>)` and `failed=<n>tests`"
+            "a run that executed tests must report `passed=<n>tests(<time>)`, `failed=<n>tests` "
+            "and `errors=<n>tests`"
         )
     blind = receipt.get("blind")
     if not blind.startswith(("n/a(", "BLIND(")):
@@ -144,6 +162,12 @@ def findings(receipt: Receipt, *, head: str, body: str) -> list[str]:
         problems.append(f"the receipt was produced for {receipt.head}, not for {head}")
     problems.extend(_presence(receipt))
     problems.extend(_run_claims(receipt))
+    red = sum(_counted(receipt.get(name)) for name in ("failed", "errors"))
+    if red and not _BASELINE_RED.search(body):
+        problems.append(
+            f"the run reported {red} failing or errored test(s); the body needs a "
+            "`baseline-red: <the node ids, and why they are not this change>` line"
+        )
     unreplaced = _UNREPLACED.search(receipt.get("refusal-loss"))
     if unreplaced is not None and int(unreplaced.group(1)) > 0 and not _REFUSAL_LINE.search(body):
         problems.append(
