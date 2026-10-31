@@ -25,7 +25,13 @@ dependencies = [
     "pydantic-settings>=2.13.1",
     # 3.1.3 ships langgraph#8556 (the delta walk cursor starts at the target),
     # so Meiva reads pagination from upstream instead of overriding it.
-    "langgraph-checkpoint-postgres>=3.1.3",
+    # Capped at the minor this adapter was written against: the message-reset
+    # reader builds `_DeltaStage2Row`, sorts by `writes_sort_key` and drives
+    # three BasePostgresSaver methods, and a minor release is where langgraph
+    # reshapes them (3.1.3 itself changed the stage-2 row). The saver refuses a
+    # changed surface when it is built; the cap keeps an untested minor out of
+    # the lock before anyone finds out.
+    "langgraph-checkpoint-postgres>=3.1.3,<3.2",
     # Imported directly: base/agents/history/checkpoint_postgres_walks.py reads
     # `writes_sort_key` (added in 4.3.0) from `langgraph.checkpoint.base`. The
     # postgres pin above supplies it transitively today; the direct import is
