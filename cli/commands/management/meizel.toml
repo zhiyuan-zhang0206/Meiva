@@ -1,9 +1,11 @@
 exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "schedules_verify.py", "schedules_verify_read_rows.py"]
 
 [uses]
+"schedule_verify_checks.py" = []
+"schedule_verify_child.py" = ["schedule_verify_checks.py"]
 "schedules_verify.py" = ["child_verdict.py", "schedule_verify_child.py", "sweep_outcome.py"]
 "schedules_verify_read_rows.py" = ["schedules_verify.py"]
-"tests" = ["child_verdict.py", "config.py", "schedules_verify.py", "sweep_outcome.py"]
+"tests" = ["child_verdict.py", "config.py", "schedule_verify_checks.py", "schedules_verify.py", "sweep_outcome.py"]
 
 [external]
 "schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
@@ -17,9 +19,6 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 [purity]
 "__init__.py" = "strict"
 "child_verdict.py" = "strict"
-"schedule_verify_child.py" = "strict-to-be"
+"schedule_verify_checks.py" = "strict"
+"schedule_verify_child.py" = { mode = "none", why = "the schedule-verification process entry: it reads the script from stdin, reads this checkout's root, asks the filesystem where a callee is defined and normalizes that path, then prints one verdict line. Every check it reports, including which files count as repository code, is decided by the strict `schedule_verify_checks.py` over the parsed source and the names the script's own imports bound (`is_repo_source` there holds the root, virtualenv and SDK-package rules); this file only starts the process, handles what the filesystem raises, and prints what a missing module, an exception and a red result print" }
 "sweep_outcome.py" = "strict"
-
-[debt.impure-call]
-"schedule_verify_child.py#Path.resolve" = 2
-"schedule_verify_child.py#inspect.getsourcefile" = 1

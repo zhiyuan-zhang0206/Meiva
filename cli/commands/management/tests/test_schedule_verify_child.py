@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.telemetry import EventPipeline
+from cli.commands.management import schedule_verify_checks
 from cli.commands.management import schedules_verify as _verify
 from cli.commands.management.schedules_verify import CheckFile, RowsFromFile
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -264,3 +265,59 @@ def test_check_file_prints_the_undefined_name_verdict(
         == 1
     )
     assert "CHECK-RED missing=undefined-name:L2 base" in capsys.readouterr().out
+
+
+# meiva:note
+# The seam the split introduced: the process entry decides which callees are repository code, the
+# check binds only what it says yes to. Pinned here because the entry's own end-to-end path cannot
+# see the difference -- a predicate that answers `False` to everything reports no problems at all,
+# and every call-site case above would go green without saying why.
+def test_the_repository_predicate_decides_which_call_sites_are_bound() -> None:
+    import ast
+    import json
+
+    tree = ast.parse("import json\n\njson.dumps(1, 2, 3)\n")
+    nothing_is_repo = schedule_verify_checks.call_site_problems(
+        tree, {"json": json}, is_repo=lambda _target: False
+    )
+    everything_is_repo = schedule_verify_checks.call_site_problems(
+        tree, {"json": json}, is_repo=lambda _target: True
+    )
+    assert nothing_is_repo == []
+    assert len(everything_is_repo) == 1 and "too many positional arguments" in everything_is_repo[0]
+
+
+# meiva:note
+# The name check is decided in the strict module too, and a `none` declaration on the entry must not
+# leave that module exercised only through a subprocess: the two cases below call it directly.
+def test_the_strict_module_reports_a_name_nothing_binds() -> None:
+    import ast
+
+    tree = ast.parse("root = base.__file__\n")
+    assert schedule_verify_checks.undefined_name_problems(tree) == ["L1 base"]
+
+
+def test_the_strict_module_keeps_a_bound_name_green() -> None:
+    import ast
+
+    tree = ast.parse(
+        "from pathlib import Path\n\nroot = Path(base.__file__)\n".replace("base", "Path")
+    )
+    assert schedule_verify_checks.undefined_name_problems(tree) == []
+
+
+# meiva:note
+# What counts as repository code is a rule of the strict module, not of the entry that reads the
+# filesystem: the entry keeps only "where is this callee defined" and the `resolve` that normalizes
+# it. Both wrong answers are silent -- a wrong `True` binds a signature that is not the one the
+# script calls, a wrong `False` skips a callee the check must bind -- so each reason to answer
+# either way is pinned here.
+def test_the_strict_module_decides_what_counts_as_repository_code(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    is_repo = schedule_verify_checks.is_repo_source
+    assert is_repo(root / "schedules/jobs/catchup.py", root=root) is True
+    assert is_repo(root / ".venv/lib/python3.12/site-packages/base/clock.py", root=root) is False
+    assert is_repo(root / "services/app/site-packages/vendor/mod.py", root=root) is False
+    assert is_repo(root / "meiva/sdk_surface/settings.py", root=root) is False
+    assert is_repo(tmp_path / "elsewhere/schedules/jobs/catchup.py", root=root) is False
+    assert is_repo(None, root=root) is False
