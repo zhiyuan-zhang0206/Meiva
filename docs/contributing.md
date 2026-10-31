@@ -55,6 +55,12 @@ naming the pull request the commit came from (2026-10-31: `2308d918a` and
 pull request" rather than as "pushed directly": `gh pr view <n> --json mergeCommit`,
 or `gh api repos/<owner>/<repo>/commits/<sha>/pulls`, answers it.
 
+**The receipt comes before the merge.** A hand merge requires the `diff-checks/v1`
+receipt line in the pull request body before `gh pr merge` runs, not as a record
+added afterwards. Check it mechanically:
+`.venv/bin/python scripts/hooks/diff_checks_receipt.py --receipt-file <line> --body-file <body>`
+must exit 0. A receipt added after the merge is a record, not a gate.
+
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from
 the branch's commits; a trailer with no email, like the `Meiva #<id>` convention, is
