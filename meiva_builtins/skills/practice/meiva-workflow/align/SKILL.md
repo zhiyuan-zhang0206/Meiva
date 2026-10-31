@@ -17,6 +17,10 @@ Calibration is part of Align throughout the work. There is no separate
 Calibrate stage to finish first. The objective is enough shared understanding
 to choose the next useful action, with uncertainty visible.
 
+Use [Understanding Loop](references/understanding-loop.md) when the human
+should finish able to predict, explain and judge the subject themselves; it
+sets that depth target and the shape of each evidence segment.
+
 Human preferences and permission are authoritative within the task; factual
 beliefs are claims to investigate. Evidence can challenge "this cannot be done
 locally" without overruling "these records must stay on this device." Human agreement
