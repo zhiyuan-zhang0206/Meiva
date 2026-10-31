@@ -35,17 +35,23 @@ def run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 # meiva:note
-# A stand-in for `gh` on PATH: the branch check reads the open pull request's body through it, and
-# the answer has to come from something a test controls. The script prints one body, ignores argv,
-# and leaves a `called` marker beside itself so a test can tell an unread body from an empty one.
-def fake_gh(tmp_path: Path, body: str) -> str:
+# A stand-in for `gh` on PATH: two reads go through it -- the open pull request's body and GitHub's
+# main -- so the script answers each by its first argument. It appends its arguments to a `called`
+# file beside itself, so a test can tell which reads were made: an empty answer and a read that never
+# happened look the same from the outside, and only one of them is the behaviour under test.
+def fake_gh(tmp_path: Path, *, body: str = "", main: str = "", fails: bool = False) -> str:
     directory = tmp_path / "bin"
     directory.mkdir()
     script = directory / "gh"
-    script.write_text(
-        f"#!/bin/sh\n: > \"{directory / 'called'}\"\ncat <<'BODY'\n{body}\nBODY\n",
-        encoding="utf-8",
-    )
+    if fails:
+        script.write_text(f'#!/bin/sh\necho "$@" >> "{directory / "called"}"\nexit 1\n', "utf-8")
+    else:
+        script.write_text(
+            f'#!/bin/sh\necho "$@" >> "{directory / "called"}"\n'
+            f'if [ "$1" = "api" ]; then\n  printf \'%s\\n\' "{main}"\n  exit 0\nfi\n'
+            f"cat <<'BODY'\n{body}\nBODY\n",
+            encoding="utf-8",
+        )
     script.chmod(0o755)
     return str(directory)
 
@@ -168,7 +174,7 @@ def test_the_branch_check_reads_an_answer_from_the_pull_request_body(
     (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     commit(repo, "Fetch from the application")
     answered = fake_gh(
-        tmp_path, "Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
+        tmp_path, body="Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
     )
     assert run_with_gh(repo, answered, "branch").returncode == 0
 
@@ -181,7 +187,7 @@ def test_a_pull_request_body_without_the_answer_still_blocks(repo: Path, tmp_pat
     git(repo, "switch", "-q", "-c", "work")
     (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     commit(repo, "Fetch from the application")
-    unrelated = fake_gh(tmp_path, "A pull request that says nothing about the site.")
+    unrelated = fake_gh(tmp_path, body="A pull request that says nothing about the site.")
     assert run_with_gh(repo, unrelated, "branch").returncode == 1
 
 
@@ -195,9 +201,12 @@ def test_a_checkout_without_a_github_origin_never_asks_for_a_body(
     (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     commit(repo, "Fetch from the application")
     answering = fake_gh(
-        tmp_path, "Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
+        tmp_path, body="Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
     )
-    assert run_with_gh(repo, answering, "branch").returncode == 1
+    done = run_with_gh(repo, answering, "branch")
+    assert done.returncode == 1
+    assert "no GitHub origin; main not checked" in done.stderr
+    assert not (Path(answering) / "called").exists()
 
 
 # meiva:note
@@ -209,10 +218,96 @@ def test_a_branch_with_no_open_site_never_asks_for_a_body(repo: Path, tmp_path: 
     (repo / "README.md").write_text("unrelated\n", encoding="utf-8")
     commit(repo, "Unrelated change")
     answering = fake_gh(
-        tmp_path, "Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
+        tmp_path, body="Hint-Ack: service-locator cli/x.py:2 -- composition root of the daemon"
     )
     assert run_with_gh(repo, answering, "branch").returncode == 0
-    assert not (Path(answering) / "called").exists()
+    assert "pr list" not in (Path(answering) / "called").read_text(encoding="utf-8")
+
+
+# meiva:note
+# The push is judged against the main GitHub has, not against the ref this checkout last fetched: a
+# site that reached main through someone else's merge is not this branch's to answer, and a stale
+# tracking ref is what turned it into one on 2026-10-31.
+def test_the_branch_check_judges_against_github_main_not_the_tracking_ref(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    merged = git(repo, "rev-parse", "HEAD")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "README.md").write_text("unrelated\n", encoding="utf-8")
+    commit(repo, "Unrelated change")
+    ahead = fake_gh(tmp_path, main=merged)
+    assert run_with_gh(repo, ahead, "branch").returncode == 0
+
+
+# meiva:note
+# A checkout here fetches from a local mirror and pushes to GitHub, so the fetch URL names no
+# repository. Reading only that URL would report every such checkout as having no GitHub origin and
+# leave the stale base in place; the push URL is what makes it a GitHub checkout.
+def test_a_github_push_url_is_enough_when_the_fetch_url_is_a_mirror(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "remote", "add", "origin", "ssh://git@mirror.example/meiva")
+    git(repo, "remote", "set-url", "--push", "origin", "git@github.com:example/repo.git")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    merged = git(repo, "rev-parse", "HEAD")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "README.md").write_text("unrelated\n", encoding="utf-8")
+    commit(repo, "Unrelated change")
+    ahead = fake_gh(tmp_path, main=merged)
+    assert run_with_gh(repo, ahead, "branch").returncode == 0
+
+
+# meiva:note
+# The same branch, the same command, and a `gh` that cannot name a main: the tracking ref is all
+# there is, so the site is asked. The difference between this test and the one above is the reading
+# alone, which is what makes the pair evidence rather than two unrelated observations.
+def test_the_same_branch_against_the_tracking_ref_still_asks(repo: Path, tmp_path: Path) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "README.md").write_text("unrelated\n", encoding="utf-8")
+    commit(repo, "Unrelated change")
+    unknown = fake_gh(tmp_path)
+    done = run_with_gh(repo, unknown, "branch")
+    assert done.returncode == 1
+    assert "github main unknown; may lag" in done.stderr
+
+
+# meiva:note
+# A main this checkout does not have cannot be compared with: the verdict stays as it was and the
+# output says the base may lag, so a red is never silently blamed on the branch.
+def test_a_github_main_this_checkout_lacks_keeps_the_verdict_and_says_so(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    elsewhere = fake_gh(tmp_path, main="0" * 40)
+    done = run_with_gh(repo, elsewhere, "branch")
+    assert done.returncode == 1
+    assert "not in this checkout; may lag" in done.stderr
+
+
+# meiva:note
+# A `gh` that answers nothing is not a finding about the branch: the check falls back to the ref it
+# has and says the base may lag.
+def test_an_unreadable_github_main_keeps_the_verdict_and_says_so(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    failing = fake_gh(tmp_path, fails=True)
+    done = run_with_gh(repo, failing, "branch")
+    assert done.returncode == 1
+    assert "github main unknown; may lag" in done.stderr
 
 
 def test_the_branch_check_needs_origin_main(repo: Path) -> None:

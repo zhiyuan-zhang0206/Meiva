@@ -111,6 +111,14 @@ A path without a line answers every site of that id in the file, and a directory
 trailing slash every site below it. Answer with the reason the site is right, not with the
 rule's name; an unanswered hint also stops the push.
 
+A push is judged against the `main` GitHub has, not against the refs this checkout happens to
+have fetched. `origin` here is a mirror that resets every few minutes, so a tracking ref can be
+behind, and a range built from a stale base carries other people's merged work — which is then
+reported as sites on a branch that never touched them. When GitHub's main cannot be read (no
+`gh`, no network, no GitHub origin, or the commit is not in this checkout) the check falls back
+to `origin/main` and says so on one line (`base=… may lag`), because a red from a stale base has
+to be visible rather than silent.
+
 ### Locality gate (meizel)
 
 `python -m meizel check` judges every first-party dependency against the
