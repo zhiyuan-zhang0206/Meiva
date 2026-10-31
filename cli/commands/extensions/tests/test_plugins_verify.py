@@ -160,6 +160,33 @@ def test_an_enabled_plugin_missing_from_disk_is_red(capsys: pytest.CaptureFixtur
     assert "RED plugin=vanished" in capsys.readouterr().out
 
 
+def test_a_retired_builtin_plugin_still_in_the_config_is_a_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _plugin("good", "LOADED = True\n")
+    _enable("good", "meiva_silent_idle")
+
+    assert cmd_plugins_verify(rng=seeded_rng(), home=meiva_home()) == 0
+
+    out = capsys.readouterr().out
+    assert "RESULT enabled=1 failed=0 rc=0" in out
+    assert out.count("WARN plugin=meiva_silent_idle") == 1
+    assert "RED" not in out
+
+
+def test_a_retired_name_does_not_hide_another_missing_plugin(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _enable("meiva_silent_idle", "vanished")
+
+    assert cmd_plugins_verify(rng=seeded_rng(), home=meiva_home()) == 1
+
+    out = capsys.readouterr().out
+    assert "WARN plugin=meiva_silent_idle" in out
+    assert "RED plugin=vanished" in out
+    assert "RED plugin=meiva_silent_idle" not in out
+
+
 def test_a_disabled_broken_plugin_is_never_imported(capsys: pytest.CaptureFixture[str]) -> None:
     _plugin("old_hooks", "raise RuntimeError('boom')\n")
     _configure(disabled=("old_hooks",))
