@@ -1,6 +1,5 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithBrowser } from "@/test-support/render";
+import { renderWithProviders } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
@@ -47,10 +46,8 @@ const baseProps = {
   onStop: vi.fn(),
 };
 
-function renderComposerTree(ui: React.ReactElement) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithBrowser(ui, { wrapper: ({ children }) =>
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
+function renderComposerTree(ui: React.ReactElement, wallNow: () => number = () => Date.now()) {
+  return renderWithProviders(ui, { wallNow });
 }
 const renderComposer = renderComposerTree;
 
@@ -401,9 +398,8 @@ describe("Composer sessionStorage draft persistence", () => {
   });
   it("does NOT clear the draft on a failed send", async () => {
     let now = 100;
-    vi.spyOn(performance, "now").mockImplementation(() => now);
     const onSend = vi.fn(() => Promise.resolve(false));
-    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />, () => now);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "failed send" } });
     expect(sessionStorage.getItem(draftKey(7))).toBe("failed send");
@@ -412,7 +408,7 @@ describe("Composer sessionStorage draft persistence", () => {
     await waitFor(() => {
       telemetryTestControl.reset();
       now = 150;
-      noteTurnStart(7);
+      noteTurnStart(7, now);
       expect(telemetryTestControl.bufferSize()).toBe(0);
     });
     expect(sessionStorage.getItem(draftKey(7))).toBe("failed send");
