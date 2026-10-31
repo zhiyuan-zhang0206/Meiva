@@ -408,3 +408,30 @@ def test_a_judged_child_loses_the_callers_product_namespace_and_keeps_its_toolch
     assert child_environment({"MEIVA_HOME": "/operator/home", "HOME": "/operator/home"}) == {
         "HOME": "/operator/home"
     }, "one rule cuts the product namespace; an allowlist of toolchain names would be a second"
+
+
+# meiva:note
+# pytest's summary counts a test that could not start as an error and leaves `failed` at 0, so a
+# receipt that parsed only the failure count reported a run of 31151 passed and 538 errors as
+# `failed=0tests` (#8001, 2026-11-01). The count is its own field, and a skipped run says so
+# instead of printing a zero nobody measured.
+def test_errors_are_counted_beside_failures_and_never_folded_into_them() -> None:
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        if "-m" in argv and "pytest" in argv:
+            return 1, "10 passed, 3 errors in 1.20s\n", 1.2
+        return 0, "0 errors, 0 warnings", 1.0
+
+    values, failed = check(
+        _change("base/thing.py"),
+        skip_tests=False,
+        execute=execute,
+        choose=_always(Selection("SELECTED", ("tests/test_a.py",), ())),
+    )
+
+    assert failed is True, "the shell saw exit 1; the receipt must not read as green"
+    assert values["passed"] == "10tests(1s)"
+    assert values["failed"] == "0tests"
+    assert values["errors"] == "3tests", "the three tests that never ran are the whole story here"
+
+    skipped, _ = _run({}, ("base/thing.py",))
+    assert skipped["errors"] == "n/a(no-test-ran)"

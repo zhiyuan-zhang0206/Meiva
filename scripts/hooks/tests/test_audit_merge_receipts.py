@@ -43,8 +43,8 @@ _OLD_RECEIPT = (
 # The defect this prevents: judging history with today's vocabulary calls every honest old receipt
 # a violation. The same line, two checkers, two verdicts -- and the pin decides which one is read.
 def test_a_line_is_judged_by_the_checker_it_is_pinned_to(tmp_path: Path) -> None:
-    passed, _ = evaluate(_OLD, _OLD_RECEIPT, "abc123", tmp_path)
-    rejected, detail = evaluate(_NEW, _OLD_RECEIPT, "abc123", tmp_path)
+    passed, _ = evaluate(_OLD, _OLD_RECEIPT, "abc123", tmp_path, "")
+    rejected, detail = evaluate(_NEW, _OLD_RECEIPT, "abc123", tmp_path, "")
 
     assert passed is True, "the commit's own vocabulary accepts the line it produced"
     assert rejected is False, "a newer checker would refuse a field the line predates"
@@ -118,3 +118,33 @@ def test_a_user_authored_commit_is_reported_aside_and_changes_no_exit_code() -> 
 
     assert exit_code([outside]) == 0
     assert exit_code([unknown]) == 2
+
+
+# meiva:note
+# The body reaches the checker, because a receipt may owe the author a declaration there (a
+# `baseline-red:` line for a red run, the refusal-loss review line). A gate that handed the
+# checker only the line would refuse every honest red receipt, and the author would learn to
+# write green ones -- the failure mode this whole gate exists to prevent.
+_BODY_READER = (
+    "import argparse, sys\n"
+    "parser = argparse.ArgumentParser()\n"
+    "parser.add_argument('--receipt-file')\n"
+    "parser.add_argument('--body-file')\n"
+    "parser.add_argument('--head')\n"
+    "parser.add_argument('--repo-root')\n"
+    "arguments = parser.parse_args()\n"
+    "body = open(arguments.body_file).read()\n"
+    "sys.exit(0 if 'baseline-red:' in body else 1)\n"
+)
+
+
+def test_the_pull_request_body_reaches_the_checker(tmp_path: Path) -> None:
+    declared = "diff-checks/v1 @abc123 failed=4tests\n\nbaseline-red: four tests red on main\n"
+    undeclared = "diff-checks/v1 @abc123 failed=4tests\n\nno line here\n"
+
+    passed, _ = evaluate(_BODY_READER, declared, "abc123", tmp_path, declared)
+    rejected, detail = evaluate(_BODY_READER, undeclared, "abc123", tmp_path, undeclared)
+
+    assert passed is True
+    assert rejected is False
+    assert "exit=1" in detail

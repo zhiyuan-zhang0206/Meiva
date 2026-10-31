@@ -104,6 +104,7 @@ FIELD_ORDER = (
     "tests",
     "passed",
     "failed",
+    "errors",
     "blind",
     "fallback",
     "vitest-app",
@@ -424,6 +425,18 @@ def _count(output: str, word: str) -> int:
 
 
 # meiva:note
+# The `N errors` count in a tool's summary, in both senses this runner reads it. pytest counts a
+# test that could not even start as an error and never as a failure: `31151 passed, 538 errors` is
+# a run in which 538 tests did not happen while `failed` stayed 0, so a receipt that parsed only
+# the failure count printed `failed=0tests` for a run whose shell exited 1 (#8001, 2026-11-01: 2267
+# files, 538 errors). pyright states its findings the same way (`9 errors, 0 warnings`). Each is
+# its own field so a reader can tell "nothing failed" from "much never ran".
+def _error_count(output: str) -> int:
+    found = re.search(r"(\d+) errors?\b", output)
+    return int(found.group(1)) if found else 0
+
+
+# meiva:note
 # What a judged child inherits: the launcher's environment, minus the product's own namespace.
 # The receipt exists to predict the verdict CI will give this change, and CI's runner carries no
 # `MEIVA_*` at all — the suite installs the sentinels it needs before any project import
@@ -452,10 +465,6 @@ def run_child(
         check=False,
     )
     return result.returncode, result.stdout + result.stderr, time.monotonic() - started
-
-
-def _pyright_errors(output: str) -> int:
-    return int(found.group(1)) if (found := re.search(r"(\d+) errors?\b", output)) else 0
 
 
 _ERROR_LINE = re.compile(r"^(?P<path>[^\s:][^:]*):\d+:\d+ - error:")
@@ -554,7 +563,7 @@ def _refusal_field(output: str) -> str:
 # cannot prove stays inside, because "the tool could not tell" and "not my code" must not look
 # the same in a receipt a reader trusts.
 def _pyright_fields(output: str, seconds: float, change: ChangeSet) -> dict[str, str]:
-    errors = _pyright_errors(output)
+    errors = _error_count(output)
     if errors == 0:
         return {
             "pyright": f"0err({_spell(seconds)})",
@@ -709,6 +718,7 @@ def check(
         values["tests"] = f"skipped({'--skip-tests' if skip_tests else 'selector-chose-none'})"
         values["passed"] = "n/a(no-test-ran)"
         values["failed"] = "n/a(no-test-ran)"
+        values["errors"] = "n/a(no-test-ran)"
         return values, failed
     code, output, seconds = execute(
         (sys.executable, "-m", "pytest", "-q", *selection.tests), change.root
@@ -716,6 +726,7 @@ def check(
     values["tests"] = f"RAN({len(selection.tests)}files)"
     values["passed"] = f"{_count(output, 'passed')}tests({_spell(seconds)})"
     values["failed"] = f"{_count(output, 'failed')}tests"
+    values["errors"] = f"{_error_count(output)}tests"
     return values, failed or code != 0
 
 
