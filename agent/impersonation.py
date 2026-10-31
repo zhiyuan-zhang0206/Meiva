@@ -195,7 +195,7 @@ async def claim_gate(
         ctx.relays,
         incarnation=incarnation,
         clock=ctx.require_clock(),
-        home=ctx.require_meiva_home(),
+        home=ctx.meiva_home,
     )
     verdict = gate_verdict(lease_phase(session))
     if verdict is GateVerdict.PROCEED:
@@ -662,7 +662,7 @@ async def supervise_relay(
     *,
     incarnation: RuntimeIncarnation | None,
     clock: Clock,
-    home: Path,
+    home: Path | None,
 ) -> None:
     child = relays.children.get(agent_id)
     now, monotonic = clock.now(), clock.monotonic()
@@ -705,7 +705,7 @@ def _lease_is_terminal(db: Database, lease_id: str) -> bool:
 
 
 async def _retire_relay_child(
-    db: Database, agent_id: int, relays: RelaySupervision, child: RelayChild, *, home: Path
+    db: Database, agent_id: int, relays: RelaySupervision, child: RelayChild, *, home: Path | None
 ) -> None:
     if relays.children.get(agent_id) is not child:
         return
@@ -773,12 +773,16 @@ async def _record_stale_relay(
     )
 
 
-async def _send_ended_notice(db: Database, agent_id: int, lease_id: str, *, home: Path) -> None:
+async def _send_ended_notice(
+    db: Database, agent_id: int, lease_id: str, *, home: Path | None
+) -> None:
     """Submit the ended lease's notice once; a failure is logged and never retried."""
     from base.agents.impersonation.terminal_notices import deliver_ended_notice
 
     # meiva:note
     # The notice resolves its Antigravity destination from a record under this host's
     # home, so the home travels down from the host that owns the process rather than
-    # being looked up inside the notice module.
+    # being looked up inside the notice module. A partial context names none, and then
+    # the notice records that it could not resolve an Antigravity destination instead of
+    # refusing to supervise a relay that may only have a Codex one.
     await asyncio.to_thread(deliver_ended_notice, db, agent_id, lease_id, home=home)
