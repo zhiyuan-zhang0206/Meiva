@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -282,10 +283,16 @@ def test_scan_preserves_checkout_and_skill_symlink_paths(
         == 1
     )
     output = capsys.readouterr().out
-    assert output == (
+    # meiva:note
+    # The summary line is part of the contract now: a receipt quotes this check to show how many
+    # documents it read, so a run that printed only its findings could not be told from a run that
+    # read two files.
+    finding = (
         ".agents/skills/sample/SKILL.md:1: "
         "`references/missing.md` — no such file (skill references/)\n"
     )
+    assert output.startswith(finding)
+    assert re.fullmatch(r"\d+ docs checked, 1 dangling reference\(s\)", output.splitlines()[-1])
 
 
 # meiva:note

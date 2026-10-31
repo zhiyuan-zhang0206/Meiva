@@ -166,11 +166,18 @@ complement each other; no third mechanism.
 
 | layer | command | cost | catches | whose job is the blind spot |
 |---|---|---|---|---|
-| **L0** full-tree static | `.venv/bin/basedpyright` (whole tree) | 3m13s | missing required arguments, cross-layer types, call sites behind `**kwargs`/dynamic imports | — |
-| **L0'** format | `ruff check` + `ruff format --check` | seconds | anything red at commit | — |
-| **L1–L3** impact tests | `python scripts/ci/test_selector.py --changed-files <diff> --base-ref origin/main --json`, then run its `tests` | with the surface (645 this time) | cross-layer construction (CLI tests), integration layer, domain unit tests | types: L0; selector: the blind-spot loop in §4.5 |
-| **L3'** frontend | `npm test` (vitest, when `ui/web` changed) | minutes | frontend unit tests | visual is not in the mandatory set (§2) |
-| **L4** repository gates | `python -m meizel check`; `python -m meizel debt diff --against origin/main --on-growth warn` | 20s–3min | manifest/fact drift, a mis-written ledger | — |
+| **L0** full-tree static | `.venv/bin/basedpyright --threads 2` (whole tree) | 1m50s | missing required arguments, cross-layer types, call sites behind `**kwargs`/dynamic imports | — |
+| **L0'** format | `ruff check` (the changed files) | seconds | anything red at commit | — |
+| **L1–L3** impact tests | `python scripts/ci/test_selector.py --changed-files <diff> --base-ref <base> --json`, then run its `tests` | 7m14s for 152 files / 3618 tests | cross-layer construction (CLI tests), integration layer, domain unit tests | types: L0; selector: the blind-spot loop in §4.5 |
+| **L3'** frontend | `vitest run --dir src/app` (any `ui/web` change; 331 tests in 6.9s) | seconds | the app router's own tests, which no selector picks whole | visual is not in the mandatory set (§2) |
+| **L4** repository gates | `python -m meizel check` (every change); `python -m meizel debt diff --against <base> --on-growth warn` (a manifest change) | 22s; 2m50s | manifest/fact drift, a mis-written ledger | — |
+| **L4'** document checks | `scripts/content_lint/check_doc_references.py`; `scripts/content_lint/lint_meiva_okf.py` (a `.md` change) | 0.2s; 3.8s for 757 documents | a doc naming a flag, file or node that no longer exists | — |
+
+A whole run on a Python change measured **13m36s** (815.83 s) on 2026-10-31, of which the test
+segment was 7m14s; `--skip-tests` measured **5m18s**. The long poles are the test segment and
+`meizel debt diff`, not pyright — which is why the debt comparison is scheduled for a manifest change
+and no other (`meizel check` already refuses a violation that is not recorded, and the only way to
+record one is to edit a manifest).
 
 **L3 takes vitest only, never visual** (405): visual needs a browser, is screenshot comparison by
 nature and is flaky by nature; putting it in the mandatory set teaches everyone to ignore a red visual.
@@ -210,21 +217,39 @@ operate on a home on every `meiva` invocation. One name for two jobs invites the
 One line, in the PR body:
 
 ```
-diff-checks/v1 @<head-sha> base=<base-sha> pyright=0err(1m28s) err_in_this_diff=0 ruff=ok(0s) selector=SELECTED:152 tests=RAN passed=3617(6m02s) failed=0 fallback=none blind=none vitest=none next-build=none meizel=ok(exit=0,772manifests,76697edges)(17s) debt=ambient-read96->96,total201->201 refusal-loss=none skipped=none generated=scripts/hooks/diff_checks.py
+diff-checks/v1 @<head-sha> base=<base-sha> scope=python+manifests pyright=0err(1m50s) err_in_this_diff=0 closure=n/a(the-tree-was-green) ruff=ok(1s) selector=SELECTED:152files tests=RAN(152files) passed=3618tests(7m14s) failed=0tests blind=n/a(no-changed-file-was-invisible) fallback=n/a(the-selection-was-not-blind) vitest=n/a(no-app-tree-file) next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76749edges)(22s) debt=ok(ambient-read15->14,total187->186)(2m50s) refusal-loss=n/a(no-net-debt-reduction) docs-refs=n/a(no-doc-touched) docs-okf=n/a(no-doc-touched) generated=scripts/hooks/diff_checks.py
 ```
+
+**The vocabulary is the whole contract** (405, 2026-10-31: a receipt of nothing but `none` proved
+nothing and looked like a pass):
+
+| value | means |
+|---|---|
+| `ok(<evidence>)(<time>)`, `0err(...)`, `645tests(...)` | the layer ran; the parentheses carry what it measured — counts, coverage, duration |
+| `n/a(<why>)` | this change cannot need the layer; `<why>` names the file kind it does not touch (`n/a(no-python-touched)`) |
+| `skipped(<why>)` | the layer applies and was deliberately not run (`skipped(--skip-tests)`) |
+| `BLIND(<files>)` | the selector admits it cannot map these changed files; the fallback must run |
+| `unreadable(<why>)` | the layer ran but its output could not be read — never a pass |
+
+**There is no bare `none` in a receipt.** "Did not apply" and "ran, found nothing" are different
+claims, and a line that prints both the same way is a line a reviewer cannot use. Values carry no
+spaces either, so a reason joins its words with `-`.
 
 `debt=` gives both the absolute numbers and the delta (405): the absolute numbers are what shows drift
 against main in a receipt pinned to a sha; the delta only says what this change did. With one half
-missing, every reader has to recompute.
+missing, every reader has to recompute. The columns are read by position, not by the reference's name,
+so a receipt pinned to a sha (a replay, or a pull request's base) reads the same numbers as one pinned
+to `origin/main`.
 
 **A checker beside it** (`scripts/hooks/diff_checks_receipt.py`, named for the receipt it reads)
-compares three things: the
-`sha` equals the PR head; the fields are all present
-(`pyright/ruff/selector/passed/vitest/meizel/debt/refusal-loss/skipped/generated`); and every layer
-named in `skipped` carries a reason — **the checker does not judge whether the reason is good**, which
-would become subjective and teach people to pad reasons.
+compares: the `sha` equals the PR head; every field of the vocabulary is present; no field is bare
+`none`; no field says `unreadable`; a skipped run reports no count and a run that executed tests
+reports both counts with their unit; a blind selection names the fallback it ran. **The checker does
+not judge whether a reason is good**, which would become subjective and teach people to pad reasons.
 
-**What it stops**: a stale receipt (sha mismatch), a missing field, a skipped layer without a reason.
+**What it stops**: a stale receipt (sha mismatch), a missing field, an absence with no reason, a
+skipped run that still claims a count, a layer whose output could not be read, a blind selection
+without its fallback.
 **What it does not stop**: a hand-written fake receipt. Hence the `generated=` field and the fixed
 `diff-checks/v1` literal, and one sentence in this convention: **a hand-written receipt is the same
 offence as a hand-written test result.**
@@ -233,13 +258,19 @@ offence as a hand-written test result.**
 
 | the change | must run |
 |---|---|
-| any `.py` | L0 + L0' + L1–L3 (selector) + L4 |
+| any change | L4 `meizel check` + the selector (L1–L3) |
+| any `.py` | + L0 + L0' |
 | a parameter added without a default / deleted / renamed / a return type changed | the same — **no extra detection needed**: the selector picks by import closure and covers cross-layer construction sites by construction |
 | migration / schema | all of the above + the integration layer against a real Postgres (migration smoke) |
 | gateway routes, request handling, configuration value objects | all of the above (the selector pulls `gateway/tests`) + that domain's e2e |
-| configuration fields / `meizel.toml` | L4 (including `meizel sync --prune` when needed) + the touched domain's L1 |
-| `ui/web/**` | additionally `vitest` |
-| documentation or comments only | L4 + the link checks |
+| configuration fields / `meizel.toml` | + `meizel debt diff --against <base>` (and the refusal-loss scan when the deleted lines outnumber the added ones) + the touched domain's L1 |
+| `ui/web/**` | additionally `vitest-app` (the whole `src/app` test tree), and the production build when the change can cross the RSC boundary |
+| documentation or comments only | the document checks (L4'): dangling references and OKF lint, each reporting how many documents it read |
+
+The last row is the one that produced the all-`none` receipt 405 and 7138 rejected: documentation was
+scheduled nothing at all, so the line a reviewer trusts carried no evidence about the change it
+described. A change kind this table does not name still owes L4, and every layer it cannot need is
+printed `n/a(<why>)` rather than dropped.
 
 #### 4.5 Closing the blind spots (405, hard rule)
 
