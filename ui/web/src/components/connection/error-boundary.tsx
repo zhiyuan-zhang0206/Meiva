@@ -4,6 +4,7 @@ import { Component, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import type { Diagnostics } from "@/lib/transport/transport";
 
 /**
  * Section-level error boundary — catches render errors in a subtree and
@@ -18,6 +19,11 @@ import { cn } from "@/lib/format/utils";
  */
 
 interface Props {
+  // meiva:note
+  // Where a caught render error is reported: the page's sink, the same one a failed stream
+  // reaches (`useStreamHub().transport.diagnostics` in the app). The shell hands it in; a
+  // test hands in its own instead of replacing a global.
+  diagnostics: Diagnostics;
   /** Optional custom fallback UI. Receives the error and a reset callback. */
   fallback?: (error: Error, reset: () => void) => ReactNode;
   /** Called when an error is caught, after logging. */
@@ -51,11 +57,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    console.error(
-      "[ErrorBoundary] Caught render error:",
-      error.message,
-      "\nComponent stack:",
-      errorInfo.componentStack,
+    this.props.diagnostics.error(
+      `[ErrorBoundary] Caught render error: ${error.message}\nComponent stack:${errorInfo.componentStack ?? ""}`,
+      error,
     );
     this.props.onError?.(error, errorInfo);
   }

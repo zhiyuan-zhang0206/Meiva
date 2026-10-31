@@ -17,6 +17,7 @@ import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { PluginPageFrame } from "@/components/plugins/plugin-page-frame";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useUiContributions } from "@/lib/plugins/ui-contributions";
+import { useStreamHub } from "@/lib/transport/transport-context";
 import { cn } from "@/lib/format/utils";
 
 export default function PluginPage({
@@ -41,6 +42,7 @@ export default function PluginPage({
   }, [params]);
 
   const { contributions } = useUiContributions();
+  const diagnostics = useStreamHub().transport.diagnostics;
 
   if (resolved === null) return null;
 
@@ -72,7 +74,7 @@ export default function PluginPage({
         <span className="text-xs text-muted-foreground">{plugin}</span>
       </header>
       <div className={cn(FLEX_1, MIN_H_0)}>
-        <ErrorBoundary>
+        <ErrorBoundary diagnostics={diagnostics}>
           <PluginPageFrame plugin={plugin} page={page} title={label} />
         </ErrorBoundary>
       </div>
