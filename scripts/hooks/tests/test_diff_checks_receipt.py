@@ -1,17 +1,28 @@
 # meiva:note
-# The receipt checker's job is to refuse a line a reader would misread: no head, no base, a
-# silent skip, a blind selection without its fallback, or unreplaced refusals nobody answered.
+# The receipt checker's job is to refuse a line a reader would misread: no head, no base, a field
+# with neither a result nor a reason, a layer whose output could not be read, a passed count beside
+# a skipped run, a blind selection without its fallback, or unreplaced refusals nobody answered.
 from __future__ import annotations
 
 import pytest
 
-from scripts.hooks.diff_checks_receipt import findings, parse, reasons_named
+from scripts.hooks.diff_checks_receipt import absence_names_reason, findings, parse
 
 GOOD = (
-    "diff-checks/v1 @abc123 base=def456 pyright=0err(1m36s) err_in_this_diff=0 ruff=ok(0s) "
-    "selector=SELECTED:645 tests=RAN passed=645(6m40s) failed=0 fallback=none blind=none "
-    "vitest=none meizel=ok(17s) debt=ambient-read102->104,total264->279 refusal-loss=none "
-    "skipped=none generated=scripts/hooks/diff_checks.py"
+    "diff-checks/v1 @abc123 base=def456 scope=python pyright=0err(1m50s) err_in_this_diff=0 "
+    "closure=n/a(the-tree-was-green) ruff=ok(1s) selector=SELECTED:2files tests=RAN(2files) "
+    "passed=645tests(6m40s) failed=0tests blind=n/a(no-changed-file-was-invisible) "
+    "fallback=n/a(the-selection-was-not-blind) vitest-app=n/a(no-web-tree-file) "
+    "next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76750edges)(22s) "
+    "debt=n/a(no-manifest-changed) refusal-loss=n/a(no-net-debt-reduction) "
+    "docs-refs=n/a(no-doc-touched) docs-okf=n/a(no-doc-touched) "
+    "generated=scripts/hooks/diff_checks.py"
+)
+
+SKIPPED = (
+    GOOD.replace("tests=RAN(2files)", "tests=skipped(--skip-tests)")
+    .replace("passed=645tests(6m40s)", "passed=n/a(no-test-ran)")
+    .replace("failed=0tests", "failed=n/a(no-test-ran)")
 )
 
 
@@ -29,6 +40,41 @@ def test_a_complete_receipt_for_this_head_has_no_findings() -> None:
     assert findings(parse(GOOD), head="abc123", body="") == []
 
 
+def test_a_run_that_skipped_its_tests_still_passes_the_checker() -> None:
+    assert findings(parse(SKIPPED), head="abc123", body="") == []
+
+
+# meiva:note
+# The defect this pins: `passed=none` is a truthy string, so a skipped run that reported it tripped
+# the very rule meant to catch a real count -- the tool rejected three of the receipts it produced
+# itself. A skipped run reports no count; if one is present, that is the finding.
+def test_a_skipped_run_reporting_passed_none_is_refused() -> None:
+    problems = findings(
+        parse(_line(tests="skipped(--skip-tests)", passed="none", failed="none")),
+        head="abc123",
+        body="",
+    )
+
+    assert any("nor a reason" in problem for problem in problems), (
+        "`none` is not a count and not a reason: the receipt says what happened in words"
+    )
+    assert any("skipped run" in problem for problem in problems)
+
+
+def test_a_skipped_run_reporting_a_real_count_is_refused() -> None:
+    problems = findings(
+        parse(_line(tests="skipped(--skip-tests)", passed="645tests(1s)")), head="abc123", body=""
+    )
+
+    assert any("skipped run" in problem for problem in problems)
+
+
+def test_a_run_that_executed_tests_must_report_both_counts_with_units() -> None:
+    problems = findings(parse(_line(passed="645(6m40s)", failed="0")), head="abc123", body="")
+
+    assert any("passed=<n>tests" in problem for problem in problems)
+
+
 def test_a_receipt_from_another_head_is_refused() -> None:
     problems = findings(parse(GOOD), head="999999", body="")
 
@@ -41,28 +87,29 @@ def test_a_missing_field_is_named_rather_than_treated_as_green() -> None:
     assert any("missing fields" in problem for problem in problems)
 
 
-def test_a_skipped_layer_must_carry_its_reason() -> None:
-    assert reasons_named("none")
-    assert reasons_named("tests(--skip-tests)")
-    assert not reasons_named("tests")
+# meiva:note
+# A layer whose output the runner could not read never passes as green: the runner fixes what it
+# can read, and the checker refuses the rest instead of trusting the absence of a verdict.
+def test_a_layer_the_runner_could_not_read_is_refused() -> None:
+    problems = findings(parse(_line(debt="ok(unreadable:no-table)(3s)")), head="abc123", body="")
 
-    problems = findings(parse(_line(skipped="tests")), head="abc123", body="")
+    assert any("could not read" in problem for problem in problems)
+
+
+def test_an_absence_names_its_reason() -> None:
+    assert absence_names_reason("n/a(no-python-touched)")
+    assert absence_names_reason("skipped(--skip-tests)")
+    assert not absence_names_reason("n/a(")
+
+    problems = findings(parse(_line(ruff="n/a(")), head="abc123", body="")
 
     assert any("reason" in problem for problem in problems)
 
 
-def test_a_skipped_run_must_not_report_a_passed_count() -> None:
-    problems = findings(
-        parse(_line(tests="SKIPPED(--skip-tests)", passed="645(1s)")), head="abc123", body=""
-    )
-
-    assert any("skipped run" in problem for problem in problems)
-
-
 def test_a_blind_selection_without_its_fallback_is_refused() -> None:
-    problems = findings(parse(_line(blind="dyn.py")), head="abc123", body="")
+    problems = findings(parse(_line(blind="BLIND(dyn.py)")), head="abc123", body="")
     answered = findings(
-        parse(_line(blind="dyn.py", fallback="RAN(scripts/ci)")), head="abc123", body=""
+        parse(_line(blind="BLIND(dyn.py)", fallback="RAN(scripts/ci)")), head="abc123", body=""
     )
 
     assert any("fallback" in problem for problem in problems)
@@ -70,7 +117,7 @@ def test_a_blind_selection_without_its_fallback_is_refused() -> None:
 
 
 def test_unreplaced_refusals_need_the_reviewer_line_in_the_body() -> None:
-    receipt = parse(_line(**{"refusal-loss": "hits=12,blocking=2,unreplaced=3"}))
+    receipt = parse(_line(**{"refusal-loss": "ok(hits=12,blocking=2,unreplaced=3)(1s)"}))
 
     assert findings(receipt, head="abc123", body="## What and why")
     assert (
