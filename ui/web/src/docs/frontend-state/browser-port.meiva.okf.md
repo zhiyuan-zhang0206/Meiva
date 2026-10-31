@@ -8,9 +8,9 @@ tags: [frontend, state, architecture]
 # Browser capability port
 
 A page's address, its two storage areas, its media queries, its clipboard, its
-unload-safe beacon, the view it scrolls and the viewport it is drawn into are
-the world this frontend runs in. They are read once, at the composition root,
-and handed down as one value.
+unload-safe beacon, the view it scrolls, the viewport it is drawn into and the
+object URLs it holds a blob under are the world this frontend runs in. They are
+read once, at the composition root, and handed down as one value.
 
 `lib/browser/browser.ts` declares the port. `lib/browser/system-browser.ts` is
 the only file that names `window`: it builds the port from the live page, and
@@ -72,6 +72,15 @@ pinned to it — `pinnedShellHeight` — and `VisualViewportHeightSync`
 applies the answer to the document. That decision is a pure function of the
 reading, so a test asserts it directly and never installs a stub on `innerHeight`
 or `visualViewport`.
+
+## A preview lives in an object URL, and the port releases it
+
+`browser.objectUrls.create(file)` answers the URL a pending image preview renders
+from, and `revoke(url)` releases the blob. The composer keeps that URL as the
+attachment's identity while it is pending, so releasing it is also the moment the
+attachment leaves. A test reads `fakeBrowser().actions.createdUrls` and
+`revokedUrls`: a preview that is never released shows up as a created URL with no
+matching revoke, and no test replaces the URL API to see that.
 
 ## What a test does
 

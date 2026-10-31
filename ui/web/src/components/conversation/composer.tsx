@@ -72,7 +72,9 @@ interface Props {
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
   const client = useApi();
   const t = useTranslations("common");
-  const session = useBrowser().session;
+  const browser = useBrowser();
+  const session = browser.session;
+  const objectUrls = browser.objectUrls;
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
     if (agentId == null) return '';
@@ -172,18 +174,18 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   useEffect(() => {
     for (const [key, previewUrl] of imagePreviewsRef.current) {
       if (!images.some((image) => image.key === key)) {
-        URL.revokeObjectURL(previewUrl);
+        objectUrls.revoke(previewUrl);
         imagePreviewsRef.current.delete(key);
       }
     }
-  }, [images]);
+  }, [images, objectUrls]);
   useEffect(() => {
     const previews = imagePreviewsRef.current;
     return () => {
-      for (const previewUrl of previews.values()) URL.revokeObjectURL(previewUrl);
+      for (const previewUrl of previews.values()) objectUrls.revoke(previewUrl);
       previews.clear();
     };
-  }, []);
+  }, [objectUrls]);
 
   const valueRef = useRef(value);
   useEffect(() => {
@@ -228,11 +230,13 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   const attachImages = (files: File[]) => {
     if (composerLocked || !onAttachImage) return;
     for (const file of files) {
-      const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       // meiva:note
       // A pending attachment previews from an object URL, so the page image policy must allow blob:.
+      // The URL is the attachment's identity while it is pending: it is unique per paste, and the
+      // preview and the key that releases it are the same value.
       // meiva:link ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md
-      const previewUrl = URL.createObjectURL(file);
+      const previewUrl = objectUrls.create(file);
+      const key = previewUrl;
       imagePreviewsRef.current.set(key, previewUrl);
       setImages((prev) => [...prev, { key, name: file.name, previewUrl, status: "uploading" }]);
       onAttachImage(file)

@@ -80,6 +80,16 @@ export interface BrowserViewport {
   subscribe(onChange: () => void): () => void;
 }
 
+// meiva:note
+// Object URLs: the page's own way of holding a blob — an image the reader just pasted, before it
+// has a server address. `create` answers the URL a preview renders from, and `revoke` releases it;
+// a component that drops a preview must call `revoke`, because the page keeps the blob alive until
+// it does.
+export interface BrowserObjectUrls {
+  create(file: Blob): string;
+  revoke(url: string): void;
+}
+
 export interface Browser {
   readonly navigation: BrowserNavigation;
   readonly local: BrowserStorage;
@@ -89,6 +99,8 @@ export interface Browser {
   readonly beacon: BrowserBeacon;
   readonly view: BrowserView;
   readonly viewport: BrowserViewport;
+
+  readonly objectUrls: BrowserObjectUrls;
 }
 
 // meiva:note
