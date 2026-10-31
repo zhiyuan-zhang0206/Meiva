@@ -12,10 +12,10 @@ notifyManager.setScheduler((cb) => {
   cb();
 });
 
-vi.mock("@/components/inspector/inspector-panel", () => ({
-  InspectorPanel: () => <div data-testid="inspector-view" />,
-}));
-
+// meiva:note
+// The panel is rendered with the real InspectorPanel behind its `next/dynamic` chunk. A test that
+// cares whether Inspector mode is mounted reads `shared-inspector`, the panel's own wrapper, so
+// nothing replaces the inspector module and the lazy chunk loads the component the app ships.
 import { SharedContextPanel } from "./shared-context-panel";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -115,7 +115,7 @@ afterEach(() => {
 it("shows the document as the panel's body without a view switcher", () => {
   renderPanelView();
   expect(screen.getByText("No content")).toBeTruthy();
-  expect(screen.queryByTestId("inspector-view")).toBeNull();
+  expect(screen.queryByTestId("shared-inspector")).toBeNull();
   expect(screen.queryByRole("tablist")).toBeNull();
 });
 
@@ -127,7 +127,7 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
   // mode with no visible exit (user report 2026-10-20).
   snapshot.inspectorOpen = true;
   renderPanelView();
-  expect(await screen.findByTestId("inspector-view")).toBeTruthy();
+  expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
   expect(screen.getByTestId("document-bar")).toBeTruthy();
   expect(screen.getByTestId("shared-inspector")).toBeTruthy();
   expect(screen.queryByText("No content")).toBeNull();
@@ -165,7 +165,7 @@ it("keeps the question at the bottom in Inspector mode and restores the reading 
   fireEvent.click(screen.getByRole("button", { name: "Open inspector" }));
   snapshot.inspectorOpen = true;
   rerender(<SharedContextPanel {...props} />);
-  expect(await screen.findByTestId("inspector-view")).toBeTruthy();
+  expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
   expect(screen.getByRole("region", { name: "Notification" })).toBeTruthy();
   expect(screen.getByRole("textbox", { name: /^Reply to notice:/ })).toBe(draft);
   body.scrollTop = 0;
@@ -229,8 +229,8 @@ it.each([false, true])("pins the question as the column's last region in both mo
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   snapshot.inspectorOpen = inspector;
   renderPanelView({ notices: [notice()] });
-  if (inspector) expect(await screen.findByTestId("inspector-view")).toBeTruthy();
-  const column = screen.getByRole("complementary");
+  if (inspector) expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
+  const column = screen.getByRole("complementary", { name: "To user" });
   const region = screen.getByTestId("notice-region");
   expect(column.lastElementChild).toBe(region);
   expect(follows(screen.getByTestId("shared-document"), region)).toBe(true);
@@ -253,7 +253,7 @@ it.each([false, true])("pins the title bar outside the reading viewport, so a sc
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   snapshot.inspectorOpen = inspector;
   renderPanelView({ notices: [notice()] });
-  if (inspector) expect(await screen.findByTestId("inspector-view")).toBeTruthy();
+  if (inspector) expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
   const bar = screen.getByTestId("document-bar");
   const readingArea = screen.getByTestId("shared-document");
   const viewport = readingArea.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
