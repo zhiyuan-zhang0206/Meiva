@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
-from base.host.system.cron import health_job
+from base.host.system.cron import health_job, mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import LINUX_X86, fake_host
@@ -92,3 +92,68 @@ def test_unregister_removes_the_meiva_lines_and_only_them(
         assert unregister(host=host) == 0
 
     assert crontab.lines == [_UNRELATED]
+
+
+# meiva:note
+# The canonical rewrite replaces the command and keeps what the operator wrote after the marker:
+# `(restored 2026-10-30 by #7100)` is the only record of which line was re-added and by whom, and
+# the rewrite wiped it on 2026-10-31 because it replaced the whole line with the caller's text.
+def test_a_note_after_the_marker_survives_a_rewrite(default_home: Path) -> None:
+    crontab = FakeCrontab(
+        _UNRELATED
+        + "\n0 4 * * * stale-command # meiva-logs-maintenance (restored 2026-10-30 by #7100)\n"
+    )
+
+    _register_all(
+        crontab,
+        JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
+    )
+
+    annotated = [line for line in crontab.lines if "# meiva-logs-maintenance" in line]
+    assert len(annotated) == 1
+    assert "stale-command" not in annotated[0]
+    assert annotated[0].endswith("(restored 2026-10-30 by #7100)")
+
+
+# meiva:note
+# Carrying the note over is not a licence to grow it: registering again over an already annotated
+# line leaves the same table, not a line with the note twice.
+def test_a_carried_note_is_not_duplicated(default_home: Path) -> None:
+    crontab = FakeCrontab(
+        _UNRELATED
+        + "\n0 4 * * * stale-command # meiva-logs-maintenance (restored 2026-10-30 by #7100)\n"
+    )
+    roots = JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home)
+
+    _register_all(crontab, roots)
+    once = sorted(crontab.lines)
+    _register_all(crontab, roots)
+
+    assert sorted(crontab.lines) == once
+
+
+# meiva:note
+# Two owned lines that disagree about the note leave the entry as the caller wrote it: picking one
+# would invent a provenance nobody wrote, and the note is only worth keeping if it is the operator's.
+def test_owned_lines_that_disagree_about_a_note_are_left_alone(default_home: Path) -> None:
+    del default_home
+    crontab = FakeCrontab(
+        "0 1 * * * first # meiva-logs-maintenance (restored by #7100)\n"
+        "0 2 * * * second # meiva-logs-maintenance (restored by #9999)\n"
+    )
+    host = _linux(crontab)
+
+    assert (
+        mechanics.replace_crontab_entry(
+            "# meiva-logs-maintenance",
+            "0 4 * * * canonical # meiva-logs-maintenance",
+            skip_phrase="test",
+            update_failure=lambda _message: None,
+            host=host,
+        )
+        == 0
+    )
+
+    assert [line for line in crontab.lines if "# meiva-logs-maintenance" in line] == [
+        "0 4 * * * canonical # meiva-logs-maintenance"
+    ]
