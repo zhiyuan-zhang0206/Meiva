@@ -494,3 +494,37 @@ async def test_admission_refusal_classifies_the_row_it_reads(
     control_text = (await explain_admission_refusal(aops_pool, healthy, "host-test")).describe()
     for other in ("terminated", "hosted elsewhere", "breaker", "streak=", "suppress"):
         assert other not in control_text
+
+
+async def test_apply_hosted_lifecycle_threads_restart_message_into_resume_note(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+) -> None:
+    from agent.ownership.hosted import apply_hosted_lifecycle
+
+    agent_id = _agent(db_conn)
+    incarnation = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    assert incarnation is not None
+    row = db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+        "VALUES (%s, %s, 'restart', 'system:restart', 'claimed') RETURNING id",
+        (agent_id, "Zhiyuan rolling out #9999"),
+    ).fetchone()
+    assert row is not None
+    db_conn.commit()
+
+    outcome = await apply_hosted_lifecycle(
+        aops_pool,
+        incarnation,
+        resume_turn=True,
+    )
+    assert outcome is not None and outcome.kind == "restart"
+    note_row = db_conn.execute(
+        "SELECT content, source, status FROM inbound_messages "
+        "WHERE agent_id = %s AND kind = 'system_note'",
+        (agent_id,),
+    ).fetchone()
+    assert note_row is not None
+    assert note_row[1:] == ("system:restart", "pending")
+    assert "Zhiyuan rolling out #9999" in note_row[0]

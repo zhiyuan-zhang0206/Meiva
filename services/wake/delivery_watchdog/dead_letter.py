@@ -1,7 +1,9 @@
 """Consume abandoned inbound rows; no automatic resurrection is performed."""
 
+from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
+from base.agents.messages.inbound import not_passive_inbound
 from base.db.transaction import write_transaction
 
 
@@ -72,26 +74,30 @@ def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: floa
 # they stay pending for the delivery wake and the watchdog's stranded-wake
 # fallback (`stranded_wake.py`), which retires them on this same clock. Internal
 # assignment notes keep their `delivery_result` failure evidence instead of
-# disappearing, and an impersonation termination notice belongs to the next
-# resurrection's native history, so its explicit marker preserves it at any age.
+# disappearing, and passive lifecycle notes plus impersonation termination notices
+# belong to the next resurrection's native history, so their explicit markers
+# preserve them at any age.
 def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: float) -> int:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE inbound_messages m SET status = 'done', claimed_at = now(), "
-            "payload = CASE WHEN m.payload->'task_notification'='true'::jsonb "
-            "AND m.payload->'delivery_resurrect'='true'::jsonb THEN "
-            "m.payload||jsonb_build_object('delivery_result', "
-            "jsonb_build_object('outcome','failed','reason','resurrection_deadline_expired')) "
-            "ELSE m.payload END "
-            "FROM agents_meta am "
-            "WHERE m.agent_id = am.id "
-            "  AND am.status = 'terminated' "
-            "  AND m.status = 'pending' "
-            "  AND m.kind IN ('terminate', 'system_note') "
-            "  AND NOT (m.kind='system_note' AND m.source='system:impersonation' "
-            "           AND COALESCE(m.payload->'impersonation_termination_notice' "
-            "                        = 'true'::jsonb, false)) "
-            "  AND m.created_at < now() - make_interval(secs => %s)",
+            pgsql.SQL(
+                "UPDATE inbound_messages m SET status = 'done', claimed_at = now(), "
+                "payload = CASE WHEN m.payload->'task_notification'='true'::jsonb "
+                "AND m.payload->'delivery_resurrect'='true'::jsonb THEN "
+                "m.payload||jsonb_build_object('delivery_result', "
+                "jsonb_build_object('outcome','failed','reason','resurrection_deadline_expired')) "
+                "ELSE m.payload END "
+                "FROM agents_meta am "
+                "WHERE m.agent_id = am.id "
+                "  AND am.status = 'terminated' "
+                "  AND m.status = 'pending' "
+                "  AND m.kind IN ('terminate', 'system_note') "
+                "  AND {not_passive} "
+                "  AND NOT (m.kind='system_note' AND m.source='system:impersonation' "
+                "           AND COALESCE(m.payload->'impersonation_termination_notice' "
+                "                        = 'true'::jsonb, false)) "
+                "  AND m.created_at < now() - make_interval(secs => %s)"
+            ).format(not_passive=pgsql.SQL(not_passive_inbound("m"))),
             (threshold_s,),
         )
         return cur.rowcount

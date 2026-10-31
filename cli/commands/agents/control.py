@@ -290,17 +290,13 @@ def cmd_agents_restart(
     config_json: str | None = None,
     *,
     source: str | None = None,
+    message: str | None = None,
 ) -> int:
     url = _api(access, f"agents/{agent_id}/restart")
-    caller = _explicit_caller(source)
-    if config_json is None:
-        resp = http_dial.post(
-            url,
-            **({"json": caller} if caller else {}),
-            timeout=_TIMEOUT_S,
-            headers=gateway_auth_headers(access),
-        )
-    else:
+    payload: dict[str, object] = {**_explicit_caller(source)}
+    if message is not None:
+        payload["message"] = message
+    if config_json is not None:
         try:
             config_overlay: dict[str, object] | list[object] | str | int | float | bool | None = (
                 json.loads(config_json)
@@ -311,12 +307,13 @@ def cmd_agents_restart(
         if not isinstance(config_overlay, dict):
             print("config must be a JSON object", file=sys.stderr)
             return 1
-        resp = http_dial.post(
-            url,
-            json={"config_overlay": config_overlay, **caller},
-            timeout=_TIMEOUT_S,
-            headers=gateway_auth_headers(access),
-        )
+        payload["config_overlay"] = config_overlay
+    resp = http_dial.post(
+        url,
+        **({"json": payload} if payload else {}),
+        timeout=_TIMEOUT_S,
+        headers=gateway_auth_headers(access),
+    )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} restart: {resp.json().get('status')}")
     return 0
@@ -327,11 +324,19 @@ def cmd_agents_restart(
 #
 # Brings a terminated agent back: a fresh process is respawned attached to the same agent_id
 # (history preserved). An already-running agent returns `already_alive`.
-def cmd_agents_resurrect(access: GatewayAccess, agent_id: int, *, source: str | None = None) -> int:
-    caller = _explicit_caller(source, field="resurrected_by")
+def cmd_agents_resurrect(
+    access: GatewayAccess,
+    agent_id: int,
+    *,
+    source: str | None = None,
+    message: str | None = None,
+) -> int:
+    payload: dict[str, object] = {**_explicit_caller(source, field="resurrected_by")}
+    if message is not None:
+        payload["prompt"] = message
     resp = http_dial.post(
         _api(access, f"agents/{agent_id}/resurrect"),
-        **({"json": caller} if caller else {}),
+        **({"json": payload} if payload else {}),
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
     )
@@ -355,12 +360,14 @@ def _terminate(
     force: bool,
     source: str | None = None,
     kill_all_shell_sessions: bool = False,
+    message: str | None = None,
 ) -> int:
     verb = "kill" if force else "terminate"
     kill_flag = {"kill_all_shell_sessions": True} if kill_all_shell_sessions else {}
+    msg_field = {"message": message} if message is not None else {}
     resp = http_dial.post(
         _api(access, f"agents/{agent_id}/terminate"),
-        json={"force": force, **kill_flag, **_explicit_caller(source)},
+        json={"force": force, **kill_flag, **msg_field, **_explicit_caller(source)},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
     )
@@ -403,6 +410,7 @@ def cmd_agents_terminate(
     *,
     source: str | None = None,
     kill_all_shell_sessions: bool = False,
+    message: str | None = None,
 ) -> int:
     return _terminate(
         access,
@@ -410,6 +418,7 @@ def cmd_agents_terminate(
         force=False,
         source=source,
         kill_all_shell_sessions=kill_all_shell_sessions,
+        message=message,
     )
 
 
@@ -427,6 +436,7 @@ def cmd_agents_kill(
     *,
     source: str | None = None,
     kill_all_shell_sessions: bool = False,
+    message: str | None = None,
 ) -> int:
     return _terminate(
         access,
@@ -434,6 +444,7 @@ def cmd_agents_kill(
         force=True,
         source=source,
         kill_all_shell_sessions=kill_all_shell_sessions,
+        message=message,
     )
 
 

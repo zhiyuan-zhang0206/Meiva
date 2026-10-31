@@ -26,7 +26,10 @@ tags:
 
 - `meiva agents ls/send/cancel/restart/resurrect/terminate/kill`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
-  label` columns. It does not expose runner-local workspace paths.
+  label` columns. It does not expose runner-local workspace paths. `restart`,
+  `resurrect`, `terminate` and `kill` require `--message TEXT | --no-message`
+  (blank `--message` exits 2 at parse); `cancel` is an immediate turn
+  interruption and takes neither.
 - `meiva notices list/resolve/clear/audit`: `resolve` reports success only when the
   gateway accepts the action. A 409 conflict is an error, including an absent
   notice, an action-kind mismatch, or an already-resolved answer/dismissal.

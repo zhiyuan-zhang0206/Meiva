@@ -120,6 +120,39 @@ class TestRestartAgentRequestConfigOverlay:
         body = RestartAgentRequest(config_overlay=config_overlay)
         assert body.config_overlay == config_overlay
 
+    def test_normalizes_and_validates_message(self) -> None:
+        body = RestartAgentRequest(message="  Zhiyuan reloading agent config  ")
+        assert body.message == "Zhiyuan reloading agent config"
+        for invalid in ("", "   ", "x" * 1_000_001):
+            with pytest.raises(ValidationError):
+                RestartAgentRequest(message=invalid)
+
+
+@pytest.mark.asyncio
+async def test_restart_agent_op_persists_message_on_restart_inbound(
+    lifecycle_agent_id: int,
+    database: Database,
+    event_bus: EventBus,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
+) -> None:
+    result = await lifecycle.lifecycle_op(
+        database,
+        event_bus,
+        f"/api/agents/{lifecycle_agent_id}/restart",
+        {"source": "user", "message": "Zhiyuan switching model"},
+        db_pool,
+        catalog=model_catalog,
+        agent_host_port=8114,
+        home=resolve_meiva_home(),
+    )
+    assert result.status == "enqueued"
+    assert db_conn.execute(
+        "SELECT kind, source, content, status FROM inbound_messages WHERE agent_id=%s",
+        (lifecycle_agent_id,),
+    ).fetchall() == [("restart", "user", "Zhiyuan switching model", "pending")]
+
 
 class TestSpawnPrechecksBlocking:
     def test_fork_resolves_checkpoint(

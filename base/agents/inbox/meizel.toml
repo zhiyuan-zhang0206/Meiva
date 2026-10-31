@@ -1,10 +1,10 @@
-exports = ["chat_delivery.py", "compact.py", "harness_notice.py", "insert.py", "rows.py", "tests"]
+exports = ["chat_delivery.py", "compact.py", "harness_notice.py", "insert.py", "passive_lifecycle_note.py", "rows.py", "tests"]
 
 [uses]
 "compact.py" = ["control_delivery.py", "insert.py"]
 "control_delivery.py" = ["insert.py"]
 "harness_notice.py" = ["insert.py"]
-"tests" = ["chat_delivery.py", "compact.py", "harness_notice.py", "insert.py"]
+"tests" = ["chat_delivery.py", "compact.py", "harness_notice.py", "insert.py", "passive_lifecycle_note.py"]
 
 [purity]
 "__init__.py" = "strict"

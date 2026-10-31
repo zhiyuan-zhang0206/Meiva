@@ -11,7 +11,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from .choices import forwarded_flags, start_flags
+from .choices import forwarded_flags, message_flag, start_flags
 from .fleet_gate import baselines, probe_helper, probe_host
 from .oneshot import start_script
 from .plan.gateway_commands import pre_verify_script
@@ -206,6 +206,7 @@ def _stop_wave(
         mode=args.mode,
         timeout=args.stop_timeout,
         infra=args.infra,
+        message=message_flag(args),
     )
     stopped: list[str] = []
     current = args.gateway
@@ -241,12 +242,15 @@ def down(s: Session, args: argparse.Namespace) -> None:
         raise RefusedError("refused: " + "; ".join(reasons))
     announce_leases(s, args.gateway, args.lease_confirm_seconds)
     _stored_schedules(s, args, new)
+    silence_note = f" ({args.message_text})" if args.message_text else ""
     run_silence(
         s,
         args.gateway,
         "open",
         hours=args.silence_hours,
-        comment=f"fleet update to {new[:12]}: planned outage; `up` expires this silence",
+        comment=(
+            f"fleet update to {new[:12]}: planned outage{silence_note}; `up` expires this silence"
+        ),
     )
     _stop_wave(s, args, serving, rebuilding)
     for alias in start_order(args.gateway, tuple(args.runner)):

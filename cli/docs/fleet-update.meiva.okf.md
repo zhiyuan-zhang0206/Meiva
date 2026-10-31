@@ -33,9 +33,11 @@ and start choices are forwarded unchanged, never checked against the diff.
 - `down` / `run`, forwarded to every host's `meiva stop --yes`:
   `--keep-shell-sessions|--close-shell-sessions`, `--keep-browser|--stop-browser`,
   `--keep-extras|--stop-extras`, `--keep-service NAME` (repeatable) or
-  `--keep-no-services`, `--mode smooth|force`, `--stop-timeout` (as `--timeout`).
-  `--keep-infra|--stop-infra` goes to the gateway's stop only. `--yes` is always
-  sent (non-interactive SSH).
+  `--keep-no-services`, `--mode smooth|force`, `--stop-timeout` (as `--timeout`),
+  `--message TEXT` (non-blank natural-language explanation for live agents and
+  closed busy shells, also appended to the Grafana silence comment) or
+  `--no-message`. `--keep-infra|--stop-infra` goes to the gateway's stop only.
+  `--yes` is always sent (non-interactive SSH).
 - `down` / `run`, for the fleet itself: `--allow-python-change|--refuse-python-change`,
   `--allow-red-schedules|--refuse-red-schedules`, `--silence-hours`,
   `--lease-confirm-seconds` (0 reports the leases and never waits).
@@ -75,19 +77,11 @@ remain unchanged throughout the update.
    check shows a dirty tree and never cleans it: untracked files are the
    operator's to move (not delete), never the update's.
 
-## The up half, in order
+## The up half
 
-1. `meiva start` with the operator's service selection on the gateway, then each runner; on macOS through a run-once
-   `gui/<uid>` LaunchAgent, because the helper's launchd job lives in `gui/<uid>`. Each start must exit 0.
-2. The roster gate: every listed machine online with checkout and running code
-   on one commit; unlisted machines are reported and never block.
-3. The gateway smoke-tests each listed agent-runner with a real agent.
-4. `meiva packages refresh` on every host; it never forces.
-5. The drift checks, last: `meiva schedules verify --no-notify` on the gateway
-   and `meiva plugins verify` on every host. Every check runs to the end and a
-   red fails `up` with all the details — after the smoke and the refresh, so a
-   red never skips them.
-6. Expire the silence.
+Ordered steps (`meiva start` on gateway then runners, roster convergence, runner
+smoke, `meiva packages refresh`, drift checks and silence expiry) and completion
+gates live in [[cli/docs/fleet-update-window/up-half.meiva.okf.md]].
 
 A failure ends the half: nothing rolls back, the message names the step to
 fix, and the whole half is rerun. Refusals exit 2 (nothing touched); failures
@@ -107,7 +101,5 @@ tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_a
 ```
 
 The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the smoke or the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
-
-Before up completes: every listed machine is online on the roster with checkout and running code on one commit — re-read on the poll interval until --roster-timeout; a listed host is matched by the machine name it reports, a name with no row fails, unlisted machines are reported and never block; the gateway has smoke-tested each listed agent-runner; and every host ran meiva packages refresh, which replaces a differing local copy and never forces.
 
 Parent: [[cli/docs/cli.meiva.okf.md]].

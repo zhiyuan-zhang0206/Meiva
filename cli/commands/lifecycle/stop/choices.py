@@ -43,6 +43,7 @@ class StopChoices:
     teardown_extras: bool
     force: bool
     keep_browser_unit: bool = False
+    message: str | None = None
 
 
 # meiva:note

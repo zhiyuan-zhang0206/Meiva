@@ -200,7 +200,12 @@ async def _drain_with(
 ) -> tuple[dict[int, asyncio.Task[None]], float]:
     tasks = {agent: asyncio.create_task(dispatch_forever()) for agent in (1, 2)}
     graceful = GracefulExit(
-        turns=_Turns(tasks), progress=TurnProgress(), write_restart=write_restart, drain_s=drain_s
+        turns=_Turns(tasks),
+        progress=TurnProgress(),
+        write_restart=write_restart,
+        drain_s=drain_s,
+        read_exit_message=lambda: None,
+        write_idle_notes=None,
     )
     graceful.request()
     started = asyncio.get_running_loop().time()
@@ -215,7 +220,7 @@ async def _drain_with(
 async def test_a_failed_restart_write_is_named_and_the_turn_still_waited_for(
     loguru_records: LogRecords,
 ) -> None:
-    async def write_restart(agent_id: int) -> OwedRestart:
+    async def write_restart(agent_id: int, _message: str | None = None) -> OwedRestart:
         if agent_id == 1:
             raise psycopg.OperationalError("database went away")
         return OwedRestart(20, written=True)
@@ -231,7 +236,7 @@ async def test_a_failed_restart_write_is_named_and_the_turn_still_waited_for(
 
 
 async def test_restart_writes_share_the_drain_deadline(loguru_records: LogRecords) -> None:
-    async def write_restart(agent_id: int) -> OwedRestart:
+    async def write_restart(agent_id: int, _message: str | None = None) -> OwedRestart:
         await asyncio.Event().wait()
         raise AssertionError(f"the write for agent {agent_id} never returns")
 
@@ -256,10 +261,70 @@ async def test_an_idle_agent_gets_no_restart(cluster: Cluster, loguru_records: L
     await served.close()
 
     assert cluster.inbound(agent_id, "restart") == []
+    assert cluster.inbound(agent_id, "system_note") == []
     assert script.calls == 0
     assert cluster.row(agent_id) == ("idling", None)
     assert [r["extra"]["written"] for r in loguru_records.events("host_exit_draining")] == [0]
     assert len(loguru_records.events("host_exit_drained")) == 1
+
+
+# meiva:note
+# The idle agent stays unwoken after host drain, with its passive note waiting in FIFO order.
+async def _assert_idle_passive_note_unwoken(
+    cluster: Cluster, idle_id: int, idle_script: Script, reason: str
+) -> None:
+    assert cluster.inbound(idle_id, "restart") == []
+    [passive_note] = cluster.inbound(idle_id, "system_note")
+    assert (passive_note.source, passive_note.status, reason in passive_note.content) == (
+        RESTART_SOURCE,
+        "pending",
+        True,
+    )
+    assert not await cluster.woken_by_a_new_host(idle_id)
+    assert idle_script.calls == 0
+
+
+async def _assert_idle_passive_note_claimed_fifo(
+    cluster: Cluster, idle_id: int, idle_script: Script, reason: str
+) -> None:
+    await _assert_idle_passive_note_unwoken(cluster, idle_id, idle_script, reason)
+    cluster.send(idle_id, "next task")
+    assert await cluster.woken_by_a_new_host(idle_id)
+    second = await cluster.host()
+    await asyncio.wait_for(second.host.run_turn(idle_id), 30)
+    claimed = [str(m.content) for m in idle_script.histories[0]]
+    positions = [i for i, text in enumerate(claimed) if reason in text or "next task" in text]
+    assert (idle_script.calls, len(positions), reason in claimed[positions[0]]) == (1, 2, True)
+    assert [n.status for n in cluster.inbound(idle_id, "system_note")] == ["done"]
+    await second.close()
+
+
+async def test_exit_message_explains_running_turn_resume_and_leaves_passive_note_for_idle_agent(
+    cluster: Cluster,
+) -> None:
+    reason = "Zhiyuan rolling out #9999"
+    running_id, running_script = cluster.spawn(
+        chat="hello",
+        steps=[Step(partial="half a sentence", holds=True), Step(text="resumed")],
+    )
+    idle_id, idle_script = cluster.spawn(chat=None, steps=[Step(text="ack")])
+    first = await cluster.host(drain_s=30, wakes=True, exit_message=reason)
+    first.scheduler.wake(running_id)
+    await asyncio.wait_for(running_script.entered.wait(), 30)
+    serving = first.serve()
+
+    first.graceful.request()
+    await _until(lambda: cluster.inbound(running_id, "restart"))
+    [restart] = cluster.inbound(running_id, "restart")
+    assert restart.content == reason
+    cluster.let_grace_pass(restart.id)
+    await asyncio.wait_for(serving, 30)
+    await first.close()
+
+    [resume_note] = cluster.inbound(running_id, "system_note")
+    assert f"while your turn was unfinished: {reason}\n" in resume_note.content
+    assert await cluster.woken_by_a_new_host(running_id)
+    await _assert_idle_passive_note_claimed_fifo(cluster, idle_id, idle_script, reason)
 
 
 def test_a_real_sigterm_drains_instead_of_interrupting_and_a_second_one_is_ignored() -> None:

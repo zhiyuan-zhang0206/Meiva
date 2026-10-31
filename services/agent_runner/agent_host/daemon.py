@@ -74,6 +74,12 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.deploy.lifecycle.host_exit_message import (
+    PLUGINS_RESTART_MESSAGE,
+    clear_host_exit_message,
+    consume_host_exit_message,
+    write_host_exit_message,
+)
 from base.deploy.release import editable_install
 from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
@@ -108,7 +114,12 @@ from .lifecycle.configuration import (
     pool_bounds,
     relief_floor_bytes,
 )
-from .lifecycle.graceful_exit import OwedRestart, serve_until_exit, write_exit_restart
+from .lifecycle.graceful_exit import (
+    OwedRestart,
+    serve_until_exit,
+    write_exit_idle_notes,
+    write_exit_restart,
+)
 from .lifecycle.instance import release_instance_lock, take_instance_lock
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
@@ -181,7 +192,12 @@ def plugins_fingerprint(root: Path) -> str:
 # itself, which starts the graceful exit: running turns settle at their restart, the
 # drains run, then the supervisor restarts the host fresh.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-async def watch_plugins_for_restart(root: Path, *, interval_s: float) -> None:
+async def watch_plugins_for_restart(
+    root: Path,
+    *,
+    interval_s: float,
+    home: Path | None = None,
+) -> None:
     baseline = plugins_fingerprint(root)
     while True:
         await asyncio.sleep(interval_s)
@@ -192,6 +208,8 @@ async def watch_plugins_for_restart(root: Path, *, interval_s: float) -> None:
             "[agent-host] external plugins changed under $MEIVA_HOME/plugins — "
             "restarting to load them (issue #170)"
         )
+        if home is not None:
+            write_host_exit_message(home, PLUGINS_RESTART_MESSAGE)
         signal.raise_signal(signal.SIGTERM)
         return
 
@@ -224,6 +242,7 @@ def background_loops(
     clock: Clock,
     plugins_root: Path,
     stdout_log: Path,
+    home: Path | None = None,
 ) -> dict[str, Coroutine[object, object, None]]:
     """The daemon's background loops for plugins, logs, exec memory and understanding chunks.
 
@@ -235,7 +254,7 @@ def background_loops(
     """
     return {
         "plugins_watch": watch_plugins_for_restart(
-            plugins_root, interval_s=PLUGINS_POLL_INTERVAL_S
+            plugins_root, interval_s=PLUGINS_POLL_INTERVAL_S, home=home
         ),
         "stdout_log_rotate": rotate_stdout_log_forever(stdout_log),
         "exec_memory_guard": run_memory_guard_forever(host_log, os.getpid(), relief_floor_bytes()),
@@ -407,7 +426,9 @@ async def serve_host_lifecycle(
     settle_coro: Coroutine[object, object, Collection[int]],
     open_health: Coroutine[object, object, asyncio.Server],
     serve_dispatch: Coroutine[object, object, None],
-    write_restart: Callable[[int], Awaitable[OwedRestart]],
+    write_restart: Callable[[int, str | None], Awaitable[OwedRestart]],
+    read_exit_message: Callable[[], str | None],
+    write_idle_notes: Callable[[str, frozenset[int]], Awaitable[int]] | None,
     clients: ClientSet | None = None,
     instance_lock: int | None = None,
     pidfile: Path,
@@ -429,6 +450,8 @@ async def serve_host_lifecycle(
                 turns=scheduler,
                 progress=host.turn_progress,
                 write_restart=write_restart,
+                read_exit_message=read_exit_message,
+                write_idle_notes=write_idle_notes,
             )
         finally:
             try:
@@ -498,6 +521,7 @@ async def run(
     instance_lock = take_instance_lock(home)
     endpoint = _endpoint(config, runtime=run_dir(home))
     _claim_pidfile(endpoint)
+    clear_host_exit_message(home)
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
     from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
@@ -616,6 +640,7 @@ async def run(
                     clock=stamping.clock,
                     plugins_root=external_plugin_read_root(home=home),
                     stdout_log=stdout_log_path(logs_dir=logs_dir(home=home)),
+                    home=home,
                 ),
                 InboundWakeDispatcher(
                     bus,
@@ -627,6 +652,8 @@ async def run(
                 ).run(),
             ),
             write_restart=partial(write_exit_restart, db, bus),
+            read_exit_message=partial(consume_host_exit_message, home),
+            write_idle_notes=partial(write_exit_idle_notes, db, local_machine),
             clients=clients,
             instance_lock=instance_lock,
             pidfile=endpoint.pidfile,

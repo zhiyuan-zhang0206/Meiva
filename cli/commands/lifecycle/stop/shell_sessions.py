@@ -190,12 +190,14 @@ def _write_close_notices(
     direct_db: bool,
     database_factory: DatabaseFactory,
     command: CommandRuntime,
+    message: str | None = None,
 ) -> None:
     notices = pty_close_notices.notices_for(
         closed,
         reason=reason,
         local_machine=command.machine.name(),
         closed_at=command.clock.now().isoformat(),
+        message=message,
     )
     if not notices:
         return
@@ -231,6 +233,7 @@ def settle_closure(
     direct_db: bool,
     database_factory: DatabaseFactory,
     command: CommandRuntime,
+    message: str | None = None,
 ) -> None:
     for step in plan_after_closure(_survivor_facts(outcome), forced=False):
         match step:
@@ -241,6 +244,7 @@ def settle_closure(
                     direct_db=direct_db,
                     database_factory=database_factory,
                     command=command,
+                    message=message,
                 )
             case ReportJobLeftover():
                 print(job_leftover_line(step), file=sys.stderr)
@@ -275,6 +279,7 @@ def close_shell_sessions(
     database_factory: DatabaseFactory,
     command: CommandRuntime,
     cleanup_wait_s: float,
+    message: str | None = None,
 ) -> closure.Outcome:
     grace_s = closure_grace_s(deadline.left() or 0.0, cleanup_wait_s)
     outcome, reason = run_closure(
@@ -291,6 +296,7 @@ def close_shell_sessions(
         direct_db=direct_db,
         database_factory=database_factory,
         command=command,
+        message=message,
     )
     return outcome
 

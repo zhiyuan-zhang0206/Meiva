@@ -83,11 +83,16 @@ def lifecycle_kind(kind: str) -> LifecycleKind:
 # meiva:note
 # The one pending note that continues a turn the restart ended unfinished; an idle agent
 # gets none.
-def resume_note(source: str, *, resume_turn: bool) -> ResumeNote | None:
+def resume_note(
+    source: str,
+    *,
+    resume_turn: bool,
+    message: str | None = None,
+) -> ResumeNote | None:
     if not resume_turn:
         return None
     return ResumeNote(
-        content=restart_resume_note(source),
+        content=restart_resume_note(source, message),
         source=source,
         note_tag=NoteTag.LIFECYCLE_RESTART.value,
     )

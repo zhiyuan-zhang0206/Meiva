@@ -74,7 +74,7 @@ KEYCHAIN_GUARD = guest_script(
 # The golden image boots its installed helper through launchd. Retire that job
 # through the supported lifecycle before start may replace a stale helper.
 STOP = guest_script(
-    f'cd "{GUEST_SOURCE}" && .venv/bin/meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 600'
+    f'cd "{GUEST_SOURCE}" && .venv/bin/meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 600 --no-message'
 )
 INIT = guest_script(f'cd "{GUEST_SOURCE}" && {" ".join(init_argv(f"{WORK}/profile.env"))}')
 START = guest_script(f'cd "{GUEST_SOURCE}" && {" ".join(START_ARGV)}')

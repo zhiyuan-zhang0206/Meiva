@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
+from base.agents.messages.inbound import not_passive_inbound
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from services.wake.heartbeat import STALE_PENDING_S
 
@@ -92,7 +94,7 @@ def select_idle_agents_needing_heartbeat(
     # handoff_applied_at IS NULL`, not by `automatic`: that column is kept as an external
     # contract and history audit, never as a mode switch — a trigger rejects `false` outright
     # since the automatic-only upgrade, and the predicate deliberately does not reference it.
-    sql = (
+    sql = pgsql.SQL(
         "SELECT id, idle_minutes, "
         " CASE WHEN handoff_recheck THEN 'unapplied_handoff_receipt' END AS reason "
         "FROM ("
@@ -140,12 +142,13 @@ def select_idle_agents_needing_heartbeat(
         " AND NOT EXISTS ("
         "   SELECT 1 FROM inbound_messages im "
         "   WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
+        "     AND {not_passive} "
         "     AND im.created_at >= now() - make_interval(secs => %s) "
         " )"
         ") AS scored "
         "WHERE handoff_recheck OR normal_eligible "
         "ORDER BY last_work_at ASC"
-    )
+    ).format(not_passive=pgsql.SQL(not_passive_inbound("im")))
     params: list[object] = [
         corpse_grace_s,
         idle_threshold_s,

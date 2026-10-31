@@ -244,7 +244,13 @@ def restart(
     client = admit_agent_host_restart(runtime, timeout=12.0)
     assert client is not None
     return restart_agent_host(
-        runtime, client, agent_host(probe), force=force, timeout=12.0, start_timeout=0.2
+        runtime,
+        client,
+        agent_host(probe),
+        force=force,
+        timeout=12.0,
+        start_timeout=0.2,
+        database_factory=None,
     )
 
 

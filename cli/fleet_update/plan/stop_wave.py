@@ -24,6 +24,7 @@ class StopChoices:
     mode: str
     timeout: int
     infra: str
+    message: str
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ class StopStep:
 
 def _flags(choices: StopChoices, *, rebuilding: bool, is_gateway: bool) -> str:
     head = (REBUILD_STOP,) if rebuilding else choices.forwarded
-    parts = [*head, f"--mode {choices.mode}", f"--timeout {choices.timeout}"]
+    parts = [*head, f"--mode {choices.mode}", f"--timeout {choices.timeout}", choices.message]
     if is_gateway:
         parts.append(choices.infra)
     return " ".join(parts)

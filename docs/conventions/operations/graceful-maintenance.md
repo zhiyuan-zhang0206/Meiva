@@ -10,12 +10,12 @@ start the gateway and verify its dependencies before starting runners.
 
 | Command | Running agent turns | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
-| `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` | Settled by the agent host's own exit | Close shell sessions with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message` | Settled by the agent host's own exit | Close shell sessions with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
 | the same with `--keep-infra` instead of `--stop-infra` | Same | Close | Keep the private data plane |
 | the same with `--keep-infra --keep-service gateway` | Same | Close | Also retain the named service; dependent services require `--keep-infra` |
-| `meiva stop --yes --keep-shell-sessions --keep-browser --keep-extras --keep-no-services --keep-infra --mode smooth --timeout 300` | Same | Retained | Stop only the roster services; keep everything else |
-| `meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300` | Same, then the start leg | Retained (`--close-shell-sessions` closes them) | Replace the native services; keep PostgreSQL, Redis, PgBouncer (always), browser, Gate, helper and native LGTM |
-| `meiva restart --only agent-host --mode smooth --timeout 300` | The agent host's exit, alone | Untouched | Only agent-host is stopped; root relaunches it |
+| `meiva stop --yes --keep-shell-sessions --keep-browser --keep-extras --keep-no-services --keep-infra --mode smooth --timeout 300 --no-message` | Same | Retained | Stop only the roster services; keep everything else |
+| `meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300 --no-message` | Same, then the start leg | Retained (`--close-shell-sessions` closes them) | Replace the native services; keep PostgreSQL, Redis, PgBouncer (always), browser, Gate, helper and native LGTM |
+| `meiva restart --only agent-host --mode smooth --timeout 300 --no-message` | The agent host's exit, alone | Untouched | Only agent-host is stopped; root relaunches it |
 | `meiva start --all-services` | Wake every agent holding a continuation note once the host is ready | Reuse retained sessions; closed sessions are not serialized | Bring up the named services from the existing home |
 
 Every `stop` choice is an explicit argument; a missing one exits 2 and lists every
@@ -29,7 +29,9 @@ nothing about the selection is remembered between runs.
 browser, the pty-sessions service and the extras have their own choices). It is
 an invocation's preservation choice, not a permanent disabled-service setting.
 `stop` asks for confirmation with `--prompt` and proceeds with `--yes`; `restart` never asks. Both
-require `--timeout SECONDS` (the examples use 300), and `restart`'s `--timeout` bounds its stop
+require `--timeout SECONDS` (the examples use 300) and `--message TEXT|--no-message` (explaining
+who initiated the stop/restart and why to live agents and closed busy shells; blank `--message`
+exits 2), and `restart`'s `--timeout` bounds its stop
 leg. A deadline is a failed stop, not permission to kill surviving services. Shell sessions and Postgres are the exceptions: Postgres' fast
 shutdown that has not finished by the end of its share of the budget (a hung
 archive command) is ended by an immediate shutdown and the leftover descendants
@@ -71,7 +73,9 @@ in root's declared order, one at a time, each only after the one before it has e
 writes one `restart` per running turn, lets each turn reach it (a model call or code
 run in flight is interrupted after the restart has waited its 10-second grace), and
 exits; the same transaction that applies a restart queues the note that continues an
-unfinished turn. Idle agents get nothing. A turn still running when the host's
+unfinished turn. With `--no-message`, idle agents get nothing; with `--message TEXT`,
+they receive a passive lifecycle note delivered on their next ordinary wake without
+waking them at boot. A turn still running when the host's
 budget (30 seconds) is spent is named at ERROR, cancelled, and not resumed: the step
 it was in is lost, as after a crash. The next `meiva start` takes every restart and
 continuation note the stop left, through the host's pending scan. How the exit is

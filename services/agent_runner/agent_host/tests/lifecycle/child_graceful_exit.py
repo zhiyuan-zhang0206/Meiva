@@ -54,7 +54,7 @@ async def _run() -> dict[str, Any]:
 
     restarts_for: list[int] = []
 
-    async def write_restart(agent_id: int) -> OwedRestart:
+    async def write_restart(agent_id: int, _message: str | None = None) -> OwedRestart:
         restarts_for.append(agent_id)
         _say("draining")
         return OwedRestart(1, written=True)
@@ -69,6 +69,8 @@ async def _run() -> dict[str, Any]:
         turns=_Turns({_AGENT: task}),
         progress=TurnProgress(),
         write_restart=write_restart,
+        read_exit_message=lambda: None,
+        write_idle_notes=None,
     )
     return {"restarts_for": restarts_for, "turn_settled": task.done(), "repeats": repeats}
 

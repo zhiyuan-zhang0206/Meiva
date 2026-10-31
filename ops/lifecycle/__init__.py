@@ -516,7 +516,7 @@ def restart_blocking(
         return insert_inbound_message(
             conn,
             agent_id,
-            "",
+            body.message or "",
             source=body.source,
             kind="restart",
             payload=payload,
@@ -550,7 +550,7 @@ async def restart_agent_op(
     )
     if iid is None:
         return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
-    await publish_inbound_arrived(bus, agent_id, iid, "restart", body.source, "")
+    await publish_inbound_arrived(bus, agent_id, iid, "restart", body.source, body.message or "")
     return RestartAgentResponse(status=RestartResult.ENQUEUED)
 
 

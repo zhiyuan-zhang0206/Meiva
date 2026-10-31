@@ -11,7 +11,8 @@
 #
 # One module per domain:
 #
-# - ``host`` — init/start/stop/restart/status/converge/firewall/trace
+# - ``host`` — init/start/stop/restart/status/converge/firewall
+# - ``observability`` — lgtm/trace
 # - ``cluster`` — the whole-cluster verbs
 # - ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
 # - ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
@@ -38,18 +39,17 @@ from cli.parsers.host import (
     add_converge_parser,
     add_firewall_parser,
     add_init_parser,
-    add_lgtm_parser,
     add_restart_parser,
     add_start_parser,
     add_status_parser,
     add_stop_parser,
-    add_trace_parser,
 )
 from cli.parsers.logs import add_logs_parser
 from cli.parsers.management import (
     add_config_parser,
     add_schedules_parser,
 )
+from cli.parsers.observability import add_lgtm_parser, add_trace_parser
 from cli.parsers.permissions import add_permissions_parser
 from cli.parsers.pty import add_pty_parser
 

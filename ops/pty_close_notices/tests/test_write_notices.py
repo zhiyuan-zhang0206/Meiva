@@ -436,3 +436,28 @@ def test_closure_receipt_stores_the_canonical_ops_status(db_conn: psycopg.Connec
     assert db_conn.execute(
         "SELECT op_status FROM api_idempotency WHERE method='ops' AND path='closure-notice'"
     ).fetchall() == [(OpStatus.COMPLETED.value,)]
+
+
+def test_closure_notice_carries_operator_message_into_text_and_payload(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    aid = _agent(db_conn, "idling")
+    (built,) = notices.notices_for(
+        [_ended(aid)],
+        reason=notices.STOP_REASON,
+        local_machine=machine_identity.name(),
+        closed_at=_CLOSED_AT,
+        message="Zhiyuan stopping runner for kernel upgrade",
+    )
+
+    assert notices.write_notices(database, event_bus, [built], direct=True) == []
+
+    ((content, source, payload),) = _inbounds(db_conn, aid)
+    assert source == "system"
+    assert "\nMessage: Zhiyuan stopping runner for kernel upgrade" in content
+    record = json.loads(payload)["closure"]
+    assert record["message"] == "Zhiyuan stopping runner for kernel upgrade"

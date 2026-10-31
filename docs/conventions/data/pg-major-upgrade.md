@@ -33,7 +33,7 @@ platform packages alone.
 
 - The bump is approved (approved-stable) and the expand change is deployed on
   the target.
-- Freeze the home: `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` (a full local stop; agents drain first).
+- Freeze the home: `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message` (a full local stop; agents drain first).
   PgBouncer and Redis are untouched by a Postgres major; no change needed.
 - Fresh recovery points: the newest WAL-G base backup recent, the newest
   logical dump verified, and the archive queue drained before the stop (see
@@ -53,7 +53,7 @@ platform packages alone.
 
 ## Path A — pg_upgrade
 
-1. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300`; confirm a clean stop and that the archiver's queue is empty.
+1. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message`; confirm a clean stop and that the archiver's queue is empty.
 2. Install the 18 binaries for this host's resolution mode: the vendored tree
    when the expand change ships it, else the platform packages
    (apt: `postgresql-18` + `postgresql-18-pgvector`; macOS: the
@@ -87,7 +87,7 @@ archive the source of truth: after the drain, the newest backup plus its WAL
 covers every committed transaction, so no "final backup at the freeze" step is
 needed.
 
-1. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` and let the archiver's queue drain (see the planned-stop note).
+1. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message` and let the archiver's queue drain (see the planned-stop note).
 2. Scratch restore on 17 (same verb as the weekly drill, newest backup that
    started before the freeze; recovering to the end of the archive):
    `meiva backup walg restore --dir <scratch> --backup <name>`. Then start the

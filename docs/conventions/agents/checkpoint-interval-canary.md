@@ -43,17 +43,17 @@ granularity for write volume and must go through this protocol.
    per-agent overlay for the proposed interval above `4` (config overlay wins
    over cluster `.env`; do NOT set the cluster-wide `.env` value first).
 2. **Restart the canaries** (`restart_required=agent`):
-   `meiva agents restart <id>` (or the frontend agent settings page).
+   `meiva agents restart <id> --message "checkpoint interval canary"` (or the frontend agent settings page).
 3. **Verify write reduction** (the thing the flag exists for): watch the
    checkpoint write rate / `checkpoint_blobs` growth over one full day against
    the pre-canary baseline. Compare the result with N=4 before accepting a
    larger recovery window.
 4. **Force interruption → resurrect recovery check** (the thing that could regress):
-   for each canary, `meiva agents kill <id>` mid-turn (an interruption request —
+   for each canary, `meiva agents kill <id> --message "checkpoint interval canary check"` mid-turn (an interruption request —
    `terminate` is graceful and lets the agent finish its turn). An `enqueued`
    response confirms acceptance, not completed exit or resource settlement.
    After the original host settles the turn and its resources, run `meiva agents
-   resurrect <id>` / send it a message and confirm:
+   resurrect <id> --message "resume after canary check"` / send it a message and confirm:
    - the agent comes back with its conversation state intact;
    - up to N-1 super-steps replay and the final state is consistent
      (no stuck "in flight" node, no duplicate-visible inbound loss — the

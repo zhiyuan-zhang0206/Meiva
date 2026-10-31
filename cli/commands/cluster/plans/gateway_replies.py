@@ -76,7 +76,8 @@ def resume_lines(name: str, *, resumed: bool) -> tuple[str, ...]:
         "add the machine's new IP/CIDR to the comma-separated MEIVA_TRUSTED_CIDRS with "
         "`meiva config set MEIVA_TRUSTED_CIDRS=<ranges>`, then run "
         "`meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras "
-        "--mode smooth --timeout 300` ON THE GATEWAY HOST (its own service selection in place of "
+        "--mode smooth --timeout 300 --start-timeout 600 --no-message` ON THE GATEWAY HOST "
+        "(its own service selection in place of "
         "--all-services) — its start leg rewrites pg_hba.conf and reloads the retained Postgres.\n"
         "    3. Respawn the agents that lived on it (pause terminated them); "
         "`meiva cluster status` / `meiva.agents.list_machines()` shows it again.",

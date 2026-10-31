@@ -52,8 +52,16 @@ def terminate_request(
     return Request("POST", f"/api/agents/{agent_id}/terminate", body=body)
 
 
-def restart_request(agent_id: int, source: str) -> Request:
-    return Request("POST", f"/api/agents/{agent_id}/restart", body={"source": source})
+def restart_request(
+    agent_id: int,
+    source: str,
+    *,
+    message: str | None = None,
+) -> Request:
+    body: dict[str, Any] = {"source": source}
+    if message is not None:
+        body["message"] = message
+    return Request("POST", f"/api/agents/{agent_id}/restart", body=body)
 
 
 def resurrect_request(agent_id: int, prompt: str, resurrected_by: str) -> Request:

@@ -60,6 +60,7 @@ def direct(mode: str) -> int:
             argparse.Namespace(
                 agent_id=42,
                 source="bogus",
+                message=None,
                 kill_all_shell_sessions=False,
                 runtime=_runtime(),
             )

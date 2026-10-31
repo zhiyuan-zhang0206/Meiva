@@ -34,20 +34,20 @@ def test_missing_send_source_is_not_compensated(post: PublicGateway) -> None:
 
 def test_lifecycle_takes_explicit_source(post: PublicGateway) -> None:
     post.caller_profile = False
-    assert post.run("agents", "restart", "42", "--source", "user") == 0
+    assert post.run("agents", "restart", "42", "--source", "user", "--no-message") == 0
     assert post.requests[-1]["json"] == {"source": "user"}
-    assert post.run("agents", "resurrect", "42", "--source", "user") == 0
+    assert post.run("agents", "resurrect", "42", "--source", "user", "--no-message") == 0
     assert post.requests[-1]["json"] == {"resurrected_by": "user"}
-    assert post.run("agents", "kill", "42", "--source", "shell:7") == 0
+    assert post.run("agents", "kill", "42", "--source", "shell:7", "--no-message") == 0
     assert post.requests[-1]["json"] == {"force": True, "source": "shell:7"}
 
 
 def test_lifecycle_never_reads_profile(post: PublicGateway) -> None:
-    assert post.run("agents", "restart", "42") == 0
+    assert post.run("agents", "restart", "42", "--no-message") == 0
     assert post.requests[-1]["body"] == b""
-    assert post.run("agents", "resurrect", "42") == 0
+    assert post.run("agents", "resurrect", "42", "--no-message") == 0
     assert post.requests[-1]["body"] == b""
-    assert post.run("agents", "kill", "42") == 0
+    assert post.run("agents", "kill", "42", "--no-message") == 0
     assert post.requests[-1]["json"] == {"force": True}
 
 
@@ -94,7 +94,7 @@ def test_restart_rejects_bad_config_at_parse_time(capsys: pytest.CaptureFixture[
     from cli.parsers import build_parser
 
     with pytest.raises(SystemExit) as exit_info:
-        build_parser().parse_args(["agents", "restart", "1", "--config", "{oops"])
+        build_parser().parse_args(["agents", "restart", "1", "--config", "{oops", "--no-message"])
     assert exit_info.value.code == 2
     assert "invalid config JSON" in capsys.readouterr().err
 
@@ -105,7 +105,7 @@ def test_restart_rejects_non_object_config_at_parse_time(
     from cli.parsers import build_parser
 
     with pytest.raises(SystemExit) as exit_info:
-        build_parser().parse_args(["agents", "restart", "1", "--config", "[1, 2]"])
+        build_parser().parse_args(["agents", "restart", "1", "--config", "[1, 2]", "--no-message"])
     assert exit_info.value.code == 2
     assert "config must be a JSON object" in capsys.readouterr().err
 

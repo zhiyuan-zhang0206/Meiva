@@ -35,6 +35,15 @@ def _validated_config_json(value: str) -> str:
     return value
 
 
+# meiva:note
+# Argparse type for `--message`: reject empty or whitespace-only explanations.
+def _nonblank_message(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise argparse.ArgumentTypeError("--message cannot be empty; pass --no-message instead")
+    return stripped
+
+
 def _h_agents_ls(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_ls
@@ -100,6 +109,7 @@ def _h_agents_restart(args: argparse.Namespace) -> int:
             args.agent_id,
             args.config,
             source=args.source,
+            message=args.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -112,7 +122,10 @@ def _h_agents_resurrect(args: argparse.Namespace) -> int:
 
     try:
         return cmd_agents_resurrect(
-            gateway_access_from_boot(args.runtime.config), args.agent_id, source=args.source
+            gateway_access_from_boot(args.runtime.config),
+            args.agent_id,
+            source=args.source,
+            message=args.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -129,6 +142,7 @@ def _h_agents_terminate(args: argparse.Namespace) -> int:
             args.agent_id,
             source=args.source,
             kill_all_shell_sessions=args.kill_all_shell_sessions,
+            message=args.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -145,6 +159,7 @@ def h_agents_kill(args: argparse.Namespace) -> int:
             args.agent_id,
             source=args.source,
             kill_all_shell_sessions=args.kill_all_shell_sessions,
+            message=args.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -279,6 +294,28 @@ def _add_source_argument(*parsers: argparse.ArgumentParser) -> None:
         )
 
 
+# meiva:note
+# Require an explicit `--message TEXT | --no-message` choice on each lifecycle verb.
+def _add_message_choice(*parsers: argparse.ArgumentParser) -> None:
+    for lifecycle_parser in parsers:
+        group = lifecycle_parser.add_mutually_exclusive_group(required=True)
+        group.add_argument(
+            "--message",
+            dest="message",
+            type=_nonblank_message,
+            default=None,
+            metavar="TEXT",
+            help="natural-language explanation delivered to the agent (who acted and why)",
+        )
+        group.add_argument(
+            "--no-message",
+            dest="message",
+            action="store_const",
+            const=None,
+            help="explicitly omit an agent-facing explanation",
+        )
+
+
 def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     agents_compact_p = sub.add_parser(
         "compact",
@@ -352,6 +389,12 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         )
 
     _add_source_argument(
+        agents_restart_p,
+        agents_resurrect_p,
+        agents_terminate_p,
+        agents_kill_p,
+    )
+    _add_message_choice(
         agents_restart_p,
         agents_resurrect_p,
         agents_terminate_p,

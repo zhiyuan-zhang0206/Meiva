@@ -2,7 +2,7 @@ exports = ["daemon.py", "dead_letter.py", "stranded_wake.py"]
 
 [uses]
 "daemon.py" = ["dead_letter.py", "stranded_wake.py"]
-"tests" = ["daemon.py", "stranded_wake.py"]
+"tests" = ["daemon.py", "dead_letter.py", "stranded_wake.py"]
 
 [purity]
 "__init__.py" = "strict"

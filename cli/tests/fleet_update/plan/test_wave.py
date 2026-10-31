@@ -22,6 +22,7 @@ _CHOICES = StopChoices(
     forwarded=("--keep-shell-sessions", "--keep-browser", "--keep-extras", "--keep-no-services"),
     mode="smooth",
     timeout=600,
+    message="--no-message",
     infra="--keep-infra",
 )
 
@@ -37,7 +38,7 @@ def test_every_runner_stops_before_the_gateway_with_the_operators_flags_verbatim
     )
     forwarded = (
         "--keep-shell-sessions --keep-browser --keep-extras --keep-no-services "
-        "--mode smooth --timeout 600"
+        "--mode smooth --timeout 600 --no-message"
     )
     assert steps == (
         StopStep("mac", forwarded, retires_extras=False),
@@ -51,9 +52,45 @@ def test_a_rebuilding_host_retires_extras_and_the_gateway_keeps_its_data_plane_c
         gateway="gw", runners=("mac",), rebuilding=frozenset({"mac", "gw"}), choices=_CHOICES
     )
     assert steps == (
-        StopStep("mac", f"{REBUILD_STOP} --mode smooth --timeout 600", retires_extras=True),
         StopStep(
-            "gw", f"{REBUILD_STOP} --mode smooth --timeout 600 --keep-infra", retires_extras=True
+            "mac", f"{REBUILD_STOP} --mode smooth --timeout 600 --no-message", retires_extras=True
+        ),
+        StopStep(
+            "gw",
+            f"{REBUILD_STOP} --mode smooth --timeout 600 --no-message --keep-infra",
+            retires_extras=True,
+        ),
+    )
+
+
+def test_stop_steps_forward_message_to_normal_and_rebuilding_hosts() -> None:
+    choices = StopChoices(
+        forwarded=(
+            "--keep-shell-sessions",
+            "--keep-browser",
+            "--keep-extras",
+            "--keep-no-services",
+        ),
+        mode="smooth",
+        timeout=600,
+        message="--message 'Zhiyuan updating kernel (#9999)'",
+        infra="--keep-infra",
+    )
+    steps = stop_steps(
+        gateway="gw", runners=("mac",), rebuilding=frozenset({"mac"}), choices=choices
+    )
+    assert steps == (
+        StopStep(
+            "mac",
+            f"{REBUILD_STOP} --mode smooth --timeout 600 "
+            "--message 'Zhiyuan updating kernel (#9999)'",
+            retires_extras=True,
+        ),
+        StopStep(
+            "gw",
+            "--keep-shell-sessions --keep-browser --keep-extras --keep-no-services "
+            "--mode smooth --timeout 600 --message 'Zhiyuan updating kernel (#9999)' --keep-infra",
+            retires_extras=False,
         ),
     )
 

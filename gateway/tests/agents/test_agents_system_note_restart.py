@@ -293,6 +293,23 @@ class TestRestart:
         assert resp.json() == {"status": "enqueued"}
         assert inbound_rows(db_conn, agent_id) == [("", "restart", "user")]
 
+    def test_restart_persists_message_and_rejects_blank_input(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with gateway_test_client() as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+            bad = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"message": "   "},
+            )
+            assert bad.status_code == 422
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"message": "  Zhiyuan reloading skill  "},
+            )
+        assert resp.status_code == 200
+        assert inbound_rows(db_conn, agent_id) == [("Zhiyuan reloading skill", "restart", "user")]
+
     def test_restart_merges_config_overlay_and_records_it_in_the_inbound(
         self, db_conn: psycopg.Connection
     ) -> None:

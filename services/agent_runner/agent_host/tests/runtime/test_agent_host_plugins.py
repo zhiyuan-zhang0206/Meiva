@@ -45,18 +45,29 @@ def test_fingerprint_tracks_plugin_add_change_remove(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_watch_restarts_on_plugin_change(tmp_path: Path) -> None:
-    raised: list[int] = []
-    # meiva:note
-    # The watcher raises SIGTERM at its own process; a real handler observes it.
-    previous = signal.signal(signal.SIGTERM, lambda signum, _frame: raised.append(signum))
-    try:
-        watcher = asyncio.create_task(daemon.watch_plugins_for_restart(tmp_path, interval_s=0.01))
-        await asyncio.sleep(0.05)
-        assert raised == []
+    from base.deploy.lifecycle.host_exit_message import consume_host_exit_message
 
-        _make_plugin(tmp_path, "alpha")
+    plugins_dir = tmp_path / "plugins"
+    home_dir = tmp_path / "home"
+    events: list[str] = []
+    # meiva:note
+    # The watcher stages its exit note under `home` before raising SIGTERM at its own process.
+    previous = signal.signal(signal.SIGTERM, lambda _signum, _frame: events.append("sigterm"))
+    try:
+        watcher = asyncio.create_task(
+            daemon.watch_plugins_for_restart(
+                plugins_dir,
+                interval_s=0.01,
+                home=home_dir,
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert events == []
+
+        _make_plugin(plugins_dir, "alpha")
         await asyncio.wait_for(watcher, 5)
     finally:
         signal.signal(signal.SIGTERM, previous)
 
-    assert raised == [signal.SIGTERM]
+    assert events == ["sigterm"]
+    assert consume_host_exit_message(home_dir) == daemon.PLUGINS_RESTART_MESSAGE

@@ -89,7 +89,7 @@ Enablement flags, endpoint defaults and the read topology have their own node:
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
   the credential-free (peer, monitoring role) Postgres receiver. Root health: `services/supervision/roster/spec.py`
   (`meiva-otel-collector`) + `services/supervision/healthchecks/otel_collector.py`.
-- `base/telemetry/tracing.py` + `cli/commands/observability/trace.py` + `cli/parsers/host.py` — the
+- `base/telemetry/tracing.py` + `cli/commands/observability/trace.py` + `cli/parsers/observability.py` — the
   mirror `meiva trace ship` replays, and the ship command.
 
 ## Entry points
