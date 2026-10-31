@@ -1,3 +1,12 @@
+"use client";
+
+// meiva:note
+// This route is a client component because it reads the router to hand the surface its `navigate`:
+// `useRouter` is a client hook, and importing it into a server component fails the production build
+// (RSC boundary — neither tsc, eslint nor vitest sees it). Every other route that reads the router
+// (`/`, `/control/guide`, `/control/schedules`) is a client component for the same reason.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+
 // /fleet — full-screen multi-agent supervision view. Renders the live agent
 // relationship graph (spawn/fork/resurrect lineage + decaying message traffic)
 // with each agent's self-reported activity, so a human can judge many agents at
