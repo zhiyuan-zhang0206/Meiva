@@ -138,9 +138,6 @@ export function ResolvedDetail({
         />
         <div className={cn("items-center gap-2", FLEX)}>
           <PriorityBadge priority={notice.priority} muted />
-          <span className="text-[10px] text-muted-foreground">
-            {t("decision")}
-          </span>
         </div>
         <h3 className="mt-2 text-sm font-medium break-words"><ChatMarkdown content={notice.title} inline /></h3>
         {notice.content && (

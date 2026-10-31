@@ -103,32 +103,63 @@ function renderGraph(
 }
 
 // meiva:note
-// jsdom reports a zero-size canvas and node, so the placement caps the card — and a capped card is
-// exactly the state these pointer tests need: its body scrolls and it takes pointer events. Assert
-// the state instead of faking the boxes the placement reads.
+// jsdom reports a zero-size canvas and node, so the inner scroll container is capped while the
+// outer tooltip shell stays overflow-visible for the safe-zone bridge.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 function expectCappedCard(card: HTMLElement) {
-  expect(card.style.maxHeight).not.toBe("");
-  expect(card.style.overflowY).toBe("auto");
   expect(card.className).toContain("pointer-events-auto");
+  expect(card.querySelector('[data-testid="hover-card-bridge"]')).not.toBeNull();
+  const scroller = card.querySelector<HTMLElement>("[data-hover-card-scroll]");
+  expect(scroller).not.toBeNull();
+  expect(scroller!.style.maxHeight).not.toBe("");
+  expect(scroller!.style.overflowY).toBe("auto");
 }
 
 describe("TaskGraph hover card grace window and states", () => {
-  it("keeps the capped card open when the pointer moves from the node onto it", async () => {
+  it("keeps the card open across bidirectional node-to-card and card-to-node transitions without flickering", async () => {
     renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      expectCappedCard(card);
+      const bridge = card.querySelector('[data-testid="hover-card-bridge"]')!;
 
-    fireEvent.mouseEnter(group);
-    const card = screen.getByRole("tooltip");
-    expectCappedCard(card);
-    fireEvent.mouseLeave(group, { relatedTarget: card.firstElementChild });
-    expect(screen.getByRole("tooltip")).toBeTruthy();
-    fireEvent.mouseLeave(card);
-    expect(screen.queryByRole("tooltip")).toBeNull();
+      fireEvent.mouseLeave(group, { relatedTarget: bridge });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(screen.getByRole("tooltip")).toBe(card);
+
+      fireEvent.mouseLeave(card, { relatedTarget: group });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(screen.getByRole("tooltip")).toBe(card);
+
+      fireEvent.mouseLeave(card);
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+      fireEvent.mouseEnter(group);
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(screen.getByRole("tooltip")).toBe(card);
+
+      fireEvent.mouseLeave(card);
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("gives the pointer a grace window to reach the capped card, then hides", async () => {
+  it("gives the pointer a grace window to reach the card, then hides after leaving the card", async () => {
     renderGraph(sampleTasks());
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -145,6 +176,9 @@ describe("TaskGraph hover card grace window and states", () => {
       });
       expect(screen.getByRole("tooltip")).toBeTruthy();
       fireEvent.mouseLeave(card);
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
       expect(screen.queryByRole("tooltip")).toBeNull();
     } finally {
       vi.useRealTimers();

@@ -176,7 +176,7 @@ describe("InboxQueue — open stream", () => {
     expect(listTitles()).toEqual(["dec-p2"]);
   });
 
-  it("labels every response-required row", () => {
+  it("renders response-required rows without a Decision or FYI kind label", () => {
     setFeed({
       open: [ni({ id: 40, title: "just-fyi", priority: "P2" })],
       awaiting: [
@@ -186,14 +186,13 @@ describe("InboxQueue — open stream", () => {
     });
     renderQueue([agent({ agent_id: 1, label: "a" })]);
     const list = screen.getByRole("list", { name: /inbox queue/i });
-    const rungOf = (title: string) =>
-      within(list)
-        .getByText(title)
-        .closest('[data-testid="inbox-row"]')
-        ?.querySelector('[data-testid="notice-kind"]')?.textContent;
     expect(within(list).queryByText("just-fyi")).toBeNull();
-    expect(rungOf("needs-answer")).toBe("Decision");
-    expect(rungOf("stalled")).toBe("Decision");
+    expect(within(list).getByText("needs-answer")).toBeTruthy();
+    expect(within(list).getByText("stalled")).toBeTruthy();
+    expect(within(list).getByText("Blocking")).toBeTruthy();
+    expect(list.querySelector('[data-testid="notice-kind"]')).toBeNull();
+    expect(screen.queryByText("Decision")).toBeNull();
+    expect(screen.queryByText("FYI")).toBeNull();
   });
 
   it("breaks priority ties by blocking, then oldest", () => {

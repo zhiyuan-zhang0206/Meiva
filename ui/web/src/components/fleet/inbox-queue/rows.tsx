@@ -141,12 +141,6 @@ export function NoticeListRow({
               <AgentStatusDot status={agentStatus} />
               <span className="break-all">{agentLabel}</span>
             </span>
-            <span
-              data-testid="notice-kind"
-              className="shrink-0 font-medium text-amber-700 dark:text-amber-400"
-            >
-              {t("decision")}
-            </span>
             {createdAt && <span>{formatRelativeTime(createdAt, now)}</span>}
             {blocking && <span className="text-destructive">{t("blocking")}</span>}
           </span>

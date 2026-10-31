@@ -281,6 +281,7 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
     fireEvent.click(screen.getByText("skipped"));
     expect(screen.getByText(/Dismissed/)).not.toBeNull();
+    expect(screen.queryByText("Decision")).toBeNull();
   });
 
   it("labels an expired resolution", () => {

@@ -153,13 +153,26 @@ export function useHoverCardState(
   hoverCard: HoverCard | undefined,
 ) {
   const [hovered, setHovered] = useState<HoveredNodeBox | null>(null);
-  const [cardScrollable, setCardScrollable] = useState(false);
-  const [prevHovered, setPrevHovered] = useState<HoveredNodeBox | null>(null);
-  if (prevHovered !== hovered) {
-    setPrevHovered(hovered);
-    if (!hovered) setCardScrollable(false);
-  }
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
+  const leaveHoverTarget = useCallback(
+    (nodeId: number, pointerOnPartner: boolean) => {
+      if (hoverCardLeave({ pointerOnPartner }) === "hold") return;
+      clearHideTimer();
+      hideTimerRef.current = setTimeout(
+        () => setHovered((cur) => (cur?.id === nodeId ? null : cur)),
+        HOVER_CARD_HIDE_GRACE_MS,
+      );
+    },
+    [clearHideTimer],
+  );
 
   const hoveredCard = useMemo(() => {
     if (!hovered || !hoverCard) return null;
@@ -169,46 +182,41 @@ export function useHoverCardState(
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hoverCardRef = useRef<HTMLDivElement | null>(null);
+  const hoverBridgeRef = useRef<HTMLDivElement | null>(null);
+  const hoverScrollRef = useRef<HTMLDivElement | null>(null);
+  const hoverContentRef = useRef<HTMLDivElement | null>(null);
   const legendRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-  }, []);
+  useEffect(() => () => clearHideTimer(), [clearHideTimer]);
 
   useLayoutEffect(() => {
     if (!hovered) {
-      if (hideTimerRef.current) {
-        clearTimeout(hideTimerRef.current);
-        hideTimerRef.current = null;
-      }
+      clearHideTimer();
       return;
     }
 
     // meiva:note
     // The card's content arrives after the hover (the full task is fetched on
-    // demand), so its box grows from a placeholder to the real height. A
-    // one-shot placement measured the placeholder and left the grown card
-    // hanging off the canvas (user report 2026-10-20); the observer below
-    // re-places it on every size change. Measuring the natural height while a
-    // cap is applied keeps that loop stable: a cap we wrote never reads back
-    // as a smaller card.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // demand), so its box grows from a placeholder to the real height. Observing
+    // the uncapped inner content wrapper re-places the card on every growth while
+    // keeping the outer tooltip shell overflow-visible so the safe-zone bridge
+    // spanning the gap to the node is never clipped by overflow-y:auto.
+    // meiva:link ui/web/src/docs/frontend-components/force-graph.meiva.okf.md
     const place = () => {
       const card = hoverCardRef.current;
+      const bridge = hoverBridgeRef.current;
+      const scroller = hoverScrollRef.current;
+      const content = hoverContentRef.current;
       const container = containerRef.current;
-      if (!card || !container) return;
+      if (!card || !bridge || !scroller || !content || !container) return;
       const rect = container.getBoundingClientRect();
       const legendBox = legendRef.current?.getBoundingClientRect();
+      const canvas = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      const node = { x: hovered.x, y: hovered.y, h: hovered.h, flipX: hovered.flipX };
+      const cardBox = { width: content.offsetWidth, height: content.offsetHeight };
       const placement = placeHoverCard({
-        canvas: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        node: { x: hovered.x, y: hovered.y, h: hovered.h, flipX: hovered.flipX },
-        card: {
-          width: card.offsetWidth,
-          // meiva:note
-          // Measure the natural height while a cap is applied: a cap we wrote must never read back
-          // as a smaller card, or the re-place loop the observer drives would shrink without end.
-          // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-          height: card.style.maxHeight ? card.scrollHeight : card.offsetHeight,
-        },
+        canvas,
+        node,
+        card: cardBox,
         legend:
           legendBox === undefined
             ? null
@@ -221,27 +229,38 @@ export function useHoverCardState(
       });
       card.style.left = `${placement.left}px`;
       card.style.top = `${placement.top}px`;
-      if (card.style.maxHeight !== placement.maxHeight) card.style.maxHeight = placement.maxHeight;
-      const scrollable = placement.maxHeight !== "";
-      card.style.overflowY = scrollable ? "auto" : "";
-      setCardScrollable((current) => (current === scrollable ? current : scrollable));
+      if (scroller.style.maxHeight !== placement.maxHeight) {
+        scroller.style.maxHeight = placement.maxHeight;
+      }
+      scroller.style.overflowY = placement.maxHeight !== "" ? "auto" : "";
+      const bridgeStyle = hoverCardBridge({ canvas, node, card: cardBox, placement });
+      bridge.style.left = bridgeStyle.left;
+      bridge.style.right = bridgeStyle.right;
+      bridge.style.top = bridgeStyle.top;
+      bridge.style.bottom = bridgeStyle.bottom;
+      bridge.style.width = bridgeStyle.width;
+      bridge.style.height = bridgeStyle.height;
     };
 
     place();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => place());
-    if (hoverCardRef.current) observer.observe(hoverCardRef.current);
+    if (hoverContentRef.current) observer.observe(hoverContentRef.current);
+    if (containerRef.current) observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [hovered]);
+  }, [hovered, clearHideTimer]);
 
   return {
     hovered,
     setHovered,
-    cardScrollable,
-    hideTimerRef,
+    clearHideTimer,
+    leaveHoverTarget,
     hoveredCard,
     containerRef,
     hoverCardRef,
+    hoverBridgeRef,
+    hoverScrollRef,
+    hoverContentRef,
     legendRef,
   };
 }
@@ -249,9 +268,10 @@ export function useHoverCardState(
 // meiva:note
 // Where the hover card goes, decided from the boxes alone: the canvas and node rectangles the page
 // reports, the card's measured size and the legend's rectangle. Nothing here reads the DOM, so the
-// placement rules (beside the node, flip, centre on a narrow canvas, lift over the legend, cap the
-// height when neither side holds the card) are decided by values a test can state.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// placement rules (beside the node top-aligned, flipped to the left edge, slid within the column or
+// capped to the column height when tall, centred on a narrow canvas, lifted over the legend) are
+// decided by values a test can state.
+// meiva:link ui/web/src/docs/frontend-components/force-graph.meiva.okf.md
 export interface HoverCardBox {
   readonly width: number;
   readonly height: number;
@@ -271,13 +291,25 @@ export interface HoverCardRect {
   readonly height: number;
 }
 
+export type HoverCardSide = "right" | "left" | "above" | "below";
+
 export interface HoverCardPlacement {
   readonly left: number;
   readonly top: number;
   readonly maxHeight: string;
+  readonly side: HoverCardSide;
 }
 
-export const HOVER_CARD_GAP = 14;
+export interface HoverCardBridgeStyle {
+  readonly left: string;
+  readonly right: string;
+  readonly top: string;
+  readonly bottom: string;
+  readonly width: string;
+  readonly height: string;
+}
+
+export const HOVER_CARD_GAP = 6;
 export const HOVER_CARD_PAD = 4;
 
 export function placeHoverCard({
@@ -322,53 +354,102 @@ export function placeHoverCard({
     }
   }
 
-  const belowTop = beside ? y + gap : nodeBottom + gap;
+  if (beside) {
+    const side: HoverCardSide = fitsRight ? "right" : "left";
+    const columnSpace = Math.max(0, bottomLimit - pad);
+    if (cardH <= columnSpace) {
+      const top = Math.max(pad, Math.min(y, bottomLimit - cardH));
+      return { left: Math.max(pad, left), top, maxHeight: "", side };
+    }
+    return {
+      left: Math.max(pad, left),
+      top: pad,
+      maxHeight: `${columnSpace}px`,
+      side,
+    };
+  }
+
+  const belowTop = nodeBottom + gap;
   const aboveTop = y - gap - cardH;
   const fitsBelow = belowTop + cardH <= bottomLimit;
   const fitsAbove = aboveTop >= pad;
-  const preferAbove = !beside;
   let top: number;
   let cap = "";
-  if (preferAbove ? fitsAbove : fitsBelow) {
-    top = preferAbove ? aboveTop : belowTop;
-  } else if (preferAbove ? fitsBelow : fitsAbove) {
-    top = preferAbove ? belowTop : aboveTop;
+  let side: HoverCardSide;
+  if (fitsAbove) {
+    top = aboveTop;
+    side = "above";
+  } else if (fitsBelow) {
+    top = belowTop;
+    side = "below";
   } else {
     const belowSpace = bottomLimit - belowTop;
     const aboveSpace = y - gap - pad;
     if (belowSpace >= aboveSpace) {
       top = belowTop;
       cap = `${Math.max(0, belowSpace)}px`;
+      side = "below";
     } else {
       top = pad;
       cap = `${Math.max(0, aboveSpace)}px`;
+      side = "above";
     }
   }
 
-  return { left: Math.max(pad, left), top: Math.max(pad, top), maxHeight: cap };
+  return { left: Math.max(pad, left), top: Math.max(pad, top), maxHeight: cap, side };
+}
+
+export function hoverCardBridge({
+  canvas,
+  node,
+  card,
+  placement,
+  gap = HOVER_CARD_GAP,
+}: {
+  readonly canvas: HoverCardRect;
+  readonly node: HoverCardNodeBox;
+  readonly card: HoverCardBox;
+  readonly placement: HoverCardPlacement;
+  readonly gap?: number;
+}): HoverCardBridgeStyle {
+  const y = node.y - canvas.top;
+  const nodeBottom = y + node.h;
+  const renderedH =
+    placement.maxHeight !== "" ? Number.parseFloat(placement.maxHeight) : card.height;
+  if (placement.side === "right" || placement.side === "left") {
+    const topOffset = Math.min(0, y - placement.top);
+    const bottomOffset = Math.min(0, placement.top + renderedH - nodeBottom);
+    return {
+      left: placement.side === "right" ? `${-gap}px` : "",
+      right: placement.side === "left" ? `${-gap}px` : "",
+      top: `${topOffset}px`,
+      bottom: `${bottomOffset}px`,
+      width: `${gap}px`,
+      height: "",
+    };
+  }
+  return {
+    left: "0px",
+    right: "0px",
+    top: placement.side === "below" ? `${-gap}px` : "",
+    bottom: placement.side === "above" ? `${-gap}px` : "",
+    width: "",
+    height: `${gap}px`,
+  };
 }
 
 // meiva:note
-// How long a card the pointer can reach stays up after the pointer leaves the node: the trip across
-// the gap between node and card takes a fraction of this, and anything longer would feel stuck.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// Symmetrical grace window for node-to-card and card-to-node pointer travel: direct transitions
+// across the safe-zone bridge hold immediately, while diagonal trips wait out the grace window.
+// meiva:link ui/web/src/docs/frontend-components/force-graph.meiva.okf.md
 export const HOVER_CARD_HIDE_GRACE_MS = 200;
 
-export type HoverCardLeave = "hide" | "hold" | "wait";
+export type HoverCardLeave = "hold" | "wait";
 
-// meiva:note
-// What a pointer leaving the node does next. A card the pointer can reach (height-capped, so its
-// body scrolls and it takes pointer events) must survive the trip across the gap between the node
-// and the card: it waits out the grace window, unless the pointer already landed on it. A card the
-// pointer cannot touch has nothing to reach for and goes at once.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 export function hoverCardLeave({
-  scrollable,
-  pointerOnCard,
+  pointerOnPartner,
 }: {
-  readonly scrollable: boolean;
-  readonly pointerOnCard: boolean;
+  readonly pointerOnPartner: boolean;
 }): HoverCardLeave {
-  if (!scrollable) return "hide";
-  return pointerOnCard ? "hold" : "wait";
+  return pointerOnPartner ? "hold" : "wait";
 }
