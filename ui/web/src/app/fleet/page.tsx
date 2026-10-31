@@ -26,10 +26,16 @@ import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { FleetView } from "@/components/fleet/fleet-view";
 import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import type { Diagnostics } from "@/lib/transport/transport";
+import { useStreamHub } from "@/lib/transport/transport-context";
 
 export interface FleetPageViewProps {
   FleetView: ComponentType<ComponentProps<typeof FleetView>>;
   navigate: (href: Route) => void;
+  // meiva:note
+  // The boundary's sink: this route's root reads the page's hub and hands it down, so the
+  // view itself needs no provider.
+  diagnostics: Diagnostics;
 }
 
 // meiva:note
@@ -40,18 +46,19 @@ export interface FleetPageViewProps {
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 export default function FleetPage() {
   const router = useRouter();
+  const diagnostics = useStreamHub().transport.diagnostics;
   const navigate = useCallback((href: Route) => { router.push(href); }, [router]);
-  return <FleetPageView FleetView={FleetView} navigate={navigate} />;
+  return <FleetPageView FleetView={FleetView} navigate={navigate} diagnostics={diagnostics} />;
 }
 
-export function FleetPageView({ FleetView, navigate }: FleetPageViewProps) {
+export function FleetPageView({ FleetView, navigate, diagnostics }: FleetPageViewProps) {
   // meiva:note
   // <main> landmark (Task #1051 a11y) -- the fleet page is a primary surface; same pattern as
   // app/page.tsx.
   // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
   return (
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
-      <ErrorBoundary>
+      <ErrorBoundary diagnostics={diagnostics}>
         <FleetView navigate={navigate} />
       </ErrorBoundary>
     </main>

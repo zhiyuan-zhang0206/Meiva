@@ -11,7 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 
 import PluginPage from "./page";
+import { StreamHubProvider } from "@/lib/transport/transport-context";
 import { renderWithApi as render } from "@/test-support/render";
+import { fakeStreamHub } from "@/test-support/fake-stream";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
@@ -20,10 +22,15 @@ beforeEach(() => {
 
 function renderRoute(plugin: string, path?: string[]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // meiva:note
+  // The route mounts the app shell's ErrorBoundary, which reports to the page's diagnostic
+  // sink; a route test mounts the hub the shell would have mounted.
   return render(
-    <QueryClientProvider client={qc}>
-      <PluginPage params={Promise.resolve({ plugin, path })} />
-    </QueryClientProvider>,
+    <StreamHubProvider hub={fakeStreamHub().hub}>
+      <QueryClientProvider client={qc}>
+        <PluginPage params={Promise.resolve({ plugin, path })} />
+      </QueryClientProvider>
+    </StreamHubProvider>,
   );
 }
 

@@ -37,7 +37,7 @@ import type { useUserSettings } from "@/lib/state/use-user-settings";
 import { timelineMaxWidthCss } from "@/lib/timeline/timeline-width";
 import type { UseTimelineResult } from "@/lib/timeline/use-timeline";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
-import { useApi } from "@/lib/transport/transport-context";
+import { useApi, useStreamHub } from "@/lib/transport/transport-context";
 
 // meiva:note
 // The home route splits in two: `page.tsx` is the composition root that reads every hook and
@@ -159,6 +159,7 @@ export function HomePageView(props: HomePageProps) {
     isLoading: agentsLoading,
   } = agents;
   const client = useApi();
+  const diagnostics = useStreamHub().transport.diagnostics;
   const toUser = useToUser(activeId);
   const noticeFeed = useNotices();
   const [mobileContextOpen, setMobileContextOpen] = useState(false);
@@ -219,7 +220,7 @@ export function HomePageView(props: HomePageProps) {
   });
 
   const sidebarColumn = (
-    <ErrorBoundary>
+    <ErrorBoundary diagnostics={diagnostics}>
       <AgentSidebar
         agents={roster}
         ancestors={agents.ancestors}
@@ -262,7 +263,7 @@ export function HomePageView(props: HomePageProps) {
   );
   const inspectorColumn =
     showContext && activeId != null ? (
-      <ErrorBoundary resetKey={activeId}>
+      <ErrorBoundary diagnostics={diagnostics} resetKey={activeId}>
         <ContextPanel
           agentId={activeId}
           document={toUser}
@@ -344,6 +345,7 @@ function HomeContent({
   sidebar,
 }: HomeContentProps) {
   const client = useApi();
+  const diagnostics = useStreamHub().transport.diagnostics;
   const t = useTranslations("common");
   const timelineText = useTranslations("timeline");
   const { isNarrow, isLarge } = breakpoint;
@@ -475,7 +477,7 @@ function HomeContent({
 
   return (
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
-      <ErrorBoundary>
+      <ErrorBoundary diagnostics={diagnostics}>
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
           {timelineError && (
             <div role="alert" className="mx-4 mt-14 mb-2 rounded-md border border-destructive/30 p-3 text-sm">

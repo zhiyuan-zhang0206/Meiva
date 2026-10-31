@@ -9,6 +9,18 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ErrorBoundary } from "./error-boundary";
 
+// meiva:note
+// The boundary reports a caught error to the sink the shell hands in, so a test states the
+// sink and reads what was reported. React's own report of the same error comes from the root,
+// not from the boundary: it is stated per render call below (`onCaughtError`), which is also
+// what keeps the run's output clean without replacing a global.
+function fakeDiagnostics() {
+  return {
+    warn: vi.fn<(message: string) => void>(),
+    error: vi.fn<(message: string, cause: unknown) => void>(),
+  };
+}
+
 function MountProbe({ onMount }: { onMount: () => void }) {
   useEffect(() => {
     onMount();
@@ -23,7 +35,7 @@ describe("ErrorBoundary resetKey", () => {
       mounts += 1;
     };
     const view = render(
-      <ErrorBoundary resetKey={1}>
+      <ErrorBoundary diagnostics={fakeDiagnostics()} resetKey={1}>
         <MountProbe onMount={onMount} />
       </ErrorBoundary>,
     );
@@ -31,7 +43,7 @@ describe("ErrorBoundary resetKey", () => {
     expect(mounts).toBe(1);
 
     view.rerender(
-      <ErrorBoundary resetKey={2}>
+      <ErrorBoundary diagnostics={fakeDiagnostics()} resetKey={2}>
         <MountProbe onMount={onMount} />
       </ErrorBoundary>,
     );
@@ -47,27 +59,29 @@ describe("ErrorBoundary resetKey", () => {
       }
       return <p>recovered</p>;
     }
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
-      /* silence the boundary's crash log in this test */
-    });
+    const diagnostics = fakeDiagnostics();
 
     const view = render(
-      <ErrorBoundary resetKey={1}>
+      <ErrorBoundary diagnostics={diagnostics} resetKey={1}>
         <MaybeThrow />
       </ErrorBoundary>,
+      { onCaughtError: () => undefined },
     );
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     expect(screen.getByText("boom")).toBeTruthy();
+    expect(diagnostics.error).toHaveBeenCalledWith(
+      expect.stringContaining("[ErrorBoundary] Caught render error: boom"),
+      expect.any(Error),
+    );
 
     shouldThrow = false;
     view.rerender(
-      <ErrorBoundary resetKey={2}>
+      <ErrorBoundary diagnostics={diagnostics} resetKey={2}>
         <MaybeThrow />
       </ErrorBoundary>,
     );
     expect(await screen.findByText("recovered")).toBeTruthy();
     expect(screen.queryByText("Something went wrong")).toBeNull();
-    consoleSpy.mockRestore();
   });
 
   it("keeps the fallback without a resetKey change; Retry recovers once the child stops throwing", async () => {
@@ -78,14 +92,13 @@ describe("ErrorBoundary resetKey", () => {
       }
       return <p>recovered</p>;
     }
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
-      /* silence the boundary's crash log in this test */
-    });
+    const diagnostics = fakeDiagnostics();
 
     render(
-      <ErrorBoundary>
+      <ErrorBoundary diagnostics={diagnostics}>
         <MaybeThrow />
       </ErrorBoundary>,
+      { onCaughtError: () => undefined },
     );
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
 
@@ -98,6 +111,6 @@ describe("ErrorBoundary resetKey", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("recovered")).toBeTruthy();
     expect(screen.queryByText("Something went wrong")).toBeNull();
-    consoleSpy.mockRestore();
+    expect(diagnostics.error).toHaveBeenCalledTimes(2);
   });
 });

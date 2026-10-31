@@ -13,7 +13,13 @@ function FleetSurface() {
 
 describe("FleetPage", () => {
   it("provides the primary landmark and mounts the fleet surface", () => {
-    render(<FleetPageView FleetView={FleetSurface} navigate={vi.fn()} />);
+    render(
+      <FleetPageView
+        FleetView={FleetSurface}
+        navigate={vi.fn()}
+        diagnostics={{ warn: vi.fn(), error: vi.fn() }}
+      />,
+    );
 
     const main = screen.getByRole("main");
     expect(main.id).toBe("main-content");
