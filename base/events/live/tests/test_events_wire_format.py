@@ -40,8 +40,8 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (ToUserChanged, "to_user_changed", {}),
     (AgentSpawned, "agent_spawned", {}),
     (AgentUpdated, "agent_updated", {}),
-    (ChatStart, "chat_start", {"item_id": "5.0"}),
-    (ChatDelta, "chat_delta", {"item_id": "5.0", "content": "hello"}),
+    (ChatStart, "chat_start", {"item_id": "5.0", "non_human_wake": False}),
+    (ChatDelta, "chat_delta", {"item_id": "5.0", "content": "hello", "non_human_wake": False}),
     (CompactRequest, "compact_request", {"content": "[compact requested, 5 chars]"}),
     (CompactDone, "compact_done", {}),
     (

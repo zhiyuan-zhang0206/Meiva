@@ -34,6 +34,9 @@ class ExcerptItem(Protocol):
     @property
     def source_message_id(self) -> str | None: ...
 
+    @property
+    def user_facing(self) -> bool: ...
+
 
 @dataclass(frozen=True)
 class ConversationExcerpt:
@@ -71,7 +74,7 @@ def _last_turn_agent_text(items: Sequence[ExcerptItem]) -> list[ExcerptItem]:
     return [
         item
         for item in items[last_inbound + 1 :]
-        if item.kind == "agent_chat" and item.payload.strip()
+        if item.kind == "agent_chat" and item.user_facing and item.payload.strip()
     ]
 
 

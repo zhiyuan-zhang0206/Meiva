@@ -1,5 +1,6 @@
 {
   "agent_id": 7,
   "role": "chat_start",
-  "item_id": "5.0"
+  "item_id": "5.0",
+  "non_human_wake": false
 }

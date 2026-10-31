@@ -71,6 +71,7 @@ class ChatStart(_Base, BaseModel):
 
     role: Literal["chat_start"] = "chat_start"
     item_id: str
+    non_human_wake: bool = False
 
 
 class ChatDelta(_Base, BaseModel):
@@ -86,6 +87,7 @@ class ChatDelta(_Base, BaseModel):
     role: Literal["chat_delta"] = "chat_delta"
     item_id: str
     content: str
+    non_human_wake: bool = False
 
 
 class CompactRequest(_Base, BaseModel):

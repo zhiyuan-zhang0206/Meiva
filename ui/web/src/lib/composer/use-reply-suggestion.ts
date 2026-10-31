@@ -52,7 +52,11 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
 
   const last = lastConversationItem(items);
   const turnKey =
-    agentId !== null && last !== null && last.kind === "agent_chat" && !last.partial
+    agentId !== null &&
+    last !== null &&
+    last.kind === "agent_chat" &&
+    last.user_facing !== false &&
+    !last.partial
       ? `${agentId}:${last.item_id}`
       : null;
   const eligible = enabled && visible && !busy && status === "idling" && turnKey !== null;

@@ -123,7 +123,109 @@ describe("applySystemEvent (clocks, compaction, and terminal states)", () => {
       content: "user",
     });
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: "agent_chat", payload: "hi user" });
+    expect(items[0]).toMatchObject({ kind: "agent_chat", payload: "hi user", user_facing: true });
+  });
+
+  it("human-wake stream strips redundant Meiva agent to user: header without flickering user_facing", () => {
+    let items: BackendTimelineItem[] = [];
+    items = applySystemEvent(items, {
+      role: "chat_start",
+      item_id: "5.0",
+      agent_id: 1,
+      non_human_wake: false,
+    });
+    expect(items[0].user_facing).toBe(true);
+
+    items = applySystemEvent(items, {
+      role: "chat_delta",
+      item_id: "5.0",
+      agent_id: 1,
+      content: "Meiva agent to user:",
+      non_human_wake: false,
+    });
+    expect(items[0].user_facing).toBe(true);
+    expect(items[0].payload).toBe("");
+
+    items = applySystemEvent(items, {
+      role: "chat_delta",
+      item_id: "5.0",
+      agent_id: 1,
+      content: " Direct answer.",
+      non_human_wake: false,
+    });
+    expect(items[0]).toMatchObject({ payload: "Direct answer.", user_facing: true });
+  });
+
+  it("non-human-wake stream stays user_facing=false until Meiva agent to user: body arrives", () => {
+    let unprefixed: BackendTimelineItem[] = [];
+    unprefixed = applySystemEvent(unprefixed, {
+      role: "chat_start",
+      item_id: "6.0",
+      agent_id: 1,
+      non_human_wake: true,
+    });
+    expect(unprefixed[0].user_facing).toBe(false);
+    unprefixed = applySystemEvent(unprefixed, {
+      role: "chat_delta",
+      item_id: "6.0",
+      agent_id: 1,
+      content: "Checking peer status...",
+      non_human_wake: true,
+    });
+    expect(unprefixed[0]).toMatchObject({
+      payload: "Checking peer status...",
+      user_facing: false,
+    });
+
+    let prefixed: BackendTimelineItem[] = [];
+    prefixed = applySystemEvent(prefixed, {
+      role: "chat_start",
+      item_id: "7.0",
+      agent_id: 1,
+      non_human_wake: true,
+    });
+    prefixed = applySystemEvent(prefixed, {
+      role: "chat_delta",
+      item_id: "7.0",
+      agent_id: 1,
+      content: "Meiva ",
+      non_human_wake: true,
+    });
+    expect(prefixed[0].user_facing).toBe(false);
+
+    prefixed = applySystemEvent(prefixed, {
+      role: "chat_delta",
+      item_id: "7.0",
+      agent_id: 1,
+      content: "agent to user: ",
+      non_human_wake: true,
+    });
+    expect(prefixed[0].user_facing).toBe(false);
+
+    prefixed = applySystemEvent(prefixed, {
+      role: "chat_delta",
+      item_id: "7.0",
+      agent_id: 1,
+      content: "Build succeeded!",
+      non_human_wake: true,
+    });
+    expect(prefixed[0]).toMatchObject({
+      payload: "Build succeeded!",
+      user_facing: true,
+    });
+
+    const midStream = applySystemEvent([], {
+      role: "chat_delta",
+      item_id: "8.0",
+      agent_id: 1,
+      content: "...internal tail",
+      non_human_wake: true,
+    });
+    expect(midStream[0]).toMatchObject({
+      payload: "...internal tail",
+      partial: true,
+      user_facing: false,
+    });
   });
 
   describe("partial flag", () => {

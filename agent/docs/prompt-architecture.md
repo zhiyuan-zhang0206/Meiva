@@ -130,7 +130,10 @@ Capabilities rather than standing as its own section.
   preferences in injected memory. Each message is self-contained, substantive
   communication with the user. Execution updates default to milestones meaningful
   to the user; routine operations stay in tool feedback or working notes.
-  Automated wakes and peer messages do not require courtesy replies or closing summaries.
+  Automated wakes and peer messages do not require courtesy replies or closing summaries;
+  on runs woken solely by non-human inputs, unprefixed assistant text folds into the
+  collapsed work log while `Meiva agent to user: ` explicitly routes a proactive
+  message to the main user conversation.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `MEIVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates

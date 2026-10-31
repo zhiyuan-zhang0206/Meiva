@@ -79,7 +79,7 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
   if (item.llmWaiting) return "primary";
   switch (item.kind) {
     case "agent_chat":
-      return "primary";
+      return item.user_facing === false ? "secondary" : "primary";
     case "inbound_chat":
       return inboundKind(item.source) === "human" ? "primary" : "secondary";
     case "attach":
@@ -241,9 +241,11 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       if (classifyMarker(it.source).kind === "memory") memories += 1;
       else systemNotes += 1; // lifecycle events + guidance notes
     } else {
-      // attach (secondary since 2026-08-30) and the defensive agent_chat
-      // (primary, never reaches a turn) land here so the "every member is
-      // counted somewhere" invariant holds regardless.
+      // meiva:note
+      // `attach` (secondary since 2026-08-30) and non-user-facing `agent_chat` (internal
+      // background-wake notes) land here so the "every member is counted somewhere" invariant
+      // holds regardless.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
       systemNotes += 1;
     }
   }

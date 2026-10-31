@@ -6,6 +6,7 @@
 #     halted           — whether the current turn has ended
 #     interrupted_by_restart — a restart ended the model call or code run in flight, so `halted` marks an unfinished turn
 #     turn_active      — the current graph invocation is mid-turn (claim's turn boundary)
+#     non_human_wake   — current run woke solely on non-human inbounds (assistant text defaults internal unless prefixed)
 #     exit_requested   — claim's END means process exit, not just turn over
 #     turn_idle        — hosted mode: claim found nothing and did not park, so the host ends the turn task
 #     compact          — nested compaction bookkeeping (CompactState, agent/state_channels.py)

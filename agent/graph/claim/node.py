@@ -58,7 +58,7 @@ from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
 
 from ._decide import decide
-from ._dispatch import BatchState, dispatch_batch
+from ._dispatch import BatchState, dispatch_batch, resolve_non_human_wake
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
 # here so existing `from agent.graph.claim.node import ...` call sites (tests)
@@ -132,12 +132,19 @@ async def claim_node_impl(
                 # span and re-invokes on the same thread; the fresh
                 # invocation's claim does the long wait. exit_requested stays
                 # False: this END means "turn over", not "process exit".
-                return Command[ClaimGoto](update={"turn_active": False}, goto=END)
+                idle_reset = {} if state.interrupted_by_restart else {"non_human_wake": False}
+                return Command[ClaimGoto](update={"turn_active": False, **idle_reset}, goto=END)
             # The host owns the idle agent and its subscription. End this
             # invocation; the dispatcher creates another task on the next wake.
-            return Command[ClaimGoto](update={"turn_active": False, "turn_idle": True}, goto=END)
+            idle_reset = {} if state.interrupted_by_restart else {"non_human_wake": False}
+            return Command[ClaimGoto](
+                update={"turn_active": False, "turn_idle": True, **idle_reset}, goto=END
+            )
+        continuation_update: dict[str, object] = {"halted": False, "turn_active": True}
+        if resume_note_pending(state):
+            continuation_update["non_human_wake"] = False
         return Command[ClaimGoto](
-            update={"halted": False, "turn_active": True},
+            update=continuation_update,
             goto=route_target(ctx, BEFORE_LLM),
         )
 
@@ -174,6 +181,7 @@ async def settle_claimed_batch(
     # restart_requested is only ever set by the hosted restart branch, which never flips the row.
     update = dict(outcome.command.update or {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     update["turn_active"] = True
+    update["non_human_wake"] = resolve_non_human_wake(state, batch, routing, st)
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
     update["restart_requested"] = st.restart_requested
     if state.interrupted_by_restart:

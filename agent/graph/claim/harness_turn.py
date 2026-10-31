@@ -29,6 +29,7 @@ from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InterruptReason
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
+from base.agents.messages.reply_intent import resolve_agent_reply
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.telemetry import SdkCall
 from base.clock import Clock
@@ -60,9 +61,7 @@ from base.lm.harness import (
     ToolResult,
     ToolUse,
 )
-from base.lm.harness import (
-    ReasoningDelta as BridgeReasoningDelta,
-)
+from base.lm.harness import ReasoningDelta as BridgeReasoningDelta
 from base.lm.harness.engine import HarnessTurn, TurnEngine
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
@@ -212,12 +211,14 @@ class HarnessTurnProjector:
         base_idx: int,
         turn_progress: TurnProgress,
         clock: Clock,
+        non_human_wake: bool = False,
     ) -> None:
         self._publisher = event_publisher
         self._agent_id = agent_id
         self._msg_idx = base_idx
         self._turn_progress = turn_progress
         self._clock = clock
+        self._non_human_wake = non_human_wake
         self._step_started_at = self._clock.now()
         self._reasoning_coalescer = DeltaCoalescer(self._emit_reasoning_delta)
         self._coalescer = DeltaCoalescer(self._emit_chat_delta)
@@ -235,16 +236,17 @@ class HarnessTurnProjector:
         self._tool_slots: dict[str, tuple[int, str, datetime]] = {}
 
     def _emit_reasoning_delta(self, item_id: str, content: str) -> None:
-        self._publisher.emit(
-            ReasoningDelta(
-                agent_id=self._agent_id, item_id=item_id, content=content
-            ).model_dump_json()
-        )
+        ev = ReasoningDelta(agent_id=self._agent_id, item_id=item_id, content=content)
+        self._publisher.emit(ev.model_dump_json())
 
     def _emit_chat_delta(self, item_id: str, content: str) -> None:
-        self._publisher.emit(
-            ChatDelta(agent_id=self._agent_id, item_id=item_id, content=content).model_dump_json()
+        ev = ChatDelta(
+            agent_id=self._agent_id,
+            item_id=item_id,
+            content=content,
+            non_human_wake=self._non_human_wake,
         )
+        self._publisher.emit(ev.model_dump_json())
 
     def on_event(self, event: BridgeEvent) -> None:
         self._turn_progress.mark(self._agent_id)
@@ -287,14 +289,10 @@ class HarnessTurnProjector:
     def _reset_step_buffers(self, now: datetime) -> None:
         self._step_started_at = now
         self._reasoning_buf.clear()
-        self._reasoning_started = False
-        self._streamed_reasoning = False
-        self._reasoning_started_at = None
-        self._reasoning_ended_at = None
         self._text_buf.clear()
-        self._chat_started = False
-        self._streamed_text = False
-        self._text_completed = False
+        self._reasoning_started_at = self._reasoning_ended_at = None
+        self._reasoning_started = self._streamed_reasoning = False
+        self._chat_started = self._streamed_text = self._text_completed = False
 
     def _build_ai_content_and_kwargs(
         self,
@@ -307,6 +305,8 @@ class HarnessTurnProjector:
         self._coalescer.flush()
         reasoning_text = "".join(self._reasoning_buf).strip()
         kwargs: dict[str, Any] = {"meiva_created_at": now.isoformat()}
+        if self._non_human_wake:
+            kwargs["meiva_non_human_wake"] = True
         reasoning_ms: int | None = None
         if reasoning_text:
             r_start = self._reasoning_started_at or self._step_started_at
@@ -357,9 +357,10 @@ class HarnessTurnProjector:
         item_id = f"{self._msg_idx}.{1 if self._reasoning_started else 0}"
         if not self._chat_started:
             self._reasoning_coalescer.flush()
-            self._publisher.emit(
-                ChatStart(agent_id=self._agent_id, item_id=item_id).model_dump_json()
+            ev = ChatStart(
+                agent_id=self._agent_id, item_id=item_id, non_human_wake=self._non_human_wake
             )
+            self._publisher.emit(ev.model_dump_json())
             self._chat_started = True
         self._text_buf.append(text)
         self._coalescer.append(item_id, text)
@@ -377,14 +378,11 @@ class HarnessTurnProjector:
         code_text = format_tool_use(event.name, event.tool_input)
         tool_id = event.tool_use_id or f"call-{self._msg_idx}"
         tool_source = event.name if event.name != "execute_code" else None
-        self._publisher.emit(
-            CodeStart(agent_id=self._agent_id, item_id=code_item_id).model_dump_json()
-        )
-        self._publisher.emit(
-            CodeDelta(
-                agent_id=self._agent_id, item_id=code_item_id, content=code_text
-            ).model_dump_json()
-        )
+        emit = self._publisher.emit
+        iso_now = now.isoformat()
+        emit(CodeStart(agent_id=self._agent_id, item_id=code_item_id).model_dump_json())
+        code_ev = CodeDelta(agent_id=self._agent_id, item_id=code_item_id, content=code_text)
+        emit(code_ev.model_dump_json())
         snapshot_items: list[dict[str, Any]] = []
         if reasoning_text:
             snapshot_items.append(
@@ -392,17 +390,21 @@ class HarnessTurnProjector:
                     item_id=f"{self._msg_idx}.0",
                     kind="agent_reasoning",
                     payload=reasoning_text,
-                    created_at=now.isoformat(),
+                    created_at=iso_now,
                     reasoning_ms=reasoning_ms,
                 ).model_dump()
             )
         if step_text:
+            chat_payload, user_facing = resolve_agent_reply(
+                step_text, non_human_wake=self._non_human_wake
+            )
             snapshot_items.append(
                 TimelineItem(
                     item_id=f"{self._msg_idx}.{1 if reasoning_text else 0}",
                     kind="agent_chat",
-                    payload=step_text,
-                    created_at=now.isoformat(),
+                    payload=chat_payload,
+                    created_at=iso_now,
+                    user_facing=user_facing,
                 ).model_dump()
             )
         snapshot_items.append(
@@ -411,19 +413,16 @@ class HarnessTurnProjector:
                 kind="agent_code",
                 source=tool_source,
                 payload=code_text,
-                created_at=now.isoformat(),
+                created_at=iso_now,
                 code_elapsed_ms=code_ms,
                 sdk_calls=[SdkCall(method=event.name, count=1)],
             ).model_dump()
         )
-        self._publisher.emit(
-            TimelineSnapshot(
-                agent_id=self._agent_id, items=snapshot_items, msg_count=self._msg_idx + 1
-            ).model_dump_json()
+        snap = TimelineSnapshot(
+            agent_id=self._agent_id, items=snapshot_items, msg_count=self._msg_idx + 1
         )
-        self._publisher.emit(
-            ExecStart(agent_id=self._agent_id, item_id=exec_item_id).model_dump_json()
-        )
+        emit(snap.model_dump_json())
+        emit(ExecStart(agent_id=self._agent_id, item_id=exec_item_id).model_dump_json())
         call = ToolCall(name=event.name, args={"code": code_text}, id=tool_id, type="tool_call")
         self._messages.append(
             AIMessage(content=content, tool_calls=[call], additional_kwargs=kwargs)
@@ -502,7 +501,8 @@ class HarnessTurnProjector:
         self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
         reasoning_text = "".join(self._reasoning_buf).strip()
         if not self._messages and not reasoning_text:
-            return [AIMessage(content=completed.text) for completed in turns]
+            kw = {"meiva_non_human_wake": True} if self._non_human_wake else {}
+            return [AIMessage(content=t.text, additional_kwargs=dict(kw)) for t in turns]
         final_text = "".join(self._text_buf).strip()
         if not final_text and not self._any_text_event:
             final_text = turns[-1].text
@@ -589,9 +589,7 @@ async def _run_harness_turn(
     effective_messages = [*state.messages, *pre_messages] if pre_messages else state.messages
     cursor = min(max(state.harness_cursor, 0), len(effective_messages))
     pending = [
-        message
-        for message in effective_messages[cursor:]
-        if not isinstance(message, (AIMessage, ToolMessage))
+        m for m in effective_messages[cursor:] if not isinstance(m, (AIMessage, ToolMessage))
     ]
     text = render_messages(pending)
     extra_updates = dict(hook_updates) if hook_updates else {}
@@ -609,6 +607,7 @@ async def _run_harness_turn(
         base_idx=len(effective_messages),
         turn_progress=ctx.turn_progress,
         clock=ctx.require_clock(),
+        non_human_wake=state.non_human_wake,
     )
     try:
         async with subscribe_interrupt(

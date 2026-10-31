@@ -2,10 +2,11 @@ from typing import Any, cast
 
 import pytest
 
-from agent.graph.prompt.conversation import user_reply_section
+from agent.graph.prompt.conversation import harness_user_reply_section, user_reply_section
 from agent.graph.prompt.live import LiveSdk, SectionInputs
 from agent.graph.prompt.skill_selection import SkillView
 from agent.graph.prompt.system_prompt import build_system_prompt
+from base.agents.messages.reply_intent import USER_REPLY_PREFIX
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -126,3 +127,12 @@ def test_milestone_policy_preserves_results_and_questions(
     assert "omitting evidence needed to use the result" in prompt
     assert "do not require courtesy replies or automatic closing summaries" in prompt
     assert "emit alongside each action" not in prompt
+
+
+def test_background_wake_reply_prefix_guidance_in_native_and_harness_sections() -> None:
+    inputs = _inputs(_slices())
+    for section in (user_reply_section(inputs), harness_user_reply_section(inputs)):
+        assert f"`{USER_REPLY_PREFIX}`" in section
+        assert "woken solely by non-human inputs" in section
+        assert "collapsed work log" in section
+        assert f"omit `{USER_REPLY_PREFIX}` on human-triggered runs" in section

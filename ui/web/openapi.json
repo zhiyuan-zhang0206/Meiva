@@ -19200,6 +19200,11 @@
             "title": "Show Timestamp",
             "default": true
           },
+          "user_facing": {
+            "type": "boolean",
+            "title": "User Facing",
+            "default": true
+          },
           "images": {
             "anyOf": [
               {

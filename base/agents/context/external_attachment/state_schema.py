@@ -60,6 +60,7 @@ class BaseAgentState(BaseModel):
     interrupted_by_restart: bool = False
     harness_cursor: int = 0
     turn_active: bool = False
+    non_human_wake: bool = False
     exit_requested: bool = False
     restart_requested: bool = False
     turn_idle: bool = False

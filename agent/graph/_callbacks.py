@@ -99,11 +99,14 @@ class RedisStreamHandler:
         agent_id: int,
         msg_idx: int,
         turn_progress: TurnProgress,
+        *,
+        non_human_wake: bool = False,
     ) -> None:
         self._publisher = event_publisher
         self._agent_id = agent_id
         self._turn_progress = turn_progress
         self._msg_idx = msg_idx
+        self._non_human_wake = non_human_wake
         # *_started flags: per content_block_index, only emit *Start on the first
         # real delta, avoiding empty blocks (signature_delta only / boundary
         # chunks etc.) creating empty chat/reasoning items.
@@ -304,7 +307,10 @@ class RedisStreamHandler:
         if kind == "chat":
             self._publisher.emit(
                 ChatDelta(
-                    agent_id=self._agent_id, item_id=item_id, content=content
+                    agent_id=self._agent_id,
+                    item_id=item_id,
+                    content=content,
+                    non_human_wake=self._non_human_wake,
                 ).model_dump_json()
             )
         elif kind == "reasoning":
@@ -362,10 +368,18 @@ class RedisStreamHandler:
         item_id = self._block_id(block_idx)
         if block_idx not in self._chat_started:
             self._publisher.emit(
-                ChatStart(agent_id=self._agent_id, item_id=item_id).model_dump_json()
+                ChatStart(
+                    agent_id=self._agent_id,
+                    item_id=item_id,
+                    non_human_wake=self._non_human_wake,
+                ).model_dump_json()
             )
             self._chat_started.add(block_idx)
         self._coalescer.append(f"chat|{item_id}", frag)
+
+    @property
+    def non_human_wake(self) -> bool:
+        return self._non_human_wake
 
     @property
     def reasoning_ms_by_block(self) -> dict[int, int]:

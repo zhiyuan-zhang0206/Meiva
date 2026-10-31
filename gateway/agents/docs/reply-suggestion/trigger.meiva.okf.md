@@ -9,7 +9,7 @@ tags: [gateway, agents]
 
 `ui/web/src/lib/composer/use-reply-suggestion.ts` is the only writer of the candidates.
 For the selected, visible agent it asks once per turn: the agent is idle, the last
-conversation item is the agent's own message, and nothing new started for one second.
+conversation item is a user-facing message from the agent (`user_facing !== false`), and nothing new started for one second.
 A new turn (busy again or a new last item), another agent, a hidden page, the user
 setting `behavior.replySuggestions` (default on) turned off, or unmount aborts the request and
 hides the suggestion. Opening an already-idle agent takes the same path. A settled turn is

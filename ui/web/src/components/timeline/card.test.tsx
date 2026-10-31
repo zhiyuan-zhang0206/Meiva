@@ -104,10 +104,16 @@ describe("messageCardConfig", () => {
     expect(cfg!.rich).toBe("output");
   });
 
-  it("agent_chat → no rich, title='Meiva ▸'", () => {
+  it("agent_chat → no rich, title='Meiva ▸', expanded when user-facing and collapsed when not", () => {
     const cfg = messageCardConfig(item("agent_chat"));
     expect(cfg!.rich).toBeNull();
     expect(cfg!.title).toBe("Meiva ▸");
+    expect(cfg!.fixedDefault).toBe(true);
+    expect(cfg!.copy).toBe(true);
+
+    const internalCfg = messageCardConfig(item("agent_chat", { user_facing: false }));
+    expect(internalCfg!.fixedDefault).toBe(false);
+    expect(internalCfg!.copy).toBe(true);
   });
 
   it("agent_chat partial → title includes '(streaming…)'", () => {
