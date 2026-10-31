@@ -4,9 +4,10 @@
 
 import { fireEvent, screen } from "@testing-library/react";
 import { act } from "react";
-import { vi } from "vitest";
 
 import type { RunTimelineResponse } from "@/lib/contracts/types";
+
+import type { CanvasContextFactory } from "./run-timeline-canvas";
 
 import { layoutsFor } from "../model/timeline-canvas-model";
 import { timeAxis } from "../model/timeline-model";
@@ -100,17 +101,17 @@ class RecordingContext {
 const contexts = new WeakMap<HTMLCanvasElement, RecordingContext>();
 
 // meiva:note
-// Makes every canvas hand out a recording context; call in `beforeEach`, and `vi.restoreAllMocks()` after.
-export function mockCanvas() {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-    let ctx = contexts.get(this);
-    if (ctx === undefined) {
-      ctx = new RecordingContext();
-      contexts.set(this, ctx);
-    }
-    return ctx as unknown as CanvasRenderingContext2D;
-  } as never);
-}
+// The drawing surface a test hands the canvases: one recording context per canvas, keyed by the
+// element itself. Pass it as `createContext` where the surface is rendered; nothing replaces the
+// platform's `getContext`.
+export const recordingCanvasContext: CanvasContextFactory = (el) => {
+  let ctx = contexts.get(el);
+  if (ctx === undefined) {
+    ctx = new RecordingContext();
+    contexts.set(el, ctx);
+  }
+  return ctx as unknown as CanvasRenderingContext2D;
+};
 
 // meiva:note
 // Lets the animation frame of the latest render run.

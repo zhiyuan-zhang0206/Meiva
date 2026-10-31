@@ -18,6 +18,13 @@ import { countDraw, countPaintMs } from "../model/render-stats";
 import { useColorResolver } from "./resolve-color";
 import type { PaintCtx } from "./run-timeline-paint";
 
+// meiva:note
+// How a canvas obtains its drawing surface. The component's parameter defaults to this, and a test
+// that reads what was painted hands in its own recording context instead of replacing a global.
+export type CanvasContextFactory = (el: HTMLCanvasElement) => CanvasRenderingContext2D | null;
+
+export const systemCanvasContext: CanvasContextFactory = (el) => el.getContext("2d");
+
 export function TrackCanvas({
   store,
   data,
@@ -31,6 +38,7 @@ export function TrackCanvas({
   testId,
   onHit,
   onChoose,
+  createContext = systemCanvasContext,
 }: {
   store: ViewportStore;
   data: NavData;
@@ -42,6 +50,7 @@ export function TrackCanvas({
   paint: (p: PaintCtx, layout: RowLayout) => void;
   paintKey: (layout: RowLayout) => string;
   testId: string;
+  createContext?: CanvasContextFactory;
   onHit: (item: NavItem | null) => void;
   onChoose: (item: NavItem) => void;
 }) {
@@ -64,7 +73,7 @@ export function TrackCanvas({
   });
   useEffect(() => {
     const el = canvas.current;
-    const ctx = el?.getContext("2d") ?? null;
+    const ctx = el === null ? null : createContext(el);
     if (el === null || ctx === null) return;
     let frame: number | null = null;
     const draw = () => {
@@ -112,7 +121,7 @@ export function TrackCanvas({
       unsubscribe();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [store, data, axis, rows, row, width, height, resolve]);
+  }, [store, data, axis, rows, row, width, height, resolve, createContext]);
   // meiva:note
   // A render that changed what the row would draw (a new selection, a new highlight) asks for a frame of its
   // own: the viewport did not move, but the picture it draws did.

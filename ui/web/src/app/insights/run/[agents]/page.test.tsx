@@ -47,8 +47,8 @@ import {
   drawn,
   itemX,
   look,
-  mockCanvas,
   paintFrame,
+  recordingCanvasContext,
 } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
 import { useMediaQuery } from "@/lib/layout/use-media-query";
 import RunTimelinePage from "./page";
@@ -80,7 +80,7 @@ function renderPage({ contextSize = true }: { contextSize?: boolean } = {}) {
     <WallClockProvider wallNow={wallNow}>
       <BrowserProvider browser={fakeBrowser()}>
       <QueryClientProvider client={queryClient}>
-        <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
+        <RunTimelinePage params={Promise.resolve({ agents: "42" })} createContext={recordingCanvasContext} />
       </QueryClientProvider>
       </BrowserProvider>
     </WallClockProvider>,
@@ -116,7 +116,6 @@ const ringOf = async (item: Item) => (await lookOf(item)).ring;
 
 beforeEach(() => {
   expect(typeof useMediaQuery).toBe("function");
-  mockCanvas();
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });
