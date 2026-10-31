@@ -315,9 +315,35 @@ def test_the_strict_module_keeps_a_bound_name_green() -> None:
 def test_the_strict_module_decides_what_counts_as_repository_code(tmp_path: Path) -> None:
     root = tmp_path / "root"
     is_repo = schedule_verify_checks.is_repo_source
-    assert is_repo(root / "schedules/jobs/catchup.py", root=root) is True
-    assert is_repo(root / ".venv/lib/python3.12/site-packages/base/clock.py", root=root) is False
-    assert is_repo(root / "services/app/site-packages/vendor/mod.py", root=root) is False
-    assert is_repo(root / "meiva/sdk_surface/settings.py", root=root) is False
-    assert is_repo(tmp_path / "elsewhere/schedules/jobs/catchup.py", root=root) is False
-    assert is_repo(None, root=root) is False
+    # meiva:note
+    # One line per rule the predicate carries, and each message names what the rule protects so a
+    # red line reports the decision that broke instead of `False is not True`. Both wrong answers
+    # are silent: a false True binds a signature that is not the one the script will call, a false
+    # False stops binding a callee the guard exists to check.
+    assert is_repo(root / "schedules/jobs/catchup.py", root=root) is True, (
+        "a file under the checkout is repository code; answering False drops the signature check "
+        "for every call a schedule script makes into the repo, which is the drift this guard exists "
+        "to catch (the 2026-10-03 class)"
+    )
+    assert is_repo(root / ".venv/lib/python3.12/site-packages/base/clock.py", root=root) is False, (
+        "the installed copy in the checkout's virtualenv is not repository code; answering True "
+        "binds the script's calls against a stale installed module instead of the source, turning "
+        "an edit under review into a red schedule script for the wrong reason"
+    )
+    assert is_repo(root / "services/app/site-packages/vendor/mod.py", root=root) is False, (
+        "a vendored site-packages tree inside the checkout is still not ours; answering True binds "
+        "third-party signatures and turns their upgrades into red schedule scripts"
+    )
+    assert is_repo(root / "meiva/sdk_surface/settings.py", root=root) is False, (
+        "the agent SDK package is skipped on purpose: plugins install its namespaces and wrap its "
+        "functions at load time, so the static module is neither the name set nor the call "
+        "contract; answering True red-flags valid SDK calls"
+    )
+    assert is_repo(tmp_path / "elsewhere/schedules/jobs/catchup.py", root=root) is False, (
+        "a file outside the checkout is not ours; answering True makes the verdict depend on what "
+        "else the machine can import, so one script passes on one host and fails on another"
+    )
+    assert is_repo(None, root=root) is False, (
+        "an unknowable source is never guessed ours; answering True invents a signature check for a "
+        "callee nobody could read, and the author cannot act on the result"
+    )
