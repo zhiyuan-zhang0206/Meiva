@@ -105,6 +105,15 @@ def _forked_late_child(child_file: str, ready: str) -> None:
     time.sleep(60)
 
 
+def _fail_loudly(reason: str) -> None:
+    # meiva:note
+    # A wrapper that refuses the launch says why on stderr and nowhere else: the retirement
+    # warning is only useful if it repeats those words.
+    sys.stderr.write(f"{reason}\n")
+    sys.stderr.flush()
+    raise SystemExit(CODE_BEHIND_MINIMUM_EXIT_CODE)
+
+
 def _code_gate_exit(marker: str) -> None:
     path = pathlib.Path(marker)
     path.write_text(path.read_text() + "start\n" if path.exists() else "start\n")
@@ -125,6 +134,7 @@ _SCENARIOS = {
     "restart_down": _restart_down,
     "forked_late_child": _forked_late_child,
     "code_gate_exit": _code_gate_exit,
+    "fail_loudly": _fail_loudly,
 }
 
 if __name__ == "__main__":

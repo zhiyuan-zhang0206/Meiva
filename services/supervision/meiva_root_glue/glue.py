@@ -266,6 +266,11 @@ def configured_memory_budgets() -> tuple[UnitBudget, ...]:
 # alert on a healthy macOS developer machine, naming a Linux mechanism that does not apply
 # there, is how an alert becomes noise.
 def bind_memory_budget(supervisor: Supervisor, *, host: Host) -> None:
+    # meiva:note
+    # The retirement policy is bound here, with the rewrite it governs: the count is what bounds
+    # the restart loop a rewrite can cause, and it is configuration because "how many transient
+    # wrapper failures is this host allowed" is an operating decision, not a code constant.
+    supervisor.set_rewrite_retire_after(settings.agent.rewrite_retire_after_failures)
     runtime_dir = ensure_user_runtime_dir(os.environ, uid=host.uid, isdir=os.path.isdir)
     budgets = configured_memory_budgets()
     if runtime_dir is None and memory_cap_wanted(budgets=budgets, platform=host.platform.system):

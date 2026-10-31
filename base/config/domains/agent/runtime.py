@@ -94,6 +94,32 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    rewrite_retire_after_failures: int = Field(
+        default=3,
+        alias="MEIVA_REWRITE_RETIRE_AFTER_FAILURES",
+        description=(
+            "How many consecutive early failures of a rewritten unit launch retire that"
+            " rewrite for the rest of the root process's life: 1 restores the old"
+            " retire-on-first-failure behavior. A rewrite retires to protect against a"
+            " restart loop -- the wrapper starts, dies, and the restart policy replays it"
+            " forever -- but a single failure is not evidence the wrapper is unusable: on"
+            " 2026-10-31 a transient `Failed to connect to bus` during the cluster's"
+            " stop/start window retired the memory cap on a host whose systemd carried the"
+            " same scope a minute later, and exec-host lost its cap as collateral. This"
+            " count is the loop bound the single failure tried to be, and a generation that"
+            " outlives the startup window clears it. Retirement is per unit."
+        ),
+        ge=1,
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     exec_host_memory_swap_max_mb: int = Field(
         default=0,
         alias="MEIVA_EXEC_HOST_MEMORY_SWAP_MAX_MB",
