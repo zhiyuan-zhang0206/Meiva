@@ -42,6 +42,7 @@ from pydantic import TypeAdapter
 
 from base.db.transaction import write_transaction
 from base.telemetry.alerts import (
+    AlertMessageStyle,
     display_language,
     upsert_alert,
 )
@@ -111,11 +112,15 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     inserted = updated = notified = 0
     rows: list[dict[str, Any]] = []
+    alert_settings = gateway_config(request).alerts
+    style = AlertMessageStyle(
+        zone=gateway_clock(request).zone(), base_url=alert_settings.frontend_base_url
+    )
     with write_transaction(request.app.state.db_pool) as conn:
         lang = display_language(conn)
         alerts = body.flattened()
         shadow = AlertShadowBatch(
-            conn, alerts, lang, native=gateway_config(request).alerts.im_notify_enabled
+            conn, alerts, lang, style=style, native=alert_settings.im_notify_enabled
         )
         for alert in shadow.items:
             instance_key, previous = shadow.observe(alert)
@@ -137,7 +142,6 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     publish_alert_rows(request.app.state.bus, rows)
 
-    alert_settings = gateway_config(request).alerts
     if alert_settings.im_notify_enabled:
         for group_id in sorted(shadow.native_ids):
             notify_alert_group(
