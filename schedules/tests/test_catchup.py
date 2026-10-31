@@ -11,10 +11,9 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from schedules.jobs.catchup import Fired, cluster_timezone, fire_slot_once
+from schedules.jobs.catchup import Fired, fire_slot_once
 from schedules.tests.support.schedule_support import claimed_slots, insert_schedule
 
 _CREATED = datetime(2026, 9, 6, 9, 30, tzinfo=UTC)
@@ -166,7 +165,3 @@ def test_a_naive_slot_is_refused(database: Database) -> None:
             schedule_id=1,
             fire=lambda slot, _payload: slot,
         )
-
-
-def test_cluster_timezone_is_the_cluster_setting() -> None:
-    assert cluster_timezone() == settings.general.timezone

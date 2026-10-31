@@ -7,8 +7,7 @@ from functools import partial
 
 from base.paths import repo_root
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.catchup import cluster_timezone
-from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.model_tracker import ModelTracker, run_tracker
 from schedules.plans.directory_plan import report_recipient

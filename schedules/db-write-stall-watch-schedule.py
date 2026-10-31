@@ -11,7 +11,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.entry import cluster_timezone
 from schedules.jobs.stall_watch import StallWatch, run_watch
 
 REPORT_AGENTS = (1818, 405)

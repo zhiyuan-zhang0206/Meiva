@@ -28,6 +28,16 @@ __all__ = ["fresh_schedule_entry", "open_schedule_entry", "schedule_entry"]
 
 
 # meiva:note
+# The cluster wall clock (`MEIVA_TIMEZONE`, cluster-pinned), never the host's OS timezone: the fleet
+# fires at one instant wherever each machine sits, and a weekly cron read host-locally lands the run
+# on the wrong calendar day, not merely at the wrong hour. An entry reads it once and hands the value
+# down, so a changed value waits for the schedule's next restart.
+# meiva:link schedules/README.md
+def cluster_timezone() -> str:
+    return Clock.from_settings().timezone
+
+
+# meiva:note
 # `image` is the commit the process loaded and `process` names it in the database gate; `home` is
 # the home the script's entry resolved. All three are the caller's values: the entry reads none
 # of them from the checkout it happens to sit in.

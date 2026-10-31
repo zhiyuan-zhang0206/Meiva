@@ -15,13 +15,14 @@ import pytest
 
 import meiva
 from base.cluster.machine import MachineIdentityReader
+from base.config import settings
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from schedules.jobs.entry import fresh_schedule_entry, schedule_entry
+from schedules.jobs.entry import cluster_timezone, fresh_schedule_entry, schedule_entry
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -137,3 +138,7 @@ def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
     assert not pipeline.stopped
     with database.connect(autocommit=True) as conn:
         assert conn.execute("SELECT 1").fetchone() == (1,)
+
+
+def test_cluster_timezone_is_the_cluster_setting() -> None:
+    assert cluster_timezone() == settings.general.timezone

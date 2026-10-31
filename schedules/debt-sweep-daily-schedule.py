@@ -8,9 +8,8 @@ from pathlib import Path
 
 import base
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.catchup import cluster_timezone
 from schedules.jobs.debt_sweep import DebtSweep, dry_run, parse_cli, sweep_day
-from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.debt_sweep_worker import parse_worker_label
 from schedules.plans.directory_plan import report_recipient
