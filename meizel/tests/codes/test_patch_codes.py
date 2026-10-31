@@ -267,6 +267,32 @@ def test_a_stale_approval_points_at_its_own_entry_not_at_an_earlier_mention(
     assert stale.line == 5
 
 
+def test_an_approved_list_past_its_budget_is_refused(make_repo: RepoFactory) -> None:
+    policy = '[approved-patches]\n"max-files" = ["1"]\n\n' + approving(
+        "app/tests/guards.py", "app/tests/other.py"
+    )
+    _, found = approval_judged(make_repo, policy)
+    [over] = [d for d in found if d.code.value == "approved-budget"]
+    assert "2 files are approved to patch" in over.message
+    assert "max-files is 1" in over.message
+    assert over.line == 2
+
+
+def test_an_approved_list_at_its_budget_passes(make_repo: RepoFactory) -> None:
+    policy = '[approved-patches]\n"max-files" = ["2"]\n\n' + approving(
+        "app/tests/guards.py", "app/tests/other.py"
+    )
+    _, found = approval_judged(make_repo, policy)
+    assert [d for d in found if d.code.value == "approved-budget"] == []
+
+
+def test_a_budget_the_run_cannot_read_as_a_count_is_refused(make_repo: RepoFactory) -> None:
+    policy = '[approved-patches]\n"max-files" = ["several"]\n\n' + approving("app/tests/guards.py")
+    _, found = approval_judged(make_repo, policy)
+    [refused] = [d for d in found if d.code.value == "policy-syntax"]
+    assert "max-files must be one count" in refused.message
+
+
 def test_a_refused_approval_points_at_its_own_entry_too(make_repo: RepoFactory) -> None:
     policy = '[external]\n"lib/mod.py" = "an earlier mention of the same path"\n\n' + approving(
         "lib/mod.py"

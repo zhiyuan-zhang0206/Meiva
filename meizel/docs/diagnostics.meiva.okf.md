@@ -20,6 +20,7 @@ Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-
 `cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.meiva.okf.md|patching]]),
 the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
 `ambient-read`, `legal-read-recorded`, `stale-root`, `stale-reader`, `stale-approval`,
+`approved-budget` ([[meizel/docs/checker/policy/policy.meiva.okf.md|the approved list's ceiling]]),
 `fake-entropy` ([[meizel/docs/checker/fake-entropy.meiva.okf.md|fake entropy]]),
 `unresolved-import`, `unlisted-allowance`,
 `stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
