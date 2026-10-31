@@ -21,13 +21,15 @@
 // is nothing to sanitize here — an unknown token or a `var(...)` value could
 // not have reached a manifest that loads.
 
-import { useTheme } from "next-themes";
 import { useEffect } from "react";
 
 import { useThemePacks, themePackId } from "@/lib/plugins/use-theme-packs";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 
-export function ThemePackTokens() {
+// meiva:note
+// `resolvedTheme` is the mode the page is in, already resolved from `"system"` by the theme
+// provider; it arrives as a value so this component never reads the theme module itself.
+export function ThemePackTokens({ resolvedTheme }: { resolvedTheme: string | undefined }) {
   const { packs } = useThemePacks();
   const { settings } = useUserSettings();
   const selected = settings["display.theme_pack"] as string | null;
@@ -36,11 +38,9 @@ export function ThemePackTokens() {
   // else is installed, and the picker shows Default.
   const pack = packs.find((p) => themePackId(p) === selected) ?? null;
 
-  // resolvedTheme, not theme: "system" has to become the concrete mode before
-  // it can choose a half. Undefined on the first client render (next-themes
-  // has not resolved yet), which reads as light — the same default the
-  // stylesheet itself starts from.
-  const { resolvedTheme } = useTheme();
+  // meiva:note
+  // Undefined on the first client render (the theme provider has not resolved yet), which reads as
+  // light — the same default the stylesheet itself starts from.
   const active =
     pack && resolvedTheme === "dark" && pack.dark_tokens ? pack.dark_tokens : pack?.tokens;
 

@@ -11,4 +11,3 @@ exports = ["context-panel-toggle.tsx", "header-bar.tsx", "home-layout.tsx", "pag
 [debt.third-party-patch]
 "home-layout.test.tsx#vi.mock react-resizable-panels" = 1
 "providers.test.tsx#vi.mock next-themes" = 1
-"theme-color-sync.test.tsx#vi.mock next-themes" = 1

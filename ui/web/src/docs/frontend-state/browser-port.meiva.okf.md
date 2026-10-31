@@ -98,6 +98,14 @@ records the slices it fires by hand, `idle: "immediate"` runs each at once for a
 page that must settle in one commit, and the default schedules on the page the
 test runs in.
 
+## The app router is not this port
+
+`browser.navigation` is the page's history object. The app's own routing lives beside this package in
+`lib/browser/navigation/` (`AppNavigation`: `pathname`, `push`, `replace`), and it is nested here as
+a capacity compromise — `lib/` is at its twenty-entry cap — not because routing belongs to the
+browser. The two values are unrelated and neither is built from the other; a `lib/` regrouped around
+a routing layer of its own should take that package with it.
+
 ## A preview lives in an object URL, and the port releases it
 
 `browser.objectUrls.create(file)` answers the URL a pending image preview renders

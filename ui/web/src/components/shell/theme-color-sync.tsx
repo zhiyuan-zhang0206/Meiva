@@ -1,6 +1,5 @@
 "use client";
 
-import { useTheme } from "next-themes";
 import { useEffect } from "react";
 
 // meiva:note
@@ -10,8 +9,11 @@ import { useEffect } from "react";
 // the in-app theme overrides the OS preference, which the SSR media queries
 // cannot see.
 // meiva:link ui/web/src/docs/frontend.meiva.okf.md
-export function ThemeColorSync() {
-  const { resolvedTheme } = useTheme();
+// meiva:note
+// `resolvedTheme` is the scheme the page actually shows (`"system"` already resolved by the theme
+// provider), and it is a value here rather than a hook: the effect re-runs when the scheme changes,
+// and the caller that already reads the theme provider passes it down.
+export function ThemeColorSync({ resolvedTheme }: { resolvedTheme: string | undefined }) {
   useEffect(() => {
     const color = getComputedStyle(document.documentElement)
       .getPropertyValue("--theme-color")
