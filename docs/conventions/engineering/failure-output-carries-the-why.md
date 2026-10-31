@@ -301,6 +301,13 @@ selector cannot see at all).
    need a reason, and **a skip is not green**.
 3. Optional second phase: put L0 + L4 into the existing pre-push hook (currently 4–5 minutes) so a red
    refuses the push; L1–L3 are too expensive and stay in the runner.
+4. **Every child runs in CI's environment contract**, which is the caller's environment minus the
+   `MEIVA_*` namespace CI's runner never carries (`#5907`). A child that inherits an agent host's shell
+   answers about that shell: the suite's session upgrade drops the cluster-scope keys its own `.env`
+   does not declare, and the environment guard compares the live environment with the snapshot it
+   took before the drop — three receipts red on
+   `tests/harness/test_home_isolation.py` while CI and `main` were green. Nothing else is filtered:
+   `PATH`, `HOME` and each toolchain's own variables must locate *this* box's tools.
 
 #### 6. The expiry rule (what happens when CI comes back)
 

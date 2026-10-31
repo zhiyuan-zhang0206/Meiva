@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -421,9 +423,34 @@ def _count(output: str, word: str) -> int:
     return int(found.group(1)) if found else 0
 
 
-def _execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+# meiva:note
+# What a judged child inherits: the launcher's environment, minus the product's own namespace.
+# The receipt exists to predict the verdict CI will give this change, and CI's runner carries no
+# `MEIVA_*` at all — the suite installs the sentinels it needs before any project import
+# (`tests/fixtures/env_bootstrap.py`) — while an agent host exports a hundred of them. They are
+# not inert: the suite's session upgrade drops every cluster-scope key its own `.env` does not
+# declare (`base/host/env/dotenv_boot.py:enforce_cluster_env_authority`), so a key the baseline
+# snapshot still holds is gone from the live environment by the time a test compares the two, and
+# `tests/harness/test_home_isolation.py` reds about the operator's shell rather than the change
+# (#5907). Nothing else is filtered, deliberately: PATH, HOME, TMPDIR, the virtualenv and each
+# toolchain's own variables must locate THIS box's tools, because CI's paths do not exist here —
+# an allowlist would trade this false red for a new one nobody predicted.
+def child_environment(parent: Mapping[str, str]) -> dict[str, str]:
+    return {name: value for name, value in parent.items() if not name.startswith("MEIVA_")}
+
+
+def run_child(
+    argv: Sequence[str], root: Path, *, environment: Mapping[str, str]
+) -> tuple[int, str, float]:
     started = time.monotonic()
-    result = subprocess.run(list(argv), cwd=root, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        list(argv),
+        cwd=root,
+        env=dict(environment),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     return result.returncode, result.stdout + result.stderr, time.monotonic() - started
 
 
@@ -656,7 +683,7 @@ def check(
     change: ChangeSet,
     *,
     skip_tests: bool,
-    execute: Callable[[Sequence[str], Path], tuple[int, str, float]] = _execute,
+    execute: Callable[[Sequence[str], Path], tuple[int, str, float]],
     choose: Callable[[ChangeSet], Selection] = select_tests,
 ) -> tuple[dict[str, str], bool]:
     matched = [trigger for trigger in TRIGGERS if trigger.matches(change)]
@@ -752,7 +779,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.dry_run:
         print("\n".join(plan(change, skip_tests=arguments.skip_tests)))
         return 0
-    values, failed = check(change, skip_tests=arguments.skip_tests)
+    judged = partial(run_child, environment=child_environment(os.environ))
+    values, failed = check(change, skip_tests=arguments.skip_tests, execute=judged)
     print(build_receipt(values, sha, _git(root, "rev-parse", arguments.base)))
     return 1 if failed else 0
 
