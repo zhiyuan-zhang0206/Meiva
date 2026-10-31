@@ -54,25 +54,32 @@ export function removeSession(session: BrowserStorage, key: string): void {
   memorySession.set(key, null);
 }
 
+// meiva:note
+// A stored attempt is a plain JSON value until this proves its shape — every field `SendAttempt`
+// declares, `agentId` included — so the reader returns a value it has checked rather than a cast of
+// one it has not.
+function isSendAttempt(value: unknown): value is SendAttempt {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "signature" in value &&
+    typeof value.signature === "string" &&
+    "clientMessageId" in value &&
+    typeof value.clientMessageId === "string" &&
+    "agentId" in value &&
+    (typeof value.agentId === "number" || value.agentId === null) &&
+    "content" in value &&
+    typeof value.content === "string" &&
+    "imageUrls" in value &&
+    Array.isArray(value.imageUrls) &&
+    value.imageUrls.every((url) => typeof url === "string")
+  );
+}
+
 export function readSendAttempt(session: BrowserStorage, agentId: number): SendAttempt | null {
   try {
-    const parsed = JSON.parse(readSession(session, sendAttemptKey(agentId)) ?? "null") as unknown;
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !("signature" in parsed) ||
-      typeof parsed.signature !== "string" ||
-      !("clientMessageId" in parsed) ||
-      typeof parsed.clientMessageId !== "string" ||
-      !("content" in parsed) ||
-      typeof parsed.content !== "string" ||
-      !("imageUrls" in parsed) ||
-      !Array.isArray(parsed.imageUrls) ||
-      !parsed.imageUrls.every((url) => typeof url === "string")
-    ) {
-      return null;
-    }
-    return parsed as SendAttempt;
+    const parsed: unknown = JSON.parse(readSession(session, sendAttemptKey(agentId)) ?? "null");
+    return isSendAttempt(parsed) ? parsed : null;
   } catch {
     return null;
   }
