@@ -47,6 +47,16 @@ class DanglingPlugin(PluginsConfigError):  # noqa: N818
         self.names: set[str] = names or set()
 
 
+# meiva:note
+# Built-in plugins this tree no longer ships. A machine's `plugins_config.json` keeps the entry of
+# a plugin a release deleted until someone removes it; startup drops it and reports it like any
+# dangling name, and `meiva plugins verify` shows it as a warning instead of a failure, because
+# nothing is broken: the plugin is gone on purpose. The PR that deletes a built-in plugin adds
+# its name here. A name that is not listed stays a failure: an enabled plugin whose directory is
+# gone is how codex_usage and deepseek_balance ran unnoticed on macmini (2026-09-11).
+RETIRED_BUILTIN_PLUGINS: frozenset[str] = frozenset({"meiva_silent_idle"})
+
+
 class DuplicatePlugin(PluginsConfigError):  # noqa: N818
     """Same plugin name exists in both builtin and external directories."""
 
