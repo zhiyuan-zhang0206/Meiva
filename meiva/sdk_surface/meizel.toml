@@ -28,7 +28,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
-"agent_identity.py" = "strict"
 "attachment_transport.py" = { mode = "none", why = "the shell of meiva.self.attach: it reads the agent's model, the catalog, the turn and the state-update slot, resolves the path the pure expansion named and stats the file, and appends the entry to the turn's update; the gate and the type checks, the home expansion, the refusals over the file facts, what a stat means, the model that runs and whether the process registers inside a turn are decided by the pure pure/media/attach/attach_request.py, attach_model.py and attach_plan.py" }
 "batch.py" = { mode = "none", why = "the executor behind the SDK batch APIs: it runs the worker over every item on threads under a semaphore and gathers the results in order; the max_concurrent contract it honours is checked by the pure pure/plans/batch_plan.py" }
 "discovery.py" = "strict-to-be"
@@ -42,6 +41,8 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "settings.py" = { mode = "none", why = "the single producer of the handles a `meiva.*` free function asks for: this process's `DatabaseHandle`, its event bus, its clock, the running agent's settings and the `DB_URL` / `REDIS_URL` / `GATEWAY_URL` values. The clients a bound context carries are built once by `meiva/boot.py`; nothing else resolves settings for the SDK namespace" }
 "skill_sources.py" = "strict"
 "validation.py" = "strict"
+"process_context.py" = { mode = "none", why = "the owner of the SDK's two process-local slots: it holds and binds `MeivaContext` and `LoadedCommit` on the `meiva` module so a reload neither resets nor duplicates them, and builds the context a launched script gets on its first read. Reads of that slot go through `agent_identity`, the identity door; nothing else binds it" }
+"agent_identity.py" = { mode = "none", why = "the SDK identity door: it reads the process-local context when the caller supplied none and answers who this process is -- the attributed agent id, the actor string a durable write is stamped with, the harness a refusal prints -- while every rule over those facts (which identity wins, which refusal an action earns, what an attached capture reports) is decided by the pure pure/caller/identity_plan.py and usage_plan.py. It is the one place a caller that named no context is answered" }
 "wraps.py" = { mode = "none", why = "the registration primitive behind meiva.extend.wrap: it resolves the target in the live meiva module, writes the chained function over it and reports a firing; the target rule, how the chained function presents itself, the async test and the counting rule are decided by the pure pure/plans/installation/wrap_plan.py" }
 
 [debt.any-collaborator]
@@ -52,8 +53,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [debt.impure-edge]
 "installation.py#base/config/service_read.py" = 1
-"process_context.py#base/agents/context/__init__.py" = 1
-"process_context.py#base/native_process/loaded_commit.py" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

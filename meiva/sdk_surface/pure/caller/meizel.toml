@@ -1,4 +1,4 @@
-exports = ["attachability.py", "identity_plan.py", "usage_plan.py"]
+exports = ["attachability.py", "harness_plan.py", "identity_plan.py", "usage_plan.py"]
 
 [uses]
 "usage_plan.py" = ["identity_plan.py"]
