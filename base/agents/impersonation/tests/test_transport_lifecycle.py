@@ -121,6 +121,7 @@ def test_ended_notice_is_submitted_once_to_the_recorded_destination(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> None:
@@ -128,7 +129,10 @@ def test_ended_notice_is_submitted_once_to_the_recorded_destination(
     end(database, event_bus, session, local_machine=machine_identity.name())
     submitted = Mock(return_value=None)
     assert (
-        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
+        terminal_notices.send_ended_notice(
+            database, session["id"], home=tmp_path, submit_codex=submitted
+        )
+        is None
     )
     submitted.assert_called_once()
     assert submitted.call_args.args[0] == session["relay_thread_id"]
@@ -142,6 +146,7 @@ def test_ended_notice_failure_is_reported_and_leaves_no_retry_state(
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> None:
@@ -149,7 +154,9 @@ def test_ended_notice_failure_is_reported_and_leaves_no_retry_state(
     end(database, event_bus, session, local_machine=machine_identity.name())
     submitted = Mock(return_value="TimeoutError: ambiguous acceptance")
     assert (
-        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted)
+        terminal_notices.send_ended_notice(
+            database, session["id"], home=tmp_path, submit_codex=submitted
+        )
         == "TimeoutError: ambiguous acceptance"
     )
     submitted.assert_called_once()
@@ -165,6 +172,7 @@ def test_controller_session_destination_gets_no_host_submission(
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> None:
@@ -177,7 +185,10 @@ def test_controller_session_destination_gets_no_host_submission(
     end(database, event_bus, session, local_machine=machine_identity.name())
     submitted = Mock(side_effect=AssertionError("Unsupported destination must not submit"))
     assert (
-        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
+        terminal_notices.send_ended_notice(
+            database, session["id"], home=tmp_path, submit_codex=submitted
+        )
+        is None
     )
 
 
@@ -186,6 +197,7 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
     config_authority: ConfigAuthority,
@@ -230,7 +242,10 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     db_conn.commit()
     submitted = Mock(return_value=None)
     assert (
-        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
+        terminal_notices.send_ended_notice(
+            database, session["id"], home=tmp_path, submit_codex=submitted
+        )
+        is None
     )
     assert submitted.call_args.args[0] == session["relay_thread_id"]
     assert submitted.call_args.kwargs["endpoint"] == session["relay_codex_remote"]
@@ -250,6 +265,7 @@ def test_terminated_agent_notice_names_the_termination(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     db_conn: psycopg.Connection,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> None:
@@ -258,7 +274,10 @@ def test_terminated_agent_notice_names_the_termination(
     db_conn.commit()
     submitted = Mock(return_value=None)
     assert (
-        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
+        terminal_notices.send_ended_notice(
+            database, session["id"], home=tmp_path, submit_codex=submitted
+        )
+        is None
     )
     assert "terminated: agent was terminated" in submitted.call_args.args[1]
 
@@ -300,7 +319,6 @@ def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
     *,
     machine_identity: MachineIdentityReader,
 ) -> None:
-    from functools import partial
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     session, _ = active
@@ -335,10 +353,18 @@ def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
     host_transport.write_antigravity_endpoint(recorded, thread_id=thread_id, home=tmp_path)
     end(database, event_bus, session, local_machine=machine_identity.name())
     try:
-        reason = terminal_notices.send_ended_notice(
-            database,
-            session["id"],
-            resolve_antigravity=partial(host_transport.resolve_antigravity_endpoint, home=tmp_path),
+        # meiva:note
+        # The production default resolver is used on purpose: the endpoint record is a file
+        # under `home`, so a notice path that drops `home` fails before it sends anything, and
+        # this assertion is where that shows up instead of in a host loop far from the cause.
+        reason = terminal_notices.send_ended_notice(database, session["id"], home=tmp_path)
+    except TypeError as error:
+        pytest.fail(
+            "the ended-lease notice must reach the recorded Antigravity thread through the "
+            "production resolver, which reads the endpoint record under the home the request "
+            "wrote it to: a call that drops that argument raises before anything is sent, and "
+            "the notice is lost with no retry (2026-10-31, b656aa594 left this call site "
+            f"behind). Raised: {error}"
         )
     finally:
         httpd.shutdown()
@@ -373,14 +399,18 @@ def test_ended_antigravity_notice_without_a_record_names_the_record_it_looked_fo
     path = host_transport.antigravity_endpoint_path(thread_id, home=tmp_path)
 
     def missing(
-        _thread_id: str, *, antigravity_server: "host_transport.AntigravityServer | None"
+        _thread_id: str,
+        *,
+        home: Path,
+        antigravity_server: "host_transport.AntigravityServer | None",
     ) -> "host_transport.AntigravityServer":
         assert antigravity_server is None
+        assert home == tmp_path
         raise RuntimeError(f"No Antigravity endpoint record exists at {path}")
 
     end(database, event_bus, session, local_machine=machine_identity.name())
     reason = terminal_notices.send_ended_notice(
-        database, session["id"], resolve_antigravity=missing
+        database, session["id"], home=tmp_path, resolve_antigravity=missing
     )
     assert reason is not None
     assert str(path) in reason

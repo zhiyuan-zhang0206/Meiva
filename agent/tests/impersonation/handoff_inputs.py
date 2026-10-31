@@ -251,6 +251,7 @@ async def prepare_graph(
     graph = builder.compile(checkpointer=saver)
     ctx = MeivaContext(
         machine=machine_identity,
+        meiva_home=Path("/nonexistent/meiva-home"),
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
@@ -427,6 +428,8 @@ async def stop_takeover_with_lost_relay(
     event_bus: EventBus,
     owner: RuntimeIncarnation,
     relays: RelaySupervision,
+    *,
+    home: Path,
 ) -> str:
     session = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert session is not None
@@ -438,6 +441,7 @@ async def stop_takeover_with_lost_relay(
         relays,
         incarnation=owner,
         clock=fixed_clock(),
+        home=home,
     )
     return "the bound relay stopped heartbeating"
 

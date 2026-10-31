@@ -282,6 +282,7 @@ def test_ended_lease_reaches_actual_codex_host_without_a_relay(
     short_socket: Path,
     database: Database,
     db_conn: psycopg.Connection,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> None:
@@ -306,7 +307,7 @@ def test_ended_lease_reaches_actual_codex_host_without_a_relay(
     server = FakeAppServer()
     server.start(short_socket)
     try:
-        assert send_ended_notice(database, str(lease_id)) is None
+        assert send_ended_notice(database, str(lease_id), home=tmp_path) is None
     finally:
         server.stop()
     payload = server.received[-1]["params"]

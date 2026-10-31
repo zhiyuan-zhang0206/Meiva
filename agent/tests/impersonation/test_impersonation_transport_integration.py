@@ -82,7 +82,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     )
     assert not model_calls
     if cause == "relay_death":
-        await stop_takeover_with_lost_relay(database, event_bus, owner, ctx.relays)
+        await stop_takeover_with_lost_relay(database, event_bus, owner, ctx.relays, home=tmp_path)
     else:
         stop_takeover_with_exhausted_ack(db_conn, requested, owner)
     died = leases.get(

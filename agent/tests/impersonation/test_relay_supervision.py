@@ -42,6 +42,7 @@ async def _supervise(
         relays,
         incarnation=owner if native else None,
         clock=fixed_clock(),
+        home=cluster.home,
     )
 
 
