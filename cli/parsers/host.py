@@ -645,8 +645,10 @@ def _h_lgtm(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     from base.paths import repo_root
+    from base.telemetry.lgtm_local import LgtmSettings
     from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on, selection_problem
     from cli.commands.observability.lgtm import cmd_lgtm_status
+    from cli.database.runtime import delivered_config
     from cli.start_runtime import StartRuntime
 
     if args.lgtm_cmd in ("on", "off"):
@@ -677,7 +679,11 @@ def _h_lgtm(
             repo_only=args.repo_only,
             database_factory=args.database_factory,
         )
-    return cmd_lgtm_status(home=args.runtime.home, machine=args.runtime.machine)
+    return cmd_lgtm_status(
+        home=args.runtime.home,
+        machine=args.runtime.machine,
+        observability=LgtmSettings.from_fields(delivered_config(args.runtime.config).get_field),
+    )
 
 
 def add_lgtm_parser(

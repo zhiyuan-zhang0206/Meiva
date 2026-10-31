@@ -3,21 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
-from base.telemetry.lgtm_local import BACKENDS, backend_urls
+from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, backend_urls
 from cli.commands.observability._lgtm_provisioning import verify_dashboard_provisioning
 from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_roles, probe_backend
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
-def cmd_lgtm_status(*, home: Path, machine: MachineIdentityReader) -> int:
+def cmd_lgtm_status(
+    *, home: Path, machine: MachineIdentityReader, observability: LgtmSettings
+) -> int:
     station = is_lgtm_host(home, roles=lgtm_roles(machine))
     if not station:
         print("this home is not an observability station")
-    print_lgtm_status()
+    print_lgtm_status(observability)
     if not station:
         return 0
     problems = verify_dashboard_provisioning(
-        home / "lgtm" / "native", grafana_url=backend_urls()["grafana"]
+        home / "lgtm" / "native", grafana_url=backend_urls(observability)["grafana"]
     )
     for problem in problems:
         print(f"  dashboard: {problem}")
@@ -28,8 +30,8 @@ def cmd_lgtm_status(*, home: Path, machine: MachineIdentityReader) -> int:
 
 # meiva:note
 # Print each backend's probe verdict and detail.
-def print_lgtm_status() -> None:
-    urls = backend_urls()
+def print_lgtm_status(observability: LgtmSettings) -> None:
+    urls = backend_urls(observability)
     for name in BACKENDS:
         result = probe_backend(name, urls=urls)
         print(f"  {name}: {result.verdict.value} ({result.detail})")

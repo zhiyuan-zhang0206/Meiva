@@ -38,6 +38,7 @@ from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.host.resource.sample import resource_sample
 from base.paths import root_manifests_path
+from base.telemetry.lgtm_local import LgtmSettings
 from cli.commands._repo import roles_or_none
 from cli.commands.cluster.control import fetch_gateway_cluster_status
 from cli.commands.converge import incomplete
@@ -80,7 +81,7 @@ from cli.commands.lifecycle.status.render import (
 from cli.commands.lifecycle.status.roster import RosterEntry, ServiceTable
 from cli.commands.observability.lgtm import is_lgtm_host, lgtm_roles, print_lgtm_status
 from cli.commands.probe import print_service_row
-from cli.database.runtime import CommandRuntime
+from cli.database.runtime import CommandRuntime, delivered_config
 from ops.cluster_status import ClusterStatus
 from services.supervision.meiva_root_glue.manifests import launched_services
 from services.supervision.roster.composition import build_services
@@ -148,7 +149,7 @@ def _execute(
         case ReadHostResources():
             _emit(host_resource_lines(_read_host_resources()))
         case ProbeLgtm():
-            print_lgtm_status()
+            print_lgtm_status(LgtmSettings.from_fields(delivered_config(command.config).get_field))
         case ProbeRedisBridge():
             print_redis_bridge_status(
                 command.home, host=command.host, machine=command.machine, config=command.config
