@@ -99,7 +99,13 @@ def _presence(receipt: Receipt) -> list[str]:
             f"fields with neither a result nor a reason: {', '.join(silent)} -- "
             f"write n/a(<why>) or skipped(<why>)"
         )
-    unread = sorted(name for name, value in receipt.fields.items() if "unreadable" in value)
+    # meiva:note
+    # A read failure is a verdict about the field, not a word in it: `unreadable(...)` is refused,
+    # while a reason that happens to mention the word -- `n/a(manifest-unreadable-on-this-ref)` --
+    # is the author telling the truth and stays theirs to word.
+    unread = sorted(
+        name for name, value in receipt.fields.items() if value.startswith("unreadable")
+    )
     if unread:
         problems.append(f"the runner could not read: {', '.join(unread)}")
     reasons = sorted(

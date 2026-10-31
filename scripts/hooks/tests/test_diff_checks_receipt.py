@@ -89,11 +89,28 @@ def test_a_missing_field_is_named_rather_than_treated_as_green() -> None:
 
 # meiva:note
 # A layer whose output the runner could not read never passes as green: the runner fixes what it
-# can read, and the checker refuses the rest instead of trusting the absence of a verdict.
+# can read, and the checker refuses the rest instead of trusting the absence of a verdict. The
+# verdict is the field's leading token -- `debt=unreadable`, `debt=unreadable(column-missing)`.
 def test_a_layer_the_runner_could_not_read_is_refused() -> None:
-    problems = findings(parse(_line(debt="ok(unreadable:no-table)(3s)")), head="abc123", body="")
+    bare = findings(parse(_line(debt="unreadable")), head="abc123", body="")
+    explained = findings(
+        parse(_line(debt="unreadable(column-missing)(3s)")), head="abc123", body=""
+    )
 
-    assert any("could not read" in problem for problem in problems)
+    assert any("could not read" in problem for problem in bare)
+    assert any("could not read" in problem for problem in explained)
+
+
+# meiva:note
+# The word is not the verdict: an author who writes `n/a(manifest-unreadable-on-this-ref)` is
+# telling the reader why the layer does not apply, and a checker that reddens the honest sentence
+# teaches authors to word reasons around the gate instead of stating them.
+def test_a_reason_that_mentions_unreadable_is_not_a_read_failure() -> None:
+    problems = findings(
+        parse(_line(debt="n/a(manifest-unreadable-on-this-ref)")), head="abc123", body=""
+    )
+
+    assert problems == []
 
 
 def test_an_absence_names_its_reason() -> None:

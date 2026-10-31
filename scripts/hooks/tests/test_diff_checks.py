@@ -213,7 +213,7 @@ def test_debt_output_without_a_table_is_reported_as_unreadable() -> None:
         choose=_always(Selection("SELECTED", (), ())),
     )
 
-    assert "unreadable" in values["debt"]
+    assert values["debt"].startswith("unreadable")
 
 
 # meiva:note

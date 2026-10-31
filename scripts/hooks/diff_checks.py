@@ -480,12 +480,12 @@ def _debt_field(code: int, output: str, seconds: float) -> str:
     # or `<sha>~1`, and the column labelled `tree` is what this tree records. A change that edits a
     # rule or a declaration prints one more column before `tree`, which the label absorbs.
     if not header or header[0] != "code" or "tree" not in header:
-        return f"{verdict}(unreadable:no-table)({_spell(seconds)})"
+        return f"unreadable(no-table)({_spell(seconds)})"
     tree_column = header.index("tree") - 1
     ambient = rows.get("ambient-read")
     total = rows.get("total")
     if ambient is None or total is None or len(total) <= tree_column or len(ambient) <= tree_column:
-        return f"{verdict}(unreadable:no-totals)({_spell(seconds)})"
+        return f"unreadable(no-totals)({_spell(seconds)})"
     return (
         f"{verdict}(ambient-read{ambient[0]}->{ambient[tree_column]},"
         f"total{total[0]}->{total[tree_column]})({_spell(seconds)})"
@@ -499,7 +499,7 @@ def _docs_refs_field(code: int, output: str, seconds: float) -> str:
     verdict = "ok" if code == 0 else f"failed({code})"
     found = re.search(r"(\d+) docs checked, (\d+) dangling reference", output)
     if found is None:
-        return f"{verdict}(unreadable:no-summary)({_spell(seconds)})"
+        return f"unreadable(no-summary)({_spell(seconds)})"
     return f"{verdict}({found.group(1)}docs,{found.group(2)}dangling)({_spell(seconds)})"
 
 
@@ -507,7 +507,7 @@ def _docs_okf_field(code: int, output: str, seconds: float) -> str:
     verdict = "ok" if code == 0 else f"failed({code})"
     found = re.search(r"(\d+) files checked, (\d+) error\(s\), (\d+) warning\(s\)", output)
     if found is None:
-        return f"{verdict}(unreadable:no-summary)({_spell(seconds)})"
+        return f"unreadable(no-summary)({_spell(seconds)})"
     return (
         f"{verdict}({found.group(1)}files,{found.group(2)}errors,"
         f"{found.group(3)}warnings)({_spell(seconds)})"
