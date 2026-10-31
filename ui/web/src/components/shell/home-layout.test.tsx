@@ -1,101 +1,92 @@
 import type { CSSProperties, ReactNode } from "react";
-import type * as ResizablePanels from "react-resizable-panels";
 import { renderToString } from "react-dom/server";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { BrowserProvider } from "@/lib/browser/browser-provider";
 import { browserOver } from "@/lib/browser/system-browser";
 import { renderWithBrowser } from "@/test-support/render";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // meiva:note
-// The measured layout engine stays at the library boundary; local wrappers and
-// useDefaultLayout execute with their real prop and persistence contracts.
-// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
-vi.mock("react-resizable-panels", async (importOriginal) => {
-  const actual = await importOriginal<typeof ResizablePanels>();
-  return {
-    ...actual,
-    Group: ({
-      children,
-      defaultLayout,
-      onLayoutChanged,
-      orientation,
-      className,
-      style,
-    }: {
-      children: ReactNode;
-      defaultLayout?: Record<string, number> | undefined;
-      onLayoutChanged?: (
-        layout: Record<string, number>,
-        meta: { isUserInteraction: boolean },
-      ) => void;
-      orientation: string;
-      className?: string;
-      style?: CSSProperties;
-    }) => (
-      <div
-        data-testid="resizable-panel-group"
-        data-slot="resizable-panel-group"
-        data-orientation={orientation}
-        data-default-layout={JSON.stringify(defaultLayout ?? null)}
-        className={className}
-        style={style}
-      >
-        <button
-          data-testid="layout-commit-programmatic"
-          onClick={() =>
-            onLayoutChanged?.(
-              { "panel-sidebar": 30, "panel-main": 70 },
-              { isUserInteraction: false },
-            )
-          }
-        />
-        <button
-          data-testid="layout-commit-drag"
-          onClick={() =>
-            onLayoutChanged?.(
-              { "panel-sidebar": 41, "panel-main": 59 },
-              { isUserInteraction: true },
-            )
-          }
-        />
-        {children}
-      </div>
-    ),
-    Panel: ({
-      children,
-      defaultSize,
-      id,
-      maxSize,
-      minSize,
-    }: {
-      children: ReactNode;
-      defaultSize: string;
-      id: string;
-      maxSize?: string;
-      minSize: string;
-    }) => (
-      <div
-        data-slot="resizable-panel"
-        data-panel-id={id}
-        data-default-size={defaultSize}
-        data-min-size={minSize}
-        data-max-size={maxSize}
-      >
-        {children}
-      </div>
-    ),
-    Separator: ({
-      className,
-      style,
-    }: {
-      className?: string;
-      style?: CSSProperties;
-    }) => <div data-slot="resizable-handle" className={className} style={style} />,
-  };
-});
+// The layout pieces this test hands the frame: plain elements that expose what the frame asked them
+// for and let the test commit a layout by hand. The library measures a layout this document cannot
+// produce, so the frame takes its pieces as a value — nothing replaces the package module.
+const fakeParts = {
+  PanelGroup: ({
+    children,
+    defaultLayout,
+    onLayoutChanged,
+    orientation,
+    className,
+    style,
+  }: {
+    children: ReactNode;
+    defaultLayout?: Record<string, number> | undefined;
+    onLayoutChanged?: (
+      layout: Record<string, number>,
+      meta: { isUserInteraction: boolean },
+    ) => void;
+    orientation: string;
+    className?: string;
+    style?: CSSProperties;
+  }) => (
+    <div
+      data-testid="resizable-panel-group"
+      data-slot="resizable-panel-group"
+      data-orientation={orientation}
+      data-default-layout={JSON.stringify(defaultLayout ?? null)}
+      className={className}
+      style={style}
+    >
+      <button
+        data-testid="layout-commit-programmatic"
+        onClick={() =>
+          onLayoutChanged?.(
+            { "panel-sidebar": 30, "panel-main": 70 },
+            { isUserInteraction: false },
+          )
+        }
+      />
+      <button
+        data-testid="layout-commit-drag"
+        onClick={() =>
+          onLayoutChanged?.(
+            { "panel-sidebar": 41, "panel-main": 59 },
+            { isUserInteraction: true },
+          )
+        }
+      />
+      {children}
+    </div>
+  ),
+  Panel: ({
+    children,
+    defaultSize,
+    id,
+    maxSize,
+    minSize,
+  }: {
+    children: ReactNode;
+    defaultSize: string;
+    id: string;
+    maxSize?: string;
+    minSize: string;
+  }) => (
+    <div
+      data-slot="resizable-panel"
+      data-panel-id={id}
+      data-default-size={defaultSize}
+      data-min-size={minSize}
+      data-max-size={maxSize}
+    >
+      {children}
+    </div>
+  ),
+  Handle: ({ className, style }: { className?: string; style?: CSSProperties }) => (
+    <div data-slot="resizable-handle" className={className} style={style} />
+  ),
+} as unknown as LayoutParts;
 
-import { HomeLayout } from "./home-layout";
+import { HomeLayout, type LayoutParts } from "./home-layout";
 
 function installLocalStoragePolyfill(): void {
   const store = new Map<string, string>();
@@ -129,6 +120,7 @@ afterEach(() => {
 
 function panes() {
   return {
+    parts: fakeParts,
     sidebar: <aside data-testid="agent-tree" />,
     main: <section data-testid="main-timeline" />,
     inspector: <aside data-testid="inspector-panel" />,
@@ -355,8 +347,10 @@ describe("HomeLayout frame contract", () => {
 
     const groups = screen.getAllByTestId("resizable-panel-group");
     for (const group of groups) {
-      expect(group.className).toContain("h-full");
-      expect(group.className).toContain("w-full");
+      // meiva:note
+      // The frame hands its group its own layout classes; `h-full w-full` belongs to the wrapper
+      // in `components/ui/resizable.tsx`, which this test no longer sits behind.
+      expect(group.className).toContain("flex-1");
       clickDirect(group, "layout-commit-programmatic");
     }
     expect(localStorage.length).toBe(0);
