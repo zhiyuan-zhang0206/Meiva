@@ -9,7 +9,7 @@ import { AgentRow } from "./agent-row";
 import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
-import { renderWithApi as rtlRender } from "@/test-support/render";
+import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {

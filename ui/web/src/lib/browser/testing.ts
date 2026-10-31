@@ -32,6 +32,9 @@ export interface FakeActions {
   readonly scrolled: { readonly target: Element; readonly block: ScrollLogicalPosition }[];
   readonly copied: string[];
   readonly beaconed: { readonly url: string; readonly body: string }[];
+  // meiva:note
+  // Every message the component put in front of the reader, in order.
+  readonly confirmed: string[];
   traversals: number;
   backs: number;
 }
@@ -70,6 +73,9 @@ export interface FakeBrowser extends Browser {
   refuseStorage(refused: boolean): void;
   failStorage(area: "local" | "session", operations: "write" | "remove" | "both"): void;
   clipboardAccepts(accepts: boolean): void;
+  // meiva:note
+  // What the reader answers the next `dialogs.confirm`; `true` unless a case says otherwise.
+  answerConfirm(accepts: boolean): void;
   beaconAccepts(accepts: boolean): void;
   readonly localValues: FakeStore;
   readonly sessionValues: FakeStore;
@@ -149,6 +155,7 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
   let historyState: unknown = null;
   let refused = false;
   let acceptsClipboard = true;
+  let acceptsConfirm = true;
   let acceptsBeacon = true;
   const localValues =
     options.local === undefined ? liveStorage("localStorage") : memoryBacking(options.local);
@@ -192,6 +199,7 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     scrolled: [],
     copied: [],
     beaconed: [],
+    confirmed: [],
     traversals: 0,
     backs: 0,
   };
@@ -290,6 +298,12 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
         if (!acceptsClipboard) return Promise.resolve(false);
         actions.copied.push(text);
         return Promise.resolve(true);
+      },
+    },
+    dialogs: {
+      confirm(message) {
+        actions.confirmed.push(message);
+        return acceptsConfirm;
       },
     },
     beacon: {
@@ -416,6 +430,9 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     },
     clipboardAccepts(value) {
       acceptsClipboard = value;
+    },
+    answerConfirm(value) {
+      acceptsConfirm = value;
     },
     beaconAccepts(value) {
       acceptsBeacon = value;

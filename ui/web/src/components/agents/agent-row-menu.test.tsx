@@ -5,7 +5,8 @@ import { beforeEach, afterEach, beforeAll, describe, expect, it, vi } from "vite
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 
 import { AgentRow } from "./agent-row";
-import { renderWithApi as rtlRender } from "@/test-support/render";
+import { fakeBrowser, type FakeBrowser } from "@/lib/browser/testing";
+import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -29,15 +30,20 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => undefined;
 });
 
-function render(ui: React.ReactElement) {
+// meiva:note
+// The row asks the page before it ends a session or kills an agent; the answer is a value here
+// (`answerConfirm`), and `page.actions.confirmed` is what it asked, in order.
+function render(ui: React.ReactElement, page: FakeBrowser = fakeBrowser()) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return rtlRender(
+  const result = rtlRender(
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
     </WallClockProvider>,
+    { browser: page },
   );
+  return { ...result, page };
 }
 
 function renderWithSettings(ui: React.ReactElement, settings: Record<string, unknown>) {
@@ -183,27 +189,33 @@ describe("AgentRow right-click context menu", () => {
 
   it("shows the end-session item only for an open session and sends its rendered ID after confirmation", () => {
     const onForceExpire = vi.fn();
-    const confirmMock = vi.fn().mockReturnValue(true);
-    vi.stubGlobal("confirm", confirmMock);
+    const page = fakeBrowser();
+    page.answerConfirm(true);
     const { container } = render(
       <AgentRow {...baseProps} onForceExpire={onForceExpire}
         agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
+      page,
     );
     openMenu(container.querySelector("li")!);
     fireEvent.click(screen.getByText("End external takeover session"));
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("agent resumes its own work"));
+    expect(page.actions.confirmed).toEqual([
+      expect.stringContaining("agent resumes its own work"),
+    ]);
     expect(onForceExpire).toHaveBeenCalledExactlyOnceWith(7);
   });
 
   it("does not end the session when confirmation is dismissed", () => {
     const onForceExpire = vi.fn();
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(false));
+    const page = fakeBrowser();
+    page.answerConfirm(false);
     const { container } = render(
       <AgentRow {...baseProps} onForceExpire={onForceExpire}
         agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
+      page,
     );
     openMenu(container.querySelector("li")!);
     fireEvent.click(screen.getByText("End external takeover session"));
+    expect(page.actions.confirmed).toHaveLength(1);
     expect(onForceExpire).not.toHaveBeenCalled();
   });
 
@@ -221,8 +233,8 @@ describe("AgentRow right-click context menu", () => {
 
   it("Kill calls onForceKill only after the confirm is accepted", () => {
     const onForceKill = vi.fn();
-    const confirmMock = vi.fn().mockReturnValue(true);
-    vi.stubGlobal("confirm", confirmMock);
+    const page = fakeBrowser();
+    page.answerConfirm(true);
     const { container } = render(
       <AgentRow
         {...baseProps}
@@ -231,17 +243,18 @@ describe("AgentRow right-click context menu", () => {
         depth={0}
         ancestorsIsLast={[]}
       />,
+      page,
     );
     openMenu(container.querySelector("li")!);
     fireEvent.click(screen.getByText("Kill"));
-    expect(confirmMock).toHaveBeenCalledOnce();
+    expect(page.actions.confirmed).toHaveLength(1);
     expect(onForceKill).toHaveBeenCalledOnce();
   });
 
   it("Kill does nothing when the confirm is dismissed", () => {
     const onForceKill = vi.fn();
-    const confirmMock = vi.fn().mockReturnValue(false);
-    vi.stubGlobal("confirm", confirmMock);
+    const page = fakeBrowser();
+    page.answerConfirm(false);
     const { container } = render(
       <AgentRow
         {...baseProps}
@@ -250,10 +263,11 @@ describe("AgentRow right-click context menu", () => {
         depth={0}
         ancestorsIsLast={[]}
       />,
+      page,
     );
     openMenu(container.querySelector("li")!);
     fireEvent.click(screen.getByText("Kill"));
-    expect(confirmMock).toHaveBeenCalledOnce();
+    expect(page.actions.confirmed).toHaveLength(1);
     expect(onForceKill).not.toHaveBeenCalled();
   });
 

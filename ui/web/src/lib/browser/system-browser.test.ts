@@ -11,6 +11,7 @@ import {
   beaconOver,
   browserOver,
   clipboardOver,
+  dialogsOver,
   idleOver,
   mediaOver,
   navigationOver,
@@ -112,6 +113,7 @@ function pageOf(overrides: Partial<LivePage> = {}): LivePage {
     visualViewport: viewportOf(900),
     navigator: navigatorOf(),
     document: documentOf(),
+    confirm: () => true,
     setTimeout: () => 0,
     clearTimeout: () => undefined,
   };
@@ -518,5 +520,26 @@ describe("idleOver", () => {
     );
     stop();
     expect(ran).toBe(0);
+  });
+});
+
+describe("dialogsOver", () => {
+  it("asks the page and answers what the reader chose", () => {
+    const asked: string[] = [];
+    const dialogs = dialogsOver(
+      pageOf({
+        confirm: (message) => {
+          asked.push(message);
+          return false;
+        },
+      }),
+    );
+
+    expect(dialogs.confirm("End the session?")).toBe(false);
+    expect(asked).toEqual(["End the session?"]);
+  });
+
+  it("refuses to answer for a frame with no page, rather than proceeding", () => {
+    expect(() => dialogsOver(null).confirm("End the session?")).toThrow(/no one to confirm/);
   });
 });
