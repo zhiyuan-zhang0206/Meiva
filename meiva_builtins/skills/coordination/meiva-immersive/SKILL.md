@@ -82,6 +82,6 @@ an active session, and do not leave a session nominally open once the human
 is gone.
 
 When the session should leave the human able to judge the subject themselves,
-the depth target and the shape of each segment are in
-[Understanding Loop](../../practice/meiva-workflow/align/references/understanding-loop.md);
-pacing stays with this skill.
+the depth target and the shape of each segment are in the `meiva-workflow`
+skill's `align/references/understanding-loop.md`, loaded with
+`meiva.help(meiva.skills.meiva_workflow)`; pacing stays with this skill.

@@ -7,7 +7,7 @@ description: "Defines a verifiable outcome and stopping conditions. Use when the
 
 Turn intent into an outcome a normal peer can pursue and verify. Use this method
 only for missing goal definition; a clear user requirement can go directly to
-execution or [goal pursuit](../../../coordination/meiva-goal/SKILL.md).
+execution or goal pursuit (`meiva.help(meiva.skills.meiva_goal)`).
 
 ## Check the Goal
 
