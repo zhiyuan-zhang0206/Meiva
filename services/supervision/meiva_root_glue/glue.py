@@ -33,7 +33,7 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import Platform
 from base.telemetry import build_pipeline
-from base.telemetry.lgtm_local import backend_urls
+from base.telemetry.lgtm_local import LgtmSettings, backend_urls
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, LeaseProbe
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
@@ -180,7 +180,7 @@ def probe_config_from_settings(*, home: Path) -> ProbeConfig:
         browser_profile=profile_dir(home),
         browser_reach_timeout_s=float(get_field("browser_reach_timeout_s")),
         browser_reach_probe_interval_s=float(get_field("browser_reach_probe_interval_s")),
-        loki_url=backend_urls()["loki"],
+        loki_url=backend_urls(LgtmSettings.from_fields(get_field))["loki"],
         environment=MappingProxyType(inherited_process_env()),
     )
 

@@ -10,12 +10,13 @@ from pathlib import Path
 
 import pytest
 
+from base import config
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.machine.tests.identity import set_machine_identity as set_machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from base.paths import otel_collector_binary, otel_collector_config
-from base.telemetry.lgtm_local import BACKENDS, service_argv
+from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, service_argv
 from services.desktop.browser.profile import profile_dir
 from services.supervision.healthchecks.gate import probe as gate_probe
 from services.supervision.roster import composition, spec
@@ -88,7 +89,9 @@ def test_the_lgtm_backends_run_from_the_home_the_roster_is_built_for(tmp_path: P
     other.mkdir()
 
     for name in BACKENDS:
-        assert _service(other, name).cmd == shlex.join(service_argv(other, name))
+        assert _service(other, name).cmd == shlex.join(
+            service_argv(other, name, LgtmSettings.from_fields(config.get_field))
+        )
 
 
 def test_the_protocol_probes_are_bound_to_the_home_the_roster_is_built_for(tmp_path: Path) -> None:

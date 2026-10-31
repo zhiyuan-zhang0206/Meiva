@@ -24,7 +24,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import get_field, settings
 from base.native_process.ownership import OwnedProcess
 from base.paths import permissions_helper_socket
-from base.telemetry.lgtm_local import backend_urls
+from base.telemetry.lgtm_local import LgtmSettings, backend_urls
 from services.desktop.browser.profile import profile_dir
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts, helper_job_label
 from services.supervision.meiva_root_glue.glue import probe_config_from_settings
@@ -84,7 +84,7 @@ def test_the_root_reads_each_diagnostic_setting_by_its_registered_name(tmp_path:
     assert config.browser_reach_probe_interval_s == float(
         get_field("browser_reach_probe_interval_s")
     )
-    assert config.loki_url == backend_urls()["loki"]
+    assert config.loki_url == backend_urls(LgtmSettings.from_fields(get_field))["loki"]
 
 
 def test_the_probe_configuration_keeps_credentials_out_of_its_repr() -> None:

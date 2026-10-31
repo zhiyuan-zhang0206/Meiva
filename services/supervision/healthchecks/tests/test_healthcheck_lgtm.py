@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base import config
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineFacts, MachineRoleInvalid
@@ -15,7 +16,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.faults import InvalidRoleIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths.tests.homes import unit_home as unit_home
-from base.telemetry.lgtm_local import backend_urls
+from base.telemetry.lgtm_local import LgtmSettings, backend_urls
 from services.supervision.healthchecks import lgtm as hc
 from services.supervision.healthchecks.tests.loki_stub import BackendStub
 
@@ -23,7 +24,7 @@ from services.supervision.healthchecks.tests.loki_stub import BackendStub
 def test_the_default_backend_urls_dial_the_historical_loopback_ports() -> None:
     # meiva:note
     # `lgtm_grafana_listen_host` defaults to the wildcard; the probe must dial loopback.
-    assert backend_urls() == {
+    assert backend_urls(LgtmSettings.from_fields(config.get_field)) == {
         "loki": "http://127.0.0.1:3100",
         "prometheus": "http://127.0.0.1:9090",
         "grafana": "http://127.0.0.1:3003",

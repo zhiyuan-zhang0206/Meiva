@@ -12,6 +12,7 @@ import yaml
 from base import config
 from base.cluster.machine import MachineIdentityReader
 from base.telemetry import EventPipeline
+from base.telemetry.lgtm_local import LgtmSettings as LocalLgtmSettings
 from base.telemetry.lgtm_local import service_argv, storage_dir
 from cli.commands.observability import lgtm_native
 from cli.commands.observability.inputs import LgtmSettings
@@ -46,7 +47,7 @@ def _render_configs(
         native_dir,
         home,
         settings=settings,
-        storage_dir=storage_dir(home),
+        storage_dir=storage_dir(home, LocalLgtmSettings.from_fields(config.get_field)),
         direct_db_url=_DIRECT_DB_URL,
         dashboard=RenderedDashboard(_STUB_RENDER, ()),
         producer=producer,
@@ -54,16 +55,17 @@ def _render_configs(
     )
 
 
+# meiva:note
+# The native Loki and Prometheus listeners are rendered from
+# `LocalLgtmSettings.from_fields(config.get_field).lgtm_listen_host`; the loopback default reproduces the
+# pre-parameterization output byte for byte (the contract lock for the MEIVA_LGTM_LISTEN_HOST
+# knob).
 def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_defaults(
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
-    """The native Loki and Prometheus listeners are rendered from
-    settings.observability.lgtm_listen_host; the loopback default reproduces the
-    pre-parameterization output byte for byte (the contract lock for the
-    MEIVA_LGTM_LISTEN_HOST knob)."""
     native = Path(__file__).resolve().parents[3] / "deploy/lgtm/native"
     loki = (native / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: __LGTM_LISTEN_HOST__" in loki
@@ -96,7 +98,9 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     prior_host = config.get_field("lgtm_listen_host")
     try:
         config.set_field("lgtm_listen_host", "127.0.0.1")
-        prometheus_argv = service_argv(home, "prometheus")
+        prometheus_argv = service_argv(
+            home, "prometheus", LocalLgtmSettings.from_fields(config.get_field)
+        )
         assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
 
         # A non-loopback setting flows through to the rendered listeners.
@@ -112,7 +116,9 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
         assert "http_listen_address: 10.0.0.5" in rendered_loki
         assert "grpc_listen_address: 10.0.0.5" in rendered_loki
         config.set_field("lgtm_listen_host", "10.0.0.5")
-        prometheus_argv = service_argv(home, "prometheus")
+        prometheus_argv = service_argv(
+            home, "prometheus", LocalLgtmSettings.from_fields(config.get_field)
+        )
         assert "--web.listen-address=10.0.0.5:9090" in prometheus_argv
     finally:
         config.set_field("lgtm_listen_host", prior_host)

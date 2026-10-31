@@ -2,10 +2,35 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from base.config import settings
+
+# meiva:note
+# The observability fields this module reads: the two listen hosts, the three loopback ports the
+# probes dial, and the retention directory. A composition root reads them once (`from_fields`)
+# and hands the value down, so nothing here names the process settings.
+@dataclass(frozen=True)
+class LgtmSettings:
+    loki_port: int
+    prometheus_port: int
+    grafana_port: int
+    listen_host: str
+    grafana_listen_host: str
+    storage_dir_setting: str
+
+    @classmethod
+    def from_fields(cls, read_field: Callable[[str], Any]) -> LgtmSettings:
+        return cls(
+            loki_port=int(read_field("lgtm_loki_port")),
+            prometheus_port=int(read_field("lgtm_prometheus_port")),
+            grafana_port=int(read_field("lgtm_grafana_port")),
+            listen_host=str(read_field("lgtm_listen_host")),
+            grafana_listen_host=str(read_field("lgtm_grafana_listen_host")),
+            storage_dir_setting=str(read_field("lgtm_storage_dir")),
+        )
 
 
 @dataclass(frozen=True)
@@ -75,30 +100,29 @@ def binary_path(home: Path, name: str) -> Path:
     return (home / "lgtm/native" / relative).resolve()
 
 
-def backend_urls() -> dict[str, str]:
+def backend_urls(observability: LgtmSettings) -> dict[str, str]:
     """Probe the configured local binds; wildcard listeners are dialed on loopback."""
-    obs = settings.observability
     ports = {
-        "loki": obs.lgtm_loki_port,
-        "prometheus": obs.lgtm_prometheus_port,
-        "grafana": obs.lgtm_grafana_port,
+        "loki": observability.loki_port,
+        "prometheus": observability.prometheus_port,
+        "grafana": observability.grafana_port,
     }
     urls: dict[str, str] = {}
     for name, port in ports.items():
-        host = obs.lgtm_grafana_listen_host if name == "grafana" else obs.lgtm_listen_host
+        host = observability.grafana_listen_host if name == "grafana" else observability.listen_host
         host = host.removeprefix("[").removesuffix("]")
         host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)  # noqa: S104 — wildcard classification, never a bind
         urls[name] = f"http://{'[' + host + ']' if ':' in host else host}:{port}"
     return urls
 
 
-def storage_dir(home: Path) -> Path:
+def storage_dir(home: Path, observability: LgtmSettings) -> Path:
     """The explicit local observation data volume, retained across service stops."""
-    configured = settings.observability.lgtm_storage_dir.strip()
+    configured = observability.storage_dir_setting.strip()
     return Path(configured).expanduser().resolve() if configured else home / "lgtm/native/data"
 
 
-def service_argv(home: Path, name: str) -> tuple[str, ...]:
+def service_argv(home: Path, name: str, observability: LgtmSettings) -> tuple[str, ...]:
     """One native invocation, launched only as an meiva-root unit."""
     native = home.resolve() / "lgtm/native"
     spec = NATIVE_SERVICES[name]
@@ -106,10 +130,10 @@ def service_argv(home: Path, name: str) -> tuple[str, ...]:
         return (str(native / "grafana/run.sh"),)
     substitutions = {
         "config": str(native / "config"),
-        "data": str(storage_dir(home)),
+        "data": str(storage_dir(home, observability)),
         "homepath": str(native / "grafana-home"),
-        "lgtm_listen_host": settings.observability.lgtm_listen_host,
-        "lgtm_prometheus_port": str(settings.observability.lgtm_prometheus_port),
+        "lgtm_listen_host": observability.listen_host,
+        "lgtm_prometheus_port": str(observability.prometheus_port),
     }
     return (str(binary_path(home, name)), *(s.format(**substitutions) for s in spec.arguments))
 
