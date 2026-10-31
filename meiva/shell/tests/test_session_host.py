@@ -21,11 +21,27 @@ def test_the_process_environment_is_the_mapping_the_bound_context_carries() -> N
         process_context.unbind_context()
 
 
+# meiva:note
+# A partial context is legal; starting a child from one is not. The failure message says what the
+# refusal protects, so a reader who breaks it learns the rule from the red run (#5885).
 def test_a_context_without_an_environment_is_refused_at_first_use() -> None:
     process_context.bind_context(MeivaContext())
     try:
-        with pytest.raises(RuntimeError, match="no process environment"):
+        try:
             process_environ()
+        except RuntimeError as refusal:
+            assert "carries no process environment" in str(refusal), (
+                "the refusal must name the value that is missing: an operator reading a red run "
+                f"has to know what to fill in, and this one said {str(refusal)!r}"
+            )
+        else:
+            pytest.fail(
+                "a context that carries no environment answered one anyway — this is the ambient "
+                "read coming back: a shell session or a watcher started here would inherit the "
+                "environment of whatever process ran the test (its PATH, its MEIVA_HOME, its "
+                "credentials) instead of the mapping its root read, which is exactly what the "
+                "field exists to prevent"
+            )
     finally:
         process_context.unbind_context()
 
