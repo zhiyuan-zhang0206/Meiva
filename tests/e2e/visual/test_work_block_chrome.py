@@ -1,11 +1,11 @@
 # meiva:note
-# The chrome band under a work block's last child, measured in a real engine: a
-# row pads its bottom by the 12px gap between blocks and hands that height back
-# with a negative margin, so the work block's clipping collapse wrapper must
-# reserve the same 12px — at 8px the clip line fell 4px inside the band and
-# shaved the bottom of the last block's stamp (user 2026-10-29). jsdom has no
-# layout engine, so the guard is a rect comparison here: a sub-pixel shortfall is
-# not a defect, a whole clipped pixel is.
+# The chrome band under a primary message row, plus the absence of below-card
+# timestamp/copy chrome inside a work block's children, measured in a real
+# engine: a primary `.timeline-item` pads its bottom by 1rem (16px) and hands
+# that height back with a negative margin, so its hover band sits inside every
+# clipping ancestor (`overflow` other than visible, or `content-visibility`
+# paint containment), whereas secondary work items inside `[data-turn-id]` omit
+# below-card timestamps and copy buttons.
 # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
 
 from __future__ import annotations
@@ -37,9 +37,10 @@ def frontend_target(request: pytest.FixtureRequest) -> str:
 
 
 # meiva:note
-# Read the last child's stamp and every ancestor that clips it: `overflow` other
-# than visible, or `content-visibility` — the row's own paint containment. Both
-# are boundaries the band must stay inside.
+# Read the primary message row's stamp and every ancestor that clips it (`overflow`
+# other than visible, or `content-visibility` paint containment), and verify that
+# the expanded work block's child rows mount neither below-card timestamps nor
+# copy controls.
 # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
 MEASURE_JS = """
 () => {
@@ -49,10 +50,12 @@ MEASURE_JS = """
   const turn = turns.reduce((best, node) => (byMembers(node) > byMembers(best) ? node : best), turns[0]);
   if (!turn) return { error: 'no work block rendered' };
   const rows = [...turn.querySelectorAll('.timeline-item')];
-  const last = rows[rows.length - 1];
-  if (!last) return { error: 'work block has no child row' };
-  const band = last.querySelector('[data-testid="card-chrome"]');
-  if (!band) return { error: 'last child mounted no chrome band' };
+  if (!rows.length) return { error: 'work block has no child row' };
+  const turnChromeCount = turn.querySelectorAll('[data-testid="card-chrome"]').length;
+  const humanRow = document.querySelector('.timeline-item[data-item-id="1.1"]');
+  if (!humanRow) return { error: 'no primary human message row rendered' };
+  const band = humanRow.querySelector('[data-testid="card-chrome"]');
+  if (!band) return { error: 'primary human row mounted no chrome band' };
   const stamp = band.querySelector('span');
   if (!stamp) return { error: 'chrome band holds no timestamp' };
   const s = stamp.getBoundingClientRect();
@@ -75,14 +78,15 @@ MEASURE_JS = """
   }
   return {
     rowCount: rows.length,
+    turnChromeCount,
     stamp: { top: s.top, bottom: s.bottom, left: s.left, right: s.right },
     clips,
     copyLabels: [...turn.querySelectorAll('button[aria-label]')].map((b) =>
       b.getAttribute('aria-label'),
     ),
     humanCopyLabel: (() => {
-      const human = document.querySelector('[data-item-id="1.1"] [data-testid="card-chrome"] button');
-      return human ? human.getAttribute('aria-label') : null;
+      const btn = band.querySelector('button');
+      return btn ? btn.getAttribute('aria-label') : null;
     })(),
   };
 }
@@ -107,7 +111,7 @@ def _open_work_block(browser: Browser, base_url: str, width: int = 1280):
     page.wait_for_selector("[data-turn-id]", timeout=15_000)
     page.wait_for_timeout(1500)
     page.evaluate(
-        "() => document.querySelector('[data-turn-id]').scrollIntoView({ block: 'center' })"
+        "() => document.querySelector('.timeline-item[data-item-id=\"1.1\"]').scrollIntoView({ block: 'center' })"
     )
     page.wait_for_timeout(300)
     return ctx, page
@@ -121,13 +125,14 @@ def test_last_block_timestamp_is_not_clipped(
         measured = page.evaluate(MEASURE_JS)
         assert "error" not in measured, measured
         assert measured["rowCount"] >= 4, measured
+        assert measured["turnChromeCount"] == 0, measured
         stamp = measured["stamp"]
         clips = measured["clips"]
-        assert clips, "the band must sit inside a clipping ancestor (the collapse wrapper)"
+        assert clips, "the band must sit inside a clipping ancestor (row containment + viewport)"
         for clip in clips:
             assert clip["top"] <= stamp["top"] + TOLERANCE_PX, (clip, stamp)
             assert stamp["bottom"] <= clip["bottom"] + TOLERANCE_PX, (
-                f"the last block's timestamp is clipped by {clip['name']}: "
+                f"the primary message timestamp is clipped by {clip['name']}: "
                 f"stamp bottom {stamp['bottom']:.2f} vs clip bottom {clip['bottom']:.2f}"
             )
     finally:

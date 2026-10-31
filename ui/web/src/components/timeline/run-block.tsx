@@ -1,45 +1,45 @@
 "use client";
 
-// TurnBlock — the aggregate collapse for a turn of adjacent secondary items. It is
-// a presentational shell around the same clickable summary-header pattern the
-// cards use (HEADER_CLS): collapsed it shows "worked for X" plus the model
-// work rounds and non-work counts ("5 turns · 2 agent messages") and, when the
-// turn has SDK calls, one wrapping line of call names × counts ("files.read ×
-// 3 · shell.run × 2") — enough
-// for "did the agent think a lot, run a lot of commands, or mostly talk to other
-// agents" at a glance without expanding. Expanded it reveals its children — the
-// individual TimelineRows, each still its own collapsible card. The parent
-// (TimelineView) owns the expanded state and builds the children only when
-// expanded, so a collapsed turn never mounts its inner rows (and never re-parses
-// their markdown / code on a streaming chunk).
-//
-// Sticky header behavior (shared with the message cards — see card.tsx
-// CardHeader): when an expanded block's top scrolls past the viewport top
-// (accounting for the floating HeaderBar offset, BAR_HEIGHT_PX), its header
-// sticks at top-11 with the shared frosted-glass pinned surface. The full detail rows
-// (thinking/code/output) continue scrolling naturally underneath the stuck
-// header. A top-level message card (CardHeader with stickyHeader) pins on the
-// same line; findClosestStuckHeaderId resolves which of the two is stuck, and
-// only one level-1 header can be pinned at a time (sibling blocks never
-// overlap). The block's own child cards pin one level deeper: each expanded
-// child header sticks just below this block's header — its nested line is
-// top-11 + --turn-header-h, the header height measured here by a
-// ResizeObserver — and the finder reports the closest pinned child alongside
-// the level-1 id in the same pass. When collapsed while stuck, the content
-// collapses in place and the viewport scroll position is preserved (no jump
-// back to block top).
+// meiva:note
+// TurnBlock renders secondary agent items in two modes: a historical collapsed
+// single-line inline disclosure (whose header pins at top-11 below HeaderBar
+// while expanded, with child CardHeaders pinning one level deeper via
+// --turn-header-h), and a fixed-height (h-56) Live Activity Window while
+// liveWindow is true on the active trailing turn, using the shared auto-hiding
+// ScrollArea scrollbar and feeding its detached scroll state into the outer
+// timeline's ScrollToBottomButton.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 
-import { ChevronDown, ChevronRight, Layers } from "lucide-react";
-import { memo, type ReactNode, useLayoutEffect, useRef } from "react";
+import { ChevronRight, Layers } from "lucide-react";
+import { useTranslations } from "next-intl";
+import {
+  memo,
+  type ReactNode,
+  type UIEvent as ReactUIEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 
 import { STUCK_HEADER_CLS, UNSTUCK_HEADER_CLS } from "./card";
-import { CallBadge, HEADER_CLS, STICKY_HEADER_CLS } from "./view/card-summary";
+import { CallBadge, STICKY_HEADER_CLS } from "./view/card-summary";
 import { useNow } from "./model/reasoning-clock";
 import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
-import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_CLIP } from "@/lib/layout/layout";
+import {
+  BAR_HEIGHT_PX,
+  FLEX,
+  FLEX_1,
+  FLEX_COL,
+  MIN_H_0,
+  MIN_W_0,
+  OVERFLOW_CLIP,
+  OVERFLOW_HIDDEN,
+} from "@/lib/layout/layout";
 
 /**
  * Identify which pinned headers are currently stuck at the top of the
@@ -151,6 +151,9 @@ interface TurnBlockProps {
   onToggle: (id: string, currentlyExpanded: boolean) => void;
   // Whether the agent is mid-turn — drives the live "working for X" / "worked for X" clock.
   turnActive?: boolean;
+  liveWindow?: boolean;
+  onActivityAtBottomChange?: (atBottom: boolean) => void;
+  scrollToBottomSeq?: number;
   // Whether this turn block is currently actively stuck at the top of the viewport.
   isStuck?: boolean;
   // The inner rows — passed only when expanded (null when collapsed).
@@ -174,6 +177,9 @@ function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolea
     prev.expanded === next.expanded &&
     prev.onToggle === next.onToggle &&
     prev.turnActive === next.turnActive &&
+    prev.liveWindow === next.liveWindow &&
+    prev.onActivityAtBottomChange === next.onActivityAtBottomChange &&
+    prev.scrollToBottomSeq === next.scrollToBottomSeq &&
     prev.isStuck === next.isStuck &&
     prev.children === next.children &&
     prev.timelineSource === next.timelineSource &&
@@ -190,11 +196,15 @@ export const TurnBlock = memo(function TurnBlock({
   expanded,
   onToggle,
   turnActive,
+  liveWindow = false,
+  onActivityAtBottomChange,
+  scrollToBottomSeq = 0,
   isStuck,
   children,
   timelineSource = "canonical",
   displayRank,
 }: TurnBlockProps) {
+  const t = useTranslations("timeline");
   // Live clock: while a block of this turn is streaming, re-render on the
   // shared live-clock tick so the displayed elapsed time advances in real
   // time. The streaming block is the ONLY thing that moves the display —
@@ -207,38 +217,103 @@ export const TurnBlock = memo(function TurnBlock({
       : 0;
   const liveNow = useNow(liveBlockStartedAt > 0);
 
+  // meiva:note
   // Nested pin line for this block's child headers (task #3215): a child
   // header sticks just below this block's header, so --turn-header-h must
-  // track its real height — the summary / timing / SDK-call lines wrap and
-  // stream, changing it at runtime. Measured only while expanded (a collapsed
-  // block mounts no children); the variable is inherited by the child rows,
-  // whose sticky class reads it (STICKY_CHILD_HEADER_CLS, card.tsx).
+  // track its real border-box height synchronously before first paint and
+  // across runtime wraps in historical expanded mode (the Live Activity Window
+  // scrolls inside its own fixed-height frame).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   const rootRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
-    if (!expanded) return;
+    if (!expanded || liveWindow) return;
     const root = rootRef.current;
     const header = headerRef.current;
     if (!root || !header || typeof ResizeObserver === "undefined") return;
     const measure = () =>
       root.style.setProperty("--turn-header-h", `${header.getBoundingClientRect().height}px`);
-    // Sync set before first paint (no 1-frame flash at the header line), then
-    // keep it live across wraps / streaming / expand-time reflows.
     measure();
     const observer = new ResizeObserver(measure);
-    // border-box: the pin offset consumes the header's full occupied height
-    // (the child line rides the header's bottom), so observe the border box —
-    // a content-box observer would miss border-only growth (task #3215 review
-    // nit; the stuck-state border that motivated it is gone since #3536).
     observer.observe(header, { box: "border-box" });
     return () => observer.disconnect();
-  }, [expanded]);
+  }, [expanded, liveWindow]);
+
+  // meiva:note
+  // Inner sticky-bottom auto-follow for the fixed-height Live Activity Window;
+  // its detached state feeds the outer timeline's single ScrollToBottomButton.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+  const activityScrollRef = useRef<HTMLDivElement | null>(null);
+  const activityContentRef = useRef<HTMLDivElement | null>(null);
+  const innerStickyRef = useRef(true);
+  const lastInnerScrollTopRef = useRef(0);
+  const seenScrollSeqRef = useRef(scrollToBottomSeq);
+
+  const handleInnerScroll = useCallback(
+    (event: ReactUIEvent<HTMLDivElement>) => {
+      const el = activityScrollRef.current;
+      if (!el) return;
+      if (event.target !== el && event.target !== event.currentTarget) return;
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const prevTop = lastInnerScrollTopRef.current;
+      lastInnerScrollTopRef.current = el.scrollTop;
+
+      if (dist <= 16) {
+        if (!innerStickyRef.current) innerStickyRef.current = true;
+        onActivityAtBottomChange?.(true);
+      } else if (el.scrollTop < prevTop - 1) {
+        innerStickyRef.current = false;
+        onActivityAtBottomChange?.(false);
+      }
+    },
+    [onActivityAtBottomChange],
+  );
+
+  useEffect(() => {
+    if (!liveWindow || !expanded) {
+      innerStickyRef.current = true;
+      onActivityAtBottomChange?.(true);
+      return;
+    }
+    return () => {
+      onActivityAtBottomChange?.(true);
+    };
+  }, [liveWindow, expanded, onActivityAtBottomChange]);
+
+  useEffect(() => {
+    if (seenScrollSeqRef.current === scrollToBottomSeq) return;
+    seenScrollSeqRef.current = scrollToBottomSeq;
+    if (!liveWindow || !expanded) return;
+    const el = activityScrollRef.current;
+    if (!el) return;
+    innerStickyRef.current = true;
+    onActivityAtBottomChange?.(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [scrollToBottomSeq, liveWindow, expanded, onActivityAtBottomChange]);
+
+  useLayoutEffect(() => {
+    if (!liveWindow || !expanded) return;
+    const scroller = activityScrollRef.current;
+    const content = activityContentRef.current;
+    if (!scroller) return;
+    const syncToBottom = () => {
+      if (!innerStickyRef.current) return;
+      scroller.scrollTop = scroller.scrollHeight;
+      lastInnerScrollTopRef.current = scroller.scrollTop;
+    };
+    syncToBottom();
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(syncToBottom);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [liveWindow, expanded, children]);
 
   // How long the block that is streaming right now has been running. Zero when
   // the turn is idle or its last item is already committed. One value, read by
   // both the header clock and the sub-block timing line below, so the two
   // cannot disagree about the block in flight.
   const liveDelta = liveBlockStartedAt > 0 ? Math.max(liveNow - liveBlockStartedAt, 0) : 0;
+  const totalWorkedMs = summary.workedMs + liveDelta;
 
   // The header timer, two states over ONE basis — the sum of the turn's block
   // durations. A turn is a maximal run of secondary items, so it can span a
@@ -255,12 +330,14 @@ export const TurnBlock = memo(function TurnBlock({
   //   notes are instantaneous inserts, not work).
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
   const workedLabel = turnActive
-    ? `Working for ${formatDuration(summary.workedMs + liveDelta)}`
+    ? t("workingFor", { duration: formatDuration(totalWorkedMs) })
     : hasWork && summary.workedMs > 0
-      ? `Worked for ${formatDuration(summary.workedMs)}`
+      ? t("workedFor", { duration: formatDuration(summary.workedMs) })
       : null;
 
-  const actionSummary = formatTurnSummary(summary);
+  const actionSummary = formatTurnSummary(summary, (key, values) =>
+    t(key as Parameters<typeof t>[0], values),
+  );
 
   // Build the header line: "Worked for Xs · 5 turns · 2 agent messages".
   // actionSummary covers every member kind except the deliberately-unlabeled
@@ -270,6 +347,91 @@ export const TurnBlock = memo(function TurnBlock({
   if (actionSummary) headerParts.push(actionSummary);
 
   const hasSdkCalls = summary.sdkCalls.length > 0;
+
+  if (liveWindow) {
+    return (
+      <div
+        ref={rootRef}
+        data-item-id={id}
+        data-timeline-source={timelineSource}
+        data-display-rank={displayRank}
+        data-turn-id={id}
+        data-turn-expanded="false"
+        data-turn-member-ids={memberIds.join(" ")}
+        data-live-activity-window="true"
+        aria-live="off"
+        className={cn(
+          "rounded-xl border border-border/80 bg-card/90 shadow-xs",
+          "dark:bg-[#252421] dark:border-white/[0.08]",
+          OVERFLOW_HIDDEN,
+        )}
+      >
+        <button
+          ref={headerRef}
+          type="button"
+          onClick={() => onToggle(id, expanded)}
+          aria-expanded={expanded}
+          data-testid="turn-toggle"
+          data-expanded={expanded}
+          data-stuck="false"
+          className={cn(
+            "w-full h-9 px-3.5 items-center justify-between gap-3 text-left select-none transition-colors",
+            "bg-muted/35 hover:bg-muted/55 dark:bg-white/[0.025] dark:hover:bg-white/[0.045]",
+            expanded && "border-b border-border/55 dark:border-white/[0.06]",
+            FLEX,
+          )}
+        >
+          <span className={cn("items-center gap-2", FLEX, MIN_W_0, FLEX_1)}>
+            <Layers className="size-3.5 shrink-0 text-muted-foreground/75" />
+            <span className="truncate text-[13px] font-medium text-foreground/88">
+              {t("working")}
+            </span>
+            {actionSummary ? (
+              <span className="hidden sm:inline truncate text-[12px] font-mono text-muted-foreground/75 tabular-nums">
+                {`· ${actionSummary}`}
+              </span>
+            ) : null}
+          </span>
+          <span className={cn("items-center gap-2 shrink-0", FLEX)}>
+            {totalWorkedMs > 0 ? (
+              <span className="text-[12px] font-mono tabular-nums text-muted-foreground/85">
+                {formatDuration(totalWorkedMs)}
+              </span>
+            ) : null}
+            <ChevronRight
+              className={cn(
+                "size-3.5 text-muted-foreground/70 transition-transform duration-200 motion-reduce:transition-none",
+                expanded && "rotate-90",
+              )}
+            />
+          </span>
+        </button>
+
+        <div
+          className={cn(
+            "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+            expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+          )}
+        >
+          <div className={cn("relative", OVERFLOW_HIDDEN, MIN_H_0, MIN_W_0)}>
+            <ScrollArea
+              data-activity-scroll="true"
+              viewportTestId="activity-scroll-viewport"
+              viewportRef={activityScrollRef}
+              onScrollCapture={handleInnerScroll}
+              className="h-56"
+              viewportClassName="[overflow-anchor:none] overscroll-y-contain px-2.5 py-2"
+            >
+              <div ref={activityContentRef} className="space-y-1">
+                {children}
+              </div>
+            </ScrollArea>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // meiva:note
   // The collapsed strip is one fixed-height line, so its chips are expanded-only:
   // a collapsed block carrying two to four chips stood 50px tall (68px when its
@@ -279,20 +441,13 @@ export const TurnBlock = memo(function TurnBlock({
   // one).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   const sdkChips = expanded && hasSdkCalls ? (
-    <span className={cn("flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 opacity-70", FLEX)}>
+    <span className={cn("flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[11px] font-mono opacity-75", FLEX)}>
       {summary.sdkCalls.map((c, i) => (
         <TurnCallChip key={c.method} call={c} showDot={i > 0} />
       ))}
     </span>
   ) : null;
 
-  // meiva:note
-  // pb-3 on the children wrapper is the row's own 12px hand-back: a child row pads
-  // its bottom by the gap between blocks and gives that height back with a
-  // negative margin, so the last row's chrome band paints past the wrapper — and
-  // the collapse wrapper above clips. A clipping ancestor that reserves less than
-  // the row hands back cuts the last child's timestamp (user 2026-10-29).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   return (
     <div
       ref={rootRef}
@@ -303,40 +458,44 @@ export const TurnBlock = memo(function TurnBlock({
       data-turn-expanded={expanded}
       data-turn-member-ids={memberIds.join(" ")}
       aria-live="off"
-      className={cn(
-        "relative border-l-2 border-dashed border-border/70 rounded-r-sm",
-        !expanded && "bg-muted/30",
-      )}
+      className="relative"
     >
       <button
         ref={headerRef}
         type="button"
         onClick={() => onToggle(id, expanded)}
         className={cn(
-          HEADER_CLS,
-          "items-start",
+          "items-start gap-1.5 text-left select-none transition-colors",
+          expanded
+            ? cn(
+                "px-2 py-0.5 rounded-md text-muted-foreground hover:text-foreground",
+                isStuck ? "w-full" : "w-[calc(100%+0.5rem)] -ml-2",
+              )
+            : "max-w-full rounded-lg px-2 py-0.5 -ml-2 text-muted-foreground/75 hover:text-foreground hover:bg-muted/50",
           // STICKY_HEADER_CLS pins below the floating HeaderBar (top-11 =
           // BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout); the stuck variant
           // masks the detail rows scrolling beneath it. Shared with CardHeader.
           expanded && STICKY_HEADER_CLS,
           expanded && (isStuck ? STUCK_HEADER_CLS : UNSTUCK_HEADER_CLS),
+          FLEX,
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
         data-expanded={expanded}
         data-stuck={expanded && Boolean(isStuck) ? "true" : "false"}
       >
-        {expanded ? (
-          <ChevronDown className="size-3 shrink-0 opacity-60 mt-0.5" />
-        ) : (
-          <ChevronRight className="size-3 shrink-0 opacity-60 mt-0.5" />
-        )}
-        <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 opacity-60 mt-0.5 transition-transform duration-200 motion-reduce:transition-none",
+            expanded && "rotate-90",
+          )}
+        />
+        <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, expanded && FLEX_1)}>
           {/* Summary line: "Worked for Xs · 5 turns · 2 agent messages".
               tabular-nums: the live clock rewrites the digits ~10x/s; fixed-
               width numerals keep the line from wobbling as digits change. */}
-          <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-            <Layers className="size-3.5 shrink-0" />
+          <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
+            <Layers className="size-3.5 shrink-0 opacity-70" />
             <span className="truncate whitespace-nowrap tabular-nums">{headerParts.join(" · ") || ""}</span>
           </span>
           {sdkChips}
@@ -355,12 +514,57 @@ export const TurnBlock = memo(function TurnBlock({
         )}
       >
         <div className={cn(OVERFLOW_CLIP, MIN_H_0, MIN_W_0)}>
-          <div className="px-2 pb-3 pt-0.5 space-y-3">{children}</div>
+          <div className="mt-1.5 ml-1.5 pl-3 border-l border-border/60 space-y-1">{children}</div>
         </div>
       </div>
     </div>
   );
 }, turnBlockPropsEqual);
+
+// meiva:note
+// Immediate fixed-height activity shell rendered right after user message
+// submission before the first reasoning or tool item arrives, preventing layout jump.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow() {
+  const t = useTranslations("timeline");
+  return (
+    <div
+      data-live-activity-window="true"
+      data-testid="pending-live-activity-window"
+      aria-live="off"
+      className={cn(
+        "rounded-xl border border-border/80 bg-card/90 shadow-xs",
+        "dark:bg-[#252421] dark:border-white/[0.08]",
+        OVERFLOW_HIDDEN,
+      )}
+    >
+      <div
+        className={cn(
+          "w-full h-9 px-3.5 items-center justify-between gap-3 select-none",
+          "bg-muted/35 border-b border-border/55 dark:bg-white/[0.025] dark:border-white/[0.06]",
+          FLEX,
+        )}
+      >
+        <span className={cn("items-center gap-2", FLEX, MIN_W_0)}>
+          <Layers className="size-3.5 shrink-0 text-muted-foreground/75" />
+          <span className="truncate text-[13px] font-medium text-foreground/88">
+            {t("working")}
+          </span>
+        </span>
+      </div>
+      <ScrollArea
+        data-activity-scroll="true"
+        className="h-56"
+        viewportClassName="overscroll-y-contain px-3.5 py-3"
+      >
+        <div className="space-y-2.5 pt-0.5">
+          <div className="h-3 w-44 rounded bg-muted/70 animate-pulse motion-reduce:animate-none" />
+          <div className="h-3 w-72 max-w-full rounded bg-muted/45 animate-pulse motion-reduce:animate-none" />
+        </div>
+      </ScrollArea>
+    </div>
+  );
+});
 
 function TurnCallChip({ call, showDot }: { call: SdkCall; showDot: boolean }) {
   return (

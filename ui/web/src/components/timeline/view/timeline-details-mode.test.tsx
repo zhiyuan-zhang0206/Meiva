@@ -101,46 +101,47 @@ describe("Details mode — collapse/expand", () => {
     expect(screen.getByText("first chat")).toBeTruthy();
     expect(screen.getByText("second chat")).toBeTruthy();
   });
-  it("clicking an expanded primary card header collapses it (override for 'none')", () => {
+  it("primary messages stay visible in flow without a card-toggle header across modes", () => {
     setToggleState({ detailsMode: "none" });
     render(
       <TimelineView
         items={[
-          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "the visible chat" }),
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "user prompt" }),
+          makeItem({ item_id: "2.0", kind: "agent_chat", payload: "the visible chat" }),
         ]}
       />,
     );
+    expect(screen.getByText("user prompt")).toBeTruthy();
     expect(screen.getByText("the visible chat")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("card-toggle"));
-    expect(screen.queryByText("the visible chat")).toBeNull();
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
   });
-  it("default expanded → clicking card header collapses content (override)", () => {
+  it("default expanded secondary item → clicking card header collapses content (override)", () => {
     setToggleState({ detailsMode: "all" });
     render(
       <TimelineView
         items={[
-          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "the open chat" }),
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "the open thought" }),
         ]}
       />,
     );
-    expect(screen.getByText("the open chat")).toBeTruthy();
+    expect(screen.getByText("the open thought")).toBeTruthy();
     fireEvent.click(screen.getByTestId("card-toggle"));
-    expect(screen.queryByText("the open chat")).toBeNull();
+    expect(screen.queryByText("the open thought")).toBeNull();
   });
   it("detailsMode change clears per-item overrides", () => {
     setToggleState({ detailsMode: "all" });
     const items = [
-      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "the chat" }),
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "the thought" }),
     ];
     const { rerender } = render(<TimelineView items={items} />);
     fireEvent.click(screen.getByTestId("card-toggle"));
-    expect(screen.queryByText("the chat")).toBeNull();
+    expect(screen.queryByText("the thought")).toBeNull();
     setToggleState({ detailsMode: "none" });
     rerender(<TimelineView items={items} />);
-    expect(screen.getByText("the chat")).toBeTruthy();
+    expect(screen.queryByText("the thought")).toBeNull();
     setToggleState({ detailsMode: "all" });
     rerender(<TimelineView items={items} />);
-    expect(screen.getByText("the chat")).toBeTruthy();
+    expect(screen.getByText("the thought")).toBeTruthy();
   });
 });
 
@@ -349,52 +350,57 @@ describe("ItemTimestamp", () => {
 });
 
 // meiva:note
-// The item stamp and Copy share one footer OUTSIDE the card box; the band is hover-revealed, so the card body keeps its own padding and both pieces of chrome line up under the card's bottom-right corner.
+// The item stamp and Copy share one footer OUTSIDE the message block; the band is hover-revealed, left-aligned under agent prose and right-aligned under the user bubble.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 describe("card hover footer", () => {
-  it("timestamp and Copy share the one band under the block, outside the card box", () => {
-    const item = makeItem({
+  it("timestamp and Copy share the one band under the block, outside the message box", () => {
+    const humanItem = makeItem({
+      item_id: "1.0",
+      kind: "inbound_chat",
+      source: "user",
+      payload: "hi",
+      created_at: "2026-10-06T13:39:24+00:00",
+    });
+    const agentItem = makeItem({
+      item_id: "2.0",
       kind: "agent_chat",
       payload: "hello",
       created_at: "2026-10-06T13:39:25+00:00",
     });
-    render(<TimelineView items={[item]} />);
-    const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
+    render(<TimelineView items={[humanItem, agentItem]} />);
+    const humanStamp = screen.getByText(formatItemTime(humanItem.created_at!, { showWeekday: true }));
+    expect(humanStamp.parentElement?.className).toContain("justify-end");
+
+    const stamp = screen.getByText(formatItemTime(agentItem.created_at!, { showWeekday: true }));
     const band = stamp.parentElement;
-    expect(band).toBe(screen.getByLabelText("Copy message").parentElement);
-    expect(band?.className).toContain("justify-end");
+    const [, agentCopy] = screen.getAllByLabelText("Copy message");
+    expect(band).toBe(agentCopy.parentElement);
+    expect(band?.className).toContain("justify-start");
     expect(band?.closest('[data-testid="card-toggle"]')).toBeNull();
     // meiva:note
-    // The band is the row's own bottom strip, not the card's: it follows the card
-    // box as a sibling inside `.timeline-item`, which pads its bottom by the gap
-    // between two blocks and gives that height back with a negative margin. So the
-    // chrome stands in whitespace that already existed, and never overlaps the
-    // body (user 2026-10-21).
+    // The band is the row's own bottom strip, not the card's: it follows the
+    // message box as a sibling inside `.timeline-item`, which pads its bottom
+    // by 1rem and gives that height back with a negative margin. So the chrome
+    // stands in whitespace that already existed, and never overlaps the body.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-    const cardBox = band?.previousElementSibling;
-    expect(cardBox?.textContent).toContain("hello");
-    expect(cardBox?.contains(band ?? null)).toBe(false);
+    const proseBox = band?.previousElementSibling;
+    expect(proseBox?.textContent).toContain("hello");
+    expect(proseBox?.contains(band ?? null)).toBe(false);
     expect(band?.className).toContain("absolute");
     expect(band?.className).toContain("bottom-0");
     expect(band?.parentElement?.className).toContain("timeline-item");
   });
-  it("a collapsed block stamps no time — the stamp rides the block that is open", () => {
+  it("secondary work items inside TurnBlock stamp no time even when expanded", () => {
+    setToggleState({ detailsMode: "all" });
     const item = makeItem({
-      kind: "agent_chat",
-      payload: "hello",
+      kind: "agent_reasoning",
+      payload: "deep thought",
       created_at: "2026-10-06T13:39:25+00:00",
     });
     render(<TimelineView items={[item]} />);
     const stamped = formatItemTime(item.created_at!, { showWeekday: true });
-    expect(screen.getByText(stamped)).toBeTruthy();
-    // meiva:note
-    // A collapsed row is a one-line header; a time under it read as chrome for a
-    // message that is not showing (user 2026-10-21).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-    fireEvent.click(screen.getByTestId("card-toggle"));
+    expect(screen.getByText("deep thought")).toBeTruthy();
     expect(screen.queryByText(stamped)).toBeNull();
-    fireEvent.click(screen.getByTestId("card-toggle"));
-    expect(screen.getByText(stamped)).toBeTruthy();
   });
   it("a streaming reply stamps the timestamp but offers no Copy", () => {
     const item = makeItem({
@@ -405,7 +411,7 @@ describe("card hover footer", () => {
     });
     render(<TimelineView items={[item]} />);
     const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
-    expect(stamp.parentElement?.className).toContain("justify-end");
+    expect(stamp.parentElement?.className).toContain("justify-start");
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
   it("standing notes (show_timestamp false) and undated items stamp nothing", () => {
@@ -428,39 +434,34 @@ describe("card hover footer", () => {
   });
 });
 
-describe("ItemTimestamp label content", () => {
-  it("ChatMarkdown label 'Meiva ▸' appears (pins label JSX against deletion)", () => {
+describe("agent_chat canvas prose and streaming indicators", () => {
+  it("plain agent_chat renders directly on canvas with no 'Meiva ▸' header and no i18n key leak (Task #816)", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x" })]}
       />,
     );
-    expect(screen.getByText(/Meiva ▸/)).toBeTruthy();
-  });
-  it("plain agent_chat label is exactly 'Meiva ▸' — no i18n key leak (Task #816)", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "x" })]}
-      />,
-    );
-    expect(screen.getByText(/^Meiva ▸$/)).toBeTruthy();
+    expect(screen.getByTestId("agent-message-prose")).toBeTruthy();
+    expect(screen.queryByText(/Meiva ▸/)).toBeNull();
     expect(screen.queryByText(/timeline\.agentChat/)).toBeNull();
     expect(screen.queryByText(/\{suffix\}/)).toBeNull();
   });
-  it("agent_chat partial=true → label contains '(streaming…)'", () => {
+  it("agent_chat partial=true → renders pulsing streaming cursor without '(streaming…)' label", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x", partial: true })]}
       />,
     );
-    expect(screen.getByText(/\(streaming…\)/)).toBeTruthy();
+    expect(screen.getByTestId("streaming-cursor")).toBeTruthy();
+    expect(screen.queryByText(/\(streaming…\)/)).toBeNull();
   });
-  it("agent_chat interrupted=true → label contains '(streaming interrupted)'", () => {
+  it("agent_chat interrupted=true → renders InterruptedNotice without streaming cursor", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x", partial: true, interrupted: true })]}
       />,
     );
+    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     const labels = screen.getAllByText(/streaming interrupted/i);
     expect(labels.length).toBeGreaterThan(0);
   });

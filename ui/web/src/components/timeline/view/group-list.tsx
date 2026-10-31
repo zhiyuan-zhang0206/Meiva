@@ -7,12 +7,12 @@ import { parseItemIdParts } from "@/lib/timeline/timeline";
 import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 
 import { LiveClockGate } from "../model/reasoning-clock";
-import { classifyItem, type TimelineGroup } from "../model/runs";
+import { classifyItem, inboundKind, type TimelineGroup } from "../model/runs";
 import { groupTimelineSegments } from "../model/segments";
 import type { CompactPin } from "../model/use-compact-transition-anchor";
 import { useTimelineWindow, useTimelineWindowLimits } from "../model/use-timeline-window";
 import { TimelineRow, cardConfigFor } from "../row";
-import { TurnBlock } from "../run-block";
+import { PendingLiveActivityWindow, TurnBlock } from "../run-block";
 
 export interface GroupEntry {
   entry: {
@@ -23,6 +23,7 @@ export interface GroupEntry {
   };
   groupKey: string;
   virtualKey: string;
+  isLiveTurn: boolean;
   runExpanded: boolean;
   virtualRows: string[] | null;
 }
@@ -84,30 +85,36 @@ export function useTimelineGroupWindow({
     const groupKey = group.kind === "single" ? group.item.item_id : group.items[0].item_id;
     const virtualKey = `${threadKey ?? ""}:${entry.source}:${entry.source === "buffer" ? compactBuffer?.epoch : ""}:${entry.rank}:${groupKey}`;
     const isLastTurn = entry === groups[groups.length - 1];
+    // meiva:note
+    // While turnActive is true, the trailing TurnBlock is the fixed-height Live
+    // Activity Window: it defaults open unless overridden and scrolls inside its
+    // own h-56 frame so outer viewport virtualization must not slice its rows.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    const isLiveTurn = group.kind === "turn" && isLastTurn && turnActive;
     const runExpanded = group.kind === "turn" && (turnOverrides.has(groupKey)
       ? (turnOverrides.get(groupKey) ?? false)
-      : effectiveDetailsMode === "all"
+      : isLiveTurn
         ? true
-        : effectiveDetailsMode === "last"
-          ? isLastTurn && turnActive
-          : false);
-    const virtualRows = group.kind === "turn" && runExpanded
+        : effectiveDetailsMode === "all");
+    const virtualRows = group.kind === "turn" && runExpanded && !isLiveTurn
       ? group.items.map((item) => `${virtualKey}:${item.item_id}`)
       : null;
-    return { entry, groupKey, virtualKey, runExpanded, virtualRows };
+    return { entry, groupKey, virtualKey, isLiveTurn, runExpanded, virtualRows };
   }), [groups, compactBuffer?.epoch, turnOverrides, effectiveDetailsMode, turnActive, threadKey]);
 
   const renderedRows = groupEntries.reduce((total, entry) => total + (entry.virtualRows?.length ?? 1), 0);
   const virtualEnabled = renderedRows > activationRows;
-  const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, virtualRows }) => ({
+  const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, isLiveTurn, runExpanded, virtualRows }) => ({
     key: virtualKey,
     rank: entry.rank,
     itemIds: entry.group.kind === "single"
       ? [entry.group.item.item_id]
       : entry.group.items.map((item) => item.item_id),
-    estimatedHeight: (entry.group.kind === "turn" && virtualRows
-      ? 60 + virtualRows.length * 92
-      : entry.group.kind === "turn" ? 56 : 80),
+    estimatedHeight: (isLiveTurn && runExpanded
+      ? 264
+      : entry.group.kind === "turn" && virtualRows
+        ? 44 + virtualRows.length * 88
+        : entry.group.kind === "turn" ? 32 : 80),
     expandedRows: virtualRows,
   })), [groupEntries]);
 
@@ -155,6 +162,8 @@ export function TimelineGroupList({
   activeStuckChildId,
   toggleExpanded,
   toggleTurn,
+  onActivityAtBottomChange,
+  activityScrollSeq,
   groups,
   groupEntries,
   virtualEnabled,
@@ -171,6 +180,8 @@ export function TimelineGroupList({
   activeStuckChildId: string | null;
   toggleExpanded: (id: string, kind: BackendTimelineItem["kind"]) => void;
   toggleTurn: (id: string, currentlyExpanded: boolean) => void;
+  onActivityAtBottomChange?: (atBottom: boolean) => void;
+  activityScrollSeq?: number;
   groups: GroupEntry["entry"][];
   groupEntries: GroupEntry[];
   virtualEnabled: boolean;
@@ -185,6 +196,7 @@ export function TimelineGroupList({
     source: "buffer" | "canonical",
     rank: number,
     forceExpand?: boolean,
+    inLiveWindow?: boolean,
   ) => {
     const renderKey = source === "buffer"
       ? `buffer:${compactBuffer?.epoch}:${rank}:${item.item_id}`
@@ -227,12 +239,25 @@ export function TimelineGroupList({
         streaming={streaming}
         expanded={expanded}
         copyable={copyable}
-        stickyHeader={isPrimary ? false : "nested"}
-        isStuck={!isPrimary && activeStuckChildId === item.item_id}
+        stickyHeader={isPrimary || inLiveWindow ? false : "nested"}
+        isStuck={!isPrimary && !inLiveWindow && activeStuckChildId === item.item_id}
         onToggle={toggleExpanded}
       />
     );
   };
+
+  // meiva:note
+  // Immediately after a human user submits a message (before the first reasoning
+  // or tool item arrives), render the fixed-height Live Activity Window shell so
+  // the user gets instant visual feedback with zero layout shift.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+  const lastGroup = groups.length > 0 ? groups[groups.length - 1].group : null;
+  const showPendingActivityWindow =
+    turnActive &&
+    (lastGroup === null ||
+      (lastGroup.kind === "single" &&
+        lastGroup.item.kind === "inbound_chat" &&
+        inboundKind(lastGroup.item.source) === "human"));
 
   return (
     <>
@@ -240,7 +265,7 @@ export function TimelineGroupList({
         <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
       ) : null}
       <LiveClockGate value={turnActive}>
-        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, runExpanded, virtualRows }, offset) => {
+        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, isLiveTurn, runExpanded, virtualRows }, offset) => {
           const group = entry.group;
           const groupIndex = virtualRange.start + offset;
           const renderedGroup = (() => {
@@ -259,11 +284,20 @@ export function TimelineGroupList({
                 expanded={runExpanded}
                 onToggle={toggleTurn}
                 turnActive={turnActive && isLastTurn}
-                isStuck={activeStuckHeaderId === turnId}
+                liveWindow={isLiveTurn}
+                onActivityAtBottomChange={isLiveTurn ? onActivityAtBottomChange : undefined}
+                scrollToBottomSeq={isLiveTurn ? activityScrollSeq : undefined}
+                isStuck={!isLiveTurn && activeStuckHeaderId === turnId}
                 timelineSource={entry.source} displayRank={entry.rank}
               >
                 {runExpanded ? (
-                  virtualRows ? (
+                  isLiveTurn ? (
+                    group.items.map((it, index) => (
+                      <div key={`${virtualKey}:${it.item_id}`}>
+                        {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, true, true)}
+                      </div>
+                    ))
+                  ) : virtualRows ? (
                     <>
                       {virtualEnabled && childRange.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: childRange.before }} aria-hidden="true" /> : null}
                       {group.items.slice(childRange.start, childRange.end).map((it, childOffset) => {
@@ -282,11 +316,16 @@ export function TimelineGroupList({
             );
           })();
           return (
-            <div key={virtualKey} data-virtual-group={virtualKey}>
+            <div key={virtualKey} data-virtual-group={virtualKey} className="py-1">
               {renderedGroup}
             </div>
           );
         })}
+        {showPendingActivityWindow ? (
+          <div className="py-1">
+            <PendingLiveActivityWindow />
+          </div>
+        ) : null}
       </LiveClockGate>
       {virtualEnabled && virtualRange.after > 0 ? (
         <div data-timeline-spacer="after" style={{ height: virtualRange.after }} aria-hidden="true" />

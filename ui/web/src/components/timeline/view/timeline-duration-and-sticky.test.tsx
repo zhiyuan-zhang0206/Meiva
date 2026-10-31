@@ -29,9 +29,9 @@ describe("detail-block duration display (Last mode)", () => {
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(/Writing code for/)).toBeTruthy();
   });
-  it("active last turn header shows a live 'Working for'", () => {
+  it("active last turn header shows the Live Activity Window 'Working…' header and viewport", () => {
     setToggleState({ detailsMode: "last" });
-    render(
+    const { container } = render(
       <TimelineView
         turnActive
         items={[
@@ -39,9 +39,12 @@ describe("detail-block duration display (Last mode)", () => {
         ]}
       />,
     );
-    expect(runToggle().textContent).toContain("Working for");
+    expect(container.querySelector('[data-live-activity-window="true"]')).not.toBeNull();
+    expect(screen.getByTestId("activity-scroll-viewport")).toBeTruthy();
+    expect(runToggle().textContent).toContain("Working…");
+    expect(runToggle().textContent).toContain("1 turn");
   });
-  it("live 'Working for' does not wait for a work item — a system-only active turn still ticks", () => {
+  it("a system-only active turn still renders the Live Activity Window 'Working…' header", () => {
     setToggleState({ detailsMode: "last" });
     render(
       <TimelineView
@@ -51,7 +54,7 @@ describe("detail-block duration display (Last mode)", () => {
         ]}
       />,
     );
-    expect(runToggle().textContent).toContain("Working for");
+    expect(runToggle().textContent).toContain("Working…");
   });
   it("completed single-code-block turn shows 'Worked for' and the rounds count", () => {
     setToggleState({ detailsMode: "last" });
@@ -108,10 +111,12 @@ describe("detail-block duration display (Last mode)", () => {
         created_at: new Date(now - 1_000).toISOString(),
       }),
     ];
-    const { rerender } = render(<TimelineView turnActive items={items} />);
-    expect(runToggle().textContent).toContain("Working for 17s");
+    const { container, rerender } = render(<TimelineView turnActive items={items} />);
+    expect(runToggle().textContent).toContain("Working…");
+    expect(runToggle().textContent).toContain("17s");
     expect(runToggle().textContent).not.toContain("6m");
     rerender(<TimelineView items={items} />);
+    expect(container.querySelector('[data-live-activity-window="true"]')).toBeNull();
     expect(runToggle().textContent).toContain("Worked for 17s");
   });
   it("live timer adds the streaming block's elapsed to the committed total", () => {
@@ -140,7 +145,8 @@ describe("detail-block duration display (Last mode)", () => {
       />,
     );
     const header = runToggle().textContent;
-    expect(header).toContain("Working for 13s");
+    expect(header).toContain("Working…");
+    expect(header).toContain("13s");
     expect(header).toContain("1 turn");
   });
   it("live timer shows on a turn with no stamped member at all", () => {
@@ -160,7 +166,49 @@ describe("detail-block duration display (Last mode)", () => {
         ]}
       />,
     );
-    expect(runToggle().textContent).toContain("Working for 4s");
+    expect(runToggle().textContent).toContain("Working…");
+    expect(runToggle().textContent).toContain("4s");
+  });
+  it("renders PendingLiveActivityWindow when turnActive is true right after a human message", () => {
+    render(
+      <TimelineView
+        turnActive
+        items={[
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "do it" }),
+        ]}
+      />,
+    );
+    const pending = screen.getByTestId("pending-live-activity-window");
+    expect(pending.textContent).toContain("Working…");
+  });
+  it("scrolling up inside the Live Activity Window reveals ScrollToBottomButton and clicking re-attaches", () => {
+    render(
+      <TimelineView
+        turnActive
+        items={[
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "do it" }),
+          makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "step 1" }),
+          makeItem({ item_id: "2.1", kind: "agent_code", payload: "print(1)" }),
+        ]}
+      />,
+    );
+    const inner = screen.getByTestId("activity-scroll-viewport");
+    Object.defineProperty(inner, "scrollHeight", { value: 600, configurable: true });
+    Object.defineProperty(inner, "clientHeight", { value: 224, configurable: true });
+    inner.scrollTop = 376;
+    fireEvent.scroll(inner);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+
+    inner.scrollTop = 100;
+    fireEvent.scroll(inner);
+    const btn = screen.getByTestId("scroll-to-bottom");
+    expect(btn).toBeTruthy();
+
+    const scrollToSpy = vi.fn();
+    inner.scrollTo = scrollToSpy;
+    fireEvent.click(btn);
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 600, behavior: "smooth" });
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
   it("active last turn stays expanded across streaming commits; collapses when a reply lands below", () => {
     setToggleState({ detailsMode: "last" });
@@ -374,7 +422,7 @@ describe("TimelineView header scrolling scope", () => {
     makeItem({ item_id: "2.2", kind: "code_output", payload: "result" }),
     makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Agent reply" }),
   ];
-  it.each(["all", "last", "none"] as const)("keeps primary titles in flow and work/detail titles sticky in %s mode", (mode) => {
+  it.each(["all", "last", "none"] as const)("keeps primary messages headerless in flow and work/detail titles sticky in %s mode", (mode) => {
     setToggleState({ detailsMode: mode });
     const { container } = render(<TimelineView items={items} />);
     for (const toggle of screen.getAllByTestId("turn-toggle")) {
@@ -382,13 +430,11 @@ describe("TimelineView header scrolling scope", () => {
     }
     revealCollapsedCards();
     const titles = [...screen.getAllByTestId("card-toggle"), ...screen.getAllByTestId("turn-toggle")];
-    expect(titles).toHaveLength(6);
+    expect(titles).toHaveLength(4);
     for (const id of ["1.0", "3.0"]) {
       const row = container.querySelector<HTMLElement>(`.timeline-item[data-item-id="${id}"]`)!;
-      const title = row.querySelector<HTMLElement>('[data-testid="card-toggle"]')!;
-      expect(row.dataset.cardSticky).toBe("false");
-      expect(title.className).not.toContain("sticky");
-      expect(title.dataset.stuck).toBe("false");
+      expect(row.querySelector('[data-testid="card-toggle"]')).toBeNull();
+      expect(row.dataset.cardSticky).toBeUndefined();
     }
     const workTitle = screen.getByTestId("turn-toggle");
     expect(workTitle.className).toContain("sticky");

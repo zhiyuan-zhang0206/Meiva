@@ -56,7 +56,10 @@ export function watchReadingNavigation(viewport: HTMLElement, wrapper: HTMLEleme
     if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) resume();
   };
   const pointerDown = (event: PointerEvent) => {
-    if ((event.target as HTMLElement).closest('[data-slot="scroll-area-scrollbar"]')) resume();
+    const el = event.target as HTMLElement | null;
+    if (el?.closest('[data-slot="scroll-area-scrollbar"]') && !el.closest('[data-activity-scroll="true"]')) {
+      resume();
+    }
   };
   viewport.addEventListener("keydown", keyDown);
   wrapper?.addEventListener("pointerdown", pointerDown, { capture: true });

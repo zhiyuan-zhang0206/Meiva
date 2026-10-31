@@ -8,60 +8,45 @@ tags:
 
 # Timeline card chrome
 
-`components/timeline/card.tsx` — `MessageCard` — draws the block: the tinted box
-(left accent, clickable header, collapsible body). It carries no chrome of its
-own. `components/timeline/row.tsx` — `TimelineRow` — owns the band under the
-block that holds the item timestamp (`components/timeline/timestamp.tsx`,
-`ItemTimestamp`) and Copy; either half can stand alone, and a row with neither
-mounts no band and does not join the hover group.
+`components/timeline/row.tsx` — `TimelineRow` — renders three visual tiers:
+1. **Human message** (`inbound_chat` with `inboundKind(source) === "human"`): a right-aligned conversational bubble (`data-testid="user-message-bubble"`, `max-w-[85%] sm:max-w-[min(70%,34rem)]`, stripped `<header>\n\n` envelope) with a right-aligned hover chrome band (`CARD_FOOTER_CLS`) below it.
+2. **Agent reply** (`agent_chat` with `user_facing !== false`): unboxed Markdown prose directly on the canvas (`data-testid="agent-message-prose"`, with a subtle pulsing `streaming-cursor` while `partial` is true) and a left-aligned hover chrome band (`CARD_FOOTER_LEFT_CLS`) below it.
+3. **Secondary work item** (thinking, tool call, tool output, system prompt, attach, notes, inter-agent / system inbound, and non-user-facing `agent_chat` with `user_facing === false`): a borderless `MessageCard` + `CardHeader` (`ChevronRight` + icon + summary/title) inside a `TurnBlock` or the Live Activity Window. Secondary items omit below-card timestamps and mount an inline top-right Copy button only when `config.copy` is true (inter-agent / external-agent messages and non-user-facing `agent_chat`).
 
 Copy is **decided per block kind**, in `messageCardConfig`'s `copy` field — a
 whitelist, not "everything except …", so a kind added later has to opt in rather
 than inherit a button. Only the two kinds whose payload is a message a reader can
 quote offer it: `inbound_chat` from a human or an agent (a peer or an external
-agent) and the agent's own reply (`agent_chat`). A system-generated inbound —
+agent, with human copy payload stripped of its envelope header via `copyPayloadFor`)
+and the agent's own reply (`agent_chat`). A system-generated inbound —
 scheduler, watcher, framework — is not text a person or an agent wrote and
 carries none. Thinking, tool calls and their output, the system prompt,
 attachments and system notes are the agent's machinery, not its conversation, and
 mount no copy control anywhere in the block: the band's button and the
 body-level one are the same decision (`PythonCode` gets `copy={false}`, the
 code-output envelope has none), and a body-level button is no longer a way to
-"keep" Copy on a kind the whitelist excludes. A collapsed or still-streaming row
-keeps its stamp but never Copy. A kind that offers neither Copy nor a stamp —
-the system prompt — mounts no band at all, so there is never an empty 12px strip
-under a block (user 2026-10-29).
+"keep" Copy on a kind the whitelist excludes. A still-streaming primary reply
+keeps its stamp (`justify-start`) but never Copy. A kind that offers neither Copy
+nor a stamp mounts no band at all, so there is never an empty strip under a block.
 
-The band **sits in the gap below the block, outside the card box** (user
-2026-10-21), so the time reads as a separator between two messages instead of
-eating the block's own bottom padding. `.timeline-item` owns that gap: it pads
-its bottom by the same 12px the row list separates rows by, and hands the height
-back as a negative margin — block-to-block spacing is unchanged and the band is
-drawn inside the row box, which it must be, because `.timeline-item` carries
-`content-visibility: auto` whose paint containment clips anything drawn past it.
-A reserved line existed once and made the gap depend on which kinds stamped a
-time (12px between two plain cards, 28px between two stamped ones); a band in the
-existing gap costs no layout height at rest.
-
-That hand-back is a contract on every **clipping ancestor**: a row gives 12px
-back, so a container that clips a row must pad its bottom by the same 12px. The
-work block's collapse wrapper (`overflow: clip`, required to collapse the block
-and to contain wide content) is the one that does, and it padded 8px: its clip
-line fell 4px inside the last child's band and shaved the bottom of that child's
-timestamp (user 2026-10-29 — `pb-3`, the same reservation the top-level list
-makes). The stamp's rect must stay inside every clipping ancestor; jsdom cannot
-measure boxes, so the guard is the Playwright check in
-`tests/e2e/visual/test_work_block_chrome.py`.
-
-The stamp **rides an expanded block only**: a collapsed row is a one-line header,
-and a time under it read as chrome for a message that is not showing (user
-2026-10-21). Copy has always been expanded-only — it attaches to an expanded,
-settled body. The block's own vertical insets are symmetric: the header's 6px
-top padding and the body's 4px bottom padding both measure 7px from the text to
-the box edge, so a block does not look bottom-heavy.
+For primary messages, the band **sits symmetrically in the 20px gap below the
+block, outside the message box**, so the time reads as a clean separator between
+blocks instead of eating the message's own bottom padding. `.timeline-item` owns
+that reservation: it pads its bottom by `1rem` (16px) and hands the height back
+as a `-1rem` negative margin (`[data-virtual-group]` adds `py-1` around each
+group on top of `space-y-3`, yielding uniform 20px block-to-block spacing and
+symmetric ~5.5px visual clearance above and below the 12px chrome band). Drawing
+the band inside `.timeline-item`'s own padding keeps it unclipped by
+`content-visibility: auto` paint containment; inside `[data-turn-id]`, child
+`.timeline-item` rows reset `padding-bottom: 0; margin-bottom: 0` because they
+carry no below-card timestamp band. The stamp's rect must stay inside every
+clipping ancestor; the Playwright check in
+`tests/e2e/visual/test_work_block_chrome.py` verifies both the primary message's
+unclipped stamp and the absence of below-card chrome inside `[data-turn-id]`.
 
 The stamp carries no brackets (`2026-05-06 16:56:29`, not `[2026-05-06 …]`) and
 renders at `text-[9px]`; Copy is a `size-2.5` icon with no padding, so the control
-fits the 12px band instead of overlapping the card edge it now sits below, and
+fits the 12px band instead of overlapping the message edge it sits below, and
 reads no taller than the stamp beside it (user 2026-10-22 — at `size-3` the glyph
 was visibly bigger than the time). Its hit area is an invisible `after:-inset-1`
 box, not a painted one.
@@ -86,8 +71,8 @@ bug). A mouse press does not take that path.
 ```meiva-contract
 id = "card-actions-overlay"
 kind = "invariant"
-statement = "A timeline block's timestamp and Copy stand in the 12px gap below the block, outside the card box and inside the row's own padding, so block-to-block spacing is unchanged; every ancestor that clips a row reserves the same 12px, so the last child of a work block keeps its whole band. The stamp appears only on an expanded block, Copy only on an expanded, settled block of a kind whose payload is message text (inbound_chat, agent_chat) — a kind with neither mounts no band — and the band is invisible and click-through until the pointer hovers the block, focus enters it, or a touch reveals it for a few seconds."
-code = ["ui/web/src/components/timeline/row.tsx:TimelineRow", "ui/web/src/components/timeline/card.tsx:CARD_FOOTER_CLS"]
+statement = "A primary timeline message's timestamp and Copy stand in the gap below the message (right-aligned under user bubbles via CARD_FOOTER_CLS, left-aligned under agent prose via CARD_FOOTER_LEFT_CLS), outside the message box and inside `.timeline-item`'s 1rem bottom padding / -1rem margin hand-back so block-to-block spacing stays uniform and the stamp stays unclipped inside every clipping ancestor. Secondary items inside TurnBlocks omit below-card timestamps and offer Copy only for agent-authored inbound_chat; Copy is scoped to settled message text (human/agent inbound_chat, agent_chat), and the chrome is invisible and click-through until hovered, focused, or touch-revealed."
+code = ["ui/web/src/components/timeline/row.tsx:TimelineRow", "ui/web/src/components/timeline/card.tsx:CARD_FOOTER_CLS", "ui/web/src/components/timeline/card.tsx:CARD_FOOTER_LEFT_CLS"]
 tests = ["ui/web/src/components/timeline/view/timeline-copy-and-boundaries.test.tsx::Copy is scoped to message text (per-kind whitelist)", "tests/e2e/visual/test_work_block_chrome.py::test_last_block_timestamp_is_not_clipped"]
 ```
 

@@ -13,6 +13,7 @@
   "lineCount": "{count} {unit}",
   "linesOfCode": "{count} {unit}代码",
   "tokens": "{count} tokens",
+  "working": "工作中…",
   "workingFor": "工作中 {duration}",
   "workedFor": "工作了 {duration}",
   "ranFor": "运行了 {duration}",

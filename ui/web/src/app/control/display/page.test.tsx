@@ -328,8 +328,8 @@ describe("DisplaySettingsPage", () => {
     });
     const slider = screen.getByLabelText<HTMLInputElement>("Timeline max width");
     expect(slider.type).toBe("range");
-    expect(slider.value).toBe("768");
-    expect(screen.getByText("768px")).toBeTruthy();
+    expect(slider.value).toBe("800");
+    expect(screen.getByText("800px")).toBeTruthy();
   });
 
   it("narrow viewport → timeline max-width slider is disabled", async () => {

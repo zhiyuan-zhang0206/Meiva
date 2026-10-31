@@ -6,7 +6,7 @@
 // on a `w-full` column, the timeline fills its pane up to the chosen pixel cap
 // and only adds centered gutters once the pane itself is wider.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
-export const TIMELINE_WIDTH_PX_DEFAULT = 768;
+export const TIMELINE_WIDTH_PX_DEFAULT = 800;
 export const TIMELINE_WIDTH_PX_MIN = 480;
 export const TIMELINE_WIDTH_PX_MAX = 1280;
 export const TIMELINE_WIDTH_PX_STEP = 32;

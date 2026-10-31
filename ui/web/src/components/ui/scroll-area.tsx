@@ -13,6 +13,7 @@ function ScrollArea({
   className,
   viewportClassName,
   viewportRef: externalViewportRef,
+  viewportTestId,
   children,
   onScrollCapture,
   ...props
@@ -21,6 +22,7 @@ function ScrollArea({
   // scrolls). Used e.g. by the timeline to set `overflow-anchor: none`.
   viewportClassName?: string;
   viewportRef?: React.RefObject<HTMLDivElement | null>;
+  viewportTestId?: string;
 }) {
   const [isScrollActive, setIsScrollActive] = React.useState(false)
   const [isDraggingScrollbar, setIsDraggingScrollbar] = React.useState(false)
@@ -129,13 +131,16 @@ function ScrollArea({
       {...props}
       onScrollCapture={(event) => {
         onScrollCapture?.(event)
-        showScrollbarUntilIdle()
+        if (event.target === event.currentTarget || event.target === viewportRef.current) {
+          showScrollbarUntilIdle()
+        }
       }}
     >
       <ScrollAreaPrimitive.Viewport
         ref={setViewportRef}
         nonce={nonce}
         data-slot="scroll-area-viewport"
+        data-testid={viewportTestId}
         className={cn(
           "size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
           viewportClassName,

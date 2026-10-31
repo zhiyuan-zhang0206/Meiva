@@ -269,4 +269,35 @@ describe("ScrollArea", () => {
     });
     expect(scrollbar.getAttribute("data-visible")).toBe("false");
   });
+
+  it("stamps viewportTestId on the inner viewport when provided", () => {
+    render(
+      <ScrollArea viewportTestId="activity-scroll-viewport">
+        <div>content</div>
+      </ScrollArea>,
+    );
+    const viewport = screen.getByTestId("activity-scroll-viewport");
+    expect(viewport.getAttribute("data-slot")).toBe("scroll-area-viewport");
+  });
+
+  it("does not flash an outer scrollbar when a nested ScrollArea scrolls", () => {
+    render(
+      <ScrollArea data-testid="outer-area" viewportTestId="outer-vp">
+        <ScrollArea data-testid="inner-area" viewportTestId="inner-vp">
+          <div>nested content</div>
+        </ScrollArea>
+      </ScrollArea>,
+    );
+    const outerBar = screen
+      .getByTestId("outer-area")
+      .querySelector(':scope > [data-slot="scroll-area-scrollbar"]')!;
+    const innerBar = screen
+      .getByTestId("inner-area")
+      .querySelector(':scope > [data-slot="scroll-area-scrollbar"]')!;
+
+    fireEvent.scroll(screen.getByTestId("inner-vp"));
+
+    expect(innerBar.getAttribute("data-visible")).toBe("true");
+    expect(outerBar.getAttribute("data-visible")).toBe("false");
+  });
 });

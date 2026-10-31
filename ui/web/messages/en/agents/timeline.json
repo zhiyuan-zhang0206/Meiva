@@ -13,6 +13,7 @@
   "lineCount": "{count} {unit}",
   "linesOfCode": "{count} {unit} of code",
   "tokens": "{count} tokens",
+  "working": "Working…",
   "workingFor": "Working for {duration}",
   "workedFor": "Worked for {duration}",
   "ranFor": "Ran for {duration}",

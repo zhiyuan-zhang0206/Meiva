@@ -18,9 +18,18 @@ beforeEach(() => {
 });
 vi.mock("../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: ReactNode }) => (
-    <div><div data-testid="history-viewport" data-slot="scroll-area-viewport">{children}</div></div>
-  ),
+  ScrollArea: ({
+    children,
+    ...rest
+  }: {
+    children: ReactNode;
+    "data-activity-scroll"?: string;
+  }) =>
+    rest["data-activity-scroll"] === "true" ? (
+      <div data-activity-scroll="true"><div>{children}</div></div>
+    ) : (
+      <div><div data-testid="history-viewport" data-slot="scroll-area-viewport">{children}</div></div>
+    ),
 }));
 const items: BackendTimelineItem[] = Array.from({ length: 16 }, (_, index) => ({
   item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,

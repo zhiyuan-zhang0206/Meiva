@@ -7,15 +7,24 @@
 import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { cn } from "@/lib/format/utils";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import { CopyButton } from "./buttons";
 import { ItemTimestamp } from "./timestamp";
-import { CARD_FOOTER_CLS, type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";
-import { ItemView } from "./item";
+import {
+  CARD_FOOTER_CLS,
+  CARD_FOOTER_LEFT_CLS,
+  type CardConfig,
+  CardHeader,
+  MessageCard,
+  messageCardConfig,
+} from "./card";
+import { copyPayloadFor, ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
+import { inboundKind } from "./model/runs";
 
 // meiva:note
 // How long a touch keeps the chrome band up: long enough to read the time and
@@ -131,27 +140,98 @@ export const TimelineRow = memo(function TimelineRow({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   //
   // meiva:note
-  // The row's chrome band carries the timestamp when the kind stamps one and
-  // Copy when the row is expanded, settled AND the kind offers Copy
-  // (config.copy). Both halves are per-kind decisions, so a kind that offers
-  // neither mounts no band at all and the row takes no hover group — an empty
-  // 12px strip under the block would read as a control that failed to load.
+  // Top-level primary messages (human inbound_chat bubble + user-facing agent_chat
+  // canvas prose) mount the hover chrome band below the message carrying the
+  // timestamp and Copy. Secondary work items inside TurnBlocks / the Live Activity
+  // Window omit timestamps and render an inline top-right Copy button only when
+  // `config.copy` is true (inter-agent messages and non-user-facing agent_chat).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  // meiva:note
-  // The stamp rides only an EXPANDED block: a collapsed row is a one-line header,
-  // and the time under it read as chrome for a message that is not showing (user
-  // 2026-10-21). Copy is already expanded-only (its `copyable` prop).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  const isHumanBubble = item.kind === "inbound_chat" && inboundKind(item.source) === "human";
+  const isAgentProse = item.kind === "agent_chat" && item.user_facing !== false;
+  const isPrimaryMessage = isHumanBubble || isAgentProse;
+
   const stamp =
-    expanded && config.showTimestamp && item.created_at ? <ItemTimestamp iso={item.created_at} /> : null;
-  const copy = copyable && config.copy ? <CopyButton text={item.payload} compact /> : null;
-  const footer = stamp || copy ? <>{stamp}{copy}</> : null;
+    isPrimaryMessage && config.showTimestamp && item.created_at ? (
+      <ItemTimestamp iso={item.created_at} />
+    ) : null;
+  const canCopy = (isPrimaryMessage ? !item.partial : copyable) && config.copy;
+  const copy = canCopy ? <CopyButton text={copyPayloadFor(item)} compact /> : null;
+  const primaryFooter = isPrimaryMessage && (stamp ?? copy) ? <>{stamp}{copy}</> : null;
+
+  if (isHumanBubble) {
+    return (
+      <div
+        data-item-id={item.item_id}
+        data-timeline-source={timelineSource}
+        data-display-rank={displayRank}
+        data-message-role="user"
+        aria-live="off"
+        className={cn("timeline-item", primaryFooter ? "group/msgcard" : null)}
+        onPointerDown={primaryFooter ? revealForTouch : undefined}
+      >
+        <ItemErrorBoundary resetKey={item.payload}>
+          <div className={cn("justify-end", FLEX, MIN_W_0)}>
+            <div
+              data-testid="user-message-bubble"
+              className={cn(
+                "max-w-[85%] sm:max-w-[min(70%,34rem)] rounded-[20px] rounded-br-md px-4 py-2.5 text-[15px] leading-[24px]",
+                "bg-secondary text-foreground/92 border border-border/60 shadow-2xs",
+                "dark:bg-[#2c2a27] dark:text-[#e5e2dc] dark:border-white/[0.065]",
+                MIN_W_0,
+              )}
+            >
+              <ItemView item={item} streaming={streaming} />
+            </div>
+          </div>
+        </ItemErrorBoundary>
+        {primaryFooter ? (
+          <div
+            data-testid="card-chrome"
+            className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}
+          >
+            {primaryFooter}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (isAgentProse) {
+    return (
+      <div
+        data-item-id={item.item_id}
+        data-timeline-source={timelineSource}
+        data-display-rank={displayRank}
+        data-message-role="assistant"
+        aria-live="off"
+        className={cn("timeline-item", primaryFooter ? "group/msgcard" : null)}
+        onPointerDown={primaryFooter ? revealForTouch : undefined}
+      >
+        <ItemErrorBoundary resetKey={item.payload}>
+          <div
+            data-testid="agent-message-prose"
+            className={cn("text-[15px] leading-[25px] text-foreground/92 dark:text-[#e2dfd9]", MIN_W_0)}
+          >
+            <ItemView item={item} streaming={streaming} />
+          </div>
+        </ItemErrorBoundary>
+        {primaryFooter ? (
+          <div
+            data-testid="card-chrome"
+            className={cn(CARD_FOOTER_LEFT_CLS, touchRevealed && "pointer-events-auto opacity-100")}
+          >
+            {primaryFooter}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   // Sticky only while expanded — a collapsed row has nothing to scroll under
   // its header. The level decides the scan bucket + the pin line: a work
   // block's child row joins the nested pass (data-turn-child) instead of the
   // level-1 scan (findClosestStuckHeaderId, run-block.tsx).
-  const sticky = !!stickyHeader && expanded;
+  const sticky = Boolean(stickyHeader) && expanded;
   const nestedSticky = stickyHeader === "nested";
 
   return (
@@ -165,8 +245,8 @@ export const TimelineRow = memo(function TimelineRow({
       data-card-sticky={sticky}
       data-turn-child={nestedSticky ? "true" : undefined}
       aria-live="off"
-      className={cn("timeline-item", footer ? "group/msgcard" : null)}
-      onPointerDown={footer ? revealForTouch : undefined}
+      className={cn("timeline-item", copy ? "group/msgcard" : null)}
+      onPointerDown={copy ? revealForTouch : undefined}
     >
       {/* Boundary wraps header + content together: the header's summary
           derivation parses the payload too, so a malformed payload must
@@ -181,21 +261,28 @@ export const TimelineRow = memo(function TimelineRow({
             stickyHeader={stickyHeader}
             isStuck={isStuck}
           />
+          {copy ? (
+            <div
+              data-testid="card-chrome"
+              className={cn(
+                "absolute top-1 right-1.5 z-10 items-center",
+                "pointer-events-none opacity-0 transition-opacity duration-150 motion-reduce:transition-none",
+                "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
+                "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
+                touchRevealed && "pointer-events-auto opacity-100",
+                FLEX,
+              )}
+            >
+              {copy}
+            </div>
+          ) : null}
           {expanded ? (
-            <div className="px-2 pb-1 pt-0.5 sm:px-3">
+            <div className="pl-5 pr-1 pb-1.5 pt-0.5">
               <ItemView item={item} streaming={streaming} />
             </div>
           ) : null}
         </MessageCard>
       </ItemErrorBoundary>
-      {footer ? (
-        <div
-          data-testid="card-chrome"
-          className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}
-        >
-          {footer}
-        </div>
-      ) : null}
     </div>
   );
 });

@@ -281,36 +281,59 @@
 
 @layer components {
   /* chat markdown output: local scope, doesn't leak into other components */
-  .chat-md { @apply [overflow-wrap:anywhere]; }
-  .chat-md p { @apply my-2; }
-  .chat-md p:first-child { @apply mt-0; }
-  .chat-md p:last-child { @apply mb-0; }
-  .chat-md ul { @apply list-disc pl-5 my-2; }
-  .chat-md ol { @apply list-decimal pl-5 my-2; }
-  .chat-md li { @apply my-0.5; }
-  .chat-md h1 { @apply text-base font-semibold mt-3 mb-2; }
-  .chat-md h2 { @apply text-sm font-semibold mt-3 mb-1.5; }
-  .chat-md h3 { @apply text-sm font-medium mt-2 mb-1; }
+  .chat-md {
+    --chat-md-p-my: 0.5rem;
+    --chat-md-li-my: 0.25rem;
+    @apply [overflow-wrap:anywhere];
+  }
+  [data-testid="agent-message-prose"] .chat-md,
+  [data-testid="user-message-bubble"] .chat-md {
+    --chat-md-p-my: 0.875rem;
+    --chat-md-li-my: 0.375rem;
+  }
+  div.chat-md { display: flow-root; }
+  .chat-md > :first-child,
+  .chat-md > :first-child > pre:first-of-type,
+  .chat-md > :is(ul, ol):first-child > li:first-child { @apply mt-0; }
+  .chat-md > :last-child,
+  .chat-md > :last-child > pre:last-child,
+  .chat-md > :is(ul, ol):last-child > li:last-child { @apply mb-0; }
+  .chat-md p { margin-block: var(--chat-md-p-my); }
+  .chat-md ul {
+    margin-block: var(--chat-md-p-my);
+    @apply list-disc pl-5.5;
+  }
+  .chat-md ol {
+    margin-block: var(--chat-md-p-my);
+    @apply list-decimal pl-5.5;
+  }
+  .chat-md li { margin-block: var(--chat-md-li-my); }
+  .chat-md :is(strong, b) {
+    @apply font-semibold text-foreground dark:text-[#efece6];
+  }
+  .chat-md h1 { @apply text-[1.3em] leading-[1.35] font-semibold text-foreground dark:text-[#efece6] mt-5 mb-2; }
+  .chat-md h2 { @apply text-[1.18em] leading-[1.38] font-semibold text-foreground dark:text-[#efece6] mt-4.5 mb-1.5; }
+  .chat-md h3 { @apply text-[1.08em] leading-[1.4] font-semibold text-foreground dark:text-[#efece6] mt-4 mb-1.5; }
   .chat-md h4,
   .chat-md h5,
-  .chat-md h6 { @apply text-xs font-medium mt-2 mb-1; }
+  .chat-md h6 { @apply text-[1em] leading-[1.45] font-semibold text-foreground dark:text-[#efece6] mt-3.5 mb-1; }
   .chat-md code {
-    @apply bg-muted px-1 py-0.5 rounded text-[0.85em] font-mono;
+    @apply bg-muted/75 dark:bg-white/[0.06] text-foreground/90 dark:text-[#e8e4dd] px-1.5 py-[1px] rounded-[5px] text-[0.86em] leading-[1.2] font-mono;
   }
   .chat-md pre {
-    @apply bg-muted p-2 rounded-sm my-2 font-mono text-xs overflow-x-auto max-w-full;
+    @apply bg-card dark:bg-[#252421] border border-border/60 dark:border-white/[0.07] px-3.5 py-2.5 rounded-lg my-3 font-mono text-[13px] leading-[1.6] text-foreground/90 dark:text-[#e4e1db] overflow-x-auto max-w-full;
   }
   .chat-md pre > code {
-    @apply bg-transparent px-0 py-0 text-inherit;
+    @apply bg-transparent dark:bg-transparent px-0 py-0 text-inherit dark:text-inherit leading-[inherit];
   }
   .chat-md blockquote {
-    @apply border-l-2 border-muted-foreground pl-3 text-muted-foreground my-2;
+    @apply border-l-2 border-muted-foreground/60 pl-3.5 text-muted-foreground my-3;
   }
   .chat-md a {
     @apply text-primary underline underline-offset-2;
   }
   .chat-md table {
-    @apply my-2 border-collapse block overflow-x-auto;
+    @apply my-3 border-collapse block overflow-x-auto text-[13.5px] leading-[1.5];
   }
   .chat-md th,
   .chat-md td {
@@ -318,9 +341,9 @@
        overflow-wrap:anywhere, which otherwise breaks every cell mid-word and
        squishes the table into a tall, narrow mess. Genuinely-wide tables
        scroll instead, via the table's overflow-x-auto above. */
-    @apply border border-border px-2 py-1 text-left [overflow-wrap:normal];
+    @apply border border-border/70 dark:border-white/[0.08] px-3 py-1.5 text-left [overflow-wrap:normal];
   }
-  .chat-md th { @apply bg-muted font-semibold; }
+  .chat-md th { @apply bg-muted/70 dark:bg-white/[0.04] font-semibold text-foreground dark:text-[#ece8e1]; }
   /* Math keeps its own spacing: the container's overflow-wrap:anywhere would
      otherwise break a formula mid-expression (the 2026-10-20 phone report had
      \frac and \left( split across three lines). A display formula wider than
@@ -343,6 +366,18 @@
   .chat-md :is(h1, h2, h3, h4, h5, h6) { @apply scroll-mt-2; }
 }
 
+[data-testid="agent-message-prose"] [data-testid="python-code"] {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-block: 0.75rem;
+}
+.chat-md > :first-child > [data-testid="python-code"]:first-of-type {
+  margin-top: 0;
+}
+.chat-md > :last-child > [data-testid="python-code"]:last-child {
+  margin-bottom: 0;
+}
+
 
 /* FleetView performance: off-screen tree nodes skip paint/layout via CSS containment.
    With 500+ agents the initial render cost is dominated by layout; content-visibility
@@ -362,16 +397,63 @@
   /* meiva:note
      A block owns the gap BELOW it: the hover chrome (timestamp, Copy) sits in
      that gap, and content-visibility paint containment would clip it if it were
-     drawn past the row. The row grows by the same 12px the row list separates
-     rows by (space-y-3) and hands the height back as a negative margin, so
-     block-to-block spacing is unchanged and the chrome lands in whitespace that
-     already existed (user 2026-10-21). */
+     drawn past the row. The row grows by 16px (1rem) and hands the height back
+     as a negative margin so block-to-block spacing (20px = 12px space-y-3 + 8px
+     group py-1) stays uniform and the 12px chrome band sits symmetrically in
+     that 20px whitespace without being clipped by paint containment. */
   position: relative;
-  padding-bottom: 0.75rem;
-  margin-bottom: -0.75rem;
+  padding-bottom: 1rem;
+  margin-bottom: -1rem;
 }
 
-/* The mounted virtual window is small enough to measure real row heights. */
-.timeline-virtual .timeline-item {
+/* The mounted virtual window and the fixed-height live activity scrollport both
+   need immediate real DOM heights without off-screen containment placeholders. */
+.timeline-virtual .timeline-item,
+[data-activity-scroll="true"] .timeline-item {
   content-visibility: visible;
+}
+
+/* Detail items inside a TurnBlock / Live Activity Window carry no below-card
+   timestamp chrome, so their layout box equals their visual card height. */
+[data-turn-id] .timeline-item {
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+/* Clean thin horizontal scrollbars for overflowing Markdown code blocks and
+   tables. In Chromium 121+, setting `scrollbar-width` disables
+   `::-webkit-scrollbar` and falls back to native OS scrollbars (with arrow
+   buttons on Linux X11), so `scrollbar-width` is scoped exclusively to engines
+   without webkit-scrollbar. */
+@supports not selector(::-webkit-scrollbar) {
+  .chat-md pre,
+  .chat-md table {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 42%, transparent) transparent;
+  }
+}
+.chat-md pre::-webkit-scrollbar,
+.chat-md table::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.chat-md pre::-webkit-scrollbar-button,
+.chat-md table::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.chat-md pre::-webkit-scrollbar-track,
+.chat-md table::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px;
+}
+.chat-md pre::-webkit-scrollbar-thumb,
+.chat-md table::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
+  border-radius: 9999px;
+}
+.chat-md pre::-webkit-scrollbar-thumb:hover,
+.chat-md table::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
 }

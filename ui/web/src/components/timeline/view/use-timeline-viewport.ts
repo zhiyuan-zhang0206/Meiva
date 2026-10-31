@@ -5,6 +5,10 @@ import { isAtBottom, type StickyController, type StickyThresholds } from "@/lib/
 
 import { rememberTimelinePosition, watchReadingNavigation } from "../model/reading-position";
 
+function isInsideActivityScroll(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-activity-scroll="true"]') !== null;
+}
+
 export function useTimelineViewport({
   wrapperRef,
   viewportRef,
@@ -108,7 +112,13 @@ export function useTimelineViewport({
     viewport.addEventListener("scrollend", onScrollEnd);
     const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => { holdRestoredPositionRef.current = false; });
 
+    // meiva:note
+    // Wheel and touch gestures inside the fixed-height Live Activity Window
+    // belong exclusively to its inner scrollport and must not disengage the
+    // outer timeline's sticky-bottom controller or pull older history.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
     const onWheel = (e: WheelEvent) => {
+      if (isInsideActivityScroll(e.target)) return;
       if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) holdRestoredPositionRef.current = false;
       if (!e.ctrlKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) controller.handleWheel(e.deltaY, snapshot());
       if (e.deltaY !== 0 && !controller.isSticky() && !isAtBottom(snapshot(), stickyThresholds)) pendingRestoreRef.current = null;
@@ -116,18 +126,32 @@ export function useTimelineViewport({
     };
     viewport.addEventListener("wheel", onWheel, { passive: false });
 
+    let touchInActivityScroll = false;
     const onTouchStart = (e: TouchEvent) => {
+      touchInActivityScroll = isInsideActivityScroll(e.target);
+      if (touchInActivityScroll) return;
       holdRestoredPositionRef.current = false;
       controller.handleTouchStart();
       pullTouchStart(e, viewport);
     };
-    const onTouchMove = (e: TouchEvent) => { pullTouchMove(e, viewport); };
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchInActivityScroll || isInsideActivityScroll(e.target)) return;
+      pullTouchMove(e, viewport);
+    };
 
     const onTouchEnd = () => {
+      if (touchInActivityScroll) {
+        touchInActivityScroll = false;
+        return;
+      }
       controller.handleTouchEnd(snapshot());
       pullTouchEnd();
     };
     const onTouchCancel = () => {
+      if (touchInActivityScroll) {
+        touchInActivityScroll = false;
+        return;
+      }
       controller.handleTouchEnd(snapshot());
       cancelPullTouch();
     };
