@@ -59,26 +59,27 @@ Long histories mount only the viewport plus one viewport of buffer on each side:
 
 After a compact, `display.compact_history_sessions` controls automatic history pages above the new summary: 0 skips them, positive values fetch that many pages, and -1 walks all available pages serially. The store edge and retention hook live in [[ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md|Selected Timeline State]].
 
-## Deep collapse
+## Deep collapse & Live Activity Window
 
-Secondary items (thinking, code, output and the other detail kinds) group into TurnBlocks; Details All/Last/None drives their default expansion, and a turn's pinned expansion map plus opposite-of-default per-item overrides survive default flips and auto-collapse (#510). The classifier and the in-progress peel are in [[ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md|Timeline deep collapse]].
+Secondary items (thinking, code, output and the other detail kinds) group into `TurnBlock`s. Historical turns collapse by default unless Details All is selected (Details All/Last/None drives secondary item defaults, and a turn's pinned expansion map plus opposite-of-default per-item overrides survive default flips and auto-collapse). While `turnActive` is true and the trailing group is a `TurnBlock`, it renders as a fixed-height (`h-56`) independently scrollable **Live Activity Window** (`data-live-activity-window="true"`, using the shared auto-hiding `ScrollArea` scrollbar and feeding its inner detached state into the single outer `ScrollToBottomButton`), preceded by `PendingLiveActivityWindow` immediately after a human prompt before the first work item arrives. The classifier and expansion state are in [[ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md|Timeline deep collapse]].
 
 ## Turn timer
 
-The collapsed turn strip is one fixed-height line: the summary truncates and the SDK-call chips are expanded-only, because a block carrying chips stood up to 38px taller than one without and those strips sit between cards (user report 2026-10-21).
+The collapsed historical turn strip is one fixed-height line: the summary truncates and the SDK-call chips are expanded-only, because a block carrying chips stood up to 38px taller than one without and those strips sit between messages (user report 2026-10-21).
 
-The turn header's timer reads ONE basis in both states — `summarizeTurn.workedMs`, the sum of the turn's block durations — with the live "Working for" adding only the in-flight block's elapsed on top, so it does not drop when the turn ends. Wall-clock across a turn is never displayed: a turn is a maximal run of secondary items and can span an idle gap (a restart, a wake-up the agent had not picked up yet).
+The turn header's timer reads ONE basis in both states — `summarizeTurn.workedMs`, the sum of the turn's block durations — with the active Live Activity Window header ("Working…") displaying `totalWorkedMs` (`workedMs` plus the in-flight block's elapsed) and transitioning cleanly to "Worked for Xs" when the turn completes. Wall-clock across a turn is never displayed: a turn is a maximal run of secondary items and can span an idle gap (a restart, a wake-up the agent had not picked up yet).
 
 ## Column geometry
 
 The scroll surface is full-bleed — the scrollbar sits at the pane edge and the
-gutters scroll — while the item column stays capped (`display.timeline_width_px`)
-and centered inside it. The column clears the floating HeaderBar with 52px
-(44px bar + 8px clearance, derived from `BAR_HEIGHT_PX`; user ruling 2026-08-06)
-so a bar-height change cannot slide the first row underneath it. The composer
-stack lives in normal flow below the surface (user ruling 2026-08-06), leaving
-only a small bottom padding, and shares the same column cap with one
-`undefined`-means-full-width convention on narrow viewports.
+gutters scroll — while the item column stays capped (`display.timeline_width_px`,
+default 800px) and centered inside it. The column clears the floating HeaderBar
+with 52px (44px bar + 8px clearance, derived from `BAR_HEIGHT_PX`; user ruling
+2026-08-06) so a bar-height change cannot slide the first row underneath it. The
+composer stack lives in normal flow below the surface (user ruling 2026-08-06),
+separated from the last message row by `pb-6` + `pt-0.5` (26px) and from the
+bottom viewport edge by `BOTTOM_BAND_CLASS` (`pb-6`), and shares the same column
+cap with one `undefined`-means-full-width convention on narrow viewports.
 
 
 ## Relationship to Other Nodes

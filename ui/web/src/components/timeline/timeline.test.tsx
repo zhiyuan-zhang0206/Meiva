@@ -401,19 +401,19 @@ describe("bounded timeline history (#4702)", () => {
 });
 
 // meiva:note
-// The gap above the composer's rule is the list's share (pb-1) plus the
+// The gap above the composer's rule is the list's share (pb-6) plus the
 // composer's (pt-0.5), and the list's share only reaches the rule because the
 // log keeps a trailing element to hold it — the last row overflows the log
-// instead when that element goes (measured 10px → 4px in the real browser).
+// instead when that element goes.
 // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 describe("the gap above the composer rule", () => {
-  it("keeps the list's share of the gap: pb-1, and a trailing element to hold it", () => {
+  it("keeps the list's share of the gap: pb-6, and a trailing element to hold it", () => {
     render(<TimelineView items={[
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "one" }),
       makeItem({ item_id: "2.0", kind: "agent_chat", payload: "two" }),
     ]} />);
     const log = screen.getByRole("log");
-    expect(log.className).toContain("pb-1");
+    expect(log.className).toContain("pb-6");
     expect(log.className).not.toContain("pb-1.5");
     expect(log.className).toContain("space-y-3");
     expect(log.lastElementChild?.getAttribute("data-virtual-group")).toBeNull();

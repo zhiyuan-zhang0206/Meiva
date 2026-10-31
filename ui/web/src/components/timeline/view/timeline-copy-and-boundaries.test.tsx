@@ -33,6 +33,21 @@ describe("CopyButton feedback state machine", () => {
       timeout: 1500,
     });
   });
+  it("copies human inbound_chat raw body stripped of its envelope header", async () => {
+    const { browser } = render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "inbound_chat",
+            source: "user",
+            payload: "User [2026-05-15]:\n\nhello raw body",
+          }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Copy message"));
+    await waitFor(() => expect(browser.actions.copied).toEqual(["hello raw body"]));
+  });
 });
 
 // meiva:note
@@ -122,11 +137,18 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
     expect(screen.getByTestId("card-toggle")).toBeTruthy();
   });
 
-  it("thinking keeps its timestamp and drops only the button", () => {
+  it("secondary items such as thinking mount neither Copy nor a below-card timestamp", () => {
     const item = makeItem({ kind: "agent_reasoning", payload: "thinking" });
     render(<TimelineView items={[item]} />);
+    expect(screen.queryByTestId("card-chrome")).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /copy/i })).toHaveLength(0);
+  });
+
+  it("a streaming primary reply keeps its timestamp and drops only the button", () => {
+    const item = makeItem({ kind: "agent_chat", payload: "streaming", partial: true });
+    render(<TimelineView items={[item]} />);
     const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
-    expect(stamp.parentElement?.className).toContain("justify-end");
+    expect(stamp.parentElement?.className).toContain("justify-start");
     expect(stamp.parentElement?.querySelectorAll("button")).toHaveLength(0);
   });
 });
@@ -162,10 +184,17 @@ describe("block-level copy actions (hover band)", () => {
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   it("footer is hidden and click-through until the card is hovered or focused", () => {
     render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />,
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "hi" }),
+          makeItem({ item_id: "2.0", kind: "agent_chat", payload: "ok" }),
+        ]}
+      />,
     );
-    const band = screen.getByLabelText("Copy message").parentElement;
-    expect(band?.className).toContain("justify-end");
+    const [humanCopy, agentCopy] = screen.getAllByLabelText("Copy message");
+    expect(humanCopy.parentElement?.className).toContain("justify-end");
+    const band = agentCopy.parentElement;
+    expect(band?.className).toContain("justify-start");
     expect(band?.className).toContain("opacity-0");
     expect(band?.className).toContain("pointer-events-none");
     expect(band?.className).toContain("group-hover/msgcard:opacity-100");

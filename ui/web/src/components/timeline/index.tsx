@@ -143,6 +143,8 @@ export const TimelineView = memo(function TimelineView({
   });
 
   const [atBottom, setAtBottom] = useState(true);
+  const [activityAtBottom, setActivityAtBottom] = useState(true);
+  const [activityScrollSeq, setActivityScrollSeq] = useState(0);
 
   const {
     stuckRafRef,
@@ -258,6 +260,10 @@ export const TimelineView = memo(function TimelineView({
         },
         freshRun,
       );
+      if (freshRun) {
+        setActivityAtBottom(true);
+        setActivityScrollSeq((seq) => seq + 1);
+      }
     },
     [controller],
   );
@@ -472,8 +478,14 @@ export const TimelineView = memo(function TimelineView({
     holdRestoredPositionRef.current = false;
     controller.requestStick();
     setAtBottom(true);
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
-  }, [controller, pendingAnchorRef]);
+    setActivityAtBottom(true);
+    setActivityScrollSeq((seq) => seq + 1);
+    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 1) {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+    } else {
+      pinToBottom(viewport, true);
+    }
+  }, [controller, pendingAnchorRef, pinToBottom]);
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
@@ -494,13 +506,12 @@ export const TimelineView = memo(function TimelineView({
           aria-relevant="additions"
           style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
           // meiva:note
-          // pb-1.5 is the list's half of the gap above the composer's bottom rule
-          // (user ruling 2026-10-29: the 12+8px the list and the composer used to
-          // add up to became 6+4). It is deliberately smaller than the 12px
-          // between items, so the last row sits closer to the rule than rows sit
-          // to each other and the composer reads as attached to the conversation.
+          // pb-6 provides generous breathing room between the last message /
+          // Live Activity Window and the composer's top rule (matching ChatGPT,
+          // Gemini, and Claude web layouts), paired with endRef below so the
+          // padding applies cleanly inside the log container.
           // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
-          className={cn("mx-auto w-full px-2 pb-1 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
+          className={cn("mx-auto w-full px-2 pb-6 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
         >
           {turnAnnouncement ? (
             <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
@@ -518,6 +529,8 @@ export const TimelineView = memo(function TimelineView({
             activeStuckChildId={activeStuckChildId}
             toggleExpanded={toggleExpanded}
             toggleTurn={toggleTurn}
+            onActivityAtBottomChange={setActivityAtBottom}
+            activityScrollSeq={activityScrollSeq}
             groups={groups}
             groupEntries={groupEntries}
             virtualEnabled={virtualEnabled}
@@ -528,7 +541,7 @@ export const TimelineView = memo(function TimelineView({
           <div ref={endRef} />
         </div>
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atBottom && (!turnActive || activityAtBottom)} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
     </div>
   );
 });

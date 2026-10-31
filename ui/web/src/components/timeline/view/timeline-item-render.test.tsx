@@ -6,23 +6,27 @@ vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 afterEach(cleanupTimelineTest);
 describe("ItemView: agent_chat", () => {
-  it("partial=false → does not show 'streaming…' marker", () => {
+  it("partial=false → renders unboxed canvas prose with no streaming marker", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "hello" })]} />,
     );
+    expect(screen.getByTestId("agent-message-prose")).toBeTruthy();
+    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     expect(screen.queryByText(/streaming…/)).toBeNull();
     expect(screen.queryByText(/streaming interrupted/i)).toBeNull();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("hello");
   });
-  it("partial=true → shows 'streaming…' label + ellipsis prefix", () => {
+  it("partial=true → renders normal prose + pulsing streaming cursor without ellipsis prefix", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "in progress", partial: true })]}
       />,
     );
-    expect(screen.getByText(/streaming/)).toBeTruthy();
+    expect(screen.getByTestId("chat-markdown").textContent).toBe("in progress");
+    expect(screen.getByTestId("streaming-cursor")).toBeTruthy();
+    expect(screen.queryByText(/streaming…/)).toBeNull();
   });
-  it("interrupted=true → shows 'streaming interrupted' label + InterruptedNotice", () => {
+  it("interrupted=true → shows InterruptedNotice and drops streaming cursor", () => {
     render(
       <TimelineView
         items={[
@@ -35,7 +39,8 @@ describe("ItemView: agent_chat", () => {
         ]}
       />,
     );
-    expect(screen.getAllByText(/streaming interrupted/i).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
+    expect(screen.getAllByText(/streaming interrupted/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/reconnects resume receiving/)).toBeTruthy();
   });
 });
@@ -267,15 +272,8 @@ describe("toggle chip: summary on expanded items", () => {
   });
 });
 
-describe("ItemView: inbound_chat source-driven color", () => {
-  function getBorderEl(payloadText: string) {
-    revealCollapsedCards();
-    const txt = screen.getByText(payloadText);
-    const accent = txt.closest(".timeline-item")?.querySelector('[data-testid="card-accent"]');
-    if (!accent) throw new Error("no card accent");
-    return accent as HTMLElement;
-  }
-  it("source='agent:5' → violet border (from another agent)", () => {
+describe("ItemView: inbound_chat source-driven rendering", () => {
+  it("source='agent:5' → renders secondary CardHeader 'Agent 5'", () => {
     render(
       <TimelineView
         items={[
@@ -287,10 +285,13 @@ describe("ItemView: inbound_chat source-driven color", () => {
         ]}
       />,
     );
-    expect(getBorderEl("from agent 5").className).toContain("border-violet");
+    revealCollapsedCards();
+    expect(screen.getByText("Agent 5")).toBeTruthy();
+    expect(screen.getByText("from agent 5")).toBeTruthy();
+    expect(screen.queryByTestId("user-message-bubble")).toBeNull();
   });
-  it("source='user' → gray border (frontend user)", () => {
-    render(
+  it("source='user' → renders right-aligned user-message-bubble with no CardHeader", () => {
+    const { container } = render(
       <TimelineView
         items={[
           makeItem({
@@ -301,9 +302,11 @@ describe("ItemView: inbound_chat source-driven color", () => {
         ]}
       />,
     );
-    expect(getBorderEl("from web").className).toContain("border-gray");
+    expect(screen.getByTestId("user-message-bubble").textContent).toBe("from web");
+    expect(container.querySelector('[data-message-role="user"]')).not.toBeNull();
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
   });
-  it("source='kernel' → sky border (system-injected)", () => {
+  it("source='kernel' → renders secondary CardHeader 'System'", () => {
     render(
       <TimelineView
         items={[
@@ -315,9 +318,11 @@ describe("ItemView: inbound_chat source-driven color", () => {
         ]}
       />,
     );
-    expect(getBorderEl("from kernel").className).toContain("border-sky");
+    revealCollapsedCards();
+    expect(screen.getByText("System")).toBeTruthy();
+    expect(screen.getByText("from kernel")).toBeTruthy();
   });
-  it("source=null → sky border (default branch)", () => {
+  it("source=null → renders secondary CardHeader 'System' (default branch)", () => {
     render(
       <TimelineView
         items={[
@@ -325,7 +330,9 @@ describe("ItemView: inbound_chat source-driven color", () => {
         ]}
       />,
     );
-    expect(getBorderEl("no source").className).toContain("border-sky");
+    revealCollapsedCards();
+    expect(screen.getByText("System")).toBeTruthy();
+    expect(screen.getByText("no source")).toBeTruthy();
   });
 });
 
@@ -374,7 +381,7 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
 });
 
 describe("ItemView: inbound_chat envelope split", () => {
-  it("payload contains '<header>\\n\\n<body>' → header and body render separately", () => {
+  it("source='user' strips '<header>\\n\\n' envelope so only the human body renders", () => {
     render(
       <TimelineView
         items={[
@@ -386,7 +393,23 @@ describe("ItemView: inbound_chat envelope split", () => {
         ]}
       />,
     );
-    expect(screen.getByText(/User/)).toBeTruthy();
+    expect(screen.queryByText(/User \[2026-05-15\]/)).toBeNull();
+    expect(screen.getByText("hello world")).toBeTruthy();
+  });
+  it("non-user inbound_chat with '<header>\\n\\n<body>' renders header and body separately", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "inbound_chat",
+            source: "agent:5",
+            payload: "Agent 5 [2026-05-15]:\n\nhello world",
+          }),
+        ]}
+      />,
+    );
+    revealCollapsedCards();
+    expect(screen.getByText(/Agent 5 \[2026-05-15\]/)).toBeTruthy();
     expect(screen.getByText("hello world")).toBeTruthy();
   });
   it("payload without '\\n\\n' → entire payload is body, no header", () => {
@@ -420,9 +443,9 @@ describe("ItemView: code_output", () => {
 });
 
 describe("ItemView: configurable timeline colors (tasks #3304/#3312)", () => {
-  it("a seeded color override drives the rendered marker classes", () => {
+  it("a seeded color override tints the marker header title without vertical accent bars", () => {
     setUserSettings({ "display.color.note": "fuchsia" });
-    render(
+    const { container } = render(
       <TimelineView
         items={[
           makeItem({
@@ -433,8 +456,29 @@ describe("ItemView: configurable timeline colors (tasks #3304/#3312)", () => {
         ]}
       />,
     );
-    const accent = screen.getByText("Note").closest(".timeline-item")?.querySelector('[data-testid="card-accent"]');
-    expect(accent?.className).toContain("border-fuchsia-500/40");
-    expect(accent?.parentElement?.className).toContain("bg-fuchsia-50/40");
+    const labelWrapper = screen.getByText("Note").parentElement;
+    expect(labelWrapper?.className).toContain("text-fuchsia-700");
+    expect(container.querySelector('[data-testid="card-accent"]')).toBeNull();
+  });
+
+  it("renders non-user-facing agent_chat as a collapsible secondary card inside a turn", () => {
+    setToggleState({ detailsMode: "none" });
+    const { container } = render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            user_facing: false,
+            payload: "internal background note",
+          }),
+        ]}
+      />,
+    );
+    expect(container.querySelector('[data-testid="agent-message-prose"]')).toBeNull();
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    const cardToggle = screen.getByTestId("card-toggle");
+    expect(cardToggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(cardToggle);
+    expect(screen.getByText("internal background note")).toBeTruthy();
   });
 });

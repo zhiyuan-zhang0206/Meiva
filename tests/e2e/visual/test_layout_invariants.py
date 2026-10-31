@@ -143,8 +143,8 @@ def test_timeline_scrollbar_hover_reveal(playwright_browser: Browser, frontend_t
         assert page.evaluate("matchMedia('(hover: hover)').matches")
 
         surface = page.locator('[data-testid="timeline-surface"]')
-        viewport = surface.locator('[data-slot="scroll-area-viewport"]')
-        track = surface.locator('[data-slot="scroll-area-scrollbar"]')
+        viewport = surface.locator('[data-slot="scroll-area-viewport"]').first
+        track = surface.locator('[data-slot="scroll-area-scrollbar"]').first
         content = viewport.locator('[role="log"]')
         expect(track).to_be_attached()
         assert viewport.evaluate("el => el.scrollHeight > el.clientHeight")
@@ -485,12 +485,15 @@ def test_pinned_work_detail_seal(
         turn_toggle = turn.locator('[data-testid="turn-toggle"]')
         if turn_toggle.get_attribute("aria-expanded") == "false":
             turn_toggle.click()
+            expect(turn_toggle).to_have_attribute("aria-expanded", "true")
+            page.wait_for_timeout(250)
         row = page.locator('.timeline-item[data-item-id="0.0"]')
         expect(row).to_be_visible()
         header_selector = '.timeline-item[data-item-id="0.0"] [data-testid="card-toggle"]'
         header = page.locator(header_selector)
         if header.get_attribute("aria-expanded") == "false":
             header.click()
+            expect(header).to_have_attribute("aria-expanded", "true")
         row.locator("div").first.evaluate("el => { el.style.minHeight = '1200px'; }")
         row.evaluate("""el => {
           const viewport = el.closest('[data-radix-scroll-area-viewport]');
@@ -508,10 +511,9 @@ def test_pinned_work_detail_seal(
         assert abs(turn_box["y"] - (bar["y"] + bar["height"])) < 0.5
         assert abs(resting["top"] - (turn_box["y"] + turn_box["height"])) < 0.5
         for item_id in ("1.1", "1.2"):
-            primary = page.locator(
-                f'.timeline-item[data-item-id="{item_id}"] [data-testid="card-toggle"]'
-            )
-            assert primary.evaluate("el => getComputedStyle(el).position") not in (
+            primary_row = page.locator(f'.timeline-item[data-item-id="{item_id}"]')
+            assert primary_row.locator('[data-testid="card-toggle"]').count() == 0
+            assert primary_row.evaluate("el => getComputedStyle(el).position") not in (
                 "sticky",
                 "fixed",
             )
@@ -530,12 +532,12 @@ def test_pinned_work_detail_seal(
 # draft and the sidebar footer keeps the resting band, so a grown composer leaves
 # the footer's rule where it was (user report 2026-10-29 replaced the day the
 # footer tracked the composer's published height). The gap above the composer's
-# rule is the list's share plus the composer's. The jsdom half of these contracts
-# is in composer.test.tsx / footer.test.tsx / header-bar.test.tsx — those pin the
-# classes, these measure the pixels.
+# rule is the list's share (`pb-6`, 24px) plus the composer's (`pt-0.5`, 2px).
+# The jsdom half of these contracts is in composer.test.tsx / footer.test.tsx /
+# header-bar.test.tsx — those pin the classes, these measure the pixels.
 # meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 BOTTOM_BAND_VIEWPORTS = [(768, 900), (1024, 900), (1440, 900), (1920, 1080)]
-BOTTOM_RULE_GAP_PX = 6
+BOTTOM_RULE_GAP_PX = 26
 SHELL_ICON_PX = 16
 
 
@@ -599,7 +601,7 @@ def test_bottom_rule_gap_is_halved(
     try:
         viewport = page.locator(
             '[data-testid="timeline-surface"] [data-slot="scroll-area-viewport"]'
-        )
+        ).first
         viewport.evaluate("el => { el.scrollTop = el.scrollHeight; }")
         page.wait_for_timeout(400)
         band_box = page.locator('[data-testid="composer-band"]').bounding_box()
@@ -608,7 +610,7 @@ def test_bottom_rule_gap_is_halved(
         gap = band_box["y"] - (row_box["y"] + row_box["height"])
         assert abs(gap - BOTTOM_RULE_GAP_PX) <= 1, (
             f"gap between the last row and the composer's rule is {gap:.2f}px at {width}px, "
-            f"expected {BOTTOM_RULE_GAP_PX}px +-1 (the timeline's pb-1 plus the composer's "
+            f"expected {BOTTOM_RULE_GAP_PX}px +-1 (the timeline's pb-6 plus the composer's "
             "pt-0.5; a row's own height is fractional, hence the 1px tolerance)"
         )
     finally:

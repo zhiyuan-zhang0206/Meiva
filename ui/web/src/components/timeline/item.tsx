@@ -1,11 +1,12 @@
 "use client";
 
 // meiva:note
-// Per-item body renderer (ItemView) — the content that sits below a card header.
-// The card frame (colored left border, background, the icon + title header, the
-// collapse chevron) is owned by MessageCard + CardHeader in `./card`, and the
-// timestamp/Copy band under the block by `./row`; ItemView renders only the body
-// for each kind, unpadded, so the card body wrapper controls spacing uniformly.
+// Per-item body renderer (ItemView). Human user messages render inside a clean
+// right-aligned bubble (stripping the backend "user [timestamp]:" envelope),
+// Meiva's agent_chat replies render as direct unboxed prose on the canvas, and
+// secondary steps (thinking, code, output, inter-agent messages, notes) render
+// inside collapsible TurnBlocks / the Live Activity Window through `./card` and
+// `./row`.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 //
 // -- Color mapping -- lives entirely in `./card`:messageCardConfig. ItemView
@@ -32,6 +33,7 @@ import { cn } from "@/lib/format/utils";
 import { EphemeralSystemMarker, MarkerBody } from "./markers";
 import { classifyMarker } from "./model/marker-classify";
 import { isLiveReasoning } from "./model/reasoning-clock";
+import { inboundKind } from "./model/runs";
 import { FLEX } from "@/lib/layout/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
@@ -65,13 +67,28 @@ export function streamingParseIntervalMs(payloadLength: number): number {
 // exec/output.py wrap_code_output both follow this). Split out the header as a metadata
 // label and the body as the main content — preserve raw text, only layer
 // visually. Empty header then entire payload is body.
-function splitEnvelope(payload: string): { header: string; body: string } {
+export function splitEnvelope(payload: string): { header: string; body: string } {
   const idx = payload.indexOf("\n\n");
   if (idx > 0 && idx < 200) {
     // Cap header at 200 chars so a long stdout first paragraph is not mistaken for the header
     return { header: payload.slice(0, idx), body: payload.slice(idx + 2) };
   }
   return { header: "", body: payload };
+}
+
+// meiva:note
+// Strip the backend `<header>\n\n` envelope from human user messages so Copy
+// puts only the user's words on the clipboard.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+export function copyPayloadFor(item: BackendTimelineItem): string {
+  if (
+    item.kind === "inbound_chat" &&
+    inboundKind(item.source) === "human" &&
+    !item.impersonation
+  ) {
+    return splitEnvelope(item.payload).body;
+  }
+  return item.payload;
 }
 
 // meiva:note
@@ -254,6 +271,8 @@ function EnvelopeContent({
   images,
   attachMode = false,
   plainMessage = false,
+  hideHeader = false,
+  codeSurface = false,
   markdown = false,
   imageCaptions = null,
 }: {
@@ -265,6 +284,8 @@ function EnvelopeContent({
   attachMode?: boolean;
   /** Impersonation messages store the original body without an envelope. */
   plainMessage?: boolean;
+  hideHeader?: boolean;
+  codeSurface?: boolean;
   /** The body is model-authored Markdown (compact summary, inter-agent message): render it through ChatMarkdown. */
   markdown?: boolean;
   /** Backend caption line per image (1:1 with `images`) — attach items only. */
@@ -274,7 +295,7 @@ function EnvelopeContent({
   const { header, body } = plainMessage ? { header: "", body: payload } : splitEnvelope(payload);
   // An image-only message stores "[image]" as its text placeholder; suppress that
   // literal in the body when real thumbnails render below.
-  const showBody = body && !(images?.length && body === "[image]");
+  const showBody = Boolean(body) && !(images?.length && body === "[image]");
   // Attach items carry data URIs (self.attach media) — those render raw;
   // gateway-relative urls (user uploads) resolve through assetUrl.
   const resolveImageSrc = (src: string) => (src.startsWith("data:") ? src : assetUrl(src));
@@ -293,9 +314,9 @@ function EnvelopeContent({
   }
   return (
     <>
-      {header ? (
-        <div className="mb-1.5">
-          <span className="font-mono text-[13px] leading-relaxed text-foreground/90 [overflow-wrap:anywhere]">
+      {header && !hideHeader ? (
+        <div className="mb-1">
+          <span className="font-mono text-[11px] leading-relaxed text-muted-foreground/75 [overflow-wrap:anywhere]">
             {header}
           </span>
         </div>
@@ -304,13 +325,18 @@ function EnvelopeContent({
         plainMessage || markdown ? (
           <ChatMarkdown content={body} />
         ) : (
-          <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-foreground/90 m-0">
+          <pre
+            className={cn(
+              "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-foreground/85 m-0",
+              codeSurface && "rounded-md border border-border/50 bg-muted/45 dark:bg-black/20 px-2.5 py-2",
+            )}
+          >
             {body}
           </pre>
         )
       ) : null}
       {images?.length ? (
-        <div className={cn("mt-1.5 flex-wrap gap-2", FLEX)}>
+        <div className={cn("mt-2 flex-wrap gap-2", FLEX)}>
           {images.map((src) => (
             <Thumbnail key={src} src={resolveImageSrc(src)} alt={t("attachedImage")} />
           ))}
@@ -327,9 +353,19 @@ function EnvelopeContent({
 function InterruptedNotice() {
   const t = useTranslations("timeline");
   return (
-    <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400 font-mono select-none">
+    <div className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400 font-mono select-none">
       {t("streamingInterrupted")}
     </div>
+  );
+}
+
+function StreamingCursor() {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="streaming-cursor"
+      className="mt-1.5 inline-block size-2 rounded-full bg-foreground/60 animate-pulse motion-reduce:animate-none"
+    />
   );
 }
 
@@ -345,7 +381,7 @@ export const ItemView = memo(function ItemView({
   // streams. The hook is called unconditionally (rules of hooks); `live` is
   // false for every other kind, making it a no-op pass-through.
   const live =
-    (item.kind === "agent_chat" && !!item.partial) ||
+    (item.kind === "agent_chat" && Boolean(item.partial)) ||
     isLiveReasoning(item) ||
     (item.kind === "agent_code" && streaming);
   const streamingPayload = useThrottledStreaming(
@@ -355,15 +391,18 @@ export const ItemView = memo(function ItemView({
   );
 
   switch (item.kind) {
-    case "inbound_chat":
+    case "inbound_chat": {
+      const isHumanUser = inboundKind(item.source) === "human";
       return (
         <EnvelopeContent
           payload={item.payload}
           images={item.images}
-          plainMessage={!!item.impersonation}
+          plainMessage={Boolean(item.impersonation)}
+          hideHeader={isHumanUser && item.source === "user"}
           markdown
         />
       );
+    }
     case "inbound_compact_summary":
       return <EnvelopeContent payload={item.payload} images={item.images} markdown />;
     case "inbound_compact_request":
@@ -384,12 +423,11 @@ export const ItemView = memo(function ItemView({
         <>
           <div
             className={cn(
-              item.partial && "italic opacity-80",
               item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
             )}
           >
-            {item.partial ? <span className="text-muted-foreground">… </span> : null}
             <ChatMarkdown content={streamingPayload} />
+            {item.partial && !item.interrupted ? <StreamingCursor /> : null}
           </div>
           {item.interrupted ? <InterruptedNotice /> : null}
         </>
@@ -400,8 +438,8 @@ export const ItemView = memo(function ItemView({
         <>
           <div
             className={cn(
-              item.partial && "italic opacity-80",
-              item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
+              "rounded-md border border-border/50 bg-muted/45 dark:bg-black/20 px-2.5 py-2",
+              item.interrupted && "border-amber-500/50",
             )}
           >
             {item.source && item.source !== "execute_code" ? (
@@ -421,12 +459,10 @@ export const ItemView = memo(function ItemView({
         <>
           <div
             className={cn(
-              "text-muted-foreground/90",
-              item.partial && "italic opacity-75",
+              "text-[12.5px] leading-relaxed text-muted-foreground/90",
               item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
             )}
           >
-            {item.partial ? <span className="text-muted-foreground">… </span> : null}
             <ChatMarkdown content={streamingPayload} />
           </div>
           {item.interrupted ? <InterruptedNotice /> : null}
@@ -434,7 +470,7 @@ export const ItemView = memo(function ItemView({
       );
 
     case "code_output":
-      return <EnvelopeContent payload={item.payload} />;
+      return <EnvelopeContent payload={item.payload} codeSurface />;
 
     case "system_prompt":
       return (

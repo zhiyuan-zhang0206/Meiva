@@ -240,21 +240,21 @@ describe("useDebouncedSetting", () => {
   it("updates the local value immediately but debounces the PUT", async () => {
     const { gateway, wrapper } = await setupSettingsGateway();
     const { result } = renderHook(
-      () => useDebouncedSetting("display.timeline_width_px", 768, 50),
+      () => useDebouncedSetting("display.timeline_width_px", 800, 50),
       { wrapper },
     );
-    await waitFor(() => expect(result.current[0]).toBe(768));
+    await waitFor(() => expect(result.current[0]).toBe(800));
 
-    act(() => result.current[1](800));
+    act(() => result.current[1](864));
     // Local value is live immediately (for a smooth drag)…
-    expect(result.current[0]).toBe(800);
+    expect(result.current[0]).toBe(864);
     // …but the network write has not fired yet.
     expect(putRequests(gateway)).toEqual([]);
 
     // After the debounce window, exactly one PUT lands with the final value.
     await waitFor(() =>
       expect(putRequests(gateway)).toEqual([
-        { key: "display.timeline_width_px", value: 800 },
+        { key: "display.timeline_width_px", value: 864 },
       ]),
     );
   });
@@ -262,18 +262,18 @@ describe("useDebouncedSetting", () => {
   it("coalesces a rapid burst of changes into one trailing PUT", async () => {
     const { gateway, wrapper } = await setupSettingsGateway();
     const { result } = renderHook(
-      () => useDebouncedSetting("display.timeline_width_px", 768, 50),
+      () => useDebouncedSetting("display.timeline_width_px", 800, 50),
       { wrapper },
     );
-    await waitFor(() => expect(result.current[0]).toBe(768));
+    await waitFor(() => expect(result.current[0]).toBe(800));
 
-    act(() => result.current[1](800));
     act(() => result.current[1](832));
     act(() => result.current[1](864));
+    act(() => result.current[1](896));
 
     await waitFor(() =>
       expect(putRequests(gateway)).toEqual([
-        { key: "display.timeline_width_px", value: 864 },
+        { key: "display.timeline_width_px", value: 896 },
       ]),
     );
   });
@@ -282,10 +282,10 @@ describe("useDebouncedSetting", () => {
     const { gateway, wrapper } = await setupSettingsGateway();
     const { result, unmount } = renderHook(
       // Long delay so the timer never fires on its own — only the unmount flush can.
-      () => useDebouncedSetting("display.timeline_width_px", 768, 10_000),
+      () => useDebouncedSetting("display.timeline_width_px", 800, 10_000),
       { wrapper },
     );
-    await waitFor(() => expect(result.current[0]).toBe(768));
+    await waitFor(() => expect(result.current[0]).toBe(800));
 
     act(() => result.current[1](960));
     expect(putRequests(gateway)).toEqual([]);

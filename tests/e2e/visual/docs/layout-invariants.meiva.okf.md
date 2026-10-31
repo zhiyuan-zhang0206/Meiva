@@ -37,28 +37,29 @@ The frosted pinned-header pane fades between stuck and unstuck, so its ::before 
 
 One more suite drives the same stubbed page for a chrome measurement rather than a
 shell invariant: `test_work_block_chrome.py` opens `stubbed_home.work_block_items()`
-— a human message plus one work block of six expanded children, all stamped — and
-asserts that the last child's timestamp sits inside every ancestor that clips it
-(`overflow` other than visible, or `content-visibility` paint containment), within
-1px. A timeline row pads its bottom by the 12px gap between blocks and hands that
-height back with a negative margin, so a work block's `overflow: clip` collapse
-wrapper has to reserve the same 12px; when it reserved 8px the clip line fell 4px
-inside the last row's chrome band and shaved the bottom of its stamp (user
-2026-10-29). The same file re-asserts the Copy scope — thinking, tool calls and
-tool output carry no copy control in the real DOM, a human message does — since
-the jsdom suite can only see the component tree. Both tests stub `/api/**` and the
-event stream even when `MEIVA_MOBILE_TEST_BASE_URL` points the suite at a deployed
-bundle: they measure that fixture, not the deployment's own data.
+— a primary human message plus one work block of six expanded children — and
+asserts that the primary human message's timestamp sits inside every ancestor that
+clips it (`overflow` other than visible, or `content-visibility` paint containment)
+within 1px, while the work block's child rows mount neither below-card timestamps
+nor copy buttons. A primary `.timeline-item` pads its bottom by 1rem (16px) and
+hands that height back with a negative margin, so its hover chrome band sits
+unclipped inside row containment. The same file re-asserts the Copy scope —
+thinking, tool calls and tool output carry no copy control in the real DOM, a human
+message does — since the jsdom suite can only see the component tree. Both tests
+stub `/api/**` and the event stream even when `MEIVA_MOBILE_TEST_BASE_URL` points
+the suite at a deployed bundle: they measure that fixture, not the deployment's own
+data.
 
 Suite entry points and CI integration: [[tests/docs/tests.meiva.okf.md]].
 
-## The bottom band's two contracts (user ruling 2026-10-29)
+## The bottom band's two contracts (user ruling 2026-10-29 & 2026-10-31)
 
 `test_bottom_rule_is_one_line`, `test_bottom_rule_gap_is_halved` and
 `test_shell_icon_size_is_uniform` measure the strip every home column ends with.
 Both columns are bottom-anchored, so the sidebar footer's rule and the composer's
 rule can only be one line if both bands are composed the same way — the code
-shares `BOTTOM_BAND_CLASS` / `BOTTOM_BAND_ROW_CLASS` with the composer. They are
+shares `BOTTOM_BAND_CLASS` / `BOTTOM_BAND_ROW_CLASS` (`73px` resting height with
+`pt-3 pb-6`) with the composer. They are
 one line at rest and only at rest: the composer's band is content-sized and its
 rule rises with a multi-line draft, while the footer keeps the resting band and
 follows no other column's geometry. The composer published its height as
@@ -75,9 +76,9 @@ column; one CSS px is still the smallest separation two *distinct* painted lines
 can have, so the 16px drift this rule replaced fails while device rounding passes.
 
 The gap above the rule is one measurement made of two halves — the timeline
-column's `pb-1` and the composer's `pt-0.5`, 6px together — asserted at 390, 768
-and 1440 because neither class is breakpoint-dependent; a breakpoint that grows
-its own padding would fail here instead of drifting silently.
+column's `pb-6` (24px) and the composer's `pt-0.5` (2px), 26px together — asserted
+at 390, 768 and 1440 because neither class is breakpoint-dependent; a breakpoint
+that grows its own padding would fail here instead of drifting silently.
 
 ## A streaming turn leaves the bottom rule still (task #5837)
 

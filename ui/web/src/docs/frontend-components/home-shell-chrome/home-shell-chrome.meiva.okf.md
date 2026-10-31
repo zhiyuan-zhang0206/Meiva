@@ -36,14 +36,14 @@ model
 
 ## The bottom band
 
-Every home column ends with the same band: a 1px rule, 8px, one 36px control row,
-12px (`BOTTOM_BAND_CLASS` + `BOTTOM_BAND_ROW_CLASS`, `BOTTOM_BAND_HEIGHT_PX` in
-`lib/layout/primitives/bars.ts`). The sidebar footer and the composer both draw
-it, so their rules are one horizontal line across the bottom of the screen
-(user ruling 2026-10-29 — before it, each column tuned its own padding and the
-sidebar's rule sat 16px below the composer's: 41px against 57px of band). The
-bands are bottom-anchored, so equal band heights are what make the rules equal;
-a column may not compose its own padding for this row.
+Every home column ends with the same band: a 1px rule, 12px (`pt-3`), one 36px
+control row, 24px (`pb-6`) — 73px in all (`BOTTOM_BAND_CLASS` +
+`BOTTOM_BAND_ROW_CLASS`, `BOTTOM_BAND_HEIGHT_PX` in
+`lib/layout/primitives/bars.ts`), giving the composer comfortable bottom
+viewport clearance while keeping the sidebar footer and the composer on one
+horizontal line across the bottom of the screen (user ruling 2026-10-29 &
+2026-10-31). The bands are bottom-anchored, so equal band heights are what make
+the rules equal; a column may not compose its own padding for this row.
 
 The composer's band is content-sized: a multi-line draft, the context-meter row
 or an upload hint grows it upward, so its rule rises with them. The sidebar
@@ -53,13 +53,12 @@ report 2026-10-29 replaced the day the footer tracked the composer's published
 height).
 
 Above the rule, the gap between the last message row and the line is split
-between the list (`pb-1`, 4px) and the composer (`pt-0.5`, 2px) — 6px in all.
-The 2026-10-29 ruling set it at 10px (`pb-1.5` + `pt-1`, down from 20.5px); the
-user read that line as too airy the same day. The list's share reaches the rule
+between the list (`pb-6`, 24px) and the composer (`pt-0.5`, 2px) — 26px in all,
+giving the final agent message or Live Activity Window clear breathing room
+above the input bar (user ruling 2026-10-31). The list's share reaches the rule
 only through the log's trailing `<div>`: without it the last row overflows the
-log by exactly that padding and the gap drops to the composer's share alone
-(measured 10px → 4px at 1440×900), so the element stays although its ref is
-never read.
+log and the gap collapses to the composer's share alone, so the element stays
+although its ref is never read.
 
 ## Icon size
 

@@ -1,16 +1,19 @@
 "use client";
 
 // meiva:note
-// Unified message-card system for the timeline. Every timeline item renders as a MessageCard: a colored left-border box with a clickable CardHeader (chevron + icon + title/summary) and a collapsible body below it, plus a hover footer under the box that carries the item timestamp and Copy.
+// Per-kind metadata and secondary step shell for the timeline. Primary messages
+// (human inbound_chat and agent_chat) render directly in TimelineRow as a
+// right-aligned user bubble and unboxed canvas Markdown prose respectively,
+// while secondary work items inside TurnBlocks / the Live Activity Window render
+// through borderless MessageCard + CardHeader (chevron + icon + title/summary).
 //
-// messageCardConfig(item, colors) is the single source of the per-kind visual mapping — icon, title, border/background color (color families resolved from @/lib/timeline-colors; user-configurable via Display settings), which global toggle governs its default expanded state, and whether the card stamps a timestamp in its hover footer. It returns null for the ephemeral system markers (compact_done / cancelled / error / unrecognized), which render bare (no card, not collapsible) through their own renderers.
+// messageCardConfig(item, colors) is the single source of the per-kind visual mapping — icon, title, color family (resolved from @/lib/timeline-colors; user-configurable via Display settings), which global toggle governs its default expanded state, and whether the item offers timestamp / Copy chrome. It returns null for the ephemeral system markers (compact_done / cancelled / error / unrecognized), which render bare (no card, not collapsible) through their own renderers.
 //
 // Four kinds carry a rich, dynamic header summary instead of a static title — Thinking ("Thought for 8s"), Code (the SDK call histogram), Output ("ran in 1s"), and the System prompt line count. Those summaries own their own icon and live/error coloring, so the header renders the Summary component for them and a plain icon + title for every other kind.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 
 import {
   Bot,
-  ChevronDown,
   ChevronRight,
   FileText,
   Info,
@@ -119,11 +122,10 @@ export function messageCardConfig(
         rich: "code",
         icon: toolCallIcon(item.source),
         title: null,
-        // Deeper border than agent_chat — the tool call is the load-bearing action.
         border: colors.agent_code.border,
-        bg: "bg-card",
+        bg: colors.agent_code.bg ?? "bg-muted/35 dark:bg-white/[0.03]",
         fixedDefault: false,
-        showTimestamp: true,
+        showTimestamp: false,
         copy: false,
       };
     case "code_output":
@@ -146,7 +148,7 @@ export function messageCardConfig(
         titleKey: `timeline.${chatTitle.titleKey}`,
         titleValues: chatTitle.titleValues,
         border: colors.agent_chat.border,
-        bg: "bg-card",
+        bg: "",
         fixedDefault: item.user_facing !== false,
         showTimestamp: true,
         copy: true,
@@ -321,44 +323,35 @@ export const UNSTUCK_HEADER_CLS =
   "before:bg-transparent before:backdrop-blur-none";
 
 // meiva:note
-// The hover chrome (timestamp, Copy) lives in the gap BELOW a block, not on the
-// block: it reads as a separator between two messages instead of eating the
-// card's own bottom padding (user 2026-10-21). `.timeline-item` owns that gap —
-// it pads its bottom by the same 12px the row list already separates rows by and
-// gives the height back as a negative margin (globals.css), so block-to-block
-// spacing is unchanged and the band is drawn inside the row rather than past it,
-// where content-visibility paint containment would clip it. A reserved line
-// existed once and made the gap depend on which kinds stamped a time; this band
-// costs no layout height at rest. Invisible and click-through until the pointer
-// hovers the block, focus enters it, or a touch reveals it for a few seconds
-// (`TimelineRow` adds that class: a coarse pointer has no hover to gate on, and
-// leaving it painted put a time and Copy under every message for good).
+// The hover chrome (timestamp, Copy) lives in the gap BELOW a primary message
+// block, not on the block: it reads as a separator between two messages instead
+// of eating the message's own bottom padding (user 2026-10-21). `.timeline-item`
+// owns that gap — it pads its bottom by 1rem (16px) and gives the height back as
+// a negative margin (globals.css), so the 12px chrome band sits symmetrically in
+// the 20px block-to-block whitespace without being clipped by content-visibility
+// paint containment. Right-aligned under user bubbles (`CARD_FOOTER_CLS`) and
+// left-aligned under agent prose (`CARD_FOOTER_LEFT_CLS`). Invisible and click-
+// through until the pointer hovers the block, focus enters it, or a touch
+// reveals it for a few seconds (`TimelineRow`).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-export const CARD_FOOTER_CLS = cn(
-  "absolute right-2 bottom-0 h-3 items-center justify-end gap-1 sm:right-3",
-  "pointer-events-none opacity-0 transition-opacity motion-reduce:transition-none",
+const FOOTER_BASE_CLS = cn(
+  "absolute bottom-0 h-3 items-center gap-1.5",
+  "pointer-events-none opacity-0 transition-opacity duration-150 motion-reduce:transition-none",
   "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
   "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
   FLEX,
 );
 
+export const CARD_FOOTER_CLS = cn(FOOTER_BASE_CLS, "right-1 justify-end sm:right-1.5");
+export const CARD_FOOTER_LEFT_CLS = cn(FOOTER_BASE_CLS, "left-0 justify-start");
+
 export function MessageCard({
-  config,
   children,
 }: {
-  config: CardConfig;
+  config?: CardConfig;
   children: ReactNode;
 }) {
-  return (
-    <div className={cn("relative rounded-r-sm", config.bg, config.cardText)}>
-      <span
-        aria-hidden
-        data-testid="card-accent"
-        className={cn("pointer-events-none absolute top-0 left-0 h-7 w-0 rounded-full border-l-2", config.border)}
-      />
-      {children}
-    </div>
-  );
+  return <div className="relative rounded-md">{children}</div>;
 }
 
 // The clickable card header — always visible, toggles the body below it. Renders
@@ -437,7 +430,7 @@ export const CardHeader = memo(function CardHeader({
       onFocus={() => void highlighter.preload()}
       className={cn(
         HEADER_CLS,
-        "flex-wrap",
+        "flex-wrap rounded-md px-1.5 py-1",
         sticky && stickyCls,
         sticky && (isStuck ? STUCK_HEADER_CLS : UNSTUCK_HEADER_CLS),
       )}
@@ -446,16 +439,17 @@ export const CardHeader = memo(function CardHeader({
       data-expanded={expanded}
       data-stuck={sticky && isStuck ? "true" : "false"}
     >
-      {expanded ? (
-        <ChevronDown className="size-3 shrink-0 opacity-60" />
-      ) : (
-        <ChevronRight className="size-3 shrink-0 opacity-60" />
-      )}
+      <ChevronRight
+        className={cn(
+          "size-3 shrink-0 opacity-55 transition-transform duration-150 motion-reduce:transition-none",
+          expanded && "rotate-90",
+        )}
+      />
       {config.rich ? (
         <Summary item={item} payload={summaryPayload} now={now} live={live} />
       ) : (
         <span className={cn("items-center gap-1.5", config.titleClass, FLEX, MIN_W_0)}>
-          {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
+          {Icon ? <Icon className="size-3.5 shrink-0 opacity-80" /> : null}
           <span className="truncate">{cardTitle(config, t)}</span>
         </span>
       )}

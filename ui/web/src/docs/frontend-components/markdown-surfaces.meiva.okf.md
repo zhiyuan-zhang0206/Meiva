@@ -13,7 +13,7 @@ Text written as Markdown by a model or an author renders through the one `ChatMa
 - To user: root and linked Markdown documents, with their raw HTML rendered
   through the shared allowlist and local references resolved through the
   authenticated document resource API.
-- Timeline: agent replies, reasoning, compact summaries, inter-agent `inbound_chat` bodies, impersonation messages, and the memory marker family (`memory` / `agent_memory` / `inherited_memory`).
+- Timeline: agent replies, human and inter-agent `inbound_chat` bodies, reasoning, compact summaries, system prompts, impersonation messages, and system markers (`memory` / `agent_memory` / `inherited_memory` and guidance notes).
 - Open-notice and fleet-inbox content, memory-note bodies, and task descriptions / results (task graph hover card, kanban row).
 
 Notice titles and question option labels/descriptions use the same renderer in
@@ -33,4 +33,4 @@ The renderer arrives through the same chunk seam as the code highlighter
 supplies its own chunk with a fake renderer instead of swapping the module's
 import.
 
-Verbatim monospace `pre` stays for content that is not Markdown prose: human messages, command output, attach captions, compact requests, the system prompt, guidance-note markers, logs, JSON and code.
+Verbatim monospace `pre` stays for content that is not Markdown prose: command output, system-generated `inbound_chat` bodies, attach captions, compact requests, lifecycle markers, logs, JSON and code.

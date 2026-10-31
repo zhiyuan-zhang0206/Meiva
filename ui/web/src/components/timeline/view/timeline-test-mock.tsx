@@ -99,15 +99,30 @@ export function ScrollAreaMock({
   children,
   className,
   viewportClassName,
+  viewportRef,
+  viewportTestId,
+  onScrollCapture,
+  ...rest
 }: {
   children: React.ReactNode;
   className?: string;
   viewportClassName?: string;
+  viewportRef?: React.Ref<HTMLDivElement>;
+  viewportTestId?: string;
+  onScrollCapture?: React.UIEventHandler<HTMLDivElement>;
+  "data-activity-scroll"?: string;
 }) {
+  const isActivity = rest["data-activity-scroll"] === "true";
   return (
-    <div data-testid="scroll-area" className={className}>
+    <div
+      data-testid={isActivity ? "activity-scroll-area" : "scroll-area"}
+      data-activity-scroll={rest["data-activity-scroll"]}
+      onScrollCapture={onScrollCapture}
+      className={className}
+    >
       <div
-        data-testid="scroll-viewport"
+        ref={viewportRef}
+        data-testid={viewportTestId ?? (isActivity ? "activity-scroll-viewport" : "scroll-viewport")}
         data-slot="scroll-area-viewport"
         className={viewportClassName}
       >
@@ -210,6 +225,7 @@ export function makeItem(
     created_at: "created_at" in overrides ? (overrides.created_at ?? null) : "2026-05-15T12:00:00Z",
     inbound_id: overrides.inbound_id ?? null,
     show_timestamp: overrides.show_timestamp ?? true,
+    user_facing: overrides.user_facing,
     partial: overrides.partial,
     interrupted: overrides.interrupted,
     reasoning_ms: overrides.reasoning_ms,

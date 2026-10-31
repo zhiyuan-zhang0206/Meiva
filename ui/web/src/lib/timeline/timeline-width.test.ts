@@ -37,7 +37,7 @@ describe("clampTimelineWidthPx", () => {
 
 describe("timelineMaxWidthCss", () => {
   it("renders a pixel max-width for the default width", () => {
-    expect(timelineMaxWidthCss(768)).toBe("768px");
+    expect(timelineMaxWidthCss(800)).toBe("800px");
   });
 
   it("renders the configured pixel ceiling", () => {
@@ -50,6 +50,6 @@ describe("timelineMaxWidthCss", () => {
   });
 
   it("falls back to the default pixel width for a missing value", () => {
-    expect(timelineMaxWidthCss(undefined)).toBe("768px");
+    expect(timelineMaxWidthCss(undefined)).toBe("800px");
   });
 });

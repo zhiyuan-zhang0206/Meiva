@@ -244,7 +244,7 @@ describe("MessageCard", () => {
     copy: false,
   };
 
-  it("marks the kind with a short accent at the header, not a full-height frame", () => {
+  it("renders a borderless secondary item wrapper with no vertical accent bar", () => {
     const { container } = render(
       <MessageCard config={cfg}>
         <div data-testid="child">hello</div>
@@ -252,28 +252,24 @@ describe("MessageCard", () => {
     );
     const frame = container.firstElementChild;
     expect(frame?.className).not.toContain("border-l-2");
-    const accent = frame?.querySelector('[data-testid="card-accent"]');
-    expect(accent?.className).toContain("border-l-2");
-    expect(accent?.className).toContain("border-red-500");
-    expect(accent?.className).toContain("h-7");
+    expect(frame?.querySelector('[data-testid="card-accent"]')).toBeNull();
   });
 
   // meiva:note
-  // The card box is only the box: the timestamp/Copy band belongs to the row, in
-  // the gap below the block (user 2026-10-21), so a card can never mount chrome of
-  // its own and a kind that stamps nothing cannot carry an empty band. The band's
-  // placement and its hover reveal are asserted at the TimelineView level.
+  // MessageCard is only the borderless secondary container: any hover chrome
+  // belongs to TimelineRow, so MessageCard never mounts group/msgcard or extra
+  // sibling chrome elements of its own.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  it("renders the box alone — the hover band belongs to the row, not the card", () => {
+  it("renders the container alone — hover chrome belongs to the row, not the card", () => {
     const { container } = render(
       <MessageCard config={cfg}>
         <div data-testid="child">hello</div>
       </MessageCard>,
     );
     const frame = container.firstElementChild;
-    expect(frame?.className).toContain("bg-red-50");
+    expect(frame?.className).toContain("relative");
     expect(frame?.className).not.toContain("group/msgcard");
-    expect(frame?.children).toHaveLength(2);
+    expect(frame?.children).toHaveLength(1);
   });
 });
 

@@ -306,7 +306,7 @@ describe("Composer button mode dispatch", () => {
     const band = screen.getByTestId("composer-band");
     expect(band.className).toContain(BOTTOM_BAND_CLASS);
     expect(band.className.split(" ")).toContain("border-t");
-    expect(band.className).toContain("pb-3");
+    expect(band.className).toContain("pb-6");
     const row = screen.getByTestId("composer-send").parentElement!;
     expect(row.className).toContain(BOTTOM_BAND_ROW_CLASS);
   });
