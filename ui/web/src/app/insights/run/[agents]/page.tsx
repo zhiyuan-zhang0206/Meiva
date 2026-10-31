@@ -15,6 +15,7 @@ import { LinkGroupDetail } from "@/components/run-timeline/run-timeline-link-gro
 import { LINK_KINDS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/links/resolve";
 import { MAX_ARROWS } from "@/components/run-timeline/model/links/cluster";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
+import type { CanvasContextFactory } from "@/components/run-timeline/canvas/run-timeline-canvas";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { useViewport } from "@/components/run-timeline/viewport/use-viewport";
 import { viewportStore, type ViewportStore } from "@/components/run-timeline/viewport/viewport-store";
@@ -47,7 +48,18 @@ const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 // meiva:note
 // The URL preserves agents in addition order without duplicates and the last agent cannot be removed. Message indices belong to their snapshot: replacing it invalidates the selection before effects run. Block selection and arrow selection exclude each other. The context card follows only the selected agent and message/node, independently of the viewport. The page owns legend highlighting so zoom and pan retain it.
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
-export default function AgentViewPage({ params }: { params: Promise<{ agents: string }> }) {
+// meiva:note
+// `createContext` is the canvases' drawing surface, handed down to `RunTimelineRows`: a route test
+// passes a recording context so it can read what was painted, and the app leaves it out so the
+// canvases use the page's own `getContext("2d")`.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+export default function AgentViewPage({
+  params,
+  createContext,
+}: {
+  params: Promise<{ agents: string }>;
+  createContext?: CanvasContextFactory;
+}) {
   const client = useApi();
   const t = useTranslations("runTimeline");
 
@@ -313,6 +325,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
             ))}
           </div>
           <RunTimelineRows
+            createContext={createContext}
             entries={entries}
             base={base}
             store={store}

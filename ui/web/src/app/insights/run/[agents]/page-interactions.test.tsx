@@ -16,7 +16,7 @@ const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTim
     getAgentRoster: vi.fn(),
   }));
 
-import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
+import { clickAt, drawn, itemX, leave, look, recordingCanvasContext, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
 import RunTimelinePage from "./page";
 import Loading from "./loading";
 import { cbdFixture, lifetimeResponse, measureTheChart, messagesResponse } from "./run-timeline-test-mock";
@@ -40,7 +40,7 @@ function renderPage({ contextSize = true }: { contextSize?: boolean } = {}) {
     <WallClockProvider wallNow={wallNow}>
       <BrowserProvider browser={fakeBrowser()}>
       <QueryClientProvider client={queryClient}>
-        <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
+        <RunTimelinePage params={Promise.resolve({ agents: "42" })} createContext={recordingCanvasContext} />
       </QueryClientProvider>
       </BrowserProvider>
     </WallClockProvider>,
@@ -75,7 +75,6 @@ const lookOf = async (item: Item) => {
 const faded = async (item: Item) => (await lookOf(item)).faded;
 const ringOf = async (item: Item) => (await lookOf(item)).ring;
 beforeEach(() => {
-  mockCanvas();
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });

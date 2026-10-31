@@ -24,7 +24,7 @@ import { MAX_ARROWS } from "./model/links/cluster";
 import { barTop } from "./model/timeline-canvas-model";
 import { frameOf, type RowLayout } from "./model/timeline-canvas-hit";
 import { RunTimelineAxis } from "./canvas/run-timeline-axis";
-import { TrackCanvas } from "./canvas/run-timeline-canvas";
+import { TrackCanvas, type CanvasContextFactory } from "./canvas/run-timeline-canvas";
 import { rowPaintKey, useThemeEpoch } from "./canvas/paint-key";
 import { countRender } from "./model/render-stats";
 import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco, type UnitHeights } from "./canvas/run-timeline-paint";
@@ -71,6 +71,7 @@ export function RunTimelineRows({
   linkKeys,
   onSelectLinks,
   maxArrows = MAX_ARROWS,
+  createContext,
 }: {
 
   entries: readonly AgentEntry[];
@@ -91,6 +92,11 @@ export function RunTimelineRows({
   onRetry: (agent: number) => void;
 
   links: readonly ResolvedLink[];
+
+  // meiva:note
+  // How the two canvases obtain their drawing surface; omitted, each uses the page's own
+  // `getContext("2d")`. A test that reads what was painted hands in a recording context.
+  createContext?: CanvasContextFactory;
 
   showUser: boolean;
   onShowUser: (on: boolean) => void;
@@ -297,6 +303,7 @@ export function RunTimelineRows({
       axis={axis}
       width={trackPx}
       height={height}
+      createContext={createContext}
       paint={paint}
       paintKey={(layout) =>
         rowPaintKey({
@@ -409,6 +416,7 @@ export function RunTimelineRows({
         store={store}
         maxArrows={maxArrows}
         geometryKey={`${theme}:${trackPx}:${loaded.map(({ id, data }) => `${id}@${data.snapshot}`).join(",")}`}
+        createContext={createContext}
         hitRef={hitRef}
       />
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">

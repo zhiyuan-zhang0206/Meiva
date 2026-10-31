@@ -11,7 +11,8 @@ import { LINK_KINDS } from "./model/links/resolve";
 import { ALL_ROWS } from "./model/timeline-nav-rows";
 import { runTimelineStats } from "./model/render-stats";
 import { viewportStore, type ViewportStore } from "./viewport/viewport-store";
-import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-canvas-test-mock";
+import type { CanvasContextFactory } from "./canvas/run-timeline-canvas";
+import { clickAt, drawn, leave, recordingCanvasContext, paintFrame, pointAt } from "./canvas/run-timeline-canvas-test-mock";
 import type { Selection } from "./model/timeline-model-selection";
 import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -27,7 +28,6 @@ function render(ui: React.ReactElement) {
   return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
 
-beforeEach(mockCanvas);
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -80,10 +80,12 @@ function renderRows(
   selection: Selection | null = null,
   heights: UnitHeights = "equal",
   store: ViewportStore = viewportStore(BASE),
+  createContext: CanvasContextFactory | null = recordingCanvasContext,
 ) {
   const onSelect = vi.fn();
   render(
     <RunTimelineRows
+      createContext={createContext ?? undefined}
       entries={ENTRIES(data)}
       base={BASE}
       store={store}
@@ -117,6 +119,17 @@ const linkedFrames = (row: string) => drawn(row).filter((d) => d.op === "stroke"
 const texts = (row: string) => drawn(row).filter((d) => d.op === "text").map((d) => d.text);
 
 describe("RunTimelineRows canvas rows", () => {
+  // meiva:note
+  // Omitted, the canvases take the page's own surface: jsdom's `getContext("2d")` answers null, so
+  // nothing is painted — while every other test here, which hands the recording factory in, paints.
+  // A default bound to a fake ahead of time would draw in exactly this case.
+  it("paints nothing when no context factory is handed in", async () => {
+    renderRows({ nodes: [node("a", 0, 500)], units: [unit("text", 0, 0, 100)] }, null, "equal", viewportStore(BASE), null);
+    await paintFrame();
+    expect(drawn("level-1")).toEqual([]);
+    expect(drawn("units")).toEqual([]);
+  });
+
   it("draws rows on canvases, not a block element per item", async () => {
     renderRows({ nodes: [node("a", 0, 500)], units: [unit("text", 0, 0, 100)] });
     await paintFrame();

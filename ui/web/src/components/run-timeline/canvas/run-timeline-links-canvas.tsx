@@ -17,6 +17,7 @@ import { useColorResolver } from "./resolve-color";
 import type { AxisMap } from "../model/timeline-model-axis";
 import type { ViewportStore } from "../viewport/viewport-store";
 import { useViewport } from "../viewport/use-viewport";
+import { systemCanvasContext, type CanvasContextFactory } from "./run-timeline-canvas";
 
 const ROW_TESTID = { units: "run-timeline-row-units", user: "run-timeline-row-user", other: "run-timeline-row-other" } as const;
 const HEAD_PX = 7;
@@ -102,6 +103,7 @@ export function LinksCanvas({
   maxArrows,
   geometryKey,
   hitRef,
+  createContext = systemCanvasContext,
 }: {
   /** The arrows to draw (the kinds that are switched on). */
   links: readonly ResolvedLink[];
@@ -112,6 +114,7 @@ export function LinksCanvas({
   store: ViewportStore;
   maxArrows: number;
   geometryKey: string;
+  createContext?: CanvasContextFactory;
   hitRef: RefObject<LinkHit>;
 }) {
   const view = useViewport(store);
@@ -124,7 +127,7 @@ export function LinksCanvas({
 
   useEffect(() => {
     const el = canvas.current;
-    const ctx = el?.getContext("2d") ?? null;
+    const ctx = el === null ? null : createContext(el);
     if (el === null || ctx === null) return;
     const last = painted.current;
     if (

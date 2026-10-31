@@ -18,7 +18,7 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
   }));
 
 import AgentViewPage from "./page";
-import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
+import { drawn, itemX, recordingCanvasContext, paintFrame, clickAt } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
 import { viewportOf } from "@/components/run-timeline/model/timeline-model-viewport";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -93,7 +93,7 @@ function renderAgentView(agents = "7", { contextSize = true }: { contextSize?: b
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = renderWithBrowser(
     <QueryClientProvider client={queryClient}>
-      <AgentViewPage params={Promise.resolve({ agents })} />
+      <AgentViewPage params={Promise.resolve({ agents })} createContext={recordingCanvasContext} />
     </QueryClientProvider>,
   );
   if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
@@ -101,7 +101,6 @@ function renderAgentView(agents = "7", { contextSize = true }: { contextSize?: b
 }
 
 beforeEach(() => {
-  mockCanvas();
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });

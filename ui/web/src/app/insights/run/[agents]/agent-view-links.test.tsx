@@ -18,7 +18,7 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
   }));
 
 import AgentViewPage from "./page";
-import { drawnLinks, itemX, mockCanvas, paintFrame } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
+import { drawnLinks, itemX, recordingCanvasContext, paintFrame } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
 import { curveOf, curvePoint } from "@/components/run-timeline/model/links/geometry";
 import { MAX_ARROWS } from "@/components/run-timeline/model/links/cluster";
 import { LINK_COLORS } from "@/components/run-timeline/model/links/resolve";
@@ -71,7 +71,7 @@ function renderAgentView(agents = "7", { contextSize = true }: { contextSize?: b
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = renderWithBrowser(
     <QueryClientProvider client={queryClient}>
-      <AgentViewPage params={Promise.resolve({ agents })} />
+      <AgentViewPage params={Promise.resolve({ agents })} createContext={recordingCanvasContext} />
     </QueryClientProvider>,
   );
   if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
@@ -79,7 +79,6 @@ function renderAgentView(agents = "7", { contextSize = true }: { contextSize?: b
 }
 
 beforeEach(() => {
-  mockCanvas();
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });

@@ -2,10 +2,9 @@ exports = ["paint-key.ts", "resolve-color.ts", "run-timeline-axis.tsx", "run-tim
 
 [uses]
 "paint-key.test.ts" = ["paint-key.ts", "run-timeline-paint.ts"]
+"run-timeline-canvas-context.test.ts" = ["run-timeline-canvas.tsx"]
 "paint-key.ts" = ["run-timeline-paint.ts"]
 "resolve-color.ts" = ["run-timeline-paint.ts"]
+"run-timeline-canvas-test-mock.ts" = ["run-timeline-canvas.tsx"]
 "run-timeline-canvas.tsx" = ["resolve-color.ts", "run-timeline-paint.ts"]
-"run-timeline-links-canvas.tsx" = ["resolve-color.ts"]
-
-[debt.stdlib-patch]
-"run-timeline-canvas-test-mock.ts#vi.spyOn HTMLCanvasElement.prototype.getContext" = 1
+"run-timeline-links-canvas.tsx" = ["resolve-color.ts", "run-timeline-canvas.tsx"]
