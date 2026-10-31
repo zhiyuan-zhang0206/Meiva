@@ -14,7 +14,9 @@ from scripts.hooks.diff_checks import (
     Selection,
     build_receipt,
     check,
+    child_environment,
     plan,
+    run_child,
 )
 
 
@@ -386,3 +388,23 @@ def test_the_app_tree_parser_reads_a_coloured_summary() -> None:
 
     assert failed is False
     assert values["vitest-app"] == "ok(331tests)(6s)"
+
+
+# meiva:note
+# A judged child runs in the contract CI gives it, not in the operator's shell: a `MEIVA_*` the
+# launcher exported must not reach it (the suite drops those keys mid-session and then reds about
+# the environment it started from — #5907), while everything that locates this box's tools must,
+# because CI's paths do not exist here. The child here is `env`, so the assertion reads the
+# environment the child actually received, not one this process happens to share with it.
+def test_a_judged_child_loses_the_callers_product_namespace_and_keeps_its_toolchain(
+    tmp_path: Path,
+) -> None:
+    caller = {"PATH": "/usr/bin:/bin", "TOOLCHAIN_LEAK_PROBE": "kept", "MEIVA_LEAK_PROBE": "1"}
+
+    code, output, _ = run_child(("env",), tmp_path, environment=child_environment(caller))
+
+    assert code == 0
+    assert set(output.splitlines()) == {"PATH=/usr/bin:/bin", "TOOLCHAIN_LEAK_PROBE=kept"}
+    assert child_environment({"MEIVA_HOME": "/operator/home", "HOME": "/operator/home"}) == {
+        "HOME": "/operator/home"
+    }, "one rule cuts the product namespace; an allowlist of toolchain names would be a second"

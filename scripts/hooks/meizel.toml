@@ -6,3 +6,6 @@ exports = ["diff_checks.py", "diff_checks_receipt.py", "tests"]
 
 [loads]
 "audit_merge_receipts.py" = ["scripts/hooks"]
+
+[roots]
+"diff_checks.py" = { kinds = ["environ"], why = "receipt entry point composes what each judged child inherits: it reads the launcher's environment once in main() and hands every child the CI contract (that environment minus MEIVA_*), because a child that inherits the operator's shell reports the shell's state as if it were the change's (#5907)" }
