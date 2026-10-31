@@ -14,8 +14,8 @@ and the reads behind them in
 
 **Open run timeline row.** The top entry is a link to `/insights/run/{agentId}`
 that wears the same row chrome as the Page section's rows — the rounded
-`bg-sidebar-accent/40` block, a leading external-link icon that brightens on
-hover, and the hover highlight — so the panel's clickable rows read as one
+`bg-sidebar-accent/40` (`dark:bg-[#2a2926]`) block, a leading external-link icon that brightens on
+hover, `11.5px` monospace values in anti-glare `#f0ede7` on dark surfaces, and the hover highlight — so the panel's clickable rows and `Metric` cells read as one
 family. The panel's amber stale dot renders at its end — it marks
 "live refresh is failing" only when a snapshot is already displayed
 (stale-while-error); a cold failure gets the full error message in the body

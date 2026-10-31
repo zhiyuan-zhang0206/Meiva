@@ -51,12 +51,12 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
             <Link
               href={fleetTaskHref(task.id)}
               className={cn(
-                "items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1 text-[11px] hover:bg-sidebar-accent",
+                "items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 text-[11.5px] leading-[17px] hover:bg-sidebar-accent",
                 FLEX,
                 MIN_W_0,
               )}
             >
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
                 #{task.id}
               </span>
               {/* The task's stakes rung (P0..P3) sits immediately right of the
@@ -71,7 +71,7 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
               >
                 {task.priority}
               </span>
-              <span className={cn("truncate text-foreground", MIN_W_0, FLEX_1)}>{task.title}</span>
+              <span className={cn("truncate text-foreground dark:text-[#f0ede7]", MIN_W_0, FLEX_1)}>{task.title}</span>
             </Link>
           </li>
         ))}

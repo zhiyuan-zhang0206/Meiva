@@ -169,7 +169,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
       <Link
         href={`/insights/run/${agentId}`}
         className={cn(
-          "items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] text-foreground hover:bg-sidebar-accent group",
+          "items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11.5px] leading-[17px] text-foreground dark:text-[#f0ede7] hover:bg-sidebar-accent group",
           FLEX,
           MIN_W_0,
           FLEX_1,
@@ -281,15 +281,15 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
               <X className="size-5" />
             </button>
           ) : null}
-          <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
+          <span className={cn("truncate font-mono text-[11px] tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
             {t("title")}
           </span>
         </header>
       )}
 
-      <ScrollArea ref={scrollRef} className={cn("text-xs", MIN_H_0, FLEX_1)}>
+      <ScrollArea ref={scrollRef} className={cn("text-[11.5px]", MIN_H_0, FLEX_1)}>
         <div className="px-4 py-3">
-          <div className="space-y-4">
+          <div className="space-y-3.5">
             {sections.map((section) => (
               <Fragment key={section.key}>{section.node}</Fragment>
             ))}

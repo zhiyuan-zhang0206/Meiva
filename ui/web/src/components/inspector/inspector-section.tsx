@@ -18,11 +18,11 @@ export function Section({
 }) {
   return (
     <section className="space-y-1.5">
-      <div className={cn("items-center gap-1.5 text-[10px] tracking-wide text-muted-foreground", FLEX)}>
+      <div className={cn("items-center gap-1.5 text-[11px] font-medium tracking-wide text-foreground/75 dark:text-[#ccc9c2]", FLEX)}>
         {icon}
         <span>{title}</span>
         {badge != null && (
-          <span className="ml-auto font-mono text-[11px] tabular-nums text-foreground normal-case">
+          <span className="ml-auto font-mono text-[11px] tabular-nums text-foreground dark:text-[#f0ede7] normal-case">
             {badge}
           </span>
         )}
@@ -51,13 +51,13 @@ export function Metric({
   valueTestId?: string;
 }) {
   return (
-    <div className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1", FLEX, FLEX_COL, className)}>
-      <span className="text-[10px] tracking-wide text-muted-foreground">{label}</span>
-      <span className="font-mono text-xs tabular-nums text-foreground" data-testid={valueTestId}>
+    <div className={cn("gap-0.5 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5", FLEX, FLEX_COL, className)}>
+      <span className="text-[10.5px] tracking-wide text-muted-foreground">{label}</span>
+      <span className="font-mono text-[11.5px] leading-[17px] tabular-nums text-foreground dark:text-[#f0ede7]" data-testid={valueTestId}>
         {value}
       </span>
       {sub != null && (
-        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{sub}</span>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/85">{sub}</span>
       )}
     </div>
   );

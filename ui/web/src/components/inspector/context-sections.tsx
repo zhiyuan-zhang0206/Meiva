@@ -38,7 +38,7 @@ function SectionRow({ node, depth }: { node: ContextSection; depth: number }) {
   const hasChildren = children.length > 0;
   return (
     <li>
-      <div className={cn("items-center text-xs", FLEX)} style={{ paddingLeft: depth * 12 }}>
+      <div className={cn("items-center text-[11px] leading-[16px]", FLEX)} style={{ paddingLeft: depth * 12 }}>
         {hasChildren ? (
           <button
             type="button"
@@ -53,7 +53,7 @@ function SectionRow({ node, depth }: { node: ContextSection; depth: number }) {
           </button>
         ) : null}
         <span className={cn("truncate text-muted-foreground", MIN_W_0, FLEX_1)}>{node.name}</span>
-        <span className="ml-1 shrink-0 tabular-nums text-muted-foreground">
+        <span className="ml-1 shrink-0 font-mono text-[11px] tabular-nums text-foreground/85 dark:text-[#e5e2dc]">
           {approx(node.estimated)}
           {formatTokens(node.tokens)}
         </span>

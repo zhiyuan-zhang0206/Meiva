@@ -95,18 +95,18 @@ export function ContextBreakdownCard({
     <section
       data-testid="context-breakdown-card"
       aria-label={t("title")}
-      className="max-w-[520px] rounded border border-border bg-card p-4"
+      className="max-w-[520px] rounded border border-border bg-card p-3.5"
     >
-      <h2 className="mb-1 text-sm font-semibold" data-testid="context-breakdown-heading">
+      <h2 className="mb-1 text-[13px] font-semibold text-foreground dark:text-[#f2efe9]" data-testid="context-breakdown-heading">
         {title}
       </h2>
-      <p data-testid="context-breakdown-subtitle" className="mb-2 text-muted-foreground text-xs">
+      <p data-testid="context-breakdown-subtitle" className="mb-2 text-muted-foreground text-[11.5px]">
         {pointed ? t("pointSubtitle") : t("subtitle")}
       </p>
       {!pointed ? (
         <ContextBreakdownBody agentId={agentId} categoryHighlight={categoryHighlight} />
       ) : at === null || noRequest ? (
-        <p data-testid="context-breakdown-empty" className="text-muted-foreground text-xs">
+        <p data-testid="context-breakdown-empty" className="text-muted-foreground text-[11.5px]">
           {t("pointEmpty")}
         </p>
       ) : (
@@ -148,7 +148,7 @@ function BreakdownQuery({
 
   if (isPending) {
     return (
-      <p data-testid="context-breakdown-loading" className="text-muted-foreground text-xs">
+      <p data-testid="context-breakdown-loading" className="text-muted-foreground text-[11.5px]">
         {t("loading")}
       </p>
     );
@@ -160,7 +160,7 @@ function BreakdownQuery({
     const isHttp = httpStatus(error) !== null || message.startsWith("HTTP ");
     return (
       <div className={cn("items-start gap-2", FLEX, FLEX_COL)}>
-        <p data-testid="context-breakdown-error" className="text-destructive text-xs">
+        <p data-testid="context-breakdown-error" className="text-destructive text-[11.5px]">
           {isHttp
             ? t("failedHttp", { message })
             : t("failedUnreachable", { message })}
@@ -169,7 +169,7 @@ function BreakdownQuery({
           type="button"
           data-testid="context-breakdown-retry"
           onClick={() => void refetch()}
-          className="rounded border border-border px-2 py-0.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="rounded border border-border px-2 py-0.5 text-[11px] hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           {t("retry")}
         </button>
@@ -219,16 +219,16 @@ function BreakdownContent({
 
   if (total <= 0 && data.categories.length === 0) {
     return (
-      <p data-testid="context-breakdown-empty" className="text-muted-foreground text-xs">
+      <p data-testid="context-breakdown-empty" className="text-muted-foreground text-[11.5px]">
         {t("empty")}
       </p>
     );
   }
 
   return (
-    <div className={cn("gap-2.5", FLEX, FLEX_COL)}>
+    <div className={cn("gap-2", FLEX, FLEX_COL)}>
 
-      <p className="text-muted-foreground text-xs tabular-nums" data-testid="context-breakdown-total">
+      <p className="font-mono text-[11px] leading-[16px] text-muted-foreground tabular-nums" data-testid="context-breakdown-total">
         <span className="block">
           {approx(data.estimated)}
           {formatTokens(total)}
@@ -236,7 +236,7 @@ function BreakdownContent({
           {t("tokensUnit")}
         </span>
         {hasThresholds ? (
-          <span className="block">
+          <span className="block text-[10.5px] text-muted-foreground/85">
             {t("thresholds", {
               soft: formatTokens(data.soft_compact_tokens),
               hard: formatTokens(data.hard_compact_tokens),
@@ -245,16 +245,16 @@ function BreakdownContent({
         ) : null}
       </p>
 
-      <ul className={cn("gap-1", FLEX, FLEX_COL)} data-testid="context-breakdown-categories">
+      <ul className={cn("gap-0.5", FLEX, FLEX_COL)} data-testid="context-breakdown-categories">
         {categories.map((c) => {
           const row = (
             <>
               <span
-                className="size-2.5 shrink-0 rounded-[2px]"
+                className="size-2 shrink-0 rounded-[2px]"
                 style={{ backgroundColor: categoryColor(c.key) }}
               />
-              <span className={cn("truncate", FLEX_1, "text-left")}>{categoryName(c.key)}</span>
-              <span className="shrink-0 tabular-nums text-muted-foreground">
+              <span className={cn("truncate text-foreground dark:text-[#f0ede7]", FLEX_1, "text-left")}>{categoryName(c.key)}</span>
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
                 {approx(c.estimated)}
                 {formatTokens(c.tokens)}
                 {total > 0 ? ` · ${((c.tokens / total) * 100).toFixed(2)}%` : ""}
@@ -264,7 +264,7 @@ function BreakdownContent({
           const clickable = categoryHighlight?.has(c.key) === true;
           const active = categoryHighlight?.active === c.key;
           return clickable ? (
-            <li key={c.key} className="text-xs">
+            <li key={c.key} className="text-[11px] leading-[16px]">
               <button
                   type="button"
                   aria-pressed={active}
@@ -281,7 +281,7 @@ function BreakdownContent({
               </button>
             </li>
           ) : (
-            <li key={c.key} className={cn("items-center gap-2 px-1 py-0.5 text-xs", FLEX)}>
+            <li key={c.key} className={cn("items-center gap-2 px-1 py-0.5 text-[11px] leading-[16px]", FLEX)}>
               {row}
             </li>
           );
@@ -291,7 +291,7 @@ function BreakdownContent({
       {data.sections.length > 0 ? (
         <div className="border-t border-border pt-2">
 
-          <div className={cn("mb-1 items-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground", FLEX)}>
+          <div className={cn("mb-1 items-center text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground/85", FLEX)}>
             <button
               type="button"
               data-testid="context-breakdown-sections-toggle"

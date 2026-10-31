@@ -33,7 +33,11 @@ The document bar is the right column's title bar, outside the reading viewport
 in both modes: only the reading area scrolls, never the bar (user 2026-10-29), and
 the bottom region never pushes that bar out of the column. There is no
 separate notice bar, queue counter or collapse control. Document padding supplies the initial spacing;
-the first Markdown block adds no top margin. Plain numbered choice rows avoid a card around every option.
+the first Markdown block adds no top margin. Within `[data-testid="document-content"]`,
+`ChatMarkdown` uses a compact auxiliary scale (`13px / 21px` prose in softened
+dark `#dfdcd6`, `15px / 14px / 13px / 12.5px` headings, `12px` code blocks and
+tables, and `11.5px` inline code) so the right-hand workspace document stays
+visually subordinate to the `15px` main conversation column. Plain numbered choice rows avoid a card around every option.
 A persistent comment input and the shared send button match the chat composer;
 the selection and comment form one explicit submission. Dismiss is a small outlined
 header button. This keeps the user's task in one reading flow rather than

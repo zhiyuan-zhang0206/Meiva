@@ -39,7 +39,7 @@ export function InspectReadError({ message, retryLabel, pending, onRetry }: {
   onRetry: () => void;
 }) {
   return (
-    <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
+    <div className="space-y-2 font-mono text-[10.5px] text-destructive" role="alert">
       <p>{message}</p>
       <button
         type="button"
@@ -95,7 +95,7 @@ export function ContextSection({ agentId }: { agentId: number }) {
             showText={false}
           />
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-1">
           <Metric
             label={t("metricContextUsed")}
             value={hasWindow
