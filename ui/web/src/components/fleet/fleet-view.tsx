@@ -17,6 +17,7 @@
 "use client";
 
 import { MessageSquare, PanelRightOpen } from "lucide-react";
+import type { Route } from "next";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
@@ -65,7 +66,7 @@ type MobileTab = "agents" | "tasks" | "inbox";
 function isMobileTab(value: string): value is MobileTab {
   return value === "agents" || value === "tasks" || value === "inbox";
 }
-export function FleetView() {
+export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
   const agents = useFleetAgents();
   const { isLarge } = useBreakpoint();
   // Cross-component selection: selecting an item in the right-side
@@ -159,6 +160,7 @@ export function FleetView() {
           anchorAgentId={anchorAgentId}
           focusNoticeId={focusNoticeId}
           routeTaskId={routeTaskId}
+          navigate={navigate}
         />
       ) : (
         <MobileLayout
@@ -174,6 +176,7 @@ export function FleetView() {
           anchorAgentId={anchorAgentId}
           focusNoticeId={focusNoticeId}
           routeTaskId={routeTaskId}
+          navigate={navigate}
         />
       )}
     </div>
@@ -192,6 +195,7 @@ const DesktopLayout = memo(function DesktopLayout({
   anchorAgentId,
   focusNoticeId,
   routeTaskId,
+  navigate,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -202,6 +206,7 @@ const DesktopLayout = memo(function DesktopLayout({
   anchorAgentId: number | null;
   focusNoticeId: number | null;
   routeTaskId: number | null;
+  navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet");
   // Queue panel collapse (RCS): collapsed leaves only a STATIC handle — no
@@ -251,6 +256,7 @@ const DesktopLayout = memo(function DesktopLayout({
               selectedTaskId={selectedTaskId}
               setSelectedTaskId={setSelectedTaskId}
               routeTaskId={routeTaskId}
+              navigate={navigate}
             />
           </div>
           {/* Static expand handle — deliberately free of any dynamic signal. */}
@@ -284,6 +290,7 @@ const DesktopLayout = memo(function DesktopLayout({
               selectedTaskId={selectedTaskId}
               setSelectedTaskId={setSelectedTaskId}
               routeTaskId={routeTaskId}
+              navigate={navigate}
             />
           </ResizablePanel>
           <ResizableHandle />
@@ -319,6 +326,7 @@ const MobileLayout = memo(function MobileLayout({
   anchorAgentId,
   focusNoticeId,
   routeTaskId,
+  navigate,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -332,6 +340,7 @@ const MobileLayout = memo(function MobileLayout({
   anchorAgentId: number | null;
   focusNoticeId: number | null;
   routeTaskId: number | null;
+  navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet");
   return (
@@ -359,6 +368,7 @@ const MobileLayout = memo(function MobileLayout({
             <GraphView
               selectedAgentId={selectedAgentId}
               onSelectAgent={setSelectedAgentId}
+              navigate={navigate}
             />
           </div>
         ) : null}
@@ -370,6 +380,7 @@ const MobileLayout = memo(function MobileLayout({
               selectedAgentId={selectedAgentId}
               onSelectAgent={setSelectedAgentId}
               routeTaskId={routeTaskId}
+              navigate={navigate}
             />
           </div>
         ) : null}

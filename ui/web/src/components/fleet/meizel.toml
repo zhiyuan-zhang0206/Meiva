@@ -16,11 +16,3 @@ exports = ["fleet-view.tsx"]
 "task-graph.test.tsx" = ["task-graph.tsx"]
 "task-graph.tsx" = ["force-controls.tsx", "force-graph-geometry.ts", "force-graph.tsx", "presentation", "task-graph-chrome.tsx", "task-kanban.tsx"]
 "tests" = ["force-controls.tsx", "force-graph-geometry.ts", "graph-view.tsx", "presentation", "task-graph-chrome.tsx", "task-graph.tsx", "task-kanban.tsx"]
-
-[debt.third-party-patch]
-"fleet-route-jump.test.tsx#vi.mock next/link" = 1
-"fleet-route-jump.test.tsx#vi.mock next/navigation" = 1
-"fleet-view.test.tsx#vi.mock next/link" = 1
-"fleet-view.test.tsx#vi.mock next/navigation" = 1
-"graph-view.test.tsx#vi.mock next/navigation" = 1
-"task-graph.test.tsx#vi.mock next/navigation" = 1

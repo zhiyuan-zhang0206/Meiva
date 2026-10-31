@@ -1,11 +1,11 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { FleetPageView } from "./page";
 
 // meiva:note
-// The supervision surface is a stand-in: the view takes it as a required prop, so this file covers
-// the landmark and the boundary it owns.
+// The supervision surface is a stand-in and the navigator a spy: the view takes both as required
+// props, so this file covers the landmark and the boundary it owns.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 function FleetSurface() {
   return <section aria-label="Fleet supervision surface" />;
@@ -13,7 +13,7 @@ function FleetSurface() {
 
 describe("FleetPage", () => {
   it("provides the primary landmark and mounts the fleet surface", () => {
-    render(<FleetPageView FleetView={FleetSurface} />);
+    render(<FleetPageView FleetView={FleetSurface} navigate={vi.fn()} />);
 
     const main = screen.getByRole("main");
     expect(main.id).toBe("main-content");

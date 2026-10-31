@@ -36,6 +36,13 @@ it) and `hoverCardLeave` (drop at once, wait out the grace window a capped card
 needs to be reached, or hold while the pointer rests on it). `force-graph.tsx`
 only measures those boxes and applies the answer.
 
+Navigation is a value the surfaces are handed, not a module they read:
+`app/fleet/page.tsx` reads the router, wraps `push` as `navigate` and passes it
+down through `FleetView`, `LeftGraphPanel` and the mobile layout to `GraphView`,
+`TaskGraph` and its Kanban cards. A double-clicked node opens
+`/?agent_id=<owner>` through that prop, and a suite hands in a spy instead of
+replacing `next/navigation`.
+
 A graph of 200 nodes or more (`layoutOptions` in `force-graph.tsx`) settles in
 manual, time-budgeted slices instead of the live d3 timer: the simulation steps
 under a per-frame budget and commits positions explicitly, twice early and then

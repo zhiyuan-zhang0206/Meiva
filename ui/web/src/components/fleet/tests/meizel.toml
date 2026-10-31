@@ -1,5 +1,0 @@
-[debt.third-party-patch]
-"graph-view-lineage-and-hover.test.tsx#vi.mock next/navigation" = 1
-"task-graph-hover-cap.test.tsx#vi.mock next/navigation" = 1
-"task-graph-mode.test.tsx#vi.mock next/navigation" = 1
-"task-graph-selection.test.tsx#vi.mock next/navigation" = 1

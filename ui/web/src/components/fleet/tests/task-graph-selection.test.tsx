@@ -10,11 +10,10 @@ import { resetTransport, transport } from "@/test-support/fake-api";
 import { renderWithProviders } from "@/test-support/render";
 
 // meiva:note
-// The one replacement left in this file: the board navigates through Next's router, which needs a
-// mounted app router. It leaves with the third-party-patch family.
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
+// The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
+// without replacing `next/navigation`.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const navigate = vi.fn();
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
 
@@ -113,6 +112,7 @@ describe("TaskGraph (graph mode)", () => {
           onSelectAgent={setAgent}
           selectedTaskId={task}
           onSelectTask={setTask}
+        navigate={navigate}
         />
       </div>
     );
@@ -175,6 +175,7 @@ describe("TaskGraph (graph mode)", () => {
               onSelectAgent={setAgent}
               selectedTaskId={task}
               onSelectTask={setTask}
+            navigate={navigate}
             />
           ) : null}
         </div>
@@ -213,6 +214,7 @@ describe("TaskGraph (graph mode)", () => {
             onSelectAgent={setAgent}
             selectedTaskId={task}
             onSelectTask={setTask}
+          navigate={navigate}
           />
         ) : null}
       </div>
@@ -292,6 +294,7 @@ describe("TaskGraph (graph mode)", () => {
             onSelectAgent={setAgent}
             selectedTaskId={task}
             onSelectTask={setTask}
+          navigate={navigate}
           />
         </div>
       );
@@ -328,6 +331,7 @@ describe("TaskGraph (graph mode)", () => {
           selectedTaskId={task}
           routeTaskId={2}
           onSelectTask={setTask}
+        navigate={navigate}
         />
       </div>
     );
@@ -343,6 +347,7 @@ describe("TaskGraph (graph mode)", () => {
         selectedTaskId={2}
         routeTaskId={2}
         onSelectTask={onSelectTask}
+      navigate={navigate}
       />,
       [
         task(1, { title: "root", status: "in_progress" }),
@@ -393,7 +398,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
     const { container } = renderTasks(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={2} onSelectTask={vi.fn()} />,
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={2} onSelectTask={vi.fn()} navigate={navigate} />,
       sampleTasks(),
     );
     await waitFor(() => {
@@ -412,7 +417,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("renders parent-child edges hanging under the root node", async () => {
-    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, sampleTasks());
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} navigate={navigate} />, sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#1/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     const mainSvg = container.querySelector("svg[role='img']");
@@ -426,7 +431,7 @@ describe("TaskGraph (graph mode)", () => {
       task(1815, { title: "done-parent", status: "done", parent_id: 1 }),
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
-    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, tasks);
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} navigate={navigate} />, tasks);
     await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
 
     const ghostTexts = screen.getAllByText(/#1815/);
@@ -448,7 +453,7 @@ describe("TaskGraph (graph mode)", () => {
       task(11, { title: "g-done", status: "done", parent_id: 10 }),
       task(12, { title: "leaf", status: "in_progress", parent_id: 11 }),
     ];
-    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, tasks);
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} navigate={navigate} />, tasks);
     await waitFor(() => expect(screen.getAllByText(/#12/).length).toBeGreaterThan(0), { timeout: 4000 });
     for (const id of [10, 11]) {
       const g = screen.getAllByText(new RegExp(`#${String(id)}`))[0].closest("g")!;
@@ -459,7 +464,7 @@ describe("TaskGraph (graph mode)", () => {
   });
 
   it("does not ghost a hidden done task with no visible children", async () => {
-    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />, sampleTasks());
+    const { container } = renderTasks(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} navigate={navigate} />, sampleTasks());
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText(/#4/)).toBeNull();
     expect(screen.queryByText(/#5/)).toBeNull();

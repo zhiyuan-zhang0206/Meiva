@@ -22,10 +22,7 @@ import type {
 
 import { GraphView } from "./graph-view";
 
-const push = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
-}));
+const navigate = vi.fn();
 
 const { getAgentRoster } = vi.hoisted(() => ({ getAgentRoster: vi.fn() }));
 
@@ -160,7 +157,7 @@ function graph(
 }
 
 beforeEach(() => {
-  push.mockReset();
+  navigate.mockReset();
   getAgentRoster.mockReset();
 });
 
@@ -170,7 +167,7 @@ describe("GraphView", () => {
   it("renders nodes and edges; selects on click, opens on double-click", async () => {
     transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
 
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />);
 
     // The simulation seeds positions asynchronously (tick -> rAF). Wait for the
     // node labels to land, which means positions populated and the SVG painted.
@@ -181,16 +178,16 @@ describe("GraphView", () => {
     // Single-click selects the node (toggle on); it does NOT navigate.
     const group = label.closest("g")!;
     fireEvent.click(group);
-    expect(push).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
 
     // Double-click opens the agent's conversation.
     fireEvent.doubleClick(group);
-    expect(push).toHaveBeenCalledWith("/?agent_id=1");
+    expect(navigate).toHaveBeenCalledWith("/?agent_id=1");
   });
 
   it("has only a reset zoom control (no +/- buttons)", async () => {
     transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />);
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     expect(screen.getByLabelText("Reset zoom")).toBeTruthy();
@@ -200,7 +197,7 @@ describe("GraphView", () => {
 
   it("explains status colors without terminated/offline or activity-score sizing legend", () => {
     transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />);
 
     const legend = screen.getByLabelText("Agent graph legend");
     for (const label of ["Running", "Idling"]) {
@@ -221,7 +218,7 @@ describe("GraphView", () => {
         edges: [edge(1, 2, "spawn")],
       }));
     const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />,
     );
     const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
     const group = label.closest("g")!;
@@ -247,7 +244,7 @@ describe("GraphView", () => {
 
   it("selecting a node focuses it (non-identity transform); reset restores identity", async () => {
     transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
-    const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />);
 
     // Node 2 has only one edge (→ node 1), so the neighbor bounding box is a
     // subset of the layout — zoom scale > 1 (non-identity).
@@ -273,7 +270,7 @@ describe("GraphView", () => {
 
   it("wheel zoom is not capped (scale can exceed the old 4x limit)", async () => {
     transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
-    const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />);
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     const svg = container.querySelector("svg")!;
@@ -308,7 +305,7 @@ describe("GraphView", () => {
     const onSelect = vi.fn();
 
     // Render with agent 1 already selected.
-    renderGraph(<GraphView selectedAgentId={1} onSelectAgent={onSelect} />);
+    renderGraph(<GraphView selectedAgentId={1} onSelectAgent={onSelect} navigate={navigate} />);
 
     const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
     const group = label.closest("g")!;
@@ -323,7 +320,7 @@ describe("GraphView", () => {
     // User ruling 2026-08-05: no blue message edges — one muted gray for all.
     transport.getFleetGraph.mockResolvedValue(graph(richGraph()));
     const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />,
     );
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
@@ -347,7 +344,7 @@ describe("GraphView", () => {
         ],
       }));
     const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />,
     );
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
@@ -378,7 +375,7 @@ describe("GraphView", () => {
         ],
       }));
     const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />,
     );
     await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
