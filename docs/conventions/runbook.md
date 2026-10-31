@@ -471,18 +471,31 @@ not compare your choices with the diff. A complete command:
 ```bash
 .venv/bin/python -m cli.fleet_update run --new NEW_SHA \
   --gateway GATEWAY --runner RUNNER --runner RUNNER2 --log-dir DIR --execute \
-  --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
+  --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
   --mode smooth --stop-timeout 600 \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
   --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
 ```
 
 Alternatives per choice: `--no-runners` instead of `--runner`; `--dry-run` instead
-of `--execute`; `--close-shell-sessions`, `--stop-browser`, `--stop-extras`,
-`--stop-infra`; `--keep-service NAME` (repeatable) instead of `--keep-no-services`;
+of `--execute`; `--stop-browser`, `--stop-extras`, `--stop-infra`;
+`--keep-service NAME` (repeatable) instead of `--keep-no-services`;
 `--mode force`; `--allow-python-change`, `--allow-red-schedules`;
 `--only-service NAME` or `--disable-service NAME` (repeatable) instead of
 `--all-services`.
+
+**An update closes the shell sessions and keeps no service.** Every roster service,
+`pty-sessions` included, is a unit of the host's `meiva-root`, and a stop that leaves any
+unit running leaves the root running with it. `meiva start` reuses a running root only
+when its launch digest is unchanged, and the digest binds the checkout's HEAD, so the
+switch to NEW always changes it. A kept root unit therefore makes every `up` start exit 1
+with `requested services change the immutable root generation: root launch inputs; run
+meiva stop before starting …` (2026-10-31: `--keep-shell-sessions` failed all five
+hosts after the switch). `--keep-shell-sessions` and `--keep-service` belong to
+`meiva restart` on one checkout, not to an update. To recover, on each host run `meiva
+stop --yes --close-shell-sessions` with the window's other stop choices (`--keep-infra`
+on the gateway), confirm `run/lifecycle-op.json` records a completed stop, then rerun
+`up` alone.
 
 `run` accepts both halves' flags, executes `down` then `up` in one log and stops
 at the first failure. It reports the failed half to repair and rerun; a failed
@@ -496,7 +509,7 @@ half, use the separate commands:
 ```bash
 .venv/bin/python -m cli.fleet_update down --new NEW_SHA \
   --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
-  --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
+  --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
   --mode smooth --stop-timeout 600 \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
   --all-services --start-timeout 1800
