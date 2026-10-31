@@ -29,6 +29,11 @@ enabled in memory. Strict callers reject dangling names. Runtime callers drop
 those entries, treat them as disabled and report each name through the required
 reporter on every failed load; recovery never makes an unknown name enabled.
 
+`RETIRED_BUILTIN_PLUGINS` names the built-in plugins a release deleted. Their stale
+entries are dropped and reported like any dangling name, but `meiva plugins verify`
+shows them as a `WARN` rather than a failure; the PR that deletes a built-in plugin
+adds its name. Any other missing plugin stays a failure.
+
 Local enable updates first resolve the requested name against the actual local
 set. Unknown names fail before a write. The written image contains only plugins
 present on this machine, so stale entries cannot make the next strict read fail.
