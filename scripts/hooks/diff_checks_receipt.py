@@ -1,9 +1,10 @@
 # meiva:note
 # Check the one line a pull request body carries: that it was produced for this head, that every
-# field a reader relies on is present, that a layer it did not run says why, that a blind
-# selection named its fallback, and that a refusal-loss count found unreplaced refusals carries
-# the reviewer's line. It judges presence and shape, never whether a reason is a good one —
-# grading reasons teaches authors to write reasons that pass.
+# field a reader relies on is present, that every field states a result or says why it has none,
+# that a layer whose output could not be read is not passed off as green, that a blind selection
+# names its fallback, and that a refusal-loss count found unreplaced refusals carries the
+# reviewer's line. It judges presence and shape, never whether a reason is a good one — grading
+# reasons teaches authors to write reasons that pass.
 from __future__ import annotations
 
 import argparse
@@ -18,27 +19,36 @@ RECEIPT_VERSION = "diff-checks/v1"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 # meiva:note
-# The fields a reader trusts. `passed` and `failed` are absent when the tests did not run, so
-# they are checked against `tests=` rather than required outright.
+# The fields a reader trusts, all of them present in every receipt: a check this change cannot
+# need says `n/a(<why>)` there rather than disappearing, so "not applicable" is a value a reader
+# can see instead of an absence they have to interpret.
 REQUIRED_FIELDS = (
     "base",
+    "scope",
     "pyright",
     "err_in_this_diff",
+    "closure",
     "ruff",
     "selector",
     "tests",
-    "fallback",
+    "passed",
+    "failed",
     "blind",
+    "fallback",
     "vitest",
+    "next-build",
     "meizel",
     "debt",
     "refusal-loss",
-    "skipped",
+    "docs-refs",
+    "docs-okf",
     "generated",
 )
 
 _REFUSAL_LINE = re.compile(r"refusal-loss:.*reviewed:")
 _UNREPLACED = re.compile(r"unreplaced=(\d+)")
+_PASSED = re.compile(r"\d+tests\(")
+_FAILED = re.compile(r"\d+tests$")
 
 
 @dataclass(frozen=True)
@@ -63,29 +73,71 @@ def parse(line: str) -> Receipt:
     return Receipt(head=parts[1][1:], fields=fields)
 
 
-def reasons_named(value: str) -> bool:
-    if value in ("", "none"):
-        return True
-    return all(item.endswith(")") and "(" in item for item in value.split(","))
+# meiva:note
+# An absence states its reason in parentheses -- `n/a(no python touched)`, `skipped(--skip-tests)`
+# -- because the bare word `none` cannot be told from a layer that ran and found nothing.
+def absence_names_reason(value: str) -> bool:
+    return not value.startswith(("n/a(", "skipped(")) or value.endswith(")")
 
 
 # meiva:note
-# What a reader would otherwise have to reconstruct by hand: a blind selection without its
-# fallback, a passed count beside a skipped run, and a refusal-loss line the author did not answer.
+# What a reader would otherwise have to reconstruct by hand: a field with no result and no reason,
+# a layer whose output the runner could not read, a passed count beside a skipped run, a run that
+# does not say how many tests passed and failed, a blind selection without its fallback, and a
+# refusal-loss line the author did not answer.
+# meiva:note
+# The fields themselves: present, stating something, and stating it readably. Each finding names
+# the fields it is about, so an author can act without re-reading the whole line.
+def _presence(receipt: Receipt) -> list[str]:
+    problems: list[str] = []
+    missing = [name for name in REQUIRED_FIELDS if name not in receipt.fields]
+    if missing:
+        problems.append(f"missing fields: {', '.join(missing)}")
+    silent = sorted(name for name, value in receipt.fields.items() if value in ("", "none"))
+    if silent:
+        problems.append(
+            f"fields with neither a result nor a reason: {', '.join(silent)} -- "
+            f"write n/a(<why>) or skipped(<why>)"
+        )
+    unread = sorted(name for name, value in receipt.fields.items() if "unreadable" in value)
+    if unread:
+        problems.append(f"the runner could not read: {', '.join(unread)}")
+    reasons = sorted(
+        name for name, value in receipt.fields.items() if not absence_names_reason(value)
+    )
+    if reasons:
+        problems.append(f"an absence must name its reason in parentheses: {', '.join(reasons)}")
+    return problems
+
+
+# meiva:note
+# Each claim here is checkable against another field: a run that skipped cannot report a count, a
+# run that executed tests must report both, and a blind selection must name the fallback it ran.
+def _run_claims(receipt: Receipt) -> list[str]:
+    problems: list[str] = []
+    tests = receipt.get("tests")
+    if tests.startswith("skipped") and not receipt.get("passed").startswith("n/a("):
+        problems.append("a skipped run must not also report a passed count")
+    if tests.startswith("RAN") and not (
+        _PASSED.search(receipt.get("passed")) and _FAILED.search(receipt.get("failed"))
+    ):
+        problems.append(
+            "a run that executed tests must report `passed=<n>tests(<time>)` and `failed=<n>tests`"
+        )
+    blind = receipt.get("blind")
+    if not blind.startswith(("n/a(", "BLIND(")):
+        problems.append("`blind=` is either n/a(<why>) or BLIND(<the files it could not map>)")
+    if blind.startswith("BLIND(") and not receipt.get("fallback").startswith("RAN("):
+        problems.append("a blind selection needs the fallback run it named")
+    return problems
+
+
 def findings(receipt: Receipt, *, head: str, body: str) -> list[str]:
     problems: list[str] = []
     if head and receipt.head != head:
         problems.append(f"the receipt was produced for {receipt.head}, not for {head}")
-    missing = [name for name in REQUIRED_FIELDS if name not in receipt.fields]
-    if missing:
-        problems.append(f"missing fields: {', '.join(missing)}")
-    tests = receipt.get("tests")
-    if tests.startswith("SKIPPED") and receipt.get("passed"):
-        problems.append("a skipped run must not also report a passed count")
-    if not reasons_named(receipt.get("skipped")):
-        problems.append("a skipped layer must name its reason in parentheses")
-    if receipt.get("blind") not in ("", "none") and not receipt.get("fallback").startswith("RAN("):
-        problems.append("a blind selection needs the fallback run it named")
+    problems.extend(_presence(receipt))
+    problems.extend(_run_claims(receipt))
     unreplaced = _UNREPLACED.search(receipt.get("refusal-loss"))
     if unreplaced is not None and int(unreplaced.group(1)) > 0 and not _REFUSAL_LINE.search(body):
         problems.append(

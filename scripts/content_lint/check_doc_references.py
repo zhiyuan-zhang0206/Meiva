@@ -555,8 +555,11 @@ def main(
             f"See docs/conventions/doc-maintenance.md.",
             file=sys.stderr,
         )
-        return 1
-    return 0
+    # meiva:note
+    # The denominator on both paths: a check that states only its verdict cannot be told from one
+    # that read three files, and a receipt that quotes it inherits that silence.
+    print(f"{len(doc_list)} docs checked, {len(unique)} dangling reference(s)")
+    return 1 if unique else 0
 
 
 if __name__ == "__main__":

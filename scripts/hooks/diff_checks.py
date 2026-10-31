@@ -38,6 +38,27 @@ class ChangeSet:
 
 
 # meiva:note
+# What kinds of file a change touches. The receipt prints it (`scope=`), a trigger reads it, and
+# the layers nothing ran take their reason from it: a documentation-only change still owes the
+# cheap document checks, and a Python change must not pay for a debt comparison it cannot move.
+_KIND_SUFFIXES = (("docs", ".md"), ("manifests", "meizel.toml"), ("python", ".py"))
+
+
+def _kinds(change: ChangeSet) -> frozenset[str]:
+    kinds = {
+        kind for kind, suffix in _KIND_SUFFIXES for name in change.files if name.endswith(suffix)
+    }
+    if any(name.startswith("ui/web/") for name in change.files):
+        kinds.add("frontend")
+    return frozenset(kinds)
+
+
+def _scope(change: ChangeSet) -> str:
+    kinds = sorted(_kinds(change))
+    return "+".join(kinds) if kinds else "other"
+
+
+# meiva:note
 # One command a trigger asks for, named by the receipt field it fills. `judge` states how a reader
 # decides red — an exit code, or a count against a threshold. The runner never reads output text
 # for a verdict, so a check cannot turn green by printing the right word.
@@ -58,10 +79,14 @@ class Trigger:
 
 
 # meiva:note
-# The fields of a receipt, in the order a reader meets them. A run fills its own field; the ones
-# no run fills (`fallback`, `vitest`, `meizel`, `debt`) are printed as `none` until their trigger
-# exists, so a missing check is visible instead of absent.
+# The fields of a receipt, in the order a reader meets them, and the whole vocabulary a value may
+# use: the count a layer measured, `n/a(<why>)` for a check this change cannot need, `skipped(<why>)`
+# for one it needs and did not run, and `unreadable(<why>)` for output the runner could not read.
+# There is no bare `none` anywhere: "did not apply" and "ran, found nothing" must never read the
+# same to the person merging on this line. No value carries a space -- the line is split on
+# whitespace, so a reason joins its words with `-`.
 FIELD_ORDER = (
+    "scope",
     "pyright",
     "err_in_this_diff",
     "closure",
@@ -70,14 +95,15 @@ FIELD_ORDER = (
     "tests",
     "passed",
     "failed",
-    "fallback",
     "blind",
+    "fallback",
     "vitest",
     "next-build",
     "meizel",
     "debt",
     "refusal-loss",
-    "skipped",
+    "docs-refs",
+    "docs-okf",
 )
 
 
@@ -103,7 +129,22 @@ def _python_runs(change: ChangeSet) -> tuple[Run, ...]:
             f"whole-tree errors must stay at the base's {PYRIGHT_ERROR_BASELINE}",
         ),
         Run("ruff", (_tool("ruff"), "check", *change.python_files()), "exit code"),
-        Run("meizel", (sys.executable, "-m", "meizel", "check"), "exit code"),
+    )
+
+
+# meiva:note
+# The checker reads manifests, role lists and declarations for every change, not only a Python
+# one: a documentation-only pull request can still leave a stale export or a role list behind.
+def _meizel_runs(_change: ChangeSet) -> tuple[Run, ...]:
+    return (Run("meizel", (sys.executable, "-m", "meizel", "check"), "exit code"),)
+
+
+# meiva:note
+# A recorded total moves only when a manifest moves: a new violation is what `meizel check` already
+# refuses, and a repayment deletes the line that recorded it. Comparing against the base costs
+# minutes, so it runs for a manifest change and says why it did not for any other.
+def _debt_runs(change: ChangeSet) -> tuple[Run, ...]:
+    return (
         Run(
             "debt",
             (
@@ -123,6 +164,24 @@ def _python_runs(change: ChangeSet) -> tuple[Run, ...]:
 
 
 # meiva:note
+# A documentation change gets the document checks, not a type check it cannot fail: what a doc
+# asserts is that its links, flags and nodes exist.
+def _docs_runs(_change: ChangeSet) -> tuple[Run, ...]:
+    return (
+        Run(
+            "docs-refs",
+            (sys.executable, "scripts/content_lint/check_doc_references.py"),
+            "exit code; the summary line carries the docs it read",
+        ),
+        Run(
+            "docs-okf",
+            (sys.executable, "scripts/content_lint/lint_meiva_okf.py"),
+            "exit code; the summary line carries the documents it read",
+        ),
+    )
+
+
+# meiva:note
 # Whether a change reduces recorded debt: a `meizel.toml` whose deleted lines outnumber the
 # added ones. The refusal-loss scan is the check that shape owes — a debt repaid by deleting a
 # refusal has to say which refusal took its place.
@@ -130,7 +189,13 @@ def _net_debt_reduction(change: ChangeSet) -> bool:
     manifests = [name for name in change.files if name.endswith("meizel.toml")]
     if not manifests:
         return False
-    counted = _git(change.root, "diff", "--numstat", f"{change.base}...HEAD", "--", *manifests)
+    # meiva:note
+    # A manifest diff this runner cannot read is not evidence that nothing was repaid, so the
+    # refusal scan runs: the check costs seconds and a missing scan is the expensive mistake.
+    try:
+        counted = _git(change.root, "diff", "--numstat", f"{change.base}...HEAD", "--", *manifests)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return True
     added = deleted = 0
     for line in counted.splitlines():
         fields = line.split("\t")
@@ -197,9 +262,27 @@ _FRONTEND_RUNS = (
 # runner below only schedules what a trigger names.
 TRIGGERS: tuple[Trigger, ...] = (
     Trigger(
+        name="repository-change",
+        matches=lambda change: bool(change.files),
+        runs=_meizel_runs,
+        blocking=True,
+    ),
+    Trigger(
         name="python-change",
         matches=lambda change: bool(change.python_files()),
         runs=_python_runs,
+        blocking=True,
+    ),
+    Trigger(
+        name="manifest-change",
+        matches=lambda change: "manifests" in _kinds(change),
+        runs=_debt_runs,
+        blocking=True,
+    ),
+    Trigger(
+        name="docs-change",
+        matches=lambda change: "docs" in _kinds(change),
+        runs=_docs_runs,
         blocking=True,
     ),
     Trigger(
@@ -244,10 +327,15 @@ class Selection:
     tests: tuple[str, ...]
     blind: tuple[str, ...]
 
+    # meiva:note
+    # A blind decision names the files it could not map; a decided one carries its unit, because
+    # `SELECTED:152` beside `passed=3618` reads as two counts of the same thing.
     @property
     def field(self) -> str:
         return (
-            f"BLIND({','.join(self.blind)})" if self.blind else f"{self.decision}:{len(self.tests)}"
+            f"BLIND({','.join(self.blind)})"
+            if self.blind
+            else f"{self.decision}:{len(self.tests)}files"
         )
 
 
@@ -422,7 +510,8 @@ def _meizel_field(code: int, output: str, seconds: float) -> str:
     return f"{'ok' if code == 0 else 'failed'}({','.join(parts)})({_spell(seconds)})"
 
 
-def _debt_field(output: str) -> str:
+def _debt_field(code: int, output: str, seconds: float) -> str:
+    verdict = "ok" if code == 0 else f"failed({code})"
     header: list[str] = []
     rows: dict[str, list[str]] = {}
     for line in output.splitlines():
@@ -433,17 +522,43 @@ def _debt_field(output: str) -> str:
             header = cells
             continue
         rows[cells[0]] = cells[1:]
-    if "origin/main" not in header or "tree" not in header:
-        return "unreadable"
-    base_column = header.index("origin/main") - 1
+    # meiva:note
+    # Read the columns by position, never by the reference's own name: the first column after
+    # `code` is whatever `--against` was given, which for a replay or a pull request base is a sha
+    # or `<sha>~1`, and the column labelled `tree` is what this tree records. A change that edits a
+    # rule or a declaration prints one more column before `tree`, which the label absorbs.
+    if not header or header[0] != "code" or "tree" not in header:
+        return f"{verdict}(unreadable:no-table)({_spell(seconds)})"
     tree_column = header.index("tree") - 1
     ambient = rows.get("ambient-read")
     total = rows.get("total")
-    if ambient is None or total is None or len(total) <= tree_column:
-        return "unreadable"
+    if ambient is None or total is None or len(total) <= tree_column or len(ambient) <= tree_column:
+        return f"{verdict}(unreadable:no-totals)({_spell(seconds)})"
     return (
-        f"ambient-read{ambient[base_column]}->{ambient[tree_column]},"
-        f"total{total[base_column]}->{total[tree_column]}"
+        f"{verdict}(ambient-read{ambient[0]}->{ambient[tree_column]},"
+        f"total{total[0]}->{total[tree_column]})({_spell(seconds)})"
+    )
+
+
+# meiva:note
+# The document checks state how much they read; a clean run that names only itself would leave a
+# reader unable to tell a scan of three files from a scan of the tree.
+def _docs_refs_field(code: int, output: str, seconds: float) -> str:
+    verdict = "ok" if code == 0 else f"failed({code})"
+    found = re.search(r"(\d+) docs checked, (\d+) dangling reference", output)
+    if found is None:
+        return f"{verdict}(unreadable:no-summary)({_spell(seconds)})"
+    return f"{verdict}({found.group(1)}docs,{found.group(2)}dangling)({_spell(seconds)})"
+
+
+def _docs_okf_field(code: int, output: str, seconds: float) -> str:
+    verdict = "ok" if code == 0 else f"failed({code})"
+    found = re.search(r"(\d+) files checked, (\d+) error\(s\), (\d+) warning\(s\)", output)
+    if found is None:
+        return f"{verdict}(unreadable:no-summary)({_spell(seconds)})"
+    return (
+        f"{verdict}({found.group(1)}files,{found.group(2)}errors,"
+        f"{found.group(3)}warnings)({_spell(seconds)})"
     )
 
 
@@ -509,28 +624,48 @@ def _fields_for(
     if run.label == "meizel":
         return {"meizel": _meizel_field(code, output, seconds)}
     if run.label == "debt":
-        return {"debt": _debt_field(output)}
+        return {"debt": _debt_field(code, output, seconds)}
+    if run.label == "docs-refs":
+        return {"docs-refs": _docs_refs_field(code, output, seconds)}
+    if run.label == "docs-okf":
+        return {"docs-okf": _docs_okf_field(code, output, seconds)}
     if run.label == "refusal-loss":
         return {"refusal-loss": _refusal_field(output)}
     verdict = "ok" if code == 0 else f"failed({code})"
     return {run.label: f"{verdict}({_spell(seconds)})"}
 
 
-def check(
+# meiva:note
+# Why every layer no trigger ran is absent, said in this change's own terms: "no python touched"
+# is a fact about the change, not an excuse, and the reader can check it against `scope=`.
+def _not_run(change: ChangeSet) -> dict[str, str]:
+    unread = {
+        "pyright": "n/a(no-python-touched)",
+        "err_in_this_diff": "n/a(no-python-touched)",
+        "closure": "n/a(no-python-touched)",
+        "ruff": "n/a(no-python-touched)",
+        "vitest": "n/a(no-app-tree-file)",
+        "next-build": "n/a(not-the-app-router)",
+        "debt": "n/a(no-manifest-changed)",
+        "refusal-loss": "n/a(no-net-debt-reduction)",
+        "docs-refs": "n/a(no-doc-touched)",
+        "docs-okf": "n/a(no-doc-touched)",
+    }
+    if "python" in _kinds(change):
+        unread["closure"] = "n/a(the-tree-was-green)"
+    return unread
+
+
+# meiva:note
+# Run what the matched triggers ask for and judge each run by its own stated verdict: an exit code,
+# except pyright, whose red tree is attributed to this change rather than counted against it.
+def _run_triggers(
     change: ChangeSet,
-    *,
-    skip_tests: bool,
-    execute: Callable[[Sequence[str], Path], tuple[int, str, float]] = _execute,
-    choose: Callable[[ChangeSet], Selection] = select_tests,
+    matched: Sequence[Trigger],
+    execute: Callable[[Sequence[str], Path], tuple[int, str, float]],
 ) -> tuple[dict[str, str], bool]:
-    matched = [trigger for trigger in TRIGGERS if trigger.matches(change)]
     values: dict[str, str] = {}
     failed = False
-    selection = choose(change)
-    values["selector"] = selection.field
-    values["blind"] = ",".join(selection.blind) if selection.blind else "none"
-    if selection.blind:
-        values["fallback"] = "none"
     for trigger in matched:
         for run in trigger.runs(change):
             code, output, seconds = execute(
@@ -541,24 +676,51 @@ def check(
             values.update(fields)
             verdict = attributed == "1" if run.label == "pyright" else code != 0
             failed = failed or (trigger.blocking and verdict)
-    if skip_tests:
-        values["tests"] = "SKIPPED(--skip-tests)"
-        return values, failed
-    if not selection.tests:
-        values["tests"] = "SKIPPED(the selector chose none)"
-        return values, failed
-    values["tests"] = "RAN"
-    code, output, seconds = execute(
-        (sys.executable, "-m", "pytest", "-q", *selection.tests), change.root
-    )
-    values["passed"] = f"{_count(output, 'passed')}({_spell(seconds)})"
-    values["failed"] = str(_count(output, "failed"))
-    failed = failed or code != 0
     return values, failed
 
 
+def check(
+    change: ChangeSet,
+    *,
+    skip_tests: bool,
+    execute: Callable[[Sequence[str], Path], tuple[int, str, float]] = _execute,
+    choose: Callable[[ChangeSet], Selection] = select_tests,
+) -> tuple[dict[str, str], bool]:
+    matched = [trigger for trigger in TRIGGERS if trigger.matches(change)]
+    values: dict[str, str] = {"scope": _scope(change)}
+    failed = False
+    selection = choose(change)
+    values["selector"] = selection.field
+    values["blind"] = (
+        f"BLIND({','.join(selection.blind)})"
+        if selection.blind
+        else "n/a(no-changed-file-was-invisible)"
+    )
+    values["fallback"] = (
+        "n/a(a-blind-selection-has-no-fallback-yet)"
+        if selection.blind
+        else "n/a(the-selection-was-not-blind)"
+    )
+    ran, failed = _run_triggers(change, matched, execute)
+    values.update(ran)
+    for label, reason in _not_run(change).items():
+        values.setdefault(label, reason)
+    if skip_tests or not selection.tests:
+        values["tests"] = f"skipped({'--skip-tests' if skip_tests else 'selector-chose-none'})"
+        values["passed"] = "n/a(no-test-ran)"
+        values["failed"] = "n/a(no-test-ran)"
+        return values, failed
+    code, output, seconds = execute(
+        (sys.executable, "-m", "pytest", "-q", *selection.tests), change.root
+    )
+    values["tests"] = f"RAN({len(selection.tests)}files)"
+    values["passed"] = f"{_count(output, 'passed')}tests({_spell(seconds)})"
+    values["failed"] = f"{_count(output, 'failed')}tests"
+    return values, failed or code != 0
+
+
 def build_receipt(values: dict[str, str], sha: str, base: str) -> str:
-    fields = [f"{label}={values.get(label, 'none')}" for label in FIELD_ORDER]
+    fields = [f"{label}={values.get(label, 'n/a(unfilled)')}" for label in FIELD_ORDER]
     return " ".join(
         (
             f"{RECEIPT_VERSION} @{sha}",
@@ -571,13 +733,13 @@ def build_receipt(values: dict[str, str], sha: str, base: str) -> str:
 
 def plan(change: ChangeSet, *, skip_tests: bool) -> list[str]:
     matched = [trigger for trigger in TRIGGERS if trigger.matches(change)]
-    lines = [f"change: {len(change.files)} files against {change.base}"]
+    lines = [f"change: {len(change.files)} files against {change.base} scope={_scope(change)}"]
     for trigger in matched:
         lines.append(f"trigger {trigger.name} (blocking={trigger.blocking})")
         for run in trigger.runs(change):
             where = f" (in {run.cwd})" if run.cwd else ""
             lines.append(f"  {run.label}: {' '.join(run.argv[:4])}{where} [{run.judge}]")
-    lines.append("  selector: scripts/ci/test_selector.py --json")
+    lines.append("  selector: scripts/ci/test_selector.py --json (the files it chooses)")
     if not skip_tests:
         lines.append("  tests: the files the selector chooses")
     return lines
