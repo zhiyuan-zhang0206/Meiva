@@ -251,7 +251,6 @@ async def prepare_graph(
     graph = builder.compile(checkpointer=saver)
     ctx = MeivaContext(
         machine=machine_identity,
-        meiva_home=Path("/nonexistent/meiva-home"),
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
