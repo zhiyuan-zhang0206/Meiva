@@ -119,10 +119,12 @@ violations pass, anything new fails, and the debt may only shrink
   change so the baseline drops with the fix. `python -m meizel debt` shows what
   is left.
 - Before merging a change that pays recorded debt down, run
-  `.venv/bin/python scripts/audit/refusal_loss.py --base origin/main` and paste its summary
-  line into the pull request body (`refusal-loss: N hits, M blocking`). The tool reads only
-  debt-reducing commits and fails on a hunk that deletes a refusal and adds nothing in its
-  place; every other hit it lists is for the author to read.
+  `.venv/bin/python scripts/audit/refusal_loss.py --base origin/main --receipt` and put its one
+  line into the pull request body (`refusal-loss: hits=N blocking=M unreplaced=K`); when
+  `unreplaced` is above zero, the same line continues with your per-case conclusion
+  (`reviewed: …`). The tool reads only debt-reducing commits and fails by default on a hunk that
+  deletes a refusal and adds nothing in its place; every other hit it lists is for the author to
+  read. A net-debt-reduction change without that line does not merge.
   [[scripts/audit/docs/refusal-loss.meiva.okf.md]]
 - Recorded debt is derived from the tree, so a merge conflict in a `[debt.*]` table is not
   resolved by choosing a side or by hand: run `python -m meizel debt resolve <meizel.toml>...`

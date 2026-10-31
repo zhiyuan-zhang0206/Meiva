@@ -12,7 +12,7 @@ down delete a refusal instead of moving it? Run it from the checkout it should r
 
 ```
 .venv/bin/python scripts/audit/refusal_loss.py [--base origin/main | --range A..B | --since "60 days ago"]
-                                                [--blocking deletion|unreplaced] [--json] [--no-block]
+                                                [--blocking deletion|unreplaced] [--receipt] [--json] [--no-block]
 ```
 
 ## Why it exists
@@ -50,8 +50,9 @@ deleted a refusal and added nothing that raises in its place — the shape that 
 guard replaced by a call whose result nobody reads, at the cost of flagging hunks that only
 reworded a refusal.
 
-Exit code `1` means a blocking hit, `0` means the change is clean or every hit is only listed;
-`--no-block` reports without failing, and `--json` prints the same findings as objects. A hunk in
+Exit code `1` means a blocking hit under the selected rule, `0` means the change is clean or every
+hit is only listed; `--no-block` reports without failing, and `--json` prints the same findings as
+objects. A finding records both verdicts, so one scan answers both rules. A hunk in
 a test file, or in a file the commit deletes, carries no finding: deleting a module takes its
 refusals with it.
 
@@ -64,10 +65,20 @@ window: the default rule catches one of the three, and `unreplaced` catches all 
 `unreplaced` blocks 152 of the same 264 hits — two and a half times the default — because it also
 flags a hunk that reworded a refusal without dropping it, which is why it stays a flag.
 
-The line to paste into a pull request body while pull-request CI is dispatch-only:
+## The line a pull request carries
 
 ```
-refusal-loss: <hits> hits, <blocking> blocking
+refusal-loss: hits=<hits> blocking=<blocking> unreplaced=<unreplaced>
 ```
+
+`--receipt` prints exactly this line and nothing else, from a single scan, and it is the line to
+paste into a pull request body while pull-request CI is dispatch-only. Three labelled counts in
+one line means no reader has to guess whether a bare number is the hit count or the blocking one,
+and the pull request body carries the same string the script produced rather than a hand-copied
+approximation of it. When `unreplaced` is above zero, the same line continues with the author's
+per-case conclusions: `refusal-loss: hits=… blocking=… unreplaced=… reviewed: <what each one was>`.
+
+The merge gate on a change that pays recorded debt down requires that line, and a change whose
+`unreplaced` count is above zero carries the author's per-case conclusions beside it.
 
 Parent: [[scripts/audit/docs/audit.meiva.okf.md]].

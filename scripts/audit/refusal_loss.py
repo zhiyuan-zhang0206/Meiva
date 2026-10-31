@@ -72,7 +72,7 @@ def surviving_text(repo: Path, sha: str, messages: tuple[str, ...]) -> str:
 # meiva:note
 # Findings over the debt-reducing commits in the range, and how many commits were read - the
 # count is what tells an operator the check ran over something rather than nothing.
-def scan(repo: Path, rev_range: str, *, rule: str = UNREPLACED) -> tuple[tuple[Finding, ...], int]:
+def scan(repo: Path, rev_range: str) -> tuple[tuple[Finding, ...], int]:
     found: list[Finding] = []
     read = 0
     for sha, subject in commits(repo, rev_range):
@@ -89,16 +89,15 @@ def scan(repo: Path, rev_range: str, *, rule: str = UNREPLACED) -> tuple[tuple[F
                 hunks=commit_hunks,
                 tree_text=tree,
                 existing=existing_paths(repo, sha),
-                rule=rule,
             )
         )
     return tuple(found), read
 
 
-def render(found: tuple[Finding, ...]) -> str:
+def render(found: tuple[Finding, ...], rule: str) -> str:
     lines = [summary_line(found)]
     for finding in found:
-        mark = "BLOCKING" if finding.blocking else "listed  "
+        mark = "BLOCKING" if finding in blocking(found, rule) else "listed  "
         lines.append(f"{mark} {finding.lens:16s} {finding.commit} {finding.path}")
         lines.append(f"    {finding.detail}")
     return "\n".join(lines)
@@ -113,6 +112,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--since", help="a history window instead of a pull request")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
+        "--receipt",
+        action="store_true",
+        help="print only the one merge-gate line, so a harness reads numbers rather than prose",
+    )
+    parser.add_argument(
         "--blocking",
         choices=(UNREPLACED, DELETION),
         default=DELETION,
@@ -125,16 +129,20 @@ def main(argv: list[str]) -> int:
     rev_range = args.rev_range or (
         f"--since={args.since} HEAD" if args.since else f"{args.base}...HEAD"
     )
-    found, read = scan(Path(), rev_range, rule=args.blocking)
+    found, read = scan(Path(), rev_range)
+    failed = bool(blocking(found, args.blocking)) and not args.no_block
+    if args.receipt:
+        print(summary_line(found))
+        return 1 if failed else 0
     if args.json:
         print(json.dumps([asdict(finding) for finding in found], indent=1))
-        return 1 if blocking(found) and not args.no_block else 0
+        return 1 if failed else 0
     if not read:
         print(f"refusal-loss: no recorded debt reduction in {rev_range}; nothing to check")
         return 0
-    print(render(found))
+    print(render(found, args.blocking))
     print(f"read {read} debt-reducing commit(s) in {rev_range}")
-    return 1 if blocking(found) and not args.no_block else 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

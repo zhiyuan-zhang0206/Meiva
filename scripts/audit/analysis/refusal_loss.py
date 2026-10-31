@@ -43,15 +43,17 @@ class Hunk:
 
 
 # meiva:note
-# One hunk worth a reader's eyes, and whether it blocks the merge.
+# One hunk worth a reader's eyes, and which gate rule it fails. A finding states both verdicts
+# rather than the one the caller asked for, so one scan reports every count a receipt carries.
 @dataclass(frozen=True, slots=True)
 class Finding:
     commit: str
     subject: str
     path: str
     lens: str
-    blocking: bool
     pure_deletion: bool
+    blocks_deletion: bool
+    blocks_unreplaced: bool
     detail: str
 
 
@@ -164,7 +166,8 @@ def _blocks(hunk: Hunk, rule: str) -> bool:
 # meiva:note
 # Every hunk of one commit the two lenses flag, in diff order. A hunk whose file the commit
 # deletes carries no refusal someone removed - the refusals left with the module - so a module
-# deletion does not report its own body.
+# deletion does not report its own body. Both verdicts are recorded here; which one the caller
+# treats as fatal is `blocking`'s argument, not this function's.
 def findings_for(
     *,
     commit: str,
@@ -172,7 +175,6 @@ def findings_for(
     hunks: tuple[Hunk, ...],
     tree_text: str,
     existing: frozenset[str],
-    rule: str = UNREPLACED,
 ) -> tuple[Finding, ...]:
     flagged: list[Finding] = []
     for hunk in hunks:
@@ -187,8 +189,9 @@ def findings_for(
                     subject=subject,
                     path=hunk.path,
                     lens=DROPPED,
-                    blocking=_blocks(hunk, rule),
                     pure_deletion=not hunk.added,
+                    blocks_deletion=_blocks(hunk, DELETION),
+                    blocks_unreplaced=_blocks(hunk, UNREPLACED),
                     detail=f"{first[:96]} -> gone {list(gone[:2])}",
                 )
             )
@@ -199,19 +202,32 @@ def findings_for(
                     subject=subject,
                     path=hunk.path,
                     lens=DEFAULT,
-                    blocking=False,
                     pure_deletion=not hunk.added,
+                    blocks_deletion=False,
+                    blocks_unreplaced=False,
                     detail=f"{first[:96]} / {fallback.strip()[:96]}",
                 )
             )
     return tuple(flagged)
 
 
-def blocking(findings: tuple[Finding, ...]) -> tuple[Finding, ...]:
-    return tuple(finding for finding in findings if finding.blocking)
+# meiva:note
+# The findings a gate rule fails on: `deletion` counts a hunk that adds nothing at all,
+# `unreplaced` every hunk that did not replace the refusal with another raise.
+def blocking(findings: tuple[Finding, ...], rule: str = DELETION) -> tuple[Finding, ...]:
+    return tuple(finding for finding in findings if _fails(finding, rule))
+
+
+def _fails(finding: Finding, rule: str) -> bool:
+    return finding.blocks_unreplaced if rule == UNREPLACED else finding.blocks_deletion
 
 
 # meiva:note
-# The line a pull request carries so a reader sees the check ran and what it found.
+# The one line a pull request carries and `--receipt` prints for the merge gate: three labelled
+# counts from one scan, so no reader has to guess which count a bare number is.
 def summary_line(findings: tuple[Finding, ...]) -> str:
-    return f"refusal-loss: {len(findings)} hits, {len(blocking(findings))} blocking"
+    return (
+        f"refusal-loss: hits={len(findings)}"
+        f" blocking={len(blocking(findings, DELETION))}"
+        f" unreplaced={len(blocking(findings, UNREPLACED))}"
+    )

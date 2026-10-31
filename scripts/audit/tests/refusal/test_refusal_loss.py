@@ -10,9 +10,7 @@ import pytest
 
 from base.host.proc import run_bounded
 from scripts.audit.analysis.refusal_loss import (
-    DELETION,
     DROPPED,
-    UNREPLACED,
     findings_for,
     manifest_delta,
     parse_diff,
@@ -77,25 +75,15 @@ def test_manifest_delta_is_positive_when_a_commit_deletes_more_debt_than_it_adds
 
 
 def test_a_guard_replaced_by_a_call_is_listed_but_not_blocking_under_deletion() -> None:
-    hunks = parse_diff(GUARD_DIFF)
     found = findings_for(
         commit="1a2c99a54",
         subject="boot id",
-        hunks=hunks,
+        hunks=parse_diff(GUARD_DIFF),
         tree_text="",
         existing=frozenset({"base/cluster/postgres.py"}),
-        rule=DELETION,
     )
-    assert [(finding.lens, finding.blocking) for finding in found] == [(DROPPED, False)]
-    wide = findings_for(
-        commit="1a2c99a54",
-        subject="boot id",
-        hunks=hunks,
-        tree_text="",
-        existing=frozenset({"base/cluster/postgres.py"}),
-        rule=UNREPLACED,
-    )
-    assert [finding.blocking for finding in wide] == [True]
+    assert [(finding.lens, finding.blocks_deletion) for finding in found] == [(DROPPED, False)]
+    assert [finding.blocks_unreplaced for finding in found] == [True]
 
 
 def test_a_pure_deletion_of_a_refusal_blocks_and_its_message_survives_elsewhere() -> None:
@@ -108,7 +96,7 @@ def test_a_pure_deletion_of_a_refusal_blocks_and_its_message_survives_elsewhere(
         tree_text="",
         existing=existing,
     )
-    assert [finding.blocking for finding in blocked] == [True]
+    assert [finding.blocks_deletion for finding in blocked] == [True]
     moved = findings_for(
         commit="1c7e410fe",
         subject="dependency pin",
@@ -127,10 +115,18 @@ def test_a_hunk_that_adds_a_default_is_listed_without_blocking() -> None:
         tree_text="",
         existing=frozenset({"cli/database/lifecycle_audit.py"}),
     )
-    assert [(finding.lens, finding.blocking) for finding in found] == [
-        (DROPPED, True),
+    assert [(finding.lens, finding.blocks_deletion) for finding in found] == [
+        (DROPPED, False),
         ("default-allow", False),
-    ]
+    ], (
+        "the default rule fails only a hunk that adds nothing at all, so a hunk that deleted a "
+        "refusal and added a fallback must be listed without blocking: a gate that failed here "
+        f"would stop every softened guard. found={found!r}"
+    )
+    assert [finding.blocks_unreplaced for finding in found] == [True, False], (
+        "the strict rule fails the same hunk because it added no refusal of its own: that is the "
+        f"shape it exists for. found={found!r}"
+    )
 
 
 def test_a_test_file_or_a_deleted_module_carries_no_finding() -> None:
@@ -249,6 +245,41 @@ def test_the_json_report_carries_every_finding_as_an_object(debt_checkout: Path)
         message="pay debt down and drop the guard",
     )
     reported = json.loads(_run_gate(debt_checkout, "--base", "HEAD~1", "--json").stdout)
-    assert [(entry["lens"], entry["blocking"], entry["path"]) for entry in reported] == [
+    assert [(entry["lens"], entry["blocks_deletion"], entry["path"]) for entry in reported] == [
         ("dropped-refusal", True, "base/boot.py")
     ]
+
+
+def test_the_receipt_mode_prints_one_line_with_every_count(debt_checkout: Path) -> None:
+    _commit(
+        debt_checkout,
+        source="def other() -> None:\n    return None\n",
+        debt='[debt.first-party-patch]\n"a.py#x" = 1\n',
+        message="pay debt down and drop the guard",
+    )
+    done = _run_gate(debt_checkout, "--base", "HEAD~1", "--receipt")
+    assert done.stdout.splitlines() == ["refusal-loss: hits=1 blocking=1 unreplaced=1"], (
+        "the merge gate reads numbers, not prose: --receipt must print exactly one line carrying "
+        "all three labelled counts, because the pull request body copies that line and a harness "
+        f"parses it. stdout={done.stdout!r} stderr={done.stderr!r}"
+    )
+    assert done.returncode == 1, (
+        "the default rule still decides the exit code under --receipt: a pure-deletion hunk that "
+        f"dropped a refusal fails the run. stdout={done.stdout!r}"
+    )
+
+
+def test_the_receipt_mode_reports_zeros_when_no_commit_pays_debt_down(debt_checkout: Path) -> None:
+    _commit(
+        debt_checkout,
+        source='def boot() -> None:\n    raise ValueError("a different refusal")\n',
+        debt='[debt.first-party-patch]\n"a.py#x" = 3\n"b.py#y" = 2\n',
+        message="reword only",
+    )
+    done = _run_gate(debt_checkout, "--base", "HEAD~1", "--receipt")
+    assert done.stdout.splitlines() == ["refusal-loss: hits=0 blocking=0 unreplaced=0"], (
+        "a receipt always carries the three counts, including when nothing was read: a harness "
+        "that gets an empty line cannot tell 'the check ran and found nothing' from 'the check "
+        f"never ran'. stdout={done.stdout!r}"
+    )
+    assert done.returncode == 0
