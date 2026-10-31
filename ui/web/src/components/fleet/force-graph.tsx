@@ -29,6 +29,8 @@ import { cn } from "@/lib/format/utils";
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
 import {
   buildConnectedNodeIds,
+  HOVER_CARD_HIDE_GRACE_MS,
+  hoverCardLeave,
   useGraphFocus,
   useHoverCardState,
   type ForceGraphEdge,
@@ -276,18 +278,24 @@ export const ForceGraph = memo(function ForceGraph({
                   }}
                   onMouseLeave={(ev) => {
                     const card = hoverCardRef.current;
-                    if (cardScrollable && card && ev.relatedTarget instanceof Node && card.contains(ev.relatedTarget)) {
+                    const leave = hoverCardLeave({
+                      scrollable: cardScrollable,
+                      pointerOnCard:
+                        card !== null && ev.relatedTarget instanceof Node && card.contains(ev.relatedTarget),
+                    });
+                    if (leave === "hold") return;
+                    if (hideTimerRef.current) {
+                      clearTimeout(hideTimerRef.current);
+                      hideTimerRef.current = null;
+                    }
+                    if (leave === "hide") {
+                      setHovered((cur) => (cur?.id === n.id ? null : cur));
                       return;
                     }
-                    if (cardScrollable) {
-                      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-                      hideTimerRef.current = setTimeout(
-                        () => setHovered((cur) => (cur?.id === n.id ? null : cur)),
-                        200,
-                      );
-                      return;
-                    }
-                    setHovered((cur) => (cur?.id === n.id ? null : cur));
+                    hideTimerRef.current = setTimeout(
+                      () => setHovered((cur) => (cur?.id === n.id ? null : cur)),
+                      HOVER_CARD_HIDE_GRACE_MS,
+                    );
                   }}
                 >
                   {hoverCard == null ? (

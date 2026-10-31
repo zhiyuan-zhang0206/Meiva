@@ -327,7 +327,7 @@ describe("GraphView lineage, hover, and empty states", () => {
   });
 
   it("shows the hover card instantly on mouseenter and hides it on mouseleave", async () => {
-    const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
       graph: {
         nodes: [node(1, { label: "alpha", node_score: 12_345_678 }), node(2)],
         edges: [edge(1, 2, "spawn")],
@@ -338,29 +338,20 @@ describe("GraphView lineage, hover, and empty states", () => {
     const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
     const group = label.closest("g")!;
 
-    const svg = container.querySelector('svg[aria-label="Fleet relationship graph"]')!;
-    const canvas = svg.parentElement!;
-    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 0, y: 0, width: 600, height: 400 }),
-    );
-    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ x: 100, y: 100, width: 36, height: 36 }),
-    );
-    const restoreCard = mockCardSize(200, 100);
-    try {
-      fireEvent.mouseEnter(group);
-      expect(screen.queryByRole("tooltip")).not.toBeNull();
-      const card = screen.getByRole("tooltip");
-      expect(card.textContent).toContain("alpha");
-      expect(card.textContent).toContain("Agent #1");
-      expect(card.textContent).toContain("Running");
-      expect(card.textContent).toContain("Activity score: 12.35M");
+    fireEvent.mouseEnter(group);
+    const card = screen.getByRole("tooltip");
+    expect(card.textContent).toContain("alpha");
+    expect(card.textContent).toContain("Agent #1");
+    expect(card.textContent).toContain("Running");
+    expect(card.textContent).toContain("Activity score: 12.35M");
 
-      fireEvent.mouseLeave(group);
-      expect(screen.queryByRole("tooltip")).toBeNull();
-    } finally {
-      restoreCard();
-    }
+    // meiva:note
+    // jsdom reports a zero-size canvas, so the card is height-capped and holds through the grace
+    // window before it goes. A card the pointer cannot reach drops at once — hoverCardLeave() in
+    // force-graph-geometry, covered there.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    fireEvent.mouseLeave(group);
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
   });
 
   it("empty graph (not loading, no error) shows the empty placeholder", async () => {
@@ -382,32 +373,3 @@ describe("GraphView lineage, hover, and empty states", () => {
     await waitFor(() => expect(screen.getByText("Graph unavailable.")).toBeTruthy());
   });
 });
-
-function mockCardSize(width: number, height: number): () => void {
-  const proto = HTMLElement.prototype;
-  const widthDesc = Object.getOwnPropertyDescriptor({ offsetWidth: 0 }, "offsetWidth");
-  const heightDesc = Object.getOwnPropertyDescriptor({ offsetHeight: 0 }, "offsetHeight");
-  const isCard = function (this: HTMLElement) {
-    return this.getAttribute("role") === "tooltip";
-  };
-  Object.defineProperty(proto, "offsetWidth", {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (isCard.call(this)) return width;
-      const real: unknown = widthDesc?.get?.call(this);
-      return typeof real === "number" ? real : 0;
-    },
-  });
-  Object.defineProperty(proto, "offsetHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (isCard.call(this)) return height;
-      const real: unknown = heightDesc?.get?.call(this);
-      return typeof real === "number" ? real : 0;
-    },
-  });
-  return () => {
-    if (widthDesc) Object.defineProperty(proto, "offsetWidth", widthDesc);
-    if (heightDesc) Object.defineProperty(proto, "offsetHeight", heightDesc);
-  };
-}

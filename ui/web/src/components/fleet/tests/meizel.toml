@@ -3,9 +3,3 @@
 "task-graph-hover-cap.test.tsx#vi.mock next/navigation" = 1
 "task-graph-mode.test.tsx#vi.mock next/navigation" = 1
 "task-graph-selection.test.tsx#vi.mock next/navigation" = 1
-
-[debt.unresolved-patch]
-"graph-view-lineage-and-hover.test.tsx#vi.spyOn canvas.\"getBoundingClientRect\"" = 1
-"graph-view-lineage-and-hover.test.tsx#vi.spyOn group.\"getBoundingClientRect\"" = 1
-"task-graph-hover-cap.test.tsx#vi.spyOn canvas.\"getBoundingClientRect\"" = 3
-"task-graph-hover-cap.test.tsx#vi.spyOn group.\"getBoundingClientRect\"" = 3
