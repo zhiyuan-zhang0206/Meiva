@@ -5,7 +5,6 @@
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import type { BrowserStorage } from "@/lib/browser/browser";
-import { newOperationKey as newClientMessageId } from "@/lib/transport/operation-key";
 
 export const draftKey = (id: number) => `composer-draft-${id}`;
 export const sendAttemptKey = (id: number) => `composer-send-attempt-${id}`;
@@ -79,12 +78,17 @@ export function readSendAttempt(session: BrowserStorage, agentId: number): SendA
   }
 }
 
+// meiva:note
+// `mintClientMessageId` is the transport's own key source: a message id has to survive a retry of
+// the same attempt, and which origin can mint one (crypto.randomUUID, or random bytes on plain
+// HTTP) is the transport's business, not a component's.
 export function resolveSendAttempt(
   session: BrowserStorage,
   current: SendAttempt | null,
   sendingAgentId: number | null,
   content: string,
   imageUrls: string[],
+  mintClientMessageId: () => string,
 ): SendAttempt {
   const signature = JSON.stringify([sendingAgentId, content, imageUrls]);
   let candidate = current;
@@ -96,7 +100,7 @@ export function resolveSendAttempt(
     ? candidate
     : {
         signature,
-        clientMessageId: newClientMessageId(),
+        clientMessageId: mintClientMessageId(),
         agentId: sendingAgentId,
         content,
         imageUrls: [...imageUrls],

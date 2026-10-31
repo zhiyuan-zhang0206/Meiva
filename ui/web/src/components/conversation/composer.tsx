@@ -263,7 +263,14 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     const sendingAgentId = agentId;
     let activeAttempt: SendAttempt | null = null;
     try {
-      const attempt = resolveSendAttempt(session, sendAttemptRef.current, sendingAgentId, content, imageUrls);
+      const attempt = resolveSendAttempt(
+        session,
+        sendAttemptRef.current,
+        sendingAgentId,
+        content,
+        imageUrls,
+        client.newOperationKey,
+      );
       activeAttempt = attempt;
       sendAttemptRef.current = attempt;
       if (sendingAgentId != null) {

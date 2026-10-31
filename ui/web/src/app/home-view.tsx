@@ -37,7 +37,6 @@ import type { useUserSettings } from "@/lib/state/use-user-settings";
 import { timelineMaxWidthCss } from "@/lib/timeline/timeline-width";
 import type { UseTimelineResult } from "@/lib/timeline/use-timeline";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
-import { newOperationKey } from "@/lib/transport/operation-key";
 import { useApi } from "@/lib/transport/transport-context";
 
 // meiva:note
@@ -369,7 +368,12 @@ function HomeContent({
       setUploadCount(files.length);
       setUploadError(null);
       try {
-        await client.submitUploadedFiles(activeId, files, newOperationKey(), setUploadProgress);
+        // meiva:note
+        // The upload's idempotency key comes from the transport this page was handed: which origin
+        // can mint one (crypto.randomUUID, or random bytes on plain HTTP) is the transport's
+        // business, and a test that needs the fallback answers `newOperationKey` itself instead of
+        // replacing the page's `crypto`.
+        await client.submitUploadedFiles(activeId, files, client.newOperationKey(), setUploadProgress);
       } catch (e: unknown) {
         setUploadError(errMsg(e));
       } finally {

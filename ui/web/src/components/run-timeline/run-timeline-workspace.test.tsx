@@ -2,6 +2,8 @@ import { cleanup, screen } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { fakeBrowser } from "@/lib/browser/testing";
+
 import {
   RUN_TIMELINE_SPLIT_LAYOUT_ID,
   RunTimelineWorkspace,
@@ -45,14 +47,15 @@ describe("RunTimelineWorkspace", () => {
     expect(screen.queryByRole("separator")).toBeNull();
   });
 
-  it("still renders when localStorage throws on every access", async () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("blocked");
+  it("still renders when the page refuses local storage", async () => {
+    // meiva:note
+    // A private window answers `unavailable` to every read and write; the split ratios fall back
+    // to this page view's memory instead of being lost with the render.
+    const page = fakeBrowser();
+    page.refuseStorage(true);
+    renderWithBrowser(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />, {
+      browser: page,
     });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    renderWithBrowser(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
 
     expect(await screen.findByRole("separator")).toBeTruthy();
   });

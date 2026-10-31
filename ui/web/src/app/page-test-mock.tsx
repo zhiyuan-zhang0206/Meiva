@@ -342,6 +342,11 @@ export async function resetHomePageTestState() {
   transport.listPages.mockResolvedValue([]);
   homePageApi = {
     ...homePageRig.api,
+    // meiva:note
+    // The page's key source is the fake the test answers, like every other member below: a test
+    // that needs the plain-HTTP fallback answers `newOperationKey` itself instead of replacing the
+    // page's `crypto` with a stub.
+    newOperationKey: transport.newOperationKey,
     sendMessage: transport.sendMessage,
     cancel: transport.cancel,
     uploadFiles: transport.uploadFiles,

@@ -124,7 +124,6 @@ describe("QueryClient defaults", () => {
 describe("Providers", () => {
   it("passes children through and provides the running app's client", () => {
     const { hub, tab } = fakeStreamHub();
-    const sources = vi.spyOn(globalThis, "EventSource");
     const view = render(
       <Providers client={fakeTransport} hub={hub}>
         <RootProbe />
@@ -137,9 +136,9 @@ describe("Providers", () => {
     // readers of settings / contributions then read through it, so this asserts the
     // identity the provider supplies rather than counting calls on a replaced module.
     expect(screen.getByTestId("provider-client").getAttribute("data-is-app-client")).toBe("true");
-    expect(sources).not.toHaveBeenCalled();
     // meiva:note
-    // Mounting must not open the stream: the hub's tab constructs a source per channel.
+    // Mounting must not open the stream: the hub's tab constructs a source per channel, so an
+    // empty record here is the same statement a spy on the global would make.
     expect(tab.sources).toHaveLength(0);
     view.unmount();
     for (const client of clients) {

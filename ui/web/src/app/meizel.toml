@@ -7,6 +7,3 @@ exports = ["insights"]
 "page-test-mock.tsx" = ["home-view.tsx"]
 "page.test.tsx" = ["page-test-mock.tsx"]
 "page.tsx" = ["home-view.tsx"]
-
-[debt.stdlib-patch]
-"page-dispatch.test.tsx#vi.stubGlobal crypto" = 1

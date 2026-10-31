@@ -34,7 +34,8 @@ const USER_SCROLL_SLACK_PX = 32;
 // it settles (or the cap elapses). A no-op when `targetId` is null or the
 // target element is missing — the caller resolves the URL hash.
 export function useSettledAnchorScroll(scrollId: string, targetId: string | null): void {
-  const view = useBrowser().view;
+  const browser = useBrowser();
+  const view = browser.view;
   useEffect(() => {
     if (!targetId) return;
     const container = document.getElementById(scrollId);
@@ -44,16 +45,30 @@ export function useSettledAnchorScroll(scrollId: string, targetId: string | null
     };
     scroll();
     // meiva:note
-    // No ResizeObserver (happy-dom tests): the initial scroll is the whole
-    // behavior — also the correct result when the content is already settled.
-    if (!container || typeof ResizeObserver === "undefined") return;
+    // Nothing to watch — no container, or one whose content has not rendered — and no size
+    // notifications at all (a frame with no page): the initial scroll is the whole behavior, which
+    // is also the correct result when the content is already settled.
+    const content = container?.firstElementChild ?? null;
+    if (container === null || content === null) return;
 
     let lastHeight = container.scrollHeight;
     let lastScrollTop = container.scrollTop;
     let stopped = false;
     let stableTimer: number | undefined;
+    let unwatch: () => void = () => undefined;
 
-    const observer = new ResizeObserver(() => {
+    const stop = (): void => {
+      if (stopped) return;
+      stopped = true;
+      unwatch();
+      window.clearTimeout(stableTimer);
+      window.clearTimeout(cap);
+    };
+
+    // meiva:note
+    // Watch the content wrapper: the container's own box does not change as
+    // its content grows — only the wrapper's height does.
+    unwatch = browser.size.observe(content, () => {
       if (stopped) return;
       const height = container.scrollHeight;
       if (height === lastHeight) return;
@@ -61,31 +76,15 @@ export function useSettledAnchorScroll(scrollId: string, targetId: string | null
       // meiva:note
       // The user took over scrolling during the settle window — stop.
       if (Math.abs(container.scrollTop - lastScrollTop) > USER_SCROLL_SLACK_PX) {
-        observer.disconnect();
-        stopped = true;
+        stop();
         return;
       }
       scroll();
       lastScrollTop = container.scrollTop;
       window.clearTimeout(stableTimer);
-      stableTimer = window.setTimeout(() => {
-        observer.disconnect();
-        stopped = true;
-      }, SETTLE_STABLE_MS);
+      stableTimer = window.setTimeout(stop, SETTLE_STABLE_MS);
     });
-    // meiva:note
-    // Watch the content wrapper: the container's own box does not change as
-    // its content grows — only the wrapper's height does.
-    const content = container.firstElementChild;
-    if (content) observer.observe(content);
-    const cap = window.setTimeout(() => {
-      observer.disconnect();
-      stopped = true;
-    }, SETTLE_CAP_MS);
-    return () => {
-      observer.disconnect();
-      window.clearTimeout(stableTimer);
-      window.clearTimeout(cap);
-    };
-  }, [scrollId, targetId, view]);
+    const cap = window.setTimeout(stop, SETTLE_CAP_MS);
+    return stop;
+  }, [browser, scrollId, targetId, view]);
 }

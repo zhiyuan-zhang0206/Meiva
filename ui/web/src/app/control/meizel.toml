@@ -16,6 +16,3 @@ exports = ["anchor-scroll.ts", "nav.tsx", "section.tsx", "sections.ts", "visibil
 "section.tsx" = ["visibility.tsx"]
 "skills" = ["visibility.tsx"]
 "visibility.test.tsx" = ["visibility.tsx"]
-
-[debt.stdlib-patch]
-"anchor-scroll.test.tsx#vi.stubGlobal ResizeObserver" = 1

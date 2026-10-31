@@ -188,10 +188,13 @@ describe("pasted image routing", () => {
       clipboardData: { files: [image], types: ["Files"] },
     });
     await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
+    // meiva:note
+    // The upload's idempotency key is the transport's to mint — this case is about the delivery
+    // path, so the key is asserted as a string, not as a UUID shape the page would have to know.
     expect(transport.submitUploadedFiles).toHaveBeenCalledWith(
       5,
       [image],
-      expect.stringMatching(/^[0-9a-f-]{36}$/),
+      expect.any(String),
       expect.any(Function),
     );
     expect(transport.uploadFiles).not.toHaveBeenCalled();
@@ -227,25 +230,22 @@ describe("pasted image routing", () => {
     expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
     expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("true");
   });
-  it("submits on private HTTP when randomUUID is unavailable", async () => {
-    const browserCrypto = globalThis.crypto;
-    vi.stubGlobal("crypto", { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) });
-    try {
-      hooksState.activeId = 5;
-      hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
-      const image = new File(["png"], "paste.png", { type: "image/png" });
-      wrap(<HomePage />);
-      fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-        clipboardData: { files: [image], types: ["Files"] },
-      });
-      await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
-      expect(transport.submitUploadedFiles.mock.calls[0][2]).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-      );
-      expect(transport.uploadFiles).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it("takes the submit's client message id from the transport, not from the page", async () => {
+    // meiva:note
+    // A plain-HTTP origin has no `crypto.randomUUID`, so the key source falls back to random bytes
+    // (key-plan.test.ts pins that shape). What this page test owns is the seam: the composer asks
+    // the transport it was given for the id and hands that id to the submit call.
+    transport.newOperationKey.mockReturnValue("operation-key-from-the-client");
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
+    const image = new File(["png"], "paste.png", { type: "image/png" });
+    wrap(<HomePage />);
+    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
+      clipboardData: { files: [image], types: ["Files"] },
+    });
+    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
+    expect(transport.submitUploadedFiles.mock.calls[0][2]).toBe("operation-key-from-the-client");
+    expect(transport.uploadFiles).not.toHaveBeenCalled();
   });
 });
 

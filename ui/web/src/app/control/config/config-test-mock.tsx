@@ -45,9 +45,13 @@ export function makeQc() {
 // the tests answer. Same provider the app mounts -- nothing replaces the module.
 export function wrap(ui: React.ReactElement, qc?: QueryClient) {
   const client = qc ?? makeQc();
+  // meiva:note
+  // The config page mounts its sections through the deferred-mount queue, so the page this
+  // harness hands in runs each idle slice at once: a test asserts a settled page, not frames.
+  const page = fakeBrowser({ idle: "immediate" });
   return render(
     <QueryClientProvider client={client}>
-      <BrowserProvider browser={fakeBrowser()}>
+      <BrowserProvider browser={page}>
         <ApiProvider api={transport}>{ui}</ApiProvider>
       </BrowserProvider>
     </QueryClientProvider>,
@@ -341,11 +345,6 @@ export function setupConfigTest() {
   vi.restoreAllMocks();
   resetTransport();
   localStorage.clear();
-  vi.stubGlobal("requestIdleCallback", (cb: IdleRequestCallback) => {
-    cb({ didTimeout: true, timeRemaining: () => 0 });
-    return 0;
-  });
-  vi.stubGlobal("cancelIdleCallback", () => undefined);
   transport.getMachines.mockResolvedValue(MACHINES);
   transport.getSystemStatus.mockResolvedValue(STATUS);
   transport.getModels.mockResolvedValue(MODELS);

@@ -11,9 +11,11 @@ import {
   beaconOver,
   browserOver,
   clipboardOver,
+  idleOver,
   mediaOver,
   navigationOver,
   objectUrlsOver,
+  sizeOver,
   storageOver,
   viewOver,
   viewportOver,
@@ -110,6 +112,8 @@ function pageOf(overrides: Partial<LivePage> = {}): LivePage {
     visualViewport: viewportOf(900),
     navigator: navigatorOf(),
     document: documentOf(),
+    setTimeout: () => 0,
+    clearTimeout: () => undefined,
   };
   return Object.assign(page, overrides);
 }
@@ -414,5 +418,105 @@ describe("browserOver", () => {
     expect(browser.navigation.location()).toBeNull();
     expect(browser.local.read("a")).toEqual({ state: "unavailable" });
     expect(browser.session.write("a", "1")).toBe("unavailable");
+  });
+});
+
+describe("sizeOver", () => {
+  it("attaches the page's observer to the element and ends the watch", () => {
+    const watched: Element[] = [];
+    const changes: (() => void)[] = [];
+    let disconnected = 0;
+    const target = document.createElement("div");
+    const size = sizeOver(
+      pageOf({
+        newResizeObserver: (onChange) => {
+          changes.push(onChange);
+          return {
+            observe: (element) => void watched.push(element),
+            disconnect: () => {
+              disconnected += 1;
+            },
+          };
+        },
+      }),
+    );
+
+    const stop = size.observe(target, () => undefined);
+
+    expect(watched).toEqual([target]);
+    expect(changes).toHaveLength(1);
+    stop();
+    expect(disconnected).toBe(1);
+  });
+
+  it("watches nothing on a frame with no page, or a browser without ResizeObserver", () => {
+    let heard = 0;
+    const stopWithoutPage = sizeOver(null).observe(document.createElement("div"), () => {
+      heard += 1;
+    });
+    const stopWithoutObserver = sizeOver(pageOf()).observe(
+      document.createElement("div"),
+      () => {
+        heard += 1;
+      },
+    );
+    stopWithoutPage();
+    stopWithoutObserver();
+    expect(heard).toBe(0);
+  });
+});
+
+describe("idleOver", () => {
+  it("asks the page for an idle slice with the caller's deadline, and cancels through the page", () => {
+    const asked: { timeout: number }[] = [];
+    const cancelled: number[] = [];
+    const idle = idleOver(
+      pageOf({
+        requestIdleCallback: (_work, options) => {
+          asked.push(options);
+          return 11;
+        },
+        cancelIdleCallback: (handle) => void cancelled.push(handle),
+      }),
+    );
+
+    const stop = idle.schedule(() => undefined, { deadlineMs: 50, fallbackDelayMs: 2000 });
+
+    expect(asked).toEqual([{ timeout: 50 }]);
+    expect(cancelled).toEqual([]);
+    stop();
+    expect(cancelled).toEqual([11]);
+  });
+
+  it("waits the caller's delay when the page has no idle callback (Safari)", () => {
+    const delays: number[] = [];
+    const cleared: number[] = [];
+    const idle = idleOver(
+      pageOf({
+        setTimeout: (_work, delayMs) => {
+          delays.push(delayMs);
+          return 3;
+        },
+        clearTimeout: (handle) => void cleared.push(handle),
+      }),
+    );
+
+    const stop = idle.schedule(() => undefined, { deadlineMs: 4000, fallbackDelayMs: 2000 });
+
+    expect(delays).toEqual([2000]);
+    stop();
+    expect(cleared).toEqual([3]);
+  });
+
+  it("never runs the work on a frame with no page", () => {
+    let ran = 0;
+    const stop = idleOver(null).schedule(
+      () => {
+        ran += 1;
+      },
+      { deadlineMs: 0, fallbackDelayMs: 0 },
+    );
+    stop();
+    expect(ran).toBe(0);
   });
 });
