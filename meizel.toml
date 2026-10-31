@@ -27,5 +27,15 @@ tests = ["tests"]
 # The user interface; its Python is a build helper.
 frontend = ["ui"]
 
+# meiva:note
+# `base/sessions/pty/tests/pty_service.py` starts the pty daemon as a subprocess
+# (`python -m services.agent_runner.pty_sessions.daemon`), so the edge is invisible to the import
+# graph. Declaring it is not available: the only `[uses]` key that can name another package's file is
+# this root table, and `base -> services` closes `base <-> services` (services already uses base) as
+# `manifest-cycle`; a directory manifest may only name its own children, and the pty package's
+# (base/sessions/pty) attempt is `manifest-unknown-child` for the same reason. The fixture's consumers
+# are base's own pty tests, which must run the real service the `services` package owns, so repaying
+# this needs a package move (the client's integration tests above both packages, or the daemon below
+# base), not a declaration. Kept as recorded debt.
 [debt.undeclared-edge]
 "base/sessions/pty/tests/pty_service.py -> services/agent_runner/pty_sessions/daemon.py" = 1
