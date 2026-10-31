@@ -11,6 +11,7 @@ from agent.state import plugin_state_schema
 from base import config
 from base.agents.context.clients import ClientSet
 from base.clock.tests.seeded_rng import seeded_rng
+from base.config.service_read import ConfigAuthority
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface.extensions import load_extensions
 from services.agent_runner.agent_host import daemon
@@ -53,10 +54,11 @@ def test_host_root_supplies_model_and_config_owners(tmp_path: Path) -> None:
         assert installation.require_catalog().models
         assert installation.clients is clients
         assert calls == []
-        assert installation.authority is not None
-        assert installation.authority.runtime is boot.view
-        assert installation.authority.all_domains.profile is None
-        assert installation.authority.all_domains is boot.view
+        authority = installation.authority
+        assert isinstance(authority, ConfigAuthority)
+        assert authority.runtime is boot.view
+        assert authority.all_domains.profile is None
+        assert authority.all_domains is boot.view
     finally:
         install.uninstall()
 
@@ -87,7 +89,7 @@ def _assert_profiled_host_defers_complete_model(tmp_path: Path) -> None:
         )
         assert calls == []
         authority = installation.authority
-        assert authority is not None
+        assert isinstance(authority, ConfigAuthority)
         assert authority.runtime is runtime
         assert authority.service_field_value("machine_host") == runtime.general.machine_host
         env["MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY"] = "42.5"

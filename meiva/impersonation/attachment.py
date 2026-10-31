@@ -59,12 +59,13 @@ from meiva.impersonation.admission import (
     require_held_version,
 )
 from meiva.sdk_surface import process_context
-from meiva.sdk_surface.installation import config_authority, installed
+from meiva.sdk_surface.installation import installed
 from meiva.sdk_surface.pure.caller.attachability import (
     BoundIdentity,
     ProcessFacts,
     refuse_unless_attachable,
 )
+from meiva.sdk_surface.settings import config_authority
 
 __all__ = ["AttachInputs", "Attachment", "attach"]
 

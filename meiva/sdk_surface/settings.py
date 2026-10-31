@@ -14,12 +14,10 @@ from typing import Any, Literal, Protocol, overload
 from base.agents.context.clients import DatabaseHandle
 from base.clock import Clock
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from meiva.sdk_surface import process_context
 
-from .installation import (
-    config_authority as config_authority,
-)
 from .installation import (
     installed,
 )
@@ -42,6 +40,19 @@ def clock() -> Clock:
     if installation is None or installation.clock is None:
         raise RuntimeError("the SDK installation carries no Clock")
     return installation.clock
+
+
+# meiva:note
+# The configuration owner this process installed. The installation stores it as an opaque root
+# collaborator -- it never reads through it -- so the name of the type, and the refusal a value
+# that is not one earns, live here with the code that does read through it.
+def config_authority() -> ConfigAuthority:
+    installation = installed()
+    carried = None if installation is None else installation.authority
+    authority = carried if isinstance(carried, ConfigAuthority) else None
+    if authority is None:
+        raise RuntimeError("the SDK installation carries no ConfigAuthority")
+    return authority
 
 
 def model_overrides() -> ModelOverrides:
