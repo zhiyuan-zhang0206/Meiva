@@ -188,7 +188,14 @@ async def claim_gate(
     db, bus = ctx.require_db(), ctx.require_bus()
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
     await supervise_relay(
-        db, bus, session, agent_id, ctx.relays, incarnation=incarnation, clock=ctx.require_clock()
+        db,
+        bus,
+        session,
+        agent_id,
+        ctx.relays,
+        incarnation=incarnation,
+        clock=ctx.require_clock(),
+        home=ctx.require_meiva_home(),
     )
     verdict = gate_verdict(lease_phase(session))
     if verdict is GateVerdict.PROCEED:
@@ -655,6 +662,7 @@ async def supervise_relay(
     *,
     incarnation: RuntimeIncarnation | None,
     clock: Clock,
+    home: Path,
 ) -> None:
     child = relays.children.get(agent_id)
     now, monotonic = clock.now(), clock.monotonic()
@@ -675,7 +683,7 @@ async def supervise_relay(
         return
     if step is Supervision.RETIRE_IF_ENDED:
         if child is not None and _lease_is_terminal(db, child.lease_id):
-            await _retire_relay_child(db, agent_id, relays, child)
+            await _retire_relay_child(db, agent_id, relays, child, home=home)
         return
     session, incarnation = _held(session, incarnation)
     if step is Supervision.END_DEAD and child is not None:
@@ -683,7 +691,7 @@ async def supervise_relay(
             _end_dead_relay_lease, db, bus, session, agent_id, incarnation, child.process.returncode
         )
         if ended:
-            await _retire_relay_child(db, agent_id, relays, child)
+            await _retire_relay_child(db, agent_id, relays, child, home=home)
         return
     await _record_stale_relay(db, session, agent_id, incarnation)
 
@@ -697,13 +705,13 @@ def _lease_is_terminal(db: Database, lease_id: str) -> bool:
 
 
 async def _retire_relay_child(
-    db: Database, agent_id: int, relays: RelaySupervision, child: RelayChild
+    db: Database, agent_id: int, relays: RelaySupervision, child: RelayChild, *, home: Path
 ) -> None:
     if relays.children.get(agent_id) is not child:
         return
     relays.children.pop(agent_id, None)
     await asyncio.to_thread(terminate_relay, child)
-    await _send_ended_notice(db, agent_id, child.lease_id)
+    await _send_ended_notice(db, agent_id, child.lease_id, home=home)
 
 
 # meiva:note
@@ -765,8 +773,12 @@ async def _record_stale_relay(
     )
 
 
-async def _send_ended_notice(db: Database, agent_id: int, lease_id: str) -> None:
+async def _send_ended_notice(db: Database, agent_id: int, lease_id: str, *, home: Path) -> None:
     """Submit the ended lease's notice once; a failure is logged and never retried."""
     from base.agents.impersonation.terminal_notices import deliver_ended_notice
 
-    await asyncio.to_thread(deliver_ended_notice, db, agent_id, lease_id)
+    # meiva:note
+    # The notice resolves its Antigravity destination from a record under this host's
+    # home, so the home travels down from the host that owns the process rather than
+    # being looked up inside the notice module.
+    await asyncio.to_thread(deliver_ended_notice, db, agent_id, lease_id, home=home)

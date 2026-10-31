@@ -5,6 +5,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import assert_never
 from uuid import UUID
 
@@ -199,6 +200,7 @@ async def admit_hosted_runtime(
     owner: UUID,
     *,
     db: DatabaseLike,
+    home: Path | None = None,
 ) -> RuntimeIncarnation | None:
     from base.agents.recovery.breaker import admit_pending_wake
 
@@ -279,7 +281,14 @@ async def admit_hosted_runtime(
         # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
         from base.agents.impersonation.terminal_notices import deliver_ended_notice
 
-        await asyncio.to_thread(deliver_ended_notice, db, agent_id, ended_lease)
+        # meiva:note
+        # The notice's Antigravity destination is a record under this host's home,
+        # written when the takeover was requested; the host that owns the process names
+        # that home here and it travels as a value, never read from the environment.
+        # `home` is optional so an admission made by a caller that has no home (a test
+        # harness, a bare re-admission) still admits: it then cannot send an Antigravity
+        # notice, and the notice records exactly that instead of failing silently.
+        await asyncio.to_thread(deliver_ended_notice, db, agent_id, ended_lease, home=home)
     logger.info("hosted runtime admitted", agent_id=agent_id, generation=str(generation))
     return incarnation
 

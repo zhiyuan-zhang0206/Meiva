@@ -74,6 +74,7 @@ class Cluster:
     event_bus: EventBus
     authority: ConfigAuthority
     machine: MachineIdentityReader
+    home: Path
 
     @property
     def local_machine(self) -> str:
@@ -178,6 +179,7 @@ def native_context(
         db=cluster.database,
         bus=cluster.event_bus,
         machine=cluster.machine,
+        meiva_home=cluster.home,
         relays=RelaySupervision(),
         catalog=build_model_catalog(home=meiva_home()),
         clock_factory=fixed_clock,
@@ -249,8 +251,9 @@ def cluster(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentityReader,
+    tmp_path: Path,
 ) -> Cluster:
-    return Cluster(db_conn, database, event_bus, config_authority, machine_identity)
+    return Cluster(db_conn, database, event_bus, config_authority, machine_identity, tmp_path)
 
 
 def relay_program(directory: Path, mode: str) -> tuple[str, ...]:

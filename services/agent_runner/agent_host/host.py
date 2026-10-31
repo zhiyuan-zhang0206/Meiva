@@ -297,6 +297,7 @@ class AgentHost:
                 self._machine,
                 self._owner,
                 db=self._db,
+                home=self._home,
             )
             if incarnation is None:
                 refused = await explain_admission_refusal(
@@ -388,6 +389,7 @@ class AgentHost:
             self._machine,
             self._owner,
             db=self._db,
+            home=self._home,
         )
         if incarnation is None:
             return
@@ -409,6 +411,7 @@ class AgentHost:
             self.relays,
             incarnation=incarnation,
             clock=self._handoff_stamping.clock,
+            home=self._home,
         )
         # meiva:note
         # An earlier ordinary failure can leave a buffered tail. Preserve

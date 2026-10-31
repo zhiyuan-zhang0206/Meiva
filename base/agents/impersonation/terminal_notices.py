@@ -6,6 +6,7 @@ nothing retries: a notice that is not accepted is reported by the caller and los
 """
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from base.agents.impersonation import host_transport
@@ -39,11 +40,17 @@ def notice_text(snapshot: dict[str, Any]) -> str:
 # The destination is the host conversation recorded on the lease, reached from
 # outside the external session's environment: an Antigravity endpoint therefore
 # comes from the record its request wrote on this host, never from a process scan.
+#
+# `home` is the root that record lives under, and the caller names it because the
+# resolver handed in here reads it. A caller that names none cannot send an Antigravity
+# notice at all: the refusal below says so and the caller logs it, rather than a missing
+# argument raising inside a host loop where no one can read it.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def send_ended_notice(
     db: DatabaseLike,
     lease_id: str,
     *,
+    home: Path | None,
     resolve_antigravity: Callable[..., AntigravityServer] = (
         host_transport.resolve_antigravity_endpoint
     ),
@@ -66,8 +73,10 @@ def send_ended_notice(
         thread_id = snapshot["thread_id"]
         if not thread_id:
             return "the recorded Antigravity destination is not deliverable"
+        if home is None:
+            return "the home holding the recorded Antigravity destination was not supplied"
         try:
-            server = resolve_antigravity(thread_id, antigravity_server=None)
+            server = resolve_antigravity(thread_id, home=home, antigravity_server=None)
         except (OSError, RuntimeError, ValueError) as exc:
             return str(exc)[:_REASON_MAX_CHARS]
         return host_transport.antigravity_live_submit(
@@ -91,10 +100,12 @@ def send_ended_notice(
 # ended here or not at all. A failure is an event rather than a return value
 # because every caller is a host loop with no one to return to.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-def deliver_ended_notice(db: DatabaseLike, agent_id: int, lease_id: str) -> None:
+def deliver_ended_notice(
+    db: DatabaseLike, agent_id: int, lease_id: str, *, home: Path | None
+) -> None:
     from base.log import logger
 
-    error = send_ended_notice(db, lease_id)
+    error = send_ended_notice(db, lease_id, home=home)
     if error is None:
         return
     logger.error(
