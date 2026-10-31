@@ -136,3 +136,22 @@ def test_the_debt_field_reads_the_tree_column_and_not_the_rules_one() -> None:
     )
 
     assert values["debt"] == "ambient-read102->104,total264->279"
+
+
+# meiva:note
+# The React Server Component boundary refuses a client hook in a server component at build time
+# only: type checking, linting and unit tests all pass, which is how a broken page shipped today.
+def test_a_change_under_the_app_router_schedules_the_production_build() -> None:
+    lines = plan(_change("ui/web/src/app/fleet/page.tsx"), skip_tests=True)
+
+    assert any("next-build" in line for line in lines), (
+        "a file under ui/web/src/app/ moves code across the RSC boundary; only the production "
+        "build refuses it"
+    )
+    assert any("ui/web" in line for line in lines), "the build runs in the frontend package"
+
+
+def test_a_change_that_cannot_cross_the_boundary_skips_the_build() -> None:
+    lines = plan(_change("ui/web/src/lib/browser/browser.ts", "base/thing.py"), skip_tests=True)
+
+    assert not any("next-build" in line for line in lines)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,7 @@ class Run:
     label: str
     argv: tuple[str, ...]
     judge: str
+    cwd: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,7 @@ FIELD_ORDER = (
     "fallback",
     "blind",
     "vitest",
+    "next-build",
     "meizel",
     "debt",
     "refusal-loss",
@@ -153,6 +156,40 @@ def _refusal_runs(change: ChangeSet) -> tuple[Run, ...]:
 
 
 # meiva:note
+# The React Server Component boundary is a framework rule: a Server Component that calls a client
+# hook type-checks, lints and unit-tests clean, and only the production build refuses it. A change
+# that touches the app router, or edits a file that imports next/navigation or next/headers, or
+# that carries "use client", can move code across that boundary.
+_RSC_PATHS = ("ui/web/src/app/",)
+_RSC_IMPORTS = ("next/navigation", "next/headers", '"use client"')
+
+
+def _touches_rsc_boundary(change: ChangeSet) -> bool:
+    for name in change.files:
+        if any(name.startswith(prefix) for prefix in _RSC_PATHS):
+            return True
+        if not name.endswith((".ts", ".tsx")):
+            continue
+        try:
+            text = (change.root / name).read_text()
+        except OSError:
+            continue
+        if any(marker in text for marker in _RSC_IMPORTS):
+            return True
+    return False
+
+
+_FRONTEND_RUNS = (
+    Run(
+        "next-build",
+        (shutil.which("npm") or "npm", "run", "build"),
+        "exit code; the production build refuses a client boundary in a server component",
+        cwd="ui/web",
+    ),
+)
+
+
+# meiva:note
 # The change shapes this script knows. `python-change` is the one every Python edit takes;
 # other owners add theirs here (a net debt reduction's refusal-loss scan, for example) and the
 # runner below only schedules what a trigger names.
@@ -161,6 +198,12 @@ TRIGGERS: tuple[Trigger, ...] = (
         name="python-change",
         matches=lambda change: bool(change.python_files()),
         runs=_python_runs,
+        blocking=True,
+    ),
+    Trigger(
+        name="frontend-rsc",
+        matches=_touches_rsc_boundary,
+        runs=lambda _change: _FRONTEND_RUNS,
         blocking=True,
     ),
     Trigger(
@@ -339,7 +382,9 @@ def check(
         values["fallback"] = "none"
     for trigger in matched:
         for run in trigger.runs(change):
-            code, output, seconds = execute(run.argv, change.root)
+            code, output, seconds = execute(
+                run.argv, change.root / run.cwd if run.cwd else change.root
+            )
             fields = _fields_for(run, code, output, seconds, change)
             over_baseline = fields.pop("_over_baseline", "0") == "1"
             values.update(fields)
@@ -378,7 +423,8 @@ def plan(change: ChangeSet, *, skip_tests: bool) -> list[str]:
     for trigger in matched:
         lines.append(f"trigger {trigger.name} (blocking={trigger.blocking})")
         for run in trigger.runs(change):
-            lines.append(f"  {run.label}: {' '.join(run.argv[:4])} [{run.judge}]")
+            where = f" (in {run.cwd})" if run.cwd else ""
+            lines.append(f"  {run.label}: {' '.join(run.argv[:4])}{where} [{run.judge}]")
     lines.append("  selector: scripts/ci/test_selector.py --json")
     if not skip_tests:
         lines.append("  tests: the files the selector chooses")
