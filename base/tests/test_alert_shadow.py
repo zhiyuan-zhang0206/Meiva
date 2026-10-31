@@ -2,14 +2,20 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Barrier
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from base.telemetry.alerts import AlertKey, notify_group_text, upsert_alert
+from base.telemetry.alerts import AlertKey, AlertMessageStyle, notify_group_text, upsert_alert
 from base.telemetry.alerts.shadow import AlertShadowBatch
+
+# meiva:note
+# The zone and jump-link URL every group in this suite is rendered with; the batch takes them as
+# values, so the assertions below can name the exact text instead of reading the process settings.
+STYLE = AlertMessageStyle(zone=ZoneInfo("Asia/Shanghai"), base_url="http://fleet.test:3000")
 
 
 def alert(fp: str, *, status: str = "firing", severity: str = "error") -> dict[str, Any]:
@@ -30,7 +36,7 @@ def ingest(
     fail: str = "",
 ) -> None:
     with conn.transaction():
-        batch = AlertShadowBatch(conn, alerts, "en")
+        batch = AlertShadowBatch(conn, alerts, "en", style=STYLE)
         keys: list[AlertKey] = []
         for item in batch.items:
             key, previous = batch.observe(item)
@@ -77,11 +83,11 @@ def test_repeat_lost_response_and_changed_members_preserve_frozen_group(
     assert current[:2] == original
     assert current[2]["group_id"] != current[0]["group_id"]
     assert [row["fingerprint"] for row in current] == ["a", "b", "c"]
-    assert current[0]["text"] == notify_group_text([a, b], "en")
+    assert current[0]["text"] == notify_group_text([a, b], "en", style=STYLE)
     assert db_conn.execute("SELECT severity FROM alerts WHERE fingerprint='a'").fetchone() == (
         "critical",
     )
-    assert current[2]["text"] == notify_group_text([c], "en")
+    assert current[2]["text"] == notify_group_text([c], "en", style=STYLE)
     assert all(row["origin"] == "shadow" for row in current)
     assert db_conn.execute(
         "SELECT count(*) FROM alerts WHERE notified_at IS NOT NULL"
@@ -211,7 +217,7 @@ def test_missing_start_lookup_waits_for_concurrent_latest_instance(
 
     with psycopg.connect(dsn) as first, ThreadPoolExecutor(max_workers=1) as executor:
         with first.transaction():
-            batch = AlertShadowBatch(first, [latest], "en")
+            batch = AlertShadowBatch(first, [latest], "en", style=STYLE)
             key, old = batch.observe(latest)
             assert key is not None
             _, _, notify, row = upsert_alert(first, latest, instance_key=key)
@@ -278,3 +284,28 @@ def test_member_write_failure_rolls_back_previously_inserted_group_and_alert_rev
             """
         )
         db_conn.commit()
+
+
+# meiva:note
+# The batch carries the zone and jump-link URL the caller read: a batch built with a different
+# style must store text rendered with THAT style, never with the process settings.
+def test_a_frozen_group_renders_the_style_it_was_given(db_conn: psycopg.Connection) -> None:
+
+    other = AlertMessageStyle(zone=ZoneInfo("Europe/Berlin"), base_url="http://other.example:8081")
+    with db_conn.transaction():
+        batch = AlertShadowBatch(db_conn, [alert("style")], "en", style=other)
+        for item in batch.items:
+            key, previous = batch.observe(item)
+            assert key is not None
+            _, _, notify, row = upsert_alert(db_conn, item, instance_key=key)
+            batch.record(item, row, previous, should_notify=notify)
+        batch.freeze()
+    row = facts(db_conn)[0]
+    assert "http://other.example:8081/insights/alerts" in row["text"], (
+        "the IM jump link must be the URL the caller handed in — a batch that re-derived it "
+        "from the process settings would push a link to a different cluster's UI"
+    )
+    assert "2026-10-07 12:00 CEST" in row["text"], (
+        "the trigger time must render in the zone the caller handed in (Berlin here); reading "
+        "the process zone instead would show a different wall clock per machine"
+    )

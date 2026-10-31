@@ -27,16 +27,16 @@ the rule explicitly labels the alert ``notify_im="false"``.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeGuard
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from base.clock import Clock
-from base.config import settings
 from base.telemetry.alerts.copy import (
     ALERT_GROUP_COUNT,
     ALERT_GROUP_MORE,
@@ -327,7 +327,23 @@ def upsert_alert(
     return (fp, starts_at), did_insert, should_notify, row
 
 
-def format_local(ts: datetime | None) -> str:
+# meiva:note
+# What one IM message renders against, read once where the cluster's configuration is: the zone
+# the trigger time is shown in (``None`` when this process holds no authoritative cluster
+# timezone, which renders in the host zone) and the fleet-UI base URL the jump link points at
+# ('' when no reachable UI is configured).
+@dataclass(frozen=True)
+class AlertMessageStyle:
+    zone: ZoneInfo | None
+    base_url: str
+
+
+# meiva:note
+# The zone is a value the caller holds: the gateway root reads the cluster clock once and hands
+# it down. A ``None`` zone — this process holding no authoritative cluster timezone
+# (settings-lite, gateway down) — renders in the host zone, which is what `Clock.zone()` returns
+# there, so the documented lite degradation survives the move.
+def format_local(ts: datetime | None, zone: ZoneInfo | None) -> str:
     """Cluster-wall-clock string for the IM message ('' when None).
 
     Carries year + zone abbreviation (tz audit, 2026-08, PR-6): the prior
@@ -343,10 +359,14 @@ def format_local(ts: datetime | None) -> str:
 
     if ts is None:
         return ""
-    return ts.astimezone(Clock.from_settings().zone()).strftime("%Y-%m-%d %H:%M %Z")
+    return ts.astimezone(zone).strftime("%Y-%m-%d %H:%M %Z")
 
 
-def frontend_base_url() -> str:
+# meiva:note
+# Both inputs arrive as values the gateway root read once for its own use: the gateway root
+# already resolves these two URLs for `allowed_origins`, so the derivation happens there rather
+# than re-reading the process settings on every render.
+def frontend_base_url(gateway_url: str, frontend_healthcheck_url: str) -> str:
     """The user-facing fleet UI base URL for IM jump links.
 
     The user reaches the fleet UI at Gate's entry port on the
@@ -356,8 +376,8 @@ def frontend_base_url() -> str:
     ``MEIVA_FRONTEND_HEALTHCHECK_URL`` (the fleet UI entry the user reaches).
     """
 
-    gw = urlsplit(settings.gateway.gateway_url or "")
-    fe = urlsplit(settings.services.frontend_healthcheck_url or "")
+    gw = urlsplit(gateway_url)
+    fe = urlsplit(frontend_healthcheck_url)
     host = gw.hostname or fe.hostname
     if not host:
         # No gateway URL and no healthcheck URL configured — no reachable
@@ -393,7 +413,7 @@ def display_language(conn: psycopg.Connection) -> str:
     return raw if raw in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
 
 
-def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
+def notify_text(alert: dict[str, Any], lang: str | None = None, *, style: AlertMessageStyle) -> str:
     """The alert IM message — the alert-specific format (user design 2026-08-12):
     a warning-sign-prefixed ``ALERT [<severity>] <alertname>`` head line, the
     summary body, the generatorURL when present, the trigger time, and the
@@ -426,16 +446,17 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
         lines.append(summary[:200])
     if alert.get("generator_url"):
         lines.append(alert["generator_url"])
-    start = format_local(parse_ts(alert.get("starts_at") or ""))
+    start = format_local(parse_ts(alert.get("starts_at") or ""), style.zone)
     if start:
         lines.append(ALERT_TRIGGERED_AT[lang].format(time=start))
-    base_url = frontend_base_url()
-    if base_url:
-        lines.append(ALERT_JUMP_LINK.format(url=base_url))
+    if style.base_url:
+        lines.append(ALERT_JUMP_LINK.format(url=style.base_url))
     return "\n".join(lines)
 
 
-def notify_group_text(alerts: list[dict[str, Any]], lang: str | None = None) -> str:
+def notify_group_text(
+    alerts: list[dict[str, Any]], lang: str | None = None, *, style: AlertMessageStyle
+) -> str:
     """One IM message for the instances of one rule that a single webhook POST carries.
 
     Grafana groups a rule's instances into one notification (`group_by alertname`), so the
@@ -445,7 +466,7 @@ def notify_group_text(alerts: list[dict[str, Any]], lang: str | None = None) -> 
     per instance. Instances are expected to share their alertname and status."""
 
     if len(alerts) == 1:
-        return notify_text(alerts[0], lang)
+        return notify_text(alerts[0], lang, style=style)
     lang = lang if lang in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
     lines = [_group_head(alerts, lang)]
     lines += [f"- {s[:200]}" for a in alerts[:_GROUP_LISTED] if (s := _summary(a))]
@@ -453,9 +474,9 @@ def notify_group_text(alerts: list[dict[str, Any]], lang: str | None = None) -> 
         lines.append(ALERT_GROUP_MORE[lang].format(n=len(alerts) - _GROUP_LISTED))
     starts = [t for a in alerts if (t := parse_ts(a.get("starts_at") or "")) is not None]
     if starts:
-        lines.append(ALERT_TRIGGERED_AT[lang].format(time=format_local(min(starts))))
-    if base_url := frontend_base_url():
-        lines.append(ALERT_JUMP_LINK.format(url=base_url))
+        lines.append(ALERT_TRIGGERED_AT[lang].format(time=format_local(min(starts), style.zone)))
+    if style.base_url:
+        lines.append(ALERT_JUMP_LINK.format(url=style.base_url))
     return "\n".join(lines)
 
 

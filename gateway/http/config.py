@@ -21,6 +21,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.env.health_ports import health_port
+from base.telemetry.alerts import frontend_base_url
 from base.telemetry.observability import cluster_label
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 from ops.cluster.rpc import RpcClient
@@ -88,6 +89,7 @@ class SseTuning:
 class AlertSettings:
     im_notify_enabled: bool
     im_bridge_url: str
+    frontend_base_url: str
     webhook_token: str = field(repr=False)
 
 
@@ -345,6 +347,7 @@ def gateway_config_from_boot(
         ),
         alerts=AlertSettings(
             im_notify_enabled=view.alerts.im_notify_enabled,
+            frontend_base_url=frontend_base_url(gateway_url, services.frontend_healthcheck_url),
             im_bridge_url=(services.im_bridge_health_url or "").rstrip("/")
             or f"http://127.0.0.1:{health_port('im_bridge', read_field=config.get_field)}",
             webhook_token="" if alerts_token is None else alerts_token.get_secret_value(),

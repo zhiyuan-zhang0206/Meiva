@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 
 from base.telemetry.alerts import (
     AlertKey,
+    AlertMessageStyle,
     alert_instance_fingerprint,
     normalize_status,
     notify_group_text,
@@ -53,10 +54,12 @@ class AlertShadowBatch:
         alerts: list[dict[str, Any]],
         language: str,
         *,
+        style: AlertMessageStyle,
         native: bool = False,
     ) -> None:
         self.conn = conn
         self.language = language
+        self.style = style
         self.native = native
         self.native_ids: set[int] = set()
         self.members: dict[tuple[str, str, AlertGroupOrigin], list[ShadowMember]] = defaultdict(
@@ -144,7 +147,9 @@ class AlertShadowBatch:
     def freeze(self) -> None:
         """Freeze newly minted groups using the existing renderer and member order."""
         for (status, alertname, origin), members in self.members.items():
-            text = notify_group_text([member.alert for member in members], self.language)
+            text = notify_group_text(
+                [member.alert for member in members], self.language, style=self.style
+            )
             group = self.conn.execute(
                 "INSERT INTO alert_notification_groups(status,alertname,language,render_version,text,origin) "
                 "VALUES (%s,%s,%s,'alert-group-v1',%s,%s) RETURNING id",

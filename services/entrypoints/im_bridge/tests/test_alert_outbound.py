@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 import psycopg
@@ -11,7 +12,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.paths import meiva_home
-from base.telemetry.alerts import upsert_alert
+from base.telemetry.alerts import AlertMessageStyle, upsert_alert
 from base.telemetry.alerts.native import load_native_group, native_sent_count, stamp_native_sent
 from base.telemetry.alerts.shadow import AlertShadowBatch
 from services.entrypoints.im_bridge.alert_outbound import (
@@ -24,6 +25,11 @@ from services.entrypoints.im_bridge.tests.slices import system_rng
 from services.entrypoints.im_bridge.tests.support import failing_insert
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter, worker_for
 from services.entrypoints.im_bridge.types import PreparedOutboundSend, SendNotStartedError
+
+# meiva:note
+# The zone and jump-link URL every group in this suite is rendered with; the batch takes them as
+# values instead of reading the process settings.
+STYLE = AlertMessageStyle(zone=ZoneInfo("Asia/Shanghai"), base_url="http://fleet.test:3000")
 
 
 def item(fp: str, *, status: str = "firing", severity: str = "error") -> dict[str, Any]:
@@ -38,7 +44,7 @@ def item(fp: str, *, status: str = "firing", severity: str = "error") -> dict[st
 
 def ingest(pool: ConnectionPool, items: list[dict[str, Any]], *, native: bool = True) -> set[int]:
     with pool.connection() as conn:
-        batch = AlertShadowBatch(conn, items, "en", native=native)
+        batch = AlertShadowBatch(conn, items, "en", style=STYLE, native=native)
         for observation in batch.items:
             key, previous = batch.observe(observation)
             if key is None:
@@ -372,7 +378,7 @@ async def test_inverse_commit_order_recovery_does_not_skip_lower_id(pool: Connec
     service = bridge(pool, AlertAdapter())
     with pool.connection() as low_conn:
         observation = item("low")
-        batch = AlertShadowBatch(low_conn, [observation], "en", native=True)
+        batch = AlertShadowBatch(low_conn, [observation], "en", style=STYLE, native=True)
         key, previous = batch.observe(observation)
         assert key is not None
         _, _, notify, row = upsert_alert(low_conn, observation, instance_key=key)
