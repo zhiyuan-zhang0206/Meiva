@@ -75,9 +75,9 @@ being one optional kind of evidence, not the measure of understanding.
 
 ## With Immersive
 
-In a live session the `meiva-immersive` skill
-(`meiva.help(meiva.skills.meiva_immersive)`) owns the cadence: the silence cap,
-the ledger, and what reverts at the end.
+In a live session the `meiva-immersive-mode` skill
+(`meiva.help(meiva.skills.meiva_immersive_mode)`) owns the cadence: the surface
+rhythm and silence watchdog cap, the ledger, and what reverts at the end.
 This guide owns what each piece of evidence feeds. Without a session the guide
 is unchanged — pieces and questions wait in notes for the human to return to —
 and only the cadence contract drops away.
