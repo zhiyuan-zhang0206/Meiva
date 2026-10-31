@@ -4,6 +4,7 @@ import json
 
 import psycopg
 import pytest
+from psycopg import sql as pgsql
 
 from base.agents.inbox.passive_lifecycle_note import insert_passive_host_lifecycle_notes
 from base.agents.messages.inbound import not_passive_inbound
@@ -67,9 +68,9 @@ def test_passive_host_lifecycle_notes_reach_only_eligible_local_live_agents(
         (idle_local,),
     )
     active_rows = db_conn.execute(
-        psycopg.sql.SQL(
+        pgsql.SQL(
             "SELECT content FROM inbound_messages m WHERE m.agent_id = %s AND {not_passive}"
-        ).format(not_passive=psycopg.sql.SQL(not_passive_inbound("m"))),
+        ).format(not_passive=pgsql.SQL(not_passive_inbound("m"))),
         (idle_local,),
     ).fetchall()
     assert active_rows == [("active note",)]
