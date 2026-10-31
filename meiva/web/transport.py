@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Timers
 from base.host.net.resilience import Policy, retry
 from meiva.web.errors import WebError
 from meiva.web.failures import connection_failed_message, http_failed_message, non_json_message
@@ -35,8 +35,9 @@ _DETAIL_MAX = 200
 class RateLimiter:
     # meiva:note
     # `timers` is the clock the slot spacing is measured and waited on, handed in with the deps of
-    # the batch that paces on it; a limiter built without one falls back to the process timers.
-    def __init__(self, qps: float, *, timers: Timers | None = None) -> None:
+    # the batch that paces on it: a limiter that read the process clock itself would pace a caller
+    # that brought its own.
+    def __init__(self, qps: float, *, timers: Timers) -> None:
         self._interval = 1.0 / qps if qps > 0 else 0.0
         self._timers = timers
         self._lock = threading.Lock()
@@ -45,7 +46,7 @@ class RateLimiter:
     def acquire(self) -> None:
         if not self._interval:
             return
-        timers = self._timers or SYSTEM_TIMERS
+        timers = self._timers
         with self._lock:
             slot = reserve(self._next_at, timers.monotonic(), self._interval)
             self._next_at = slot.next_at

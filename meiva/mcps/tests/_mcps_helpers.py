@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from base.agents.context.identity import AgentIdentity
+from base.clock import SYSTEM_TIMERS, Timers
 from meiva.mcps._clients import McpClients
 from meiva.mcps._tools import DiskCache, ToolSource
 from meiva.mcps.config import ToolInfo
@@ -17,8 +18,10 @@ from meiva.mcps.tests.stub_daemon import Respond, StubDaemon, ok_line
 
 # meiva:note
 # This test's own MCP clients (a daemon client per test) for the daemon socket at `socket_path`.
-def local_mcp_clients(socket_path: Path, timeout_seconds: float = 15.0) -> McpClients:
-    return McpClients(socket_path, timeout_seconds)
+def local_mcp_clients(
+    socket_path: Path, timeout_seconds: float = 15.0, *, timers: Timers = SYSTEM_TIMERS
+) -> McpClients:
+    return McpClients(socket_path, timeout_seconds, timers=timers)
 
 
 # meiva:note

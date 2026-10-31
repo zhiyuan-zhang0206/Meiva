@@ -186,10 +186,9 @@ def process_clients(
         from base.paths import mcp_daemon_shared_socket
         from base.paths.home import resolve_meiva_home
 
-        return McpClients(
-            Path(mcp_daemon_shared_socket(resolve_meiva_home())),
-            config.view.sandbox.mcp_connect_timeout_seconds,
-        )
+        timeout_s = config.view.sandbox.mcp_connect_timeout_seconds
+        socket_path = Path(mcp_daemon_shared_socket(resolve_meiva_home()))
+        return McpClients(socket_path, timeout_s, timers=SYSTEM_TIMERS)
 
     return ClientSet(
         gateway_url=gateway_url,

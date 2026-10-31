@@ -10,7 +10,7 @@ import meiva.mcps as mcps_mod
 import meiva.mcps._remote as remote_mod
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from meiva.mcps._clients import McpClients
 from meiva.mcps._tools import DiskCache, ServerProxy, cached_tools, call_raw, list_tools
@@ -111,7 +111,11 @@ def test_description_raises_for_missing_server(machine_config: Path) -> None:
 def test_module_getattr_returns_proxy(machine_config: Path, bound_agent: BindAgent) -> None:
     bound_agent(
         1,
-        clients=ClientSet(factories={McpClients: lambda: McpClients(Path("unused.sock"), 1.0)}),
+        clients=ClientSet(
+            factories={
+                McpClients: lambda: McpClients(Path("unused.sock"), 1.0, timers=SYSTEM_TIMERS)
+            }
+        ),
         clock_factory=_clock,
     )
     write_servers(machine_config, {"fs": {"command": "x"}})
@@ -125,7 +129,9 @@ def test_module_getattr_returns_proxy(machine_config: Path, bound_agent: BindAge
 def test_a_proxy_runs_against_the_bound_contexts_values(
     unit_home: Path, machine_config: Path, bound_agent: BindAgent
 ) -> None:
-    clients = ClientSet(factories={McpClients: lambda: McpClients(Path("unused.sock"), 7.5)})
+    clients = ClientSet(
+        factories={McpClients: lambda: McpClients(Path("unused.sock"), 7.5, timers=SYSTEM_TIMERS)}
+    )
     bound_agent(3, clients=clients, clock_factory=_clock)
     write_servers(machine_config, {"fs": {"command": "x"}})
     source = mcps_mod.fs._source

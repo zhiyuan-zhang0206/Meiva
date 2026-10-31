@@ -12,6 +12,7 @@ import pytest
 
 import meiva.mcps as mcps_mod
 import meiva.mcps._remote as remote_mod
+from base.clock import SYSTEM_TIMERS
 from meiva.mcps._tools import ServerProxy, call_raw, schema_to_signature
 from meiva.mcps.tests._mcps_helpers import (
     canned_daemon,
@@ -80,7 +81,7 @@ def test_the_request_budget_is_measured_on_the_clock_the_client_was_given() -> N
 # fails, and the next request with a longer budget succeeds on the same client.
 def test_each_request_waits_with_its_own_timeout(stub_daemon: Start) -> None:
     daemon = stub_daemon(lambda request: [0.5, ok_line(request, [])])
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
 
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
         client.list_tools("srv", timeout_seconds=0.1, agent_id=None)
@@ -97,7 +98,7 @@ def test_foreign_responses_do_not_reset_the_request_deadline(stub_daemon: Start)
             steps += [line({"id": 9000 + i, "ok": True, "result": []}), 0.05]
         return steps
 
-    client = remote_mod.RemoteMCPClient(stub_daemon(foreign_stream).path)
+    client = remote_mod.RemoteMCPClient(stub_daemon(foreign_stream).path, timers=SYSTEM_TIMERS)
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
         client.list_tools("srv", timeout_seconds=0.3, agent_id=None)
 
@@ -106,7 +107,7 @@ def test_list_tools_roundtrip(stub_daemon: Start) -> None:
     daemon = stub_daemon(
         answering([{"name": "t1", "description": "d1", "input_schema": {"type": "object"}}])
     )
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
 
     tools = client.list_tools("srv", timeout_seconds=5.0, agent_id=7)
 
@@ -118,7 +119,7 @@ def test_list_tools_roundtrip(stub_daemon: Start) -> None:
 def test_call_tool_roundtrip(stub_daemon: Start) -> None:
     result: dict[str, Any] = {"content": [], "isError": False, "structuredContent": None}
     daemon = stub_daemon(answering(result))
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
 
     out = client.call_tool("srv", "tool_x", {"k": "v"}, timeout_seconds=5.0, agent_id=None)
 
@@ -141,7 +142,7 @@ def test_error_response_raises_and_keeps_the_connection(stub_daemon: Start) -> N
         return [error_line(request, "permission denied")]
 
     daemon = stub_daemon(respond)
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     with pytest.raises(mcps_mod.MCPCallError, match="permission denied"):
         client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
     assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
@@ -158,7 +159,7 @@ def test_connection_closed_raises_and_the_next_request_reconnects(stub_daemon: S
         return [CLOSE] if next(closes) else [ok_line(request, [])]
 
     daemon = stub_daemon(respond)
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     with pytest.raises(mcps_mod.MCPConnectError, match="connection closed"):
         client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
     assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
@@ -178,7 +179,7 @@ def test_timeout_drops_the_socket_so_a_late_reply_cannot_reach_the_next_request(
         return [next(delays), ok_line(request, [{"name": f"late-{request['id']}"}])]
 
     daemon = stub_daemon(respond)
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
         client.list_tools("srv", timeout_seconds=0.1, agent_id=None)
     tools = client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
@@ -191,13 +192,13 @@ def test_timeout_drops_the_socket_so_a_late_reply_cannot_reach_the_next_request(
 def test_chunked_response_is_accumulated_until_the_newline(stub_daemon: Start) -> None:
     payload = line({"id": 1, "ok": True, "result": []})
     daemon = stub_daemon(lambda _request: [payload[:10], 0.05, payload[10:]])
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
 
 
 def test_request_ids_increment(stub_daemon: Start) -> None:
     daemon = stub_daemon(answering([]))
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
     client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
     assert [request["id"] for request in daemon.requests] == [1, 2]
@@ -220,7 +221,7 @@ def test_request_ids_increment(stub_daemon: Start) -> None:
 )
 def test_foreign_lines_before_the_response_are_skipped(stub_daemon: Start, foreign: bytes) -> None:
     daemon = stub_daemon(lambda request: [foreign, ok_line(request, "fresh")])
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == "fresh"
 
 
@@ -234,7 +235,7 @@ def test_stale_response_and_notification_together_are_skipped(stub_daemon: Start
             + ok_line(request, "mine")
         ]
     )
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == "mine"
 
 
@@ -250,7 +251,7 @@ def test_malformed_response_line_raises_and_the_next_request_reconnects(
         return [b"not json at all\n"] if next(garbage) else [ok_line(request, [])]
 
     daemon = stub_daemon(respond)
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     with pytest.raises(mcps_mod.MCPConnectError, match="malformed"):
         client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
     assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
@@ -261,7 +262,7 @@ def test_malformed_response_line_raises_and_the_next_request_reconnects(
 # After a call is sent, a lost reply is UNKNOWN: it is never replayed.
 def test_a_failed_tool_call_reports_an_unknown_result(stub_daemon: Start) -> None:
     daemon = stub_daemon(lambda _request: [CLOSE])
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
     with pytest.raises(mcps_mod.MCPCallError, match="result unknown"):
         client.call_tool("srv", "charge", {}, timeout_seconds=5.0, agent_id=None)
     assert len(daemon.requests) == 1

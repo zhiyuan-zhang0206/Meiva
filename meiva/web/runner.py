@@ -35,7 +35,7 @@ def run_search(
     deps: SearchDeps,
     delivery: FindingDelivery,
     *,
-    timers: Timers | None = None,
+    timers: Timers,
     policy: Policy = WEB_READ_POLICY,
 ) -> list[list[Hit]]:
     pacer = RateLimiter(deps.deepseek.qps, timers=timers)
@@ -63,7 +63,7 @@ def run_fetch(
     deps: FetchDeps,
     delivery: FindingDelivery,
     *,
-    timers: Timers | None = None,
+    timers: Timers,
     policy: Policy = WEB_READ_POLICY,
 ) -> list[str]:
     pacer = RateLimiter(deps.deepseek.qps, timers=timers)
