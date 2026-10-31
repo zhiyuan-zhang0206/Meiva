@@ -184,6 +184,6 @@ not need that full procedure.
 - [Define Goal](define-goal/SKILL.md) — sharpen an unclear outcome and its evidence.
 - [Plan](plan/SKILL.md) — record dependencies and checkpoints when useful.
 - [Evaluate](evaluate/SKILL.md) — discover failures, calibrate judgment, compare alternatives, and improve the work with limited human attention.
-- [Goal pursuit](../../coordination/meiva-goal/SKILL.md) — sustain a terminal outcome with freely chosen execution and peer coordination.
-- [Dynamic Workflow](../../coordination/meiva-dynamic-workflow/SKILL.md) — generate a Python script to coordinate peers and aggregate results.
-- [Long-running work](../../coordination/meiva-being-a-long-running-agent/SKILL.md) — arrange event delivery, bounded waits, and recovery without repeated model turns.
+- Goal pursuit — `meiva.help(meiva.skills.meiva_goal)`: sustain a terminal outcome with freely chosen execution and peer coordination.
+- Dynamic Workflow — `meiva.help(meiva.skills.meiva_dynamic_workflow)`: generate a Python script to coordinate peers and aggregate results.
+- Long-running work — `meiva.help(meiva.skills.meiva_being_a_long_running_agent)`: arrange event delivery, bounded waits, and recovery without repeated model turns.

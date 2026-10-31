@@ -154,5 +154,5 @@ Load only what the evaluation needs:
 
 - Software correctness and failure paths: [testing](../../meiva-serious-engineering/practices/testing/SKILL.md) and [verification discipline](../../meiva-serious-engineering/ai-era/verification-discipline/SKILL.md).
 - Research metrics and inferential uncertainty: [measure](../../meiva-serious-research/practices/measure/SKILL.md) and [verify](../../meiva-serious-research/practices/verify/SKILL.md).
-- Meiva skill authoring, case formats, and replay evidence: [skill evaluation protocol](../../../platform/meiva-guide/references/evaluation.md).
+- Meiva skill authoring, case formats, and replay evidence: the skill evaluation protocol — `meiva.help(meiva.skills.meiva_guide)` → `references/evaluation.md`.
 - Method provenance and limits of the adaptations: [sources](references/sources.md).

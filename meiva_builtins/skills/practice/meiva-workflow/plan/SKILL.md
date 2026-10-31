@@ -27,7 +27,7 @@ coordination explicit improves the work. Scale its depth to the need:
   and decision before committing to a broad approach.
 - **Duration or collaboration:** keep recovery state and handoffs for work
   spanning sessions or peers. A few tasks can use short briefs; repeated dispatch
-  can use a [dynamic workflow](../../../coordination/meiva-dynamic-workflow/SKILL.md).
+  can use a dynamic workflow (`meiva.help(meiva.skills.meiva_dynamic_workflow)`).
 
 A short sequence with its key checkpoint is often enough. Continue settled,
 authorized work while planning only what dependencies or uncertainty require.

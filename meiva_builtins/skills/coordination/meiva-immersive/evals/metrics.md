@@ -1,7 +1,7 @@
 # meiva-immersive evaluation
 
-Read [the shared contract](../../../platform/meiva-guide/references/evaluation.md)
-before running these cases. `evals.json` contains constructed live-session
+Read the shared evaluation contract — `meiva.help(meiva.skills.meiva_guide)` →
+`references/evaluation.md` — before running these cases. `evals.json` contains constructed live-session
 scenarios; all data is inline in each prompt, and only writes under an isolated
 scratch directory are permitted.
 
