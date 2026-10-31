@@ -1,8 +1,10 @@
 # meiva:note
-# Only a write that changes the work restarts a task's reminder ladder (task #5314).
-# `reminder_count` is what the task-maintenance daemon escalates on, so a note-only write that
-# zeroed it kept every task in the fleet at one reminder (87% of all updates are notes). These
-# cases pin the criterion per update kind, end to end through the SDK entry point.
+# Which writes restart a task's reminder ladder, per update kind, end to end through the SDK entry
+# point. `reminder_count` is what the task-maintenance daemon escalates on, and the default policy
+# counts the work (status, results, owner, priority, parent) and a note, while leaving a rename, a
+# description edit and an interval change out. A note counts by user ruling (2026-10-31): an owner
+# answering a reminder with one is still on the task, and reading it as silence escalated tasks
+# nobody had abandoned.
 # meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.meiva.okf.md
 
 from __future__ import annotations
@@ -70,14 +72,30 @@ def _climbed(db: psycopg.Connection, task_id: int) -> Ladder:
 
 
 # meiva:note
-# The defect itself: a daily "no change" note must not rewind the counters.
-def test_note_only_write_keeps_the_ladder(
+# The user's bug report (2026-10-31): answering a reminder with a note left the counters climbing,
+# so an owner who reported in was escalated as if nobody had come back.
+def test_note_only_write_restarts_the_ladder(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
-    climbed = _climbed(db_conn, task_id)
+    _climb(db_conn, task_id)
     task_registry.update(task_id, note="still waiting on the draft", operation_key=str(uuid4()))
+    _restarted(db_conn, task_id)
+
+
+# meiva:note
+# A retry of the same write is not a second sign of life: the keyed replay must leave the window
+# where the first delivery put it, or a caller that retries could hold a task fresh forever.
+def test_a_replayed_note_does_not_advance_the_window_again(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    task_registry.update(task_id, note="first and only", operation_key="replayed")
+    _age(db_conn, task_id)
+    climbed = _climbed(db_conn, task_id)
+    task_registry.update(task_id, note="first and only", operation_key="replayed")
     _kept(db_conn, task_id, climbed)
+    assert _age_days(db_conn, task_id) > 29
 
 
 def test_results_write_restarts_the_ladder(
@@ -247,29 +265,31 @@ def test_a_past_deadline_resumes(
     assert stored < datetime.now(UTC)
 
 
-def test_policy_can_name_the_note_kind(
+def test_policy_can_leave_the_note_out(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, unit_home: Path
 ) -> None:
     # meiva:note
-    # The documented rollback: naming `note` restores the rule that any write restarts. The policy
-    # is read from this home's `meiva_fleet` image on every write, so writing the image is the
-    # whole switch — no restart, no patched symbol.
+    # The documented narrow window: a home that wants escalation to measure progress alone leaves
+    # `note` out. The policy is read from this home's `meiva_fleet` image on every write, so writing
+    # the image is the whole switch — no restart, no patched symbol. This is also the one path
+    # where a note-only write carries no row field at all, so the row UPDATE must be skipped.
     image = disk_image_path("meiva_fleet", home=unit_home)
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_text(
-        FleetConfig(task_reminder_reset_on=("status", "note")).model_dump_json(), encoding="utf-8"
+        FleetConfig(task_reminder_reset_on=("status", "results")).model_dump_json(),
+        encoding="utf-8",
     )
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
-    _climb(db_conn, task_id)
+    climbed = _climbed(db_conn, task_id)
     task_registry.update(task_id, note="explicit progress", operation_key=str(uuid4()))
-    _restarted(db_conn, task_id)
+    _kept(db_conn, task_id, climbed)
 
 
 # meiva:note
 # `updated_at` is the reminder daemon's due clock (`now() - updated_at > remind_interval_seconds`),
-# so the same criterion decides it: only a write that changes the work moves it. A note-only write
-# that moved it kept an annotated, frozen task below its interval forever, which is why no task in
-# the fleet ever passed one reminder (task #5311).
+# so one criterion decides both: it moves exactly when the window restarts. The default counts a
+# note, so answering a reminder with a log line postpones the next one rather than letting the
+# ladder climb to escalation.
 def _age(db: psycopg.Connection, task_id: int) -> None:
     with db.cursor() as cur:
         cur.execute(
@@ -290,13 +310,13 @@ def _age_days(db: psycopg.Connection, task_id: int) -> float:
     return float(row[0])
 
 
-def test_note_only_write_keeps_the_clock(
+def test_note_only_write_moves_the_clock(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _age(db_conn, task_id)
     task_registry.update(task_id, note="still waiting on the draft", operation_key=str(uuid4()))
-    assert _age_days(db_conn, task_id) > 29
+    assert _age_days(db_conn, task_id) < 1
 
 
 def test_results_write_moves_the_clock(

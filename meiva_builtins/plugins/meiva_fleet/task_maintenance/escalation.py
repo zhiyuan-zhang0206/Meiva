@@ -77,14 +77,15 @@ def _lock_candidates(cur: psycopg.Cursor, threshold: int) -> tuple[list[int], di
 # meiva:note
 # Escalation copy states the evidence, never a verdict on the owner. This pass reads
 # task bookkeeping only — status, reminder_count, escalated_at and the ancestor
-# owners — and `tasks.log` deliberately leaves `updated_at` alone, so "no state
-# change" is the strongest claim the daemon can support. An owner that answered in
-# chat, worked in a shell or advanced a peer's task is indistinguishable here from
-# one that is gone, and the same words have to serve both (2026-10-30 ruling, task
-# #5862). Liveness lives in `agents_meta` and `routing.nearest_manager` already
-# reads it to pick a recipient; it is deliberately not a claim about the owner.
+# owners — and a note on the task restarts the reminder window, so N reminders in a
+# row mean nothing was recorded on the task since they began: "no state change" is
+# the strongest claim the daemon can support. An owner that answered in chat, worked
+# in a shell or advanced a peer's task is indistinguishable here from one that is
+# gone, and the same words have to serve both (2026-10-30 ruling, task #5862).
+# Liveness lives in `agents_meta` and `routing.nearest_manager` already reads it to
+# pick a recipient; it is deliberately not a claim about the owner.
 # meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
-_STATE_CHANGE_BASIS = "a tasks.log note is not a state change"
+_STATE_CHANGE_BASIS = "a note or a change on the task would have restarted the reminders"
 
 
 def _user_notice(

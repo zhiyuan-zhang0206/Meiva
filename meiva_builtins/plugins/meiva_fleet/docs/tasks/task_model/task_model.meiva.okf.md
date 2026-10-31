@@ -25,10 +25,10 @@ class Task:
     owner: int | None          # responsible agent id; NULL only on root task
     created_by: str            # creator agent's id string ("system" for root)
     created_at: datetime       # creation time
-    updated_at: datetime       # when the work last changed — the reminder daemon's due clock; a note, a rename or a description edit does not move it
+    updated_at: datetime       # when the task last showed activity (a change to the work, or a note) — the reminder daemon's due clock; a rename or a description edit does not move it
     remind_interval_seconds: int | None = None      # seconds without a change to the work after which to remind; cannot be turned off, NULL only on root
-    last_reminded_at: datetime | None = None   # last reminder time; cleared by a write that changes the work
-    reminder_count: int = 0                     # reminder count; cleared by a write that changes the work
+    last_reminded_at: datetime | None = None   # last reminder time; cleared by a write the reset policy counts (work, or by default a note)
+    reminder_count: int = 0                     # reminder count; cleared by the same writes
     reminders_paused_until: datetime | None = None  # owner-set silence deadline; reminders and escalations skip the task until it passes
     priority: str = "P2"                     # "P0".."P3"; added in #663
 ```

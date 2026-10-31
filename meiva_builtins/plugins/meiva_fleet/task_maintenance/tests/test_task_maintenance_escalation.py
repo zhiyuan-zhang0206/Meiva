@@ -23,7 +23,8 @@ from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes im
 # failed delivery leaves it unset (the next sweep retries), and both update() paths
 # clear it with the reminder counters (re-arming the task's next window). The copy
 # asserts reminders and an unchanged task state, never a verdict on the owner: this
-# pass reads task bookkeeping only, and `tasks.log` does not move `updated_at`.
+# pass reads task bookkeeping only, and a note restarts the window, so N reminders in a
+# row mean nothing was recorded on the task.
 # meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
 _TASK_TITLE = count(1)
 
@@ -355,10 +356,10 @@ def test_delegator_escalation_is_not_a_user_notification(
 
 # meiva:note
 # The copy rule the escalation pass has to keep: its evidence is task bookkeeping
-# (reminder_count, and state changes — `tasks.log` notes deliberately do not move
-# `updated_at`), so it may state reminders and an unchanged state but may never
-# rule on the owner. An owner that answered in chat and one that is gone look
-# identical to this pass, and the same words serve both (2026-10-30, task #5862).
+# (reminder_count, and the window a note or a state change restarts), so it may state
+# reminders and an unchanged state but may never rule on the owner. An owner that
+# answered in chat and one that is gone look identical to this pass, and the same
+# words serve both (2026-10-30, task #5862).
 # meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
 _VERDICT_WORDS = ("unresponsive", "stalled", "not responding")
 
@@ -405,7 +406,7 @@ def test_digest_copy_serves_a_live_and_a_gone_owner_alike(
     content = messages[0][0]
     assert content.splitlines()[0] == (
         "Subtasks still open after repeated reminders — task state unchanged "
-        "(a tasks.log note is not a state change):"
+        "(a note or a change on the task would have restarted the reminders):"
     )
     assert f"- #{live_task} " in content
     assert f"- #{gone_task} " in content
@@ -439,8 +440,8 @@ def test_human_notice_copy_states_reminders_and_an_unchanged_state(
     assert title.endswith(" — 3 reminders with no state change; reassign or cancel")
     assert content == (
         f"Agent #{owner} has not changed this task's state after 3 reminders "
-        "(a tasks.log note is not a state change), and no live agent owns any ancestor "
-        "task to catch it. Reassign it to another agent, cancel it, or reply to remind "
-        "the owner once more."
+        "(a note or a change on the task would have restarted the reminders), and no live agent "
+        "owns any ancestor task to catch it. Reassign it to another agent, cancel it, or reply "
+        "to remind the owner once more."
     )
     assert_states_evidence_not_a_verdict(f"{title}\n{content}")
