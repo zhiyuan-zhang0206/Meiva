@@ -9,8 +9,9 @@ boundaries; diagnostics never repair them from inside the service subtree.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -38,6 +39,7 @@ from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, LeaseProbe
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
+from services.supervision.meiva_root.supervisor import Supervisor
 from services.supervision.meiva_root.wiring import WiringContext, WiringParticipant
 from services.supervision.meiva_root_glue.diagnostic_probes import (
     ProbeConfig,
@@ -77,6 +79,41 @@ _SCOPE_PROBE_TIMEOUT_S = 10.0
 # The probe runs once, at assembly, because the alternative failure is worse than having
 # no cap: a unit wrapped in a launcher the host cannot run never starts at all, so a
 # configuration mistake would take the whole agent plane down instead of bounding it.
+# meiva:note
+# systemd-run --user reaches the user manager through the bus that XDG_RUNTIME_DIR names.
+# A daemonized root supervisor inherits no login session, so the variable is simply absent
+# (ppid=1 once the launcher exits) -- and then both the capability probe and every scoped
+# launch fail for a reason neither of them can report. On 2026-10-31 that disabled a
+# configured 18432 MiB budget for a whole boot: the config reached the process, no OOM
+# appeared in the journal, and only cgroup memory.max showed the unit running unbounded.
+# meiva:note
+# An absent path is not a guess worth making: returning None keeps "cannot scope" distinct
+# from "cannot start at all", which is what inventing a directory that does not exist would
+# trade it for.
+def user_runtime_dir(
+    environ: Mapping[str, str], *, uid: int, isdir: Callable[[str], bool]
+) -> str | None:
+    current = environ.get("XDG_RUNTIME_DIR")
+    if current:
+        return current
+    candidate = f"/run/user/{uid}"
+    return candidate if isdir(candidate) else None
+
+
+# meiva:note
+# Writing it onto the process is the point, not a convenience: the launch rewrite hands
+# `systemd-run --user` to the supervisor, which inherits this environment. Repairing the
+# probe alone would leave that second hop failing exactly as before.
+def ensure_user_runtime_dir(
+    environ: MutableMapping[str, str], *, uid: int, isdir: Callable[[str], bool]
+) -> str | None:
+    resolved = user_runtime_dir(environ, uid=uid, isdir=isdir)
+    if resolved is not None:
+        environ["XDG_RUNTIME_DIR"] = resolved
+    return resolved
+
+
+# meiva:note
 # Inputs are parameters, not ambient reads, so the decision is testable without patching.
 def agent_host_memory_caps(
     *,
@@ -100,9 +137,15 @@ def agent_host_memory_caps(
         else scope_available
     )
     if not supported:
-        _log.warning(
+        # meiva:note
+        # Error, not warning: a configured budget that silently degrades to unbounded leaves
+        # the operator believing the plane is capped. The likely cause is named so the next
+        # reader does not have to rediscover it by reading cgroup memory.max.
+        _log.error(
             "agent-host memory cap configured (%d MiB) but this systemd cannot carry the "
-            "scope attributes it needs; the unit runs unbounded rather than failing to start",
+            "scope attributes it needs; the unit runs unbounded rather than failing to start "
+            "(check XDG_RUNTIME_DIR: systemd-run --user needs it, and a daemonized supervisor "
+            "inherits none)",
             max_mb,
         )
         return {}
@@ -162,6 +205,44 @@ def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
 
 
 # meiva:note
+# The one place the memory budget is decided: config, platform and scope support are read
+# here and handed on as an opaque launch rewrite, so the supervisor stays free of platform
+# names and ambient config.
+#
+# It takes `host` because the decision needs the user id, and `Host` is the door that already
+# carries it. A daemonized supervisor inherits no login session, so the user-bus variable has
+# to be restored before anything asks whether scoping is possible -- and restoring it in the
+# process environment is the point, because the later `systemd-run --user` launch inherits it
+# too. Repairing only the probe would leave that second hop failing for the same reason.
+def memory_cap_wanted(*, max_mb: int, platform: str) -> bool:
+    return max_mb > 0 and platform == "linux"
+
+
+# meiva:note
+# The repair runs unconditionally -- writing a runtime dir that already exists costs nothing
+# and the launch below may need it on platforms that never cap. The complaint does not: an
+# alert on a healthy macOS developer machine, naming a Linux mechanism that does not apply
+# there, is how an alert becomes noise.
+def bind_memory_budget(supervisor: Supervisor, *, host: Host) -> None:
+    runtime_dir = ensure_user_runtime_dir(os.environ, uid=host.uid, isdir=os.path.isdir)
+    max_mb = settings.agent.agent_host_memory_max_mb
+    if runtime_dir is None and memory_cap_wanted(max_mb=max_mb, platform=host.platform.system):
+        _log.error(
+            "no user runtime dir: XDG_RUNTIME_DIR is unset and /run/user/%d does not exist; "
+            "systemd-run --user cannot reach the user manager, so unit memory caps will not apply",
+            host.uid,
+        )
+    caps = agent_host_memory_caps(
+        max_mb=max_mb,
+        swap_max_mb=settings.agent.agent_host_memory_swap_max_mb,
+        platform=host.platform.system,
+    )
+    supervisor.set_argv_transform(
+        (lambda unit_id, argv: memory_scoped_argv(unit_id, argv, caps=caps)) if caps else None
+    )
+
+
+# meiva:note
 # The settings the host diagnostics decide on, read once here, where the root assembles them.
 def probe_config_from_settings(*, home: Path) -> ProbeConfig:
     from base.sessions.helperproc import helper_client
@@ -213,23 +294,12 @@ def build_wiring(
     if Path.cwd().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
     context.supervisor.bind_runtime(identity, home=home)
-    # meiva:note
-    # The one place the memory budget is decided: config, platform and scope support are
-    # read here and handed on as an opaque launch rewrite, so the supervisor stays free
-    # of platform names and ambient config.
-    caps = agent_host_memory_caps(
-        max_mb=settings.agent.agent_host_memory_max_mb,
-        swap_max_mb=settings.agent.agent_host_memory_swap_max_mb,
-        platform=Platform.current().system,
-    )
-    context.supervisor.set_argv_transform(
-        (lambda unit_id, argv: memory_scoped_argv(unit_id, argv, caps=caps)) if caps else None
-    )
     image = LoadedCommit.capture(Path(identity.code_root))
     if config is None:
         config = ConfigBoot()
         config.boot()
     host = Host.system(environ=config.process_environment())
+    bind_memory_budget(context.supervisor, host=host)
     machine = ConfiguredMachineIdentity(config)
     clock = context.clock
     version = CodeVersion(image)

@@ -342,6 +342,59 @@ async def test_reference_station_and_writer_share_one_entry_gate(
 # worse than no cap: it lets an operator believe the plane is bounded. These tests pin
 # the three ways it declines (zero, non-Linux, no usable systemd) and the one way it
 # applies, through explicit parameters rather than patched module state.
+# meiva:note
+# The runtime dir is what makes `systemd-run --user` reachable at all. Pinning it separately
+# from the caps decision keeps the two failures apart: "this systemd cannot scope" and "this
+# process never knew where the user bus was" look identical from cgroup memory.max, and only
+# the second one is repairable at assembly time.
+def test_user_runtime_dir_prefers_the_configured_value() -> None:
+    assert (
+        glue.user_runtime_dir(
+            {"XDG_RUNTIME_DIR": "/run/user/7"}, uid=1000, isdir=lambda _path: True
+        )
+        == "/run/user/7"
+    )
+
+
+def test_user_runtime_dir_defaults_to_the_uid_path_when_it_exists() -> None:
+    assert (
+        glue.user_runtime_dir({}, uid=1000, isdir=lambda path: path == "/run/user/1000")
+        == "/run/user/1000"
+    )
+
+
+def test_user_runtime_dir_refuses_to_invent_an_absent_path() -> None:
+    assert glue.user_runtime_dir({}, uid=1000, isdir=lambda _path: False) is None
+
+
+def test_ensure_user_runtime_dir_puts_it_where_children_inherit_it() -> None:
+    environ: dict[str, str] = {}
+    resolved = glue.ensure_user_runtime_dir(
+        environ, uid=1000, isdir=lambda path: path == "/run/user/1000"
+    )
+    assert resolved == "/run/user/1000"
+    assert environ["XDG_RUNTIME_DIR"] == "/run/user/1000"
+
+
+def test_ensure_user_runtime_dir_leaves_an_existing_value_alone() -> None:
+    environ = {"XDG_RUNTIME_DIR": "/run/user/1000"}
+    assert (
+        glue.ensure_user_runtime_dir(environ, uid=1000, isdir=lambda _path: False)
+        == "/run/user/1000"
+    )
+    assert environ["XDG_RUNTIME_DIR"] == "/run/user/1000"
+
+
+# meiva:note
+# The complaint about a missing runtime dir is conditional on someone wanting a cap on a
+# platform that has one. Without the guard a healthy macOS machine logs an error naming a
+# Linux mechanism on every assembly, which is how a real alert gets trained into noise.
+def test_memory_cap_wanted_only_on_linux_with_a_budget() -> None:
+    assert glue.memory_cap_wanted(max_mb=18432, platform="linux") is True
+    assert glue.memory_cap_wanted(max_mb=18432, platform="darwin") is False
+    assert glue.memory_cap_wanted(max_mb=0, platform="linux") is False
+
+
 def test_agent_host_cap_is_off_by_default() -> None:
     assert (
         glue.agent_host_memory_caps(
