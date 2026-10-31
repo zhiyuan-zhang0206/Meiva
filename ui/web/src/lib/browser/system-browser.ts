@@ -12,6 +12,7 @@ import type {
   Browser,
   BrowserBeacon,
   BrowserClipboard,
+  BrowserDialogs,
   BrowserIdle,
   BrowserMedia,
   BrowserNavigation,
@@ -68,6 +69,7 @@ export interface LivePage {
   readonly visualViewport: LiveViewport | null;
   readonly navigator: LiveNavigator;
   readonly document: LiveDocument;
+  confirm(message: string): boolean;
   // meiva:note
   // Absent when the browser has no ResizeObserver; a page that has one builds it with the port's
   // change callback.
@@ -294,6 +296,18 @@ export function sizeOver(page: LivePage | null): BrowserSize {
 }
 
 // meiva:note
+// The page's modal question. A frame with no page has nobody to ask, so it throws rather than
+// answering "yes" on the reader's behalf.
+export function dialogsOver(page: LivePage | null): BrowserDialogs {
+  return {
+    confirm(message) {
+      if (page === null) throw new Error("a server render has no one to confirm");
+      return page.confirm(message);
+    },
+  };
+}
+
+// meiva:note
 // The page's spare time. The idle callback is the real one where the browser has it, with the
 // caller's deadline so starved work still runs; everywhere else the caller's timer delay stands in
 // (Safari), and cancelling releases whichever of the two was scheduled.
@@ -336,6 +350,7 @@ export function browserOver(page: LivePage | null, warn: (message: string) => vo
     media: mediaOver(page === null ? null : (query) => page.matchMedia(query)),
     clipboard: clipboardOver(page?.navigator ?? null, page?.document ?? null),
     beacon: beaconOver(page?.navigator ?? null),
+    dialogs: dialogsOver(page),
     view: viewOver(page),
     viewport: viewportOver(page),
     size: sizeOver(page),
@@ -384,6 +399,7 @@ export const browser: Browser =
         setTimeout: (work, delayMs) => window.setTimeout(work, delayMs),
         clearTimeout: (handle) => window.clearTimeout(handle),
 
+        confirm: (message) => window.confirm(message),
         createObjectUrl: (file) => URL.createObjectURL(file),
         revokeObjectUrl: (url) => URL.revokeObjectURL(url),
         navigator: window.navigator,

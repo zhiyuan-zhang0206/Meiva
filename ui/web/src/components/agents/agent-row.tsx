@@ -30,6 +30,8 @@
 import { GitFork, PowerOff, RotateCw, Shrink, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
+
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { useEffect, useState } from "react";
 
 import {
@@ -162,6 +164,7 @@ export function AgentRow({
   onCompact,
 }: AgentRowProps) {
   const t = useTranslations("agentRow");
+  const browser = useBrowser();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   // Prompt dialogs for the "... with prompt" menu items. Two independent
@@ -207,15 +210,10 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
     setEditing(false);
   };
 
-  /** Safely call window.confirm — degrades gracefully in test environments
-   *  where window.confirm may not be defined (happy-dom). */
-  const safeConfirm = (message: string): boolean => {
-    if (typeof window.confirm === "function") {
-      return window.confirm(message);
-    }
-    // No confirm available (test environment) — proceed as if confirmed
-    return true;
-  };
+  // meiva:note
+  // The question goes through the browser port: a test answers it by value, and a frame with nobody
+  // to ask refuses rather than proceeding on the reader's behalf.
+  const askConfirm = (message: string): boolean => browser.dialogs.confirm(message);
 
   const confirmForceKill = () => {
     const confirmSetting = userSettings["behavior.confirm_force_kill"] !== false;
@@ -224,7 +222,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
       return;
     }
     if (
-      safeConfirm(
+      askConfirm(
         t("forceKillConfirm", { id: agent.agent_id }),
       )
     ) {
@@ -239,7 +237,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
       return;
     }
     if (
-      safeConfirm(
+      askConfirm(
         t("terminateConfirm", { id: agent.agent_id }),
       )
     ) {
@@ -251,7 +249,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
     const sessionId = agent.open_impersonation_session_id;
     if (sessionId == null) return;
     const confirmSetting = userSettings["behavior.confirm_terminate"] !== false;
-    if (!confirmSetting || safeConfirm(t("forceExpireConfirm"))) {
+    if (!confirmSetting || askConfirm(t("forceExpireConfirm"))) {
       onForceExpire(sessionId);
     }
   };
@@ -263,7 +261,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
       return;
     }
     if (
-      safeConfirm(
+      askConfirm(
         t("restartConfirm", { id: agent.agent_id }),
       )
     ) {

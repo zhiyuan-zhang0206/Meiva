@@ -62,6 +62,15 @@ export interface BrowserBeacon {
   send(url: string, body: string): boolean;
 }
 
+// meiva:note
+// The page's own question: `confirm` puts a message in front of the reader and answers what they
+// chose. It is a capability rather than a prop because it is the page's chrome — every surface that
+// asks uses the same one — and because a caller must not fall back to "proceed" when the page cannot
+// ask: a frame with no page (a server render) has nobody to ask and says so.
+export interface BrowserDialogs {
+  confirm(message: string): boolean;
+}
+
 export interface BrowserView {
   scrollIntoView(target: Element, block: ScrollLogicalPosition): void;
 }
@@ -125,6 +134,7 @@ export interface Browser {
   readonly media: BrowserMedia;
   readonly clipboard: BrowserClipboard;
   readonly beacon: BrowserBeacon;
+  readonly dialogs: BrowserDialogs;
   readonly view: BrowserView;
   readonly viewport: BrowserViewport;
   readonly size: BrowserSize;

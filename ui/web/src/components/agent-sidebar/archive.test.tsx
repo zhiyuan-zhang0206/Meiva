@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentArchive } from "./archive";
 import type { InnerProps } from "./types";
 import type { AgentRow } from "@/lib/contracts/types";
-import { renderWithApi as render } from "@/test-support/render";
+import { fakeNavigation, navigationWrapper } from "@/lib/browser/navigation/testing";
+import { renderWithBrowser as render } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -48,11 +49,15 @@ const row = (id: number): AgentRow => ({
 let client: QueryClient;
 beforeEach(() => { vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); });
 afterEach(() => { cleanup(); client.clear(); });
+// meiva:note
+// The archive renders rows, and a row ends a session through the page's confirm and moves through
+// the app's navigation: both arrive as values here.
 function mount() {
   return render(
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={client}><AgentArchive props={props} /></QueryClientProvider>
     </WallClockProvider>,
+    { wrapper: navigationWrapper(fakeNavigation()) },
   );
 }
 

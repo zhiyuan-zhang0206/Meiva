@@ -74,6 +74,14 @@ applies the answer to the document. That decision is a pure function of the
 reading, so a test asserts it directly and never installs a stub on `innerHeight`
 or `visualViewport`.
 
+## The page's own question
+
+`browser.dialogs.confirm(message)` asks the reader and answers what they chose. It is a capability
+rather than a prop because the modal is the page's chrome — every surface that asks uses the same
+one — and because the caller must not answer for the reader: a frame with no page has nobody to ask
+and throws instead of proceeding. A test calls `answerConfirm(false)` on the fake and reads
+`actions.confirmed` for the messages it asked.
+
 ## A settling page reports the size that moved
 
 `browser.size.observe(target, onChange)` asks the page to report when an element's
