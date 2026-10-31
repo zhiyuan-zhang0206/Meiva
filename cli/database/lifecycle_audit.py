@@ -18,6 +18,7 @@ from base.log import logger
 from base.native_process.root_control.ipc import CallerPayload
 
 __all__ = [
+    "AuditUnavailableError",
     "CommandAudit",
     "lifecycle_audit",
     "operator_lifecycle_audit",
@@ -32,6 +33,16 @@ __all__ = [
 # `SSH_CONNECTION` is four short tokens (client ip/port, server ip/port); the bound is
 # the wire's own argv bound, applied so a corrupt environment cannot write a huge row.
 _CONNECTION_CHARS = 200
+
+
+# meiva:note
+# The command cannot name its caller, so it must not run: a lifecycle command that changes the
+# host has to leave an attributable row, and the caller block is the only thing that says who
+# asked. `cli.main` reports it as one line and exits 1, before the command ran. Only this read
+# refuses — the enrichment reads below and the sink are best-effort. Ruling: memory pool
+# `meiva/rulings/prod/audit-identity-unreadable-must-refuse-20261031.md` (2026-10-31).
+class AuditUnavailableError(RuntimeError): ...
+
 
 RequestRecorder = Callable[[str, Sequence[str]], None]
 Outcome = Literal["ok", "failed"]
@@ -115,12 +126,14 @@ def record_lifecycle_result(*, outcome: Outcome, seconds: float) -> None:
 # worth a row. The caller block and the source commit are read once, when the scope
 # opens, from the `environ` and `home` the command carries.
 #
-# The audit is a write-only sink, so a sink that cannot be built never stops the command: a
-# reading that fails for any reason (a working directory that is gone, a home that cannot be
-# read) prints one warning line on stderr (a CLI verb that opens no log sink would drop a loguru
-# record) and the command runs unaudited, because the record must never fail the command that
-# repairs the host. Writing a row stays best-effort once the scope is open for the same reason.
-# A source checkout with no readable commit is not a fault; its `head_sha` is None.
+# The audit has three reads with three failure policies. The caller block refuses the command:
+# a destructive command must not run unattributed, and a missing working directory is a failure
+# the operator can cause, so accepting it would hand out one unattributed execution per `rm -rf`.
+# The enrichment reads (what launched the command, the source commit) are best-effort: they only
+# make the row richer, so a failure prints one line on stderr (a CLI verb that opens no log sink
+# would drop a loguru record) and the command keeps the attribution it has. The sink is
+# best-effort too: writing a row must never fail the command that repairs the host. A source
+# checkout with no readable commit is not a fault; its `head_sha` is None.
 # meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
 @contextmanager
 def operator_lifecycle_audit(
@@ -136,17 +149,28 @@ def operator_lifecycle_audit(
         return
     try:
         caller = _caller_identity(environ)
+    except Exception as exc:
+        raise AuditUnavailableError(
+            f"lifecycle audit cannot read the caller block ({exc}); rerun from a working directory"
+        ) from exc
+    try:
         spawn = _spawn_evidence(environ, caller["ppid"])
+    except Exception as exc:
+        print(
+            f"meiva: warning: lifecycle audit could not read what launched this command "
+            f"({exc!r}); its row carries the caller block only",
+            file=sys.stderr,
+        )
+        spawn = {}
+    try:
         head_sha = _head_sha(home, environ)
     except Exception as exc:
         print(
-            f"meiva: warning: lifecycle audit could not identify its caller ({exc!r}); "
-            "this command runs unaudited",
+            f"meiva: warning: lifecycle audit could not read the source commit ({exc!r}); "
+            "its row carries no head_sha",
             file=sys.stderr,
         )
-        with lifecycle_audit(None) as command:
-            yield command
-        return
+        head_sha = None
     with lifecycle_audit(
         operator_request_recorder(
             database_factory=database_factory, caller=caller, head_sha=head_sha, spawn=spawn

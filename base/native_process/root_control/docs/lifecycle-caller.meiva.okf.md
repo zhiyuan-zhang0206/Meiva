@@ -116,8 +116,20 @@ not — stop with the old checkout, or kill the root, before pulling.
 ## What this does not do
 
 It records, it does not authorize: the block is not authenticated beyond the
-kernel-reported socket peer, and no permission model keys on it. The record is
-evidence about the operation and never gates it — every failure in the audit
-path is logged and dropped.
+kernel-reported socket peer, and no permission model keys on it.
+
+The audit has three reads and three failure policies
+(2026-10-31 ruling, `meiva/rulings/prod/audit-identity-unreadable-must-refuse-20261031.md`):
+
+- **the caller block refuses.** A lifecycle command that cannot name its caller
+  exits with `AuditUnavailableError` before the command body runs, because the
+  block is the only fact that says who asked and an operator can destroy the read
+  on purpose (a removed working directory). Accepting it would hand out one
+  unattributed execution per `rm -rf`.
+- **the enrichment reads are best-effort.** What launched the command and the
+  source commit only make the row richer; a failure prints one line and the row
+  keeps the attribution it has.
+- **the sink is best-effort.** A recorder that cannot be built or written never
+  fails the command that repairs the host.
 
 Parent: [[base/native_process/root_control/docs/root_control.meiva.okf.md]].

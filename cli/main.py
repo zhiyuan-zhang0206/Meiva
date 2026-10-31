@@ -290,6 +290,7 @@ def dispatch_parsed(
     from base.cluster.machine import MachineRoleInvalid
     from base.paths.private_dir import ensure_private_dir
     from cli.database import operator_database_factory
+    from cli.database.lifecycle_audit import AuditUnavailableError
     from cli.database.runtime import CommandRuntime
 
     # meiva:note
@@ -316,6 +317,12 @@ def dispatch_parsed(
             f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
             file=sys.stderr,
         )
+        return 1
+    except AuditUnavailableError as exc:
+        # meiva:note
+        # The refusal happens before the command body ran: an unattributable lifecycle command
+        # could change the host with no row naming who asked for it.
+        print(f"✗ meiva: {exc}", file=sys.stderr)
         return 1
     except ValidationError as exc:
         return print_settings_load_failure(exc)
