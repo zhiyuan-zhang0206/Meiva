@@ -60,6 +60,15 @@ class ImpersonationTerminalNoticeFailed(TypedDict):
 # lease). The agent is the event's `agent_id`, and `pending_sources` names the receipts behind the
 # condition.
 # meiva:link base/agents/impersonation/docs/event-log.meiva.okf.md
+# meiva:note
+# `host_exit_idle_notes_failed` payload — the passive lifecycle notes a draining host owed.
+# One event per drain that could not write them; `reason` carries the failure or
+# `the drain deadline passed first`, which is what tells an incident review whether the host
+# ran out of time or the write itself was refused.
+class HostExitIdleNotesFailed(TypedDict):
+    reason: str
+
+
 class ImpersonationEventLogIncomplete(TypedDict):
     condition: Literal["seal_stuck", "capture_failed"]
     lease_id: str
@@ -206,6 +215,14 @@ EVENTS: dict[str, EventSpec] = {
         "a SIGTERMed agent-host wrote no restart for a running turn: the write failed, or "
         "the drain deadline passed first; the turn is still waited for, and without the "
         "restart a turn cut short is not woken again until new input arrives",
+        tier="anomaly",
+    ),
+    "host_exit_idle_notes_failed": telemetry_event(
+        "host_exit_idle_notes_failed",
+        "a SIGTERMed agent-host wrote no passive lifecycle notes for the idle agents whose "
+        "turns it owed: the write failed, or the drain deadline passed first; their turns "
+        "are still waited for, but a turn cut short is not woken again until new input",
+        payload=HostExitIdleNotesFailed,
         tier="anomaly",
     ),
     "host_exit_repeated": telemetry_event(
