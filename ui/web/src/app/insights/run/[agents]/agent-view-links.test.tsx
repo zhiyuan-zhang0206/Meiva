@@ -17,12 +17,12 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
     getSettings: vi.fn(),
   }));
 
-import AgentViewPage from "@/app/insights/run/[agents]/page";
-import { drawnLinks, itemX, mockCanvas, paintFrame } from "../canvas/run-timeline-canvas-test-mock";
-import { curveOf, curvePoint } from "../model/links/geometry";
-import { MAX_ARROWS } from "../model/links/cluster";
-import { LINK_COLORS } from "../model/links/resolve";
-import { viewportOf } from "../model/timeline-model-viewport";
+import AgentViewPage from "./page";
+import { drawnLinks, itemX, mockCanvas, paintFrame } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
+import { curveOf, curvePoint } from "@/components/run-timeline/model/links/geometry";
+import { MAX_ARROWS } from "@/components/run-timeline/model/links/cluster";
+import { LINK_COLORS } from "@/components/run-timeline/model/links/resolve";
+import { viewportOf } from "@/components/run-timeline/model/timeline-model-viewport";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -147,13 +147,56 @@ describe("arrows between agents", () => {
   const messageArrowMiddle = () =>
     curvePoint(curveOf(`send_message-${at(40)}-7-8-0`, 1000 / 3, mid(7, "run-timeline-row-units"), 1000 / 3, mid(8, "run-timeline-row-units")), 0.5);
 
+  // meiva:note
+  // jsdom has no layout: every element measures 0x0, and this file reads two shapes of it — the
+  // rows that carry `data-track` (1000px wide, 30px tall, 40px apart) and the link canvases the
+  // arrows are drawn into (1000x4000). The second agent's group mounts after the links resolve, so
+  // the geometry follows the DOM instead of being applied once: a MutationObserver stamps each
+  // element as it appears, on the element itself rather than on `HTMLElement.prototype`, and the
+  // row's top is read from its current position at call time (rows arrive in more than one pass,
+  // so a number frozen at mount would point at the wrong lane).
+  const watchGeometry = (): (() => void) => {
+    const box = (top: number, width: number, height: number) => ({
+      left: 0, top, width, height, right: width, bottom: top + height, x: 0, y: top, toJSON: () => ({}),
+    });
+    const stamp = (element: Element): void => {
+      const boxed = element.hasAttribute("data-track")
+        ? () => box(trackRect(element).top, 1000, 30)
+        : element.getAttribute("data-testid") === "run-timeline-links-canvas"
+          ? () => box(0, 1000, 4000)
+          : null;
+      if (boxed !== null) {
+        Object.defineProperty(element, "getBoundingClientRect", { configurable: true, value: boxed });
+      }
+    };
+    const stampAll = (root: ParentNode): void => {
+      for (const element of root.querySelectorAll('[data-track], [data-testid="run-timeline-links-canvas"]')) {
+        stamp(element);
+      }
+    };
+    stampAll(document);
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof Element) {
+            stamp(node);
+            stampAll(node);
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  };
+
+  let stopGeometry: (() => void) | null = null;
   beforeEach(() => {
     getRunTimelineLinks.mockResolvedValue({ links: LINKS });
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this.hasAttribute("data-track")) return trackRect(this);
-      const height = this.dataset.testid === "run-timeline-links-canvas" ? 4000 : 0;
-      return { left: 0, top: 0, width: height === 0 ? 0 : 1000, height, right: 1000, bottom: height, x: 0, y: 0, toJSON: () => ({}) };
-    });
+    stopGeometry = watchGeometry();
+  });
+  afterEach(() => {
+    stopGeometry?.();
+    stopGeometry = null;
   });
 
   const canvasOf = (agent: number, row: string) => within(group(agent)).getByTestId(`run-timeline-canvas-${row}`);

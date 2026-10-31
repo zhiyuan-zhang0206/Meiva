@@ -1,5 +1,7 @@
 exports = ["page.tsx"]
 
 [uses]
+"agent-view-links.test.tsx" = ["page.tsx"]
+"agent-view.test.tsx" = ["page.tsx"]
 "page-interactions.test.tsx" = ["loading.tsx", "page.tsx", "run-timeline-test-mock.tsx"]
 "page.test.tsx" = ["page.tsx", "run-timeline-test-mock.tsx"]

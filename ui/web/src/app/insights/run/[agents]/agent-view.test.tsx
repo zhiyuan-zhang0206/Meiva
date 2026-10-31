@@ -17,9 +17,9 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
     getSettings: vi.fn(),
   }));
 
-import AgentViewPage from "@/app/insights/run/[agents]/page";
-import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-canvas-test-mock";
-import { viewportOf } from "../model/timeline-model-viewport";
+import AgentViewPage from "./page";
+import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
+import { viewportOf } from "@/components/run-timeline/model/timeline-model-viewport";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
