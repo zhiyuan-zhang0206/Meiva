@@ -1,0 +1,10 @@
+exports = ["navigation.ts", "navigation-provider.tsx", "system-navigation.tsx", "testing.tsx"]
+
+[uses]
+"navigation.ts" = []
+"navigation-provider.tsx" = ["navigation.ts"]
+"system-navigation.tsx" = ["navigation-provider.tsx", "navigation.ts"]
+"testing.tsx" = ["navigation-provider.tsx", "navigation.ts"]
+
+[purity]
+"navigation.ts" = "strict"

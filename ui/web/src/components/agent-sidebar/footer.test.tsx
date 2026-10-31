@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
+import { fakeNavigation, navigationWrapper } from "@/lib/browser/navigation/testing";
 import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
 import { BOTTOM_BAND_CLASS, BOTTOM_BAND_ROW_CLASS, ICON_SIZE_CLASS } from "@/lib/layout/layout";
 
@@ -27,9 +28,9 @@ beforeEach(() => {
 
 const clients = new Set<QueryClient>();
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
+// meiva:note
+// The footer's jumps go to the navigation value the harness hands in; no module is replaced.
+const navigation = fakeNavigation();
 
 // meiva:note
 // The footer's stat cards age on the page's clock; the real one keeps this file's strings as they
@@ -42,6 +43,7 @@ function renderFooter(ui: React.ReactElement) {
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
     </WallClockProvider>,
+    { wrapper: navigationWrapper(navigation) },
   );
 }
 

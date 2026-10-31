@@ -11,11 +11,5 @@
 "sidebar-tree-and-search.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
 "spawn-popover.tsx" = ["icon-button.tsx"]
 
-[debt.third-party-patch]
-"agent-sidebar.test.tsx#vi.mock next/navigation" = 1
-"footer.test.tsx#vi.mock next/navigation" = 1
-"sidebar-stats-cards.test.tsx#vi.mock next/navigation" = 1
-"sidebar-tree-and-search.test.tsx#vi.mock next/navigation" = 1
-
 [debt.type-cast]
 "footer.tsx#cast StatsCards.<lambda>" = 1

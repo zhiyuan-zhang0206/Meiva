@@ -2,10 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StatsDashboard } from "@/lib/contracts/types";
 import { transport } from "@/test-support/fake-api";
-import { handlers, makeAgent, pushSpy, resetSidebarTestState, SCENARIO_NOW, state, wrap } from "./sidebar-test-mock";
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushSpy }),
-}));
+import { handlers, makeAgent, resetSidebarTestState, SCENARIO_NOW, state, wrap } from "./sidebar-test-mock";
 import { AgentSidebar } from "./index";
 afterEach(cleanup);
 beforeEach(resetSidebarTestState);

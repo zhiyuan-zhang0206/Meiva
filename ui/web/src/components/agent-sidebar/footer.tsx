@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 
 import { AlertsBadge } from "@/components/notifications/alerts-badge";
 import { PluginNavIcons } from "@/components/plugins/plugin-nav";
@@ -42,6 +41,7 @@ import {
 import { cn } from "@/lib/format/utils";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
+import { useNavigation } from "@/lib/browser/navigation/navigation-provider";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { markNavIntent } from "@/lib/telemetry/nav-timing";
 
@@ -313,7 +313,7 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
 export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null }) {
   const t = useTranslations("sidebar");
   const navT = useTranslations("nav");
-  const router = useRouter();
+  const navigation = useNavigation();
   const { windowHours, setWindowHours } = useStatsWindow();
   const { stats, error: statsError, isFetching, refetch } = useStatsDashboard(windowHours);
 
@@ -364,15 +364,15 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
           <AlertsBadge />
           <SidebarNavButton
             href={fleetHref(activeAgentId)}
-            onClick={() => router.push(fleetHref(activeAgentId))}
+            onClick={() => navigation.push(fleetHref(activeAgentId))}
             label={navT("fleet")}
           >
             <Waypoints className={ICON_SIZE_CLASS} />
           </SidebarNavButton>
-          <SidebarNavButton href="/insights" onClick={() => router.push("/insights")} label={navT("insights")}>
+          <SidebarNavButton href="/insights" onClick={() => navigation.push("/insights")} label={navT("insights")}>
             <Activity className={ICON_SIZE_CLASS} />
           </SidebarNavButton>
-          <SidebarNavButton href="/control" onClick={() => router.push("/control")} label={navT("control")}>
+          <SidebarNavButton href="/control" onClick={() => navigation.push("/control")} label={navT("control")}>
             <Settings className={ICON_SIZE_CLASS} />
           </SidebarNavButton>
           <PluginNavIcons location="sidebar" />

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { SIDEBAR_SORT_DEFAULT } from "@/lib/agents/sidebar";
 import type { OpenNotice } from "@/lib/contracts/types";
@@ -10,7 +10,6 @@ import {
   handlers,
   installMenuPolyfills,
   makeAgent,
-  pushSpy,
   resetSidebarTestState,
   queryRow,
   rowOrder,
@@ -19,9 +18,6 @@ import {
   wrap,
 } from "./sidebar-test-mock";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushSpy }),
-}));
 
 import { AgentSidebar } from "./index";
 

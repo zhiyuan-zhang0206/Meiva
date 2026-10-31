@@ -7,6 +7,3 @@ exports = ["auth-guard.tsx", "login-form.tsx"]
 [debt.first-party-patch]
 "auth-guard.test.tsx#vi.mock ui/web/src/lib/auth/auth-context.tsx" = 1
 "login-form.test.tsx#vi.mock ui/web/src/lib/auth/auth-context.tsx" = 1
-
-[debt.third-party-patch]
-"auth-guard.test.tsx#vi.mock next/navigation" = 1

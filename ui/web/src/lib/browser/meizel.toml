@@ -1,4 +1,4 @@
-exports = ["browser.ts", "browser-provider.tsx", "system-browser.ts", "testing.ts", "viewport.ts"]
+exports = ["browser.ts", "browser-provider.tsx", "navigation", "system-browser.ts", "testing.ts", "viewport.ts"]
 
 [uses]
 "browser-provider.test.tsx" = ["browser-provider.tsx", "testing.ts"]

@@ -9,7 +9,6 @@ exports = ["package-draft-entry.tsx", "plugin-nav.tsx", "plugin-page-frame.tsx",
 "theme-pack-tokens.test.tsx" = ["theme-pack-tokens.tsx"]
 
 [debt.third-party-patch]
-"package-draft-entry.test.tsx#vi.mock next/navigation" = 1
 "theme-pack-tokens.test.tsx#vi.mock next-themes" = 1
 
 [debt.type-cast]
