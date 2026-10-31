@@ -8,10 +8,7 @@ exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "lazy-chunk.ts",
 "lazy-chunk.ts" = []
 "markdown-lazy.test.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx", "markdown.tsx"]
 "markdown-renderer.tsx" = ["copy-button.tsx", "python-code.tsx"]
-"markdown.test.tsx" = ["fixtures", "markdown-renderer.tsx", "markdown.tsx", "python-code.tsx"]
+"markdown.test.tsx" = ["fixtures", "lazy-chunk.ts", "markdown-renderer.tsx", "markdown.tsx", "python-code.tsx"]
 "markdown.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx"]
 "python-code.test.tsx" = ["lazy-chunk.ts", "python-code.tsx"]
 "python-code.tsx" = ["copy-button.tsx", "lazy-chunk.ts"]
-
-[debt.first-party-patch]
-"markdown.test.tsx#vi.mock ui/web/src/components/content/python-code.tsx" = 1

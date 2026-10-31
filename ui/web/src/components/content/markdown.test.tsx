@@ -2,13 +2,10 @@ import { cleanup, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("./python-code", () => ({
-  PythonCode: ({ code }: { code: string }) => (
-    <pre data-testid="python-code">{code}</pre>
-  ),
-}));
+import { PythonCodeHighlighterProvider } from "./python-code";
 
 import { MarkdownMathProvider } from "@/components/content/markdown-renderer";
+import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { createMarkdownMath, type MarkdownMath } from "@/lib/markdown/math";
 import reportedMessage from "./fixtures/reported-message-20261019.json";
 import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
@@ -17,11 +14,31 @@ beforeAll(async () => {
   await preloadChatMarkdown();
 });
 
+// meiva:note
+// The python block routes to the real PythonCode. Its highlighter chunk is the module's own
+// seam (`PythonCodeHighlighterProvider`), so this file hands in one that never resolves: the
+// block renders plain source — the shape the fence-routing assertions read — without loading
+// prism, and no test replaces a component module.
+const pendingHighlighter = createLazyChunk<never>({
+  name: "test-highlighter",
+  importModule: () => new Promise<never>(() => undefined),
+});
+
+function renderMarkdown(
+  ui: React.ReactElement,
+  options?: Parameters<typeof renderWithBrowser>[1],
+) {
+  return renderWithBrowser(
+    <PythonCodeHighlighterProvider value={pendingHighlighter}>{ui}</PythonCodeHighlighterProvider>,
+    options,
+  );
+}
+
 afterEach(cleanup);
 
 describe("ChatMarkdown", () => {
   it("preserves KaTeX radicals and accessible math in inline labels", async () => {
-    renderWithBrowser(<h4><ChatMarkdown inline content={"Choose $\\sqrt{x}$"} /></h4>);
+    renderMarkdown(<h4><ChatMarkdown inline content={"Choose $\\sqrt{x}$"} /></h4>);
     const heading = screen.getByRole("heading");
     await waitFor(() => expect(heading.querySelector(".katex svg path")).not.toBeNull());
     expect(heading.querySelector("math msqrt")).not.toBeNull();
@@ -29,7 +46,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("still sanitizes authored HTML and links in inline labels", () => {
-    renderWithBrowser(<h4><ChatMarkdown inline content={'[unsafe](javascript:alert(1))<svg><path d="M0 0" /></svg><script>unsafe script</script> **Safe**'} /></h4>);
+    renderMarkdown(<h4><ChatMarkdown inline content={'[unsafe](javascript:alert(1))<svg><path d="M0 0" /></svg><script>unsafe script</script> **Safe**'} /></h4>);
     const heading = screen.getByRole("heading");
     expect(heading.querySelector("svg, script, a[href]")).toBeNull();
     expect(heading.textContent).not.toContain("unsafe script");
@@ -37,7 +54,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("renders inline formatting inside a heading without block elements or copy controls", () => {
-    renderWithBrowser(<h4><ChatMarkdown inline content={"**Decision** [details](https://example.com) `option`\n\nNext paragraph\n\n```\ncode\n```"} /></h4>);
+    renderMarkdown(<h4><ChatMarkdown inline content={"**Decision** [details](https://example.com) `option`\n\nNext paragraph\n\n```\ncode\n```"} /></h4>);
     const heading = screen.getByRole("heading");
     expect(heading.querySelector("strong")?.textContent).toBe("Decision");
     expect(heading.querySelector("code")?.textContent).toBe("option");
@@ -47,12 +64,12 @@ describe("ChatMarkdown", () => {
   });
 
   it("renders plain text", () => {
-    renderWithBrowser(<ChatMarkdown content="hello world" />);
+    renderMarkdown(<ChatMarkdown content="hello world" />);
     expect(screen.getByText("hello world")).toBeTruthy();
   });
 
   it("external link (https://) auto-adds target=_blank rel=noopener noreferrer", () => {
-    renderWithBrowser(<ChatMarkdown content="[link](https://example.com)" />);
+    renderMarkdown(<ChatMarkdown content="[link](https://example.com)" />);
     const a = screen.getByRole("link", { name: "link" });
     expect(a.getAttribute("target")).toBe("_blank");
     expect(a.getAttribute("rel")).toContain("noopener");
@@ -60,7 +77,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("ends a literal autolink before fullwidth punctuation and CJK text", () => {
-    renderWithBrowser(<ChatMarkdown content={"\u6d4f\u89c8\u5668\u5f00 https://ip.sb\uff1a\u663e\u793a"} />);
+    renderMarkdown(<ChatMarkdown content={"\u6d4f\u89c8\u5668\u5f00 https://ip.sb\uff1a\u663e\u793a"} />);
 
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
@@ -70,7 +87,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("keeps a CJK period outside a literal autolink", () => {
-    renderWithBrowser(<ChatMarkdown content={"https://ip.sb\u3002"} />);
+    renderMarkdown(<ChatMarkdown content={"https://ip.sb\u3002"} />);
 
     const link = screen.getByRole("link", { name: "https://ip.sb" });
     expect(link.getAttribute("href")).toBe("https://ip.sb");
@@ -102,7 +119,7 @@ describe("ChatMarkdown", () => {
   it("renders the reported bold URL without swallowed delimiters", () => {
     const content =
       "\u65b9\u6848\u62a5\u544a\u5728 **http://10.0.0.72:8000/pages/3682-events-checkpoint-growth-p2/**\uff0c\u9644\u4e09\u9879\u9700\u4f60\u51b3\u7b56\u7684\u6e05\u5355\uff1a**events drop / N-step canary / Loki archive 365d**——\u4f60\u6709\u7a7a\u770b\u65f6\u62cd\u677f\uff0c\u4e0d\u6025\u3002";
-    const { container } = renderWithBrowser(<ChatMarkdown content={content} />);
+    const { container } = renderMarkdown(<ChatMarkdown content={content} />);
 
     const link = container.querySelector("strong > a");
     expect(link?.getAttribute("href")).toBe(
@@ -137,7 +154,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("keeps a Unicode ellipsis outside a literal autolink", () => {
-    renderWithBrowser(<ChatMarkdown content="https://ip.sb……" />);
+    renderMarkdown(<ChatMarkdown content="https://ip.sb……" />);
 
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
@@ -147,33 +164,33 @@ describe("ChatMarkdown", () => {
   });
 
   it("same-page anchor (#foo) does not add target=_blank", () => {
-    renderWithBrowser(<ChatMarkdown content="[a](#foo)" />);
+    renderMarkdown(<ChatMarkdown content="[a](#foo)" />);
     const a = screen.getByRole("link", { name: "a" });
     expect(a.getAttribute("target")).toBeNull();
     expect(a.getAttribute("href")).toBe("#foo");
   });
 
   it("javascript: URL never reaches the DOM (XSS guard)", () => {
-    const { container } = renderWithBrowser(<ChatMarkdown content="[evil](javascript:alert(1))" />);
+    const { container } = renderMarkdown(<ChatMarkdown content="[evil](javascript:alert(1))" />);
     const anchor = container.querySelector("a");
     expect(anchor?.textContent).toBe("evil");
     expect(anchor?.getAttribute("href")).toBeNull();
   });
 
   it("fenced ```python``` block routes to PythonCode component", () => {
-    renderWithBrowser(<ChatMarkdown content={"```python\nprint('hi')\n```"} />);
+    renderMarkdown(<ChatMarkdown content={"```python\nprint('hi')\n```"} />);
     expect(screen.getByTestId("python-code").textContent).toBe("print('hi')");
   });
 
   it("inline `code` does not route to PythonCode (no language-* className)", () => {
-    renderWithBrowser(<ChatMarkdown content="some `inline` code" />);
+    renderMarkdown(<ChatMarkdown content="some `inline` code" />);
     expect(screen.queryByTestId("python-code")).toBeNull();
     const codes = document.querySelectorAll("code");
     expect(codes.length).toBeGreaterThan(0);
   });
 
   it("non-python fenced block uses plain <pre><code>", () => {
-    renderWithBrowser(<ChatMarkdown content={"```bash\necho hi\n```"} />);
+    renderMarkdown(<ChatMarkdown content={"```bash\necho hi\n```"} />);
     expect(screen.queryByTestId("python-code")).toBeNull();
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
@@ -181,7 +198,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("no-language fence renders as a <pre> block, not inline (newlines kept)", () => {
-    renderWithBrowser(<ChatMarkdown content={"```\nline1\nline2\n```"} />);
+    renderMarkdown(<ChatMarkdown content={"```\nline1\nline2\n```"} />);
     expect(screen.queryByTestId("python-code")).toBeNull();
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
@@ -190,7 +207,7 @@ describe("ChatMarkdown", () => {
 
   it("multi-line ASCII diagram in a bare fence stays a <pre> block", () => {
     const diagram = "```\n┌──┐\n│\u4f60│\n└──┘\n```";
-    renderWithBrowser(<ChatMarkdown content={diagram} />);
+    renderMarkdown(<ChatMarkdown content={diagram} />);
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
     expect(pre?.textContent).toContain("┌──┐");
@@ -198,7 +215,7 @@ describe("ChatMarkdown", () => {
   });
 
   it("inline `code` with no newline still renders inline (not a <pre>)", () => {
-    renderWithBrowser(<ChatMarkdown content="some `inline` code" />);
+    renderMarkdown(<ChatMarkdown content="some `inline` code" />);
     const inlineCode = screen.getByText("inline");
     expect(inlineCode.tagName).toBe("CODE");
     expect(inlineCode.closest("pre")).toBeNull();
@@ -353,7 +370,7 @@ line<br>break <mark>m</mark> <kbd>K</kbd>
 describe("math through the lazy KaTeX surface", () => {
   it("never loads the math chunk for content without $", () => {
     const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
-    renderWithBrowser(<ChatMarkdown content="no formulas here" />, {
+    renderMarkdown(<ChatMarkdown content="no formulas here" />, {
       wrapper: ({ children }) => (
         <MarkdownMathProvider value={createMarkdownMath(load)}>{children}</MarkdownMathProvider>
       ),
@@ -363,7 +380,7 @@ describe("math through the lazy KaTeX surface", () => {
 
   it("renders through the injected math source rather than the shipped chunk", async () => {
     const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
-    const { container } = renderWithBrowser(<ChatMarkdown content={"cost $x$ here"} />, {
+    const { container } = renderMarkdown(<ChatMarkdown content={"cost $x$ here"} />, {
       wrapper: ({ children }) => (
         <MarkdownMathProvider value={createMarkdownMath(load)}>{children}</MarkdownMathProvider>
       ),
@@ -385,7 +402,7 @@ describe("math through the lazy KaTeX surface", () => {
   });
 
   it("does not read a pair around inline code as math", async () => {
-    const { container } = renderWithBrowser(<ChatMarkdown content={"cost $ `a` and `b` $ end"} />);
+    const { container } = renderMarkdown(<ChatMarkdown content={"cost $ `a` and `b` $ end"} />);
 
     await waitFor(() => expect(container.textContent).toContain("cost $`a` and `b`$ end"), { timeout: 5000 });
     expect(container.querySelector(".katex")).toBeNull();
@@ -393,14 +410,14 @@ describe("math through the lazy KaTeX surface", () => {
   });
 
   it("renders the reported 2026-10-19 reply without a katex-error", async () => {
-    const { container } = renderWithBrowser(<ChatMarkdown content={reportedMessage.text} />);
+    const { container } = renderMarkdown(<ChatMarkdown content={reportedMessage.text} />);
 
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBeGreaterThan(0), { timeout: 5000 });
     expect(container.querySelector(".katex-error")).toBeNull();
   });
 
   it("keeps the reported reply's stray $ literal and its arrows as math", async () => {
-    const { container } = renderWithBrowser(<ChatMarkdown content={reportedMessage.text} />);
+    const { container } = renderMarkdown(<ChatMarkdown content={reportedMessage.text} />);
 
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBeGreaterThan(0), { timeout: 5000 });
     const arrows = [...container.querySelectorAll("annotation")].filter((node) => node.textContent === "\\to");
@@ -420,7 +437,7 @@ describe("math through the lazy KaTeX surface", () => {
       "$$\\phi(u_{l,j}) = \\frac{\\tau_{e,l,j}}{\\tau_{e,l}} \\cdot \\mathbb{I}(u_{l,j} > 0)$$",
       "- \u5217\u8868\u9879 $x^2$ \u4ecd\u7136\u662f\u884c\u5185\u516c\u5f0f",
     ].join("\n");
-    const { container } = renderWithBrowser(<ChatMarkdown content={content} />);
+    const { container } = renderMarkdown(<ChatMarkdown content={content} />);
 
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBe(3), { timeout: 5000 });
     expect(container.querySelectorAll(".katex-display").length).toBe(2);
@@ -434,7 +451,7 @@ describe("math through the lazy KaTeX surface", () => {
   });
 
   it("renders inline and display math once the math chunk loads", async () => {
-    const { container } = renderWithBrowser(<ChatMarkdown content={`inline $x^2$ math
+    const { container } = renderMarkdown(<ChatMarkdown content={`inline $x^2$ math
 
 $$\\int_0^1 x dx$$`} />);
     await waitFor(() => expect(container.querySelectorAll(".katex").length).toBe(2), { timeout: 5000 });
@@ -444,7 +461,7 @@ $$\\int_0^1 x dx$$`} />);
 
 describe("document anchors", () => {
   it("gives headings stable slug ids and keeps same-document links", () => {
-    const { container } = renderWithBrowser(<ChatMarkdown content={`## Section One
+    const { container } = renderMarkdown(<ChatMarkdown content={`## Section One
 
 [go](#section-one)
 
@@ -461,7 +478,7 @@ describe("document anchors", () => {
 
 describe("GFM footnotes", () => {
   it("keeps every footnote anchor pair matching after sanitizing", () => {
-    const { container } = renderWithBrowser(<ChatMarkdown content={`Text[^1].
+    const { container } = renderMarkdown(<ChatMarkdown content={`Text[^1].
 
 [^1]: Note body.`} />);
     const reference = container.querySelector("a[data-footnote-ref]");
