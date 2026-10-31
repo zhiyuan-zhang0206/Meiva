@@ -18,7 +18,7 @@
 
 "use client";
 
-import { useRouter } from "next/navigation";
+import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
@@ -50,15 +50,16 @@ export function TaskGraph({
   selectedAgentId,
   onSelectAgent,
   routeTaskId,
+  navigate,
 }: {
   selectedTaskId: number | null;
   onSelectTask: (id: number | null) => void;
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
   routeTaskId?: number | null;
+  navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet.task");
-  const router = useRouter();
   const { params, setParams, reset } = useForceParams(TASK_FORCE_KEY, FORCE_DEFAULTS);
 
   // Mode + filters are DB-backed user settings (display.task_*), so they follow
@@ -267,8 +268,8 @@ export function TaskGraph({
   // drill-down path — same interaction as the Agent Graph's double-click).
   const openTaskTimeline = useCallback((taskId: number) => {
     const task = tasks.find((t) => t.id === taskId);
-    if (task?.owner != null) router.push(`/?agent_id=${task.owner}`);
-  }, [tasks, router]);
+    if (task?.owner != null) navigate(`/?agent_id=${task.owner}`);
+  }, [tasks, navigate]);
 
   // Adapt the task list to the shared node/edge model (square nodes).
   const graphNodes = useMemo<ForceGraphNode[]>(
@@ -385,6 +386,7 @@ export function TaskGraph({
           selectedAgentId={selectedAgentId}
           onSelectAgent={onSelectAgent}
           routeCarried={routeCarried}
+          navigate={navigate}
         />
       </div>
     );

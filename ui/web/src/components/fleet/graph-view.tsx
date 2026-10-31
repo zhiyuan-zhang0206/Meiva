@@ -18,7 +18,7 @@
 
 "use client";
 
-import { useRouter } from "next/navigation";
+import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -112,11 +112,12 @@ function findNearestLiveAncestor(
 export function GraphView({
   selectedAgentId,
   onSelectAgent,
+  navigate,
 }: {
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
+  navigate: (href: Route) => void;
 }) {
-  const router = useRouter();
   const t = useTranslations("fleet.graph");
 
 
@@ -334,7 +335,7 @@ export function GraphView({
         statusText={STATUS_TEXT}
         selectedId={selectedAgentId}
         onSelect={onSelectAgent}
-        onOpen={(id) => router.push(`/?agent_id=${id}`)}
+        onOpen={(id) => navigate(`/?agent_id=${id}`)}
         params={forceParams}
         setParams={setForceParams}
         resetParams={resetForceParams}

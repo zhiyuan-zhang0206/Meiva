@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test-support/render";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
@@ -11,22 +11,6 @@ import {
   NOTICES_RESOLVED_QUERY_KEY,
 } from "@/lib/notifications/use-notices";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
-
-// meiva:note
-// next/link needs no router in this isolated render — a plain anchor suffices.
-// next/navigation: TaskGraph calls useRouter at its top level now (the graph
-// mode's double-click → owner timeline path), so the layout tests need a stub.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...rest }: { children: ReactNode; href: string }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  ),
-}));
 
 // meiva:note
 // vitest+happy-dom has no localStorage by default — the view persists its mobile
@@ -69,6 +53,12 @@ import { BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { FleetView } from "./fleet-view";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
+
+// meiva:note
+// The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
+// without replacing `next/navigation`.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const navigate = vi.fn();
 beforeEach(() => {
   resetTransport();
   transport.getNotices.mockImplementation(() =>
@@ -181,7 +171,7 @@ describe("FleetView (desktop)", () => {
       makeAgent({ agent_id: 2, spawner: "agent:1", label: "worker" }),
       makeAgent({ agent_id: 3, spawner: "agent:1", status: "terminated" }),
     ];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     // 2 alive (idling + running), 1 terminated
     expect(screen.getByText("2 active · 3 total")).toBeTruthy();
     expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
@@ -189,7 +179,7 @@ describe("FleetView (desktop)", () => {
 
   it("shows 0 active · 0 total when there are no agents", () => {
     const agents: AgentRow[] = [];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     expect(screen.getByText("0 active · 0 total")).toBeTruthy();
   });
 
@@ -198,14 +188,14 @@ describe("FleetView (desktop)", () => {
     // shrinks to its content max-width — clicking a short Inbox item
     // collapsed the whole fleet surface to the left ~60% of the viewport.
     const agents: AgentRow[] = [];
-    const { container } = wrap(<FleetView />, { agents });
+    const { container } = wrap(<FleetView navigate={navigate} />, { agents });
     const root = container.firstElementChild as HTMLElement;
     expect(root.classList.contains("flex-1")).toBe(true);
   });
 
   it("aligns the Agents/Tasks bar with the Inbox header (one shared height)", () => {
     const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     // Both bars must pin the SAME explicit height — their content heights
     // differ, so equal padding would still leave the two borders off by a
     // couple of pixels.
@@ -219,14 +209,14 @@ describe("FleetView (desktop)", () => {
 
   it("links the header back to the conversation", () => {
     const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     const link = screen.getByLabelText("Back to conversation");
     expect(link.getAttribute("href")).toBe("/");
   });
 
   it("renders the unified Inbox panel (no Decisions/Reviews split)", () => {
     const agents: AgentRow[] = [makeAgent({ agent_id: 1, unread_notice_count: 2 })];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     expect(screen.getByText("Inbox")).toBeTruthy();
     expect(screen.queryByText("Decisions")).toBeNull();
     expect(screen.queryByText("Reviews")).toBeNull();
@@ -262,7 +252,7 @@ describe("FleetView (desktop)", () => {
       resolved: [],
     };
 
-    wrap(<FleetView />, { agents, notices });
+    wrap(<FleetView navigate={navigate} />, { agents, notices });
 
     const list = screen.getByRole("list", { name: /inbox queue/i });
     const row = within(list).getByText("Review result").closest('[data-testid="inbox-row"]');
@@ -276,7 +266,7 @@ describe("FleetView (desktop)", () => {
         awaiting_response_count: ([{ id: 1, title: "Q", content: null, priority: "P0", require_response: true, blocking: true, created_at: "2026-06-06T00:00:00Z" }]).length, highest_notice_priority: "P0",
       }),
     ];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     fireEvent.click(screen.getByLabelText("Collapse queue"));
 
     // Queue gone; only the static handle remains — and it carries NO dynamic
@@ -289,7 +279,7 @@ describe("FleetView (desktop)", () => {
 
   it("expanding the collapsed queue restores the Inbox and persists", async () => {
     const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     fireEvent.click(screen.getByLabelText("Collapse queue"));
     fireEvent.click(await screen.findByLabelText("Expand queue"));
     await waitFor(() => expect(screen.getByText("Inbox")).toBeTruthy());
@@ -299,7 +289,7 @@ describe("FleetView (desktop)", () => {
   it("restores the collapsed state from the DB setting on mount", () => {
     storedSettings = { "display.fleet_queue_collapsed": true };
     const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     expect(screen.queryByText("Inbox")).toBeNull();
     expect(screen.getByLabelText("Expand queue")).toBeTruthy();
   });
@@ -312,7 +302,7 @@ describe("FleetView (mobile)", () => {
 
   it("renders the Agents / Tasks / Inbox mobile tabs; Agents shows the graph", () => {
     const agents: AgentRow[] = [makeAgent({ agent_id: 1, label: "lead", status: "running" })];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     const tablist = screen.getByRole("tablist", { name: "Fleet sections" });
     expect(tablist.tagName).toBe("DIV");
     expect(screen.getByRole("tab", { name: /Agents/ })).toBeTruthy();
@@ -348,7 +338,7 @@ describe("FleetView (mobile)", () => {
       ],
       resolved: [],
     };
-    wrap(<FleetView />, { agents, notices });
+    wrap(<FleetView navigate={navigate} />, { agents, notices });
     fireEvent.click(screen.getByRole("tab", { name: /Inbox/ }));
     expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
     expect(screen.getByText("What next?")).toBeTruthy();
@@ -382,7 +372,7 @@ describe("FleetView (mobile)", () => {
       awaiting: [noticeItem({ id: 1 })],
       resolved: [],
     };
-    wrap(<FleetView />, { agents, notices });
+    wrap(<FleetView navigate={navigate} />, { agents, notices });
     expect(screen.getByRole("tab", { name: /Inbox 1/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Agents 1/ })).toBeTruthy();
   });
@@ -390,7 +380,7 @@ describe("FleetView (mobile)", () => {
   it("persists mobile tab selection across remounts", () => {
     localStorage.setItem("meiva.fleet.mobileTab", "inbox");
     const agents: AgentRow[] = [makeAgent({ agent_id: 1, label: "lead", unread_notice_count: 1 })];
-    wrap(<FleetView />, { agents });
+    wrap(<FleetView navigate={navigate} />, { agents });
     // Should restore to the Inbox tab.
     expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
   });
@@ -402,7 +392,7 @@ describe("FleetView (mobile)", () => {
     // The queue states its own row: the list only replaces the empty state when there is something
     // in it, so a test that wants the list says what the agent is waiting on.
     const notices: FeedRows = { open: [], awaiting: [noticeItem({ id: 1 })], resolved: [] };
-    wrap(<FleetView />, { agents, notices });
+    wrap(<FleetView navigate={navigate} />, { agents, notices });
     expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
     expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
     window.location.hash = "";

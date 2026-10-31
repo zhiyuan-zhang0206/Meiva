@@ -28,16 +28,11 @@ import { FleetView } from "./fleet-view";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { renderWithProviders } from "@/test-support/render";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  ),
-}));
+// meiva:note
+// The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
+// without replacing `next/navigation`.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const navigate = vi.fn();
 
 const localStorageMock = (() => {
   const store = new Map<string, string>();
@@ -197,7 +192,7 @@ describe("fleet route jumps", () => {
   it("?task= selects the task and mounts the Tasks surface without persisting the view", async () => {
     const tasks: TaskRow[] = [task({ id: 42, owner: 7 })];
     window.history.replaceState(null, "", "/fleet?task=42");
-    wrap(<FleetView />, { tasks });
+    wrap(<FleetView navigate={navigate} />, { tasks });
     // meiva:note
     // The route's task is selected on the real board: its node carries the selection ring. The pin
     // that lets this outrank an ambient agent selection (task #3500) is behavioural, and is covered
@@ -212,7 +207,7 @@ describe("fleet route jumps", () => {
   });
 
   it("without ?task= the default view stays the agent graph", () => {
-    wrap(<FleetView />);
+    wrap(<FleetView navigate={navigate} />);
     expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
     expect(screen.queryByLabelText("Task graph legend")).toBeNull();
   });
@@ -227,7 +222,7 @@ describe("fleet route jumps", () => {
       resolved: [],
     };
     window.history.replaceState(null, "", "/fleet?notice=8");
-    wrap(<FleetView />, { notices });
+    wrap(<FleetView navigate={navigate} />, { notices });
     // The reply box (require_response notice) carries the selected notice's
     // title in its accessible name — the unambiguous "which detail is open".
     await waitFor(() => {
@@ -241,7 +236,7 @@ describe("fleet route jumps", () => {
       awaiting: [notice({ id: 7, title: "first notice" })],
       resolved: [],
     };
-    wrap(<FleetView />, { notices });
+    wrap(<FleetView navigate={navigate} />, { notices });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: /first notice/ })).toBeTruthy();
     });
@@ -251,7 +246,7 @@ describe("fleet route jumps", () => {
     window.innerWidth = 375;
     const tasks: TaskRow[] = [task({ id: 42, owner: 7 })];
     window.history.replaceState(null, "", "/fleet?task=42");
-    wrap(<FleetView />, { tasks });
+    wrap(<FleetView navigate={navigate} />, { tasks });
     await waitFor(() => {
       const node = screen.getAllByText(/#42/)[0].closest("g")!;
       expect(node.querySelector('[stroke-dasharray="4 3"]')).toBeTruthy();
@@ -261,7 +256,7 @@ describe("fleet route jumps", () => {
 
   it("malformed route ids are inert (default view, no crash)", () => {
     window.history.replaceState(null, "", "/fleet?task=abc&notice=");
-    wrap(<FleetView />);
+    wrap(<FleetView navigate={navigate} />);
     expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
     expect(screen.queryByLabelText("Task graph legend")).toBeNull();
   });
@@ -273,7 +268,7 @@ describe("fleet route jumps", () => {
       resolved: [],
     };
     window.history.replaceState(null, "", "/fleet?notice=999");
-    wrap(<FleetView />, { notices });
+    wrap(<FleetView navigate={navigate} />, { notices });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: /first notice/ })).toBeTruthy();
     });

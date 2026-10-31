@@ -15,14 +15,7 @@ import { GraphView } from "../graph-view";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { renderWithProviders } from "@/test-support/render";
 
-const push = vi.fn();
-// meiva:note
-// The one replacement left in this file: the view navigates through Next's router, which needs a
-// mounted app router. It leaves with the third-party-patch family.
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
-}));
-
+const navigate = vi.fn();
 const { getAgentRoster } = vi.hoisted(() => ({ getAgentRoster: vi.fn() }));
 
 function node(agent_id: number, over: Partial<WireFleetGraphNode> = {}): WireFleetGraphNode {
@@ -142,7 +135,7 @@ function getNodeLabel(id: number): HTMLElement {
 
 beforeEach(() => {
   resetTransport();
-  push.mockReset();
+  navigate.mockReset();
   getAgentRoster.mockReset();
   transport.getAgentRoster.mockImplementation(getAgentRoster);
 });
@@ -151,7 +144,7 @@ afterEach(cleanup);
 
 describe("GraphView lineage, hover, and empty states", () => {
   it("shows rendered-set counts and the empty state when every node is terminated", async () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, {
       graph: {
         nodes: [node(1, { status: "terminated" }), node(2, { status: "terminated" })],
         edges: [edge(1, 2, "spawn")],
@@ -169,7 +162,7 @@ describe("GraphView lineage, hover, and empty states", () => {
 
   it.each(["spawn", "fork"] as const)("re-parents %s descendants to their nearest live ancestor with solid edges when intermediate parents terminate", async (kind) => {
     const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />,
       {
         graph: {
           nodes: [
@@ -204,7 +197,7 @@ describe("GraphView lineage, hover, and empty states", () => {
 
   it.each([false, true])("renders roster fork lineage as solid with telemetry=%s", async (withTelemetry) => {
     const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />,
       {
         graph: {
           nodes: [node(1), node(2)],
@@ -235,7 +228,7 @@ describe("GraphView lineage, hover, and empty states", () => {
     getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
     transport.getFleetGraph.mockResolvedValue(EMPTY_GRAPH);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    renderWithProviders(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
+    renderWithProviders(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, {
       queryClient: qc,
       settings: {},
       wallNow: () => Date.now(),
@@ -254,7 +247,7 @@ describe("GraphView lineage, hover, and empty states", () => {
       snapshot_at: null,
     });
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    renderWithProviders(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
+    renderWithProviders(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, {
       queryClient: qc,
       settings: {},
       wallNow: () => Date.now(),
@@ -267,7 +260,7 @@ describe("GraphView lineage, hover, and empty states", () => {
   });
 
   it("renders no degradation marker for a fresh graph", async () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, {
       graph: {
         nodes: [node(1), node(2)],
         edges: [edge(1, 2, "spawn")],
@@ -281,7 +274,7 @@ describe("GraphView lineage, hover, and empty states", () => {
   });
 
   it("renders no telemetry-degraded copy (task #3893)", async () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, {
       graph: {
         nodes: [node(1), node(2)],
         edges: [edge(1, 2, "spawn")],
@@ -297,7 +290,7 @@ describe("GraphView lineage, hover, and empty states", () => {
 
   it("merges multiple lineage kinds per pair into one edge (no duplicate React keys)", async () => {
     const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />,
       {
         graph: {
           nodes: [node(1), node(2), node(3)],
@@ -327,7 +320,7 @@ describe("GraphView lineage, hover, and empty states", () => {
   });
 
   it("shows the hover card instantly on mouseenter and hides it on mouseleave", async () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, {
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, {
       graph: {
         nodes: [node(1, { label: "alpha", node_score: 12_345_678 }), node(2)],
         edges: [edge(1, 2, "spawn")],
@@ -355,20 +348,20 @@ describe("GraphView lineage, hover, and empty states", () => {
   });
 
   it("empty graph (not loading, no error) shows the empty placeholder", async () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />);
 
     await waitFor(() => expect(screen.getByText("No agents to graph.")).toBeTruthy());
     expect(screen.getByText("0 nodes · 0 edges")).toBeTruthy();
   });
 
   it("empty graph while loading shows the loading placeholder", () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, { fetch: "pending" });
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, { fetch: "pending" });
 
     expect(screen.getByText("Loading...")).toBeTruthy();
   });
 
   it("error (endpoint absent / gateway down) shows the unavailable placeholder", async () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />, { fetch: "reject" });
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, { fetch: "reject" });
 
     await waitFor(() => expect(screen.getByText("Graph unavailable.")).toBeTruthy());
   });

@@ -15,14 +15,13 @@ import { TaskGraph } from "../task-graph";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { renderWithProviders } from "@/test-support/render";
 
-afterEach(cleanup);
-
 // meiva:note
-// The one replacement left in this file: the board navigates through Next's router, which needs a
-// mounted app router. It leaves with the third-party-patch family.
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
+// The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
+// without replacing `next/navigation`.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const navigate = vi.fn();
+
+afterEach(cleanup);
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
 
@@ -97,6 +96,7 @@ function renderGraph(
       selectedTaskId={null}
       onSelectTask={vi.fn()}
       {...props}
+    navigate={navigate}
     />,
     { queryClient, settings, wallNow: () => Date.now() },
   );

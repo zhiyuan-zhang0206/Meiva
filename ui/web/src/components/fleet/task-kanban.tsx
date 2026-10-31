@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useRouter } from "next/navigation";
+import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
@@ -33,6 +33,7 @@ export function TaskKanban({
   selectedAgentId,
   onSelectAgent,
   routeCarried,
+  navigate,
 }: {
   tasks: readonly TaskGraphRow[];
   statusFill: Record<string, string>;
@@ -42,10 +43,10 @@ export function TaskKanban({
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
   routeCarried?: boolean;
+  navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet.task");
   const laneLabels = [t("status.inProgress"), t("status.done"), t("status.canceled")] as const;
-  const router = useRouter();
   // Track last agent-sync trigger to avoid overriding manual clicks.
   const lastSyncedAgentRef = useRef<number | null>(null);
 
@@ -117,7 +118,7 @@ export function TaskKanban({
                   }
                   agentOwner={task.owner}
                   selectedAgentId={selectedAgentId}
-                  router={router}
+                  navigate={navigate}
                 />
               ))}
             </div>
@@ -136,7 +137,7 @@ function KanbanCard({
   onSelect,
   agentOwner,
   selectedAgentId,
-  router,
+  navigate,
 }: {
   task: TaskGraphRow;
   statusFill: Record<string, string>;
@@ -145,7 +146,7 @@ function KanbanCard({
   onSelect: () => void;
   agentOwner: number | null;
   selectedAgentId: number | null;
-  router: ReturnType<typeof useRouter>;
+  navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet.task");
   return (
@@ -155,7 +156,7 @@ function KanbanCard({
       onClick={onSelect}
       onDoubleClick={(ev) => {
         ev.preventDefault();
-        if (agentOwner != null) router.push(`/?agent_id=${agentOwner}`);
+        if (agentOwner != null) navigate(`/?agent_id=${agentOwner}`);
       }}
       onKeyDown={(ev) => {
         if (ev.key === "Enter" || ev.key === " ") {

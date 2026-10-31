@@ -8,6 +8,7 @@
 // without rewriting the stored preference. The route id is forwarded to
 // TaskGraph as the pin that outranks an ambient agent selection (#3500).
 
+import type { Route } from "next";
 import { memo, useState } from "react";
 import { useTranslations } from "next-intl";
 
@@ -25,12 +26,14 @@ export const LeftGraphPanel = memo(function LeftGraphPanel({
   selectedTaskId,
   setSelectedTaskId,
   routeTaskId,
+  navigate,
 }: {
   selectedAgentId: number | null;
   setSelectedAgentId: (id: number | null) => void;
   selectedTaskId: number | null;
   setSelectedTaskId: (id: number | null) => void;
   routeTaskId?: number | null;
+  navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet");
   const { settings, setSetting } = useUserSettings();
@@ -62,7 +65,11 @@ export const LeftGraphPanel = memo(function LeftGraphPanel({
             render — the dual always-mounted display:none pattern is deleted). */}
         {view === "graph" ? (
           <div className="absolute inset-0">
-            <GraphView selectedAgentId={selectedAgentId} onSelectAgent={setSelectedAgentId} />
+            <GraphView
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={setSelectedAgentId}
+              navigate={navigate}
+            />
           </div>
         ) : (
           <div className="absolute inset-0">
@@ -72,6 +79,7 @@ export const LeftGraphPanel = memo(function LeftGraphPanel({
               selectedAgentId={selectedAgentId}
               onSelectAgent={setSelectedAgentId}
               routeTaskId={routeTaskId}
+              navigate={navigate}
             />
           </div>
         )}
