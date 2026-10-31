@@ -28,7 +28,6 @@ from base.agents.sdk import (
 )
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
-from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.plugin_config_contracts import PluginConfigImages, UnboundPluginConfigImages
@@ -111,11 +110,14 @@ class EventPipelines(Protocol):
 
 # meiva:note
 # Optional root collaborator and disable-entry keyword arguments accepted by `install` and
-# forwarded by `load_extensions`.
+# forwarded by `load_extensions`. Each collaborator is named by the narrowest type this module
+# needs, and for one it only stores and hands back that is `object`: the shell able to say what
+# a configuration authority is -- and to refuse a value that is not one -- is
+# `settings.config_authority`, which reads through it.
 class InstallOptions(TypedDict, total=False):
     catalog: ModelCatalog | None
     provider_keys: ProviderKeys | None
-    authority: ConfigAuthority | None
+    authority: object | None
     clock: Clock | None
     clients: EventPipelines | None
     external_caller: CallerIdentity | None
@@ -144,7 +146,7 @@ class Installation:
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
     catalog: ModelCatalog | None = None
     provider_keys: ProviderKeys | None = None
-    authority: ConfigAuthority | None = None
+    authority: object | None = None
     clock: Clock | None = None
     clients: EventPipelines | None = None
     external_caller: CallerIdentity | None = None
@@ -158,7 +160,7 @@ class Installation:
         sampling: SamplingPolicyOwner,
         catalog: ModelCatalog | None = None,
         provider_keys: ProviderKeys | None = None,
-        authority: ConfigAuthority | None = None,
+        authority: object | None = None,
         configs: Mapping[str, BaseModel] | None = None,
     ) -> Installation:
         return cls(
@@ -243,13 +245,6 @@ def model_catalog() -> ModelCatalog:
     if installation is None or installation.catalog is None:
         raise RuntimeError("the SDK installation carries no ModelCatalog")
     return installation.catalog
-
-
-def config_authority() -> ConfigAuthority:
-    installation = installed()
-    if installation is None or installation.authority is None:
-        raise RuntimeError("the SDK installation carries no ConfigAuthority")
-    return installation.authority
 
 
 def expansions() -> tuple[str, ...]:

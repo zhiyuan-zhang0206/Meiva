@@ -36,11 +36,11 @@ def root_complete_read(later_home: str) -> None:
     boot.boot()
     meiva.ensure_plugins_loaded(surface=True, config=boot)
     from meiva.sdk_surface.installation import installed
+    from meiva.sdk_surface.settings import config_authority
 
     installation = installed()
     assert installation is not None
-    owner = installation.authority
-    assert owner is not None
+    owner = config_authority()
     assert owner.runtime is boot.view
     assert not owner.runtime.has_domain("web")
     before = boot.boot_state()
