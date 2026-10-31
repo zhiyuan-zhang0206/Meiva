@@ -7,7 +7,3 @@ exports = ["package-draft-entry.tsx", "plugin-nav.tsx", "plugin-page-frame.tsx",
 "plugin-nav.tsx" = ["plugin-nav-icon.ts"]
 "plugin-page-frame.test.tsx" = ["plugin-page-frame.tsx"]
 "theme-pack-tokens.test.tsx" = ["theme-pack-tokens.tsx"]
-
-[debt.type-cast]
-"theme-pack-tokens.tsx#cast ThemePackTokens" = 1
-"theme-pack-tokens.tsx#cast ThemePackTokens.<lambda>" = 1

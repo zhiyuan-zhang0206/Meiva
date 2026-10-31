@@ -32,7 +32,8 @@ import { useUserSettings } from "@/lib/state/use-user-settings";
 export function ThemePackTokens({ resolvedTheme }: { resolvedTheme: string | undefined }) {
   const { packs } = useThemePacks();
   const { settings } = useUserSettings();
-  const selected = settings["display.theme_pack"] as string | null;
+  const storedPack = settings["display.theme_pack"];
+  const selected = typeof storedPack === "string" ? storedPack : null;
   // A stored id whose plugin was since disabled or uninstalled resolves to no
   // pack: the console falls back to its own palette rather than to whatever
   // else is installed, and the picker shows Default.
@@ -55,7 +56,7 @@ export function ThemePackTokens({ resolvedTheme }: { resolvedTheme: string | und
   useEffect(() => {
     if (!tokensJson) return;
     const root = document.documentElement;
-    const tokens = Object.entries(JSON.parse(tokensJson) as Record<string, string>);
+    const tokens = tokenEntries(tokensJson);
     for (const [token, value] of tokens) root.style.setProperty(token, value);
     // Removing on cleanup is what makes switching packs and clearing the
     // choice both work: the previous pack's properties go before the next
@@ -66,4 +67,15 @@ export function ThemePackTokens({ resolvedTheme }: { resolvedTheme: string | und
   }, [tokensJson]);
 
   return null;
+}
+
+// meiva:note
+// The halves arrive from a validated plugin manifest, but the effect reads them back out of the
+// serialized key, so this checks each value once instead of casting the parse.
+function tokenEntries(json: string): [string, string][] {
+  const parsed: unknown = JSON.parse(json);
+  if (typeof parsed !== "object" || parsed === null) return [];
+  return Object.entries(parsed).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
 }

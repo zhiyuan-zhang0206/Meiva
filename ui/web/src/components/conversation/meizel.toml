@@ -18,8 +18,5 @@ exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
 "composer-lifecycle.test.tsx#vi.spyOn performance.now" = 1
 "composer.test.tsx#vi.spyOn performance.now" = 1
 
-[debt.type-cast]
-"composer-session.ts#cast readSendAttempt" = 2
-
 [debt.unresolved-patch]
 "upload-button.test.tsx#vi.spyOn input.\"click\"" = 2
