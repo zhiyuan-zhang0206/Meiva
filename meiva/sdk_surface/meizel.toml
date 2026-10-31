@@ -7,7 +7,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "batch.py" = ["pure"]
 "discovery.py" = ["pure"]
 "extensions.py" = ["install.py", "installation.py", "pure"]
-"help.py" = ["__init__.py", "discovery.py", "process_context.py", "pure", "settings.py"]
+"help.py" = ["__init__.py", "discovery.py", "pure"]
 "injection_check.py" = ["pure"]
 "install.py" = ["__init__.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "pure", "sdk_disable.py", "wraps.py"]
 "installation.py" = ["__init__.py"]
@@ -39,6 +39,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "metering.py" = { mode = "none", why = "the wrapping half of SDK usage metering: it walks the live namespace, decides from the live attributes whether a target still needs a recorder, writes the recorders over the public routines and runs every call through the telemetry owner with the caller's provenance; what makes a callable a recorder, what stripping or restoring one leaves, how the walk tells members apart, the MCP call name and the identity stamped on a call are decided by the pure pure/plans/metering/recorder_plan.py and meter_plan.py" }
 "plugins.py" = "strict"
 "sdk_disable.py" = "strict"
+"settings.py" = { mode = "none", why = "the single producer of the handles a `meiva.*` free function asks for: this process's `DatabaseHandle`, its event bus, its clock, the running agent's settings and the `DB_URL` / `REDIS_URL` / `GATEWAY_URL` values. The clients a bound context carries are built once by `meiva/boot.py`; nothing else resolves settings for the SDK namespace" }
 "skill_sources.py" = "strict"
 "validation.py" = "strict"
 "wraps.py" = { mode = "none", why = "the registration primitive behind meiva.extend.wrap: it resolves the target in the live meiva module, writes the chained function over it and reports a firing; the target rule, how the chained function presents itself, the async test and the counting rule are decided by the pure pure/plans/installation/wrap_plan.py" }
@@ -53,8 +54,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "installation.py#base/config/service_read.py" = 1
 "process_context.py#base/agents/context/__init__.py" = 1
 "process_context.py#base/native_process/loaded_commit.py" = 1
-"settings.py#base/agents/context/clients.py" = 1
-"settings.py#base/config/__init__.py" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

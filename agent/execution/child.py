@@ -310,6 +310,7 @@ def apply_oom_preference(env: Mapping[str, str], path: Path) -> int | None:
 
 
 def run_code(code: str, payload: ResultPayload) -> None:
+    import meiva
     from agent.execution.agent_traceback import (
         format_agent_traceback,
         format_full_traceback,
@@ -329,7 +330,7 @@ def run_code(code: str, payload: ResultPayload) -> None:
         else dict(vars(builtins))
     )
     original_help = builtins_map["help"]
-    builtins_map["help"] = HelpRouter(original_help)
+    builtins_map["help"] = HelpRouter(original_help, meiva_help=meiva.help)
     fresh_globals: dict[str, Any] = {
         "__name__": "__agent_code__",
         "__builtins__": builtins_map,

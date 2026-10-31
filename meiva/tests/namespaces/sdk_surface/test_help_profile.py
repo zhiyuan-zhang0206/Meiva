@@ -122,8 +122,13 @@ def test_the_profile_merges_the_capability_gate_with_the_declaration(
     assert declared.doc_style == "terse"
 
 
-def test_current_is_empty_without_an_agent_context() -> None:
-    assert ModelHelpProfile.current() == ModelHelpProfile()
+def test_a_process_that_names_no_model_gets_the_empty_profile() -> None:
+    from base.api_contracts.agent_contract import Harness
+
+    profile = ModelHelpProfile.for_process(
+        harness=Harness.MEIVA, external_attach=False, model_setting=None, catalog=None
+    )
+    assert profile == ModelHelpProfile()
 
 
 def test_external_harness_profile_hides_attach_compact_and_restart_in_self(
