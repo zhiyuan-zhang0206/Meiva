@@ -22,10 +22,16 @@ import { ApiError } from "@/lib/transport/api";
 import { setSessionInvalidHandler, useAuth } from "@/lib/auth/auth-context";
 import { useNonce } from "@/lib/auth/nonce-context";
 import { useApi } from "@/lib/transport/transport-context";
+import { fakeNavigation } from "@/lib/browser/navigation/testing";
 import { transport as fakeTransport } from "@/test-support/fake-api";
 import { fakeStreamHub } from "@/test-support/fake-stream";
 
 import { createQueryClient, Providers } from "./providers";
+
+// meiva:note
+// The tree's navigation value: the real one comes from the app router, which does not exist in this
+// suite, so the composition root is given one — the same way it is given a client and a hub.
+const navigation = fakeNavigation();
 
 const clients = new Set<QueryClient>();
 const originalLang = document.documentElement.lang;
@@ -125,7 +131,7 @@ describe("Providers", () => {
   it("passes children through and provides the running app's client", () => {
     const { hub, tab } = fakeStreamHub();
     const view = render(
-      <Providers client={fakeTransport} hub={hub}>
+      <Providers client={fakeTransport} hub={hub} navigation={navigation}>
         <RootProbe />
         <span data-testid="child">child</span>
       </Providers>,
@@ -148,7 +154,7 @@ describe("Providers", () => {
 
   it("passes the request nonce to the theme bootstrap script", () => {
     render(
-      <Providers client={fakeTransport} hub={fakeStreamHub().hub} nonce="request-nonce">
+      <Providers client={fakeTransport} hub={fakeStreamHub().hub} navigation={navigation} nonce="request-nonce">
         <RootProbe />
         <span>child</span>
       </Providers>,
@@ -163,7 +169,7 @@ describe("Providers", () => {
     }
 
     render(
-      <Providers client={fakeTransport} hub={fakeStreamHub().hub} nonce="request-nonce">
+      <Providers client={fakeTransport} hub={fakeStreamHub().hub} navigation={navigation} nonce="request-nonce">
         <RootProbe />
         <NonceProbe />
       </Providers>,

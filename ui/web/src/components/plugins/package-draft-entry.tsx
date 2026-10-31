@@ -14,7 +14,6 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -23,6 +22,7 @@ import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type { PackageKind } from "@/lib/contracts/types";
 import { FLEX } from "@/lib/layout/layout";
+import { useNavigation } from "@/lib/browser/navigation/navigation-provider";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -47,7 +47,7 @@ export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
   const client = useApi();
   const showToast = useStore((s) => s.showToast);
   const setActiveId = useStore((s) => s.setActiveId);
-  const router = useRouter();
+  const navigation = useNavigation();
   const [nl, setNl] = useState("");
   const { label, placeholder } = COPY[kind];
 
@@ -58,7 +58,7 @@ export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
       setNl("");
       setActiveId(res.agent_id);
       showToast(`Installer #${res.agent_id} created — check its conversation for progress`);
-      router.push("/");
+      navigation.push("/");
     },
     onError: (err: unknown) => showToast(`Install failed: ${errMsg(err)}`),
   });

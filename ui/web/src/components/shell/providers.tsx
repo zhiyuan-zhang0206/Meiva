@@ -14,6 +14,9 @@ import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
 import type { Browser } from "@/lib/browser/browser";
 import { BrowserProvider } from "@/lib/browser/browser-provider";
 import { browser as systemBrowser } from "@/lib/browser/system-browser";
+import type { AppNavigation } from "@/lib/browser/navigation/navigation";
+import { NavigationProvider } from "@/lib/browser/navigation/navigation-provider";
+import { SystemNavigationProvider } from "@/lib/browser/navigation/system-navigation";
 import { API_BASE, ApiError, api } from "@/lib/transport/api";
 import type { Api } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
@@ -135,6 +138,23 @@ function RootContexts({
 }
 
 // meiva:note
+// The navigation value the app's surfaces read: the real one comes from the app router, and a test
+// that renders this tree hands in its own, the same way it hands in `client` and `browser`.
+function NavigationRoot({
+  navigation,
+  children,
+}: {
+  navigation?: AppNavigation;
+  children: React.ReactNode;
+}) {
+  return navigation === undefined ? (
+    <SystemNavigationProvider>{children}</SystemNavigationProvider>
+  ) : (
+    <NavigationProvider navigation={navigation}>{children}</NavigationProvider>
+  );
+}
+
+// meiva:note
 // The composition root: it builds the app's one gateway client and hands it to every reader
 // through <ApiProvider>. `client` names that input, so a test can compose the same tree with
 // its own fake instead of replacing the transport module.
@@ -144,14 +164,22 @@ export function Providers({
   client = api,
   hub,
   browser = systemBrowser,
+  navigation,
 }: {
   children: React.ReactNode;
   nonce?: string;
   client?: Api;
   hub?: StreamHub;
   browser?: Browser;
+  navigation?: AppNavigation;
 }) {
   const [queryClient] = useState(() => createQueryClient());
+  // meiva:note
+  // What rides at the root, and why each is here rather than on a page: the plugin skin's tokens
+  // over the active light/dark palette (`ThemePackTokens`, renders nothing), the theme colour sync,
+  // the navigation timing report, the connection banner, the toast host (an error must reach the
+  // user on every route, not just the Home page) and the terminate open-tasks notice (a terminate
+  // that reports open tasks must surface wherever the action was taken).
   const [streamHub] = useState(
     () =>
       hub ??
@@ -162,40 +190,35 @@ export function Providers({
       ),
   );
   return (
-    <RootContexts nonce={nonce} client={client} hub={streamHub} browser={browser}>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <EventStreamProvider>
-            <AlertsProvider>
-              <ThemeProvider
-                attribute="class"
-                defaultTheme="system"
-                enableSystem
-                disableTransitionOnChange
-                nonce={nonce}
-              >
-                <LanguageProvider>
-                  {/* Applies the selected plugin skin's tokens over the active
-                      light/dark palette; renders nothing. */}
-                  <ThemePackTokens />
-                  <ThemeColorSync />
-                  <NavTimingReporter />
-                  <AppConnectionBanner />
-                  {children}
-                  {/* The toast renderer is root-level so error toasts reach the
-                      user on every route, not just the Home page (Task #1051). */}
-                  <ToastHost />
-                  {/* Terminate open-tasks notice — same root-level slot pattern
-                      as the toast: a terminate response that reports open tasks
-                      must surface wherever the action was taken (task #3374). */}
-                  <OpenTasksNoticeHost />
-                </LanguageProvider>
-              </ThemeProvider>
-            </AlertsProvider>
-          </EventStreamProvider>
-        </AuthProvider>
-      </QueryClientProvider>
-    </RootContexts>
+    <NavigationRoot navigation={navigation}>
+      <RootContexts nonce={nonce} client={client} hub={streamHub} browser={browser}>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <EventStreamProvider>
+              <AlertsProvider>
+                <ThemeProvider
+                  attribute="class"
+                  defaultTheme="system"
+                  enableSystem
+                  disableTransitionOnChange
+                  nonce={nonce}
+                >
+                  <LanguageProvider>
+                    <ThemePackTokens />
+                    <ThemeColorSync />
+                    <NavTimingReporter />
+                    <AppConnectionBanner />
+                    {children}
+                    <ToastHost />
+                    <OpenTasksNoticeHost />
+                  </LanguageProvider>
+                </ThemeProvider>
+              </AlertsProvider>
+            </EventStreamProvider>
+          </AuthProvider>
+        </QueryClientProvider>
+      </RootContexts>
+    </NavigationRoot>
   );
 }
 

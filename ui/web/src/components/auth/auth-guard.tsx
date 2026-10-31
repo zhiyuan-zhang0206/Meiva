@@ -5,26 +5,28 @@
 // Wrap around pages that require authentication. The login page itself
 // should NOT be wrapped — it reads auth state directly.
 //
-import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { TelemetryPageView } from "@/lib/telemetry/telemetry-page-view";
 import { useAuth } from "@/lib/auth/auth-context";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useNavigation } from "@/lib/browser/navigation/navigation-provider";
 
 export function AuthGuard({ children }: { children: ReactNode }) {
   const { status } = useAuth();
-  const router = useRouter();
-  const pathname = usePathname();
+  const navigation = useNavigation();
 
-  const isLoginPage = pathname === "/login";
+  const isLoginPage = navigation.pathname() === "/login";
 
+  // meiva:note
+  // A redirect replaces the entry: the page the guard refused must not come back with the browser's
+  // back button.
   useEffect(() => {
     if (status === "unauthenticated" && !isLoginPage) {
-      router.replace("/login");
+      navigation.replace("/login");
     }
-  }, [status, isLoginPage, router]);
+  }, [status, isLoginPage, navigation]);
 
   // Show nothing while checking auth (avoids flash of unprotected content)
   if (status === "loading") {

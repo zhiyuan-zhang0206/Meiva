@@ -25,6 +25,7 @@ import type { StatsWindowHours } from "@/lib/agents/sidebar";
 import { SIDEBAR_SORT_DEFAULT } from "@/lib/agents/sidebar";
 import { BREAKPOINT_LG_PX, BREAKPOINT_MD_PX, BREAKPOINT_WIDE_PX } from "@/lib/layout/breakpoint";
 import { useStore } from "@/lib/state/store";
+import { fakeNavigation, navigationWrapper } from "@/lib/browser/navigation/testing";
 import { fakeBrowser } from "@/test-support/browser";
 import { renderWithProviders } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -127,8 +128,9 @@ function statsAnswer(): () => Promise<StatsDashboard> {
 }
 
 // meiva:note
-// The router the framework mock records navigation calls on.
-export const pushSpy = vi.fn();
+// Where the rail sends the page: the record of its moves, so a route assertion reads the call the
+// component made (`push` or `replace`) and its target, not a spy wired into a module mock.
+export const navigation = fakeNavigation();
 
 const NO_ALERTS: AlertsResponse = {
   alerts: [],
@@ -177,6 +179,7 @@ export function wrap(ui: ReactElement) {
     settings,
     queryClient,
     wallNow: () => SCENARIO_NOW,
+    wrapper: navigationWrapper(navigation),
   });
 }
 
@@ -262,7 +265,7 @@ export function resetSidebarTestState(): void {
     }),
   );
   vi.clearAllMocks();
-  pushSpy.mockReset();
+  navigation.moves.length = 0;
   state.agents = [];
   state.activeId = null;
   state.pendingActions = {};

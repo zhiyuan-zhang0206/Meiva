@@ -1,17 +1,17 @@
-// PackageDraftEntry tests — the natural-language "add a package" entry shared
-// by the Skills / Plugins / MCP sections.
-//
-// Asserts the contract that matters: it posts the SECTION'S kind alongside the
-// user's words, jumps to the spawned installer's conversation, and offers no
-// URL/spec field (the no-URL rule is the point of the flow, so it is a test).
-//
-// happy-dom + RTL + real QueryClient (mock at the api layer); next/navigation
-// router and the Zustand store's toast/selection are mocked.
+// meiva:note
+// PackageDraftEntry tests — the natural-language "add a package" entry shared by the Skills /
+// Plugins / MCP sections. They assert the contract that matters: it posts the section's kind
+// alongside the user's words, jumps to the spawned installer's conversation, and offers no
+// URL/spec field (the no-URL rule is the point of the flow, so it is a test). happy-dom + RTL with
+// a real QueryClient answered at the api layer; the address change is read from a fake navigation
+// value and the Zustand store's toast/selection are seeded.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { NavigationProvider } from "@/lib/browser/navigation/navigation-provider";
+import { fakeNavigation } from "@/lib/browser/navigation/testing";
 import { useStore } from "@/lib/state/store";
 
 import { PackageDraftEntry } from "./package-draft-entry";
@@ -22,20 +22,26 @@ beforeEach(() => {
 });
 
 
-const pushSpy = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
+const navigation = fakeNavigation();
 
 afterEach(cleanup);
 beforeEach(() => {
   vi.restoreAllMocks();
-  pushSpy.mockReset();
+  navigation.moves.length = 0;
 });
 
-function wrap(ui: React.ReactElement) {
-  const qc = new QueryClient({
+// meiva:note
+// The entry reads the address change from the navigation value it is given; this wrapper is the
+// only thing between the test and the component besides the query cache.
+function wrap(ui: React.ReactElement, qc?: QueryClient) {
+  const client = qc ?? new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return render(
+    <NavigationProvider navigation={navigation}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </NavigationProvider>,
+  );
 }
 
 describe("PackageDraftEntry", () => {
@@ -54,13 +60,13 @@ describe("PackageDraftEntry", () => {
     useStore.setState({ toast: null });
     const draft = transport.draftPackage.mockRejectedValue(new Error("response lost"));
     const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
-    render(<QueryClientProvider client={client}><PackageDraftEntry kind="mcp" /></QueryClientProvider>);
+    wrap(<PackageDraftEntry kind="mcp" />, client);
     const input = screen.getByPlaceholderText(/Describe a tool you want to reach/);
     fireEvent.change(input, { target: { value: "install tools" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(useStore.getState().toast).toBe("Install failed: response lost"));
     expect(draft).toHaveBeenCalledOnce();
-    expect(pushSpy).not.toHaveBeenCalled();
+    expect(navigation.moves).toEqual([]);
   });
 
   it("submit posts the section's kind + the user's words, then opens the conversation", async () => {
@@ -72,7 +78,7 @@ describe("PackageDraftEntry", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find and install an MCP server" }));
 
     await waitFor(() => expect(draft).toHaveBeenCalledWith("mcp", "query our Linear issues"));
-    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith("/"));
+    await waitFor(() => expect(navigation.moves).toEqual([{ kind: "push", href: "/" }]));
   });
 
   it("Enter submits too", async () => {
@@ -132,6 +138,6 @@ describe("PackageDraftEntry", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find and install a skill" }));
 
     await waitFor(() => expect(transport.draftPackage).toHaveBeenCalled());
-    expect(pushSpy).not.toHaveBeenCalled();
+    expect(navigation.moves).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { BAR_DIVIDER_CLASS } from "@/lib/layout/layout";
 import { useStore } from "@/lib/state/store";
@@ -11,7 +11,6 @@ import {
   makeAgent,
   NARROW_MEDIA,
   openRowMenu,
-  pushSpy,
   queryRow,
   resetSidebarTestState,
   rowButton,
@@ -22,14 +21,10 @@ import {
 } from "./sidebar-test-mock";
 
 // meiva:note
-// The rail's one remaining replaced module is the framework's: the App Router has no public
-// seam for useRouter/usePathname, so a route assertion still mocks next/navigation. Everything
-// else arrives as a value: the roster through props, preferences through the settings cache,
-// the drawer/search selection through the store, the viewport through the fake browser.
+// Every input arrives as a value and no module is replaced: the roster through props, preferences
+// through the settings cache, the drawer/search selection through the store, the viewport through
+// the fake browser, and the route change through the navigation value the harness hands in.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushSpy }),
-}));
 
 import { AgentSidebar } from "./index";
 
