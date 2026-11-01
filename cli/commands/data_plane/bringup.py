@@ -101,7 +101,7 @@ def ensure_gateway_data_plane(
     config: DataPlaneConfig,
     *,
     home: Path,
-    macos: bool,
+    system: str,
     retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: DatabaseFactory,
     machine: MachineIdentityReader,
@@ -139,7 +139,7 @@ def ensure_gateway_data_plane(
                 redis_user=cluster.redis_identity(config.redis_url),
                 retained_children=retained_children,
                 machine=machine,
-                macos=macos,
+                system=system,
                 timers=timers,
                 environ=environ,
             )

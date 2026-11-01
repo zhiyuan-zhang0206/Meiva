@@ -31,6 +31,13 @@ from base.cluster.dataplane.pg_tools import (
 from base.host.net.resilience import ExponentialBackoff, Policy, retry
 from base.paths import meiva_home
 
+# meiva:note
+# The operating system the launch receipt is written for. `postgres.start` takes it as a value,
+# and these suites drive the real server the way the Linux lane does (`NATIVE_TEST_MACOS` in
+# `cli/commands/data_plane/tests/native_cluster.py` is the same stand-in): a receipt and the read
+# that validates it must name one system, and the suite's is this one.
+NATIVE_SYSTEM = "linux"
+
 
 # meiva:note
 # The resolved initdb binary receives only fixed flags and this fixture's disposable PGDATA.
@@ -153,6 +160,7 @@ def test_a_postmaster_that_never_becomes_ready_is_refused_on_the_callers_timers(
             timeout=2.0,
             retained_children=children,
             timers=manual,
+            system=NATIVE_SYSTEM,
         )
 
     assert sum(manual.sleeps) == pytest.approx(2.0, abs=0.06)
@@ -175,6 +183,7 @@ def test_captured_postmaster_without_pidfile_resumes_full_admission(
                 timeout=0.1,
                 retained_children=children,
                 timers=SYSTEM_TIMERS,
+                system=NATIVE_SYSTEM,
             )
         captured = pg.read_receipt(data)
         assert captured is not None and captured.state == "captured"
@@ -194,6 +203,7 @@ def test_captured_postmaster_without_pidfile_resumes_full_admission(
                 expected=owner,
                 retained_children=children,
                 timers=SYSTEM_TIMERS,
+                system=NATIVE_SYSTEM,
             )
         assert owner.live() and pg.read_receipt(data) == captured
 
@@ -234,6 +244,7 @@ def test_captured_postmaster_without_pidfile_resumes_full_admission(
         expected=owner,
         retained_children=children,
         timers=SYSTEM_TIMERS,
+        system=NATIVE_SYSTEM,
     )
     assert owner.same_birth(resumed)
     assert len(children) == 1
@@ -257,6 +268,7 @@ def test_ready_postmaster_still_requires_its_bound_pidfile(
         timeout=10,
         retained_children=children,
         timers=SYSTEM_TIMERS,
+        system=NATIVE_SYSTEM,
     )
     record = data / "postmaster.pid"
     saved = record.rename(data / "retained.pid")
@@ -274,6 +286,7 @@ def test_ready_postmaster_still_requires_its_bound_pidfile(
                 expected=owner,
                 retained_children=children,
                 timers=SYSTEM_TIMERS,
+                system=NATIVE_SYSTEM,
             )
     finally:
         saved.rename(record)
@@ -300,6 +313,7 @@ def test_ready_warm_start_reloads_configuration_before_waiting_for_readiness(
         timeout=10,
         retained_children=children,
         timers=SYSTEM_TIMERS,
+        system=NATIVE_SYSTEM,
     )
     with (data / "postgresql.conf").open("a") as config:
         config.write("\nlog_min_messages = 'error'\n")
@@ -314,6 +328,7 @@ def test_ready_warm_start_reloads_configuration_before_waiting_for_readiness(
         expected=owner,
         retained_children=children,
         timers=SYSTEM_TIMERS,
+        system=NATIVE_SYSTEM,
     )
     assert owner.same_birth(resumed) and len(children) == 1
     assert _reloaded(port)

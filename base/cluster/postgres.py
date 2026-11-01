@@ -82,7 +82,7 @@ def _inode(path: Path) -> tuple[int, int]:
 SUPPORTED_SYSTEMS = frozenset({"linux", "darwin"})
 
 
-def boot_id(system: str) -> str:
+def custody_platform(system: str) -> Literal["linux", "darwin"]:
     # meiva:note
     # Custody - a pidfile bound to one native birth inside one boot scope - is defined on macOS and
     # Linux only, so another system is refused before a boot scope is read: an identity nobody
@@ -90,10 +90,23 @@ def boot_id(system: str) -> str:
     # The caller states the system rather than this function reading the host, so the launch door
     # reads it once (and a receipt carries the one its own read was checked against) and a test
     # can hand in an unsupported one without patching the host.
-    if system not in SUPPORTED_SYSTEMS:
-        raise RuntimeError(
-            f"owned PostgreSQL custody requires a supported POSIX platform, not {system!r}"
-        )
+    #
+    # Refusing and naming are one check: a receipt's `platform` holds exactly these two values, so
+    # the value a caller may record is the value this guard accepted, not a second narrowing of it.
+    if system == "linux":
+        return "linux"
+    if system == "darwin":
+        return "darwin"
+    raise RuntimeError(
+        f"owned PostgreSQL custody requires a supported POSIX platform, not {system!r}"
+    )
+
+
+def boot_id(system: str) -> str:
+    # meiva:note
+    # A boot scope is only read for a system custody is defined on: the refusal and the receipt's
+    # platform come from the same check.
+    custody_platform(system)
     boot = native_boot_id()
     if boot is None:
         raise RuntimeError("cannot observe PostgreSQL native boot scope")
@@ -443,6 +456,11 @@ def _retained_start(data: Path, port: int, expected: OwnedProcess) -> Receipt:
     return receipt
 
 
+# meiva:note
+# `system` is the platform the receipt is written for, read once at the launch door
+# (`CommandRuntime.host.platform.system`) and handed in: the receipt records it, and
+# `boot_id(system)` refuses a system custody is not defined on. This function never asks the
+# process for its own.
 def start(
     data: Path,
     port: int,
@@ -454,6 +472,7 @@ def start(
     expected: OwnedProcess | None = None,
     retained_children: list[subprocess.Popen[bytes]],
     timers: Timers,
+    system: str,
 ) -> OwnedProcess:
     """Complete readiness for a new child or the exact retained postmaster.
 
@@ -477,14 +496,13 @@ def start(
         if observe(data) is not None:
             raise RuntimeError("PostgreSQL is already running; startup cannot replace its birth")
         require_listener(None, port, required=False)
-        system = Platform.current().system
         captured = spawn_postgres(
             data,
             Receipt(
                 data=str(data),
                 directory=_inode(data),
                 port=port,
-                platform=system,
+                platform=custody_platform(system),
                 boot_id=boot_id(system),
                 state="pending",
             ),

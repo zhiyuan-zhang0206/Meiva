@@ -248,7 +248,7 @@ def _prepare_schema(
             retained_children=born.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
-            macos=command_runtime.host.platform.system == "darwin",
+            system=command_runtime.host.platform.system,
             timers=command_runtime.timers,
             environ=command_runtime.config.process_environment(),
         )
@@ -534,7 +534,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             retained_children=configured.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
-            macos=command_runtime.host.platform.system == "darwin",
+            system=command_runtime.host.platform.system,
             timers=command_runtime.timers,
             environ=command_runtime.config.process_environment(),
         )

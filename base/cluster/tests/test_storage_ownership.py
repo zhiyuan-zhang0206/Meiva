@@ -19,6 +19,13 @@ from base.cluster import ownership, port_preflight
 from base.cluster import postgres as pg
 from base.native_process.ownership import OwnedProcess
 
+# meiva:note
+# The operating system the launch receipt is written for. `postgres.start` takes it as a value,
+# and these suites drive the real server the way the Linux lane does (`NATIVE_TEST_MACOS` in
+# `cli/commands/data_plane/tests/native_cluster.py` is the same stand-in): a receipt and the read
+# that validates it must name one system, and the suite's is this one.
+NATIVE_SYSTEM = "linux"
+
 _PG_TEST_CHILD = Path(__file__).with_name("_pg_test_child.py")
 
 
@@ -113,6 +120,34 @@ def _pg_receipt(data: Path, *, state: str = "captured", pid: int = 123) -> pg.Re
         },
     }
     return pg.Receipt.model_validate_json(json.dumps(values))
+
+
+# meiva:note
+# The launch door states the platform the receipt is written for; this function never reads the
+# host. Naming a system custody is not defined on reaches `boot_id`'s refusal, which is the proof
+# the value came from the caller: a reader of its own platform would have launched instead.
+def test_start_takes_the_system_its_caller_states(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+
+    with pytest.raises(RuntimeError) as refusal:
+        pg.start(
+            data,
+            15439,
+            ["/bin/false"],
+            {},
+            ready=lambda: False,
+            timeout=1.0,
+            retained_children=[],
+            timers=SYSTEM_TIMERS,
+            system="windows",
+        )
+
+    assert "requires a supported POSIX platform" in str(refusal.value), (
+        "postgres.start records the platform its caller stated, so a refusal naming that value "
+        "proves the parameter reached the receipt's guard. If this test fails with a launch "
+        f"attempt instead, start read the host again. refusal={refusal.value!r}"
+    )
 
 
 def test_an_unsupported_system_is_refused_before_any_boot_scope_is_read() -> None:
@@ -329,6 +364,7 @@ def test_retained_postgres_cannot_signal_replacement(
             expected=OwnedProcess(123, 100.0, 456),
             retained_children=retained_children,
             timers=SYSTEM_TIMERS,
+            system=NATIVE_SYSTEM,
         )
 
 

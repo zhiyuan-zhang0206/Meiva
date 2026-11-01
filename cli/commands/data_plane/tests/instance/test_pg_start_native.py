@@ -22,7 +22,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.cluster_instance import StartTuning
-from cli.commands.data_plane.tests.native_cluster import NativeCluster
+from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM, NativeCluster
 from cli.commands.data_plane.tests.native_cluster import (
     native_cluster as native_cluster,
 )
@@ -49,6 +49,7 @@ def _start(
         machine=machine,
         tuning=StartTuning(bind_wait_s=bind_wait_s),
         timers=SYSTEM_TIMERS,
+        system=NATIVE_TEST_SYSTEM,
     )
 
 
