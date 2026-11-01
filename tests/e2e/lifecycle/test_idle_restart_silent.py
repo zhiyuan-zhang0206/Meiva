@@ -101,7 +101,11 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
         f"pre-restart cwd not written to plugin state: {values.get('meiva_code__cwd')!r}"
     )
 
-    httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/restart", timeout=10.0).raise_for_status()
+    httpx.post(
+        f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
+        json={"message": "restart idle agent"},
+        timeout=10.0,
+    ).raise_for_status()
 
     values = _wait_for_silent_restart_cycle(agent_id)
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Literal
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Literal
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -13,12 +15,17 @@ from base.agents.birth.harness import coerce_harness
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
 from base.agents.inbox.compact import insert_compact_request_inbound
-from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Harness
+from base.api_contracts.agent_contract import (
+    AgentNotFound,
+    AgentStatus,
+    Harness,
+)
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from gateway.agents.launch.forward import forward_to_home_machine
-from gateway.http.config import GatewayConfig, gateway_rpc
+from gateway.http.config import GatewayConfig, gateway_config, gateway_rpc
 from gateway.http.model_catalog import require_model_catalog
 from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import (
@@ -199,48 +206,131 @@ async def post_agent_resurrect(
     return ResurrectAgentResponse.model_validate(forwarded)
 
 
-def _assert_restart_native_blocking(pool: ConnectionPool, agent_id: int) -> None:
-    with pool.connection() as conn:
-        row = conn.execute("SELECT harness FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
-    if row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    harness = coerce_harness(row[0])
-    if harness is not Harness.MEIVA:
+def _resolve_restart_target_harness(
+    overlay: Mapping[str, object] | None, current_harness: Harness
+) -> Harness:
+    if not overlay or "harness" not in overlay:
+        return current_harness
+    from base.api_contracts.agent_contract import LAUNCHABLE_HARNESSES
+
+    raw_h = overlay["harness"]
+    try:
+        target_harness = coerce_harness(raw_h)
+        is_launchable = target_harness.value in LAUNCHABLE_HARNESSES
+    except Exception as exc:
         raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Restart is not supported for external harness '{harness.value}'; "
-                f"use terminate and resurrect instead."
-            ),
+            status_code=422, detail=f"Invalid harness in config_overlay: {exc}"
+        ) from exc
+    if not is_launchable:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid harness in config_overlay: Harness '{target_harness.value}' is not launchable",
         )
+    return target_harness
+
+
+def _verify_restart_preconditions(
+    conn: psycopg.Connection[Any],
+    agent_id: int,
+    status: str,
+    current_harness: Harness,
+    target_harness: Harness,
+) -> None:
+    has_lease = (
+        conn.execute(
+            "SELECT 1 FROM agent_impersonations WHERE agent_id = %s "
+            "AND (status IN ('requested', 'accepted', 'active') OR delta_version > applied_version OR handoff_applied_at IS NULL) LIMIT 1",
+            (agent_id,),
+        ).fetchone()
+        is not None
+    )
+    if has_lease:
+        raise HTTPException(status_code=409, detail="Agent has an active impersonation lease")
+
+    if (
+        target_harness != current_harness or current_harness is not Harness.MEIVA
+    ) and status not in ("idling", "terminated"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot restart agent in status '{status}'; must be idling or terminated",
+        )
+
+
+def _validate_post_agent_restart_blocking(
+    pool: ConnectionPool,
+    agent_id: int,
+    body: RestartAgentRequest,
+    *,
+    catalog: ModelCatalog,
+    default_model: str,
+    home: Path,
+) -> None:
+    overlay_without_harness = (
+        {k: v for k, v in body.config_overlay.items() if k != "harness"}
+        if body.config_overlay
+        else {}
+    )
+    if overlay_without_harness:
+        from base.packages.plugins.config_registration import validate_config_overlay
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+
+        try:
+            validate_config_overlay(
+                overlay_without_harness,
+                models=catalog.models,
+                decision_models=catalog.decision_models,
+                prices=catalog.prices,
+                home=home,
+            )
+        except InvalidConfigOverlay as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    from base.agents.model.restart_config import validate_restart_model_config
+
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT status, harness, birth_config, config_overlay FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        ).fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        status = str(row[0])
+        current_harness = coerce_harness(row[1])
+        target_harness = _resolve_restart_target_harness(body.config_overlay, current_harness)
+        _verify_restart_preconditions(conn, agent_id, status, current_harness, target_harness)
+        with conn.cursor() as cur:
+            validate_restart_model_config(
+                cur,
+                agent_id,
+                body.config_overlay or {},
+                catalog=catalog,
+                default_model=default_model,
+                harness=target_harness,
+            )
 
 
 @router.post(
     "/api/agents/{agent_id}/restart",
-    description="Enqueue native restart on the agent's home runner.\n\nThe current turn reaches claim, returns normally and flushes its checkpoint.\nThe host then applies the exact command and releases the incarnation for\nnew admission, retaining agent ID and context. Terminated agents require\nresurrection; restart returns already_terminated for them.",
+    description="Enqueue restart or harness switch on the agent's home runner.\n\nRestart requires a non-empty message. For native meiva agents while alive,\nthe current turn reaches claim, returns normally and flushes its checkpoint.\nFor harness switching, external harnesses, or terminated agents, an exact\n4-step transition sequence settles, drops, updates harness, and resurrects.",
 )
 async def post_agent_restart(
     agent_id: int,
     request: Request,
-    body: RestartAgentRequest = Body(default_factory=RestartAgentRequest),  # noqa: B008
+    body: RestartAgentRequest,
 ) -> RestartAgentResponse:
+    if not body.message or not body.message.strip():
+        raise HTTPException(status_code=422, detail="Restart requires a non-empty message")
 
-    await asyncio.to_thread(_assert_restart_native_blocking, request.app.state.db_pool, agent_id)
-    if body.config_overlay:
-        from base.packages.plugins.config_registration import validate_config_overlay
-        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+    await asyncio.to_thread(
+        _validate_post_agent_restart_blocking,
+        request.app.state.db_pool,
+        agent_id,
+        body,
+        catalog=require_model_catalog(request),
+        default_model=gateway_config(request).models.llm_model,
+        home=request.app.state.gateway_process.home,
+    )
 
-        catalog = require_model_catalog(request)
-        try:
-            validate_config_overlay(
-                body.config_overlay,
-                models=catalog.models,
-                decision_models=catalog.decision_models,
-                prices=catalog.prices,
-                home=request.app.state.gateway_process.home,
-            )
-        except InvalidConfigOverlay as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
     forwarded = await forward_to_home_machine(
         agent_id,
         f"/api/agents/{agent_id}/restart",

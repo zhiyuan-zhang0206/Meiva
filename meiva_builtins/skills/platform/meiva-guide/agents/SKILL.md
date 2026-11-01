@@ -18,7 +18,8 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
   interruption when a clean stop cannot progress; `enqueued` confirms
   acceptance, not exit or completion of owned work).
 - `restart` — finish current turn, then restart as a fresh process under the
-  same `agent_id`.
+  same `agent_id` (mandatory `message` explaining the restart reason; optional
+  `config_overlay` to change model, effort, or switch harness).
 - `resurrect` — wake a `terminated` agent with its full conversation state
   intact (must include a `prompt` telling it why it was woken).
 - `transfer` (CLI only: `meiva agents transfer <id> --to <machine> --message "..."`
@@ -44,6 +45,41 @@ agent's own agent-ID context note at each window establishment.
 SDK reference: `meiva.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
 `send_message` / `list_agents` / `list_machines` / `get_neighbors` /
 `get_ancestors` / `commands` / `get_last_message`).
+
+## Switching Harnesses & Handoff Process
+
+An agent's harness (the runtime loop it runs on: `meiva`, `claude_code`, `codex`,
+`antigravity`, `kimi_code`) can be switched bidirectionally (`meiva` <-> external,
+or external <-> external) via `restart` with a config overlay:
+
+- **SDK**: `meiva.agents.restart(agent_id, message="Switching to Codex", config_overlay={"harness": "codex"})`
+- **CLI**: `meiva agents restart <agent_id> -m "Switching to Codex" --overlay harness=codex`
+- **Gateway REST API**: `POST /api/agents/{agent_id}/restart` with body `{"message": "...", "config_overlay": {"harness": "..."}}`
+
+### Preconditions, Invariants & Handoff Process
+1. **Agent State**: The agent must be in `idling` or `terminated` status. A running
+   agent will be rejected with `409 Conflict`.
+2. **Mandatory Message**: `message` is mandatory across all restart calls (minimum
+   1 non-whitespace character).
+3. **Model Compatibility**: If changing harness, ensure the target harness supports
+   the agent's model, or supply a compatible `llm_model` in the overlay.
+4. **Handoff Document**: Before stopping or requesting a harness switch, have the
+   outgoing agent write a comprehensive handoff file (`README.md` or `HANDOFF.md`)
+   in its workspace root. This document should cover:
+   - Workspace directories and current layout
+   - Git branches and active worktree paths
+   - Open tasks, active investigations, and pending decisions
+   - Key architectural invariants and constraints
+   - Optionally creating a git bundle or archive if switching machines
+   The restart caller should then pass the path to this handoff document and a concise
+   summary of current progress in the mandatory `message` argument of the restart call.
+
+### Transition Sequence
+When switching harnesses on restart:
+1. The runner calls `/prepare-harness-switch` to persist a lifecycle switch note in the timeline.
+2. The agent is dropped from active runner cache, and any prior harness CLI session files on disk (`$MEIVA_HOME/harness/sessions/{agent_id}.json`) are removed to ensure a clean start.
+3. If `idling`, the agent is cleanly terminated.
+4. `agents_meta.harness` is updated in the database, and the agent is resurrected on its new harness with a wake prompt referencing the restart message.
 
 ## Command (user-level command)
 
@@ -130,7 +166,7 @@ cluster-default change does not affect agents already spawned.
 
 To change an agent's config after spawn: restart it with a new `config_overlay`
 (`meiva.agents.restart(agent_id, message=...)` in SDK, or
-`meiva agents restart <id> --message "..."` / `--no-message` in CLI —
+`meiva agents restart <id> --message "..."` in CLI —
 the restart path accepts a config_overlay).
 
 #### User settings

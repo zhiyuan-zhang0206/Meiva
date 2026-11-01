@@ -35,27 +35,24 @@ and asserts the set of nodes that executed.
 The choice of a whole-turn node and the rejected single-LLM-call alternative are
 recorded in [the harness decision](../../../docs/decisions/agents/graph/2026-10-19-external-harness.md#the-decision).
 
-## CQRS storage contract and submission cursor
+## Storage contract and external timeline (Plan B)
 
 For an external harness (`harness != "meiva"`), the external CLI's on-disk session
 file (`FileSessionRegistry`) is the **Execution Source of Truth**: the CLI owns its
-context window, compaction, and continuation. Postgres `state.messages` is strictly
-an **append-only UI Timeline Projection** (`state.harness_cursor` marks how much of
-`state.messages` is covered by committed harness turns and is never reset to `0`).
+context window, compaction, and continuation.
 
-- An empty window writes `[SystemMessage(content=handoff.render()), *notes, *reset.tail]`
-  with `harness_cursor = 0` (`model-visible ⟺ logged`): `messages[0]` is the rendered
-  **handoff document** at `0.0`, followed by standing context notes (`timezone`, `memory`,
-  `agent_id`, `agent_memory`, `inherited_memory`, `preloaded_skills`, plugin notes).
-- On the first turn, `pending_messages(state)` co-delivers the handoff `SystemMessage`,
-  standing context notes, and first user message in one submission.
-- `harness_turn` runs `harness_pre_turn_hooks` and `node_lifecycle(HARNESS_TURN, ...)`,
-  while `HarnessTurnProjector` projects `BridgeEvent`s (`TextDelta`, `AssistantText`,
-  `ToolUse`, `ToolResult`) into live SSE events and `state.messages`, advancing
-  `harness_cursor` over all sent and appended messages using one turn-scoped UTC `Clock`.
-
-The cursor records committed graph turns, not durable provider acknowledgements;
-a crash or cancel before commit can re-submit pending input across sessions.
+Under Plan B:
+- External harnesses write UI timeline items strictly to the dedicated Postgres table
+  `agent_harness_messages` (with monotonic `seq` per agent) and **never** read or write
+  LangGraph `state.messages`.
+- LangGraph checkpoints remain 100% the execution and UI store for native `meiva` agents,
+  eliminating cross-harness schema corruption and serialization bugs.
+- `harness_cursor` has been completely retired from `BaseAgentState`.
+- `claim` drains the inbound queue, maps incoming messages to `TimelineItem`s, writes
+  them to `agent_harness_messages`, and passes the pending text to `harness_turn` via
+  `state.harness_pending_input`.
+- `harness_turn` executes the bridge turn, streams `BridgeEvent`s, atomically appends
+  committed timeline items to `agent_harness_messages`, and clears `harness_pending_input`.
 
 ## The bridge
 
@@ -71,8 +68,8 @@ in `FileSessionRegistry`.
   heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Completed keys within
   the same session replay the ticket outcome without emitting a second completion event.
 - When a turn is interrupted by a system/terminate signal (`InterruptReason.SYSTEM`), any tool
-  calls and reasoning already projected during the turn are committed to `state.messages`
-  and covered by `harness_cursor` before `claim` settles the termination inbound.
+  calls and reasoning already projected during the turn are committed to `agent_harness_messages`
+  before `claim` settles the termination inbound.
 - A session that faults or closes mid-turn retires itself and raises a fatal stream
   abort; the next inbound opens a fresh resumed session from the registry. Only a
   failure that names this turn ends it, and a session failure ends it as a closed
@@ -118,19 +115,11 @@ Execution model/effort resolve through the registry binding described in
 Because an external harness CLI owns its context window and turn loop, native
 context/lifecycle mutations are native (`Harness.MEIVA`) only:
 
-- **`fork`, `compact`, `restart`, and `meiva.self.attach` are native-only**:
-  - `fork` (`fork_from`), `POST /api/agents/{id}/compact`, and `POST /api/agents/{id}/restart`
-    reject external harnesses with HTTP 400 (`ForkHarnessMismatch` on fork; guarded
-    in `claim` dispatch); the web UI hides `Fork`, `Compact`, and `Restart` (and
-    omits `/compact` from slash autocomplete) for external harnesses.
-  - Calling `meiva.self.compact()`, `meiva.self.restart()`, or `meiva.self.attach()`
-    on an external harness raises `RuntimeError`.
+- **`fork`, `compact`, and `meiva.self.attach` are native-only**:
+  - `fork` (`fork_from`) and `POST /api/agents/{id}/compact` reject external harnesses with HTTP 400 (`ForkHarnessMismatch` on fork; guarded in `claim` dispatch); the web UI hides `Fork` and `Compact` (and omits `/compact` from slash autocomplete) for external harnesses.
+  - `POST /api/agents/{id}/restart` and the Web UI `Restart` action are supported on `idling` external-harness agents and for bidirectional harness switching on `idling`/`terminated` agents (requiring a non-empty `message`). Calling `meiva.self.restart()` from code remains native-only (raises `RuntimeError` on external harnesses).
+  - Calling `meiva.self.compact()` or `meiva.self.attach()` on an external harness raises `RuntimeError`.
 - **Supported `meiva.self` surface on external harnesses**:
-  - `harness_sdk_expand_section` and `meiva.help(meiva.self)` expose only
-    `meiva.self.terminate()`, `meiva.self.pause_heartbeat(duration)`, and read-only
-    identity constants (`AGENT_ID`, `MACHINE_SPEC`, `MachineSpec`). Use `terminate`
-    and `resurrect` to stop and resume an external harness agent.
+  - `harness_sdk_expand_section` and `meiva.help(meiva.self)` expose only `meiva.self.terminate()`, `meiva.self.pause_heartbeat(duration)`, and read-only identity constants (`AGENT_ID`, `MACHINE_SPEC`, `MachineSpec`). Use `terminate` and `resurrect`, or `restart` via API/UI to stop and resume an external harness agent.
 
-A cancelled turn keeps its message in the window and does not advance the cursor,
-so the next turn re-submits it. `LAUNCHABLE_HARNESSES` gates a wake before any of
-this runs.
+A cancelled turn keeps its message in the window, so the next turn re-submits it. `LAUNCHABLE_HARNESSES` gates a wake before any of this runs.

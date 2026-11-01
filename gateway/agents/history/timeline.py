@@ -27,6 +27,7 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages,
     load_checkpoint_messages_segment,
 )
+from base.agents.history.harness_messages import load_harness_timeline_items
 from base.agents.history.timeline import TimelineItem, build_timeline_items, tail_window
 from base.agents.history.timeline_item import hydrate
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -224,9 +225,23 @@ def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
 def load_current_timeline_items(
     db: Database, agent_id: int, *, inputs: TimestampPolicy
 ) -> list[TimelineItem]:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+            row = cur.fetchone()
+            harness = str(row[0]) if row and row[0] is not None else "meiva"
+        if harness != "meiva":
+            return load_harness_timeline_items(conn, agent_id)
     messages = load_current_messages(db, agent_id)
     items, _ = build_timeline_items(messages, inputs=inputs)
     return items
+
+
+def _get_agent_harness(request: Request, agent_id: int) -> str:
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+        return str(row[0]) if row and row[0] is not None else "meiva"
 
 
 def _require_agent(request: Request, agent_id: int) -> None:
@@ -302,6 +317,22 @@ def head_timeline(
     """
     _require_agent(request, agent_id)
     read = request_timeline_read(request)
+    harness = _get_agent_harness(request, agent_id)
+    if harness != "meiva":
+        with request.app.state.db_pool.connection() as conn:
+            items = load_harness_timeline_items(conn, agent_id)
+            msg_count = len(items)
+        tail, tail_has_more = tail_window(items, read.default_limit)
+        window = initial_window(
+            _rows(items),
+            tail_size=len(tail),
+            tail_has_more=tail_has_more,
+            limit=read.default_limit,
+            historical_segments_available=False,
+        )
+        return TimelineResponse(
+            items=_picked(items, window), msg_count=msg_count, has_more=window.has_more
+        )
     boundary_ids = _load_boundary_ids(request.app.state.db, agent_id, read.compact_history)
     return _head_response(request, agent_id, messages, read.default_limit, boundary_ids, read=read)
 
@@ -392,6 +423,29 @@ def get_timeline(
         limit = read.default_limit
     cursor = parse_cursor(before) if before is not None else None
     _require_agent(request, agent_id)
+    harness = _get_agent_harness(request, agent_id)
+    if harness != "meiva":
+        with request.app.state.db_pool.connection() as conn:
+            items = load_harness_timeline_items(conn, agent_id)
+            msg_count = len(items)
+        if before is None:
+            tail, tail_has_more = tail_window(items, limit)
+            window = initial_window(
+                _rows(items),
+                tail_size=len(tail),
+                tail_has_more=tail_has_more,
+                limit=limit,
+                historical_segments_available=False,
+            )
+            return TimelineResponse(
+                items=_picked(items, window), msg_count=msg_count, has_more=window.has_more
+            )
+        if cursor is None:
+            return TimelineResponse(items=[], msg_count=msg_count, has_more=False)
+        window = window_before(_rows(items), cursor.item_id(), limit)
+        return TimelineResponse(
+            items=_picked(items, window), msg_count=msg_count, has_more=window.has_more
+        )
     depth = read.compact_history
     db: Database = request.app.state.db
     boundary_ids = _load_boundary_ids(db, agent_id, depth)

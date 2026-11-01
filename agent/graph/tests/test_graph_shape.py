@@ -116,7 +116,11 @@ async def executed_nodes(
                 additional_kwargs={"meiva_msg_type": "inbound", "meiva_inbound_id": 7},
             ),
         ],
-        harness_cursor=1,
+        harness_pending_input=(
+            {"prompt": "do it", "key": "k1", "inbound_ids": [7]}
+            if harness is not Harness.MEIVA
+            else None
+        ),
     )
     seen: list[str] = []
     stream = _stream(graph, state, make_context(harness, engine))

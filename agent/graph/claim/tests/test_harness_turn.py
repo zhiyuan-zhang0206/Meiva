@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -162,33 +162,13 @@ def config(agent_id: int = 6984) -> RunnableConfig:
     return {"configurable": {"thread_id": str(agent_id)}}
 
 
-def test_the_standing_head_is_not_pending() -> None:
-    state = AgentState(
-        messages=[SystemMessage(content="prompt"), HumanMessage(content="agent id note")],
-        harness_cursor=2,
-    )
-    state.messages.append(inbound("hello", 11))
-
-    assert [message.content for message in pending_messages(state)] == ["hello"]
-
-
-def test_a_shrunk_window_submits_nothing_rather_than_resending() -> None:
-    state = AgentState(messages=[inbound("hello", 11)], harness_cursor=9)
-
-    assert pending_messages(state) == []
-
-
 def test_own_replies_are_never_pending() -> None:
-    state = AgentState(
-        messages=[
-            inbound("hello", 11),
-            AIMessage(content="hi"),
-            ToolMessage(content="out", tool_call_id="call_1"),
-        ],
-        harness_cursor=0,
-    )
-
-    assert [message.content for message in pending_messages(state)] == ["hello"]
+    messages = [
+        inbound("hello", 11),
+        AIMessage(content="hi"),
+        ToolMessage(content="out", tool_call_id="call_1"),
+    ]
+    assert [message.content for message in pending_messages(messages)] == ["hello"]
 
 
 def test_multimodal_content_renders_its_text_and_marks_the_rest() -> None:
@@ -216,35 +196,31 @@ def test_a_notes_only_window_uses_its_length() -> None:
 
 async def test_a_turn_submits_the_pending_messages_and_commits_the_reply() -> None:
     engine = FakeEngine(reply="done")
-    state = AgentState(
-        messages=[SystemMessage(content="prompt"), inbound("do it", 7)], harness_cursor=1
-    )
+    state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     command = await harness_turn_node(state, runtime(engine), config())
 
     assert command.goto == "claim"
     assert command.update is not None
     assert engine.submitted == [("do it", "inbound-7")]
-    reply = command.update["messages"][0]
-    assert isinstance(reply, AIMessage) and reply.content == "done"
-    assert command.update["harness_cursor"] == 3, "the reply is covered by the cursor too"
+    assert command.update["harness_pending_input"] is None
     assert command.update["halted"] is True
 
 
 async def test_a_turn_with_nothing_pending_ends_without_calling_the_engine() -> None:
     engine = FakeEngine()
-    state = AgentState(messages=[SystemMessage(content="prompt")], harness_cursor=1)
+    state = AgentState()
 
     command = await harness_turn_node(state, runtime(engine), config())
 
     assert command.goto == "claim"
     assert engine.submitted == []
-    assert command.update == {"halted": True, "harness_cursor": 1}
+    assert command.update == {"halted": True, "harness_pending_input": None}
 
 
 async def test_a_turn_logs_usage_under_the_harness(loguru_records: LogRecords) -> None:
     engine = FakeEngine(usage=Usage(input_tokens=1200, output_tokens=34))
-    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+    state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     await harness_turn_node(state, runtime(engine), config(6984))
 
@@ -270,12 +246,13 @@ async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
         reply="done",
         usage=Usage(input_tokens=8, output_tokens=3, cache_read_input_tokens=99),
     )
-    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+    state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     command = await harness_turn_node(state, runtime(engine), config())
 
     assert command.update is not None
-    assert [message.content for message in command.update["messages"]] == ["done"]
+    assert command.update["harness_pending_input"] is None
+    assert command.update["halted"] is True
     warned = loguru_records.events("harness_usage_log_failed")
     assert len(warned) == 1
     assert warned[0]["extra"]["agent_id"] == 6984
@@ -293,13 +270,13 @@ async def test_the_handoff_turn_lands_as_its_own_message(loguru_records: LogReco
         interrupted=False,
     )
     engine = FakeEngine(reply="done", prelude=(opening,))
-    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+    state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     command = await harness_turn_node(state, runtime(engine), config())
 
     assert command.update is not None
-    assert [message.content for message in command.update["messages"]] == ["acknowledged", "done"]
-    assert command.update["harness_cursor"] == 3, "both messages are covered by the cursor"
+    assert command.update["harness_pending_input"] is None
+    assert command.update["halted"] is True
     rows = loguru_records.events("llm_usage")
     assert [row["extra"]["in_total"] for row in rows] == [900, 7], "each turn keeps its own row"
 
@@ -317,7 +294,7 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
         ) -> HarnessTurn:
             raise HarnessTurnFaultedError("cli died")
 
-    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+    state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     with pytest.raises(FatalLLMStreamError, match="claude_code harness turn aborted: cli died"):
         await harness_turn_node(state, runtime(FaultingEngine()), config())
@@ -342,7 +319,7 @@ async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_ab
         ) -> HarnessTurn:
             raise HarnessSetupError("claude_code session could not start: no sdk")
 
-    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+    state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     with pytest.raises(FatalLLMStreamError, match="harness turn aborted"):
         await harness_turn_node(state, runtime(UnstartableEngine()), config())
@@ -424,7 +401,7 @@ async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
     engine = FakeEngine(reply="the answer")
 
     await harness_turn_node(
-        AgentState(messages=[inbound("do it", 7)], harness_cursor=0),
+        AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"}),
         runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
         config(agent_id),
     )
@@ -461,7 +438,7 @@ async def test_the_handoff_prelude_is_not_the_last_message(
     engine = FakeEngine(prelude=(ack,), reply="the answer")
 
     await harness_turn_node(
-        AgentState(messages=[inbound("do it", 7)], harness_cursor=0),
+        AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"}),
         runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
         config(agent_id),
     )
@@ -502,27 +479,14 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages() ->
     publisher = MagicMock()
     publisher.emit.side_effect = record_emit
     rt = runtime(engine, publisher=publisher)
-    state = AgentState(
-        messages=[SystemMessage(content="handoff"), inbound("list files", 7)],
-        harness_cursor=0,
-    )
+    state = AgentState(harness_pending_input={"prompt": "list files", "key": "inbound-7"})
 
     command = await harness_turn_node(state, rt, config())
 
     assert command.update is not None
-    committed = command.update["messages"]
-    assert [(type(m), m.content) for m in committed] == [
-        (AIMessage, "Checking files..."),
-        (ToolMessage, "README.md\n"),
-        (AIMessage, "all done"),
-    ]
-    assert committed[0].tool_calls[0]["name"] == "Bash"
-    assert committed[0].tool_calls[0]["args"] == {"code": "ls -la"}
-    assert committed[1].additional_kwargs["sdk_calls"] == [{"method": "Bash", "count": 1}]
-    assert command.update["harness_cursor"] == 5
+    assert command.update == {"halted": True, "harness_pending_input": None}
 
     assert emitted == [
-        "timeline_snapshot",
         "chat_start",
         "chat_delta",
         "code_start",
@@ -559,26 +523,17 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
     publisher = MagicMock()
     publisher.emit.side_effect = record_emit
     rt = runtime(engine, publisher=publisher)
-    state = AgentState(
-        messages=[SystemMessage(content="handoff"), inbound("two steps", 7)],
-        harness_cursor=0,
-    )
+    state = AgentState(harness_pending_input={"prompt": "two steps", "key": "inbound-7"})
 
     command = await harness_turn_node(state, rt, config(6985))
 
     assert command.update is not None
-    committed = command.update["messages"]
-    assert [(type(m), m.content) for m in committed] == [
-        (AIMessage, "First message"),
-        (AIMessage, "Second message"),
-    ]
-    assert command.update["harness_cursor"] == 4
+    assert command.update == {"halted": True, "harness_pending_input": None}
     assert emitted == [
-        ("timeline_snapshot", None),
-        ("chat_start", "2.0"),
-        ("chat_delta", "2.0"),
-        ("chat_start", "3.0"),
-        ("chat_delta", "3.0"),
+        ("chat_start", "0.0"),
+        ("chat_delta", "0.0"),
+        ("chat_start", "1.0"),
+        ("chat_delta", "1.0"),
         ("llm_done", None),
     ]
 
@@ -665,30 +620,16 @@ async def test_harness_turn_projects_reasoning_and_step_timing() -> None:
     publisher = MagicMock()
     publisher.emit.side_effect = record_emit
     rt = runtime(engine, publisher=publisher)
-    state = AgentState(
-        messages=[SystemMessage(content="handoff"), inbound("run it", 9)],
-        harness_cursor=0,
-    )
+    state = AgentState(harness_pending_input={"prompt": "run it", "key": "inbound-9"})
 
     command = await harness_turn_node(state, rt, config(6985))
     assert command.update is not None
-    committed = command.update["messages"]
-    assert len(committed) == 3
-    first_ai = committed[0]
-    assert isinstance(first_ai, AIMessage)
-    assert first_ai.content == [{"type": "thinking", "thinking": "Planning tool call", "index": 0}]
-    assert "meiva_reasoning_ms_by_block" in first_ai.additional_kwargs
-    final_ai = committed[2]
-    assert isinstance(final_ai, AIMessage)
-    assert final_ai.content == [
-        {"type": "thinking", "thinking": "Synthesizing reply", "index": 0},
-        {"type": "text", "text": "Final answer", "index": 1},
-    ]
+    assert command.update == {"halted": True, "harness_pending_input": None}
+    assert ("reasoning_start", "0.0") in emitted
+    assert ("reasoning_delta", "0.0") in emitted
+    assert ("code_start", "0.1") in emitted
     assert ("reasoning_start", "2.0") in emitted
-    assert ("reasoning_delta", "2.0") in emitted
-    assert ("code_start", "2.1") in emitted
-    assert ("reasoning_start", "4.0") in emitted
-    assert ("chat_start", "4.1") in emitted
+    assert ("chat_start", "2.1") in emitted
 
 
 async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> None:
@@ -717,23 +658,9 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> N
             raise ModelInterruptedError(InterruptReason.SYSTEM)
 
     engine = SelfTerminatingEngine()
-    state = AgentState(
-        messages=[
-            SystemMessage(content="handoff"),
-            inbound("initial task", 1),
-            AIMessage(content="done"),
-            HumanMessage(content="[Heartbeat]: check in"),
-        ],
-        harness_cursor=3,
-    )
+    state = AgentState(harness_pending_input={"prompt": "[Heartbeat]: check in", "key": "window-4"})
 
     command = await harness_turn_node(state, runtime(engine), config(6986))
     assert engine.submitted == [("[Heartbeat]: check in", "window-4")]
     assert command.update is not None
-    committed = command.update["messages"]
-    assert len(committed) == 2
-    assert isinstance(committed[0], AIMessage)
-    assert committed[0].tool_calls[0]["name"] == "Bash"
-    assert isinstance(committed[1], ToolMessage)
-    assert command.update["harness_cursor"] == 6
-    assert command.update["halted"] is True
+    assert command.update == {"halted": True, "harness_pending_input": None}

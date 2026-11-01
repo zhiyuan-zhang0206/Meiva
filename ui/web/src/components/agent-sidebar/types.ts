@@ -15,7 +15,7 @@ export interface Props {
   onSpawn: (opts: { machine?: string; model?: string; reasoning_effort?: string; harness?: Harness }) => void;
   onTerminate: (id: number, force?: boolean) => void;
   onForceExpire: (id: number, sessionId: number) => void;
-  onRestart: (id: number) => void;
+  onRestart: (id: number, message: string) => void;
   onResurrect: (id: number, prompt?: string) => void;
   onFork: (id: number, prompt?: string) => void;
   onCompact: (id: number) => void;
@@ -32,7 +32,7 @@ export interface InnerProps {
   onSpawn: (opts: { machine?: string; model?: string; reasoning_effort?: string; harness?: Harness }) => void;
   onTerminate: (id: number, force?: boolean) => void;
   onForceExpire: (id: number, sessionId: number) => void;
-  onRestart: (id: number) => void;
+  onRestart: (id: number, message: string) => void;
   onResurrect: (id: number, prompt?: string) => void;
   onFork: (id: number, prompt?: string) => void;
   onCompact: (id: number) => void;

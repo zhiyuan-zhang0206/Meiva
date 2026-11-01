@@ -180,13 +180,22 @@ def _run(cur: _Cursor, statements: tuple[plans.SqlStatement, ...]) -> None:
         cur.execute(statement.sql, statement.params)
 
 
-def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
+def restart(message: str, *, config_overlay: dict[str, object] | None = None) -> NoReturn:
     """Restart yourself under the same identity, preserving your conversation.
 
     This call ends the current execution; finish required work before calling it.
+    `message` is a mandatory, non-blank natural language explanation of why you restarted.
     `config_overlay` is a flat `{field_name: value}` mapping merged into your
     persistent per-agent settings."""
+    message = coerce_str(message, "message")
+    if not message.strip():
+        raise ValueError("message must not be blank")
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
+    if config_overlay and "harness" in config_overlay:
+        raise ValueError(
+            "harness cannot be changed via meiva.self.restart(); harness switching "
+            "requires the agent to be idling or terminated via external or peer restart"
+        )
     from meiva.sdk_surface import agent_identity
 
     _assert_native_self_action("restart")
@@ -232,7 +241,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
                 catalog=_settings.model_catalog(),
                 default_model=_settings.agent_setting("llm_model"),
             )
-        _run(cur, plans.restart_statements(agent_id, stored))
+        _run(cur, plans.restart_statements(agent_id, message, stored))
     _publish_self_inbound_wake()
     raise AgentRestart
 

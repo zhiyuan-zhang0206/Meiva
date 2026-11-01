@@ -10,7 +10,6 @@ import psycopg
 import pytest
 
 from base.agents.birth.harness import (
-    DEFAULT_HARNESS,
     LAUNCHABLE_HARNESSES,
     HarnessProbe,
     coerce_harness,
@@ -18,6 +17,7 @@ from base.agents.birth.harness import (
     resolve_birth_harness,
 )
 from base.api_contracts.agent_contract import (
+    DEFAULT_HARNESS,
     ErrorReason,
     ForkHarnessMismatch,
     Harness,

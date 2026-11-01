@@ -479,6 +479,7 @@ class AgentHost:
                 birth_config=birth_config,
             ),
             self._evict,
+            retire=self._sessions.retire,
         )
 
     # meiva:note

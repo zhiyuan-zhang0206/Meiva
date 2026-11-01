@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, TypeGuard
 
 from langchain_core.messages import BaseMessage, SystemMessage
@@ -15,14 +16,22 @@ from agent.impersonation_handoff import introduction_note, note_stamp
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.agents.history.harness_messages import (
+    aappend_harness_timeline_items,
+    aload_harness_message_count,
+)
+from base.agents.history.timeline import build_timeline_items
 from base.agents.messages.delivery.retry import retryable_database_error
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.api_contracts.agent_contract import Harness
+from base.db.transaction import async_write_transaction
 from base.lm.harness.handoff import ClusterFact, Handoff
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, handoff_for
 from base.log import logger
 from base.paths import workspace_dir
 
 from .claim import route_target
+from .claim.harness_turn import pending_messages, render_messages, turn_key
 from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
@@ -78,6 +87,53 @@ def cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
         desc = f"{role_str} ({description})" if description else role_str
         facts.append(ClusterFact(str(name), desc))
     return tuple(facts)
+
+
+async def _establish_external_harness_context(
+    ctx: MeivaContext,
+    *,
+    agent_id: int,
+    notes: Sequence[BaseMessage],
+    reset: ContextReset,
+    indexed: set[str],
+) -> Command[NodeName]:
+    handoff = _build_grounded_handoff(ctx, agent_id=agent_id)
+    set_handoff = getattr(ctx.harness_bridge, "set_handoff", None)
+    if callable(set_handoff):
+        set_handoff(handoff)
+    if ctx.ops_pool is not None:
+        async with async_write_transaction(ctx.ops_pool) as pool_conn:
+            count = await aload_harness_message_count(pool_conn, agent_id)
+            to_append: list[BaseMessage] = (
+                [SystemMessage(content=handoff.render()), *notes, *reset.tail]
+                if count == 0
+                else list(reset.tail)
+            )
+            if to_append:
+                items, _ = build_timeline_items(to_append, inputs=ctx.timestamp_policy())
+                await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
+    target = route_target(ctx, reset.resume)
+    ext_update: dict[str, Any] = {
+        "capabilities": CapabilitiesState(indexed=indexed),
+        "context_reset": ContextReset(),
+    }
+    pending: list[BaseMessage] = (
+        [SystemMessage(content=handoff.render()), *notes, *pending_messages(reset.tail)]
+        if target == "harness_turn" and reset.tail
+        else []
+    )
+    if pending:
+        inbound_ids = [
+            iid
+            for m in pending
+            if isinstance(iid := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
+        ]
+        ext_update["harness_pending_input"] = {
+            "prompt": render_messages(pending),
+            "key": turn_key(pending),
+            "inbound_ids": inbound_ids,
+        }
+    return Command[NodeName](update=ext_update, goto=target)
 
 
 def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
@@ -145,9 +201,10 @@ async def init_context_node(
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
+        publish_timeline=runtime.context.harness is Harness.MEIVA,
     ):
         reset = state.context_reset
-        if state.messages:
+        if runtime.context.harness is Harness.MEIVA and state.messages:
             # History intact — nothing to establish. A parked tail here would
             # mean a requester cleared the history and something re-populated it
             # before this node ran; drop it rather than splicing it into the
@@ -209,19 +266,12 @@ async def init_context_node(
 
         # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
         if runtime.context.harness is not Harness.MEIVA:
-            agent_id = agent_id_from_config(config)
-            handoff = _build_grounded_handoff(runtime.context, agent_id=agent_id)
-            set_handoff = getattr(runtime.context.harness_bridge, "set_handoff", None)
-            if callable(set_handoff):
-                set_handoff(handoff)
-            return Command[NodeName](
-                update={
-                    "messages": [SystemMessage(content=handoff.render()), *notes, *reset.tail],
-                    "capabilities": CapabilitiesState(indexed=indexed),
-                    "harness_cursor": 0,
-                    "context_reset": ContextReset(),
-                },
-                goto=route_target(runtime.context, reset.resume),
+            return await _establish_external_harness_context(
+                runtime.context,
+                agent_id=agent_id_from_config(config),
+                notes=notes,
+                reset=reset,
+                indexed=indexed,
             )
 
         head: list[BaseMessage] = [

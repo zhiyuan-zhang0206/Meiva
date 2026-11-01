@@ -241,25 +241,25 @@ def test_restart_overlay_is_validated_before_it_is_forwarded(
         _set_agent_machine(db_conn, agent_id, "remote-runner")
         valid = client.post(
             f"/api/agents/{agent_id}/restart",
-            json={"config_overlay": {"completion_notice_policy": "hourly"}},
+            json={
+                "message": "restarting",
+                "config_overlay": {"completion_notice_policy": "hourly"},
+            },
         )
         invalid = client.post(
             f"/api/agents/{agent_id}/restart",
-            json={"config_overlay": {"completion_notice_policy": "bogus"}},
+            json={"message": "restarting", "config_overlay": {"completion_notice_policy": "bogus"}},
         )
 
     assert valid.status_code == 200
     assert valid.json() == {"status": "enqueued"}
     assert invalid.status_code == 422
-    # meiva:note
-    # The forward carries the request model verbatim (`body.model_dump()`), so a field
-    # the caller left unset arrives as its default: `message` is None here.
     assert runner.payloads("lifecycle") == [
         {
             "path": f"/api/agents/{agent_id}/restart",
             "body": {
                 "source": "user",
-                "message": None,
+                "message": "restarting",
                 "config_overlay": {"completion_notice_policy": "hourly"},
             },
         }

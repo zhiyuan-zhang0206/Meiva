@@ -26,7 +26,7 @@ def test_gateway_membership_refusal_is_422_before_forward(db_conn: psycopg.Conne
     ):
         refused = client.post(
             f"/api/agents/{agent_id}/restart",
-            json={"config_overlay": {"llm_model": "unknown-model"}},
+            json={"message": "restarting", "config_overlay": {"llm_model": "unknown-model"}},
         )
     # meiva:note
     # an invalid overlay is refused here: the runner has no scripted `lifecycle` reply, so a
@@ -47,7 +47,7 @@ def test_gateway_preserves_runner_typed_400(db_conn: psycopg.Connection) -> None
         runner_ops(db_conn, "remote-runner", {"lifecycle": refusal}),
         gateway_test_client() as client,
     ):
-        response = client.post(f"/api/agents/{agent_id}/restart", json={})
+        response = client.post(f"/api/agents/{agent_id}/restart", json={"message": "restarting"})
     assert response.status_code == 400
     assert response.json()["reason"] == "invalid_model_config"
     assert response.json()["detail"] == "provider configuration is invalid"

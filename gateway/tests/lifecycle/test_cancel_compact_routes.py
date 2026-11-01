@@ -91,7 +91,7 @@ def test_compact_refuses_an_external_harness_agent_with_400(
     ).fetchone() == (0,)
 
 
-def test_restart_refuses_an_external_harness_agent_with_400(
+def test_restart_rejects_external_harness_while_running_and_accepts_while_idling(
     _local_machine: MachineIdentityReader,
     gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
@@ -100,10 +100,16 @@ def test_restart_refuses_an_external_harness_agent_with_400(
         agent_id = spawn_via_http(
             client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
+        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="running")
+        running_resp = client.post(
+            f"/api/agents/{agent_id}/restart", json={"message": "switch or restart"}
+        )
+        assert running_resp.status_code == 409
+        assert "Cannot restart agent in status 'running'" in running_resp.json()["detail"]
+
         _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="idling")
-        response = client.post(f"/api/agents/{agent_id}/restart")
-    assert response.status_code == 400
-    assert (
-        response.json()["detail"]
-        == "Restart is not supported for external harness 'codex'; use terminate and resurrect instead."
-    )
+        idling_resp = client.post(
+            f"/api/agents/{agent_id}/restart", json={"message": "restarting codex"}
+        )
+        assert idling_resp.status_code == 200
+        assert idling_resp.json() == {"status": "enqueued"}

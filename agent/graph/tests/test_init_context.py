@@ -666,10 +666,13 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         _config(tid),
     )
 
+    from base.agents.history.harness_messages import load_harness_timeline_items
+
     assert command.update is not None
-    msgs = cast(list[AnyMessage], command.update["messages"])
-    assert len(msgs) >= 3 and isinstance(msgs[0], SystemMessage)
-    head_text = str(msgs[0].content)
+    assert "messages" not in command.update
+    items = load_harness_timeline_items(db_conn, tid)
+    assert len(items) >= 3 and items[0].kind == "system_prompt"
+    head_text = str(items[0].payload)
     assert all(
         s in head_text
         for s in (
@@ -679,7 +682,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
             "# Custom Plugin Section",
         )
     )
-    note_texts = "\n".join(str(m.content) for m in msgs[1:])
+    note_texts = "\n".join(str(it.payload) for it in items[1:])
     assert all(
         s in note_texts
         for s in (
@@ -690,7 +693,6 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
     )
     assert (
         isinstance(command.update["capabilities"], CapabilitiesState)
-        and command.update["harness_cursor"] == 0
         and command.update["context_reset"] == ContextReset()
         and command.goto == "claim"
     )
@@ -705,18 +707,16 @@ async def test_external_context_reset_preserves_the_tail_behind_handoff(
         HumanMessage(content="The real compact summary", id="compact-summary")
     ]
     command = await init_context_node(
-        AgentState(harness_cursor=19, context_reset=ContextReset(tail=tail, resume="before_llm")),
+        AgentState(context_reset=ContextReset(tail=tail, resume="before_llm")),
         _runtime(None, harness=harness, database_gate=database_gate),
         _config(42),
     )
 
     assert command.update is not None
-    msgs = cast(list[AnyMessage], command.update["messages"])
-    assert len(msgs) == 2
-    assert isinstance(msgs[0], SystemMessage)
-    assert "# Role & Operating Context — Agent #42" in str(msgs[0].content)
-    assert msgs[1:] == tail
-    assert command.update["harness_cursor"] == 0
+    assert "messages" not in command.update
+    prompt = command.update["harness_pending_input"]["prompt"]
+    assert "# Role & Operating Context — Agent #42" in prompt
+    assert prompt.endswith("The real compact summary")
     assert command.update["context_reset"] == ContextReset()
     assert command.goto == "harness_turn"
 
@@ -728,7 +728,6 @@ async def test_existing_external_history_and_cursor_are_not_rewritten(
 ) -> None:
     state = AgentState(
         messages=[SystemMessage(content="Legacy local prompt"), HumanMessage(content="Task")],
-        harness_cursor=1,
     )
     command = await init_context_node(
         state,
@@ -736,15 +735,18 @@ async def test_existing_external_history_and_cursor_are_not_rewritten(
         _config(42),
     )
 
-    assert command.update is None
-    assert state.harness_cursor == 1
+    assert command.update is not None
+    assert "messages" not in command.update
     assert state.messages[0].content == "Legacy local prompt"
 
 
-async def test_the_built_in_loop_writes_no_cursor(database_gate: ProcessDbGate) -> None:
+async def test_the_built_in_loop_writes_no_cursor(
+    database_gate: ProcessDbGate,
+) -> None:
     command = await init_context_node(
         AgentState(), _runtime(None, database_gate=database_gate), _config(42)
     )
 
     assert command.update is not None
-    assert "harness_cursor" not in command.update
+    assert "messages" in command.update
+    assert "harness_pending_input" not in command.update

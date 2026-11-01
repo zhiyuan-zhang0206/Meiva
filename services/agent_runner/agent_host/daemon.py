@@ -102,7 +102,7 @@ from services.agent_runner.understanding.chunk_consumer import understanding_loo
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
 from .exec_memory_guard import run_memory_guard_forever
-from .health_routes import cancel_turn_route, stats_route
+from .health_routes import cancel_turn_route, prepare_harness_switch_route, stats_route
 from .host import AgentHost
 from .host_beat import close_ownership_beat, ownership_beat_completion
 from .lifecycle.configuration import (
@@ -631,6 +631,9 @@ async def run(
                 extra_routes={
                     ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid(), home=home),
                     ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
+                    ("POST", "/prepare-harness-switch"): prepare_harness_switch_route(
+                        host, clock=stamping.clock
+                    ),
                 },
             ),
             serve_dispatch=run_dispatcher_group(

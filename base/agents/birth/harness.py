@@ -12,38 +12,19 @@ from typing import Any, NamedTuple, TypeGuard
 import psycopg
 
 from base.api_contracts.agent_contract import (
+    LAUNCHABLE_HARNESSES,
     AgentNotFound,
     ForkHarnessMismatch,
     Harness,
     HarnessNotLaunchable,
     HarnessStatus,
+    coerce_harness,
 )
 from base.host.env.harness_binaries import (
     HARNESS_BIN_DIRS,
     harness_child_path,
     locate_harness_binary,
     resolve_user_home,
-)
-
-DEFAULT_HARNESS = Harness.MEIVA
-
-# meiva:note
-# A harness enters this set when a launcher that can start a session on it
-# exists. Until then the runner refuses to wake a row born on it: recording an
-# intent the platform cannot honour would make the stored value a claim about a
-# runtime loop that is not actually running. Every external harness is here
-# because the graph routes its turns to `harness_turn`, whose bridge opens an
-# adapter session; removing a value retires its launcher and leaves rows born on
-# it inert, which is the rollback.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
-LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset(
-    {
-        Harness.MEIVA,
-        Harness.CLAUDE_CODE,
-        Harness.CODEX,
-        Harness.ANTIGRAVITY,
-        Harness.KIMI_CODE,
-    }
 )
 
 
@@ -66,18 +47,6 @@ class _LoginEvidence:
 # trimmed. Agents start without the interactive shell profile, so a missing PATH
 # entry alone is not proof that the harness is absent.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-
-
-def coerce_harness(value: str | Harness | None) -> Harness:
-    if value is None:
-        return DEFAULT_HARNESS
-    if isinstance(value, Harness):
-        return value
-    try:
-        return Harness(value)
-    except ValueError:
-        legal = ", ".join(harness.value for harness in Harness)
-        raise ValueError(f"unknown harness {value!r}; legal values: {legal}") from None
 
 
 # meiva:note

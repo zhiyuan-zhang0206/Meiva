@@ -56,11 +56,12 @@ def restart_request(
     agent_id: int,
     source: str,
     *,
-    message: str | None = None,
+    message: str,
+    config_overlay: Mapping[str, object] | None = None,
 ) -> Request:
-    body: dict[str, Any] = {"source": source}
-    if message is not None:
-        body["message"] = message
+    body: dict[str, Any] = {"source": source, "message": message}
+    if config_overlay:
+        body["config_overlay"] = dict(config_overlay)
     return Request("POST", f"/api/agents/{agent_id}/restart", body=body)
 
 

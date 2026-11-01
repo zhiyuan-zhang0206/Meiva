@@ -41,7 +41,9 @@ def direct(mode: str) -> int:
             _access(), "7", None, None, None, None, None, enabled=None, idempotency_key="key"
         )
     if mode == "restart-invalid-config":
-        return control.cmd_agents_restart(_access(), 9, '["not", "an", "object"]')
+        return control.cmd_agents_restart(
+            _access(), 9, '["not", "an", "object"]', message="restarting"
+        )
     if mode == "send-missing-source":
         return control.cmd_agents_send(_access(), 42, "hello", None, idempotency_key="key")
     if mode in {"send-handler-missing", "send-handler-invalid"}:

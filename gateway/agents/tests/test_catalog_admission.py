@@ -19,7 +19,9 @@ def _catalog() -> ModelCatalog:
 
 
 def test_dto_shape_does_not_construct_a_catalog() -> None:
-    request = RestartAgentRequest(config_overlay={"llm_model": "test-provider-model"})
+    request = RestartAgentRequest(
+        message="restarting", config_overlay={"llm_model": "test-provider-model"}
+    )
     assert request.config_overlay == {"llm_model": "test-provider-model"}
     assert request.config_overlay is not None
     with pytest.raises(plugin_errors.InvalidConfigOverlay, match="not a registered model"):
@@ -41,7 +43,9 @@ def test_runner_catalog_refusal_precedes_transaction(
     # A pool that was never opened refuses every borrow: the refusal below can only come from
     # the catalog check that runs before any transaction is acquired.
     unopened = ConnectionPool[Connection[TupleRow]]("postgresql://127.0.0.1:1/none", open=False)
-    request = RestartAgentRequest(config_overlay={"llm_model": "unknown-model"})
+    request = RestartAgentRequest(
+        message="restarting", config_overlay={"llm_model": "unknown-model"}
+    )
     with pytest.raises(InvalidModelConfig, match="not a registered model"):
         lifecycle.restart_blocking(
             database,

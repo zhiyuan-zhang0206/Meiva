@@ -188,7 +188,11 @@ def test_sdk_calls_resolve_relative_paths_against_the_logical_cwd(
 
 
 def _restart_and_wait(agent_id: int) -> None:
-    httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/restart", timeout=10.0).raise_for_status()
+    httpx.post(
+        f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
+        json={"message": "restart code effects"},
+        timeout=10.0,
+    ).raise_for_status()
 
     def applied() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:

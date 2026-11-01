@@ -325,10 +325,11 @@ def cmd_agents_restart(
     source: str | None = None,
     message: str | None = None,
 ) -> int:
+    if not message or not message.strip():
+        print("restart requires a non-blank --message", file=sys.stderr)
+        return 1
     url = _api(access, f"agents/{agent_id}/restart")
-    payload: dict[str, object] = {**_explicit_caller(source)}
-    if message is not None:
-        payload["message"] = message
+    payload: dict[str, object] = {**_explicit_caller(source), "message": message}
     if config_json is not None:
         try:
             config_overlay: dict[str, object] | list[object] | str | int | float | bool | None = (

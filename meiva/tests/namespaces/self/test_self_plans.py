@@ -18,23 +18,27 @@ from meiva.self.plans import (
 def test_a_restart_without_an_overlay_writes_only_the_restart_inbound(
     overlay: dict[str, object] | None,
 ) -> None:
-    (insert,) = restart_statements(41, overlay)
+    (insert,) = restart_statements(41, "restarting", overlay)
     assert "'restart', 'self'" in insert.sql
-    assert insert.params == (41, None)
+    assert insert.params == (41, "restarting", None)
 
 
 def test_a_restart_with_an_overlay_merges_it_then_queues_the_restart() -> None:
     overlay: dict[str, object] = {"llm_model": "model-a", "effort": "high"}
-    merge, insert = restart_statements(41, overlay)
+    merge, insert = restart_statements(41, "restarting", overlay)
     assert merge.sql.startswith("UPDATE agents_meta SET config_overlay")
     assert merge.params == (json.dumps(overlay), 41)
     assert "'restart', 'self'" in insert.sql
-    assert insert.params == (41, '{"config_overlay": {"effort": "high", "llm_model": "model-a"}}')
+    assert insert.params == (
+        41,
+        "restarting",
+        '{"config_overlay": {"effort": "high", "llm_model": "model-a"}}',
+    )
 
 
 def test_restart_statements_leave_the_overlay_untouched() -> None:
     overlay: dict[str, object] = {"llm_model": "model-a"}
-    restart_statements(41, overlay)
+    restart_statements(41, "restarting", overlay)
     assert overlay == {"llm_model": "model-a"}
 
 

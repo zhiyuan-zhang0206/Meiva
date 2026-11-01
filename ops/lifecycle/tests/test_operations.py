@@ -117,7 +117,7 @@ class TestRestartAgentRequestConfigOverlay:
     def test_accepts_legacy_empty_overlay_forms(
         self, config_overlay: dict[str, object] | None
     ) -> None:
-        body = RestartAgentRequest(config_overlay=config_overlay)
+        body = RestartAgentRequest(message="restarting", config_overlay=config_overlay)
         assert body.config_overlay == config_overlay
 
     def test_normalizes_and_validates_message(self) -> None:
@@ -245,8 +245,9 @@ async def test_restart_agent_op_terminated_short_circuits(
             database,
             event_bus,
             agent_id,
-            RestartAgentRequest(source="user"),
+            RestartAgentRequest(source="user", message="restart terminated"),
             pool,
+            host=lifecycle.local_agent_host(meiva_home(), health_port=8114),
             catalog=build_model_catalog(home=meiva_home()),
             default_model=settings.lm.llm_model,
             home=meiva_home(),
@@ -274,7 +275,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             database,
             event_bus,
             f"/api/agents/{lifecycle_agent_id}/restart",
-            {"config_overlay": {"definitely_not_a_config_field": "x"}},
+            {"message": "restarting", "config_overlay": {"definitely_not_a_config_field": "x"}},
             db_pool,
             catalog=model_catalog,
             agent_host_port=8114,

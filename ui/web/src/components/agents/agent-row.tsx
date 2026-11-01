@@ -91,7 +91,7 @@ export interface AgentRowProps {
    *  loop / hung call that the graceful terminate can't reach. Right-click
    *  menu only (guarded by a confirm), never a one-click button. */
   onForceKill: () => void;
-  onRestart: () => void;
+  onRestart: (message: string) => void;
   /** Resurrect a terminated agent. The plain button / quick menu item is a
    *  pure lifecycle event — no prompt; the agent just wakes. An optional
    *  prompt (the "with prompt..." menu item) is delivered as the agent wakes. */
@@ -167,6 +167,7 @@ export function AgentRow({
   // the other action mid-fade.
   const [forkOpen, setForkOpen] = useState(false);
   const [resurrectOpen, setResurrectOpen] = useState(false);
+  const [restartOpen, setRestartOpen] = useState(false);
   // Re-render every minute so the relative-time string refreshes
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -250,18 +251,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
   };
 
   const confirmRestart = () => {
-    const confirmSetting = userSettings["behavior.confirm_restart"] !== false;
-    if (!confirmSetting) {
-      onRestart();
-      return;
-    }
-    if (
-      askConfirm(
-        t("restartConfirm", { id: agent.agent_id }),
-      )
-    ) {
-      onRestart();
-    }
+    setRestartOpen(true);
   };
 
   return (
@@ -407,7 +397,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           </>
         ) : (
           <>
-            {agent.harness === "meiva" && (
+            {(agent.harness === "meiva" || agent.status === "idling") && (
               <ContextMenuItem
                 onSelect={confirmRestart}
                 disabled={pending !== undefined}
@@ -470,6 +460,21 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           placeholder={t("resurrectPromptPlaceholder")}
           submitLabel={t("resurrect")}
           onSubmit={onResurrect}
+        />
+      ) : null}
+      {restartOpen ? (
+        <LazyPromptDialog
+          open
+          onOpenChange={setRestartOpen}
+          title={t("restartAgent")}
+          description={t("restartDesc")}
+          placeholder={t("restartPromptPlaceholder")}
+          submitLabel={t("restart")}
+          onSubmit={(message: string) => {
+            if (message.trim()) {
+              onRestart(message.trim());
+            }
+          }}
         />
       ) : null}
     </ContextMenu>

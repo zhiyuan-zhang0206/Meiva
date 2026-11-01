@@ -40,20 +40,20 @@ harness today; the MCP tool endpoint and the task-assignment router build their
 bodies without one and therefore always birth on `meiva`, which is what their
 callers run.
 
-## Immutable, enforced three times
+## Birth settlement and restart switching
 
-Harness is a property of the agent, not of a run, so nothing may change it:
+Harness is a property of the agent initialized at birth and switchable on restart:
 
 - The SDK and the request schema reject an unknown name at the boundary
   (`meiva.agents.spawn` raises before any request; `SpawnAgentRequest.harness` is
   a typed enum, so HTTP answers 422). No path falls back to the default.
-- The birth transaction settles the value once
+- The birth transaction settles the initial value
   (`base/agents/birth/transaction.py` calls `resolve_birth_harness` before it
   writes the row).
-- A `BEFORE UPDATE OF harness` trigger (`agents_meta_harness_immutable`) raises
-  on any UPDATE that would change it. Restart, resurrect, rollout and manual
-  repair therefore cannot move an agent onto another runtime; correcting a wrong
-  value means a new agent.
+- On restart, an agent in `idling` or `terminated` status may switch harness via
+  `POST /api/agents/{id}/restart` with `config_overlay={"harness": "..."}` and a
+  mandatory `message`. The prior immutable update trigger was retired to enable
+  controlled operator and agent transitions.
 
 ## The fork rule
 

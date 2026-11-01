@@ -150,7 +150,7 @@ _HANDLERS: tuple[tuple[list[str], types.ModuleType, str], ...] = (
     (["plugins", "verify"], _plugins, "_h_plugins_verify"),
     (["agents", "ls"], _agents, "_h_agents_ls"),
     (["agents", "cancel", "1"], _agents, "_h_agents_cancel"),
-    (["agents", "restart", "1", "--no-message"], _agents, "_h_agents_restart"),
+    (["agents", "restart", "1", "-m", "restarting"], _agents, "_h_agents_restart"),
     (["agents", "terminate", "1", "--no-message"], _agents, "_h_agents_terminate"),
     (["agents", "kill", "1", "--no-message"], _agents, "h_agents_kill"),
     (["agents", "resurrect", "1", "--no-message"], _agents, "_h_agents_resurrect"),
@@ -206,18 +206,23 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
 ) -> None:
     """The restart parser keeps the JSON string intact for its HTTP command."""
     args = _main.parse_command_args(
-        ["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}', "--no-message"]
+        ["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}', "-m", "restarting"]
     )
     assert args.agent_id == 8
     assert args.config == '{"llm_model":"gpt-5.6-sol"}'
     assert args.source is None
+    assert args.message == "restarting"
     with serving({("POST", "/api/agents/8/restart"): Reply(body={"status": "restarted"})}) as gw:
         command_runtime.config.set_field("gateway_url", gw.url)
         command_runtime.config.set_field("cluster_secret", "test-secret")
         args.runtime = command_runtime
         assert args.func(args) == 0
     assert [(req.method, req.target, req.body) for req in gw.requests] == [
-        ("POST", "/api/agents/8/restart", {"config_overlay": {"llm_model": "gpt-5.6-sol"}})
+        (
+            "POST",
+            "/api/agents/8/restart",
+            {"config_overlay": {"llm_model": "gpt-5.6-sol"}, "message": "restarting"},
+        )
     ]
 
 

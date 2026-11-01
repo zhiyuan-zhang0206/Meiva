@@ -693,7 +693,7 @@ describe("useAgents.terminate", () => {
 });
 
 describe("useAgents.restart", () => {
-  it("success → calls api.restartAgent(id)", async () => {
+  it("success → calls api.restartAgent(id, { message })", async () => {
     vi.mocked(api.restartAgent).mockResolvedValue({ status: "enqueued" });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => {
@@ -701,10 +701,10 @@ describe("useAgents.restart", () => {
     });
 
     await act(async () => {
-      await result.current.restart(1);
+      await result.current.restart(1, "restarting");
     });
 
-    expect(api.restartAgent).toHaveBeenCalledWith(1);
+    expect(api.restartAgent).toHaveBeenCalledWith(1, { message: "restarting", config_overlay: undefined });
   });
 
   it("failure → showError + does not throw", async () => {
@@ -716,7 +716,7 @@ describe("useAgents.restart", () => {
     });
 
     await act(async () => {
-      await result.current.restart(1);
+      await result.current.restart(1, "restarting");
     });
 
     expect(showError).toHaveBeenCalledWith(expect.stringContaining("Restart failed"));
@@ -735,7 +735,7 @@ describe("useAgents.restart", () => {
 
     let rp: Promise<void>;
     act(() => {
-      rp = result.current.restart(2);
+      rp = result.current.restart(2, "restarting");
     });
 
     await waitFor(() => {

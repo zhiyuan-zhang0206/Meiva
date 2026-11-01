@@ -78,8 +78,11 @@ export function createControlApi(http: Http) {
       f(`/api/agents/${agentId}/impersonation/force-expire`, postJson({ session_id: sessionId }))
         .then(ok<{ session_id: number; status: "expired" | "not_open" }>),
 
-    restartAgent: (agentId: number): Promise<RestartAgentResponse> => {
-      return f(`/api/agents/${agentId}/restart`, postInit).then(ok<RestartAgentResponse>);
+    restartAgent: (
+      agentId: number,
+      body: { message: string; config_overlay?: Record<string, unknown> },
+    ): Promise<RestartAgentResponse> => {
+      return f(`/api/agents/${agentId}/restart`, postJson(body)).then(ok<RestartAgentResponse>);
     },
 
     resurrectAgent: (

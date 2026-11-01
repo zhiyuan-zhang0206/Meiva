@@ -126,7 +126,7 @@ def test_model_requests_report_unavailable(
         ("/api/memory/search", {"query": "recover the provider", "purpose": "search"}),
         (
             f"/api/agents/{agent_id}/restart",
-            {"config_overlay": {"llm_model": "deepseek-flash"}},
+            {"message": "recover the provider", "config_overlay": {"llm_model": "deepseek-flash"}},
         ),
     ):
         response = client.post(path, json=body)

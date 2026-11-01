@@ -42,6 +42,7 @@ file split by axis under Task #1006. cc 70 → ~8-10 per module.
 
 from __future__ import annotations
 
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -56,6 +57,15 @@ from agent.messages import has_conversation
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.agents.history.harness_messages import (
+    aappend_harness_timeline_items,
+    aload_harness_message_count,
+)
+from base.agents.history.timeline import build_timeline_items
+from base.agents.messages.kwargs import read_meiva_kwargs
+from base.api_contracts.agent_contract import Harness
+from base.db.transaction import async_write_transaction
+from base.events.live.projection import TimelineSnapshot
 
 from ._decide import decide
 from ._dispatch import BatchState, dispatch_batch, resolve_non_human_wake
@@ -67,9 +77,10 @@ from ._dispatch import by_who as by_who
 from ._dispatch import handle_heartbeat as handle_heartbeat
 from ._present import publish_end_timeline_snapshot, publish_inbound_committed
 from ._routing import ClaimGoto, resolve_routing, route_target
+from .harness_turn import render_messages, turn_key
 
 
-def claim_will_idle(state: _state.AgentState) -> bool:
+def claim_will_idle(state: _state.AgentState, *, harness: Harness = Harness.MEIVA) -> bool:
     """The claim's single idle predicate — impl branch and wrapper snapshot share it.
 
     Idle when the turn already ended (`halted`), when the window carries no
@@ -80,6 +91,8 @@ def claim_will_idle(state: _state.AgentState) -> bool:
     full-window snapshot calls this same function, so the two decisions
     cannot drift.
     """
+    if harness is not Harness.MEIVA:
+        return not bool(state.harness_pending_input)
     return (
         state.halted
         or (not has_conversation(state.messages) and not resume_note_pending(state))
@@ -120,7 +133,7 @@ async def claim_node_impl(
     if not batch:
         # Every permanent rejection parks without fresh input. A healthy new
         # chat can try again after the cause is corrected.
-        if claim_will_idle(state):
+        if claim_will_idle(state, harness=ctx.harness):
             drain = build_attach_drain(state, ctx)
             if drain is not None:
                 return Command[ClaimGoto](update=drain, goto=CLAIM)
@@ -151,6 +164,45 @@ async def claim_node_impl(
     return await settle_claimed_batch(ctx, state, agent_id, batch)
 
 
+async def _settle_external_harness_batch(
+    ctx: MeivaContext,
+    agent_id: int,
+    st: BatchState,
+    *,
+    enters_harness_turn: bool,
+    update: dict[str, object],
+) -> None:
+    update.pop("messages", None)
+    if st.new_msgs and ctx.ops_pool is not None:
+        items, _ = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())
+        async with async_write_transaction(ctx.ops_pool) as pool_conn:
+            persisted = await aappend_harness_timeline_items(
+                pool_conn, agent_id, ctx.harness.value, items
+            )
+            total_count = await aload_harness_message_count(pool_conn, agent_id)
+        if ctx.event_publisher is not None:
+            snap = TimelineSnapshot(
+                agent_id=agent_id,
+                items=[it.model_dump() for it in persisted],
+                msg_count=total_count,
+            )
+            ctx.event_publisher.emit(snap.model_dump_json())
+    if enters_harness_turn:
+        pending = [m for m in st.new_msgs if not isinstance(m, (AIMessage, ToolMessage))]
+        text = render_messages(pending)
+        key = turn_key(pending)
+        inbound_ids = [
+            id
+            for m in st.new_msgs
+            if isinstance(id := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
+        ]
+        update["harness_pending_input"] = {
+            "prompt": text,
+            "key": key,
+            "inbound_ids": inbound_ids,
+        }
+
+
 # meiva:note
 # Everything the claim does once it holds a batch: resolve the batch's winner, dispatch every
 # item through its handler, tell the frontend which chat inbounds were committed, decide the one
@@ -168,7 +220,7 @@ async def settle_claimed_batch(
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)
     await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
     outcome = await decide(ctx, state, agent_id, st, routing)
-    if outcome.publish_end_snapshot:
+    if outcome.publish_end_snapshot and ctx.harness is Harness.MEIVA:
         publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     # meiva:note
     # A dispatched batch means this invocation is mid-turn: stamp turn_active so a later claim
@@ -188,6 +240,16 @@ async def settle_claimed_batch(
         # meiva:note
         # The claim that takes the restart has read the mark; it describes one interrupt.
         update["interrupted_by_restart"] = False
+
+    if ctx.harness is not Harness.MEIVA:
+        await _settle_external_harness_batch(
+            ctx,
+            agent_id,
+            st,
+            enters_harness_turn=outcome.command.goto in (BEFORE_LLM, "harness_turn"),  # pyright: ignore[reportUnknownMemberType]
+            update=update,
+        )
+
     return Command[ClaimGoto](update=update, goto=route_target(ctx, outcome.command.goto))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType, reportCallIssue]
 
 
@@ -216,7 +278,7 @@ async def claim_node(
     # If a batch wakes the
     # claim right after, the snapshot is still a legal view of the committed
     # state — the next node's incremental snapshot covers the new messages.
-    will_idle = claim_will_idle(state)
+    will_idle = claim_will_idle(state, harness=runtime.context.harness)
     async with node_lifecycle(
         CLAIM,
         messages=state.messages,
@@ -227,5 +289,6 @@ async def claim_node(
         full_window=will_idle,
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
+        publish_timeline=runtime.context.harness is Harness.MEIVA,
     ):
         return await claim_node_impl(state, runtime, config)

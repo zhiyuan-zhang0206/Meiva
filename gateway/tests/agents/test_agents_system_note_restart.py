@@ -271,7 +271,8 @@ class TestRestart:
             assert spawned.status_code == 201, spawned.text
             agent_id = spawned.json()["id"]
             response = client.post(
-                f"/api/agents/{agent_id}/restart", json={"config_overlay": overlay}
+                f"/api/agents/{agent_id}/restart",
+                json={"message": "restarting", "config_overlay": overlay},
             )
         assert response.status_code == 400, response.text
         assert "unsupported reasoning effort" in response.json()["detail"]
@@ -288,10 +289,10 @@ class TestRestart:
     ) -> None:
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            resp = client.post(f"/api/agents/{agent_id}/restart")
+            resp = client.post(f"/api/agents/{agent_id}/restart", json={"message": "restarting"})
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued"}
-        assert inbound_rows(db_conn, agent_id) == [("", "restart", "user")]
+        assert inbound_rows(db_conn, agent_id) == [("restarting", "restart", "user")]
 
     def test_restart_persists_message_and_rejects_blank_input(
         self, db_conn: psycopg.Connection
@@ -323,7 +324,7 @@ class TestRestart:
             db_conn.commit()
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": {"llm_model": "gpt-5.6-sol"}},
+                json={"message": "restarting", "config_overlay": {"llm_model": "gpt-5.6-sol"}},
             )
 
         assert resp.status_code == 200
@@ -346,7 +347,7 @@ class TestRestart:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": {"llm_model": model}},
+                json={"message": "restarting", "config_overlay": {"llm_model": model}},
             )
         assert resp.status_code == 200, resp.text
         with db_conn.cursor() as cur:
@@ -372,7 +373,7 @@ class TestRestart:
             db_conn.commit()
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": config_overlay},
+                json={"message": "restarting", "config_overlay": config_overlay},
             )
 
         assert resp.status_code == 200
@@ -392,7 +393,10 @@ class TestRestart:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": {"definitely_not_a_config_field": "x"}},
+                json={
+                    "message": "restarting",
+                    "config_overlay": {"definitely_not_a_config_field": "x"},
+                },
             )
 
         assert resp.status_code == 422
@@ -406,12 +410,153 @@ class TestRestart:
                     "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
                 )
             db_conn.commit()
-            resp = client.post(f"/api/agents/{agent_id}/restart")
+            resp = client.post(f"/api/agents/{agent_id}/restart", json={"message": "restarting"})
         assert resp.status_code == 200
         assert resp.json() == {"status": "already_terminated"}
         assert inbound_rows(db_conn, agent_id) == []
 
     def test_restart_nonexistent_404(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            resp = client.post("/api/agents/9999/restart")
+            resp = client.post("/api/agents/9999/restart", json={"message": "restarting"})
         assert resp.status_code == 404
+
+    def test_harness_switch_meiva_to_codex(self, db_conn: psycopg.Connection) -> None:
+        from base.agents.history.harness_messages import append_harness_timeline_items
+        from base.agents.history.timeline_item import TimelineItem
+
+        with gateway_test_client() as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "switching to codex",
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == {"status": "enqueued"}
+
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT harness, birth_config, config_overlay FROM agents_meta WHERE id = %s",
+                    (agent_id,),
+                )
+                row = cur.fetchone()
+                assert row is not None
+                assert row[0] == "codex"
+                assert row[1].get("harness_model_selection") == 1
+                assert row[2].get("llm_model") == "gpt-6.1-sol"
+                assert "harness" not in row[2]
+
+            item = TimelineItem(
+                item_id="1.0",
+                kind="agent_chat",
+                source="codex",
+                payload="hello from codex",
+                created_at="2026-11-01T12:00:00Z",
+            )
+            append_harness_timeline_items(db_conn, agent_id, "codex", [item])
+            db_conn.commit()
+
+            t_resp = client.get(f"/api/agents/{agent_id}/timeline")
+            assert t_resp.status_code == 200
+            items = t_resp.json()["items"]
+            assert any(i.get("payload") == "hello from codex" for i in items)
+
+    def test_harness_switch_codex_to_meiva(self, db_conn: psycopg.Connection) -> None:
+        from base import paths
+        from base.lm.harness.registry import FileSessionRegistry
+
+        with gateway_test_client() as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "switching to codex",
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                },
+            )
+            assert resp.status_code == 200
+
+            sessions_dir = paths.harness_sessions_dir(home=client.app.state.gateway_process.home)
+            registry = FileSessionRegistry(sessions_dir)
+            registry.path(agent_id).parent.mkdir(parents=True, exist_ok=True)
+            registry.path(agent_id).write_text(
+                '{"session_id": "test", "harness": "codex", "agent_id": '
+                + str(agent_id)
+                + ', "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:00Z"}'
+            )
+            assert registry.path(agent_id).exists()
+
+            resp2 = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "switching back to meiva",
+                    "config_overlay": {"harness": "meiva", "llm_model": "deepseek-flash"},
+                },
+            )
+            assert resp2.status_code == 200, resp2.text
+            assert resp2.json() == {"status": "enqueued"}
+            assert not registry.path(agent_id).exists()
+
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT harness, config_overlay FROM agents_meta WHERE id = %s",
+                    (agent_id,),
+                )
+                row2 = cur.fetchone()
+                assert row2 is not None
+                assert row2[0] == "meiva"
+                assert row2[1].get("llm_model") == "deepseek-flash"
+
+    def test_harness_switch_preconditions(self, db_conn: psycopg.Connection) -> None:
+        with gateway_test_client() as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+
+            with db_conn.cursor() as cur:
+                cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
+            db_conn.commit()
+
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "switch while running",
+                    "config_overlay": {"harness": "codex"},
+                },
+            )
+            assert resp.status_code == 409
+            assert "Cannot restart agent in status 'running'" in resp.json()["detail"]
+
+            with db_conn.cursor() as cur:
+                cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (agent_id,))
+            db_conn.commit()
+
+            resp_blank = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "   ",
+                    "config_overlay": {"harness": "codex"},
+                },
+            )
+            assert resp_blank.status_code == 422
+
+            resp_bad_harness = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "bad harness",
+                    "config_overlay": {"harness": "not-a-valid-harness"},
+                },
+            )
+            assert resp_bad_harness.status_code == 422
+
+            resp_bad_model = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "bad model",
+                    "config_overlay": {"harness": "kimi_code", "llm_model": "gpt-6.1-sol"},
+                },
+            )
+            assert resp_bad_model.status_code == 400
+            assert "not supported by harness 'kimi_code'" in resp_bad_model.json()["detail"]

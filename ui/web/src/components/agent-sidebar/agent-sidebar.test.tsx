@@ -280,12 +280,15 @@ describe("handleSelect and lifecycle forwarding", () => {
     expect(handlers.onTerminate).toHaveBeenCalledWith(4);
   });
 
-  it("row menu Restart → onRestart, and Fork → onFork with no prompt", async () => {
+  it("row menu Restart prompts for a message → onRestart, and Fork → onFork with no prompt", async () => {
     state.agents = [makeAgent({ agent_id: 4 })];
     wrap(<AgentSidebar {...handlers} />);
     openRowMenu(4);
     fireEvent.click(await screen.findByText("Restart"));
-    expect(handlers.onRestart).toHaveBeenCalledWith(4);
+    const promptInput = await screen.findByPlaceholderText("Message to deliver on restart…");
+    fireEvent.change(promptInput, { target: { value: "resume handoff" } });
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(handlers.onRestart).toHaveBeenCalledWith(4, "resume handoff");
     openRowMenu(4);
     fireEvent.click(await screen.findByText("Fork"));
     expect(handlers.onFork).toHaveBeenCalledWith(4, undefined);

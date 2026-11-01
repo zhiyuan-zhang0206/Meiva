@@ -25,7 +25,7 @@ export interface AgentActions {
   fork: (sourceId: number, prompt?: string) => Promise<number | null>;
   terminate: (id: number, force?: boolean) => Promise<void>;
   forceExpire: (id: number, sessionId: number) => Promise<void>;
-  restart: (id: number) => Promise<void>;
+  restart: (id: number, message: string, config_overlay?: Record<string, unknown>) => Promise<void>;
   resurrect: (id: number, prompt?: string) => Promise<void>;
   compact: (id: number) => Promise<void>;
 }
@@ -172,7 +172,15 @@ export function useAgentActions(
   });
 
   const restartMutation = useMutation({
-    mutationFn: (id: number) => client.restartAgent(id),
+    mutationFn: ({
+      id,
+      message,
+      config_overlay,
+    }: {
+      id: number;
+      message: string;
+      config_overlay?: Record<string, unknown>;
+    }) => client.restartAgent(id, { message, config_overlay }),
     onSuccess: () => track("restart"),
     onError: (e: unknown) => showError(`Restart failed: ${errMsg(e)}`),
   });
@@ -198,7 +206,7 @@ export function useAgentActions(
       out[terminateMutation.variables.id] = "terminating";
     }
     if (restartMutation.isPending) {
-      out[restartMutation.variables] = "restarting";
+      out[restartMutation.variables.id] = "restarting";
     }
     if (resurrectMutation.isPending) {
       out[resurrectMutation.variables.id] = "resurrecting";
@@ -376,9 +384,13 @@ export function useAgentActions(
   );
 
   const restart = useCallback(
-    async (id: number) => {
+    async (
+      id: number,
+      message: string,
+      config_overlay?: Record<string, unknown>,
+    ) => {
       try {
-        await restartMutation.mutateAsync(id);
+        await restartMutation.mutateAsync({ id, message, config_overlay });
       } catch {
         // error already handled in onError callback
       }

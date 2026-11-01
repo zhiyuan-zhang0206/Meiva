@@ -345,9 +345,9 @@ class TestLifecycle:
         bound_wire.stub.reply("POST", "/api/agents/42/restart", {"status": "idling"})
         bound_wire.stub.reply("POST", "/api/agents/43/restart", {"status": "enqueued"})
 
-        status = restart(42, source="agent:1")
+        status = restart(42, source="agent:1", message="restarting agent")
         assert status == "idling"
-        assert bound_wire.sent[0].body == {"source": "agent:1"}
+        assert bound_wire.sent[0].body == {"source": "agent:1", "message": "restarting agent"}
 
         process_context.bind_context(replace(bound_wire.context, identity=AgentIdentity(1, True)))
         assert agents.restart(43, message="Zhiyuan reloading skill") == "enqueued"
