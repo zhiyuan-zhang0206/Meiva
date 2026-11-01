@@ -74,6 +74,16 @@ def test_a_hand_written_receipt_is_left_alone() -> None:
 
 
 # meiva:note
+# A body that describes the block in prose is not a body that carries one: the markers count only on
+# a line of their own, so a mention in backticks is left where the author wrote it.
+def test_a_prose_mention_of_the_marker_is_not_a_block() -> None:
+    body = "Writes into a block marked `<!-- receipt-attach:begin -->` / `<!-- receipt-attach:end -->`.\n"
+
+    assert outside_receipts(body) == []
+    assert attached(body, "diff-checks/v1 @c", "note").startswith(body.rstrip())
+
+
+# meiva:note
 # The red-as-green failure: a line the pinned checker refuses produces no body at all, so the caller
 # has nothing to write and the pull request keeps the body it had.
 def test_a_refused_receipt_never_produces_a_body(tmp_path: Path) -> None:

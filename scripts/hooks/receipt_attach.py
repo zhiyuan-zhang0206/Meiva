@@ -25,7 +25,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 RECEIPT_PREFIX = "diff-checks/v1 "
 MARK_BEGIN = "<!-- receipt-attach:begin -->"
 MARK_END = "<!-- receipt-attach:end -->"
-_OWNED = re.compile(re.escape(MARK_BEGIN) + r".*?" + re.escape(MARK_END) + r"\n?", re.DOTALL)
+# meiva:note
+# The markers count only on a line of their own: a body may describe this block in prose, and a
+# marker inside backticks must not be mistaken for one this tool owns.
+_OWNED = re.compile(
+    r"^" + re.escape(MARK_BEGIN) + r"[ \t]*\n.*?^" + re.escape(MARK_END) + r"[ \t]*\n?",
+    re.DOTALL | re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
