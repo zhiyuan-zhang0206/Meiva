@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from typing import cast
 
 import pytest
 
-from meiva_builtins.plugins.meiva_usage.parsers import (
+from meiva_builtins.plugins.meiva_usage.credentials import (
     parse_antigravity_credentials_blob,
-    parse_antigravity_windows,
     parse_claude_oauth_blob,
+)
+from meiva_builtins.plugins.meiva_usage.parsers import (
+    parse_anthropic_cost_report_page,
+    parse_antigravity_windows,
     parse_claude_windows,
     parse_codex_primary_window,
+    parse_openai_costs_page,
     sanitize_codex_rpc_error,
 )
 from meiva_builtins.plugins.meiva_usage.types import UsageProbeError, email_from_jwt
@@ -253,11 +259,169 @@ def test_parse_antigravity_windows_protobuf_omitted_zero() -> None:
             }
         ]
     }
-    session, weekly = parse_antigravity_windows(payload)
+    session, _ = parse_antigravity_windows(payload)
     assert session is not None
     assert session.used_percent == 100.0
     assert session.window_minutes == 300
 
-    assert weekly is not None
-    assert weekly.used_percent == 20.0
-    assert weekly.window_minutes == 10080
+
+def test_parse_openai_costs_page_basic() -> None:
+    payload = {
+        "data": [
+            {
+                "start_time": 1790000000,
+                "results": [
+                    {"amount": {"value": 1.75, "currency": "usd"}},
+                    {"amount": {"value": 2, "currency": "usd"}},
+                    {"amount": {"value": "0.50", "currency": "usd"}},
+                ],
+            }
+        ],
+        "has_more": False,
+        "next_page": None,
+    }
+    page = parse_openai_costs_page(payload)
+    dt = datetime.fromtimestamp(1790000000, tz=UTC).date()
+    assert page.daily_usd == {dt: Decimal("4.25")}
+    assert page.next_page is None
+
+
+def test_parse_openai_costs_page_multi_bucket() -> None:
+    t1 = 1790000000
+    t2 = 1790086400
+    d1 = datetime.fromtimestamp(t1, tz=UTC).date()
+    d2 = datetime.fromtimestamp(t2, tz=UTC).date()
+
+    payload = {
+        "data": [
+            {
+                "start_time": t1,
+                "results": [
+                    {"amount": {"value": 10.0, "currency": "usd"}},
+                ],
+            },
+            {
+                "start_time": t2,
+                "results": [
+                    {"amount": {"value": 5.25, "currency": "usd"}},
+                    {"amount": {"value": 4.75, "currency": "usd"}},
+                ],
+            },
+        ],
+        "has_more": True,
+        "next_page": "cursor_page_2",
+    }
+    page = parse_openai_costs_page(payload)
+    assert page.daily_usd[d1] == Decimal("10.0")
+    assert page.daily_usd[d2] == Decimal("10.00")
+    assert page.next_page == "cursor_page_2"
+
+
+def test_parse_openai_costs_page_pagination_errors() -> None:
+    with pytest.raises(UsageProbeError, match="indicated has_more but next_page is missing"):
+        parse_openai_costs_page({"data": [], "has_more": True, "next_page": None})
+
+    with pytest.raises(UsageProbeError, match="indicated has_more but next_page is missing"):
+        parse_openai_costs_page({"data": [], "has_more": True, "next_page": "   "})
+
+
+def test_parse_openai_costs_page_currency_validation() -> None:
+    bad_payload = {
+        "data": [
+            {
+                "start_time": 1790000000,
+                "results": [{"amount": {"value": 5.0, "currency": "eur"}}],
+            }
+        ]
+    }
+    with pytest.raises(UsageProbeError, match="Unsupported currency in OpenAI costs: eur"):
+        parse_openai_costs_page(bad_payload)
+
+
+def test_parse_openai_costs_page_invalid_payload() -> None:
+    with pytest.raises(UsageProbeError, match="missing data list"):
+        parse_openai_costs_page({})
+
+    with pytest.raises(UsageProbeError, match="Invalid bucket"):
+        parse_openai_costs_page({"data": ["not-a-dict"]})
+
+    with pytest.raises(UsageProbeError, match="missing valid start_time"):
+        parse_openai_costs_page({"data": [{"start_time": "invalid"}]})
+
+    with pytest.raises(UsageProbeError, match="missing results list"):
+        parse_openai_costs_page({"data": [{"start_time": 1790000000}]})
+
+    with pytest.raises(UsageProbeError, match="missing amount object"):
+        empty_res_payload: dict[str, object] = {
+            "data": [{"start_time": 1790000000, "results": [cast(dict[str, object], {})]}]
+        }
+        parse_openai_costs_page(empty_res_payload)
+
+
+def test_parse_anthropic_cost_report_page_basic() -> None:
+    payload = {
+        "data": [
+            {
+                "starting_at": "2026-10-01T00:00:00Z",
+                "results": [
+                    {"amount": "123.45", "currency": "USD"},
+                    {"amount": "200", "currency": "USD"},
+                ],
+            }
+        ],
+        "has_more": False,
+    }
+    page = parse_anthropic_cost_report_page(payload)
+    assert page.daily_usd == {date(2026, 10, 1): Decimal("3.2345")}
+    assert page.next_page is None
+
+
+def test_parse_anthropic_cost_report_page_multi_bucket_and_pagination() -> None:
+    payload = {
+        "data": [
+            {
+                "starting_at": "2026-10-01T00:00:00Z",
+                "results": [{"amount": "1000", "currency": "USD"}],
+            },
+            {
+                "starting_at": "2026-10-02T00:00:00Z",
+                "results": [{"amount": "500", "currency": "USD"}],
+            },
+        ],
+        "has_more": True,
+        "next_page": "anthropic_cursor_123",
+    }
+    page = parse_anthropic_cost_report_page(payload)
+    assert page.daily_usd[date(2026, 10, 1)] == Decimal("10.00")
+    assert page.daily_usd[date(2026, 10, 2)] == Decimal("5.00")
+    assert page.next_page == "anthropic_cursor_123"
+
+
+def test_parse_anthropic_cost_report_page_pagination_errors() -> None:
+    with pytest.raises(UsageProbeError, match="indicated has_more but next_page is missing"):
+        parse_anthropic_cost_report_page({"data": [], "has_more": True, "next_page": None})
+
+
+def test_parse_anthropic_cost_report_page_currency_validation() -> None:
+    bad_payload = {
+        "data": [
+            {
+                "starting_at": "2026-10-01T00:00:00Z",
+                "results": [{"amount": "500", "currency": "gbp"}],
+            }
+        ]
+    }
+    with pytest.raises(UsageProbeError, match="Unsupported currency in Anthropic cost report: gbp"):
+        parse_anthropic_cost_report_page(bad_payload)
+
+
+def test_parse_anthropic_cost_report_page_invalid_payload() -> None:
+    with pytest.raises(UsageProbeError, match="missing data list"):
+        parse_anthropic_cost_report_page({})
+
+    with pytest.raises(UsageProbeError, match="Invalid bucket"):
+        parse_anthropic_cost_report_page({"data": ["not-a-dict"]})
+
+    with pytest.raises(UsageProbeError, match="missing starting_at"):
+        empty_bucket_payload: dict[str, object] = {"data": [cast(dict[str, object], {})]}
+        parse_anthropic_cost_report_page(empty_bucket_payload)

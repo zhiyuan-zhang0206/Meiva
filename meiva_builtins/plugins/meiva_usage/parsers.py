@@ -4,19 +4,27 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import TypeGuard
 
 from meiva_builtins.plugins.meiva_usage.types import (
-    AntigravityCredentials,
-    ClaudeOAuthCredentials,
+    CostBucketsPage,
     RateWindow,
     UsageProbeError,
-    email_from_jwt,
+    parse_timestamp,
     parse_timestamp_opt,
+)
+
+__all__ = (
+    "parse_anthropic_cost_report_page",
+    "parse_antigravity_windows",
+    "parse_claude_windows",
+    "parse_codex_primary_window",
+    "parse_openai_costs_page",
+    "sanitize_codex_rpc_error",
 )
 
 
@@ -26,35 +34,6 @@ def _is_mapping(val: object) -> TypeGuard[Mapping[str, object]]:
 
 def _is_list(val: object) -> TypeGuard[list[object]]:
     return isinstance(val, list)
-
-
-def parse_claude_oauth_blob(data: Mapping[str, object] | str) -> ClaudeOAuthCredentials:
-    parsed: Mapping[str, object]
-    if isinstance(data, str):
-        try:
-            raw: object = json.loads(data)
-        except Exception as exc:
-            raise UsageProbeError("Invalid Claude credentials JSON") from exc
-        if not _is_mapping(raw):
-            raise UsageProbeError("Invalid Claude credentials format")
-        parsed = raw
-    elif _is_mapping(data):
-        parsed = data
-    else:
-        raise UsageProbeError("Invalid Claude credentials format")
-
-    oauth_raw = parsed.get("claudeAiOauth")
-    oauth_obj: Mapping[str, object] = oauth_raw if _is_mapping(oauth_raw) else parsed
-
-    token = oauth_obj.get("accessToken")
-    if not isinstance(token, str) or not token.strip():
-        raise UsageProbeError("Claude credentials missing claudeAiOauth.accessToken")
-
-    expires_raw = oauth_obj.get("expiresAt")
-    parsed_dt = parse_timestamp_opt(expires_raw)
-    dt = parsed_dt if parsed_dt is not None else datetime.fromtimestamp(0, tz=UTC)
-
-    return ClaudeOAuthCredentials(access_token=token.strip(), expires_at=dt)
 
 
 def _parse_claude_limit_item(
@@ -194,72 +173,6 @@ def sanitize_codex_rpc_error(error_payload: object) -> str:
     return clean
 
 
-def _load_credentials_mapping(data: Mapping[str, object] | str, name: str) -> Mapping[str, object]:
-    if isinstance(data, str):
-        try:
-            raw: object = json.loads(data)
-        except Exception as exc:
-            raise UsageProbeError(f"Invalid {name} credentials JSON") from exc
-        if not _is_mapping(raw):
-            raise UsageProbeError(f"Invalid {name} credentials format")
-        return raw
-    if _is_mapping(data):
-        return data
-    raise UsageProbeError(f"Invalid {name} credentials format")
-
-
-def _extract_antigravity_email(parsed: Mapping[str, object]) -> str | None:
-    email = parsed.get("id_token_email")
-    if isinstance(email, str) and email.strip():
-        return email.strip()
-    id_token = parsed.get("id_token")
-    return email_from_jwt(str(id_token)) if id_token is not None else None
-
-
-def parse_antigravity_credentials_blob(
-    data: Mapping[str, object] | str,
-) -> AntigravityCredentials:
-    parsed = _load_credentials_mapping(data, "Antigravity")
-
-    token_raw = parsed.get("token")
-    token_obj: Mapping[str, object] = token_raw if _is_mapping(token_raw) else parsed
-
-    access_token_raw = token_obj.get("access_token")
-    access_token = access_token_raw.strip() if isinstance(access_token_raw, str) else ""
-
-    refresh_token_raw = token_obj.get("refresh_token")
-    refresh_token = (
-        refresh_token_raw.strip()
-        if isinstance(refresh_token_raw, str) and refresh_token_raw.strip()
-        else None
-    )
-
-    if not access_token and not refresh_token:
-        raise UsageProbeError("Antigravity credentials missing access_token and refresh_token")
-
-    expiry = parse_timestamp_opt(token_obj.get("expiry"))
-    client_id_raw = token_obj.get("client_id")
-    client_id = (
-        client_id_raw.strip() if isinstance(client_id_raw, str) and client_id_raw.strip() else None
-    )
-
-    client_sec_raw = token_obj.get("client_secret")
-    client_secret = (
-        client_sec_raw.strip()
-        if isinstance(client_sec_raw, str) and client_sec_raw.strip()
-        else None
-    )
-
-    return AntigravityCredentials(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expiry=expiry,
-        client_id=client_id,
-        client_secret=client_secret,
-        email=_extract_antigravity_email(parsed),
-    )
-
-
 def _is_gemini_group(group: Mapping[str, object]) -> bool:
     name = str(
         group.get("displayName", "") or group.get("name", "") or group.get("groupId", "")
@@ -372,3 +285,102 @@ def parse_antigravity_windows(
             weekly_win = win
 
     return session_win, weekly_win
+
+
+def _parse_pagination_next_page(payload: Mapping[str, object], provider_name: str) -> str | None:
+    if payload.get("has_more") is True:
+        next_page = payload.get("next_page")
+        if isinstance(next_page, str) and next_page.strip():
+            return next_page.strip()
+        raise UsageProbeError(f"{provider_name} indicated has_more but next_page is missing")
+    return None
+
+
+def _parse_openai_amount(result: object) -> Decimal:
+    if not _is_mapping(result):
+        raise UsageProbeError("Invalid result in OpenAI cost bucket")
+    amount_obj = result.get("amount")
+    if not _is_mapping(amount_obj):
+        raise UsageProbeError("OpenAI cost result missing amount object")
+    val_raw = amount_obj.get("value")
+    if val_raw is None:
+        raise UsageProbeError("OpenAI cost amount missing value")
+    try:
+        amt = Decimal(str(val_raw))
+    except Exception as exc:
+        raise UsageProbeError(f"Invalid OpenAI cost amount value: {val_raw!r}") from exc
+    currency = str(amount_obj.get("currency", "")).strip().lower()
+    if amt > Decimal("0") and currency and currency != "usd":
+        raise UsageProbeError(f"Unsupported currency in OpenAI costs: {currency}")
+    return amt
+
+
+def _parse_openai_bucket(bucket: object, daily_usd: dict[date, Decimal]) -> None:
+    if not _is_mapping(bucket):
+        raise UsageProbeError("Invalid bucket in OpenAI costs data")
+    start_time_raw = bucket.get("start_time")
+    if not isinstance(start_time_raw, (int, float)) or isinstance(start_time_raw, bool):
+        raise UsageProbeError("OpenAI cost bucket missing valid start_time")
+    bucket_date = datetime.fromtimestamp(float(start_time_raw), tz=UTC).date()
+    results = bucket.get("results")
+    if not _is_list(results):
+        raise UsageProbeError("OpenAI cost bucket missing results list")
+    for result in results:
+        daily_usd[bucket_date] = daily_usd.get(bucket_date, Decimal("0")) + _parse_openai_amount(
+            result
+        )
+
+
+def parse_openai_costs_page(payload: Mapping[str, object]) -> CostBucketsPage:
+    data = payload.get("data")
+    if not _is_list(data):
+        raise UsageProbeError("OpenAI costs payload missing data list")
+    daily_usd: dict[date, Decimal] = {}
+    for bucket in data:
+        _parse_openai_bucket(bucket, daily_usd)
+    next_page = _parse_pagination_next_page(payload, "OpenAI costs")
+    return CostBucketsPage(daily_usd=daily_usd, next_page=next_page)
+
+
+def _parse_anthropic_amount(result: object) -> Decimal:
+    if not _is_mapping(result):
+        raise UsageProbeError("Invalid result in Anthropic cost report bucket")
+    amount_raw = result.get("amount")
+    if amount_raw is None:
+        raise UsageProbeError("Anthropic cost result missing amount")
+    try:
+        cents = Decimal(str(amount_raw))
+    except Exception as exc:
+        raise UsageProbeError(f"Invalid Anthropic cost amount value: {amount_raw!r}") from exc
+    currency = str(result.get("currency", "")).strip().lower()
+    dollars = cents / Decimal(100)
+    if dollars > Decimal("0") and currency and currency != "usd":
+        raise UsageProbeError(f"Unsupported currency in Anthropic cost report: {currency}")
+    return dollars
+
+
+def _parse_anthropic_bucket(bucket: object, daily_usd: dict[date, Decimal]) -> None:
+    if not _is_mapping(bucket):
+        raise UsageProbeError("Invalid bucket in Anthropic cost report data")
+    starting_at_raw = bucket.get("starting_at")
+    if not isinstance(starting_at_raw, str) or not starting_at_raw.strip():
+        raise UsageProbeError("Anthropic cost bucket missing starting_at")
+    bucket_date = parse_timestamp(starting_at_raw).date()
+    results = bucket.get("results")
+    if not _is_list(results):
+        raise UsageProbeError("Anthropic cost bucket missing results list")
+    for result in results:
+        daily_usd[bucket_date] = daily_usd.get(bucket_date, Decimal("0")) + _parse_anthropic_amount(
+            result
+        )
+
+
+def parse_anthropic_cost_report_page(payload: Mapping[str, object]) -> CostBucketsPage:
+    data = payload.get("data")
+    if not _is_list(data):
+        raise UsageProbeError("Anthropic cost report missing data list")
+    daily_usd: dict[date, Decimal] = {}
+    for bucket in data:
+        _parse_anthropic_bucket(bucket, daily_usd)
+    next_page = _parse_pagination_next_page(payload, "Anthropic cost report")
+    return CostBucketsPage(daily_usd=daily_usd, next_page=next_page)

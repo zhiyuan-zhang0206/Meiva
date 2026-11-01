@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime, tzinfo
-from typing import TypeGuard
+from datetime import UTC, date, datetime, timedelta, tzinfo
+from decimal import Decimal
+from typing import Literal, TypeGuard
 
 from meiva_builtins.plugins.meiva_usage.types import CardReading, RateWindow, UsageProbeError
 
@@ -132,4 +133,41 @@ def format_deepseek_balance_card(payload: Mapping[str, object]) -> CardReading:
     value = f"{currency} {total}"
     detail = _format_other_balances(others)
     status = "warn" if payload.get("is_available") is False else "ok"
+    return CardReading(value=value, detail=detail, status=status)
+
+
+def format_admin_cost_card(
+    daily_usd: Mapping[date, Decimal],
+    *,
+    today_utc: date,
+    known_balance_usd: float | None = None,
+    balance_as_of: date | None = None,
+) -> CardReading:
+    if (known_balance_usd is None) != (balance_as_of is None):
+        raise ValueError("known_balance_usd and balance_as_of must be configured together")
+
+    today_spend = daily_usd.get(today_utc, Decimal("0"))
+
+    if known_balance_usd is None or balance_as_of is None:
+        cutoff = today_utc - timedelta(days=29)
+        spend_30d = sum(
+            (amt for day, amt in daily_usd.items() if cutoff <= day <= today_utc),
+            Decimal("0"),
+        )
+        value = f"${spend_30d:.2f} (30d)"
+        detail = f"today ${today_spend:.2f} · 30d ${spend_30d:.2f}"
+        return CardReading(value=value, detail=detail, status="ok")
+
+    baseline = Decimal(str(known_balance_usd))
+    spent_since = sum(
+        (amt for day, amt in daily_usd.items() if day >= balance_as_of),
+        Decimal("0"),
+    )
+    remaining = baseline - spent_since
+    value = f"${remaining:.2f} left"
+    detail = (
+        f"today ${today_spend:.2f} · spent ${spent_since:.2f} since {balance_as_of.isoformat()}"
+    )
+    warn_threshold = max(Decimal("5"), baseline * Decimal("0.10"))
+    status: Literal["ok", "warn"] = "warn" if remaining <= warn_threshold else "ok"
     return CardReading(value=value, detail=detail, status=status)

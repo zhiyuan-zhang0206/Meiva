@@ -9,6 +9,7 @@ from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig
+from meiva_builtins.plugins.meiva_usage.probes.anthropic_costs import probe_anthropic
 from meiva_builtins.plugins.meiva_usage.probes.antigravity import probe_antigravity
 from meiva_builtins.plugins.meiva_usage.probes.claude import (
     probe_claude,
@@ -22,6 +23,7 @@ from meiva_builtins.plugins.meiva_usage.probes.codex import (
 )
 from meiva_builtins.plugins.meiva_usage.probes.deepseek import probe_deepseek
 from meiva_builtins.plugins.meiva_usage.probes.http_client import urllib_json_fetcher
+from meiva_builtins.plugins.meiva_usage.probes.openai_costs import probe_openai
 from meiva_builtins.plugins.meiva_usage.probes.transport import (
     HttpJsonFetcher,
     HttpJsonRequest,
@@ -36,11 +38,13 @@ __all__ = (
     "HttpStatusError",
     "default_codex_rpc_runner",
     "find_codex_binary",
+    "probe_anthropic",
     "probe_antigravity",
     "probe_claude",
     "probe_codex",
     "probe_collector",
     "probe_deepseek",
+    "probe_openai",
     "read_macos_keychain_claude_credentials",
     "urllib_json_fetcher",
 )
@@ -105,6 +109,28 @@ def probe_collector(
             codex_rpc_runner=codex_rpc_runner,
             display_tz=display_tz,
             timeout_s=timeout_s,
+        )
+
+    if collector.provider == "openai":
+        return probe_openai(
+            collector,
+            user_home=user_home,
+            environ=environ,
+            now=now,
+            platform=platform,
+            http_fetch=fetcher,
+            display_tz=display_tz,
+        )
+
+    if collector.provider == "anthropic":
+        return probe_anthropic(
+            collector,
+            user_home=user_home,
+            environ=environ,
+            now=now,
+            platform=platform,
+            http_fetch=fetcher,
+            display_tz=display_tz,
         )
 
     raise UsageProbeError(f"Unsupported provider: {collector.provider}")

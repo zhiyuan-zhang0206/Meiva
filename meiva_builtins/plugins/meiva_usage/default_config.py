@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -17,7 +18,25 @@ CARD_ID_RE = r"^[a-z0-9][a-z0-9_-]*$"
 _COMPILED_ENV_NAME_RE = re.compile(ENV_NAME_RE)
 _COMPILED_CARD_ID_RE = re.compile(CARD_ID_RE)
 
-ProviderKind = Literal["claude", "codex", "antigravity", "deepseek"]
+ProviderKind = Literal["claude", "codex", "antigravity", "deepseek", "openai", "anthropic"]
+
+_COMPILED_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_balance_as_of(val: str) -> None:
+    if _COMPILED_DATE_RE.match(val) is None:
+        raise ValueError("balance_as_of must match 'YYYY-MM-DD'")
+    try:
+        date.fromisoformat(val)
+    except ValueError as exc:
+        raise ValueError(f"balance_as_of is not a valid date: {exc}") from None
+
+
+def _validate_admin_cost_baseline(collector: CollectorConfig) -> None:
+    if (collector.known_balance_usd is None) != (collector.balance_as_of is None):
+        raise ValueError("known_balance_usd and balance_as_of must be configured together")
+    if collector.balance_as_of is not None:
+        _validate_balance_as_of(collector.balance_as_of)
 
 
 def _validate_env_var_name(name: str | None, field_name: str) -> None:
@@ -50,6 +69,8 @@ def _validate_deepseek_selectors(collector: CollectorConfig) -> None:
             "account_email",
             "oauth_client_id_env",
             "oauth_client_secret_env",
+            "known_balance_usd",
+            "balance_as_of",
         ),
         "DeepSeek",
     )
@@ -58,7 +79,14 @@ def _validate_deepseek_selectors(collector: CollectorConfig) -> None:
 def _validate_claude_selectors(collector: CollectorConfig) -> None:
     _check_disallowed_fields(
         collector,
-        ("key_env", "account_email", "oauth_client_id_env", "oauth_client_secret_env"),
+        (
+            "key_env",
+            "account_email",
+            "oauth_client_id_env",
+            "oauth_client_secret_env",
+            "known_balance_usd",
+            "balance_as_of",
+        ),
         "Claude",
     )
 
@@ -66,13 +94,24 @@ def _validate_claude_selectors(collector: CollectorConfig) -> None:
 def _validate_codex_selectors(collector: CollectorConfig) -> None:
     _check_disallowed_fields(
         collector,
-        ("key_env", "keychain_account", "oauth_client_id_env", "oauth_client_secret_env"),
+        (
+            "key_env",
+            "keychain_account",
+            "oauth_client_id_env",
+            "oauth_client_secret_env",
+            "known_balance_usd",
+            "balance_as_of",
+        ),
         "Codex",
     )
 
 
 def _validate_antigravity_selectors(collector: CollectorConfig) -> None:
-    _check_disallowed_fields(collector, ("key_env", "keychain_account"), "Antigravity")
+    _check_disallowed_fields(
+        collector,
+        ("key_env", "keychain_account", "known_balance_usd", "balance_as_of"),
+        "Antigravity",
+    )
     has_id = collector.oauth_client_id_env is not None
     has_secret = collector.oauth_client_secret_env is not None
     if has_id != has_secret:
@@ -81,11 +120,47 @@ def _validate_antigravity_selectors(collector: CollectorConfig) -> None:
         )
 
 
+def _validate_openai_selectors(collector: CollectorConfig) -> None:
+    if collector.key_env is None:
+        raise ValueError("OpenAI collector requires key_env")
+    _check_disallowed_fields(
+        collector,
+        (
+            "credentials_path",
+            "keychain_account",
+            "account_email",
+            "oauth_client_id_env",
+            "oauth_client_secret_env",
+        ),
+        "OpenAI",
+    )
+    _validate_admin_cost_baseline(collector)
+
+
+def _validate_anthropic_selectors(collector: CollectorConfig) -> None:
+    if collector.key_env is None:
+        raise ValueError("Anthropic collector requires key_env")
+    _check_disallowed_fields(
+        collector,
+        (
+            "credentials_path",
+            "keychain_account",
+            "account_email",
+            "oauth_client_id_env",
+            "oauth_client_secret_env",
+        ),
+        "Anthropic",
+    )
+    _validate_admin_cost_baseline(collector)
+
+
 _PROVIDER_VALIDATORS = {
     "deepseek": _validate_deepseek_selectors,
     "claude": _validate_claude_selectors,
     "codex": _validate_codex_selectors,
     "antigravity": _validate_antigravity_selectors,
+    "openai": _validate_openai_selectors,
+    "anthropic": _validate_anthropic_selectors,
 }
 
 
@@ -136,6 +211,8 @@ class CollectorConfig(BaseModel):
     account_email: str | None = None
     oauth_client_id_env: str | None = None
     oauth_client_secret_env: str | None = None
+    known_balance_usd: float | None = Field(default=None, ge=0.0)
+    balance_as_of: str | None = None
 
     def secret_env_vars(self) -> tuple[str, ...]:
         ordered: list[str] = []

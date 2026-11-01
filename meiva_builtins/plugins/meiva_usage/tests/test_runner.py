@@ -354,3 +354,100 @@ def test_schedules_face_filtering_and_fingerprint() -> None:
     script2 = specs2[0].script
     assert '"interval_minutes":15' in script2
     assert script1 != script2
+
+
+def test_refresh_collector_once_openai(db_conn: psycopg.Connection[Any], tmp_path: Path) -> None:
+    db = FakeDatabase(db_conn)
+    collector = CollectorConfig(
+        id="test-openai",
+        label="OpenAI Spend",
+        provider="openai",
+        machine="gateway",
+        key_env="OPENAI_ADMIN_KEY",
+        known_balance_usd=100.0,
+        balance_as_of="2026-10-15",
+    )
+    environ = {"OPENAI_ADMIN_KEY": "sk-test-admin"}
+    now = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+    today_epoch = int(datetime(2026, 11, 1, 0, 0, tzinfo=UTC).timestamp())
+
+    def mock_fetch(_req: HttpJsonRequest) -> dict[str, object]:
+        return {
+            "data": [
+                {
+                    "start_time": today_epoch,
+                    "results": [{"amount": {"value": 12.50, "currency": "usd"}}],
+                }
+            ],
+            "has_more": False,
+        }
+
+    reading = refresh_collector_once(
+        collector,
+        db=cast(Any, db),
+        user_home=tmp_path,
+        environ=environ,
+        now=now,
+        platform="darwin",
+        http_fetch=mock_fetch,
+    )
+    assert reading.status == "ok"
+    assert reading.value == "$87.50 left"
+    assert "spent $12.50 since 2026-10-15" in reading.detail
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT value, detail, status, updated_at FROM plugin_stats WHERE plugin = %s AND id = %s",
+            ("meiva_usage", "test-openai"),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == "$87.50 left"
+        assert row[2] == "ok"
+
+
+def test_refresh_collector_once_anthropic(db_conn: psycopg.Connection[Any], tmp_path: Path) -> None:
+    db = FakeDatabase(db_conn)
+    collector = CollectorConfig(
+        id="test-anthropic",
+        label="Anthropic Costs",
+        provider="anthropic",
+        machine="gateway",
+        key_env="ANTHROPIC_ADMIN_KEY",
+    )
+    environ = {"ANTHROPIC_ADMIN_KEY": "sk-ant-admin-test"}
+    now = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+
+    def mock_fetch(_req: HttpJsonRequest) -> dict[str, object]:
+        return {
+            "data": [
+                {
+                    "starting_at": "2026-11-01T00:00:00Z",
+                    "results": [{"amount": "3450", "currency": "USD"}],
+                }
+            ],
+            "has_more": False,
+        }
+
+    reading = refresh_collector_once(
+        collector,
+        db=cast(Any, db),
+        user_home=tmp_path,
+        environ=environ,
+        now=now,
+        platform="darwin",
+        http_fetch=mock_fetch,
+    )
+    assert reading.status == "ok"
+    assert reading.value == "$34.50 (30d)"
+    assert "today $34.50 · 30d $34.50" in reading.detail
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT value, detail, status, updated_at FROM plugin_stats WHERE plugin = %s AND id = %s",
+            ("meiva_usage", "test-anthropic"),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == "$34.50 (30d)"
+        assert row[2] == "ok"

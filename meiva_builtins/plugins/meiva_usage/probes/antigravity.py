@@ -9,19 +9,21 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 
+from meiva_builtins.plugins.meiva_usage.credentials import parse_antigravity_credentials_blob
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig
 from meiva_builtins.plugins.meiva_usage.formatters import format_dual_window_card
-from meiva_builtins.plugins.meiva_usage.parsers import (
-    AntigravityCredentials,
-    parse_antigravity_credentials_blob,
-    parse_antigravity_windows,
-)
+from meiva_builtins.plugins.meiva_usage.parsers import parse_antigravity_windows
 from meiva_builtins.plugins.meiva_usage.probes.transport import (
     HttpJsonFetcher,
     HttpJsonRequest,
     HttpStatusError,
 )
-from meiva_builtins.plugins.meiva_usage.types import CardReading, UsageProbeError, resolve_user_path
+from meiva_builtins.plugins.meiva_usage.types import (
+    AntigravityCredentials,
+    CardReading,
+    UsageProbeError,
+    resolve_user_path,
+)
 
 
 def _epoch_utc() -> datetime:

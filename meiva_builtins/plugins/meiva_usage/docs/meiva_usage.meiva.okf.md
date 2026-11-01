@@ -13,7 +13,7 @@ tags:
 ## What is it
 
 `meiva_usage` is a built-in plugin that periodically queries account balances, credit limits,
-and usage metrics from LLM providers (`claude`, `codex`, `antigravity`, `deepseek`) across
+and usage metrics from LLM providers (`claude`, `codex`, `antigravity`, `deepseek`, `openai`, `anthropic`) across
 multiple accounts and target machines, and publishes current readings into `plugin_stats`.
 
 Each collector is declared in the cluster-pinned configuration (`configs/meiva_usage/config.json`)
@@ -27,14 +27,16 @@ via `CollectorConfig`. Through declarative contribution faces, the plugin provis
 ### 1. Multi-account collector configuration (`default_config.py`)
 
 `UsageConfig` carries a tuple of `CollectorConfig` items scoped as `cluster-pinned`:
-- `provider`: One of `claude`, `codex`, `antigravity`, `deepseek`.
+- `provider`: One of `claude`, `codex`, `antigravity`, `deepseek`, `openai`, `anthropic`.
 - `machine`: Target cluster machine where the probe runs (e.g. `gateway`, `company-air`).
 - `interval_minutes`: Polling cadence in minutes.
-- `key_env`: Environment variable name supplying the provider API key (e.g. `DEEPSEEK_API_KEY`).
+- `key_env`: Environment variable name supplying the provider API key (e.g. `DEEPSEEK_API_KEY`, `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`).
 - `credentials_path`: Explicit credentials JSON path (for Claude session tokens or OAuth tokens).
 - `keychain_account`: macOS Keychain account identifier (for reading Claude CLI OAuth credentials).
 - `account_email`: Account identifier (for Antigravity or Codex RPC multi-account selectors).
 - `oauth_client_id_env` / `oauth_client_secret_env`: Process environment variable names for OAuth flows.
+- `known_balance_usd`: Optional prepaid dollar baseline for `openai` and `anthropic` cost collectors.
+- `balance_as_of`: Optional UTC ISO date (`YYYY-MM-DD`) anchoring the prepaid baseline; spend on or after this date is subtracted from `known_balance_usd`.
 
 ### 2. Declarative faces
 
@@ -71,3 +73,13 @@ resident session:
   using the machine's bearer token.
 - The resolved secrets are merged directly into the child session's execution environment (`env`),
   keeping process command-line arguments and database schedule rows clean of credentials.
+
+### 5. Organization admin cost probes (`openai`, `anthropic`)
+
+For providers without a direct balance endpoint, `meiva_usage` polls their official Organization Admin Cost APIs:
+- **OpenAI**: `GET /v1/organization/costs` paginated with daily buckets in direct USD dollars.
+- **Anthropic**: `GET /v1/organizations/cost_report` paginated with daily buckets where amounts are in lowest currency units (cents, divided by 100 for USD).
+
+Card formatting operates in two modes:
+1. **30-day trailing spend (default)**: When `known_balance_usd` is not configured, the card displays 30-day cumulative spend (e.g. `$42.50 (30d)`) and today's spend in the detail line.
+2. **Prepaid baseline subtraction**: When `known_balance_usd` and `balance_as_of` (`YYYY-MM-DD`) are both configured, the probe computes remaining prepaid credit by subtracting spend since `balance_as_of` from `known_balance_usd` (e.g. `$85.20 left`), entering `"warn"` status when remaining balance drops to $\le 10\%$ of baseline or $\le \$5.00$.
