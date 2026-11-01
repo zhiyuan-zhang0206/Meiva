@@ -25,7 +25,7 @@ from base.lm.attach.packing import (
 )
 from base.lm.catalog import ModelCatalog
 
-__all__ = ["pack_attachments"]
+__all__ = ["image_dimensions", "pack_attachments"]
 
 
 def pack_attachments(
@@ -50,7 +50,7 @@ def _observe(request: PackRequest) -> Observation:
         case StatRequest(entry_path=entry_path):
             return _stat(entry_path)
         case DimensionsRequest(path=path):
-            return _dimensions(Path(path))
+            return DimensionsObserved(image_dimensions(Path(path)))
         case ReadRequest(path=path):
             return _read(Path(path))
 
@@ -75,15 +75,16 @@ def _stat(entry_path: str) -> StatObserved:
 
 
 # meiva:note
-# Read only image metadata; bad image bytes become an unreadable answer, which the plan captions as a skip.
-def _dimensions(path: Path) -> DimensionsObserved:
+# Read only image metadata (`(width, height)` in pixels), or None when the file cannot be opened as
+# an image; attach packing and `meiva.understand` both read image dimensions here.
+def image_dimensions(path: Path) -> tuple[int, int] | None:
     from PIL import Image, UnidentifiedImageError
 
     try:
         with Image.open(path) as image:
-            return DimensionsObserved(image.size)
+            return image.size
     except (Image.DecompressionBombError, OSError, UnidentifiedImageError, ValueError):
-        return DimensionsObserved(None)
+        return None
 
 
 def _read(path: Path) -> ReadObserved:

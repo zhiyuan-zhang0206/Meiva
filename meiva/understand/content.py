@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from base.lm.attach.constants import media_type_for_mime
-from base.lm.attach.packing import file_size_error, media_block
+from base.lm.attach.packing import file_size_error, image_dimension_error, media_block
 from base.lm.catalog import ModelCatalog
 from meiva.understand.errors import UnderstandError
 
@@ -20,7 +20,7 @@ __all__ = ["MediaPart", "Part", "TextPart", "content_for", "content_types"]
 
 # meiva:note
 # One file of a `paths` target as read: a text file's UTF-8 content, or a media file's bytes with
-# its MIME type and the path it was named by (for refusals).
+# its MIME type, pixel dimensions (for images) and the path it was named by (for refusals).
 @dataclass(frozen=True)
 class TextPart:
     text: str
@@ -31,6 +31,7 @@ class MediaPart:
     path: str
     mime: str
     data: bytes
+    dimensions: tuple[int, int] | None = None
 
     @property
     def media_type(self) -> str:
@@ -49,20 +50,29 @@ def content_types(parts: Sequence[Part]) -> frozenset[str]:
 # meiva:note
 # The content list `model` receives: the parts in `paths` order, the prompt last. A media part
 # becomes the provider-native block the attach packing builds for `model`, after the same
-# per-file size limits (the shared ceiling and the provider's own limit for the type).
+# per-file size limits (the shared ceiling and the provider's own limit for the type) and
+# `AttachPolicy.image_dimension_tiers` pixel-dimension limits.
 #
 # Raises:
-#     UnderstandError: a media file is over a size limit for `model`.
+#     UnderstandError: a media file is over a size or image-dimension limit for `model`, or its
+#         image dimensions cannot be read.
 def content_for(
     catalog: ModelCatalog, model: str, parts: Sequence[Part], prompt: str
 ) -> list[dict[str, object]]:
     blocks: list[dict[str, object]] = []
+    image_count = 0
     for part in parts:
         if isinstance(part, TextPart):
             blocks.append({"type": "text", "text": part.text})
             continue
         if reason := file_size_error(model, part.media_type, len(part.data), catalog=catalog):
             raise UnderstandError(f"{part.path!r} cannot be sent to {model}: {reason}")
+        if part.media_type == "image":
+            image_count += 1
+            if reason := image_dimension_error(
+                model, image_count, part.dimensions, catalog=catalog
+            ):
+                raise UnderstandError(f"{part.path!r} cannot be sent to {model}: {reason}")
         blocks.append(media_block(model, part.media_type, part.mime, part.data, catalog=catalog))
     blocks.append({"type": "text", "text": prompt})
     return blocks
