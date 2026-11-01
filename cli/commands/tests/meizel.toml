@@ -2,4 +2,5 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 
 [uses]
 "test_service_probe_ports.py" = ["roster_probe_child.py"]
+"test_single_box.py" = ["test_single_box_static.py"]
 "test_unit_capability_commands.py" = ["test_single_box.py"]

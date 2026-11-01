@@ -16,10 +16,11 @@ from __future__ import annotations
 import contextlib
 import getpass
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -29,26 +30,29 @@ from redis.exceptions import RedisError
 
 from base import cluster
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import authority, ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_tools import pg_tool
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
-from base.host.env import port_lease
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
+from base.host.system.tests.fake_commands import fake_host
 from base.native_process.child_env import daemon_process_env
 from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
 from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from cli.commands.data_plane.instance.storage_plan import (
     BirthGeneration,
@@ -56,8 +60,13 @@ from cli.commands.data_plane.instance.storage_plan import (
     InAdminSession,
 )
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
-from cli.commands.data_plane.tests.native_cluster import shutdown_redis
+from cli.commands.data_plane.tests.native_cluster import (
+    cached_pg_template,
+    seed_pg_template,
+    shutdown_redis,
+)
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
+from cli.commands.tests.test_single_box_static import REPO_ROOT, configure_single_box_home
 from cli.database import (
     OperatorDatabaseFactory,
     open_operator_database,
@@ -66,15 +75,11 @@ from cli.database import (
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from cli.startup.tests.birth_facts import birth_facts
-from services.backup.artifact import passphrase
 
 pytestmark = pytest.mark.skipif(
     not (Path(base_pooler.pgbouncer_bin()).exists() or shutil.which(base_pooler.pgbouncer_bin())),
     reason="pgbouncer not installed (brew/apt)",
 )
-
-_REPO = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)
@@ -115,145 +120,47 @@ class Born:
         )
 
 
-def _intent(home: Path, record: cluster.ClusterRecord, values: dict[str, str]) -> None:
-    body = {
-        "version": 1,
-        "home": str(home),
-        "checkout": str(_REPO),
-        "roles": ["agent-runner", "gateway"],
-        "config_digest": None,
-        "phase": "configured",
-        "record": asdict(record),
-        "env": values,
-    }
-    path = home / "start-intent.json"
-    path.write_text(json.dumps(body, sort_keys=True) + "\n")
-    path.chmod(0o600)
-
-
 def _teardown(born: Born) -> None:
     try:
-        pooler.stop_pgbouncer(force=True, home=meiva_home(), timers=SYSTEM_TIMERS)
+        pooler.stop_pgbouncer(force=True, home=born.home, timers=SYSTEM_TIMERS)
     finally:
-        subprocess.run(
-            [
-                str(pg_tool("pg_ctl", home=meiva_home())),
-                "-D",
-                str(born.home / "pg"),
-                "-m",
-                "immediate",
-                "stop",
-            ],
-            check=False,
-            capture_output=True,
-        )
+        if (born.home / "pg" / "postmaster.pid").exists():
+            cmd = [str(pg_tool("pg_ctl", home=born.home)), "-D", str(born.home / "pg")]
+            subprocess.run([*cmd, "-m", "immediate", "stop"], check=False, capture_output=True)
         for child in born.retained_children:
             child.wait(timeout=1)
-        with contextlib.suppress(RedisError):
-            shutdown_redis(
-                born.record.ports["redis"], born.values["MEIVA_REDIS_ADMIN_PASSWORD"], save=False
-            )
+        if (born.home / "redis" / "redis.conf").exists():
+            with contextlib.suppress(RedisError):
+                pw = born.values["MEIVA_REDIS_ADMIN_PASSWORD"]
+                shutdown_redis(born.record.ports["redis"], pw, save=False)
 
 
 def _configure(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    home: Path,
     distinct_free_ports: Callable[[int], list[int]],
     unit_plane: DataPlaneConfig,
+    *,
+    template_seed: Path,
 ) -> Born:
-    """A configured-but-unprovisioned single-box home (minted cluster secret)."""
-    from cli.start_identity import IdentityInput, gateway_values
-
-    home = (tmp_path / "home").resolve()
-    home.mkdir(mode=0o700)
-    point_home(monkeypatch, home)
-    # meiva:note
-    # Allocate the entire roster at once. The lease hands out a number it never repeats
-    # while this session lives, so the slots cannot collide with each other, with another
-    # holder on the host, or with a later fixture that asks for one more port.
-    ports = cluster.new_home_ports()
-    for name, port in zip(
-        cluster.FIXED_PORTS, distinct_free_ports(len(cluster.FIXED_PORTS)), strict=True
-    ):
-        ports[name] = port
-    record = cluster.ClusterRecord(ports=ports, gateway_home=str(home), created_at="test")
-    values = gateway_values(
-        record,
-        IdentityInput(
-            home,
-            _REPO,
-            frozenset({"gateway", "agent-runner"}),
-            {},
-            occupied_ports=frozenset(),
-            birth=birth_facts(),
-        ),
-    )
-    assert values["MEIVA_CLUSTER_SECRET"]
-    assert "MEIVA_DB_ADMIN_PASSWORD" not in values
-    assert "MEIVA_RUNNER_DB_PASSWORD" not in values
-    (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
-    _intent(home, record, values)
-    passphrase.ensure_minted(home)  # as the birth's claim publication pins it
-    # meiva:note
-    # The config the commands read: the unit environment's values with the minted ones.
-    plane = replace(
-        unit_plane,
-        cluster_secret=values["MEIVA_CLUSTER_SECRET"],
-        db_url=values["MEIVA_DB_URL"],
-        redis_url=values["MEIVA_REDIS_URL"],
-        redis_admin_password=values["MEIVA_REDIS_ADMIN_PASSWORD"],
-        events_channel=values["MEIVA_EVENTS_CHANNEL"],
-        pgbouncer_enabled=True,
-    )
-    return Born(
-        home=home,
-        record=record,
-        values=values,
-        plane=plane,
-        process_env=dict(values),
-    )
-
-
-# meiva:note
-# Birth records this session's leased roster, not whatever a kernel probe would hand out.
-#
-# This test used to fake `socket.socket` with a kernel that releases a port for reuse:
-# that is how two closed probes could be handed one number and duplicate a slot. A leased
-# number belongs to the session for its whole life (`base/host/env/tests/test_port_lease.py`
-# proves that across processes), so the roster is distinct by construction — and the birth
-# still holds no socket of its own.
-def test_configured_roster_is_this_sessions_leased_table(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    distinct_free_ports: Callable[[int], list[int]],
-    data_plane_config: DataPlaneConfig,
-) -> None:
-    from cli.start_identity import read_intent
-
-    configured = _configure(monkeypatch, tmp_path, distinct_free_ports, data_plane_config)
-    intent = read_intent(configured.home)
-    assert intent is not None
-    assert set(configured.record.ports) == set(cluster.FIXED_PORTS)
-    assert len(set(configured.record.ports.values())) == len(cluster.FIXED_PORTS)
-    assert set(configured.record.ports.values()) <= set(port_lease.leased_ports())
+    c = configure_single_box_home(home, distinct_free_ports, unit_plane)
+    seed_pg_template(home, template_seed)
+    return Born(c.home, c.record, c.values, c.plane, dict(c.values))
 
 
 def _prepare_schema(
     born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> None:
-    assert (
-        bringup.ensure_gateway_data_plane(
-            born.plane,
-            home=born.home,
-            retained_children=born.retained_children,
-            database_factory=operator_database,
-            machine=command_runtime.machine,
-            system=command_runtime.host.platform.system,
-            timers=command_runtime.timers,
-            environ=command_runtime.config.process_environment(),
-        )
-        == 0
+    rc = bringup.ensure_gateway_data_plane(
+        born.plane,
+        home=born.home,
+        retained_children=born.retained_children,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        system=command_runtime.host.platform.system,
+        timers=command_runtime.timers,
+        environ=command_runtime.config.process_environment(),
     )
+    assert rc == 0
     bringup.prepare_gateway_schema(born.plane, home=born.home)
     cmd_migrations_apply(
         database_factory=operator_database,
@@ -289,6 +196,8 @@ def _birth(
 
 @pytest.fixture
 def configured(
+    pytestconfig: pytest.Config,
+    tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     postgres_access: None,
@@ -297,7 +206,10 @@ def configured(
     data_plane_config: DataPlaneConfig,
 ) -> Iterator[Born]:
     # These commands simulate a process entry and deliver its unit environment.
-    born = _configure(monkeypatch, tmp_path, distinct_free_ports, data_plane_config)
+    home = (tmp_path / "home").resolve()
+    point_home(monkeypatch, home)
+    seed = cached_pg_template(pytestconfig, tmp_path_factory)
+    born = _configure(home, distinct_free_ports, data_plane_config, template_seed=seed)
     try:
         yield born
     finally:
@@ -310,6 +222,72 @@ def born(
 ) -> Born:
     _birth(configured, operator_database=operator_database, command_runtime=command_runtime)
     return configured
+
+
+@pytest.fixture(scope="module")
+def _born_readonly_cluster(
+    pytestconfig: pytest.Config,
+    tmp_path_factory: pytest.TempPathFactory,
+    distinct_free_ports: Callable[[int], list[int]],
+) -> Iterator[Born]:
+    home = (tmp_path_factory.mktemp("single-box-readonly") / "home").resolve()
+    config = snapshot_process_config()
+    seed = cached_pg_template(pytestconfig, tmp_path_factory)
+    cb = _configure(
+        home, distinct_free_ports, data_plane_config_from_boot(config), template_seed=seed
+    )
+    machine = ConfiguredMachineIdentity(config)
+    system = fake_host(uid=os.geteuid()).platform.system
+    db = operator_database_factory(
+        local_host=machine.host, home=home, open_database=open_operator_database
+    )
+    try:
+        assert (
+            bringup.ensure_gateway_data_plane(
+                cb.plane,
+                home=home,
+                retained_children=cb.retained_children,
+                database_factory=db,
+                machine=machine,
+                system=system,
+                timers=ManualTimers(),
+                environ=config.process_environment(),
+            )
+            == 0
+        )
+        bringup.prepare_gateway_schema(cb.plane, home=home)
+        cmd_migrations_apply(database_factory=db, machine=machine, config=cb.plane, home=home)
+        completion.complete_gateway_data_plane(
+            cb.plane,
+            home=home,
+            environment=cb.process_env,
+            database_factory=db,
+            machine=machine,
+            macos=system == "darwin",
+            timers=SYSTEM_TIMERS,
+        )
+        yield cb
+    finally:
+        _teardown(cb)
+
+
+@pytest.fixture
+def _born_readonly_home(monkeypatch: pytest.MonkeyPatch, _born_readonly_cluster: Born) -> Born:
+    point_home(monkeypatch, _born_readonly_cluster.home)
+    return _born_readonly_cluster
+
+
+@pytest.fixture
+def born_readonly(
+    _born_readonly_home: Born,
+    postgres_access: None,
+    redis_access: None,
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
+) -> Born:
+    assert command_runtime.home == _born_readonly_home.home
+    operator_database.adopt_login(_born_readonly_home.dsn("gateway"))
+    return _born_readonly_home
 
 
 # A login without a stored verifier fails authentication before PostgreSQL
@@ -331,8 +309,9 @@ def assert_refused(**kwargs: Any) -> str:
 
 
 def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
-    born: Born, operator_database: OperatorDatabaseFactory
+    born_readonly: Born, operator_database: OperatorDatabaseFactory
 ) -> None:
+    born = born_readonly
     current = ledger.require_ledger(born.home)
     assert current.owner == "meiva"
     assert current.active is not None and current.active.number == 0
@@ -357,7 +336,8 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
     assert json.loads((born.home / "start-intent.json").read_text())["phase"] == "provisioned"
 
 
-def test_birth_refuses_unauthenticated_and_owner_logins(born: Born) -> None:
+def test_birth_refuses_unauthenticated_and_owner_logins(born_readonly: Born) -> None:
+    born = born_readonly
     socket_dir = str(ci.pg_socket_dir(born.home))
     for host in ("127.0.0.1", socket_dir):
         # The owner exists but can never log in, with or without a password.
@@ -392,25 +372,33 @@ def test_birth_refuses_unauthenticated_and_owner_logins(born: Born) -> None:
         ).fetchone() == (True,)
 
 
-def test_generation_logins_work_with_group_privileges(born: Born) -> None:
-    with psycopg.connect(born.dsn("gateway"), prepare_threshold=None, autocommit=True) as gw:
-        assert gw.execute("SELECT session_user").fetchone() == (born.login("gateway")[0],)
-        gw.execute("INSERT INTO agents (id) VALUES (910001)")
-        gw.execute("INSERT INTO agents_meta (id, status) VALUES (910001, 'running')")
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            gw.execute("CREATE TABLE gateway_must_not_create (id int)")
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            gw.execute("SET ROLE meiva")
-    with psycopg.connect(born.dsn("runner"), prepare_threshold=None, autocommit=True) as runner:
-        assert runner.execute("SELECT count(*) FROM agents WHERE id = 910001").fetchone() == (1,)
-        runner.execute("UPDATE agents_meta SET status = 'idling' WHERE id = 910001")
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            runner.execute("INSERT INTO agents (id) VALUES (910002)")
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            runner.execute("SET ROLE meiva_gateway")
+def test_generation_logins_work_with_group_privileges(born_readonly: Born) -> None:
+    born = born_readonly
+    try:
+        with psycopg.connect(born.dsn("gateway"), prepare_threshold=None, autocommit=True) as gw:
+            assert gw.execute("SELECT session_user").fetchone() == (born.login("gateway")[0],)
+            gw.execute("INSERT INTO agents (id) VALUES (910001)")
+            gw.execute("INSERT INTO agents_meta (id, status) VALUES (910001, 'running')")
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                gw.execute("CREATE TABLE gateway_must_not_create (id int)")
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                gw.execute("SET ROLE meiva")
+        with psycopg.connect(born.dsn("runner"), prepare_threshold=None, autocommit=True) as runner:
+            assert runner.execute("SELECT count(*) FROM agents WHERE id = 910001").fetchone() == (
+                1,
+            )
+            runner.execute("UPDATE agents_meta SET status = 'idling' WHERE id = 910001")
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                runner.execute("INSERT INTO agents (id) VALUES (910002)")
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                runner.execute("SET ROLE meiva_gateway")
+    finally:
+        with born.admin() as conn:
+            conn.execute("TRUNCATE agents CASCADE")
 
 
-def test_pooler_admin_console_is_the_userlist_only_operator_entry(born: Born) -> None:
+def test_pooler_admin_console_is_the_userlist_only_operator_entry(born_readonly: Born) -> None:
+    born = born_readonly
     admin = delivery.read_pooler_admin(born.home)
     assert base_pooler.pgbouncer_listener_reachable(born.pooler_port, admin.password)
     assert not base_pooler.pgbouncer_listener_reachable(born.pooler_port, "wrong-password-xxxxx")
@@ -588,11 +576,12 @@ def test_interrupted_birth_retries_to_the_same_generation(
     assert settled.active is not None and settled.active.number == 0
 
 
-def test_launched_services_receive_their_class_login_only(born: Born) -> None:
+def test_launched_services_receive_their_class_login_only(born_readonly: Born) -> None:
     from base.sessions.env_forwarding import managed_service_env
     from cli.commands.lifecycle.root_driver import service_extra_env
     from services.supervision.roster.service_spec import BOTH, ServiceSpec
 
+    born = born_readonly
     # The launcher's settings-free serve-gateway read (a born single box).
     launch = LaunchDelivery(
         home=born.home,
@@ -661,7 +650,7 @@ def _collector_postgres_receiver(
         config.set_field(name, getattr(born.plane, name))
     command_runtime.machine.set(name="test-machine")
     rendered = oc.generate_config(
-        _REPO,
+        REPO_ROOT,
         born.home,
         _ROLES,
         settings=collector_settings_from_boot(config),
@@ -727,11 +716,15 @@ def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
 
 
 def test_collector_postgres_receiver_keeps_no_credential(
-    born: Born, operator_database: OperatorDatabaseFactory, *, command_runtime: CommandRuntime
+    born_readonly: Born,
+    operator_database: OperatorDatabaseFactory,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The collector's PostgreSQL receiver logs in as the stable monitoring
     role by `peer` over the owner-only socket: no password at rest in its
     config and no application data."""
+    born = born_readonly
     receiver = _collector_postgres_receiver(
         born, operator_database=operator_database, command_runtime=command_runtime
     )
@@ -768,10 +761,11 @@ def test_collector_postgres_receiver_keeps_no_credential(
 
 
 def test_direct_exemption_dials_postgres_as_the_delivered_login(
-    born: Born, command_runtime: CommandRuntime
+    born_readonly: Born, command_runtime: CommandRuntime
 ) -> None:
     """With pooling on, the admin-plane `direct=True` dial swaps only the port to
     the real Postgres (this home's own record) and keeps the delivered login."""
+    born = born_readonly
 
     # meiva:note
     # The factory builds each handle's dial slice from the live process settings, which the suite

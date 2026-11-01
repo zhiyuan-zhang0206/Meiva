@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import getpass
 import json
 import subprocess
 from collections.abc import Callable, Iterator
@@ -21,13 +22,16 @@ from typing import cast
 
 import pytest
 import redis
+from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
+from redis.retry import Retry
 
 from base import cluster
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.env import port_lease
 from base.paths import meiva_home
+from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
 
 __all__ = [
@@ -37,12 +41,14 @@ __all__ = [
     "NATIVE_TEST_SYSTEM",
     "RUNTIME_PASSWORD",
     "NativeCluster",
+    "cached_pg_template",
     "free_port",
     "native_cluster",
     "redis_command",
     "redis_from_url",
     "redis_ping",
     "retained_children",
+    "seed_pg_template",
     "shutdown_redis",
 ]
 
@@ -50,6 +56,7 @@ BEARER = "test_bearer_abc123"
 ADMIN_PASSWORD = "test_redis_admin_abc123"  # noqa: S105
 RUNTIME_PASSWORD = "test_redis_runtime_abc123"  # noqa: S105
 _IDENTITY = "meiva_tinst"
+_PG_TEMPLATE_KEY = pytest.StashKey[Path]()
 
 # meiva:note
 # The platform value these tests start and stop a cluster with. They run the test environment's
@@ -64,6 +71,28 @@ NATIVE_TEST_MACOS = False
 # receipt that names another system is refused when it is read back. This suite drives the real
 # server the way the Linux lane does, which is the same stand-in `NATIVE_TEST_MACOS` above names.
 NATIVE_TEST_SYSTEM = "linux"
+
+
+# meiva:note
+# One worker-local `initdb` template directory reused across per-test homes.
+#
+# Each test still gets its own copied `pg` data directory through `ensure_pg_data`'s normal
+# template-hit branch; tests that verify cold `initdb` build an unseeded home directly.
+def cached_pg_template(
+    pytestconfig: pytest.Config, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    seed = pytestconfig.stash.get(_PG_TEMPLATE_KEY, None)
+    if seed is None:
+        seed = tmp_path_factory.mktemp("pg-template-17") / "template"
+        instance.initdb(seed, os_user=getpass.getuser(), home=meiva_home())
+        pytestconfig.stash[_PG_TEMPLATE_KEY] = seed
+    return seed
+
+
+def seed_pg_template(home: Path, template_seed: Path) -> None:
+    template = instance.pg_template_dir(home)
+    if not template.exists() and not template.is_symlink():
+        template.symlink_to(template_seed, target_is_directory=True)
 
 
 # meiva:note
@@ -157,6 +186,8 @@ def retained_children() -> list[subprocess.Popen[bytes]]:
 
 @pytest.fixture
 def native_cluster(
+    pytestconfig: pytest.Config,
+    tmp_path_factory: pytest.TempPathFactory,
     unit_home: Path,
     data_plane_config: DataPlaneConfig,
     retained_children: list[subprocess.Popen[bytes]],
@@ -164,6 +195,7 @@ def native_cluster(
     redis_access: None,
     distinct_free_ports: Callable[[int], list[int]],
 ) -> Iterator[NativeCluster]:
+    seed_pg_template(unit_home, cached_pg_template(pytestconfig, tmp_path_factory))
     ports = cluster.new_home_ports()
     reserved = set(ports.values())
     for _ in range(8):
@@ -191,18 +223,19 @@ def native_cluster(
     try:
         yield running
     finally:
-        subprocess.run(
-            [
-                str(pg_tool("pg_ctl", home=meiva_home())),
-                "-D",
-                str(running.pg_data),
-                "-m",
-                "immediate",
-                "stop",
-            ],
-            check=False,
-            capture_output=True,
-        )
+        if (running.pg_data / "postmaster.pid").exists():
+            subprocess.run(
+                [
+                    str(pg_tool("pg_ctl", home=running.home)),
+                    "-D",
+                    str(running.pg_data),
+                    "-m",
+                    "immediate",
+                    "stop",
+                ],
+                check=False,
+                capture_output=True,
+            )
         for child in retained_children:
             child.wait(timeout=5)
         with contextlib.suppress(RedisError):
@@ -211,9 +244,16 @@ def native_cluster(
 
 # meiva:note
 # Ends a test cluster's real redis-server through its own protocol, saving the dataset or not. The
-# server closes the connection as it exits, so a dropped connection is the success answer.
+# server closes the connection as it exits, so a dropped connection is the success answer and
+# client-side retries against the closed port must stay disabled.
 def shutdown_redis(port: int, password: str, *, save: bool) -> None:
-    client = redis.Redis(host="127.0.0.1", port=port, password=password, socket_timeout=5)
+    client = redis.Redis(
+        host="127.0.0.1",
+        port=port,
+        password=password,
+        socket_timeout=5,
+        retry=Retry(NoBackoff(), 0),
+    )
     try:
         client.execute_command("SHUTDOWN", "SAVE" if save else "NOSAVE")  # pyright: ignore[reportUnknownMemberType]
     except RedisConnectionError:

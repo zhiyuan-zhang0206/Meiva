@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import getpass
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -41,6 +42,7 @@ from cli.commands.data_plane.tests.native_cluster import (
     NATIVE_TEST_SYSTEM,
     RUNTIME_PASSWORD,
     NativeCluster,
+    cached_pg_template,
     redis_command,
     redis_from_url,
     redis_ping,
@@ -83,6 +85,27 @@ def _admin(cluster_: NativeCluster, database: str) -> psycopg.Connection[tuple[o
         dbname=database,
         autocommit=True,
     )
+
+
+def test_ensure_pg_data_initializes_cold_template_once_and_reuses_it(tmp_path: Path) -> None:
+    cold_home = tmp_path / "cold-home"
+    cold_home.mkdir(mode=0o700)
+    template = instance.pg_template_dir(cold_home)
+    data = instance.pg_data_dir(cold_home)
+    assert not template.exists()
+
+    instance.ensure_pg_data(cold_home, os_user=getpass.getuser())
+
+    assert (template / "PG_VERSION").is_file()
+    assert (data / "PG_VERSION").is_file()
+
+    marker = template / "cached-template.marker"
+    marker.write_text("from-template\n")
+    shutil.rmtree(data)
+
+    instance.ensure_pg_data(cold_home, os_user=getpass.getuser())
+
+    assert (data / "cached-template.marker").read_text() == "from-template\n"
 
 
 def test_per_cluster_instance_bringup(
@@ -249,7 +272,10 @@ def test_a_fresh_single_box_redis_refuses_unauthenticated_connections(
 # meiva:note
 # TCP ownership does not make another directory's equal Unix port ours.
 def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
-    native_cluster: NativeCluster, command_machine: MachineIdentityReader
+    pytestconfig: pytest.Config,
+    tmp_path_factory: pytest.TempPathFactory,
+    native_cluster: NativeCluster,
+    command_machine: MachineIdentityReader,
 ) -> None:
     assert (
         instance.start_pg(
@@ -268,7 +294,8 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
     with tempfile.TemporaryDirectory(prefix="meiva-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
         data = directory / "data"
-        instance.initdb(data, os_user=getpass.getuser(), home=native_cluster.home)
+        shutil.copytree(cached_pg_template(pytestconfig, tmp_path_factory), data)
+        data.chmod(0o700)
         subprocess.run(
             [
                 str(pg_tool("pg_ctl", home=meiva_home())),
