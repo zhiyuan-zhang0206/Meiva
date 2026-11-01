@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 from langchain_core.messages import BaseMessage
+from PIL import Image
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
@@ -149,7 +150,7 @@ class UnderstandHarness:
 @pytest.fixture
 def fake_image(tmp_path: Path) -> Path:
     path = tmp_path / "img.png"
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    Image.new("RGB", (2, 2), "white").save(path)
     return path
 
 
