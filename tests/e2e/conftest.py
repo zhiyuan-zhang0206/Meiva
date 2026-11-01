@@ -71,6 +71,7 @@ from tests.e2e._ports import (
 )
 from tests.e2e._truncate import truncate_with_deadlock_retry
 from tests.e2e.fixture_environment import E2EEnv
+from tests.e2e.frontend_build import build_frontend, pnpm_run
 from tests.e2e.process_support import (
     SERVING_OWNER,
     SERVING_READER,
@@ -370,40 +371,23 @@ def frontend_proc() -> Iterator[None]:
     build_dir = frontend_src / ".builds" / f"build-{_E2E_SUFFIX}"
     env = {**os.environ, "NEXT_PUBLIC_API_BASE": GATEWAY_URL}
 
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
-    shutil.copytree(
+    # meiva:note
+    # _LOG_DIR is created by the package-scoped e2e_process_env, which runs AFTER session-scoped
+    # frontend_proc — a fresh checkout (CI runner cache evicted, new worktree) has no
+    # tmp/e2e-logs, and the build's log needs it.
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    build_frontend(
         frontend_src,
         build_dir,
-        ignore=shutil.ignore_patterns(
-            "node_modules", ".next", ".builds", "coverage", "*.log", "tsconfig.tsbuildinfo"
-        ),
+        env=env,
+        log=_LOG_DIR / f"frontend-build-{_E2E_SUFFIX}.log",
     )
-    # symlink goes relative path `../../node_modules` (= ui/web/node_modules)
-    (build_dir / "node_modules").symlink_to(Path("../../node_modules"))
-
-    # _LOG_DIR is created by the package-scoped e2e_process_env, which runs
-    # AFTER session-scoped frontend_proc — a fresh checkout (CI runner cache
-    # evicted, new worktree) has no tmp/e2e-logs and this open() would fail.
-    _LOG_DIR.mkdir(parents=True, exist_ok=True)
-    build_log = _LOG_DIR / f"frontend-build-{_E2E_SUFFIX}.log"
-    with build_log.open("w") as f:
-        result = subprocess.run(
-            ["pnpm", "run", "build"],
-            cwd=str(build_dir),
-            env=env,
-            stdout=f,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
-    if result.returncode != 0:
-        raise RuntimeError(f"pnpm run build failed (exit {result.returncode}); see {build_log}")
 
     # The port has been held since import, through the build above; hand it to Next now.
     FRONTEND_RESERVATION.release()
     try:
         with managed_proc(
-            ["pnpm", "run", "start", "-p", str(FRONTEND_PORT)],
+            pnpm_run("start", "-p", str(FRONTEND_PORT)),
             cwd=str(build_dir),
             env=env,
             label="frontend",
