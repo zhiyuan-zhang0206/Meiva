@@ -12,7 +12,7 @@ from ops.rpc_schemas import (
 _SCHEMAS: list[tuple[type[BaseModel], str, dict[str, object]]] = [
     (SpawnAgentRequest, "prompt_source", {"prompt": "hello"}),
     (ResurrectAgentRequest, "resurrected_by", {}),
-    (RestartAgentRequest, "source", {}),
+    (RestartAgentRequest, "source", {"message": "restarting"}),
     (TerminateAgentRequest, "source", {"force": True}),
 ]
 
@@ -39,12 +39,15 @@ def test_malformed_declaration_is_rejected_before_dispatch(
         schema.model_validate(other | {field: source})
 
 
-@pytest.mark.parametrize("schema", [TerminateAgentRequest, RestartAgentRequest])
+@pytest.mark.parametrize(
+    ("schema", "extra"),
+    [(TerminateAgentRequest, {}), (RestartAgentRequest, {"message": "restarting"})],
+)
 @pytest.mark.parametrize("reason", ["machine-pause", "incident-operator", "self"])
 def test_legacy_lifecycle_audit_reason_is_not_chat_envelope_grammar(
-    schema: type[BaseModel], reason: str
+    schema: type[BaseModel], extra: dict[str, object], reason: str
 ) -> None:
-    assert schema.model_validate({"source": reason}).model_dump()["source"] == reason
+    assert schema.model_validate(extra | {"source": reason}).model_dump()["source"] == reason
 
 
 @pytest.mark.parametrize("field", ["prompt", "prompt_source", "label"])

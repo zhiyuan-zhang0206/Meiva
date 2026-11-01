@@ -372,7 +372,7 @@ class TestSchedulerIntegration:
         assert record["exception"].traceback is not None
         report = record["extra"]
         assert report["exception_type"] == "ValueError"
-        assert report["config_fingerprint"] == config_fingerprint(overlay, None)
+        assert report["config_fingerprint"] == config_fingerprint(overlay, None, harness="meiva")
         with pytest.raises(ValueError, match="turn failed"):
             await sched.aclose()
 

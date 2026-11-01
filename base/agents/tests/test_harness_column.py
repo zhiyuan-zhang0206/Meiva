@@ -66,29 +66,24 @@ def test_unknown_harness_is_rejected_by_the_column(db_conn: psycopg.Connection) 
     assert _row_count(db_conn, 503) == 0
 
 
-def test_changing_the_harness_after_birth_is_rejected(db_conn: psycopg.Connection) -> None:
+def test_changing_the_harness_after_birth_updates_to_declared_harness(
+    db_conn: psycopg.Connection,
+) -> None:
     _birth(db_conn, 504, "codex")
 
-    with (
-        pytest.raises(errors.RaiseException, match="harness is immutable"),
-        db_conn.transaction(),
-    ):
+    with db_conn.transaction():
         db_conn.execute("UPDATE agents_meta SET harness = 'meiva' WHERE id = 504")
 
-    assert _harness_of(db_conn, 504) == "codex"
+    assert _harness_of(db_conn, 504) == "meiva"
 
 
-def test_upserting_a_changed_harness_is_rejected(db_conn: psycopg.Connection) -> None:
+def test_changing_the_harness_to_an_unknown_value_is_rejected(
+    db_conn: psycopg.Connection,
+) -> None:
     _birth(db_conn, 506, "codex")
 
-    with (
-        pytest.raises(errors.RaiseException, match="harness is immutable"),
-        db_conn.transaction(),
-    ):
-        db_conn.execute(
-            "INSERT INTO agents_meta (id, status, harness) VALUES (506, 'idling', 'meiva') "
-            "ON CONFLICT (id) DO UPDATE SET harness = EXCLUDED.harness"
-        )
+    with pytest.raises(errors.CheckViolation), db_conn.transaction():
+        db_conn.execute("UPDATE agents_meta SET harness = 'claude-code' WHERE id = 506")
 
     assert _harness_of(db_conn, 506) == "codex"
 
