@@ -662,7 +662,7 @@ def test_heavy_linux_jobs_run_in_digest_pinned_ghcr_runner_container() -> None:
         assert container["image"].startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:"), (
             job_name
         )
-        assert container["options"] == "--shm-size=2g", job_name
+        assert container["options"] == "--init --shm-size=2g", job_name
         assert job["defaults"]["run"]["shell"] == "bash", job_name
         for step in job["steps"]:
             uses = str(step.get("uses", ""))
