@@ -49,7 +49,7 @@ the PR head; see [merged-tree lint](../docs/conventions/engineering/merged-tree-
 
 | CI check name | Composition |
 |---|---|
-| backend (pytest + pyright) | aggregator over `backend-static` (ruff, migration + clock-lattice lints, native Grafana/migration smoke and pyright), parallel `backend-static-tests` (owned static pytest contracts with required JUnit, counts and coverage, without native toolchain setup) + 8 checked whole-file shards (`-n 4` each, pytest-split LPT with fresh runner-local full plans and the cached `.test_durations`); combines per-shard coverage and applies the 85% line gate |
+| backend (pytest + pyright) | aggregator over `backend-static` (ruff, migration + clock-lattice lints, native Grafana/migration smoke and pyright), parallel `backend-static-tests` (4-shard full static pytest contracts with JUnit, counts and coverage — narrowed to 1 shard over selected static files on `SELECTED` pull requests — inside the runner container without native toolchain setup) + 8 checked whole-file shards (`-n 4` each, pytest-split LPT with fresh runner-local full plans and the cached `.test_durations`); combines per-shard coverage and applies the 85% line gate |
 | backend structure (pre-commit lint + codegen freshness) | structure and source-note checks cover every eligible change class; Node/pnpm supplies the parser; four freshness hooks run on matching paths, selector errors and manual dispatch |
 | frontend (eslint + tsc + vitest) | one job: `pnpm install --frozen-lockfile`, route typegen, `tsc --noEmit`, eslint with a warning baseline, `vitest run --coverage`, serial flaky lane |
 | e2e (Playwright happy path) | aggregator over 4 shards, Playwright chromium `-n 2` each (browser dir cached) |

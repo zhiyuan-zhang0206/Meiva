@@ -536,6 +536,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
+relative_files = true
 # Must match the CI shards' --cov= flags (ci.yml backend-shard / backend-serial).
 # agent/meiva/gateway/base/ui is the historical set; cli joined 2026-08-25
 # (tech audit P1 — measured 82% standalone with tests/cli).
@@ -573,6 +574,13 @@ omit = [
     "*/tests/*",
     "meiva_builtins/skills/*/*/scripts/*",
     "meiva_builtins/skills/*/*/references/*",
+]
+
+[tool.coverage.paths]
+source = [
+    ".",
+    "/__w/Meiva/Meiva",
+    "/home/runner/work/Meiva/Meiva",
 ]
 
 [tool.coverage.report]

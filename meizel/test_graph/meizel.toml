@@ -1,0 +1,12 @@
+exports = ["cutoff.py", "impact.py", "lanes.py", "model.py"]
+
+[uses]
+"__init__.py" = ["checkout_plan.py", "model.py", "scan_facts.py"]
+"checkout_plan.py" = ["model.py"]
+"cutoff.py" = ["model.py"]
+"impact.py" = ["cutoff.py", "model.py"]
+"lanes.py" = ["model.py"]
+"scan_facts.py" = ["model.py"]
+
+[purity]
+"." = "strict"

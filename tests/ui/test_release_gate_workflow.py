@@ -40,23 +40,38 @@ def test_every_leg_runs_on_the_commit_the_precheck_resolved_and_skips_idle_train
     assert set(jobs) == {
         "precheck",
         "static-and-structure",
+        "backend-static",
         "frontend",
         "backend",
         "e2e",
         "platform-smoke",
         "certify",
     }
-    for name in ("static-and-structure", "frontend", "backend", "e2e", "platform-smoke"):
+    for name in (
+        "static-and-structure",
+        "backend-static",
+        "frontend",
+        "backend",
+        "e2e",
+        "platform-smoke",
+    ):
         assert jobs[name]["needs"] == "precheck"
         assert jobs[name]["if"] == "needs.precheck.outputs.skip_train != 'true'"
         checkout = jobs[name]["steps"][0]
         assert checkout["with"]["ref"] == "${{ needs.precheck.outputs.sha }}"
 
-    for container_leg in ("static-and-structure", "backend", "e2e", "platform-smoke"):
+    for container_leg in (
+        "static-and-structure",
+        "backend-static",
+        "backend",
+        "e2e",
+        "platform-smoke",
+    ):
         container = jobs[container_leg]["container"]
         assert container["image"].startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:")
         assert container["options"] == "--init --shm-size=2g"
         assert jobs[container_leg]["defaults"]["run"]["shell"] == "bash"
+    assert jobs["backend-static"]["strategy"]["matrix"]["group"] == [1, 2, 3, 4]
 
 
 def test_precheck_validates_target_base_and_nightly_verdict() -> None:
@@ -79,6 +94,7 @@ def test_certify_mints_git_native_certificate_without_reverse_pr() -> None:
     assert certify["needs"] == [
         "precheck",
         "static-and-structure",
+        "backend-static",
         "frontend",
         "backend",
         "e2e",

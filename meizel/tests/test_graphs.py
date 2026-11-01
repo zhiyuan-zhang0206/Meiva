@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import ast
+import json
+import sqlite3
 from pathlib import Path
 
+import pytest
+
+from meizel.contracts.cli import GitRepo
 from meizel.graph import universe as model
 from meizel.graph.graphs import feedback_edges, strongly_connected, unneeded_back_edges
+from meizel.tests.synthetic import RepoFactory, commit, run, write
+
+PYPROJECT = '[tool.pytest.ini_options]\ntestpaths = ["tests", "pkg/**/tests", "app/**/tests", "base/**/tests"]\n'
+ROLES = '[roles]\napplication = ["pkg", "app", "base"]\ntests = ["tests"]\n'
 
 
 def without(graph: dict[str, list[str]], edges: list[tuple[str, str]]) -> dict[str, list[str]]:
@@ -149,3 +158,202 @@ def test_the_shell_owns_the_reader() -> None:
         if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef))
     }
     assert defined >= _SHELL_NAMES
+
+
+def test_derive_lanes_covers_fixtures_autouse_scopes_classes_markers_and_modules(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": ROLES,
+            "base/__init__.py": "",
+            "base/deploy/__init__.py": "",
+            "base/deploy/tests/__init__.py": "",
+            "base/deploy/tests/containers.py": "def start_pg() -> None: pass\n",
+            "tests/harness_manifest.py": (
+                "from base.deploy.tests.containers import start_pg\n"
+                "from pkg.core import VALUE\n"
+                "__all__ = ['VALUE', 'start_pg']\n"
+            ),
+            "tests/test_manifest_contract.py": (
+                "from tests.harness_manifest import VALUE\n"
+                "def test_expected() -> None:\n    assert VALUE == 42\n"
+            ),
+            "tests/test_reexported_container.py": (
+                "from tests.harness_manifest import start_pg\n"
+                "def test_container() -> None:\n    start_pg()\n"
+            ),
+            "pkg/__init__.py": "",
+            "pkg/core.py": "VALUE = 42\n",
+            "pkg/tests/shared_fixtures.py": (
+                "import pytest\n"
+                "@pytest.fixture\n"
+                "def seeded_db(db_url: str) -> str:\n    return db_url\n"
+            ),
+            "pkg/tests/test_pure.py": (
+                "from pkg.core import VALUE\ndef test_value() -> None:\n    assert VALUE == 42\n"
+            ),
+            "pkg/tests/scoped/path_scopes.toml": '"pkg.tests.shared_fixtures" = ["."]\n',
+            "pkg/tests/scoped/test_via_scope.py": (
+                "def test_seeded(seeded_db: str) -> None:\n    assert seeded_db\n"
+            ),
+            "pkg/tests/autouse_native/conftest.py": (
+                "import pytest\n"
+                "@pytest.fixture(autouse=True)\n"
+                "def _boot_bus(event_bus: object) -> None:\n    pass\n"
+            ),
+            "pkg/tests/autouse_native/test_implicit.py": "def test_ok() -> None: pass\n",
+            "app/__init__.py": "",
+            "app/tests/test_class_method.py": (
+                "class TestStore:\n"
+                "    def test_save(self, redis_url: str) -> None:\n        assert redis_url\n"
+            ),
+            "app/tests/test_marked.py": (
+                "import pytest\n@pytest.mark.requires_host\ndef test_host() -> None: pass\n"
+            ),
+            "app/tests/test_dynamic_fixture.py": (
+                "import pytest\n"
+                "def test_dyn(request: pytest.FixtureRequest, name: str = 'x') -> None:\n"
+                "    request.getfixturevalue(name)\n"
+            ),
+        }
+    )
+    lanes = GitRepo(root).test_lanes()
+    assert lanes.static == frozenset(
+        {
+            "pkg/tests/test_pure.py",
+            "tests/test_manifest_contract.py",
+        }
+    )
+    assert lanes.native == frozenset(
+        {
+            "app/tests/test_class_method.py",
+            "app/tests/test_dynamic_fixture.py",
+            "app/tests/test_marked.py",
+            "pkg/tests/autouse_native/test_implicit.py",
+            "pkg/tests/scoped/test_via_scope.py",
+            "tests/test_reexported_container.py",
+        }
+    )
+
+
+def test_sqlite_cache_persists_lanes_and_invalidates_on_dirty_or_untracked_edits(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": ROLES,
+            "pkg/__init__.py": "",
+            "pkg/tests/test_unit.py": "def test_unit() -> None: pass\n",
+        }
+    )
+    repo = GitRepo(root)
+    first = repo.test_lanes()
+    assert first.static == frozenset({"pkg/tests/test_unit.py"})
+    assert first.native == frozenset()
+
+    db_path = root / ".git" / "meizel-scan-cache-v1.sqlite3"
+    assert db_path.is_file()
+    with sqlite3.connect(db_path) as conn:
+        keys = [row[0] for row in conn.execute("SELECT k FROM scan_cache").fetchall()]
+    assert any(key.startswith("pytest-lanes:v1:") for key in keys)
+    assert any(key.startswith("pytest-facts:v1:") for key in keys)
+    assert repo.test_lanes() == first
+
+    (root / "pkg/tests/test_unit.py").write_text(
+        "def test_unit(db_url: str) -> None:\n    assert db_url\n",
+        encoding="utf-8",
+    )
+    flipped = repo.test_lanes()
+    assert flipped.static == frozenset()
+    assert flipped.native == frozenset({"pkg/tests/test_unit.py"})
+
+    (root / "pkg/tests/test_untracked.py").write_text(
+        "def test_untracked() -> None: pass\n",
+        encoding="utf-8",
+    )
+    with_untracked = repo.test_lanes()
+    assert with_untracked.static == frozenset({"pkg/tests/test_untracked.py"})
+    assert with_untracked.native == frozenset({"pkg/tests/test_unit.py"})
+
+
+def test_cli_tests_subcommand_reports_lanes_and_strict_cutoff_selection(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": '[uses]\n"app" = ["pkg"]\n"tests" = ["app", "pkg"]\n\n' + ROLES,
+            "pkg/__init__.py": "",
+            "pkg/meizel.toml": 'exports = ["calc.py"]\npurity = "strict"\n',
+            "pkg/calc.py": "def double(x: int) -> int:\n    return x * 2\n",
+            "pkg/tests/test_calc.py": (
+                "from pkg.calc import double\n"
+                "def test_double() -> None:\n    assert double(3) == 6\n"
+            ),
+            "app/__init__.py": "",
+            "app/tests/test_app_native.py": (
+                "from pkg.calc import double\n"
+                "def test_with_db(db_url: str) -> None:\n    assert double(2) == 4 and db_url\n"
+            ),
+            "tests/test_lint_tree.py": "def test_tree() -> None: pass\n",
+        }
+    )
+    commit(root, "initial")
+
+    assert run(root, "tests", "--lane", "static", "--json") == 0
+    static_payload = json.loads(capsys.readouterr().out)
+    assert static_payload == {
+        "count": 2,
+        "lane": "static",
+        "tests": ["pkg/tests/test_calc.py", "tests/test_lint_tree.py"],
+    }
+
+    assert run(root, "tests", "--lane", "native") == 0
+    assert capsys.readouterr().out.splitlines() == ["app/tests/test_app_native.py"]
+
+    write(
+        root,
+        {
+            "pkg/calc.py": (
+                "def _step(x: int) -> int:\n    return x + x\n\n"
+                "def double(x: int) -> int:\n    return _step(x)\n"
+            )
+        },
+    )
+    assert run(root, "tests", "--changed", "pkg/calc.py", "--base-ref", "HEAD", "--json") == 0
+    cutoff_payload = json.loads(capsys.readouterr().out)
+    assert cutoff_payload["decision"] == "SELECTED"
+    assert cutoff_payload["tests"] == ["pkg/tests/test_calc.py", "tests/test_lint_tree.py"]
+
+    write(
+        root,
+        {"pkg/calc.py": "def double(x: int, *, factor: int = 2) -> int:\n    return x * factor\n"},
+    )
+    assert run(root, "tests", "--changed", "pkg/calc.py", "--base-ref", "HEAD", "--json") == 0
+    propagated = json.loads(capsys.readouterr().out)
+    assert propagated["tests"] == [
+        "app/tests/test_app_native.py",
+        "pkg/tests/test_calc.py",
+        "tests/test_lint_tree.py",
+    ]
+
+    assert (
+        run(
+            root,
+            "tests",
+            "--changed",
+            "pkg/calc.py",
+            "--base-ref",
+            "HEAD",
+            "--lane",
+            "native",
+            "--json",
+        )
+        == 0
+    )
+    native_only = json.loads(capsys.readouterr().out)
+    assert native_only["tests"] == ["app/tests/test_app_native.py"]

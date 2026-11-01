@@ -26,17 +26,39 @@ from meizel.graph import project_metadata_paths, python_reverse_closure, standal
 from meizel.graph.model import MeizelError
 from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, EditPlan, Universe
 from meizel.roles import parse_roles
+from meizel.test_graph import (
+    build_test_checkout,
+    decode_raw_facts,
+    encode_raw_facts,
+    hash_test_tree,
+    is_test_config_file,
+    resolve_test_facts,
+    scan_raw_test_facts,
+)
+from meizel.test_graph.impact import select_impacted_tests
+from meizel.test_graph.lanes import derive_test_lanes
+from meizel.test_graph.model import (
+    CutoffContext,
+    FileTestFacts,
+    ModuleTable,
+    RawFileTestFacts,
+    TestCheckout,
+    TestLanes,
+    TestSelection,
+)
 
 __all__ = [
     "GitRepo",
     "apply_plan",
     "has_file",
+    "lanes_at",
     "load_universe",
     "python_reverse_closure_at",
     "read_bytes",
     "read_roles",
     "read_text",
     "roles_at",
+    "select_tests_at",
     "toplevel",
     "tracked_files",
 ]
@@ -333,6 +355,14 @@ class GitRepo:
     def universe(self) -> Universe:
         return load_universe(self.root, repo=self)
 
+    def test_lanes(self) -> TestLanes:
+        return lanes_at(self.root, repo=self)
+
+    def select_tests(
+        self, changed_paths: Sequence[str], *, base_ref: str | None = None
+    ) -> TestSelection:
+        return select_tests_at(self.root, changed_paths, base_ref=base_ref, repo=self)
+
     @contextmanager
     def checkout(self, ref: str) -> Generator[GitRepo]:
         # meiva:note
@@ -582,3 +612,183 @@ def _process_scanner_digest() -> str:
         hasher.update(b"policy\0")
         hasher.update(policy_path.read_bytes())
     return hasher.hexdigest()
+
+
+_SKIP_WALK_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        ".worktrees",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        "tmp",
+        "dist",
+        "build",
+    }
+)
+_LANES_MEMO: dict[str, TestLanes] = {}
+
+
+def _walk_non_git_files(root: Path) -> list[str]:
+    found: list[str] = []
+    stack: list[tuple[str, Path]] = [("", root)]
+    while stack:
+        rel_dir, abs_dir = stack.pop()
+        with suppress(OSError):
+            for entry in os.scandir(abs_dir):
+                name = entry.name
+                if name in _SKIP_WALK_DIRS or entry.is_symlink():
+                    continue
+                if name.startswith(".") and name != ".python-version":
+                    continue
+                rel = f"{rel_dir}/{name}" if rel_dir else name
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append((rel, Path(entry.path)))
+                elif entry.is_file(follow_symlinks=False):
+                    found.append(rel)
+    return sorted(found)
+
+
+def _git_test_digests(root: Path) -> dict[str, str]:
+    # meiva:note
+    # Lists non-ignored untracked test/config files via fixed git ls-files argv without a shell.
+    digests = _working_tree_digests(root)
+    others = subprocess.run(  # noqa: S603
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "-z"],
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    if others.returncode == 0:
+        for raw in others.stdout.split(b"\0"):
+            rel = raw.decode(errors="replace") if raw else ""
+            if rel and (rel.endswith(".py") or is_test_config_file(rel)):
+                with suppress(OSError):
+                    digests[rel] = f"raw:{hashlib.sha256((root / rel).read_bytes()).hexdigest()}"
+    regular = set(_regular_paths(root, list(digests), lstat=os.lstat))
+    return {k: v for k, v in digests.items() if k in regular}
+
+
+def _resolve_graph_state(
+    all_files: list[str], root: Path, raw_map: Mapping[str, RawFileTestFacts]
+) -> tuple[TestCheckout, dict[str, FileTestFacts]]:
+    configs = {rel: read_text(root, rel) for rel in all_files if is_test_config_file(rel)}
+    checkout = build_test_checkout(all_files, configs, raw_map)
+    table = ModuleTable.build(checkout.python_files, checkout.top_packages)
+    return checkout, resolve_test_facts(checkout, raw_map, table)
+
+
+def _load_cached_raw_facts(
+    root: Path, repo: GitRepo, py_files: Sequence[str], tree_digests: Mapping[str, str]
+) -> dict[str, RawFileTestFacts]:
+    ver = _process_scanner_digest()
+    keys = {rel: f"pytest-facts:v1:{ver}:{rel}:{tree_digests[rel]}" for rel in py_files}
+    cached = repo.cache_get_many(keys.values())
+    raw_map: dict[str, RawFileTestFacts] = {}
+    updates: dict[str, str] = {}
+    for rel, ckey in keys.items():
+        if (hit := cached.get(ckey)) is not None:
+            raw_map[rel] = decode_raw_facts(hit)
+        else:
+            raw_map[rel] = scanned = scan_raw_test_facts(rel, read_text(root, rel))
+            updates[ckey] = encode_raw_facts(scanned)
+    repo.cache_put_many(updates)
+    return raw_map
+
+
+def _load_test_graph_state(
+    root: Path, repo: GitRepo, digests: dict[str, str] | None = None
+) -> tuple[TestCheckout, dict[str, FileTestFacts]]:
+    if _common_git_dir(root) is None:
+        all_files = _walk_non_git_files(root)
+        raw_map = {
+            rel: scan_raw_test_facts(rel, read_text(root, rel))
+            for rel in all_files
+            if rel.endswith(".py") and not rel.startswith("tests/e2e/")
+        }
+        return _resolve_graph_state(all_files, root, raw_map)
+    tree_digests = digests if digests is not None else _git_test_digests(root)
+    all_files = sorted(tree_digests)
+    py_files = [r for r in all_files if r.endswith(".py") and not r.startswith("tests/e2e/")]
+    return _resolve_graph_state(
+        all_files, root, _load_cached_raw_facts(root, repo, py_files, tree_digests)
+    )
+
+
+def lanes_at(root: Path, *, repo: GitRepo | None = None) -> TestLanes:
+    seat = repo if repo is not None else GitRepo(root)
+    if _common_git_dir(root) is None:
+        checkout, facts = _load_test_graph_state(root, seat)
+        return derive_test_lanes(checkout, facts)
+    digests = _git_test_digests(root)
+    lanes_key = f"pytest-lanes:v1:{hash_test_tree(_process_scanner_digest(), digests)}"
+    if (memo := _LANES_MEMO.get(lanes_key)) is not None:
+        return memo
+    if (hit := seat.cache_get_many([lanes_key]).get(lanes_key)) is not None:
+        decoded = TestLanes.decode(hit)
+        _LANES_MEMO[lanes_key] = decoded
+        return decoded
+    checkout, facts = _load_test_graph_state(root, seat, digests=digests)
+    lanes = derive_test_lanes(checkout, facts)
+    seat.cache_put_many({lanes_key: lanes.encode()})
+    _LANES_MEMO[lanes_key] = lanes
+    return lanes
+
+
+def _load_cutoff_context(
+    seat: GitRepo, checkout: TestCheckout, changed_paths: Sequence[str], base_ref: str
+) -> CutoffContext | None:
+    # meiva:note
+    # Lists tracked files at `base_ref` via fixed git ls-tree argv without invoking a shell.
+    listing = subprocess.run(  # noqa: S603
+        ["git", "-C", str(seat.root), "ls-tree", "-r", "--name-only", "-z", base_ref],
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    if listing.returncode != 0:
+        return None
+    base_files = [raw.decode(errors="replace") for raw in listing.stdout.split(b"\0") if raw]
+    base_configs = {
+        rel: txt
+        for rel in base_files
+        if is_test_config_file(rel) and (txt := seat.show_optional_text(base_ref, rel)) is not None
+    }
+    base_checkout = build_test_checkout(base_files, base_configs, {})
+    base_sources = {
+        rel: txt
+        for rel in changed_paths
+        if rel.endswith(".py") and (txt := seat.show_optional_text(base_ref, rel)) is not None
+    }
+    head_sources = {
+        rel: read_text(seat.root, rel)
+        for rel in changed_paths
+        if rel.endswith(".py") and has_file(seat.root, rel)
+    }
+    return CutoffContext(
+        base_sources=base_sources,
+        head_sources=head_sources,
+        base_manifests=base_checkout.manifests,
+        head_manifests=checkout.manifests,
+        base_test_dirs=base_checkout.test_dirs,
+        base_collectable=base_checkout.collectable,
+    )
+
+
+def select_tests_at(
+    root: Path,
+    changed_paths: Sequence[str],
+    *,
+    base_ref: str | None = None,
+    repo: GitRepo | None = None,
+) -> TestSelection:
+    seat = repo if repo is not None else GitRepo(root)
+    checkout, facts = _load_test_graph_state(root, seat)
+    cutoff = (
+        _load_cutoff_context(seat, checkout, changed_paths, base_ref)
+        if base_ref is not None
+        else None
+    )
+    return select_impacted_tests(tuple(changed_paths), checkout, facts, cutoff=cutoff)
