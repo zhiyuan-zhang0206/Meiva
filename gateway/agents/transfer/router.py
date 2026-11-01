@@ -2,9 +2,10 @@
 # Gateway coordinator for `POST /api/agents/{agent_id}/transfer` and the internal bundle-pull route
 # `GET /api/internal/agent-transfers/{transfer_id}/bundle`.
 #
-# Orchestrates precheck, target prepare, source fenced export, request-scoped bundle staging and
-# target import, atomic `SELECT ... FOR UPDATE` Postgres cutover (with target rollback on CAS
-# conflict), and post-commit workspace retirement on source and target.
+# Orchestrates precheck, step-1 termination on from_machine when idling, target prepare, source
+# export while terminated, request-scoped bundle staging and target import, atomic
+# `SELECT ... FOR UPDATE` Postgres cutover (with target rollback on CAS conflict), step-3 wake
+# (`resurrect-explicit`) on to_machine with completion message, and post-commit workspace retirement.
 # meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
 
 from __future__ import annotations
@@ -20,12 +21,9 @@ import httpx
 import psycopg
 from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi.responses import Response
-from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents.messages.inbound import PASSIVE_INBOUND_KEY
-from base.agents.messages.kwargs import NoteTag
 from base.clock.ids import new_uuid
 from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from base.db import Database
@@ -44,7 +42,9 @@ from gateway.agents.transfer.transfer_plan import (
     TransferPlan,
     TransferPrecheckFacts,
     TransferRefusal,
-    compose_transfer_system_note,
+    check_agent_state,
+    check_blocking_activity,
+    compose_transfer_wake_message,
     evaluate_precheck,
     verify_cutover_cas,
 )
@@ -59,6 +59,9 @@ from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, RpcClient
 from ops.lifecycle.events import publish_page_closed
 from ops.pages import close_all_agent_pages_in_transaction
 from ops.rpc_schemas import (
+    ResurrectAgentRequest,
+    TerminateAgentRequest,
+    TerminateAgentResponse,
     TransferAgentRequest,
     TransferAgentResponse,
     WorkspaceBundleManifest,
@@ -74,9 +77,9 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 _PREPARE_TIMEOUT_S = 15.0
+_FINALIZE_TIMEOUT_S = 15.0
 _EXPORT_TIMEOUT_S = 90.0
 _IMPORT_TIMEOUT_S = 90.0
-_FINALIZE_TIMEOUT_S = 15.0
 
 
 @dataclass(frozen=True)
@@ -106,30 +109,17 @@ def _deps_from_request(request: Request) -> TransferDeps:
 def _query_agent_facts(
     cur: psycopg.Cursor, agent_id: int, *, for_update: bool
 ) -> AgentRowFacts | None:
-    if for_update:
-        cur.execute(
-            "SELECT machine, status, harness, runtime_owner, runtime_generation, "
-            "last_admission_at, session_index FROM agents_meta WHERE id = %s FOR UPDATE",
-            (agent_id,),
-        )
-    else:
-        cur.execute(
-            "SELECT machine, status, harness, runtime_owner, runtime_generation, "
-            "last_admission_at, session_index FROM agents_meta WHERE id = %s",
-            (agent_id,),
-        )
+    query = (
+        "SELECT machine, status, harness FROM agents_meta WHERE id = %s FOR UPDATE"
+        if for_update
+        else "SELECT machine, status, harness FROM agents_meta WHERE id = %s"
+    )
+    cur.execute(query, (agent_id,))
     row = cur.fetchone()
     if row is None:
         return None
     return AgentRowFacts(
-        agent_id=agent_id,
-        machine=str(row[0]),
-        status=str(row[1]),
-        harness=str(row[2]),
-        runtime_owner=row[3],
-        runtime_generation=row[4],
-        last_admission_at=row[5],
-        session_index=int(row[6]),
+        agent_id=agent_id, machine=str(row[0]), status=str(row[1]), harness=str(row[2])
     )
 
 
@@ -142,47 +132,36 @@ def _query_blocking_facts(
         "AND status IN ('pending', 'claimed') ORDER BY id LIMIT 1",
         (agent_id,),
     )
-    lc_row = cur.fetchone()
-    pending_lc = (
-        PendingLifecycleFact(kind=str(lc_row[0]), status=str(lc_row[1]))
-        if lc_row is not None
-        else None
-    )
+    lc = cur.fetchone()
+    pending_lc = PendingLifecycleFact(kind=str(lc[0]), status=str(lc[1])) if lc else None
 
     cur.execute(
         "SELECT session_id, status, delta_version > applied_version, handoff_applied_at IS NULL "
-        "FROM agent_impersonations "
-        "WHERE agent_id = %s AND ("
+        "FROM agent_impersonations WHERE agent_id = %s AND ("
         "  status IN ('requested', 'accepted', 'active') "
-        "  OR delta_version > applied_version "
-        "  OR handoff_applied_at IS NULL"
+        "  OR delta_version > applied_version OR handoff_applied_at IS NULL"
         ") ORDER BY session_id DESC LIMIT 1",
         (agent_id,),
     )
-    imp_row = cur.fetchone()
+    imp = cur.fetchone()
     imp_conflict = (
         ImpersonationConflictFact(
-            session_id=int(imp_row[0]),
-            status=str(imp_row[1]),
-            delta_unapplied=bool(imp_row[2]),
-            handoff_unapplied=bool(imp_row[3]),
+            session_id=int(imp[0]),
+            status=str(imp[1]),
+            delta_unapplied=bool(imp[2]),
+            handoff_unapplied=bool(imp[3]),
         )
-        if imp_row is not None
+        if imp
         else None
     )
 
     cur.execute(
         "SELECT batch_id, state FROM upload_delivery_batches "
-        "WHERE agent_id = %s AND state IN ('receiving', 'pending') "
-        "ORDER BY batch_id LIMIT 1",
+        "WHERE agent_id = %s AND state IN ('receiving', 'pending') ORDER BY batch_id LIMIT 1",
         (agent_id,),
     )
-    up_row = cur.fetchone()
-    pending_up = (
-        PendingUploadFact(batch_id=str(up_row[0]), state=str(up_row[1]))
-        if up_row is not None
-        else None
-    )
+    up = cur.fetchone()
+    pending_up = PendingUploadFact(batch_id=str(up[0]), state=str(up[1])) if up else None
     return pending_lc, imp_conflict, pending_up
 
 
@@ -195,11 +174,10 @@ def _query_machine_facts(cur: psycopg.Cursor, name: str) -> MachineFacts | None:
     row = cur.fetchone()
     if row is None:
         return None
-    roles = tuple(str(r) for r in (row[1] or ()))
     return MachineFacts(
         name=name,
         gateway_url=row[0],
-        roles=roles,
+        roles=tuple(str(r) for r in (row[1] or ())),
         paused=bool(row[2]),
         stopped=bool(row[3]),
     )
@@ -215,8 +193,6 @@ def _precheck_blocking(
                 TransferPrecheckFacts(agent=None, agent_id=agent_id, to_machine=to_machine)
             )
         pending_lc, imp_conflict, pending_up = _query_blocking_facts(cur, agent_id)
-        source_machine = _query_machine_facts(cur, agent.machine)
-        target_machine = _query_machine_facts(cur, to_machine)
         return evaluate_precheck(
             TransferPrecheckFacts(
                 agent=agent,
@@ -225,9 +201,60 @@ def _precheck_blocking(
                 pending_lifecycle=pending_lc,
                 impersonation=imp_conflict,
                 pending_upload=pending_up,
-                source_machine=source_machine,
-                target_machine=target_machine,
+                source_machine=_query_machine_facts(cur, agent.machine),
+                target_machine=_query_machine_facts(cur, to_machine),
             )
+        )
+
+
+def _guard_idling_pre_termination_blocking(
+    pool: ConnectionPool, agent_id: int, from_machine: str
+) -> list[str]:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        agent = _query_agent_facts(cur, agent_id, for_update=True)
+        if agent is None:
+            raise HTTPException(404, f"agent {agent_id} does not exist")
+        if agent.machine != from_machine:
+            raise HTTPException(
+                409,
+                f"agent {agent_id} moved from {from_machine!r} to {agent.machine!r} during transfer",
+            )
+        state_refusal = check_agent_state(agent)
+        if isinstance(state_refusal, TransferRefusal):
+            raise HTTPException(state_refusal.status_code, state_refusal.detail)
+
+        pending_lc, imp_conflict, pending_up = _query_blocking_facts(cur, agent_id)
+        activity_refusal = check_blocking_activity(
+            TransferPrecheckFacts(
+                agent=agent,
+                agent_id=agent_id,
+                to_machine="",
+                pending_lifecycle=pending_lc,
+                impersonation=imp_conflict,
+                pending_upload=pending_up,
+            )
+        )
+        if activity_refusal is not None:
+            raise HTTPException(activity_refusal.status_code, activity_refusal.detail)
+
+        cur.execute(
+            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
+            (agent_id,),
+        )
+        open_pages = [str(r[0]) for r in cur.fetchall()]
+        cur.execute(
+            "UPDATE agents_meta SET status = 'terminated', termination_source = 'user', "
+            "heartbeat_paused_until = NULL WHERE id = %s",
+            (agent_id,),
+        )
+        return open_pages
+
+
+def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: list[int]) -> None:
+    with write_transaction(pool) as conn:
+        conn.execute(
+            "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = ANY(%s)",
+            (agent_id, killed),
         )
 
 
@@ -240,29 +267,23 @@ async def _fetch_source_export(
     try:
         async with (
             httpx.AsyncClient(
-                timeout=httpx.Timeout(_EXPORT_TIMEOUT_S, connect=5.0),
-                trust_env=False,
+                timeout=httpx.Timeout(_EXPORT_TIMEOUT_S, connect=5.0), trust_env=False
             ) as client,
             client.stream(
-                "POST",
-                url,
-                json=export_req.model_dump(mode="json"),
-                headers=headers,
+                "POST", url, json=export_req.model_dump(mode="json"), headers=headers
             ) as response,
         ):
             if response.status_code != 200:
                 raw_err = (await response.aread()).decode("utf-8", errors="replace").strip()
                 detail = raw_err or f"source workspace export returned HTTP {response.status_code}"
-                if response.status_code in (409, 413, 422):
-                    raise HTTPException(response.status_code, detail)
-                raise HTTPException(503, detail)
+                status = response.status_code if response.status_code in (409, 413, 422) else 503
+                raise HTTPException(status, detail)
             buf = bytearray()
             async for chunk in response.aiter_bytes():
                 buf.extend(chunk)
                 if len(buf) > MAX_BUNDLE_STREAM_BYTES:
                     raise HTTPException(
-                        413,
-                        f"workspace export stream exceeds {MAX_BUNDLE_STREAM_BYTES}-byte limit",
+                        413, f"workspace export stream exceeds {MAX_BUNDLE_STREAM_BYTES}-byte limit"
                     )
             return bytes(buf)
     except httpx.HTTPError as exc:
@@ -275,9 +296,7 @@ def _decode_and_digest_bundle(
     bundle_bytes: bytes, *, agent_id: int, transfer_id: str
 ) -> tuple[WorkspaceBundleManifest, str]:
     manifest, _tar = decode_bundle(
-        bundle_bytes,
-        expected_agent_id=agent_id,
-        expected_transfer_id=transfer_id,
+        bundle_bytes, expected_agent_id=agent_id, expected_transfer_id=transfer_id
     )
     return manifest, hashlib.sha256(bundle_bytes).hexdigest()
 
@@ -296,7 +315,11 @@ def commit_cutover_blocking(
     snapshot: AgentTransferSnapshot,
     body: TransferAgentRequest,
     manifest: WorkspaceBundleManifest,
-) -> tuple[list[str], telemetry.Event]:
+    step1_closed_pages: list[str] | None = None,
+    step1_killed_shells: list[int] | None = None,
+) -> tuple[list[str], list[int], telemetry.Event]:
+    s1_closed = step1_closed_pages or []
+    s1_shells = step1_killed_shells or []
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT paused_at IS NOT NULL, stopped_at IS NOT NULL, 'agent-runner' = ANY(role) "
@@ -332,7 +355,20 @@ def commit_cutover_blocking(
                 f"agent {snapshot.agent_id} started an upload delivery batch during transfer"
             )
 
-        closed_pages = close_all_agent_pages_in_transaction(conn, snapshot.agent_id)
+        cutover_closed_pages = close_all_agent_pages_in_transaction(conn, snapshot.agent_id)
+        closed_pages = list(dict.fromkeys(s1_closed + cutover_closed_pages))
+        killed_shell_sessions = sorted(set(s1_shells + manifest.killed_shell_sessions))
+
+        # meiva:note
+        # Unlink only pages tied to the current status_changed_at so resurrect on to_machine
+        # does not reopen host-local pages from from_machine, preserving older history.
+        cur.execute(
+            "UPDATE agent_pages SET closed_at = closed_at - interval '1 millisecond' "
+            "WHERE agent_id = %s AND closed_at = ("
+            "  SELECT status_changed_at FROM agents_meta WHERE id = %s"
+            ")",
+            (snapshot.agent_id, snapshot.agent_id),
+        )
         cur.execute("DELETE FROM agent_shell_ttls WHERE agent_id = %s", (snapshot.agent_id,))
         cur.execute(
             "UPDATE agents_meta SET machine = %s, runtime_owner = NULL, "
@@ -341,41 +377,23 @@ def commit_cutover_blocking(
             (body.to_machine, snapshot.agent_id),
         )
 
-        note_text = compose_transfer_system_note(
-            from_machine=snapshot.from_machine,
-            to_machine=body.to_machine,
-            source=body.source,
-            message=body.message,
-            killed_shell_sessions=manifest.killed_shell_sessions,
-            closed_pages=closed_pages,
-        )
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, %s, 'system_note', %s, %s)",
-            (
-                snapshot.agent_id,
-                note_text,
-                body.source,
-                Jsonb({"note_tag": NoteTag.CONTEXT.value, PASSIVE_INBOUND_KEY: True}),
+        prepared_event = record_audit(
+            conn,
+            prepare_event_log(
+                event_type="transfer",
+                agent_id=snapshot.agent_id,
+                source=body.source,
+                payload={
+                    "from_machine": snapshot.from_machine,
+                    "to_machine": body.to_machine,
+                    "files_transferred": manifest.files_count,
+                    "bytes_transferred": manifest.total_file_bytes,
+                    "killed_shell_sessions": killed_shell_sessions,
+                    "closed_pages": closed_pages,
+                },
             ),
         )
-
-        audit_payload: dict[str, object] = {
-            "from_machine": snapshot.from_machine,
-            "to_machine": body.to_machine,
-            "files_transferred": manifest.files_count,
-            "bytes_transferred": manifest.total_file_bytes,
-            "killed_shell_sessions": manifest.killed_shell_sessions,
-            "closed_pages": closed_pages,
-        }
-        event = prepare_event_log(
-            event_type="transfer",
-            agent_id=snapshot.agent_id,
-            source=body.source,
-            payload=audit_payload,
-        )
-        prepared_event = record_audit(conn, event)
-    return closed_pages, prepared_event
+    return closed_pages, killed_shell_sessions, prepared_event
 
 
 async def _abort_target_best_effort(
@@ -415,9 +433,7 @@ async def _finalize_best_effort(
             target_machine=machine,
             kind="workspace_transfer_finalize",
             payload=WorkspaceTransferFinalizePayload(
-                agent_id=agent_id,
-                transfer_id=transfer_id,
-                role=role,
+                agent_id=agent_id, transfer_id=transfer_id, role=role
             ).model_dump(mode="json"),
             timeout_s=_FINALIZE_TIMEOUT_S,
             retries=0,
@@ -445,17 +461,18 @@ async def _stage_and_import_bundle(
     bundle_path = f"/api/internal/agent-transfers/{transfer_id}/bundle"
     with deps.bundles.stage(transfer_id, bundle_bytes):
         try:
+            payload = WorkspaceTransferImportPayload(
+                agent_id=agent_id,
+                transfer_id=transfer_id,
+                bundle_path=bundle_path,
+                bundle_bytes=len(bundle_bytes),
+                bundle_sha256=bundle_sha256,
+            ).model_dump(mode="json")
             raw_import = await deps.rpc.dispatch_to_machine(
                 deps.db,
                 target_machine=to_machine,
                 kind="workspace_transfer_import",
-                payload=WorkspaceTransferImportPayload(
-                    agent_id=agent_id,
-                    transfer_id=transfer_id,
-                    bundle_path=bundle_path,
-                    bundle_bytes=len(bundle_bytes),
-                    bundle_sha256=bundle_sha256,
-                ).model_dump(mode="json"),
+                payload=payload,
                 timeout_s=_IMPORT_TIMEOUT_S,
                 retries=0,
             )
@@ -473,8 +490,7 @@ async def _stage_and_import_bundle(
             )
             reason = exc.result.get("reason")
             err_msg = str(exc.result.get("error") or "workspace import failed")
-            status_code = 413 if reason == "transfer_too_large" else 502
-            raise HTTPException(status_code, err_msg) from exc
+            raise HTTPException(413 if reason == "transfer_too_large" else 502, err_msg) from exc
 
     if (
         import_result.files_transferred != manifest.files_count
@@ -486,6 +502,55 @@ async def _stage_and_import_bundle(
         raise HTTPException(
             502, "target workspace import counters did not match the verified manifest"
         )
+
+
+async def _terminate_source_if_idling(
+    deps: TransferDeps,
+    *,
+    agent_id: int,
+    snapshot: AgentTransferSnapshot,
+    source: str,
+) -> tuple[list[int], list[str]]:
+    if snapshot.status != "idling":
+        return [], []
+    step1_closed_pages = await asyncio.to_thread(
+        _guard_idling_pre_termination_blocking,
+        deps.db_pool,
+        agent_id,
+        snapshot.from_machine,
+    )
+    try:
+        raw_term = await deps.rpc.dispatch_to_machine(
+            deps.db,
+            target_machine=snapshot.from_machine,
+            kind="lifecycle",
+            payload={
+                "path": f"/api/agents/{agent_id}/terminate",
+                "body": TerminateAgentRequest(
+                    source=source, force=True, kill_all_shell_sessions=True
+                ).model_dump(mode="json"),
+            },
+            timeout_s=_PREPARE_TIMEOUT_S,
+            retries=0,
+        )
+    except ClusterOpUnreachable as exc:
+        raise HTTPException(
+            503, f"source machine {snapshot.from_machine!r} is unreachable: {exc}"
+        ) from exc
+    except ClusterOpFailed as exc:
+        raise HTTPException(
+            502,
+            f"source machine {snapshot.from_machine!r} failed to terminate agent: {exc.result.get('error')}",
+        ) from exc
+
+    term_response = TerminateAgentResponse.model_validate(raw_term)
+    step1_killed_shells: list[int] = []
+    if term_response.shell_sessions is not None and term_response.shell_sessions.killed:
+        step1_killed_shells = term_response.shell_sessions.killed
+        await asyncio.to_thread(
+            _drop_killed_shell_ttls, deps.db_pool, agent_id, step1_killed_shells
+        )
+    return step1_killed_shells, step1_closed_pages
 
 
 # meiva:note
@@ -508,14 +573,20 @@ async def execute_agent_transfer(
     snapshot = decision.snapshot
     transfer_id = new_uuid(deps.rng).hex
 
+    step1_killed_shells, step1_closed_pages = await _terminate_source_if_idling(
+        deps,
+        agent_id=agent_id,
+        snapshot=snapshot,
+        source=body.source,
+    )
+
     try:
         await deps.rpc.dispatch_to_machine(
             deps.db,
             target_machine=decision.to_machine,
             kind="workspace_transfer_prepare",
             payload=WorkspaceTransferPreparePayload(
-                agent_id=agent_id,
-                transfer_id=transfer_id,
+                agent_id=agent_id, transfer_id=transfer_id
             ).model_dump(mode="json"),
             timeout_s=_PREPARE_TIMEOUT_S,
             retries=0,
@@ -530,15 +601,7 @@ async def execute_agent_transfer(
             f"target machine {decision.to_machine!r} refused workspace prepare: {exc.result.get('error')}",
         ) from exc
 
-    export_req = WorkspaceExportRequest(
-        agent_id=agent_id,
-        transfer_id=transfer_id,
-        expected_status=snapshot.status,
-        expected_runtime_owner=snapshot.runtime_owner,
-        expected_runtime_generation=snapshot.runtime_generation,
-        expected_last_admission_at=snapshot.last_admission_at,
-        expected_session_index=snapshot.session_index,
-    )
+    export_req = WorkspaceExportRequest(agent_id=agent_id, transfer_id=transfer_id)
     bundle_bytes = await _fetch_source_export(
         decision.source_ops_url,
         export_req,
@@ -568,27 +631,23 @@ async def execute_agent_transfer(
     )
 
     try:
-        closed_pages, prepared_event = await asyncio.to_thread(
+        closed_pages, killed_shell_sessions, prepared_event = await asyncio.to_thread(
             commit_cutover_blocking,
             deps.db_pool,
             snapshot=snapshot,
             body=body,
             manifest=manifest,
+            step1_closed_pages=step1_closed_pages,
+            step1_killed_shells=step1_killed_shells,
         )
     except CutoverConflictError as exc:
         await _abort_target_best_effort(
-            deps,
-            to_machine=decision.to_machine,
-            agent_id=agent_id,
-            transfer_id=transfer_id,
+            deps, to_machine=decision.to_machine, agent_id=agent_id, transfer_id=transfer_id
         )
         raise HTTPException(409, str(exc)) from exc
     except Exception:
         await _abort_target_best_effort(
-            deps,
-            to_machine=decision.to_machine,
-            agent_id=agent_id,
-            transfer_id=transfer_id,
+            deps, to_machine=decision.to_machine, agent_id=agent_id, transfer_id=transfer_id
         )
         raise
 
@@ -597,31 +656,65 @@ async def execute_agent_transfer(
     for page_name in closed_pages:
         await publish_page_closed(deps.bus, agent_id, page_name)
 
-    await asyncio.gather(
-        _finalize_best_effort(
-            deps,
-            machine=decision.to_machine,
-            role="target",
-            agent_id=agent_id,
-            transfer_id=transfer_id,
-        ),
-        _finalize_best_effort(
-            deps,
-            machine=snapshot.from_machine,
-            role="source",
-            agent_id=agent_id,
-            transfer_id=transfer_id,
-        ),
+    wake_message = compose_transfer_wake_message(
+        from_machine=snapshot.from_machine,
+        to_machine=decision.to_machine,
+        source=body.source,
+        message=body.message,
+        killed_shell_sessions=killed_shell_sessions,
+        closed_pages=closed_pages,
     )
+
+    try:
+        try:
+            await deps.rpc.dispatch_to_machine(
+                deps.db,
+                target_machine=decision.to_machine,
+                kind="lifecycle",
+                payload={
+                    "path": f"/api/agents/{agent_id}/resurrect-explicit",
+                    "body": ResurrectAgentRequest(
+                        resurrected_by=body.source,
+                        prompt=wake_message,
+                    ).model_dump(mode="json"),
+                },
+            )
+        except ClusterOpUnreachable as exc:
+            raise HTTPException(
+                503,
+                f"target machine {decision.to_machine!r} is unreachable for resurrection: {exc}",
+            ) from exc
+        except ClusterOpFailed as exc:
+            raise HTTPException(
+                502,
+                f"target machine {decision.to_machine!r} failed to resurrect agent: {exc.result.get('error')}",
+            ) from exc
+    finally:
+        await asyncio.gather(
+            _finalize_best_effort(
+                deps,
+                machine=decision.to_machine,
+                role="target",
+                agent_id=agent_id,
+                transfer_id=transfer_id,
+            ),
+            _finalize_best_effort(
+                deps,
+                machine=snapshot.from_machine,
+                role="source",
+                agent_id=agent_id,
+                transfer_id=transfer_id,
+            ),
+        )
 
     return TransferAgentResponse(
         agent_id=agent_id,
         from_machine=snapshot.from_machine,
         to_machine=decision.to_machine,
-        agent_status=snapshot.status,
+        agent_status="idling",
         files_transferred=manifest.files_count,
         bytes_transferred=manifest.total_file_bytes,
-        killed_shell_sessions=manifest.killed_shell_sessions,
+        killed_shell_sessions=killed_shell_sessions,
         closed_pages=closed_pages,
     )
 

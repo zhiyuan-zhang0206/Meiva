@@ -57,35 +57,23 @@ def _verify_export_fence(
     request: WorkspaceExportRequest,
     *,
     local_machine: str,
-) -> None:
+) -> int:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT machine, status, runtime_owner, runtime_generation, "
-            "last_admission_at, session_index "
-            "FROM agents_meta WHERE id = %s",
+            "SELECT machine, status, session_index FROM agents_meta WHERE id = %s",
             (request.agent_id,),
         )
         row = cur.fetchone()
         if row is None:
             raise WorkspaceTransferConflictError(f"agent {request.agent_id} does not exist")
-        machine, status, runtime_owner, runtime_generation, last_admission_at, session_index = row
+        machine, status, session_index = row
         if machine != local_machine:
             raise WorkspaceTransferConflictError(
                 f"agent {request.agent_id} is hosted on {machine!r}, not {local_machine!r}"
             )
-        if status == "running":
+        if status != "terminated":
             raise WorkspaceTransferConflictError(
-                f"agent {request.agent_id} is running on {local_machine!r}; transfer refuses running agents"
-            )
-        if (
-            status != request.expected_status
-            or runtime_owner != request.expected_runtime_owner
-            or runtime_generation != request.expected_runtime_generation
-            or last_admission_at != request.expected_last_admission_at
-            or int(session_index) != request.expected_session_index
-        ):
-            raise WorkspaceTransferConflictError(
-                f"agent {request.agent_id} state changed on {local_machine!r} before workspace export"
+                f"agent {request.agent_id} status is {status!r}; transfer requires 'terminated'"
             )
         cur.execute(
             "SELECT 1 FROM inbound_messages WHERE agent_id = %s "
@@ -96,12 +84,12 @@ def _verify_export_fence(
             raise WorkspaceTransferConflictError(
                 f"agent {request.agent_id} has an in-flight lifecycle command"
             )
+        return int(session_index)
 
 
 # meiva:note
-# Verify the source fence, kill local persistent shells below `expected_session_index`, pack the
-# workspace into a `MEIVA_WS_V1` bundle, and re-verify the fence so a turn admitted mid-pack aborts
-# before returning bytes.
+# Verify the source fence is 'terminated', kill local persistent shells, pack the workspace into a
+# `MEIVA_WS_V1` bundle, and re-verify the fence.
 def export_workspace_bundle(
     pool: ConnectionPool,
     request: WorkspaceExportRequest,
@@ -109,10 +97,10 @@ def export_workspace_bundle(
     local_machine: str,
     home: Path,
 ) -> bytes:
-    _verify_export_fence(pool, request, local_machine=local_machine)
+    session_index = _verify_export_fence(pool, request, local_machine=local_machine)
     killed = kill_agent_shells(
         request.agent_id,
-        before_session_index=request.expected_session_index,
+        before_session_index=session_index,
         home=home,
     )
     _manifest, stream = pack_workspace(

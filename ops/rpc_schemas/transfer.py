@@ -6,9 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -20,8 +18,8 @@ from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 # `POST /api/agents/{id}/transfer` request body.
 #
 # `to_machine` names the destination `agent-runner` machine. `source` defaults to `"user"` and is
-# validated against `validate_source` so the passive `system_note` inserted at cutover carries a
-# valid claim-side provenance string. `message`, when given, must be non-blank after trimming.
+# validated against `validate_source` so the wake prompt dispatched at cutover carries a valid
+# claim-side provenance string. `message`, when given, must be non-blank after trimming.
 class TransferAgentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -74,19 +72,14 @@ class TransferAgentResponse(BaseModel):
 
 # meiva:note
 # Tiny JSON request body (`< 1 KiB`, inside the 64 KiB `agent-ops` body limit) sent by the gateway
-# to `POST /workspace/export` on the source runner. Carries the precheck fence values so the source
-# runner verifies the agent is still non-running and unmoved on this host before killing local
-# shells and packing `<home>/workspaces/<agent_id>`.
+# to `POST /workspace/export` on the source runner. Carries agent_id and transfer_id so the source
+# runner verifies the agent is still terminated and unmoved on this host before killing local shells
+# and packing `<home>/workspaces/<agent_id>`.
 class WorkspaceExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: int = Field(gt=0)
     transfer_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    expected_status: Literal["idling", "terminated"]
-    expected_runtime_owner: UUID | None = None
-    expected_runtime_generation: UUID | None = None
-    expected_last_admission_at: datetime | None = None
-    expected_session_index: int = Field(ge=0)
 
 
 # meiva:note

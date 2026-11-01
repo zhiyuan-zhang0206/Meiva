@@ -1,5 +1,5 @@
 # meiva:note
-# Pure eligibility checks, CAS comparison, and passive `system_note` composition for whole-agent
+# Pure eligibility checks, CAS comparison, and wake message composition for whole-agent
 # cross-machine transfers.
 #
 # No database, filesystem, network, clock, or randomness access lives here (`purity = "strict"`).
@@ -8,9 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal
-from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -19,10 +17,6 @@ class AgentRowFacts:
     machine: str
     status: str
     harness: str
-    runtime_owner: UUID | None
-    runtime_generation: UUID | None
-    last_admission_at: datetime | None
-    session_index: int
 
 
 @dataclass(frozen=True)
@@ -59,10 +53,6 @@ class AgentTransferSnapshot:
     agent_id: int
     from_machine: str
     status: Literal["idling", "terminated"]
-    runtime_owner: UUID | None
-    runtime_generation: UUID | None
-    last_admission_at: datetime | None
-    session_index: int
 
 
 @dataclass(frozen=True)
@@ -98,7 +88,7 @@ def _parse_settled_status(status: str) -> Literal["idling", "terminated"]:
     raise ValueError(f"unsupported status {status!r} for transfer")
 
 
-def _check_agent_state(agent: AgentRowFacts) -> Literal["idling", "terminated"] | TransferRefusal:
+def check_agent_state(agent: AgentRowFacts) -> Literal["idling", "terminated"] | TransferRefusal:
     if agent.harness != "meiva":
         return TransferRefusal(
             409,
@@ -120,7 +110,7 @@ def _check_agent_state(agent: AgentRowFacts) -> Literal["idling", "terminated"] 
         )
 
 
-def _check_blocking_activity(facts: TransferPrecheckFacts) -> TransferRefusal | None:
+def check_blocking_activity(facts: TransferPrecheckFacts) -> TransferRefusal | None:
     agent_id = facts.agent_id
     if facts.pending_lifecycle is not None:
         return TransferRefusal(
@@ -200,10 +190,10 @@ def _check_machines(agent: AgentRowFacts, facts: TransferPrecheckFacts) -> str |
 def evaluate_precheck(facts: TransferPrecheckFacts) -> TransferPlan | TransferRefusal:
     if facts.agent is None:
         return TransferRefusal(404, f"agent {facts.agent_id} does not exist")
-    settled = _check_agent_state(facts.agent)
+    settled = check_agent_state(facts.agent)
     if isinstance(settled, TransferRefusal):
         return settled
-    blocked = _check_blocking_activity(facts)
+    blocked = check_blocking_activity(facts)
     if blocked is not None:
         return blocked
     source_ops_url = _check_machines(facts.agent, facts)
@@ -215,10 +205,6 @@ def evaluate_precheck(facts: TransferPrecheckFacts) -> TransferPlan | TransferRe
             agent_id=agent.agent_id,
             from_machine=agent.machine,
             status=settled,
-            runtime_owner=agent.runtime_owner,
-            runtime_generation=agent.runtime_generation,
-            last_admission_at=agent.last_admission_at,
-            session_index=agent.session_index,
         ),
         source_ops_url=source_ops_url,
         to_machine=facts.to_machine,
@@ -226,8 +212,8 @@ def evaluate_precheck(facts: TransferPrecheckFacts) -> TransferPlan | TransferRe
 
 
 # meiva:note
-# Verify under `SELECT ... FOR UPDATE` that the agent's placement, status, runtime ownership,
-# admission timestamp, and shell sequence number have not moved while workspace bytes were copied.
+# Verify under `SELECT ... FOR UPDATE` that the agent's placement and status remain valid on
+# from_machine and status is 'terminated'.
 def verify_cutover_cas(
     snapshot: AgentTransferSnapshot,
     current: AgentRowFacts | None,
@@ -241,27 +227,19 @@ def verify_cutover_cas(
             f"agent {snapshot.agent_id} moved from {snapshot.from_machine!r} "
             f"to {current.machine!r} during transfer"
         )
-    if current.status != snapshot.status:
+    if current.status != "terminated":
         return (
-            f"agent {snapshot.agent_id} status changed from {snapshot.status!r} "
-            f"to {current.status!r} during transfer"
+            f"agent {snapshot.agent_id} status changed to {current.status!r} "
+            "during transfer; expected 'terminated'"
         )
-    if (
-        current.runtime_owner != snapshot.runtime_owner
-        or current.runtime_generation != snapshot.runtime_generation
-        or current.last_admission_at != snapshot.last_admission_at
-    ):
-        return f"agent {snapshot.agent_id} admitted a new turn during transfer"
-    if current.session_index != snapshot.session_index:
-        return f"agent {snapshot.agent_id} allocated a new shell session during transfer"
     return None
 
 
 # meiva:note
-# Compose the passive `system_note` (`NoteTag.CONTEXT`, `passive=True`) recorded on cutover so the
-# agent learns on its next turn on `to_machine` that its host changed and machine-local shells/pages
-# on `from_machine` were closed.
-def compose_transfer_system_note(
+# Compose the transfer wake message delivered when the agent is resurrected on `to_machine`,
+# informing it that cross-machine transfer is complete, its workspace is active, and any
+# machine-local shells or pages on `from_machine` were closed.
+def compose_transfer_wake_message(
     *,
     from_machine: str,
     to_machine: str,
@@ -271,7 +249,7 @@ def compose_transfer_system_note(
     closed_pages: list[str],
 ) -> str:
     details: list[str] = [
-        f"You were transferred from machine '{from_machine}' to '{to_machine}' by {source}.",
+        f"Cross-machine transfer from '{from_machine}' to '{to_machine}' initiated by {source} is complete.",
         f"Your workspace files are now at your workspace directory on '{to_machine}'.",
     ]
     if killed_shell_sessions:

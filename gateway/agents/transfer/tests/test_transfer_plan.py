@@ -4,9 +4,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from uuid import UUID
-
 import pytest
 
 from gateway.agents.transfer.bundle_store import TransferBundleStore
@@ -19,14 +16,10 @@ from gateway.agents.transfer.transfer_plan import (
     TransferPlan,
     TransferPrecheckFacts,
     TransferRefusal,
-    compose_transfer_system_note,
+    compose_transfer_wake_message,
     evaluate_precheck,
     verify_cutover_cas,
 )
-
-_OWNER = UUID("11111111-1111-1111-1111-111111111111")
-_GEN = UUID("22222222-2222-2222-2222-222222222222")
-_TS = datetime(2026, 11, 1, 0, 0, tzinfo=UTC)
 
 
 def _agent(
@@ -34,18 +27,12 @@ def _agent(
     machine: str = "macmini",
     status: str = "idling",
     harness: str = "meiva",
-    last_admission_at: datetime | None = _TS,
-    session_index: int = 4,
 ) -> AgentRowFacts:
     return AgentRowFacts(
         agent_id=2697,
         machine=machine,
         status=status,
         harness=harness,
-        runtime_owner=_OWNER,
-        runtime_generation=_GEN,
-        last_admission_at=last_admission_at,
-        session_index=session_index,
     )
 
 
@@ -81,9 +68,6 @@ def test_precheck_accepts_idling_and_terminated_native_agents() -> None:
         )
         assert isinstance(decision, TransferPlan)
         assert decision.snapshot.status == status
-        assert decision.snapshot.runtime_owner == _OWNER
-        assert decision.snapshot.runtime_generation == _GEN
-        assert decision.snapshot.session_index == 4
         assert decision.to_machine == "company-mini"
 
 
@@ -215,19 +199,16 @@ def test_verify_cutover_cas_detects_concurrent_mutations() -> None:
     assert isinstance(plan, TransferPlan)
     snap = plan.snapshot
 
-    assert verify_cutover_cas(snap, _agent()) is None
+    assert verify_cutover_cas(snap, _agent(status="terminated")) is None
     assert verify_cutover_cas(snap, None) is not None
     assert verify_cutover_cas(snap, _agent(status="running")) is not None
-    assert verify_cutover_cas(snap, _agent(machine="other")) is not None
-    assert verify_cutover_cas(snap, _agent(session_index=5)) is not None
-    assert (
-        verify_cutover_cas(snap, _agent(last_admission_at=datetime(2026, 11, 1, 1, 0, tzinfo=UTC)))
-        is not None
-    )
+    assert verify_cutover_cas(snap, _agent(status="idling")) is not None
+    assert verify_cutover_cas(snap, _agent(status="terminated", machine="other")) is not None
+    assert verify_cutover_cas(snap, _agent(status="terminated", harness="codex")) is not None
 
 
-def test_compose_transfer_system_note_and_bundle_store_cleanup() -> None:
-    note = compose_transfer_system_note(
+def test_compose_transfer_wake_message_and_bundle_store_cleanup() -> None:
+    note = compose_transfer_wake_message(
         from_machine="macmini",
         to_machine="company-mini",
         source="user",
@@ -235,7 +216,7 @@ def test_compose_transfer_system_note_and_bundle_store_cleanup() -> None:
         killed_shell_sessions=[1, 3],
         closed_pages=["dashboard"],
     )
-    assert "from machine 'macmini' to 'company-mini' by user" in note
+    assert "Cross-machine transfer from 'macmini' to 'company-mini' initiated by user" in note
     assert "1, 3" in note
     assert "dashboard" in note
     assert "Reason: Rebalancing workload" in note
