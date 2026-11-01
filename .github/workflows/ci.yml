@@ -1163,6 +1163,12 @@ jobs:
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
       COVERAGE_FILE: coverage-data-${{ matrix.group }}
     steps:
+      # Diagnostic only, not a gate: what PID 1 is inside this job's container.
+      - name: Diagnostic - container PID 1 (not a gate)
+        run: |
+          cat /proc/1/comm
+          ps -o pid,ppid,stat,comm -p 1
+          head -3 /proc/1/status
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Restore the test durations
@@ -1338,6 +1344,12 @@ jobs:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
+      # Diagnostic only, not a gate: what PID 1 is inside this job's container.
+      - name: Diagnostic - container PID 1 (not a gate)
+        run: |
+          cat /proc/1/comm
+          ps -o pid,ppid,stat,comm -p 1
+          head -3 /proc/1/status
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Restore the test durations
@@ -1457,6 +1469,12 @@ jobs:
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
       COVERAGE_FILE: coverage-data-serial
     steps:
+      # Diagnostic only, not a gate: what PID 1 is inside this job's container.
+      - name: Diagnostic - container PID 1 (not a gate)
+        run: |
+          cat /proc/1/comm
+          ps -o pid,ppid,stat,comm -p 1
+          head -3 /proc/1/status
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Cache uv wheels
