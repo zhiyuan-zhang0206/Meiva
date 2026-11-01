@@ -9,14 +9,14 @@ tags:
 
 # Schema reset generations
 
-The 2026-10-26 reset folds the 93 preceding deltas into the baseline and removes
+The 2026-11-01 reset folds the 8 preceding deltas into the baseline and removes
 their seed stamps (while keeping `20261017T203552_checkpoints-compact-boundary-index`
 as a post-baseline file for the LangGraph `public.checkpoints` table).
 `base/deploy/schema/migration_history.py` retains that exact inventory plus the earlier
-2026-09-23 (101-name) and 2026-08-14 (59-name) generations: older backup restores have
+2026-10-26 (93-name), 2026-09-23 (101-name) and 2026-08-14 (59-name) generations: older backup restores have
 not been ruled out. Before convergence deletes tracking rows, any partial
 generation raises `MigrationHistoryGap`. Without the current reset anchor, the
-complete 93-name predecessor set is mandatory, including on baseline-only
+complete 8-name predecessor set is mandatory, including on baseline-only
 restores. Fresh databases stamp the new anchor directly. The upgrade inserts
 the anchor and deletes folded tracking rows in one transaction, so an
 interruption preserves a retryable generation. A real Postgres `AFTER DELETE`
