@@ -444,7 +444,9 @@ def test_agent_host_launches_under_the_agent_profile(unit_home: Path) -> None:
         environment={},
         env_file=read_env_aliases(env_file_path(unit_home)),
     )
-    profile = root_driver.service_extra_env(agent_host, delivery=launch)["MEIVA_PROCESS_PROFILE"]
+    profile = root_driver.service_extra_env(
+        agent_host, delivery=launch, roles=frozenset({"agent-runner"})
+    )["MEIVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
     assert profile == "agent"
 

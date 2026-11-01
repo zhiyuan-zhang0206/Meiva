@@ -10,7 +10,7 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel
 
-from base.cluster.machine import MachineRole
+from base.cluster.machine import MachineRole, MachineRoles
 from base.daemon.health import DaemonProbe
 from base.host.env.health_ports import DEFAULT_PORTS
 
@@ -128,6 +128,18 @@ class ServiceSpec:
     no_profile_marker: bool = False
     config_inputs: tuple[Path, ...] = ()
     db_access: DbAccess | None = None
+    # meiva:note
+    # `api_access_from_host` marks a service that runs on every host kind, so its machine API
+    # token class is the HOST's own: `runner` where the host carries `agent-runner`, `gateway`
+    # on a gateway-only host, none where it carries neither (that host does not run the service).
+    # The pty session daemon declares it: every shell it starts (an agent's, a schedule's, a
+    # watcher's) inherits its environment, so one fixed class cannot launch on both kinds of
+    # host — a runner machine issues only its unit capability's runner token and a gateway-only
+    # machine only its generation's gateway token (2026-11-01, task #5979: an empty environment
+    # left all 16 sessions of a runner host without a bearer). A service that declares
+    # `db_access` or a single capability takes that class instead; the telemetry collector,
+    # whose bearer is rendered into its configuration, receives none.
+    api_access_from_host: bool = False
     stop_ceiling_s: float | None = None
     health_name: str | None = None
     home_healthz: bool = False
@@ -263,4 +275,22 @@ def api_access(spec: ServiceSpec) -> DbAccess | None:
         return "gateway"
     if marker in {"runner", "agent"} or (marker is None and spec.capabilities == AGENT_RUNNER):
         return "runner"
+    return None
+
+
+# meiva:note
+# The machine API token class the launcher delivers to `spec` on a host with `roles`.
+#
+# `api_access` decides every service with a class of its own; a service that runs on every host
+# kind declares `api_access_from_host` and has none, so it takes the host's. `roles` is the
+# host's own role set, never the service's capability set: only the host knows which class it
+# can issue.
+def api_access_for_host(spec: ServiceSpec, roles: MachineRoles) -> DbAccess | None:
+    declared = api_access(spec)
+    if declared is not None or not spec.api_access_from_host:
+        return declared
+    if "agent-runner" in roles:
+        return "runner"
+    if "gateway" in roles:
+        return "gateway"
     return None

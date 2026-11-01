@@ -591,7 +591,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
 def test_launched_services_receive_their_class_login_only(born: Born) -> None:
     from base.sessions.env_forwarding import managed_service_env
     from cli.commands.lifecycle.root_driver import service_extra_env
-    from services.supervision.roster.service_spec import ServiceSpec
+    from services.supervision.roster.service_spec import BOTH, ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).
     launch = LaunchDelivery(
@@ -610,16 +610,33 @@ def test_launched_services_receive_their_class_login_only(born: Born) -> None:
     frontend = ServiceSpec(
         session="frontend", cmd="x", capabilities=frozenset({"gateway"}), requires_db=False
     )
-    assert service_extra_env(gateway, delivery=launch)["MEIVA_DB_URL"] == born.dsn("gateway")
-    assert service_extra_env(runner, delivery=launch)["MEIVA_DB_URL"] == born.dsn("runner")
-    assert service_extra_env(runner, delivery=launch)[delivery.GENERATION_ENV] == "0"
-    assert "MEIVA_DB_URL" not in service_extra_env(frontend, delivery=launch)
+    assert service_extra_env(gateway, delivery=launch, roles=_ROLES)["MEIVA_DB_URL"] == born.dsn(
+        "gateway"
+    )
+    assert service_extra_env(runner, delivery=launch, roles=_ROLES)["MEIVA_DB_URL"] == born.dsn(
+        "runner"
+    )
+    assert service_extra_env(runner, delivery=launch, roles=_ROLES)[delivery.GENERATION_ENV] == "0"
+    assert "MEIVA_DB_URL" not in service_extra_env(frontend, delivery=launch, roles=_ROLES)
     # The born single box authenticates its API: each service is delivered its class
     # token, the database-free frontend included, and never the root itself.
     tokens = ledger.read_secret(born.home, delivery.active_generation(born.home)).api
-    assert service_extra_env(gateway, delivery=launch)[API_TOKEN_ENV] == tokens.gateway
-    assert service_extra_env(runner, delivery=launch)[API_TOKEN_ENV] == tokens.runner
-    assert service_extra_env(frontend, delivery=launch)[API_TOKEN_ENV] == tokens.gateway
+    assert (
+        service_extra_env(gateway, delivery=launch, roles=_ROLES)[API_TOKEN_ENV] == tokens.gateway
+    )
+    assert service_extra_env(runner, delivery=launch, roles=_ROLES)[API_TOKEN_ENV] == tokens.runner
+    assert (
+        service_extra_env(frontend, delivery=launch, roles=_ROLES)[API_TOKEN_ENV] == tokens.gateway
+    )
+    # meiva:note
+    # A service that runs on every host kind takes the host's own class (task #5979): runner
+    # here, because a single box runs agent shells, and gateway on a gateway-only host.
+    anywhere = ServiceSpec("pty-sessions", "x", BOTH, False, api_access_from_host=True)
+    assert (
+        service_extra_env(anywhere, delivery=launch, roles=_ROLES)[API_TOKEN_ENV] == tokens.runner
+    )
+    gateway_only = service_extra_env(anywhere, delivery=launch, roles=frozenset({"gateway"}))
+    assert gateway_only[API_TOKEN_ENV] == tokens.gateway and "MEIVA_DB_URL" not in gateway_only
     root = managed_service_env(settings.general.service_path, environ=process_environment())
     assert "MEIVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root

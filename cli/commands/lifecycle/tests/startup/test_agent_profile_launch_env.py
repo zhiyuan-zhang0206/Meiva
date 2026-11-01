@@ -50,7 +50,8 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
         env_file=read_env_aliases(env_file_path(unit_home)),
     )
     environments = {
-        spec.session: root_driver.service_extra_env(spec, delivery=launch) for spec in (agent, ops)
+        spec.session: root_driver.service_extra_env(spec, delivery=launch, roles=AGENT_RUNNER)
+        for spec in (agent, ops)
     }
     path = generate(
         tmp_path / "manifest.json",
