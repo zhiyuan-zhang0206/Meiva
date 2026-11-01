@@ -1,5 +1,5 @@
 // meiva:note
-// Raw HTML renders only through the shared sanitize allowlist — scripts, styles, frames and event handlers never reach the DOM; urlTransform keeps HTTP(S)/mailto/page-anchor URLs and sends the rest to about:blank; external HTTP(S) links open in a new tab with rel=noopener noreferrer, and explicit document resolvers may replace registered local references with authenticated resource URLs. remark-cjk-friendly, plus the remark-cjk-friendly-gfm-strikethrough companion required while remark-gfm is in the pipeline, restores bold and strikethrough when delimiters sit against CJK letters or punctuation-led content (curly quotes, straight quotes, corner brackets — task #3314); plain CJK and ASCII emphasis stays unchanged. Both GFM tilde tokenizers disable single-tilde strike-through so home paths and approximations like the reported ~61G and ~/work stay literal, only the double form strikes, and tildes inside inline code are untouched (task #3653). Fenced code retains whitespace even without a language tag, renders as one pre block, and exposes copy controls; a fenced python block routes to the PythonCode surface while inline code never does. Memoization avoids re-parsing unchanged sibling content during streaming. The suite mocks PythonCode, so the tests never run Prism.
+// Raw HTML renders only through the shared sanitize allowlist — scripts, styles, frames and event handlers never reach the DOM; urlTransform keeps HTTP(S)/mailto/page-anchor URLs and sends the rest to about:blank; external HTTP(S) links open in a new tab with rel=noopener noreferrer, and explicit document resolvers may replace registered local references with authenticated resource URLs. remark-cjk-friendly, plus the remark-cjk-friendly-gfm-strikethrough companion required while remark-gfm is in the pipeline, restores bold and strikethrough when delimiters sit against CJK letters or punctuation-led content (curly quotes, straight quotes, corner brackets — task #3314); plain CJK and ASCII emphasis stays unchanged. Both GFM tilde tokenizers disable single-tilde strike-through so home paths and approximations like the reported ~61G and ~/work stay literal, only the double form strikes, and tildes inside inline code are untouched (task #3653). remark-breaks turns single soft line breaks into <br> tags so model replies and natural prose preserve author line breaks rather than collapsing them to spaces. Fenced code retains whitespace even without a language tag, renders as one pre block, and exposes copy controls; a fenced python block routes to the PythonCode surface while inline code never does. Memoization avoids re-parsing unchanged sibling content during streaming. The suite mocks PythonCode, so the tests never run Prism.
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
 "use client";
 
@@ -8,6 +8,7 @@ import ReactMarkdown, { type Components, type UrlTransform } from "react-markdow
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
+import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough";
 import remarkGfm from "remark-gfm";
@@ -64,6 +65,7 @@ const sanitizeSchema = {
 };
 
 const baseRemarkPlugins: PluggableList = [
+  remarkBreaks,
   [remarkGfm, { singleTilde: false }],
   remarkCjkFriendly,
   [remarkCjkFriendlyGfmStrikethrough, { singleTilde: false }],
