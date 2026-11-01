@@ -271,6 +271,11 @@ def test_put_non_dict_half_422(db_conn: psycopg.Connection) -> None:
 # meiva:note
 # The inventory routes read the registry through `request.app.state.db_pool`: swap in
 # another pool and it is the one that serves the requests.
+#
+# The upload recovery worker is switched off for this app: it borrows from the same pool on its own
+# five-second cadence, so it would be counted here as if a route had used the retired pool. It is a
+# different tenant with its own test (`test_a_round_uses_the_pool_the_app_holds_now`), which is why
+# the counts below stay exact instead of becoming a lower bound.
 def test_inventory_borrows_from_the_apps_own_pool(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
@@ -286,7 +291,7 @@ def test_inventory_borrows_from_the_apps_own_pool(
     }
     with (
         runner_ops(db_conn, REMOTE, answers),
-        gateway_test_client() as client,
+        gateway_test_client(config=gateway_test_config(upload_recovery_enabled=False)) as client,
         database.pool(max_size=2) as other_pool,
     ):
         original_pool = client.app.state.db_pool

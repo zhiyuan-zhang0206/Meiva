@@ -256,7 +256,7 @@ async def test_a_lost_wake_is_not_repeated(
     client, agent = uploaded_agent
     batch_id = post(client, agent).json()["batch_id"]
     lossy = UploadRecovery(
-        client.app.state.db_pool,
+        lambda: client.app.state.db_pool,
         client.app.state.db,
         unpublishable_bus(),
         machine=machine_identity,

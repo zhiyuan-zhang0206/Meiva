@@ -300,7 +300,7 @@ async def lifespan(
             releases.callback(monitor.stop)
 
             upload_recovery = UploadRecovery(
-                app.state.db_pool,
+                lambda: app.state.db_pool,
                 app.state.db,
                 app.state.bus,
                 machine=process.machine,

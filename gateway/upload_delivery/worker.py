@@ -33,12 +33,19 @@ from ops.lifecycle import resurrect_if_terminated
 _log = logging.getLogger(__name__)
 
 
+# meiva:note
+# The pool is read per round, not kept: `app.state.db_pool` is a runtime fact that a restart or a
+# reconnect may replace, and a worker holding the object it was built with keeps borrowing from the
+# retired one -- silently, because that pool stays open until the process closes it.
+PoolProvider = Callable[[], ConnectionPool]
+
+
 class UploadRecovery:
     """A source domain round and its actual native futures; never time-based leases."""
 
     def __init__(
         self,
-        pool: ConnectionPool,
+        pool_provider: PoolProvider,
         db: Database,
         bus: EventBus,
         *,
@@ -47,7 +54,7 @@ class UploadRecovery:
         claim_seconds: float,
         rpc: RpcClient,
     ) -> None:
-        self.pool, self.db, self.bus = pool, db, bus
+        self.pool_provider, self.db, self.bus = pool_provider, db, bus
         self.rpc = rpc
         self.machine = machine
         self.home = home
@@ -56,6 +63,13 @@ class UploadRecovery:
         self.nudged = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
+
+    # meiva:note
+    # Every use re-reads the provider: one round may span a swap, and a method that kept the
+    # object it started with would write one half of the round into the retired pool.
+    @property
+    def pool(self) -> ConnectionPool:
+        return self.pool_provider()
 
     def nudge(self) -> None:
         self.nudged.set()
@@ -111,9 +125,10 @@ class UploadRecovery:
 
     async def round(self) -> None:
         machine_name = self.machine.name()
+        pool = self.pool_provider()
         requests = await self.native(
             source.due,
-            self.pool,
+            pool,
             4,
             local_machine=machine_name,
             home=self.home,
@@ -125,13 +140,13 @@ class UploadRecovery:
         if not self.stopped.is_set():
             await self.native(
                 staging.release_accepted,
-                self.pool,
+                pool,
                 local_machine=machine_name,
                 home=self.home,
             )
             await self.native(
                 staging.sweep_unsent,
-                self.pool,
+                pool,
                 local_machine=machine_name,
                 home=self.home,
                 ttl_seconds=STAGED_FILE_TTL_SECONDS,

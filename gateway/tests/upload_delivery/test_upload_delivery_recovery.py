@@ -116,7 +116,7 @@ CLAIM_SECONDS = 300.0
 # A recovery worker on the gateway's resources, driven by the test one round at a time.
 def recovery_for(client: GatewayTestClient, machine: MachineIdentityReader) -> UploadRecovery:
     return UploadRecovery(
-        client.app.state.db_pool,
+        lambda: client.app.state.db_pool,
         client.app.state.db,
         client.app.state.bus,
         machine=machine,
@@ -124,6 +124,26 @@ def recovery_for(client: GatewayTestClient, machine: MachineIdentityReader) -> U
         claim_seconds=CLAIM_SECONDS,
         rpc=client.app.state.rpc,
     )
+
+
+# meiva:note
+# A round reads the pool the app holds at that moment: after the app's pool is replaced, the next
+# round borrows from the replacement and the retired pool serves nothing. Without this, the worker
+# could keep a construction-time pool object and only the inventory tenant would notice.
+@pytest.mark.asyncio
+async def test_a_round_uses_the_pool_the_app_holds_now(
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentityReader
+) -> None:
+    client, _agent = uploaded_agent
+    worker = recovery_for(client, machine_identity)
+    retired = client.app.state.db_pool
+    retired_before = retired.get_stats().get("requests_num", 0)
+    with client.app.state.db.pool(max_size=2) as replacement:
+        client.app.state.db_pool = replacement
+        replacement_before = replacement.get_stats().get("requests_num", 0)
+        await worker.round()
+        assert replacement.get_stats().get("requests_num", 0) > replacement_before
+        assert retired.get_stats().get("requests_num", 0) == retired_before
 
 
 def stage(
