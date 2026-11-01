@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from base.agents.context.clients import DatabaseFactory
+from base.host.system.hostport import Host
 from base.log import logger
 from base.native_process.root_control.ipc import CallerPayload
 
@@ -139,7 +140,7 @@ def record_lifecycle_result(*, outcome: Outcome, seconds: float) -> None:
 def operator_lifecycle_audit(
     *,
     database_factory: DatabaseFactory,
-    environ: Mapping[str, str],
+    host: Host,
     home: Path,
     pid: int,
     enabled: bool = True,
@@ -148,6 +149,7 @@ def operator_lifecycle_audit(
         with lifecycle_audit(None) as command:
             yield command
         return
+    environ = host.environ
     try:
         caller = _caller_identity(environ, pid=pid)
     except Exception as exc:
@@ -164,7 +166,7 @@ def operator_lifecycle_audit(
         )
         spawn = {}
     try:
-        head_sha = _head_sha(home, environ)
+        head_sha = _head_sha(home, host)
     except Exception as exc:
         print(
             f"meiva: warning: lifecycle audit could not read the source commit ({exc!r}); "
@@ -214,10 +216,10 @@ def _spawn_evidence(environ: Mapping[str, str], parent_pid: int) -> dict[str, ob
     }
 
 
-def _head_sha(home: Path, environ: Mapping[str, str]) -> str | None:
+def _head_sha(home: Path, host: Host) -> str | None:
     from base.deploy.git.cluster_drift import prod_source_head_sha
 
-    return prod_source_head_sha(home, environ=environ)
+    return prod_source_head_sha(home, host=host)
 
 
 # meiva:note

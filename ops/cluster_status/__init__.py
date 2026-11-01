@@ -30,10 +30,10 @@ from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
-from base.host.env.registry import process_environment
 from base.host.proc import process_alive
 from base.host.resource.reading import ResourceSample
 from base.host.resource.sample import resource_sample
+from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.backend import get_backend, get_shell_backend
 from ops.cluster_status.model import (
@@ -182,12 +182,13 @@ def status_snapshot(
     local_machine: MachineIdentityReader,
     home: Path,
     agent_host_pidfile: Path,
+    host: Host,
     observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
 ) -> ClusterStatus:
     machine_name = local_machine.name()
     roles = local_machine.role()
     runner = "agent-runner" in roles
-    head_sha = checkout_head_sha(home / "source", environ=process_environment())
+    head_sha = checkout_head_sha(home / "source", host=host)
     agent_host_online = check_pidfile(str(agent_host_pidfile))[0] if runner else None
     supervisor_online = _supervisor_online(home)
     sessions = collect_sessions(

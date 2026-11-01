@@ -26,6 +26,8 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database, create_agent
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home, run_dir
 from base.sessions.pty.tests.pty_shells import new
@@ -39,6 +41,12 @@ from ops.cluster_status import (
 from ops.rpc_schemas import AgentSessionGroup
 
 _RUNNER = frozenset({"agent-runner"})
+
+
+# meiva:note
+# A snapshot reads the checkout through this host: real git, and an environment this
+# file names, so no case depends on the machine running the suite.
+_HOST = fake_host(commands=run_bounded)
 
 
 def _image(tmp_path: Path) -> LoadedCommit:
@@ -209,6 +217,7 @@ def test_a_runner_reports_its_agents_shells_daemons_and_resources(
         local_machine=machine_identity,
         home=unit_home,
         agent_host_pidfile=pidfile,
+        host=_HOST,
     )
 
     assert status.machine_name == "runner-a"
@@ -254,6 +263,7 @@ def test_a_gateway_probes_no_agent_host_and_counts_no_agents(
         local_machine=machine_identity,
         home=unit_home,
         agent_host_pidfile=pidfile,
+        host=_HOST,
     )
 
     assert status.serve_gateway is True
@@ -277,6 +287,7 @@ def test_a_runner_whose_agent_host_left_no_live_pid_reads_offline(
         local_machine=machine_identity,
         home=unit_home,
         agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
+        host=_HOST,
     )
 
     assert status.agent_host_online is False
@@ -300,6 +311,7 @@ def test_a_snapshot_with_an_unreachable_database_still_answers_but_claims_no_rea
         local_machine=machine_identity,
         home=unit_home,
         agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
+        host=_HOST,
     )
 
     assert (status.paused, status.paused_reason) == (True, "no_state")

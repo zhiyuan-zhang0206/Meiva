@@ -20,6 +20,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.deploy.lifecycle.tests.serving_root import observe, observe_unreadable
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from gateway.cluster.status import StatusCache
 from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_process
 from gateway.tests.routers.cluster_endpoints.cluster_support import serving_gate as serving_gate
@@ -355,7 +357,11 @@ class TestPanelCarriesNoFrozenPin:
         head = _git(source, "rev-parse", "HEAD")
         _insert_machine(db_conn, "cloud-test", "https://meiva.example.com", "gateway")
 
-        with gateway_test_client(machine=stub_machine_identity, home=tmp_path) as client:
+        # meiva:note
+        # The panel reports the checkout the gateway's host reads, so this case hands the
+        # gateway a host that runs the real git against the checkout it just wrote.
+        host = fake_host(commands=run_bounded, environ={})
+        with gateway_test_client(machine=stub_machine_identity, home=tmp_path, host=host) as client:
             body = client.get("/api/status").json()["cluster"]
 
         assert "cluster_target_sha" not in body

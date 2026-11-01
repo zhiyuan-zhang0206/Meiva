@@ -38,6 +38,7 @@ from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.resource.reading import ResourceSample
+from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.lm.usage import vendor_of_model
 from base.native_process.loaded_commit import LoadedCommit
@@ -262,6 +263,10 @@ class RosterEnv:
     rpc: RpcClient
     observe: Callable[[Path], start_serving.RootBirth]
     environ: Mapping[str, str] = field(repr=False)
+    # meiva:note
+    # The machine this gateway process runs on: the checkout read and the program lookups go
+    # through it, so the roster reports the host the process holds rather than reading one.
+    host: Host = field(repr=False)
 
 
 def roster_env(request: Request) -> RosterEnv:
@@ -276,6 +281,7 @@ def roster_env(request: Request) -> RosterEnv:
         rpc=gateway_rpc(request),
         observe=request.app.state.gateway_process.observe,
         environ=request.app.state.gateway_process.config.process_environment(),
+        host=request.app.state.gateway_process.host,
     )
 
 
@@ -387,7 +393,7 @@ def read_local_facts(env: RosterEnv, *, with_resource: bool) -> LocalFacts:
         paused_reason=serving_gate_reason(
             serving=start_serving.is_serving(env.home, observe=env.observe)
         ),
-        head_sha=checkout_head_sha(env.home / "source", environ=env.environ),
+        head_sha=checkout_head_sha(env.home / "source", host=env.host),
         # meiva:note
         # This gateway process's own frozen commit — not a disk bookmark, so a
         # gateway that outlived a checkout advance reports the old commit and the

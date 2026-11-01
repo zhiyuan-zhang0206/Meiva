@@ -185,7 +185,7 @@ def test_a_sink_that_cannot_be_dialled_never_fails_an_attributable_command(
     try:
         with operator_lifecycle_audit(
             database_factory=refuse_database,
-            environ=command_runtime.config.process_environment(),
+            host=command_runtime.host_after_config(),
             home=command_runtime.home,
             pid=os.getpid(),
         ) as command:
@@ -204,7 +204,7 @@ def test_a_boot_start_is_not_attributed_to_an_operator(command_runtime: CommandR
     try:
         with operator_lifecycle_audit(
             database_factory=refuse_database,
-            environ=command_runtime.config.process_environment(),
+            host=command_runtime.host_after_config(),
             home=command_runtime.home,
             enabled=False,
             pid=os.getpid(),
@@ -226,7 +226,7 @@ def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
 ) -> None:
     with operator_lifecycle_audit(
         database_factory=operator_database,
-        environ=command_runtime.config.process_environment(),
+        host=command_runtime.host_after_config(),
         home=command_runtime.home,
         pid=os.getpid(),
     ) as command:

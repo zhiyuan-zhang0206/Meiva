@@ -21,6 +21,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.deploy.lifecycle import start_serving
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.roster.roster_rows import RosterRowSpec
@@ -56,6 +58,10 @@ def _env(
         rpc=gateway_test_rpc(),
         observe=start_serving.observe_root,
         environ=dict(os.environ),
+        # meiva:note
+        # The roster reads the checkout through this host: real git, and the environment the
+        # case names, so no case depends on the machine running the suite.
+        host=fake_host(commands=run_bounded, environ=dict(os.environ)),
     )
 
 
@@ -74,7 +80,12 @@ def test_the_local_head_sha_is_read_with_the_environment_the_roster_holds(
 
     assert status_mod.read_local_facts(env, with_resource=False).head_sha == head
 
-    blind = replace(env, environ={**os.environ, "GIT_DIR": str(tmp_path / "no-such-git-dir")})
+    blind = replace(
+        env,
+        host=replace(
+            env.host, environ={**os.environ, "GIT_DIR": str(tmp_path / "no-such-git-dir")}
+        ),
+    )
     assert status_mod.read_local_facts(blind, with_resource=False).head_sha is None
 
 

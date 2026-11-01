@@ -12,6 +12,13 @@ from base.deploy.git.cluster_drift import (
     prod_source_head_sha,
     running_from_prod_source,
 )
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
+
+# meiva:note
+# These reads run real git against a checkout the test wrote, so the host carries the
+# production runner; the platform and the environment are the ones this file names.
+_HOST = fake_host(commands=run_bounded)
 
 
 def _git(source: Path, *args: str) -> str:
@@ -48,26 +55,26 @@ def _commit(source: Path, content: str, msg: str) -> str:
 
 def test_head_sha_absent(tmp_path: Path) -> None:
     """No source repo → None (nothing to read)."""
-    assert prod_source_head_sha(tmp_path, environ={}) is None
+    assert prod_source_head_sha(tmp_path, host=_HOST) is None
 
 
 def test_head_sha_returns_head(tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "source")
-    assert prod_source_head_sha(tmp_path, environ={}) == sha
+    assert prod_source_head_sha(tmp_path, host=_HOST) == sha
 
 
 def test_branch_drift_absent(tmp_path: Path) -> None:
-    assert prod_source_branch_drift(tmp_path, environ={}) is None
+    assert prod_source_branch_drift(tmp_path, host=_HOST) is None
 
 
 def test_branch_drift_on_main(tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source")
-    assert prod_source_branch_drift(tmp_path, environ={}) is None
+    assert prod_source_branch_drift(tmp_path, host=_HOST) is None
 
 
 def test_branch_drift_feature_branch(tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source", branch="meiva-7/fix")
-    assert prod_source_branch_drift(tmp_path, environ={}) == "meiva-7/fix"
+    assert prod_source_branch_drift(tmp_path, host=_HOST) == "meiva-7/fix"
 
 
 # meiva:note
@@ -85,8 +92,8 @@ def test_prod_source_dir_is_the_homes_own_source(tmp_path: Path) -> None:
 
 def test_checkout_head_sha_reads_an_explicit_checkout(tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "wt")
-    assert checkout_head_sha(tmp_path / "wt", environ={}) == sha
-    assert checkout_head_sha(tmp_path / "absent", environ={}) is None
+    assert checkout_head_sha(tmp_path / "wt", host=_HOST) == sha
+    assert checkout_head_sha(tmp_path / "absent", host=_HOST) is None
 
 
 def test_running_from_prod_source_recognizes_the_loaded_checkout(tmp_path: Path) -> None:

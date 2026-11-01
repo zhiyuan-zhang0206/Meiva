@@ -21,6 +21,8 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.lifecycle.tests.serving_root import observe, observe_unreadable
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import run_dir
@@ -34,6 +36,11 @@ from gateway.tests.routers.cluster_endpoints.cluster_support import (
     serving_gate as serving_gate,
 )
 from ops import cluster_status
+
+# meiva:note
+# A snapshot reads the checkout through this host: real git, and an environment this
+# file names, so no case depends on the machine running the suite.
+_HOST = fake_host(commands=run_bounded)
 
 
 def _snapshot(
@@ -50,6 +57,7 @@ def _snapshot(
         local_machine=machine,
         home=home,
         agent_host_pidfile=run_dir(home) / "agent_host.pid",
+        host=_HOST,
         observe=observe,
     )
 
@@ -104,6 +112,7 @@ def test_snapshot_reads_the_serving_gate_of_the_home_it_is_given(
         local_machine=machine_identity,
         home=elsewhere,
         agent_host_pidfile=run_dir(elsewhere) / "agent_host.pid",
+        host=_HOST,
     )
 
     assert (snap.paused, snap.paused_reason) == (True, "startup")

@@ -27,6 +27,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
+from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.composer_commands import Command
 from base.packages.skills import project_skill_roots
@@ -85,6 +86,7 @@ def cluster_status_op(
     local_machine: MachineIdentityReader,
     home: Path,
     agent_host_pidfile: Path,
+    host: Host,
 ) -> ClusterStatus:
     return status_snapshot(
         db,
@@ -93,6 +95,7 @@ def cluster_status_op(
         local_machine=local_machine,
         home=home,
         agent_host_pidfile=agent_host_pidfile,
+        host=host,
     )
 
 

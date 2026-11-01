@@ -13,9 +13,16 @@ from psycopg_pool import ConnectionPool
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import operations as cluster
 from ops.cluster_status import ClusterStatus
+
+# meiva:note
+# A snapshot reads the checkout through this host: real git, and an environment this
+# file names, so no case depends on the machine running the suite.
+_HOST = fake_host(commands=run_bounded)
 
 
 @pytest.fixture
@@ -45,6 +52,7 @@ def test_cluster_status_op_returns_this_hosts_snapshot(
         local_machine=machine_identity,
         home=unit_home,
         agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
+        host=_HOST,
     )
 
     assert status.machine_name == "runner-a"
@@ -71,6 +79,7 @@ def test_cluster_status_op_without_a_pool_reads_through_a_direct_connection(
         local_machine=machine_identity,
         home=unit_home,
         agent_host_pidfile=tmp_path / "run" / "agent_host.pid",
+        host=_HOST,
     )
 
     assert (status.machine_name, status.running_sha) == ("runner-a", None)

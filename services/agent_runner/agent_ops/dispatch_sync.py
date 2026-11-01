@@ -82,6 +82,7 @@ def dispatch_sync(
                 local_machine=local_machine,
                 home=home,
                 agent_host_pidfile=agent_host.pidfile,
+                host=host,
             ).model_dump(mode="json")
         case "config_read":
             return OpStatus.COMPLETED, host_config.config_read_op(

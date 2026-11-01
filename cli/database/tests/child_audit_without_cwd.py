@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from cli.database.lifecycle_audit import (
     AuditUnavailableError,
     operator_lifecycle_audit,
@@ -37,7 +39,7 @@ def main(argv: list[str]) -> int:
     try:
         with operator_lifecycle_audit(
             database_factory=_refuse_database,
-            environ=os.environ,
+            host=fake_host(commands=run_bounded, environ=dict(os.environ)),
             home=Path(os.environ["MEIVA_HOME"]),
             enabled=scope == "operator",
             pid=os.getpid(),
