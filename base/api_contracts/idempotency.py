@@ -31,6 +31,19 @@ def stored_key(kind: str, subject: str, method: str, path: str, key: str) -> str
     return _STORAGE_PREFIX + hashlib.sha256(material.encode()).hexdigest()
 
 
+# meiva:note
+# One caller's chat key, narrowed to the sender and target that chose it.
+#
+# `chat_message_key` is cluster-wide on purpose, so a key a caller picks must arrive
+# already carrying its own namespace: two senders that both choose `nightly` are two
+# messages, not one silent collision. The result is an ordinary header key — the gateway
+# still derives the stored identity from it.
+def scoped_chat_message_key(source: str, agent_id: int, key: str) -> str:
+    key = validate_idempotency_key(key)
+    material = json.dumps(["chat-message-caller", source, agent_id, key])
+    return hashlib.sha256(material.encode()).hexdigest()
+
+
 def chat_message_key(key: str) -> str:
     """Stored `client_message_id` of one chat message.
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,7 @@ from pydantic import BaseModel
 from base.agents.messages.delivery.retry import network_errors, retryable_response
 from base.agents.messages.envelope import validate_source
 from base.api_contracts.agent_contract import ShellSessionKillTiming
-from base.api_contracts.idempotency import keyed_headers
+from base.api_contracts.idempotency import keyed_headers, scoped_chat_message_key
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
 from base.host.net.resilience import ExponentialBackoff, Policy, retry
@@ -149,12 +150,26 @@ def _explicit_send_source(source: str | None) -> str:
 
 
 # meiva:note
+# What the gateway answered to a send: the target's status, and whether this call
+# delivered anything at all.
+@dataclass(frozen=True)
+class SendReceipt:
+    status: str
+    inbound_id: int | None = None
+    duplicate: bool = False
+
+
+# meiva:note
 # Send chat with explicit provenance, optional output tail and finite retries.
 #
 # A call retries transient transport and known transient HTTP responses with one idempotency
 # key. Final errors are exposed. Normal delivery can wake a terminated target on its home
 # machine. No sender journal or later background delivery is created. argparse enforces
 # --source for the CLI; the guard covers programmatic callers.
+#
+# A caller-supplied --client-message-id replaces the freshly minted key, narrowed to this
+# sender and target: repeating it reports the original delivery instead of sending again,
+# and another sender choosing the same text gets its own message.
 def cmd_agents_send(
     access: GatewayAccess,
     agent_id: int,
@@ -164,9 +179,12 @@ def cmd_agents_send(
     *,
     completion: bool = False,
     idempotency_key: str,
+    client_message_id: str | None = None,
 ) -> int:
     source = _explicit_send_source(source)
-    status = send_agent_message(
+    if client_message_id is not None:
+        idempotency_key = scoped_chat_message_key(source, agent_id, client_message_id)
+    receipt = send_agent_message(
         access,
         agent_id,
         content,
@@ -175,8 +193,17 @@ def cmd_agents_send(
         completion=completion,
         idempotency_key=idempotency_key,
     )
-    print(f"  ✓ agent {agent_id} send: {status}")
+    print(f"  ✓ agent {agent_id} send: {_send_outcome(receipt)}")
     return 0
+
+
+# meiva:note
+# One line saying what the send did. A repeat says so plainly: the caller asked for a
+# message to exist once and it already does, which is not the same as a second delivery.
+def _send_outcome(receipt: SendReceipt) -> str:
+    if receipt.duplicate:
+        return f"duplicate: already delivered as {receipt.inbound_id}"
+    return receipt.status
 
 
 # meiva:note
@@ -235,7 +262,7 @@ def send_agent_message(
     tail_file: str | None = None,
     completion: bool = False,
     idempotency_key: str,
-) -> str:
+) -> SendReceipt:
     if tail_file is not None:
         content = _with_tail(content, tail_file)
     headers = {**gateway_auth_headers(access), **keyed_headers(idempotency_key)}
@@ -259,7 +286,12 @@ def send_agent_message(
     if response.status_code >= 400:
         print(response.text, file=sys.stderr)
     response.raise_for_status()
-    return str(response.json().get("status"))
+    answer = response.json()
+    return SendReceipt(
+        status=str(answer.get("status")),
+        inbound_id=answer.get("inbound_id"),
+        duplicate=bool(answer.get("duplicate")),
+    )
 
 
 # meiva:note

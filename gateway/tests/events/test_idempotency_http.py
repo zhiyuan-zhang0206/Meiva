@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.api_contracts.idempotency import keyed_headers
+from base.api_contracts.idempotency import keyed_headers, scoped_chat_message_key
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.test_idempotency import agent_id as agent_id
 from gateway.tests.test_idempotency import client as client
@@ -114,7 +114,31 @@ def test_same_key_retry_lands_once(
     )
     assert resp2.status_code == 201, resp2.text
     assert resp1.json()["inbound_id"] == resp2.json()["inbound_id"]
+    assert resp1.json()["duplicate"] is False
+    assert resp2.json()["duplicate"] is True
     assert count_inbounds(db_conn, agent_id, "hello once") == 1
+
+
+# meiva:note
+# Client message ids are cluster-wide, so a caller key is narrowed by its sender first:
+# two shells that both name a message `nightly` are two messages.
+def test_two_senders_scoping_one_caller_key_deliver_twice(
+    client: TestClient, db_conn: psycopg.Connection, agent_id: int
+) -> None:
+    body = {"content": "one caller key", "source": "shell:7"}
+    first = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json=body,
+        headers=keyed_headers(scoped_chat_message_key("shell:7", agent_id, "nightly")),
+    )
+    second = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json=body | {"source": "shell:8"},
+        headers=keyed_headers(scoped_chat_message_key("shell:8", agent_id, "nightly")),
+    )
+    assert first.status_code == second.status_code == 201, first.text + second.text
+    assert first.json()["inbound_id"] != second.json()["inbound_id"]
+    assert count_inbounds(db_conn, agent_id, "one caller key") == 2
 
 
 def test_same_key_different_body_fails_closed(client: TestClient, agent_id: int) -> None:
@@ -251,8 +275,9 @@ def test_non_alwk_route_ignores_key(client: TestClient) -> None:
     assert resp.status_code == 200, resp.text
 
 
-def test_replay_preserves_status_and_body(client: TestClient, agent_id: int) -> None:
-    """The replayed response carries the stored status + body."""
+# meiva:note
+# The replay carries the stored delivery; only `duplicate` tells the two answers apart.
+def test_replay_preserves_status_and_inbound(client: TestClient, agent_id: int) -> None:
     resp1 = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "replay", "source": "user"},
@@ -265,4 +290,7 @@ def test_replay_preserves_status_and_body(client: TestClient, agent_id: int) -> 
         headers=keyed_headers("key-replay"),
     )
     assert resp2.status_code == resp1.status_code
-    assert resp2.json() == body1
+    assert resp2.json()["status"] == body1["status"]
+    assert resp2.json()["inbound_id"] == body1["inbound_id"]
+    assert body1["duplicate"] is False
+    assert resp2.json()["duplicate"] is True

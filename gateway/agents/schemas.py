@@ -50,6 +50,10 @@ class LabelPatchRequest(BaseModel):
     source: Literal["user", "self"] = "user"
 
 
+# meiva:note
+# `duplicate` separates the two answers a same-key retry can get: the call that queued the
+# message reports false, and the retry returns the stored row with true. The rest of the
+# receipt is the same on both.
 class AgentMessageEnqueued(BaseModel):
     """POST /messages receipt — durable inbound id plus current agent status.
 
@@ -59,6 +63,7 @@ class AgentMessageEnqueued(BaseModel):
 
     status: AgentStatus
     inbound_id: int | None = None
+    duplicate: bool = False
 
 
 class SystemNoteIn(BaseModel):

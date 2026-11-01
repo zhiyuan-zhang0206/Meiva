@@ -137,7 +137,9 @@ async def post_agent_message(
         except ClientMessageConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if existing is not None:
-            return AgentMessageEnqueued(status=existing.status, inbound_id=existing.inbound_id)
+            return AgentMessageEnqueued(
+                status=existing.status, inbound_id=existing.inbound_id, duplicate=True
+            )
     if body.completion_notice:
         notice = CompletionNotice(source=body.source, content=body.content)
         if not await asyncio.to_thread(

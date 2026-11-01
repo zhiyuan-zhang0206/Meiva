@@ -2,6 +2,7 @@
 
 import pytest
 
+from base.api_contracts.idempotency import scoped_chat_message_key
 from cli.tests.wire.public_gateway import PublicGateway
 from cli.tests.wire.public_gateway import wire as wire
 
@@ -32,6 +33,57 @@ def test_missing_send_source_is_not_compensated(post: PublicGateway) -> None:
     assert post.requests == []
 
 
+def _send_keyed(*, source: str, key: str) -> tuple[str, ...]:
+    return (
+        "agents",
+        "send",
+        "42",
+        "hello",
+        "--source",
+        source,
+        "--client-message-id",
+        key,
+    )
+
+
+# meiva:note
+# The same caller key twice, from the same sender and target, is one message.
+def test_client_message_id_names_one_message_for_one_sender(post: PublicGateway) -> None:
+    send = _send_keyed(source="user", key="nightly-brief")
+    assert post.run(*send) == 0
+    assert post.run(*send) == 0
+    keys = [request["headers"]["Idempotency-Key"] for request in post.requests[-2:]]
+    assert keys[0] == keys[1] == scoped_chat_message_key("user", 42, "nightly-brief")
+
+
+# meiva:note
+# The cluster-wide key space is narrowed per sender, so reuse cannot swallow a send.
+def test_one_client_message_id_from_two_senders_is_two_messages(post: PublicGateway) -> None:
+    assert post.run(*_send_keyed(source="shell:7", key="nightly-brief")) == 0
+    assert post.run(*_send_keyed(source="shell:8", key="nightly-brief")) == 0
+    first, second = (request["headers"]["Idempotency-Key"] for request in post.requests[-2:])
+    assert first == scoped_chat_message_key("shell:7", 42, "nightly-brief")
+    assert second == scoped_chat_message_key("shell:8", 42, "nightly-brief")
+    assert first != second
+
+
+def test_a_send_without_a_client_message_id_still_mints_a_fresh_key(
+    post: PublicGateway,
+) -> None:
+    assert post.run("agents", "send", "42", "hello", "--source", "user") == 0
+    assert post.run("agents", "send", "42", "hello", "--source", "user") == 0
+    keys = [request["headers"]["Idempotency-Key"] for request in post.requests[-2:]]
+    assert keys[0] != keys[1]
+
+
+def test_a_duplicate_reply_reports_the_delivery_instead_of_claiming_a_new_one(
+    post: PublicGateway, capsys: pytest.CaptureFixture[str]
+) -> None:
+    post.respond("POST", {"status": "idling", "inbound_id": 99, "duplicate": True})
+    assert post.run(*_send_keyed(source="user", key="nightly-brief")) == 0
+    assert "duplicate: already delivered as 99" in capsys.readouterr().out
+
+
 def test_lifecycle_takes_explicit_source(post: PublicGateway) -> None:
     post.caller_profile = False
     assert post.run("agents", "restart", "42", "--source", "user", "--no-message") == 0
@@ -49,6 +101,21 @@ def test_lifecycle_never_reads_profile(post: PublicGateway) -> None:
     assert post.requests[-1]["body"] == b""
     assert post.run("agents", "kill", "42", "--no-message") == 0
     assert post.requests[-1]["json"] == {"force": True}
+
+
+# meiva:note
+# The key is validated where `--source` is: a key the wire cannot carry never reaches a write.
+def test_send_rejects_a_client_message_id_the_wire_cannot_carry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.parsers import build_parser
+
+    with pytest.raises(SystemExit) as exit_info:
+        build_parser().parse_args(
+            ["agents", "send", "1", "hi", "--source", "user", "--client-message-id", "x" * 129]
+        )
+    assert exit_info.value.code == 2
+    assert "1 to 128 characters" in capsys.readouterr().err
 
 
 def test_send_requires_source_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
