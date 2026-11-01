@@ -1,0 +1,3 @@
+[uses]
+"test_admission_floor.py" = ["admission_support.py"]
+"test_admission_run.py" = ["admission_support.py"]
