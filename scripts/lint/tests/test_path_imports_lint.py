@@ -10,9 +10,6 @@ from base.host.proc import run_bounded
 from meizel.tests.synthetic import (
     synthetic_ambient_allowlists as synthetic_ambient_allowlists,
 )
-from meizel.tests.synthetic import (
-    synthetic_decision_allowlists as synthetic_decision_allowlists,
-)
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
