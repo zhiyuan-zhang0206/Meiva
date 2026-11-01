@@ -45,7 +45,7 @@ from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import fake_host, real_commands_host
 from base.native_process.child_env import daemon_process_env
 from base.paths import meiva_home
 from base.paths.tests.homes import point_home
@@ -153,6 +153,7 @@ def _prepare_schema(
     rc = bringup.ensure_gateway_data_plane(
         born.plane,
         home=born.home,
+        host=real_commands_host(),
         retained_children=born.retained_children,
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -246,6 +247,7 @@ def _born_readonly_cluster(
             bringup.ensure_gateway_data_plane(
                 cb.plane,
                 home=home,
+                host=real_commands_host(),
                 retained_children=cb.retained_children,
                 database_factory=db,
                 machine=machine,
@@ -519,6 +521,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
         bringup.ensure_gateway_data_plane(
             configured.plane,
             home=configured.home,
+            host=real_commands_host(),
             retained_children=configured.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,

@@ -20,6 +20,7 @@ from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointS
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.env import port_lease
+from base.host.system.tests.fake_commands import real_commands_host
 from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -63,6 +64,7 @@ def owned_pg(
                 data_plane_config,
                 pg_port,
                 home=unit_home,
+                host=real_commands_host(),
                 retained_children=children,
                 machine=command_runtime.machine,
                 system=command_runtime.host.platform.system,

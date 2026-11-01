@@ -44,6 +44,7 @@ from base.host.env.bootstrap import config_source_is_local
 from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.url_secret import url_host
 from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
@@ -63,6 +64,7 @@ from cli.commands.data_plane.instance.launch_delivery import (
     api_delivery_kind,
     db_delivery_kind,
 )
+from cli.commands.data_plane.instance.probe import ProbeState
 from cli.commands.data_plane.instance.status_lines import (
     failure_detail,
     local_pg_line,
@@ -79,6 +81,7 @@ from cli.commands.data_plane.instance.storage_plan import (
     admit_gateway_storage,
 )
 from cli.commands.data_plane.maintenance_stop_report import live_identities
+from cli.commands.data_plane.pg_probe import pg_running
 from cli.commands.data_plane.stop_waits import (
     PROCESS_CLEANUP_WAIT_S,
     PROCESS_KILL_WAIT_S,
@@ -101,6 +104,7 @@ def ensure_gateway_data_plane(
     config: DataPlaneConfig,
     *,
     home: Path,
+    host: Host,
     system: str,
     retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: DatabaseFactory,
@@ -133,6 +137,7 @@ def ensure_gateway_data_plane(
             return instance.ensure_cluster_storage(
                 config,
                 home=home,
+                host=host,
                 pg_port=ports.postgres,
                 redis_port=ports.redis,
                 redis_password=cluster.redis_password_from_env(home),
@@ -234,15 +239,23 @@ def local_listener(port: int) -> bool:
 # managed by this cluster — `meiva stop` skips them, so if they are still running they keep
 # consuming the home's ports and data dir. Print a manual-teardown hint instead of silently
 # leaving them. Never raises: this is a hint on an already-successful path.
-def warn_orphaned_local_instance(home: Path) -> None:
+def warn_orphaned_local_instance(home: Path, *, host: Host) -> None:
     try:
         rec = cluster.get_record(home)
         if rec is None:
             return
+        postgres = pg_running(
+            str(pg_tool("pg_isready", home=home)),
+            rec.ports["postgres"],
+            "127.0.0.1",
+            host=host,
+        )
         warning = stop_plan.orphan_warning(
-            postgres_running=instance.pg_running(
-                str(pg_tool("pg_isready", home=home)), rec.ports["postgres"], "127.0.0.1"
-            ),
+            # meiva:note
+            # A probe that could not run says nothing about the server, so it names no leftover:
+            # this hint only lists what a probe saw. The registry-driven part of the warning (the
+            # Redis listener check below) still runs.
+            postgres_running=postgres.state is ProbeState.RUNNING,
             # meiva:note
             # A plain listener check: the left-behind Redis always requires its admin password,
             # which a remote-managed home no longer carries.
@@ -445,7 +458,7 @@ def host_api_delivery(cls: DbAccess, *, delivery: LaunchDelivery) -> dict[str, s
 # the userlist plus the SCRAM pass-through backend hop. With PgBouncer disabled `pooled_db_url ==
 # db_url` and the probe is direct anyway.
 def print_data_plane_status(
-    config: DataPlaneConfig, *, home: Path, database_factory: DatabaseFactory
+    config: DataPlaneConfig, *, home: Path, host: Host, database_factory: DatabaseFactory
 ) -> None:
     if config.is_remote:
         print(remote_status_header())
@@ -457,9 +470,9 @@ def print_data_plane_status(
     pg_host, redis_host = url_host(config.db_url), url_host(config.redis_url)
     pg_port = urlsplit(config.db_url).port or 5432
     redis_port = urlsplit(config.redis_url).port or 6379
-    running = instance.pg_running(str(pg_tool("pg_isready", home=home)), pg_port, pg_host)
+    pg_probe = pg_running(str(pg_tool("pg_isready", home=home)), pg_port, pg_host, host=host)
     connect_error: str | None = None
-    if running:
+    if pg_probe.state is ProbeState.RUNNING:
         try:
             # meiva:note
             # pooled front door (PgBouncer when enabled)
@@ -467,7 +480,7 @@ def print_data_plane_status(
                 conn.execute("select 1")
         except Exception as exc:
             connect_error = failure_detail(str(exc))
-    print(local_pg_line(host=pg_host, port=pg_port, running=running, connect_error=connect_error))
+    print(local_pg_line(host=pg_host, port=pg_port, probe=pg_probe, connect_error=connect_error))
     redis_ok = instance.redis_reachable(config.redis_admin_password, redis_port, redis_host)
     print(local_redis_line(host=redis_host, port=redis_port, ok=redis_ok))
     if config.pgbouncer_enabled:
@@ -504,6 +517,7 @@ def stop_cluster_instance(
     config: DataPlaneConfig,
     *,
     home: Path,
+    host: Host,
     macos: bool,
     timers: Timers,
     environ: Mapping[str, str],
@@ -512,7 +526,7 @@ def stop_cluster_instance(
 ) -> int:
     if config.is_remote:
         print(stop_plan.remote_stop_notice(url_host(config.db_url)))
-        warn_orphaned_local_instance(home)
+        warn_orphaned_local_instance(home, host=host)
         return 0
     port = ownership.redis_port_of(config.redis_url)
     # meiva:note

@@ -33,9 +33,12 @@ from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool
 from base.cluster.machine import MachineIdentityReader
+from base.host.system.tests.fake_commands import real_commands_host
 from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
+from cli.commands.data_plane.instance.probe import ProbeState
+from cli.commands.data_plane.pg_probe import pg_running
 from cli.commands.data_plane.tests.native_cluster import (
     ADMIN_PASSWORD,
     BEARER,
@@ -64,6 +67,7 @@ def _storage(cluster_: NativeCluster, machine: MachineIdentityReader) -> int:
     return instance.ensure_cluster_storage(
         cluster_.plane,
         home=cluster_.home,
+        host=cluster_.host,
         pg_port=cluster_.pg_port,
         redis_port=cluster_.redis_port,
         redis_password=RUNTIME_PASSWORD,
@@ -94,7 +98,7 @@ def test_ensure_pg_data_initializes_cold_template_once_and_reuses_it(tmp_path: P
     data = instance.pg_data_dir(cold_home)
     assert not template.exists()
 
-    instance.ensure_pg_data(cold_home, os_user=getpass.getuser())
+    instance.ensure_pg_data(cold_home, os_user=getpass.getuser(), host=real_commands_host())
 
     assert (template / "PG_VERSION").is_file()
     assert (data / "PG_VERSION").is_file()
@@ -103,7 +107,7 @@ def test_ensure_pg_data_initializes_cold_template_once_and_reuses_it(tmp_path: P
     marker.write_text("from-template\n")
     shutil.rmtree(data)
 
-    instance.ensure_pg_data(cold_home, os_user=getpass.getuser())
+    instance.ensure_pg_data(cold_home, os_user=getpass.getuser(), host=real_commands_host())
 
     assert (data / "cached-template.marker").read_text() == "from-template\n"
 
@@ -199,6 +203,7 @@ def test_the_entry_brings_up_the_instance_on_the_recorded_ports_with_the_url_ide
         return ensure_gateway_data_plane(
             plane,
             home=native_cluster.home,
+            host=native_cluster.host,
             retained_children=native_cluster.retained_children,
             database_factory=operator_database,
             machine=command_machine,
@@ -243,6 +248,7 @@ def test_a_fresh_single_box_redis_refuses_unauthenticated_connections(
         ensure_gateway_data_plane(
             native_cluster.plane,
             home=native_cluster.home,
+            host=native_cluster.host,
             retained_children=native_cluster.retained_children,
             database_factory=operator_database,
             machine=command_machine,
@@ -282,6 +288,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             native_cluster.plane,
             native_cluster.pg_port,
             home=native_cluster.home,
+            host=native_cluster.host,
             retained_children=native_cluster.retained_children,
             machine=command_machine,
             timers=SYSTEM_TIMERS,
@@ -320,7 +327,10 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             canonical_socket = instance.pg_socket_dir(native_cluster.home) / f".s.PGSQL.{pg_port}"
             canonical_socket.unlink()
             isready = str(pg_tool("pg_isready", home=meiva_home()))
-            assert instance.pg_running(isready, pg_port, "127.0.0.1"), "the TCP instance is ready"
+            assert (
+                pg_running(isready, pg_port, "127.0.0.1", host=native_cluster.host).state
+                is ProbeState.RUNNING
+            ), "the TCP instance is ready"
             with pytest.raises(psycopg.OperationalError):
                 cluster.ensure_cluster_role(
                     "must_not_create",

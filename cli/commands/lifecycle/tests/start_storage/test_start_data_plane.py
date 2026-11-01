@@ -18,6 +18,7 @@ import pytest
 
 from base import cluster
 from base.host.db_authority.api import read_telemetry_token, telemetry_token, telemetry_token_path
+from base.host.system.tests.fake_commands import real_commands_host
 from cli import start_identity
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane.cluster_instance import pg_socket_dir
@@ -75,6 +76,7 @@ def test_gateway_data_plane_brings_up_own_instance(
         bringup.ensure_gateway_data_plane(
             native_cluster.plane,
             home=native_cluster.home,
+            host=native_cluster.host,
             retained_children=native_cluster.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -115,6 +117,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
         bringup.ensure_gateway_data_plane(
             data_plane_config,
             home=unit_home,
+            host=real_commands_host(),
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -143,6 +146,7 @@ def test_gateway_data_plane_no_record_is_error(
         bringup.ensure_gateway_data_plane(
             data_plane_config,
             home=unit_home,
+            host=real_commands_host(),
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -168,6 +172,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
         bringup.ensure_gateway_data_plane(
             data_plane_config,
             home=unit_home,
+            host=real_commands_host(),
             retained_children=None,
             database_factory=operator_database,
             machine=command_runtime.machine,

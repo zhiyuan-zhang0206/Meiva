@@ -64,6 +64,7 @@ def _start_instance(
     rc = bringup.ensure_gateway_data_plane(
         cluster.plane,
         home=cluster.home,
+        host=cluster.host,
         retained_children=cluster.retained_children,
         database_factory=factory,
         machine=machine,

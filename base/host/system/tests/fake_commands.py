@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from base.host.proc import CommandRunner
+from base.host.proc import CommandRunner, run_bounded
 from base.host.system.hostport import Host
 from base.native_process.os_platform import Platform
 
@@ -144,3 +144,12 @@ def fake_host(
         uid=os.geteuid() if uid is None else uid,
         environ={} if environ is None else environ,
     )
+
+
+# meiva:note
+# A test's host whose `run` is the real runner: a test that starts this machine's own programs
+# (`postgres`, `redis-server`, `git`) needs them to run, and says so once here instead of reading
+# the process's platform. Everything else stays a test value: `which` answers None, so a component
+# that wants a program through the host fails loudly rather than resolving this process's PATH.
+def real_commands_host(*, environ: Mapping[str, str] | None = None) -> Host:
+    return fake_host(commands=run_bounded, environ=environ)

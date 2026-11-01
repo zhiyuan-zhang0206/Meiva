@@ -30,6 +30,8 @@ from redis.retry import Retry
 from base import cluster
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.env import port_lease
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import real_commands_host
 from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -84,7 +86,9 @@ def cached_pg_template(
     seed = pytestconfig.stash.get(_PG_TEMPLATE_KEY, None)
     if seed is None:
         seed = tmp_path_factory.mktemp("pg-template-17") / "template"
-        instance.initdb(seed, os_user=getpass.getuser(), home=meiva_home())
+        instance.initdb(
+            seed, os_user=getpass.getuser(), home=meiva_home(), host=real_commands_host()
+        )
         pytestconfig.stash[_PG_TEMPLATE_KEY] = seed
     return seed
 
@@ -134,6 +138,14 @@ class NativeCluster:
     @property
     def pg_data(self) -> Path:
         return self.home / "pg"
+
+    # meiva:note
+    # This machine as these tests hand it in: the port that runs the real programs and answers for
+    # the platform. Its environment is empty because nothing under the data plane reads one — a
+    # `run` inherits this process's environment, exactly as the shell did before it took a host.
+    @property
+    def host(self) -> Host:
+        return real_commands_host()
 
     def record(self) -> cluster.ClusterRecord:
         return cluster.ClusterRecord(

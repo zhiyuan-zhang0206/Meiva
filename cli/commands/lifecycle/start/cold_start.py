@@ -119,6 +119,7 @@ def _run_step(
             return bringup.ensure_gateway_data_plane(
                 cold.plane,
                 home=command.home,
+                host=command.host,
                 system=command.host.platform.system,
                 retained_children=retained_children,
                 database_factory=cold.database_factory,

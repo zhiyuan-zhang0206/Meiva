@@ -430,6 +430,17 @@ def spawn_postgres(
         )
 
 
+# meiva:note
+# A launch that outlived its readiness deadline, as its own type.
+#
+# The custody boundary has several ways to refuse a start, and only this one means "the process is
+# there but nothing says it serves". The caller that owns the wait can then add what it learned
+# while waiting — a probe that never answered — without rewriting the message every caller reads
+# today for a postmaster that simply did not start.
+class PostgresNotReadyError(RuntimeError):
+    pass
+
+
 def _complete_start(
     data: Path,
     receipt: Receipt,
@@ -443,7 +454,9 @@ def _complete_start(
     while owner.live():
         protocol_ready = ready()
         if timers.monotonic() >= deadline:
-            raise RuntimeError("PostgreSQL did not become ready; captured custody is retained")
+            raise PostgresNotReadyError(
+                "PostgreSQL did not become ready; captured custody is retained"
+            )
         if protocol_ready:
             _require_process(data, receipt)
             inode, header = read_pidfile(data, receipt)
