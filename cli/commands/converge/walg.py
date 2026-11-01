@@ -60,7 +60,12 @@ def execute_walg_plan(
                 raise RuntimeError(message)
             case InstallWalgBinary():
                 system, machine = artifact_system(ctx.host.platform)
-                ensure_walg_binary(home=ctx.meiva_home, system=system, machine=machine)
+                ensure_walg_binary(
+                    home=ctx.meiva_home,
+                    system=system,
+                    machine=machine,
+                    environ=ctx.host.environ,
+                )
             case LoadWalgConfig():
                 walg_config.load_walg_config(path=walg_config_file, home=ctx.meiva_home)
             case PrepareWalgStateDir():

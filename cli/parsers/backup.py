@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from base.cluster.dataplane.runtime_binaries import artifact_system
-
 
 def _h_backup_walg_check(args: argparse.Namespace) -> int:
+    from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_check, walg_plane
 
     system, machine = artifact_system(args.runtime.host.platform)
@@ -21,6 +20,7 @@ def _h_backup_walg_check(args: argparse.Namespace) -> int:
 
 
 def _h_backup_walg_run(args: argparse.Namespace) -> int:
+    from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_run, walg_plane, walg_throwaway
 
     config = args.runtime.config
@@ -38,6 +38,7 @@ def _h_backup_walg_run(args: argparse.Namespace) -> int:
 
 
 def _h_backup_walg_drill(args: argparse.Namespace) -> int:
+    from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_drill, walg_plane, walg_throwaway
 
     config = args.runtime.config
@@ -55,6 +56,7 @@ def _h_backup_walg_drill(args: argparse.Namespace) -> int:
 
 
 def _h_backup_walg_restore(args: argparse.Namespace) -> int:
+    from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_restore, walg_plane
 
     system, machine = artifact_system(args.runtime.host.platform)
@@ -74,6 +76,7 @@ def _h_backup_walg_restore(args: argparse.Namespace) -> int:
 
 
 def _h_backup_walg_status(args: argparse.Namespace) -> int:
+    from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_status, walg_plane
 
     system, machine = artifact_system(args.runtime.host.platform)

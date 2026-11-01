@@ -15,7 +15,7 @@ from base.cluster.dataplane.runtime_binaries import (
 )
 from base.host.net.ports import UrlOpener
 from base.log import logger
-from base.native_process.child_env import daemon_process_env
+from base.native_process.child_env import filter_daemon_env
 
 __all__ = [
     "WALG_ARTIFACTS",
@@ -91,7 +91,11 @@ def installed_problem(
     return None
 
 
-def _require_version(binary: Path) -> None:
+# meiva:note
+# The probe runs the candidate with the environment its caller states, filtered to the daemon set:
+# this module holds no opinion about the process it happens to run in, and a probe must not hand
+# the boot pass's gateway credentials to a downloaded binary.
+def _require_version(binary: Path, *, environ: Mapping[str, str]) -> None:
     """The candidate binary must run and report the pinned version."""
     result = subprocess.run(  # noqa: S603 — the candidate is the checksum-verified pinned artifact
         [str(binary), "--version"],
@@ -99,7 +103,7 @@ def _require_version(binary: Path) -> None:
         text=True,
         check=False,
         timeout=_VERSION_PROBE_TIMEOUT_S,
-        env=daemon_process_env(),
+        env=filter_daemon_env(environ),
     )
     if result.returncode != 0 or WALG_VERSION not in result.stdout:
         raise RuntimeError(
@@ -113,6 +117,7 @@ def ensure_walg_binary(
     home: Path,
     system: str,
     machine: str,
+    environ: Mapping[str, str],
     artifacts: Mapping[str, tuple[str, str]] | None = None,
     open_url: UrlOpener | None = None,
 ) -> Path:
@@ -144,7 +149,7 @@ def ensure_walg_binary(
             file.flush()
             os.fsync(file.fileno())
         candidate.chmod(0o755)
-        _require_version(candidate)
+        _require_version(candidate, environ=environ)
         candidate.replace(target)
     finally:
         with suppress(FileNotFoundError):
