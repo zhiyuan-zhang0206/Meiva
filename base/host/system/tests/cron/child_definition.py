@@ -62,7 +62,16 @@ def _external(*, fails: bool) -> None:
         Reply(returncode=1 if fails else 0, stderr="refused"),
         repeat=True,
     )
-    host = fake_host(commands, platform=DARWIN_ARM64, programs={"brew": "/safe/bin/brew"}, uid=501)
+    # meiva:note
+    # The host carries the environment this child was launched with: `XPC_SERVICE_NAME` is one key
+    # of it, and the registrar reads the label from the host, not from the live process.
+    host = fake_host(
+        commands,
+        platform=DARWIN_ARM64,
+        programs={"brew": "/safe/bin/brew"},
+        uid=501,
+        environ=dict(os.environ),
+    )
     plist = Path.home() / "Library/LaunchAgents/com.meiva.health-probe.plist"
     assert health_job.register_macos(300, host=host, roots=_roots()) == (1 if fails else 0)
     _verify(plist)
@@ -85,7 +94,7 @@ def _deferred() -> None:
     from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, fake_host
 
     commands = FakeCommands()
-    host = fake_host(commands, platform=DARWIN_ARM64)
+    host = fake_host(commands, platform=DARWIN_ARM64, environ=dict(os.environ))
     assert health_job.register_macos(300, host=host, roots=_roots()) == 0
     assert not (Path.home() / "Library").exists()
     assert not (Path.home() / ".meiva").exists()

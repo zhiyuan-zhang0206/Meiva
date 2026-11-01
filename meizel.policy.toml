@@ -124,7 +124,6 @@ bus = [
 "base.host.git.gitenv.git_env()" = { why = "copies the live os.environ when no mapping is passed", unless = "environ" }
 "base.native_process.child_env.daemon_process_env()" = "filters the live os.environ"
 "base.native_process.child_env.inherited_process_env()" = "copies the live os.environ"
-"base.native_process.os_platform.launchd_job_label()" = "reads XPC_SERVICE_NAME from os.environ"
 "meiva.boot.is_launched_process()" = "judges the launch facts from the live os.environ"
 "meiva.boot.process_disable_entries()" = "reads the SDK disable entries from the live os.environ"
 

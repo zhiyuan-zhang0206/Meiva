@@ -70,7 +70,12 @@ def is_linux() -> bool:
     return _sys_platform().startswith("linux")
 
 
-def launchd_job_label() -> str | None:
+# meiva:note
+# The label is one key of the process environment, and a caller that was handed an environment
+# (`Host.environ` where it holds a host) must be answered from that one: a reader reaching for the
+# live `os.environ` cannot be told a different answer, which is what made every caller of this an
+# ambient acquisition.
+def launchd_job_label(environ: Mapping[str, str]) -> str | None:
     """The launchd label naming this process, or None outside a LaunchAgent.
 
     launchd sets ``XPC_SERVICE_NAME`` only for the job's DIRECT child — the job
@@ -81,7 +86,7 @@ def launchd_job_label() -> str | None:
     :func:`descends_from_launchd_job`. Per-process scheduler identity, not
     operator-configurable Meiva settings.
     """
-    return os.environ.get("XPC_SERVICE_NAME")
+    return environ.get("XPC_SERVICE_NAME")
 
 
 def _launchd_print(

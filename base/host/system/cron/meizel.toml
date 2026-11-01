@@ -6,6 +6,3 @@ exports = ["health_content.py", "health_job.py", "mechanics.py"]
 [purity]
 "__init__.py" = "strict"
 "health_content.py" = "strict"
-
-[debt.ambient-read]
-"health_job.py#environ base.native_process.os_platform.launchd_job_label" = 1

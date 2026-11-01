@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from loguru import logger
@@ -28,7 +29,7 @@ def _own_probe_job_of(
     own_labels: set[str],
     *,
     uid: int,
-    current_label: str | None = None,
+    environ: Mapping[str, str],
     ancestral_labels: frozenset[str] | None = None,
 ) -> str | None:
     # meiva:note
@@ -38,7 +39,7 @@ def _own_probe_job_of(
     # descendants read "0" (see `base.native_process.os_platform.descends_from_launchd_job`) —
     # so the environment is a fast path and the live process tree is the proof.
     # Labels are probed in sorted order for deterministic logging/reporting.
-    current = launchd_job_label() if current_label is None else current_label
+    current = launchd_job_label(environ)
     if current is not None and current in own_labels:
         return current
     if ancestral_labels is not None:
@@ -58,7 +59,6 @@ def register_macos(
     *,
     host: Host,
     roots: JobRoots,
-    current_label: str | None = None,
     ancestral_labels: frozenset[str] | None = None,
 ) -> int:
     # meiva:note
@@ -81,7 +81,7 @@ def register_macos(
     own_job = _own_probe_job_of(
         {label},
         uid=host.uid,
-        current_label=current_label,
+        environ=host.environ,
         ancestral_labels=ancestral_labels,
     )
     if own_job is not None:
