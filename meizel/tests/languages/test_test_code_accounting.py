@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # meiva:link meizel/docs/checker/test-code.meiva.okf.md
 DOCUMENTED = {
     "ui/web/src/app/page-test-mock.tsx": 95,
-    "ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx": 135,
+    "ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx": 136,
     "ui/web/src/components/inspector/inspector-test-mock.tsx": 4,
 }
 PRODUCTION = {
