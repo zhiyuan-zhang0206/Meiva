@@ -134,7 +134,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from base.config import _lite
 from base.config._lite import (
@@ -209,10 +209,58 @@ if TYPE_CHECKING:
     # the eager chain this module defers). See _TYPE_CHECKING_ALLOWED in
     # scripts/lint/code_structure.py. None of these imports run at runtime.
     from base.config._full import (
+        AgentSettings as AgentSettings,
+    )
+    from base.config._full import (
+        AlertsSettings as AlertsSettings,
+    )
+    from base.config._full import (
+        DaemonSettings as DaemonSettings,
+    )
+    from base.config._full import (
         DataPlaneSettings as DataPlaneSettings,
     )
     from base.config._full import (
+        FeishuSettings as FeishuSettings,
+    )
+    from base.config._full import (
+        GatewaySettings as GatewaySettings,
+    )
+    from base.config._full import (
+        GeneralSettings as GeneralSettings,
+    )
+    from base.config._full import (
+        LmSettings as LmSettings,
+    )
+    from base.config._full import (
+        ObservabilitySettings as ObservabilitySettings,
+    )
+    from base.config._full import (
+        PackagesSettings as PackagesSettings,
+    )
+    from base.config._full import (
+        SandboxSettings as SandboxSettings,
+    )
+    from base.config._full import (
+        ServiceSettings as ServiceSettings,
+    )
+    from base.config._full import (
         Settings as Settings,
+    )
+    from base.config._full import (
+        TelegramSettings as TelegramSettings,
+    )
+    from base.config._full import (
+        ToUserSettings as ToUserSettings,
+    )
+    from base.config._full import (
+        WalgSettings as WalgSettings,
+    )
+    from base.config._full import (
+        WebSettings as WebSettings,
+    )
+    from base.config._full import (
+        flat_dump as flat_dump,
     )
 
     # Names the lite latch installs into this module's globals at upgrade
@@ -232,9 +280,37 @@ if TYPE_CHECKING:
     from base.config.admin.metadata import (
         get_config_metadata as get_config_metadata,
     )
+    from base.config.agent_pins import (
+        field_lifecycle as field_lifecycle,
+    )
+    from base.config.agent_pins import (
+        frozen_field_names as frozen_field_names,
+    )
+    from base.config.agent_pins import (
+        live_field_names as live_field_names,
+    )
+    from base.config.agent_pins import (
+        resolve_agent_config_pins as resolve_agent_config_pins,
+    )
+    from base.config.profiles import (
+        FieldInfoLike as FieldInfoLike,
+    )
+    from base.config.profiles import (
+        FieldRef as FieldRef,
+    )
     from base.config.service_read import (
         bootstrap_config_values as bootstrap_config_values,
     )
+    from base.config.service_read import (
+        current_field_values as current_field_values,
+    )
+
+    # meiva:note
+    # Values the lite latch computes at upgrade from the live registry: no module holds them,
+    # so the checker is told the shape the `__getattr__` branches serve.
+    FIELD_REFS: dict[str, FieldRef]
+    FIELD_INFOS: dict[str, FieldInfoLike]
+    BOOTSTRAP_FIELDS: tuple[str, ...]
 
 
 # ── The static index surface (no registry build) ──
@@ -373,7 +449,7 @@ def refresh_data_plane_settings() -> None:
 boot_state = _lite.boot_state
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     """Eager-only names (Settings, BOOTSTRAP_FIELDS, the metadata /
     service-read / turn-view re-exports) are reached through the same
     boot-lite gate as every other full-chain read — `_lite.maybe_upgrade`: a
