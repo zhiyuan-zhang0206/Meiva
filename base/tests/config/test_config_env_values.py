@@ -175,6 +175,23 @@ def test_retired_env_aliases_are_not_read() -> None:
     assert AlertsSettings.from_environment(legacy_env).webhook_token is None
 
 
+def test_the_retired_understand_media_model_is_not_read() -> None:
+    # meiva:note
+    # `MEIVA_UNDERSTAND_MEDIA_MODEL` gave way to one model per content type: a stale key neither
+    # survives as a field nor reaches any of the per-type models.
+    from base.config.domains.lm import LmSettings
+
+    lm = LmSettings.from_environment({"MEIVA_UNDERSTAND_MEDIA_MODEL": "gemini-3.1-pro-preview"})
+
+    assert "understand_media_model" not in LmSettings.model_fields
+    assert (
+        lm.understand_image_model,
+        lm.understand_pdf_model,
+        lm.understand_audio_model,
+        lm.understand_video_model,
+    ) == ("deepseek-flash", "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.8-flash")
+
+
 def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
     """The child process receives the aliases before its Settings singleton loads."""
     proc = subprocess.run(  # noqa: S603 -- fixed argv, sys.executable is trusted

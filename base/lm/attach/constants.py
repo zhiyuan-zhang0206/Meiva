@@ -35,6 +35,16 @@ ATTACH_MEDIA_MIME: dict[str, str] = {
     ".pdf": "application/pdf",
 }
 
+
+# meiva:note
+# The media type a MIME type of the table above belongs to, in the vocabulary of
+# `ModelSpec.media_types` (image / pdf / audio / video). The one place a file's
+# MIME type becomes the modality that model capabilities, attach and
+# `meiva.understand` routing are checked against.
+def media_type_for_mime(mime: str) -> str:
+    return "pdf" if mime == "application/pdf" else mime.split("/", maxsplit=1)[0]
+
+
 # Attachment payload guards (task #3696 exception inventory): per-file ceiling
 # (one file cannot dominate the turn), per-turn count and byte total (a turn's
 # media stays bounded before packing), label cap (rides the merged prompt).

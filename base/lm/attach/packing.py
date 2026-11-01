@@ -22,6 +22,7 @@ from base.lm.attach.constants import (
     ATTACH_MAX_LABEL_CHARS,
     ATTACH_MAX_TOTAL_BYTES,
     ATTACH_MEDIA_MIME,
+    media_type_for_mime,
 )
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import AttachPolicy
@@ -179,7 +180,7 @@ class _PackingState:
         catalog: ModelCatalog,
     ) -> None:
         self.media_blocks.append(
-            _content_block(model, attachment.media_type, attachment.mime, data, catalog=catalog)
+            media_block(model, attachment.media_type, attachment.mime, data, catalog=catalog)
         )
         self.delivered.append(attachment.path_text)
         self.delivered_bytes = self.delivered_bytes + len(data)
@@ -338,7 +339,7 @@ def _attachment_file(observed: StatObserved) -> _AttachmentFile | _SkippedAttach
         path_text=observed.path,
         size=size,
         mime=mime,
-        media_type=_media_type_for_mime(mime),
+        media_type=media_type_for_mime(mime),
     )
 
 
@@ -358,15 +359,25 @@ def _delivery_error(
     catalog: ModelCatalog,
     max_files_per_turn: int = ATTACH_MAX_FILES_PER_TURN,
 ) -> str | None:
+    if reason := file_size_error(model, media_type, size, catalog=catalog):
+        return reason
+    if len(state.delivered) >= max_files_per_turn:
+        return f"turn already has {max_files_per_turn} delivered files"
+    if state.delivered_bytes + size > ATTACH_MAX_TOTAL_BYTES:
+        return f"would exceed {_mib(ATTACH_MAX_TOTAL_BYTES)} total limit"
+    return None
+
+
+# meiva:note
+# Why one file of `size` bytes cannot reach `model` inline, or None when it can: the shared
+# per-file ceiling, then the provider's own limit for the media type (`AttachPolicy`). Attach
+# packing and `meiva.understand` both judge a file by it.
+def file_size_error(model: str, media_type: str, size: int, *, catalog: ModelCatalog) -> str | None:
     if size > ATTACH_MAX_FILE_BYTES:
         return f"file exceeds {_mib(ATTACH_MAX_FILE_BYTES)} limit"
     provider_size_limit = _file_size_limit(model, media_type, catalog=catalog)
     if size > provider_size_limit:
         return f"file exceeds {_mib(provider_size_limit)} limit"
-    if len(state.delivered) >= max_files_per_turn:
-        return f"turn already has {max_files_per_turn} delivered files"
-    if state.delivered_bytes + size > ATTACH_MAX_TOTAL_BYTES:
-        return f"would exceed {_mib(ATTACH_MAX_TOTAL_BYTES)} total limit"
     return None
 
 
@@ -379,12 +390,6 @@ def _image_dimension_error(
     if max(observed.dimensions) > dimension_limit:
         return f"image exceeds {dimension_limit} px dimension limit"
     return None
-
-
-def _media_type_for_mime(mime: str) -> str:
-    if mime == "application/pdf":
-        return "pdf"
-    return mime.split("/", maxsplit=1)[0]
 
 
 def _file_size_limit(model: str, media_type: str, *, catalog: ModelCatalog) -> int:
@@ -417,7 +422,12 @@ def _image_dimension_limit(model: str, image_count: int, *, catalog: ModelCatalo
     return dimension_limit
 
 
-def _content_block(
+# meiva:note
+# The provider-native content block that carries one media file to `model`: an image as a
+# standard `image_url` data URI (every provider client decodes it), a PDF as a `document` block
+# where the provider's `AttachPolicy` asks for one, any other media as an inline `media` part.
+# Attach packing and `meiva.understand` both build their media blocks here.
+def media_block(
     model: str, media_type: str, mime: str, file_bytes: bytes, *, catalog: ModelCatalog
 ) -> dict[str, object]:
     if media_type == "image":

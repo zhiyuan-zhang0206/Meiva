@@ -112,9 +112,13 @@ transforms, scanning — run the same id on its V4.1 Flash backend.
 
 - Complexity is absorbed by **decomposition and verification waves**, not by
   upgrading the model (next section).
-- Vision work uses plain `deepseek-flash`: it receives images natively
-  (user uploads, `meiva.self.attach`). PDF, audio and video still go through
-  `meiva.understand`.
+- Vision work uses plain `deepseek-flash`: it receives images natively. To look
+  at a local file yourself (user upload, screenshot, downloaded or generated
+  image), `meiva.self.attach` it: the media enters your own context at your next
+  step and stays in the conversation. To keep context small, or for a PDF, audio
+  or video, ask `meiva.understand`: a separate model answers in text; by default
+  images go to `deepseek-flash` and PDF, audio and video to `gemini-3.8-flash`
+  (one model per type: `MEIVA_UNDERSTAND_{TEXT,IMAGE,PDF,AUDIO,VIDEO}_MODEL`).
 - Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
   default policy: select one only when the user explicitly asks for that
   model, and confirm it is on the roster first (section above).

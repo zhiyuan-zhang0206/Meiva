@@ -47,10 +47,20 @@ def test_llm_model_code_default_is_deepseek_flash() -> None:
     assert LmSettings.model_fields["llm_model"].default == "deepseek-flash"
 
 
-def test_understand_media_model_code_default_is_gemini_3_8_flash() -> None:
+@pytest.mark.parametrize(
+    ("field", "default"),
+    [
+        ("understand_text_model", "deepseek-flash"),
+        ("understand_image_model", "deepseek-flash"),
+        ("understand_pdf_model", "gemini-3.8-flash"),
+        ("understand_audio_model", "gemini-3.8-flash"),
+        ("understand_video_model", "gemini-3.8-flash"),
+    ],
+)
+def test_each_understand_content_type_has_its_code_default_model(field: str, default: str) -> None:
     from base.config.domains.lm import LmSettings
 
-    assert LmSettings.model_fields["understand_media_model"].default == "gemini-3.8-flash"
+    assert LmSettings.model_fields[field].default == default
 
 
 def test_gateway_session_ttl_defaults_to_one_day() -> None:

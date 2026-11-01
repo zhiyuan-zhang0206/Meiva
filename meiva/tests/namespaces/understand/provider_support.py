@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 from collections.abc import Iterator
 from pathlib import Path
@@ -34,11 +35,19 @@ __all__ = [
     "fake_image",
     "fake_pdf",
     "fake_video",
+    "image_block",
     "run_understand",
     "understand_harness",
 ]
 
 ANSWER = "fake answer"
+
+
+# meiva:note
+# The block an image reaches a model in: a standard `image_url` data URI, whatever the provider.
+def image_block(data: bytes, mime: str = "image/png") -> dict[str, Any]:
+    encoded = base64.b64encode(data).decode("ascii")
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
 
 
 def run_understand(
@@ -52,20 +61,53 @@ def run_understand(
 
 
 # meiva:note
-# `meiva.understand` over `deps`; `text` and `media` are the scripts of the two models.
+# `meiva.understand` over `deps`; each configured model has one script, shared by the content types
+# that name the same model (by default text and image share the deepseek-flash script, and pdf,
+# audio and video the Gemini one). `text`, `image`, `pdf`, `audio` and `video` are the scripts of
+# the models configured for those types.
 class UnderstandHarness:
     def __init__(self, deps: UnderstandDeps, models: ScriptedModels) -> None:
         self.deps = deps
         self.scripted_models = models
-        self.text = models.script(deps.text_model, ANSWER)
-        self.media = models.script(deps.media_model, ANSWER)
+        self._scripts: dict[str, Script] = {}
+        self._bind_models()
+
+    def _bind_models(self) -> None:
+        for model in dict.fromkeys(dataclasses.astuple(self.deps.models)):
+            if model not in self._scripts:
+                self._scripts[model] = self.scripted_models.script(model, ANSWER)
+            self.scripted_models.bind(model, self._scripts[model])
+
+    @property
+    def text(self) -> Script:
+        return self._scripts[self.deps.models.text]
+
+    @property
+    def image(self) -> Script:
+        return self._scripts[self.deps.models.image]
+
+    @property
+    def pdf(self) -> Script:
+        return self._scripts[self.deps.models.pdf]
+
+    @property
+    def audio(self) -> Script:
+        return self._scripts[self.deps.models.audio]
+
+    @property
+    def video(self) -> Script:
+        return self._scripts[self.deps.models.video]
 
     # meiva:note
-    # Change fields of the deps; a renamed model keeps its script under the new name.
+    # Change fields of the deps; a model named for the first time gets its own script.
     def configure(self, **changes: Any) -> None:
         self.deps = dataclasses.replace(self.deps, **changes)
-        self.scripted_models.bind(self.deps.text_model, self.text)
-        self.scripted_models.bind(self.deps.media_model, self.media)
+        self._bind_models()
+
+    # meiva:note
+    # Configure the model of some content types (`text`, `image`, `pdf`, `audio`, `video`).
+    def configure_models(self, **changes: str) -> None:
+        self.configure(models=dataclasses.replace(self.deps.models, **changes))
 
     # meiva:note
     # Bind an exec turn in this process and return its state update, where the findings land.

@@ -17,6 +17,7 @@ from meiva import files
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface import settings as sdk_settings
 from meiva.understand.answer import OVERFLOW_DIRNAME, OutputSite, RetryPolicy, UnderstandDeps
+from meiva.understand.routing import UnderstandModels
 
 __all__ = ["understand_deps", "understand_deps_for"]
 
@@ -62,8 +63,13 @@ def understand_deps_for(
         catalog=catalog,
         keys=keys,
         overrides=overrides,
-        text_model=authority.service_field_value("understand_text_model"),
-        media_model=authority.service_field_value("understand_media_model"),
+        models=UnderstandModels(
+            text=authority.service_field_value("understand_text_model"),
+            image=authority.service_field_value("understand_image_model"),
+            pdf=authority.service_field_value("understand_pdf_model"),
+            audio=authority.service_field_value("understand_audio_model"),
+            video=authority.service_field_value("understand_video_model"),
+        ),
         media_resolution=authority.service_field_value("understand_media_resolution"),
         media_thinking_level=authority.service_field_value("understand_media_thinking_level"),
         media_base_url=authority.service_field_value("understand_media_base_url"),
