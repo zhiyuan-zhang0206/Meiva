@@ -20,6 +20,14 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 
 [debt.ambient-read]
 "emitter.py#clock datetime.datetime.now" = 1
-"pipeline_build.py#environ base.host.env.registry.process_environment" = 1
 "process_logging.py#pid os.getpid" = 1
 "trace_mirror.py#clock datetime.datetime.now" = 1
+
+# meiva:note
+# The read is `build_pipeline`, and it is the composition root of the telemetry pipeline:
+# every daemon builds its pipeline once, after its boot loaded the `.env` it will run with, and the
+# value read there (`MEIVA_TELEMETRY_OTLP_ENDPOINT`'s explicit-override flag) decides which exporter
+# the pipeline gets. The file reads the environment nowhere else; a second read here would be a
+# second boot, so add a parameter and hand the value down instead.
+[roots]
+"pipeline_build.py" = { kinds = ["environ"], why = "composition root of the event pipeline: build_pipeline() reads the process environment once to decide whether the OTLP endpoint was set explicitly, then hands that answer to the exporter it builds" }
