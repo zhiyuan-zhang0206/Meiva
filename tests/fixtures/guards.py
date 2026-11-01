@@ -13,7 +13,9 @@
 
 import importlib.abc
 import importlib.machinery
+import ipaddress
 import os
+import socket
 import sys
 from collections.abc import Callable, Generator, Iterator, Sequence
 from functools import wraps
@@ -30,7 +32,13 @@ from redis.connection import AbstractConnection as RedisConnection
 from base.log.tests.stdlib_logging import stdlib_logging_isolated
 from tests.fixtures.loaded_modules import loaded_attribute
 
-__all__ = ["HelperDoorGuard", "refuse_native_data_plane", "stub_boundaries", "stub_everywhere"]
+__all__ = [
+    "HelperDoorGuard",
+    "refuse_external_network",
+    "refuse_native_data_plane",
+    "stub_boundaries",
+    "stub_everywhere",
+]
 
 
 @pytest.fixture(autouse=True)
@@ -473,6 +481,81 @@ def refuse_native_data_plane(patch: pytest.MonkeyPatch, *, reason: str | None = 
                 (_REDIS_BOUNDARIES, "Redis"),
             )
             for owner, name in boundaries
+        ),
+    )
+
+
+def _is_local_host(host: object) -> bool:
+    if not host:
+        return True
+    if isinstance(host, bytes):
+        try:
+            host = host.decode("utf-8", "surrogateescape")
+        except UnicodeError:
+            return False
+    if not isinstance(host, str):
+        return False
+    if host.rstrip(".").lower() in {"localhost", "ip6-localhost", "ip6-loopback"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_unspecified
+    except ValueError:
+        return False
+
+
+# meiva:note
+# Fail closed on external network socket connection or DNS lookup in static processes,
+# while preserving Python's pre-syscall tuple unpacking and IDNA label validation.
+def refuse_external_network(patch: pytest.MonkeyPatch) -> None:
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_create_connection = socket.create_connection
+    real_getaddrinfo = socket.getaddrinfo
+
+    def _fail_if_external_host(host: object, detail: str) -> None:
+        if not _is_local_host(host):
+            if isinstance(host, str):
+                host.encode("idna")
+            pytest.fail(
+                f"Static tests cannot make external network calls: attempted {detail}; "
+                "use the native test environment or mock the external network boundary."
+            )
+
+    def _check_socket_address(address: object, op: str) -> None:
+        if isinstance(address, tuple) and len(cast(tuple[object, ...], address)) >= 1:
+            target = cast(tuple[object, ...], address)[0]
+            _fail_if_external_host(target, f"{op} to {address!r}")
+
+    def guarded_connect(self: Any, address: Any) -> None:
+        if hasattr(socket, "AF_UNIX") and getattr(self, "family", None) == socket.AF_UNIX:
+            return real_connect(self, address)
+        _check_socket_address(address, "connect")
+        return real_connect(self, address)
+
+    def guarded_connect_ex(self: Any, address: Any) -> int:
+        if hasattr(socket, "AF_UNIX") and getattr(self, "family", None) == socket.AF_UNIX:
+            return real_connect_ex(self, address)
+        _check_socket_address(address, "connect_ex")
+        return real_connect_ex(self, address)
+
+    def guarded_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
+        host, port = address
+        _fail_if_external_host(host, f"create_connection to {(host, port)!r}")
+        return real_create_connection((host, port), *args, **kwargs)
+
+    def guarded_getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+        if host is not None:
+            _fail_if_external_host(host, f"getaddrinfo for {host!r}")
+        return real_getaddrinfo(host, port, *args, **kwargs)
+
+    stub_boundaries(
+        patch,
+        (
+            (socket.socket, "connect", guarded_connect),
+            (socket.socket, "connect_ex", guarded_connect_ex),
+            (socket, "create_connection", guarded_create_connection),
+            (socket, "getaddrinfo", guarded_getaddrinfo),
         ),
     )
 
