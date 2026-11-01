@@ -32,30 +32,14 @@ Omitted `notify` marks the shell-level send as a plain platform completion (`mei
 
 ## What happens when a watcher's session ends
 
-- **The watcher exits on its own** (script finished, one-shot fired, timeout watchdog) — the shell layer sends the usual completion notice (log path, last 3 output lines), respecting the `notify` policy, and the session closes itself. Nothing else to do; re-launch it yourself if you still need it.
-- **You kill it yourself** (`meiva.shell.sessions.kill` / `kill_all`) — no extra message: the call already returned its result to you in the same turn.
-- **The platform reclaims it at its TTL deadline** (`meiva.shell.sessions`' TTL reaper — a watcher's shell TTL IS its target deadline: launch = created + timeout, cron = end, at = moment + grace) — you get the ordinary shell-reclaimed interruption notice, because a watcher always has a running job when this fires.
-- **A `meiva stop` or `meiva restart` that names `--close-shell-sessions` (updates included) force-closes busy sessions** — you get the closure notice for a busy session, written by the stop itself (`cli/commands/lifecycle/stop/shell_sessions.py`), the same as any other shell with work in flight.
-- **`meiva stop --mode force` (`force_close_shell_sessions`, same module) or the pty-sessions service ending with no orchestrated closer** (an external SIGKILL, a machine power loss, a service crash with nothing to record it) — accepted gap: you get no notice in any of these. The session is simply gone from `meiva.shell.sessions.list()` on your next check. Nothing is watching for these cases, by design (see the decision record for why); if a watcher's absence would matter, check for it explicitly rather than relying on a message.
-
-None of these ever re-spawns the watcher. Decide whether to re-create it yourself.
-
-**A watcher outlives its owner's termination.** Terminating the agent does
-nothing to a watcher it left running — it is a session, not part of the
-agent's process. The watcher's next fire delivers its wake as an ordinary
-chat inbound (`source="watcher:<id>"`), and chat delivery auto-resurrects a
-terminated agent (`ops/lifecycle/delivery.py` ->
-`ops.resurrect_if_terminated`) — nothing reaps a terminated owner's watcher
-early any more, so a standing cron keeps re-waking it at every fire for as
-long as it lives. This is intended: the LLM decides each time. An agent that
-does not want to be woken again kills its watchers
-(`meiva.shell.sessions.kill`) before terminating.
-
-**Orphan governance (task #1726).** A watcher whose session ended without taking it along (a pty-sessions service crash, an external SIGKILL of the shell) is reparented to init with its session gone — still alive, still firing cron/at; 49 of 85 watcher processes on the fleet host were once such multi-generation orphans. The generated bootstrap arms an **orphan guard**: a daemon thread comparing `os.getppid()` against the boot-time parent every 5s, hard-exiting with code 125 on a mismatch, so session end → child death within seconds on every such path. This is the only thing standing between a dead session and a watcher that keeps firing forever — nothing external scans for or kills orphaned watcher processes any more.
+Self-exit, your own kill, TTL reclaim, a stop that force-closes busy sessions, the
+accepted no-notice gaps, what happens to a watcher that outlives its owner, and the
+orphan guard that kills one whose session is gone:
+[[meiva/watcher/docs/lifecycle.meiva.okf.md]]. None of them ever re-spawns a watcher.
 
 ## Key Dependencies
 - [[shell.meiva.okf.md]] — a watcher's underlying session IS an `meiva.shell.sessions` session: `meiva/watcher/spawn.py:run` creates it on the agent's `ShellSessions` and uses `meiva/shell/background.py` for the log and launch file
-- `base/host/env/dotenv_boot.py:project_watcher_runner_env` (called with the process environment and homes by `meiva/watcher/wiring.py`) validates an agent-profile launcher's runner-class DB login (with its `MEIVA_DB_GENERATION` marker when delivered) and runner Redis URLs before session allocation and passes them only to the watcher session. A secured default-home gateway refuses a launcher without that projection before creating a watcher; other homes and pure agent-runner units retain their child config source. The data-plane owner-URL guard remains the child-side boundary.
+- `base/host/env/dotenv_boot.py:project_watcher_runner_env` (called with the process environment and homes by `meiva/watcher/wiring.py`) validates an agent-profile launcher's runner-class DB login (with its `MEIVA_DB_GENERATION` marker when delivered) and runner Redis URLs before session allocation and passes them only to the watcher session. **That projection is an override, not the token's carrier**: the machine token reaches a watcher from the pty session service's own environment — the daemon is started with the token its host issues (task #5979) — so a launcher with no projection at all (a seat rebuilt from the launchd side) still yields a watcher that can send. A secured default-home gateway refuses a launcher without that projection before creating a watcher; other homes and pure agent-runner units retain their child config source. The data-plane owner-URL guard remains the child-side boundary.
 
 ## Notes
 Generated watcher scripts (`watcher_<session_id>.py` + `_boot.py` + `_launch.sh`) land under `$TMPDIR/meiva/<cluster>/<agent>/watchers/` (`meiva/watcher/files.py:watchers_dir`) — temp storage because they are read exactly once at launch; the per-cluster + per-agent path segments keep co-located clusters (each with its own DB-assigned session ids, which may overlap) from colliding. The generated script files only need to survive launch — there is no other persistence, and liveness is the session itself. While running, a watcher is a normal shell session—visible in `meiva.shell.sessions.list()`. Timeout parameter supports seconds, `timedelta`, or `"<n>{s,m,h,d}"` strings. When a watcher stops (self-exit / crash / timeout), the shell layer sends the policy-selected completion notification (exit code + log path of full output + output tail), then the session auto-closes—even if the child process gets SIGKILL, an eligible notification is not lost. The dedicated `remind` primitive has been removed: waking yourself = sending yourself a message (generic `meiva.agents.send_message`); at/cron generated scripts internally use the same delivery path (source marked `watcher:N`).

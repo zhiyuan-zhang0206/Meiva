@@ -1,5 +1,8 @@
 # meiva:note
-# Build the `SpawnDeps` of this process: its agent, directories, sessions, CLI, runner env and interpreter.
+# Build the `SpawnDeps` of this process: its agent, directories, sessions, CLI, runner env and
+# interpreter. `runner_env` is the launcher's data-plane projection, an optional override; the
+# machine token itself rides the pty session service's own environment (task #5979), so a
+# launcher without a projection still yields a watcher that can send.
 # This is the one place the watcher reads the OS user's home, and the environment it reads is the
 # one the bound context carries rather than `os.environ` a second time: the launcher's runner
 # projection is computed from that mapping here and travels down as a value. It runs on each
