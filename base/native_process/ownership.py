@@ -432,18 +432,21 @@ def assemble_process_metadata(
 # meiva:note
 # Observed process facts for one caller, standardized for attestation.
 #
-# `codex_home` is the `CODEX_HOME` the caller's invocation saw (provider routing context the
-# relay spec needs, never an executor identity assertion); the caller's root reads it.
+# `pid` is the caller's own process id, read once where the command is composed
+# (`CommandRuntime.pid`) and handed in: the facts then name the process the caller meant, and a
+# test can record a tree rooted anywhere. `codex_home` is the `CODEX_HOME` the caller's invocation
+# saw (provider routing context the relay spec needs, never an executor identity assertion); the
+# caller's root reads it.
 #
 # Identity fields use the stable start time (`stable_create_time`) so a
 # later reader compares against the same value the kernel keeps. The parent
 # walk is bounded and records what it could observe instead of failing: a
 # permission gap on an ancestor path must not lose the facts below it.
-def process_metadata(*, codex_home: str | None) -> dict[str, Any]:
+def process_metadata(*, pid: int, codex_home: str | None) -> dict[str, Any]:
     nodes: list[dict[str, object]] = []
     observation_error: str | None = None
-    process = psutil.Process()
-    caller_pid = process.pid
+    process = psutil.Process(pid)
+    caller_pid = pid
     for _depth in range(8):
         try:
             identity = OwnedProcess.capture(process)
