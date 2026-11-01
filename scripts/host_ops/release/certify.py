@@ -153,7 +153,7 @@ def _select_version(
     from datetime import datetime
 
     if not isinstance(certified_dt, datetime):
-        raise ValueError("certified_dt must be a datetime")
+        raise TypeError("certified_dt must be a datetime")
     if hotfix_of:
         return mint_release_tag(
             certified_dt, hotfix_of=hotfix_of, existing_tags=list_tag_names(repository)
