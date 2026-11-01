@@ -8,12 +8,10 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 
+from meiva_builtins.plugins.meiva_usage.credentials import parse_claude_oauth_blob
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig
 from meiva_builtins.plugins.meiva_usage.formatters import format_dual_window_card
-from meiva_builtins.plugins.meiva_usage.parsers import (
-    parse_claude_oauth_blob,
-    parse_claude_windows,
-)
+from meiva_builtins.plugins.meiva_usage.parsers import parse_claude_windows
 from meiva_builtins.plugins.meiva_usage.probes.transport import (
     HttpJsonFetcher,
     HttpJsonRequest,

@@ -4,8 +4,10 @@ exports = ["__init__.py"]
 "transport.py" = "strict"
 
 [uses]
-"__init__.py" = ["antigravity.py", "claude.py", "codex.py", "deepseek.py", "http_client.py", "transport.py"]
+"__init__.py" = ["anthropic_costs.py", "antigravity.py", "claude.py", "codex.py", "deepseek.py", "http_client.py", "openai_costs.py", "transport.py"]
+"anthropic_costs.py" = ["transport.py"]
 "antigravity.py" = ["transport.py"]
 "claude.py" = ["transport.py"]
 "deepseek.py" = ["transport.py"]
 "http_client.py" = ["transport.py"]
+"openai_costs.py" = ["transport.py"]

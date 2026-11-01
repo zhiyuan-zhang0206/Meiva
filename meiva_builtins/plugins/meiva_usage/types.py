@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal, TypeGuard
 
@@ -34,6 +36,12 @@ class CardReading:
     value: str
     detail: str
     status: Literal["ok", "warn", "error"]
+
+
+@dataclass(frozen=True)
+class CostBucketsPage:
+    daily_usd: Mapping[date, Decimal]
+    next_page: str | None = None
 
 
 @dataclass(frozen=True)

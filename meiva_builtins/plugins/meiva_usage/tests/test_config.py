@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 from pydantic import BaseModel
 
@@ -243,3 +245,181 @@ def test_contribute_returns_contributions() -> None:
 
     contrib_plugin = contribute_plugin()
     assert contrib_plugin.config is None
+
+
+def test_openai_and_anthropic_valid_config() -> None:
+    c_oai = CollectorConfig(
+        id="openai-main",
+        label="OpenAI Costs",
+        provider="openai",
+        machine="host-a",
+        key_env="OPENAI_ADMIN_KEY",
+    )
+    assert c_oai.secret_env_vars() == ("OPENAI_ADMIN_KEY",)
+
+    c_ant = CollectorConfig(
+        id="anthropic-main",
+        label="Anthropic Costs",
+        provider="anthropic",
+        machine="host-a",
+        key_env="ANTHROPIC_ADMIN_KEY",
+        known_balance_usd=50.0,
+        balance_as_of="2026-10-01",
+    )
+    assert c_ant.secret_env_vars() == ("ANTHROPIC_ADMIN_KEY",)
+    assert c_ant.known_balance_usd == 50.0
+    assert c_ant.balance_as_of == "2026-10-01"
+
+
+def test_openai_and_anthropic_require_key_env() -> None:
+    with pytest.raises(ValueError, match="OpenAI collector requires key_env"):
+        CollectorConfig(
+            id="openai-no-key",
+            label="OpenAI",
+            provider="openai",
+            machine="host-a",
+        )
+
+    with pytest.raises(ValueError, match="Anthropic collector requires key_env"):
+        CollectorConfig(
+            id="anthropic-no-key",
+            label="Anthropic",
+            provider="anthropic",
+            machine="host-a",
+        )
+
+
+def test_openai_and_anthropic_disallow_other_selectors() -> None:
+    disallowed_cases = (
+        ("credentials_path", "~/.creds.json"),
+        ("keychain_account", "user@example.com"),
+        ("account_email", "admin@company.com"),
+        ("oauth_client_id_env", "OAUTH_ID"),
+        ("oauth_client_secret_env", "OAUTH_SECRET"),
+    )
+    for provider in ("openai", "anthropic"):
+        for field, value in disallowed_cases:
+            kwargs: dict[str, object] = {
+                "id": f"{provider}-bad",
+                "label": "Test",
+                "provider": provider,
+                "machine": "host-a",
+                "key_env": "API_KEY",
+                field: value,
+            }
+            with pytest.raises(ValueError):
+                CollectorConfig(**cast(Any, kwargs))
+
+
+def test_known_balance_and_balance_as_of_coupling() -> None:
+    with pytest.raises(
+        ValueError, match="known_balance_usd and balance_as_of must be configured together"
+    ):
+        CollectorConfig(
+            id="oai-only-bal",
+            label="OpenAI",
+            provider="openai",
+            machine="host-a",
+            key_env="OPENAI_KEY",
+            known_balance_usd=100.0,
+        )
+
+    with pytest.raises(
+        ValueError, match="known_balance_usd and balance_as_of must be configured together"
+    ):
+        CollectorConfig(
+            id="oai-only-date",
+            label="OpenAI",
+            provider="openai",
+            machine="host-a",
+            key_env="OPENAI_KEY",
+            balance_as_of="2026-10-01",
+        )
+
+
+def test_balance_as_of_format_validation() -> None:
+    invalid_dates = (
+        "2026-10-1",
+        "2026/10/01",
+        "2026-13-01",
+        "2026-02-30",
+        " 2026-10-01 ",
+        "2026-10-01T00:00:00Z",
+        "not-a-date",
+    )
+    for bad_date in invalid_dates:
+        with pytest.raises(ValueError):
+            CollectorConfig(
+                id="oai-bad-date",
+                label="OpenAI",
+                provider="openai",
+                machine="host-a",
+                key_env="OPENAI_KEY",
+                known_balance_usd=100.0,
+                balance_as_of=bad_date,
+            )
+
+
+def test_known_balance_disallowed_on_other_providers() -> None:
+    for provider, extra in (
+        ("deepseek", {"key_env": "KEY"}),
+        ("claude", {"credentials_path": "~/c.json"}),
+        ("codex", {"credentials_path": "~/c"}),
+        ("antigravity", {"account_email": "a@b.com"}),
+    ):
+        kwargs1: dict[str, object] = {
+            "id": f"{provider}-bal",
+            "label": "Test",
+            "provider": provider,
+            "machine": "host-a",
+            "known_balance_usd": 100.0,
+            **extra,
+        }
+        with pytest.raises(ValueError, match="does not accept known_balance_usd"):
+            CollectorConfig(**cast(Any, kwargs1))
+
+        kwargs2: dict[str, object] = {
+            "id": f"{provider}-date",
+            "label": "Test",
+            "provider": provider,
+            "machine": "host-a",
+            "balance_as_of": "2026-10-01",
+            **extra,
+        }
+        with pytest.raises(ValueError, match="does not accept balance_as_of"):
+            CollectorConfig(**cast(Any, kwargs2))
+
+
+def test_known_balance_int_and_float_accepted_under_strict() -> None:
+    c_int = CollectorConfig(
+        id="oai-int",
+        label="OpenAI Int",
+        provider="openai",
+        machine="host-a",
+        key_env="OPENAI_KEY",
+        known_balance_usd=100,
+        balance_as_of="2026-10-01",
+    )
+    assert c_int.known_balance_usd == 100.0
+
+    c_float = CollectorConfig(
+        id="oai-float",
+        label="OpenAI Float",
+        provider="openai",
+        machine="host-a",
+        key_env="OPENAI_KEY",
+        known_balance_usd=100.5,
+        balance_as_of="2026-10-01",
+    )
+    assert c_float.known_balance_usd == 100.5
+
+    with pytest.raises(ValueError):
+        CollectorConfig(
+            id="oai-neg",
+            label="OpenAI Neg",
+            provider="openai",
+            machine="host-a",
+            key_env="OPENAI_KEY",
+            known_balance_usd=-5.0,
+            balance_as_of="2026-10-01",
+        )

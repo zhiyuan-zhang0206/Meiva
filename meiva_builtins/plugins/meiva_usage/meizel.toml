@@ -2,6 +2,7 @@ exports = ["runner.py"]
 
 [purity]
 "__init__.py" = "strict"
+"credentials.py" = "strict"
 "default_config.py" = "strict"
 "formatters.py" = "strict"
 "parsers.py" = "strict"
@@ -11,12 +12,13 @@ exports = ["runner.py"]
 "ui_stats.py" = "strict"
 
 [uses]
+"credentials.py" = ["types.py"]
 "formatters.py" = ["types.py"]
 "parsers.py" = ["types.py"]
-"probes" = ["default_config.py", "formatters.py", "parsers.py", "types.py"]
+"probes" = ["credentials.py", "default_config.py", "formatters.py", "parsers.py", "types.py"]
 "runner.py" = ["default_config.py", "probes", "types.py"]
 "schedules.py" = ["default_config.py"]
-"tests" = ["default_config.py", "formatters.py", "parsers.py", "plugin.py", "probes", "runner.py", "schedules.py", "types.py"]
+"tests" = ["credentials.py", "default_config.py", "formatters.py", "parsers.py", "plugin.py", "probes", "runner.py", "schedules.py", "types.py"]
 "ui_stats.py" = ["default_config.py"]
 
 [roots]

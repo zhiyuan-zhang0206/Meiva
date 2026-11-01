@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from meiva_builtins.plugins.meiva_usage.formatters import (
+    format_admin_cost_card,
     format_codex_window_card,
     format_deepseek_balance_card,
     format_dual_window_card,
@@ -132,3 +134,109 @@ def test_format_deepseek_balance_card_missing_info_raises() -> None:
 
     with pytest.raises(UsageProbeError, match="missing balance_infos"):
         format_deepseek_balance_card({"balance_infos": []})
+
+
+def test_format_admin_cost_card_trailing_30d() -> None:
+    today = date(2026, 11, 1)
+    daily = {
+        today: Decimal("2.50"),
+        date(2026, 10, 15): Decimal("10.00"),
+        date(2026, 10, 3): Decimal("5.00"),
+        date(2026, 10, 2): Decimal("100.00"),
+        date(2026, 11, 2): Decimal("50.00"),
+    }
+    reading = format_admin_cost_card(daily, today_utc=today)
+    assert reading.value == "$17.50 (30d)"
+    assert reading.detail == "today $2.50 · 30d $17.50"
+    assert reading.status == "ok"
+
+
+def test_format_admin_cost_card_trailing_30d_zero_spend() -> None:
+    today = date(2026, 11, 1)
+    reading = format_admin_cost_card({}, today_utc=today)
+    assert reading.value == "$0.00 (30d)"
+    assert reading.detail == "today $0.00 · 30d $0.00"
+    assert reading.status == "ok"
+
+
+def test_format_admin_cost_card_prepaid_balance_ok() -> None:
+    today = date(2026, 11, 1)
+    as_of = date(2026, 10, 15)
+    daily = {
+        date(2026, 10, 10): Decimal("20.00"),
+        date(2026, 10, 15): Decimal("10.00"),
+        today: Decimal("5.00"),
+    }
+    reading = format_admin_cost_card(
+        daily,
+        today_utc=today,
+        known_balance_usd=100.0,
+        balance_as_of=as_of,
+    )
+    assert reading.value == "$85.00 left"
+    assert reading.detail == "today $5.00 · spent $15.00 since 2026-10-15"
+    assert reading.status == "ok"
+
+
+def test_format_admin_cost_card_warn_threshold_percentage() -> None:
+    today = date(2026, 11, 1)
+    as_of = date(2026, 10, 1)
+
+    r_warn = format_admin_cost_card(
+        {today: Decimal("90.00")},
+        today_utc=today,
+        known_balance_usd=100.0,
+        balance_as_of=as_of,
+    )
+    assert r_warn.value == "$10.00 left"
+    assert r_warn.status == "warn"
+
+    r_ok = format_admin_cost_card(
+        {today: Decimal("89.99")},
+        today_utc=today,
+        known_balance_usd=100.0,
+        balance_as_of=as_of,
+    )
+    assert r_ok.value == "$10.01 left"
+    assert r_ok.status == "ok"
+
+
+def test_format_admin_cost_card_warn_threshold_small_and_negative() -> None:
+    today = date(2026, 11, 1)
+    as_of = date(2026, 10, 1)
+
+    r_warn_small = format_admin_cost_card(
+        {today: Decimal("15.00")},
+        today_utc=today,
+        known_balance_usd=20.0,
+        balance_as_of=as_of,
+    )
+    assert r_warn_small.value == "$5.00 left"
+    assert r_warn_small.status == "warn"
+
+    r_ok_small = format_admin_cost_card(
+        {today: Decimal("14.99")},
+        today_utc=today,
+        known_balance_usd=20.0,
+        balance_as_of=as_of,
+    )
+    assert r_ok_small.value == "$5.01 left"
+    assert r_ok_small.status == "ok"
+
+    r_neg = format_admin_cost_card(
+        {today: Decimal("60.00")},
+        today_utc=today,
+        known_balance_usd=50.0,
+        balance_as_of=as_of,
+    )
+    assert r_neg.value == "$-10.00 left"
+    assert r_neg.status == "warn"
+
+
+def test_format_admin_cost_card_validation_errors() -> None:
+    today = date(2026, 11, 1)
+    with pytest.raises(ValueError, match="must be configured together"):
+        format_admin_cost_card({}, today_utc=today, known_balance_usd=100.0, balance_as_of=None)
+
+    with pytest.raises(ValueError, match="must be configured together"):
+        format_admin_cost_card({}, today_utc=today, known_balance_usd=None, balance_as_of=today)
