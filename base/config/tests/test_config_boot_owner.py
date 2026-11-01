@@ -76,6 +76,18 @@ def test_process_entry_still_delivers_its_home_environment(tmp_path: Path) -> No
         owner.read_process_environment()
 
 
+def test_a_handed_environment_is_captured_instead_of_the_live_one() -> None:
+    before = dict(os.environ)
+    handed = "postgresql://handed@127.0.0.1:1/handed"
+    owner = ConfigBoot(environment={**os.environ, "MEIVA_DB_URL": handed})
+    owner.read_process_environment()
+    assert owner.process_environment()["MEIVA_DB_URL"] == handed
+    # meiva:note
+    # The field reads that capture; the data-plane domain appends the resolved `hostaddr`.
+    assert owner.view.data_plane.db_url.startswith(handed)
+    assert dict(os.environ) == before
+
+
 def test_two_real_models_keep_stable_views_overlays_and_live_readers() -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first_view, second_view = first.view, second.view

@@ -10,6 +10,7 @@ import os
 
 import meiva
 from agent.tests.impersonation.external.runtime import Takeover, independent_boot
+from base.config.tests.configuration import data_plane_environment
 from meiva import impersonation
 from meiva.impersonation.admission import lease_target
 from meiva.impersonation.attachment import AttachInputs, Attachment
@@ -34,7 +35,7 @@ def test_independent_attachments_own_fresh_machine_caches(attached_runtime: Take
     target = lease_target(attached_runtime.lease_id, None)
     owners: list[object] = []
     for _ in range(2):
-        boot = independent_boot()
+        boot = independent_boot(data_plane_environment())
         with Attachment(AttachInputs(target, None, boot, pid=os.getpid(), suffix="probe")):
             machine = meiva.context.require_machine()
             assert machine is boot.machine

@@ -294,7 +294,6 @@ def _clean_db(
     provisioned_db: str,
     postgres_access: None,
     _db_stall_guard: None,
-    monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> Iterator[None]:
     import psycopg
@@ -304,7 +303,6 @@ def _clean_db(
     previous_db_url = get_field("db_url")
     set_field("db_url", provisioned_db)
     request.addfinalizer(functools.partial(set_field, "db_url", previous_db_url))
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", provisioned_db)
     env_file = TEST_MEIVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
@@ -335,7 +333,6 @@ def _clean_db(
 def _clean_redis(
     provisioned_redis: str,
     redis_access: None,
-    monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> Iterator[None]:
     import redis
@@ -345,7 +342,6 @@ def _clean_redis(
     previous_redis_url = get_field("redis_url")
     set_field("redis_url", provisioned_redis)
     request.addfinalizer(functools.partial(set_field, "redis_url", previous_redis_url))
-    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", provisioned_redis)
     env_file = TEST_MEIVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))

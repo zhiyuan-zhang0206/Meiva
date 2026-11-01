@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,8 +77,12 @@ def assert_detached() -> None:
     assert _settings.attached_agent_view() is None
 
 
-def independent_boot() -> OwnedBoot:
-    config = ConfigBoot()
+# meiva:note
+# A boot of a second process inside this one captures the launch environment it is handed, not the
+# live one: the test names the data plane that process would carry, which is the environment a
+# launcher gives an external harness.
+def independent_boot(environment: Mapping[str, str]) -> OwnedBoot:
+    config = ConfigBoot(environment=dict(environment))
     config.read_process_environment()
     return own_external_process(config)
 

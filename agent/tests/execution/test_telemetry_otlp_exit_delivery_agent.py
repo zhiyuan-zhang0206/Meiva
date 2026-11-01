@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import http.server
 import json
-import os
 import subprocess
 import sys
 import threading
@@ -20,6 +19,7 @@ import pytest
 from agent.tests.impersonation.external.runtime import native_agent_with_checkpoint
 from agent.tests.impersonation.lease_support import Cluster
 from agent.tests.impersonation.lease_support import cluster as cluster
+from base.config.tests.configuration import data_plane_environment
 from base.telemetry import Event, event_row
 
 _POSTS: list[tuple[str, bytes]] = []
@@ -137,7 +137,7 @@ def test_external_cli_tail_sdk_call_reaches_receiver_once_before_exit(
     home = tmp_path / "home"
     takeover = native_agent_with_checkpoint(cluster, db_url)
     takeover.write_channels({"messages": [], "meiva_code__cwd": str(tmp_path)})
-    env = os.environ.copy()
+    env = data_plane_environment()
     env.update(
         {
             "MEIVA_HOME": str(home),

@@ -22,6 +22,7 @@ import meiva
 from agent.tests.impersonation.external.runtime import Takeover, independent_boot
 from base.agents.context.clients import ClientSet
 from base.config import ConfigBoot
+from base.config.tests.configuration import data_plane_environment
 from base.host.proc import run_bounded
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
@@ -42,7 +43,7 @@ def discard(batch: list[Event]) -> None:
 # meiva:note
 # A boot whose client set owns an observable event pipeline, built before the attachment.
 def owned_boot() -> tuple[OwnedBoot, EventPipeline]:
-    boot = independent_boot()
+    boot = independent_boot(data_plane_environment())
     pipeline = EventPipeline(writer=discard, flush_interval_s=0.01)
     clients = ClientSet(database=boot.database, pipeline_factory=lambda: pipeline)
     clients.event_pipeline()
@@ -128,7 +129,13 @@ def test_independent_attachment_does_not_redeliver_environment(
     process_context.unbind_context()
     target = lease_target(attached_runtime.lease_id, None)
     with Attachment(
-        AttachInputs(target, None, independent_boot(), pid=os.getpid(), suffix="probe")
+        AttachInputs(
+            target,
+            None,
+            independent_boot(data_plane_environment()),
+            pid=os.getpid(),
+            suffix="probe",
+        )
     ):
         assert dict(os.environ) == before
         assert meiva.context.require_clock().timezone == delivered.view.general.timezone
@@ -136,6 +143,14 @@ def test_independent_attachment_does_not_redeliver_environment(
             assert_competing_attachment_is_refused(attached_runtime.lease_id)
         assert dict(os.environ) == before
     assert dict(os.environ) == before
+
+
+# meiva:note
+# An attachment of an unbound process that owns its boot, applied to `lease_id`.
+def probe_attachment(boot: OwnedBoot, lease_id: str) -> Attachment:
+    return Attachment(
+        AttachInputs(lease_target(lease_id, None), None, boot, pid=os.getpid(), suffix="probe")
+    )
 
 
 @pytest.mark.parametrize("failure_at", ["lease", "plugins", "snapshot"])
@@ -155,11 +170,7 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
         install.mark_load_failed(primary)
     try:
         with pytest.raises(RuntimeError) as raised:
-            Attachment(
-                AttachInputs(
-                    lease_target(lease_id, None), None, boot, pid=os.getpid(), suffix="probe"
-                )
-            )
+            probe_attachment(boot, lease_id)
         if failure_at == "plugins":
             assert raised.value is primary
     finally:
@@ -167,7 +178,7 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
     assert pipeline.stopped
     assert getattr(meiva, "context", None) is None
     with pytest.raises(RuntimeError, match="does not exist"):
-        impersonation.attach(MISSING_LEASE)
+        probe_attachment(independent_boot(data_plane_environment()), MISSING_LEASE)
 
 
 def test_the_facade_closes_the_clients_it_built_when_construction_is_refused(

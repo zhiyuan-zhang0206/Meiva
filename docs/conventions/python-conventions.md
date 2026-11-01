@@ -597,7 +597,7 @@ falls back to `os.environ`.
 
 | The test needs to control | The form |
 |---|---|
-| Configuration, including a value that comes from an environment variable | A value (form 1). At a component boundary (a daemon, an app factory, a command group) the component takes its own frozen `XxxConfig` with exactly the fields it reads; inside the component, plain values travel down. The composition root builds the config from `settings`; the component never reads `settings` or `os.environ`. A test builds the config it wants. |
+| Configuration, including a value that comes from an environment variable | A value (form 1). At a component boundary (a daemon, an app factory, a command group) the component takes its own frozen `XxxConfig` with exactly the fields it reads; inside the component, plain values travel down. The composition root builds the config from `settings`; the component never reads `settings` or `os.environ`. A test builds the config it wants — including for a reader that takes a whole environment (a boot built inside the test, a child process it starts): that reader is handed the mapping, `data_plane_environment()` in `base/config/tests/configuration.py` being the one for the throwaway data plane, and the value is never published on `os.environ` for it. |
 | A tuning constant (timeout, threshold, interval) | A field of that config whose default is today's constant. A test passes a small value. |
 | A client, a factory | A required parameter with no default. |
 | A path | A value (form 1). A test hands in `tmp_path`; it does not switch `MEIVA_HOME`. |

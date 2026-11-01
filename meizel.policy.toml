@@ -445,11 +445,10 @@ rule-inputs = [
 # ceiling the run fails as `approved-budget`. Repay an entry and lower the number, or raise it in the same
 # review and say what the new file hides.
 [approved-patches]
-"max-files" = ["6"]
+"max-files" = ["5"]
 
 [approved-patches.files]
 "tests/fixtures/guards.py" = "Guards that keep every test off the host: autouse ones refuse process exec, the helper converge and the native Postgres and Redis drivers and keep the suite outside the exec domain, and the port guard a home requests gives it its own ports; stub_everywhere and stub_boundaries take their targets as arguments, so no fixed list of targets exists to inject."
-"tests/fixtures/provisioning.py" = "The runner's provisioning plugin, loaded once per pytest process by the root conftest: its function-scoped resource windows publish the throwaway data plane a test requested on the process-environment surface — the one every config boot reads and every descendant inherits — and put the unreachable sentinel back afterwards, so a test that requested no resource still cannot dial one. No parameter of the code under test reaches those readers; the settings field and the private .env cover only the readers this file can name."
 "tests/e2e/fakes/child_budget_writer.py" = "The entry of a child process the test starts: it holds the handoff snapshot writes of one generated scenario by wrapping Path.open and os.fdopen inside that process, a place no parameter of the code under test reaches."
 "tests/integration/child_schedule_runner.py" = "The entry of a child process the test starts: its missing-module-files mode removes the file attribute of two standard-library modules before the production runner loads, to put the interpreter in a state no parameter reaches."
 "cli/tests/bootstrap/child_main_dispatch.py" = "Fresh-interpreter probes of the CLI entry's import and admission boundaries: each probe must see the import order of a new interpreter, and forbids network there by replacing socket.create_connection and socket.socket.connect."
