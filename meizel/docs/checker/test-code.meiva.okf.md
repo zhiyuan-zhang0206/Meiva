@@ -41,13 +41,13 @@ ships carry.
 
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
-| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 135 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (45), `sidebar-tree-and-search.test.tsx` (56) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
+| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 136 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (46), `sidebar-tree-and-search.test.tsx` (56) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
 | `ui/web/src/app/page-test-mock.tsx` | 95 | `page.test.tsx` (55), `page-dispatch.test.tsx` (40) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-notices.test.tsx` (1) | the inspector's `inspectorMockState` |
 
-237 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
+235 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
 of a module the suite renders. `python -m meizel debt sites --code first-party-patch --json` lists every
-site (333 at `57745fe29`); 237 name one of these modules, 2 sit in `[approved-patches.files]`, and 94 are
+site (238 at `1d6710493`); 235 name one of these modules, 2 sit in `[approved-patches.files]`, and 1 is
 recorded. A repayment lowers these numbers and a new site raises them, and
 `meizel/tests/languages/test_test_code_accounting.py` fails until this table and the tree agree; the same
 test injects a production import of each double into the run's fact graph and asserts every record comes
