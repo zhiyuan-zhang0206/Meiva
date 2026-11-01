@@ -1,0 +1,65 @@
+# Promote an already-certified CalVer release tag (`vYYYY.MM.DD.HHMMSS` or `-hf<N>`) to
+# `channel/stable` without re-running tests or opening reverse pull requests.
+
+name: Promote release to stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Certified CalVer tag vYYYY.MM.DD.HHMMSS[-hfN] to promote to channel/stable
+        required: true
+      reason:
+        description: Operator promotion note recorded in channel/stable
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote certified release to channel/stable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Fetch release and channel tags
+        run: git fetch --tags --force origin
+
+      - name: Verify release certificate and update channel/stable
+        id: promote
+        env:
+          VERSION: ${{ inputs.version }}
+          REASON: ${{ inputs.reason }}
+        run: >
+          python3 scripts/host_ops/release/promote.py
+          --repo .
+          --version "$VERSION"
+          --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          --reason "$REASON"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Push channel/stable and mark GitHub Release latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.promote.outputs.version }}
+          SHA: ${{ steps.promote.outputs.sha }}
+        run: |
+          git push --force origin refs/tags/channel/stable:refs/tags/channel/stable
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release edit "$VERSION" --latest
+          else
+            gh release create "$VERSION" \
+              --verify-tag \
+              --latest \
+              --title "$VERSION" \
+              --notes "Promoted certified commit \`$SHA\` to \`channel/stable\`."
+          fi

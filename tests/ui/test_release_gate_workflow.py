@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-gate.yml"
+_RELEASE_GATE = _REPO_ROOT / ".github" / "workflows" / "release-gate.yml"
+_PROMOTE_RELEASE = _REPO_ROOT / ".github" / "workflows" / "promote-release.yml"
 
 
 def _yaml(path: Path) -> dict[object, Any]:
@@ -19,91 +22,68 @@ def _step(steps: list[dict[str, Any]], name: str) -> dict[str, Any]:
     return matches[0]
 
 
-def test_only_a_launched_wave_starts_the_gate() -> None:
-    workflow = _yaml(_WORKFLOW)
+def test_release_gate_supports_scheduled_train_and_manual_dispatch() -> None:
+    workflow = _yaml(_RELEASE_GATE)
+    triggers = workflow[True]
 
-    assert set(workflow[True]) == {"workflow_dispatch"}
-    assert workflow[True]["workflow_dispatch"]["inputs"]["version"]["required"] is True
+    assert set(triggers) == {"schedule", "workflow_dispatch"}
+    assert triggers["schedule"] == [{"cron": "17 */6 * * *"}]
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"target_ref", "version", "hotfix_of", "reason"}
+    assert inputs["version"]["required"] is False
+    assert "pull-requests" not in workflow["permissions"]
 
 
-def test_every_leg_runs_on_the_commit_the_precheck_resolved() -> None:
-    jobs = _yaml(_WORKFLOW)["jobs"]
+def test_every_leg_runs_on_the_commit_the_precheck_resolved_and_skips_idle_train() -> None:
+    jobs = _yaml(_RELEASE_GATE)["jobs"]
 
     assert set(jobs) == {"precheck", "backend", "e2e", "platform-smoke", "certify"}
     for name in ("backend", "e2e", "platform-smoke"):
         assert jobs[name]["needs"] == "precheck"
+        assert jobs[name]["if"] == "needs.precheck.outputs.skip_train != 'true'"
         checkout = jobs[name]["steps"][0]
         assert checkout["with"]["ref"] == "${{ needs.precheck.outputs.sha }}"
 
 
-def test_the_precheck_refuses_a_tree_without_a_certified_base() -> None:
-    precheck = _yaml(_WORKFLOW)["jobs"]["precheck"]
+def test_precheck_validates_target_base_and_nightly_verdict() -> None:
+    precheck = _yaml(_RELEASE_GATE)["jobs"]["precheck"]
+    resolve = _step(precheck["steps"], "Resolve target and check idle train")
     refusal = _step(precheck["steps"], "Refuse a tree without a certified base")
-
-    assert "scripts/host_ops/release/base.py" in refusal["run"]
-    # meiva:note
-    # The first release can only bootstrap here; base.py holds the history condition that closes the door again, so the flag is wiring, not the decision.
-    assert "--bootstrap-when-empty" in refusal["run"]
-
-
-def test_the_label_is_checked_against_the_target_tree_before_anything_runs() -> None:
-    precheck = _yaml(_WORKFLOW)["jobs"]["precheck"]
-    steps = precheck["steps"]
-    names = [step.get("name") for step in steps]
-    label = _step(steps, "Refuse a certificate label the tree does not carry")
-
-    assert "scripts/host_ops/release/label.py" in label["run"]
-    # meiva:note
-    # Quoted: both are caller-supplied text handed to a shell.
-    assert '--version "${{ inputs.version }}"' in label["run"]
-    # meiva:note
-    # The target, not this checkout: the input may name another commit.
-    assert '--target "${{ steps.target.outputs.sha }}"' in label["run"]
-    assert names.index("Refuse a certificate label the tree does not carry") < names.index(
-        "Refuse a tree without a certified base"
-    )
-
-
-def test_the_publish_step_asks_the_tested_decision_and_quotes_its_inputs() -> None:
-    certify = _yaml(_WORKFLOW)["jobs"]["certify"]
-    tag = _step(certify["steps"], "Publish the tag the humans read")
-
-    # meiva:note
-    # The three-way decision (no tag / same commit / another commit) lives in tag.py, where both
-    # real-tag cases run against a repository; a shell comparison here would be untestable, and
-    # the one that used to sit here was wrong for annotated tags.
-    assert "scripts/host_ops/release/tag.py" in tag["run"]
-    assert '--version "${{ inputs.version }}"' in tag["run"]
-    assert '--target "${{ needs.precheck.outputs.sha }}"' in tag["run"]
-    assert 'action="$(python3 scripts/host_ops/release/tag.py' in tag["run"]
-
-
-def test_only_a_tree_that_passed_every_leg_is_certified() -> None:
-    jobs = _yaml(_WORKFLOW)["jobs"]
-    certify = jobs["certify"]
-
-    assert certify["needs"] == ["precheck", "backend", "e2e", "platform-smoke"]
-
-
-def test_certification_writes_the_record_and_the_tag_that_points_at_it() -> None:
-    certify = _yaml(_WORKFLOW)["jobs"]["certify"]
-    record = _step(certify["steps"], "Write the release record")
-    tag = _step(certify["steps"], "Publish the tag the humans read")
-    pull_request = _step(certify["steps"], "Open the pull request that lands the record")
-
-    assert '"passed": True' in record["run"]
-    assert 'path = pathlib.Path("release") / f"{version}.json"' in record["run"]
-    assert '"v${{ inputs.version }}"' in tag["run"]
-    assert tag["run"].index("git push origin") > tag["run"].index("git tag -a")
-    assert "gh pr create" in pull_request["run"]
-
-
-def test_a_red_night_blocks_the_gate_and_a_missing_night_does_not() -> None:
-    precheck = _yaml(_WORKFLOW)["jobs"]["precheck"]
     nightly = _step(precheck["steps"], "Refuse a commit whose nightly full suite was red")
-    script = nightly["run"]
 
-    assert "refresh-test-durations.yml" in script
-    assert 'failure) echo "::error::' in script
-    assert "exit 1" in script.split("failure)")[1].split(";;")[0]
-    assert "no nightly run for $sha" in script
+    assert "scripts/host_ops/release/certify.py precheck" in resolve["run"]
+    assert "scripts/host_ops/release/label.py" not in _RELEASE_GATE.read_text(encoding="utf-8")
+    assert "scripts/host_ops/release/base.py" in refusal["run"]
+    assert "--bootstrap-when-empty" in refusal["run"]
+    assert "refresh-test-durations.yml" in nightly["run"]
+    assert 'failure) echo "::error::' in nightly["run"]
+
+
+def test_certify_mints_git_native_certificate_without_reverse_pr() -> None:
+    jobs = _yaml(_RELEASE_GATE)["jobs"]
+    certify = jobs["certify"]
+    assert certify["needs"] == ["precheck", "backend", "e2e", "platform-smoke"]
+    assert "skip_train != 'true'" in certify["if"]
+
+    mint = _step(certify["steps"], "Mint annotated release certificate")
+    publish = _step(certify["steps"], "Publish release tag, channel/latest, and GitHub Release")
+    assert "scripts/host_ops/release/certify.py mint" in mint["run"]
+    assert "refs/tags/channel/latest" in publish["run"]
+    assert "gh release create" in publish["run"]
+    assert "gh pr create" not in _RELEASE_GATE.read_text(encoding="utf-8")
+
+
+def test_promote_workflow_verifies_certificate_and_updates_channel_stable() -> None:
+    workflow = _yaml(_PROMOTE_RELEASE)
+    triggers = workflow[True]
+    assert set(triggers) == {"workflow_dispatch"}
+    assert triggers["workflow_dispatch"]["inputs"]["version"]["required"] is True
+
+    promote_job = workflow["jobs"]["promote"]
+    verify_step = _step(
+        promote_job["steps"], "Verify release certificate and update channel/stable"
+    )
+    push_step = _step(promote_job["steps"], "Push channel/stable and mark GitHub Release latest")
+    assert "scripts/host_ops/release/promote.py" in verify_step["run"]
+    assert "refs/tags/channel/stable:refs/tags/channel/stable" in push_step["run"]
+    assert "--latest" in push_step["run"]

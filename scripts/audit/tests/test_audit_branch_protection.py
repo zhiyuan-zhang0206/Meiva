@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import NoReturn
 
 import pytest
@@ -16,7 +15,6 @@ from scripts.audit.analysis import (
     mapping,
     outcome,
     report_text,
-    trunk_gate_findings,
 )
 
 _ADMISSION_CHECKS = frozenset(
@@ -28,32 +26,6 @@ _ADMISSION_CHECKS = frozenset(
     }
 )
 _EXPECTED_CHECKS = _ADMISSION_CHECKS
-
-_TRUNK_FIXTURE = """
-version: 0.1
-merge:
-  required_statuses:
-    - backend (pytest + pyright)
-    - backend serial (flaky)
-    - backend static (ruff + pyright + migration smoke)
-    - backend structure (pre-commit lint + codegen freshness)
-    - backend vendored pgvector smoke (Linux)
-    - classify change
-    - e2e (Playwright happy path)
-    - e2e env guard (serial)
-    - e2e hosted (agent-runner-as-server happy path)
-    - frontend (eslint + tsc + vitest)
-    - repo language (no raw CJK)
-    - secret scan (Gitleaks)
-"""
-
-_TRUNK_BAD_FIXTURE = """
-version: 0.1
-merge:
-  required_statuses:
-    - backend (pytest + pyright)
-    - backend shard (${{ matrix.group }}/16)
-"""
 
 
 def _protection(
@@ -92,17 +64,9 @@ def _fake_gh(protection: dict[str, object], workflows: dict[str, object]):
     return fake
 
 
-def test_expected_checks_is_the_trunk_admission_gate() -> None:
+def test_expected_checks_is_the_branch_admission_gate() -> None:
     assert expected_checks() == _ADMISSION_CHECKS
     assert "doc lints (pre-commit family)" in _ADMISSION_CHECKS
-
-
-def test_trunk_gate_findings_reject_matrix_template_names() -> None:
-    findings = trunk_gate_findings(_TRUNK_BAD_FIXTURE)
-    assert (
-        "trunk.yaml required_statuses contains a matrix template name: "
-        "backend shard (${{ matrix.group }}/16)"
-    ) in findings
 
 
 def test_drift_report_accepts_the_exact_live_contract() -> None:
@@ -173,27 +137,6 @@ def test_cli_reports_drift_and_exits_one(capsys: pytest.CaptureFixture[str]) -> 
         audit.main(
             ["--repo", "owner/repo", "--json"],
             run_gh_fn=_fake_gh(protection, _workflows()),
-        )
-        == 1
-    )
-    assert capsys.readouterr().out.rstrip().endswith("AUDIT_RESULT=drift")
-
-
-def test_cli_reports_declaration_mismatch_as_drift_without_calling_github(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    trunk_file = tmp_path / "trunk.yaml"
-    trunk_file.write_text(_TRUNK_BAD_FIXTURE)
-
-    def unexpected_gh(_args: list[str]) -> NoReturn:
-        raise AssertionError("declaration drift must not depend on the GitHub API")
-
-    assert (
-        audit.main(
-            ["--repo", "owner/repo", "--json"],
-            trunk_file=trunk_file,
-            run_gh_fn=unexpected_gh,
         )
         == 1
     )

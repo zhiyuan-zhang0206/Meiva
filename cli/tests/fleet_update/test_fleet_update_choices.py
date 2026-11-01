@@ -87,6 +87,24 @@ def test_disabled_services_and_keeping_infra_are_forwarded_too(
         (["--mode", "gentle"], "--mode smooth|force"),
         (["--message", ""], "--message: cannot be empty; pass --no-message instead"),
         (["--message", "   \n "], "--message: cannot be empty; pass --no-message instead"),
+        (["--channel", "canary"], "--channel stable|latest"),
+        (
+            ["--release", "v1.0.0"],
+            "--release 'v1.0.0': expected CalVer tag vYYYY.MM.DD.HHMMSS",
+        ),
+        (
+            ["--track-branch", "origin/main"],
+            "pass the branch name without 'origin/' or 'refs/' prefix",
+        ),
+        (["--track-branch", ""], "--track-branch '': expected a branch name"),
+        (["--new", ""], "--new '': expected a commit SHA or revision"),
+        (
+            ["--channel", "stable", "--release", "v2026.10.24.120000"],
+            "conflicting target flags",
+        ),
+        (["--channel", "stable", "--new", "HEAD"], "conflicting target flags"),
+        (["--channel", "stable", "--channel", "latest"], "conflicting target flags"),
+        (["--release", "v2026.10.24.120000", "--track-branch", "main"], "conflicting target flags"),
     ],
 )
 def test_a_value_a_host_would_refuse_is_refused_before_any_host(
@@ -126,6 +144,10 @@ def test_a_service_listing_that_cannot_run_is_named_not_mistaken_for_unknown_ser
 # test drops exactly one and expects only that one to be named.
 _ONE_EACH = [
     (["--runner", "mac", "--runner", "lin"], "--runner ALIAS... | --no-runners"),
+    (
+        ["--channel", "stable"],
+        "--channel stable|latest | --release TAG | --track-branch BRANCH | --new SHA",
+    ),
     (["--execute"], "--dry-run | --execute"),
     (["--all-services"], "--all-services | --only-service | --disable-service"),
     (["--start-timeout", "1800"], "--start-timeout"),
@@ -155,7 +177,7 @@ def test_each_single_missing_choice_is_refused_before_any_host(
 ) -> None:
     cluster, _ = env
     given = [arg for i, (tokens, _form) in enumerate(_ONE_EACH) if i != dropped for arg in tokens]
-    argv = ["run", "--gateway", "gw", "--log-dir", str(tmp_path / "logs"), "--new", "HEAD"]
+    argv = ["run", "--gateway", "gw", "--log-dir", str(tmp_path / "logs")]
     with pytest.raises(SystemExit) as exc:
         cluster.invoke([*argv, *given])
     assert exc.value.code == 2
@@ -163,13 +185,6 @@ def test_each_single_missing_choice_is_refused_before_any_host(
     listed = [line.strip() for line in err.splitlines()[1:] if line.strip()]
     assert len(listed) == 1 and _ONE_EACH[dropped][1] in listed[0], err
     assert cluster.commands == []
-
-
-_EVERY_CHOICE = {
-    "down": ["--new", "HEAD"],
-    "up": [],
-    "run": ["--new", "HEAD"],
-}
 
 
 @pytest.mark.parametrize("half", ["down", "up", "run"])
@@ -180,7 +195,7 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
     half: str,
 ) -> None:
     cluster, _ = env
-    argv = [half, "--gateway", "gw", "--log-dir", str(tmp_path / "logs"), *_EVERY_CHOICE[half]]
+    argv = [half, "--gateway", "gw", "--log-dir", str(tmp_path / "logs")]
     with pytest.raises(SystemExit) as exc:
         cluster.invoke(argv)
     assert exc.value.code == 2
@@ -193,6 +208,7 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
     ]
     if half != "up":
         expected += [
+            "--channel stable|latest | --release TAG | --track-branch BRANCH | --new SHA",
             "--keep-shell-sessions | --close-shell-sessions",
             "--keep-browser | --stop-browser",
             "--keep-extras | --stop-extras",

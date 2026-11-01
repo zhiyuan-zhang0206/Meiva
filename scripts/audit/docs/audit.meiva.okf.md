@@ -13,7 +13,7 @@ runtime-impact graph's own numbers, the SDK surface in use, and a live
 database's columns against the `db/schema.sql` baseline. None of them writes to
 the repository, the database or the remote.
 
-`branch_protection.py` compares live GitHub protection with `.trunk/trunk.yaml`.
+`branch_protection.py` compares live GitHub protection with the canonical required-check contract in `analysis/protection.py`.
 Before changes, `where_used.py` groups importers, tests, strings, docs and baseline
 entries of symbols/modules/paths (`--json`).
 After moves, `module_moves.py` rejects remaining old references and missing names.

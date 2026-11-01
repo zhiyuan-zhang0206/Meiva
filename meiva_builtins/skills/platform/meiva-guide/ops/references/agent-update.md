@@ -29,13 +29,16 @@ both halves' effects; it is not a successful deployment.
 
 ## Submit from the agent's shell
 
-Replace the checkout, fixed target SHA, natural-language `--message` (who is
+Replace the checkout, target selection (`--channel stable` for standard production rollouts,
+`--channel latest`, `--release vYYYY.MM.DD.HHMMSS` / `-hf<N>`, certified `--new SHA`, or
+preview-only `--track-branch BRANCH`), natural-language `--message` (who is
 updating and why, delivered to running and idle agents on affected hosts; or
 `--no-message`) and SSH aliases below, along with all required stop/start flags
 from `python -m cli.fleet_update run --help`. Repeat runner
 aliases as needed, or use `--no-runners` for a gateway-only roster. The operator checkout
-must already contain the target commit. The Python below uses only the standard
-library; it generates a private job directory, runner and plist without importing
+must already have fetched the certified release and channel tags (`git fetch --tags origin`).
+Uncertified or tampered targets exit 2 before contacting any host. The Python below uses only the
+standard library; it generates a private job directory, runner and plist without importing
 Meiva or copying the agent's environment into the job.
 
 ```bash
@@ -46,16 +49,16 @@ UPDATE_LABEL="com.meiva.fleet-operator.$(uuidgen)"
 
 "$OPERATOR_CHECKOUT/.venv/bin/python" - \
   "$OPERATOR_CHECKOUT" "$UPDATE_DIR" "$UPDATE_LABEL" \
-  NEW_SHA GATEWAY RUNNER_1 RUNNER_2 <<'PY'
+  stable GATEWAY RUNNER_1 RUNNER_2 <<'PY'
 import plistlib
 import sys
 from pathlib import Path
 
-checkout, directory, label, target, gateway, *runners = sys.argv[1:]
+checkout, directory, label, channel, gateway, *runners = sys.argv[1:]
 root = Path(directory)
 command = [
     str(Path(checkout) / ".venv/bin/python"), "-m", "cli.fleet_update", "run",
-    "--new", target, "--gateway", gateway, "--log-dir", str(root / "logs"),
+    "--channel", channel, "--gateway", gateway, "--log-dir", str(root / "logs"),
 ]
 for runner in runners:
     command.extend(["--runner", runner])

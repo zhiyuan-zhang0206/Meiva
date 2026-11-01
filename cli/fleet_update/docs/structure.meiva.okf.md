@@ -23,7 +23,8 @@ are spent on. Nothing below reads the environment, the clock or `sys.argv`.
   itself.
 - `choices.py` parses and validates every explicit choice. `down.py` and `up.py` are the two
   halves; `fleet_gate.py` and `fleet_verify.py` are the reads and the verification they run.
-- `plan/` holds what the window decides, as strict pure modules: the order of the stops and the
+- `plan/` holds what the window decides, as strict pure modules: target mode, CalVer release
+  certificate, and channel pointer verification (`release_target`), the order of the stops and the
   flags each host gets (`stop_wave`, `wave_order`), the journal reading that says whether a stop
   finished (`journal`), what a failed stop brings back (`recovery`), what the probes refuse on
   (`host_probe`, `helper_gate`, `old_target`), how the shipped programs' replies are read

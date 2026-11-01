@@ -16,7 +16,7 @@ the runbook
 this node owns the code-side order, and the window's guards are
 [[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]].
 The halves are idempotent: after a failure, fix the cause and rerun the failed
-half. `run` accepts both halves' options, requires `--new`, uses one log and
+half. `run` accepts both halves' options, requires one explicit target selection, uses one log and
 stops at the first failure; a failed `down` never enters `up`. A failed `up`
 does not require repeating `down`. The package imports no application code, so
 it runs from a bare operator checkout, whatever generation the cluster runs; its
@@ -28,6 +28,14 @@ Each choice below is a required flag; a missing or conflicting one exits 2, all
 listed together, before any host is touched or log written. The operator's stop
 and start choices are forwarded unchanged, never checked against the diff.
 
+- `down` / `run`, target selection (mutually exclusive modes, verified locally before any SSH):
+  `--channel stable|latest` (verifies `refs/tags/channel/<name>` `meiva-channel/v1` pointer and
+  its target `meiva-release/v1` tag certificate), `--release TAG` (`vYYYY.MM.DD.HHMMSS` or
+  `-hf<N>` with a verified `meiva-release/v1` certificate), `--new SHA` (40-hex commit carrying
+  a verified `meiva-release/v1` tag certificate), or `--track-branch BRANCH` (optionally paired
+  with `--new SHA` for an ancestor commit on `origin/BRANCH`, printing
+  `target: UNRELEASED branch <branch> @ <sha> (preview / rapid-iteration mode)`). Uncertified or
+  tampered tags, pointers, or commits refuse with exit 2 before contacting any host.
 - Both halves: `--runner ALIAS` (repeatable) or `--no-runners`; `--dry-run` or
   `--execute`.
 - `down` / `run`, forwarded to every host's `meiva stop --yes`:
@@ -99,8 +107,8 @@ or starting hosts.
 id = "complete-update"
 kind = "invariant"
 statement = "run requires a target and every lifecycle choice as an explicit argument (a missing or conflicting one exits 2, all listed at once, before any host is touched), forwards the stop and start choices verbatim to each host (--keep-infra/--stop-infra to the gateway's stop only), and executes down then up in one log; a failure stops at its phase, names that half for recovery and never rolls back or retries; a failed down never starts a host, and --dry-run previews both halves without their effects."
-code = ["cli/fleet_update/__init__.py:main", "cli/fleet_update/down.py:down"]
-tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_run_does_not_start_after_a_failed_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_reports_up_failure_without_repeating_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_dry_run_plans_both_halves_without_mutation", "cli/tests/fleet_update/test_fleet_update.py::test_run_uses_one_log_and_accepts_both_halves_options", "cli/tests/fleet_update/test_fleet_update.py::test_run_requires_a_target_before_contacting_hosts", "cli/tests/fleet_update/test_fleet_update_choices.py::test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start", "cli/tests/fleet_update/test_fleet_update_choices.py::test_missing_choices_are_all_listed_at_once_and_no_host_is_touched"]
+code = ["cli/fleet_update/__init__.py:main", "cli/fleet_update/down.py:down", "cli/fleet_update/plan/release_target.py:resolve_update_target"]
+tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_run_does_not_start_after_a_failed_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_reports_up_failure_without_repeating_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_dry_run_plans_both_halves_without_mutation", "cli/tests/fleet_update/test_fleet_update.py::test_run_uses_one_log_and_accepts_both_halves_options", "cli/tests/fleet_update/test_fleet_update.py::test_run_requires_a_target_before_contacting_hosts", "cli/tests/fleet_update/test_fleet_update_choices.py::test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start", "cli/tests/fleet_update/test_fleet_update_choices.py::test_missing_choices_are_all_listed_at_once_and_no_host_is_touched", "cli/tests/fleet_update/test_fleet_update_gates.py::test_uncertified_or_tampered_targets_refuse_exit_2_before_any_ssh_command"]
 ```
 
 The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the smoke or the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).

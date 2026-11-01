@@ -23,7 +23,6 @@ from scripts.audit.analysis.protection import (
     encode_branch,
     expected_checks,
     mapping,
-    trunk_gate_findings,
 )
 from scripts.audit.analysis.protection_report import error_detail, outcome, report_text
 from scripts.audit.analysis.reach import Census, Site, census, report_lines
@@ -100,6 +99,5 @@ __all__ = [
     "scan",
     "schema_columns",
     "strip_comments",
-    "trunk_gate_findings",
     "verdict_line",
 ]

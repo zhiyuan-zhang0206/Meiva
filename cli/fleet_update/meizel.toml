@@ -1,8 +1,9 @@
 exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_verify.py", "oneshot.py", "plan", "programs.py", "schedules_verify_check_rows.py", "session.py", "timers.py"]
 
 [uses]
-"__init__.py" = ["choices.py", "down.py", "plan", "session.py", "up.py"]
+"__init__.py" = ["choices.py", "down.py", "fleet_gate.py", "plan", "session.py", "up.py"]
 "__main__.py" = ["__init__.py", "session.py", "timers.py"]
+"choices.py" = ["plan"]
 "down.py" = ["choices.py", "fleet_gate.py", "oneshot.py", "plan", "programs.py", "session.py"]
 "fleet_gate.py" = ["plan", "session.py"]
 "fleet_verify.py" = ["plan", "session.py"]

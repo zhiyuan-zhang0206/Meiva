@@ -471,21 +471,25 @@ gateway's stop only. Choose what survives the window yourself — the fleet does
 not compare your choices with the diff. A complete command:
 
 ```bash
-.venv/bin/python -m cli.fleet_update run --new NEW_SHA \
+.venv/bin/python -m cli.fleet_update run --channel stable \
   --gateway GATEWAY --runner RUNNER --runner RUNNER2 --log-dir DIR --execute \
   --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
-  --mode smooth --stop-timeout 600 --message "Operator rolling out #PR: reason" \
+  --mode smooth --stop-timeout 600 --message "Operator rolling out stable release: reason" \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
   --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
 ```
 
-Alternatives per choice: `--no-runners` instead of `--runner`; `--dry-run` instead
+Alternatives per choice: `--channel latest`, `--release vYYYY.MM.DD.HHMMSS` (or `-hf<N>`),
+certified `--new NEW_SHA`, or preview-only `--track-branch BRANCH` (optionally paired with
+`--new SHA` on `origin/BRANCH`) instead of `--channel stable`; `--no-runners` instead of
+`--runner`; `--dry-run` instead
 of `--execute`; `--stop-browser`, `--stop-extras`,
 `--stop-infra`; `--keep-service NAME` (repeatable) instead of `--keep-no-services`;
 `--mode force`; `--no-message` instead of `--message TEXT`; `--allow-python-change`,
 `--allow-red-schedules`;
 `--only-service NAME` or `--disable-service NAME` (repeatable) instead of
-`--all-services`.
+`--all-services`. Uncertified or tampered tags, channel pointers, or commits refuse with exit 2
+before opening any SSH session; see [host versioning](engineering/host-versioning.md).
 
 **An update closes the shell sessions and keeps no service.** Every roster service,
 `pty-sessions` included, is a unit of the host's `meiva-root`, and a stop that leaves any
@@ -510,10 +514,10 @@ When the release needs intermediate manual work, or when recovering a failed
 half, use the separate commands:
 
 ```bash
-.venv/bin/python -m cli.fleet_update down --new NEW_SHA \
+.venv/bin/python -m cli.fleet_update down --channel stable \
   --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
   --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
-  --mode smooth --stop-timeout 600 --message "Operator rolling out #PR: reason" \
+  --mode smooth --stop-timeout 600 --message "Operator rolling out stable release: reason" \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
   --all-services --start-timeout 1800
 # manual release steps, if any

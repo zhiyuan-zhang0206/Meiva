@@ -20,41 +20,50 @@ tasks #2915 / #3267).
   When neither exists the caller surfaces "unknown" — never a guessed number a
   gate would trust.
 
-## Release eligibility: `vX.Y.Z` carries the gate
+## Release eligibility: timestamped CalVer tags carry `meiva-release/v1` certificates
 
 The host version above answers "which tree is this machine running". A **release version**
-answers a different question: "did this tree pass the release gate". The two never mix, and
-neither replaces the other.
+answers a different question: "did this tree pass the release gate, and which channel promotes
+it". The two never mix, and neither replaces the other; see the
+[release-train and channel decision](../../decisions/engineering/tooling/2026-11-01-release-train-and-channels.md).
 
-- **`vX.Y.Z` ⟺ the commit passed the release gate.** The machine-readable proof is
-  `release/<version>.json` — gated sha, gate run, verdict — and that record is the authority.
-  An annotated tag `vX.Y.Z` is a human marker for the same fact; **a tag alone never creates
-  release eligibility**, so a hand-made tag cannot certify anything.
-- **Only a strict three-part version is a release.** The historical milestone tags
-  (`v0.2-eval-driven`, `v0.3-control-plane`, ...) are narrative markers for where a line of
-  work ended. They are not releases, and nothing reads them as one.
-- **Deployment precondition.** A release wave may only deploy a commit that descends from (or
-  is) a certified commit: `git merge-base --is-ancestor <certified> <target>`.
-  `scripts/host_ops/release/base.py` is that check, and the release gate runs it before it
-  spends a runner-hour on a matrix. **The deployment path does not call it yet**: only the gate
-  reads a release record today, so a wave launched through the existing deployment tooling is
-  not refused by this rule. Wiring that check into the wave is a change to the release path and
-  waits for the operator's decision; until then this paragraph describes the gate, not every
-  wave.
-- **Hotfix channel.** Stop-the-bleed work may reach production before the gate ran, but such a
-  commit is **not a usable base** until a gate run is recorded on it within 24 hours. The
-  reader names that case (`hotfix-not-followed-up`) instead of guessing.
-- **`[project].version`** stays the product version axis, bumped where a release is cut. It is
-  not derived from the commit and not a gate input; the certificate lives in `release/`.
-  **The certificate's label must still equal it**: the gate reads the *target commit's*
-  `[project].version` and refuses a label the tree does not carry (`version-mismatch`). That does
-  not make the product version an input to test selection or to the compatibility verdict, and
-  the two axes stay independent: only the label is required to match the tree it names, because
-  a tag and a record that assert a version the artifacts do not report are wrong from the first
-  release onward.
+- **`vYYYY.MM.DD.HHMMSS[-hf<N>]` ⟺ the commit passed the release gate.** Every certified
+  release is an annotated Git tag minted from the exact UTC second of certification (for example
+  `v2026.11.01.183045`), carrying an embedded `meiva-release/v1` JSON block
+  (`---BEGIN MEIVA RELEASE CERTIFICATE---` ... `---END MEIVA RELEASE CERTIFICATE---`) verified by
+  `cli/fleet_update/plan/release_target.py:parse_tag_certificate` and written by
+  `scripts/host_ops/release/certify.py`. Lightweight tags, forged CalVer tags without a valid
+  certificate block, or tags whose peeled commit disagrees with the certificate's 40-hex `sha`
+  are rejected. No `release/<version>.json` files or reverse commits are written to `main`.
+- **Post-release hotfix suffix (`-hf<N>`).** Forward fixes on `main` mint the next timestamped
+  `vYYYY.MM.DD.HHMMSS` tag on the Release Train. Out-of-band hotfixes that branch from an earlier
+  certified release commit (`hotfix_base != latest_head`) append `-hf1`, `-hf2`, ... in strictly
+  monotonic order with `kind = "hotfix"` and `hotfix_of` naming the base release tag.
+- **Moving channel tags (`channel/latest`, `channel/stable`).** Two moving annotated Git tags
+  embed a `meiva-channel/v1` JSON pointer (`---BEGIN MEIVA CHANNEL POINTER---` ...
+  `---END MEIVA CHANNEL POINTER---`). `.github/workflows/release-gate.yml` (6-hour scheduled
+  Release Train plus manual/hotfix dispatch) advances `channel/latest` and publishes the GitHub
+  Release (`--latest=false`). `.github/workflows/promote-release.yml` invokes
+  `scripts/host_ops/release/promote.py` to verify the target tag's `meiva-release/v1` certificate
+  before advancing `channel/stable` and marking that GitHub Release `--latest`.
+- **Enforced deployment gate (`cli.fleet_update`).** `cli.fleet_update` (`down` and `run`)
+  resolves its target through `cli/fleet_update/plan/release_target.py:resolve_update_target`
+  before opening any SSH session: `--channel stable|latest`, a certified `--release <tag>` or
+  `--new <sha>`, or explicit preview opt-in `--track-branch <branch> [--new <sha>]` (which prints
+  `target: UNRELEASED branch <branch> @ <sha> (preview / rapid-iteration mode)`). Any uncertified
+  or tampered tag, channel pointer, or commit SHA exits 2 before touching any host.
+- **Ancestry & train regression isolation.** `scripts/host_ops/release/base.py` verifies whether a
+  target commit descends from a certified release tag (`git merge-base --is-ancestor`). When a
+  scheduled Release Train batch uncovers a cross-PR regression between `channel/latest` and `main`
+  `HEAD`, `scripts/host_ops/release/bisect_train.py` isolates the first bad commit in
+  `ceil(log2(K))` steps inside a temporary detached worktree.
+- **Historical milestone tags & `[project].version`.** Historical tags (`v0.2-eval-driven`,
+  `v0.3-control-plane`, ...) are narrative markers and never satisfy release certification.
+  `[project].version` in `pyproject.toml` remains only the wheel-install fallback for checkout-less
+  runtimes and is decoupled from release tags.
 
-Two axes, two questions: `YYYY.M.D+g<sha>` says *what is running*, `vX.Y.Z` + `release/`
-says *what is released*.
+Two axes, two questions: `YYYY.M.D+g<sha>` says *what is running*, `vYYYY.MM.DD.HHMMSS[-hfN]` +
+`channel/{latest,stable}` says *what is certified and promoted*.
 
 ## What packages declare
 

@@ -1,9 +1,9 @@
 # meiva:note
-# What the branch-protection audit promises: the admission gate, the queue gate, live drift.
-#
-# `branch_protection.py` runs `gh`, reads `.trunk/trunk.yaml` and prints; which checks must be
-# required, which workflow files must be active, and how a GitHub payload differs from that
-# contract are decided here.
+# What the branch-protection audit promises: the GitHub branch-protection admission gate and
+# active workflow checks. `branch_protection.py` runs read-only `gh` queries and prints; which
+# status checks must be required, which workflow files must be active, and how a GitHub payload
+# differs from that contract are decided here.
+# meiva:link scripts/audit/docs/audit.meiva.okf.md
 
 from __future__ import annotations
 
@@ -12,24 +12,18 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TypeGuard
 
-import yaml
-
 __all__ = [
     "audit_target",
     "drift_report",
     "encode_branch",
     "expected_checks",
     "mapping",
-    "trunk_gate_findings",
 ]
 
 # meiva:note
-# P2 ruling (2026-09-02): the branch-protection admission gate is the three
-# suite aggregators. Amended 2026-09-13 (task #3207): the docs-only gate
-# "doc lints (pre-commit family)" joined the admission set once the docs-only
-# classify gap was closed by #2302 and the check was promoted to a required
-# context. The queue TESTING gate lives in trunk.yaml and is audited separately
-# by trunk_gate_findings().
+# The GitHub branch-protection admission gate on `main` is the three suite aggregators plus
+# `doc lints (pre-commit family)`; post-merge full-suite certification runs asynchronously via
+# `.github/workflows/release-gate.yml` (the Release Train).
 _ADMISSION_CHECKS = frozenset(
     {
         "backend (pytest + pyright)",
@@ -38,7 +32,6 @@ _ADMISSION_CHECKS = frozenset(
         "doc lints (pre-commit family)",
     }
 )
-_MATRIX_TEMPLATE = re.compile(r"\$\{\{ matrix")
 _GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _REMOTE_REPO = re.compile(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$")
 _REQUIRED_WORKFLOWS = (
@@ -111,41 +104,8 @@ def _list(value: object, location: str) -> list[object]:
 
 def expected_checks() -> frozenset[str]:
     # meiva:note
-    # Return the branch-protection admission gate (P2 ruling).
+    # Return the branch-protection admission gate.
     return _ADMISSION_CHECKS
-
-
-def trunk_gate_findings(text: str) -> list[str]:
-    # meiva:note
-    # Audit the queue TESTING gate declared in .trunk/trunk.yaml.
-    #
-    # Invariants: required_statuses must be present and non-empty, carry the three suite
-    # aggregators, and must not contain raw matrix template names (a fully-skipped matrix
-    # reports only the template name, so such an entry could stall the queue forever on
-    # docs-only PRs).
-    document: object = yaml.safe_load(text)
-    root = mapping(document, ".trunk/trunk.yaml")
-    if "merge" not in root:
-        return ["trunk.yaml is missing merge.required_statuses"]
-    merge = mapping(root["merge"], "merge")
-    if "required_statuses" not in merge:
-        return ["trunk.yaml is missing merge.required_statuses"]
-    statuses = _string_set(merge["required_statuses"], "merge.required_statuses")
-    if not statuses:
-        return ["trunk.yaml merge.required_statuses must not be empty"]
-
-    findings: list[str] = []
-    for aggregator in (
-        "backend (pytest + pyright)",
-        "frontend (eslint + tsc + vitest)",
-        "e2e (Playwright happy path)",
-    ):
-        if aggregator not in statuses:
-            findings.append(f"trunk.yaml required_statuses missing {aggregator}")
-    for name in sorted(statuses):
-        if _MATRIX_TEMPLATE.search(name):
-            findings.append(f"trunk.yaml required_statuses contains a matrix template name: {name}")
-    return findings
 
 
 def _string_set(value: object, location: str) -> frozenset[str]:

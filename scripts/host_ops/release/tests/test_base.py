@@ -7,36 +7,37 @@ from pathlib import Path
 
 import pytest
 
+from cli.fleet_update.plan.release_target import (
+    ReleaseCertificate,
+    format_tag_message,
+)
 from scripts.host_ops.release import base as release_base
 
 
-def _record(
+def _cert(
     *,
-    version: str = "1.2.3",
-    sha: str = "gated",
-    gate_run: str = "https://github.com/o/r/actions/runs/1",
-    passed: bool = True,
-    hotfix: bool = False,
-    followup_gate_run: str | None = None,
-) -> release_base.ReleaseRecord:
-    return release_base.ReleaseRecord(
+    version: str = "v2026.11.01.120000",
+    sha: str = "a" * 40,
+    hotfix_of: str | None = None,
+) -> ReleaseCertificate:
+    return ReleaseCertificate(
         version=version,
         sha=sha,
-        gate_run=gate_run,
-        passed=passed,
-        hotfix=hotfix,
-        followup_gate_run=followup_gate_run,
+        source_ref="refs/heads/main",
+        gate_run_id="1",
+        gate_run_url="https://github.com/o/r/actions/runs/1",
+        certified_at="2026-11-01T12:00:00Z",
+        hotfix_of=hotfix_of,
     )
 
 
 def _ancestor_of(edges: dict[str, set[str]]) -> Callable[[str, str], bool]:
-
-    def is_ancestor(base: str, target: str) -> bool:
+    def check(ancestor: str, target: str) -> bool:
         seen: set[str] = set()
         stack = [target]
         while stack:
             node = stack.pop()
-            if node == base:
+            if node == ancestor:
                 return True
             if node in seen:
                 continue
@@ -44,160 +45,17 @@ def _ancestor_of(edges: dict[str, set[str]]) -> Callable[[str, str], bool]:
             stack.extend(edges.get(node, set()))
         return False
 
-    return is_ancestor
+    return check
 
 
-def test_target_descending_from_a_gated_release_is_allowed() -> None:
-    verdict = release_base.verify_release_base(
-        "deployed",
-        [_record()],
-        _ancestor_of({"deployed": {"gated"}}),
+def _git(repo: Path, *arguments: str) -> str:
+    done = subprocess.run(  # noqa: S603
+        ("git", "-C", str(repo), *arguments), check=True, capture_output=True, text=True
     )
-
-    assert verdict.ok
-    assert verdict.reason == "descends-from-release/1.2.3"
-    assert verdict.base is not None and verdict.base.sha == "gated"
+    return done.stdout.strip()
 
 
-def test_no_provenance_at_all_refuses() -> None:
-    verdict = release_base.verify_release_base("deployed", [], _ancestor_of({}))
-
-    assert not verdict.ok
-    assert verdict.reason == "no-provenance"
-
-
-# meiva:note
-# The bootstrap exists because the record can only come from the run that certifies it: without it the first release is locked out for good (2026-10-29, the first real gate run). It stays a one-shot — allowed only by the caller, and never by an empty directory.
-def test_an_empty_release_history_may_bootstrap_the_first_release() -> None:
-    verdict = release_base.verify_release_base(
-        "deployed",
-        [],
-        _ancestor_of({}),
-        bootstrap_allowed=True,
-    )
-
-    assert verdict.ok
-    assert verdict.reason == "bootstrap-no-release-history"
-    assert verdict.base is None
-
-
-def test_the_bootstrap_needs_the_caller_to_allow_it() -> None:
-    verdict = release_base.verify_release_base(
-        "deployed",
-        [],
-        _ancestor_of({}),
-        bootstrap_allowed=False,
-    )
-
-    assert not verdict.ok
-    assert verdict.reason == "no-provenance"
-
-
-def test_a_record_that_is_not_an_ancestor_still_refuses_beside_the_bootstrap() -> None:
-    verdict = release_base.verify_release_base(
-        "side-branch",
-        [_record()],
-        _ancestor_of({"side-branch": {"base"}}),
-        bootstrap_allowed=True,
-    )
-
-    assert not verdict.ok
-    assert verdict.reason == "no-gated-ancestor"
-
-
-def test_a_commit_that_does_not_descend_from_any_gated_tree_refuses() -> None:
-    verdict = release_base.verify_release_base(
-        "side-branch",
-        [_record()],
-        _ancestor_of({"side-branch": {"base"}}),
-    )
-
-    assert not verdict.ok
-    assert verdict.reason == "no-gated-ancestor"
-
-
-def test_a_hotfix_without_a_follow_up_gate_run_is_not_a_usable_base() -> None:
-    hotfix = _record(sha="hot", hotfix=True, followup_gate_run=None)
-    verdict = release_base.verify_release_base(
-        "deployed",
-        [hotfix],
-        _ancestor_of({"deployed": {"hot"}}),
-    )
-
-    assert not verdict.ok
-    assert verdict.reason == "hotfix-not-followed-up"
-
-
-def test_a_hotfix_with_its_follow_up_gate_run_is_a_usable_base() -> None:
-    hotfix = _record(sha="hot", hotfix=True, followup_gate_run="https://example/run/2")
-    verdict = release_base.verify_release_base(
-        "deployed",
-        [hotfix],
-        _ancestor_of({"deployed": {"hot"}}),
-    )
-
-    assert verdict.ok
-    assert verdict.reason == "descends-from-release/1.2.3"
-
-
-def test_the_highest_reachable_release_wins() -> None:
-    older = _record(version="1.2.3", sha="older")
-    newer = _record(version="1.10.0", sha="newer")
-    verdict = release_base.verify_release_base(
-        "deployed",
-        [older, newer],
-        _ancestor_of({"deployed": {"newer"}, "newer": {"older"}}),
-    )
-
-    assert verdict.ok
-    assert verdict.base is not None and verdict.base.version == "1.10.0"
-
-
-def test_a_failed_gate_never_makes_its_commit_releasable() -> None:
-    verdict = release_base.verify_release_base(
-        "deployed",
-        [_record(passed=False)],
-        _ancestor_of({"deployed": {"gated"}}),
-    )
-
-    assert not verdict.ok
-    assert verdict.reason == "no-gated-ancestor"
-
-
-@pytest.mark.parametrize("tag", ["v0.2-eval-driven", "v0.3-control-plane", "app-v1.0.0", "1.2.3"])
-def test_milestone_and_foreign_tags_are_not_release_tags(tag: str) -> None:
-    assert release_base.parse_release_tag(tag) is None
-
-
-def test_a_three_part_tag_parses_to_its_version() -> None:
-    assert release_base.parse_release_tag("v1.10.0") == (1, 10, 0)
-
-
-def test_a_malformed_provenance_file_fails_loudly(tmp_path: Path) -> None:
-    (tmp_path / "1.2.3.json").write_text(json.dumps({"version": "1.2.3"}), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="missing sha, gate_run, passed"):
-        release_base.load_records(tmp_path)
-
-
-def test_loading_reads_every_record(tmp_path: Path) -> None:
-    payload = {"version": "1.2.3", "sha": "gated", "gate_run": "run/1", "passed": True}
-    (tmp_path / "1.2.3.json").write_text(json.dumps(payload), encoding="utf-8")
-
-    records = release_base.load_records(tmp_path)
-
-    assert [record.version for record in records] == ["1.2.3"]
-
-
-# meiva:note
-# The door is history, not the working tree: a record that was committed and later deleted must not turn the bootstrap back on, or "delete the file" becomes a way to certify any tree. These three cases are that rule, run against a real repository.
-def _git(repo: Path, *arguments: str) -> None:
-    subprocess.run(  # noqa: S603
-        ("git", "-C", str(repo), *arguments), check=True, capture_output=True
-    )
-
-
-def _repository(tmp_path: Path) -> Path:
+def _repository(tmp_path: Path) -> tuple[Path, str]:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
@@ -206,48 +64,88 @@ def _repository(tmp_path: Path) -> Path:
     (repo / "README.md").write_text("x\n", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
-    return repo
+    return repo, _git(repo, "rev-parse", "HEAD")
 
 
-def test_a_repository_that_never_committed_a_record_has_no_history(tmp_path: Path) -> None:
-    assert release_base.has_release_history(_repository(tmp_path), "release") is False
+def test_target_descending_from_a_certified_release_is_allowed() -> None:
+    gated = "a" * 40
+    deployed = "b" * 40
+    verdict = release_base.verify_release_base(
+        deployed,
+        [_cert(sha=gated)],
+        _ancestor_of({deployed: {gated}}),
+    )
+
+    assert verdict.ok
+    assert verdict.reason == "descends-from-release/v2026.11.01.120000"
+    assert verdict.base is not None and verdict.base.sha == gated
 
 
-# meiva:note
-# The pathspec has to name the files the reader reads. A README, a .gitkeep or a nested file are
-# not records, and counting any of them closed the bootstrap door on a tree that carries none -
-# the first-release deadlock wearing a different filename.
-def test_a_placeholder_in_the_directory_is_not_a_record(tmp_path: Path) -> None:
-    repo = _repository(tmp_path)
-    (repo / "release").mkdir()
-    (repo / "release" / "README.md").write_text("how records are written\n", encoding="utf-8")
-    (repo / "release" / ".gitkeep").write_text("", encoding="utf-8")
-    (repo / "release" / "sub").mkdir()
-    (repo / "release" / "sub" / "nested.json").write_text("{}\n", encoding="utf-8")
-    _git(repo, "add", "-f", ".")
-    _git(repo, "commit", "-q", "-m", "docs: describe the release directory")
+def test_no_provenance_refuses_unless_bootstrap_is_explicit() -> None:
+    denied = release_base.verify_release_base("b" * 40, [], _ancestor_of({}))
+    assert not denied.ok and denied.reason == "no-provenance"
 
-    assert release_base.has_release_history(repo, "release") is False
+    bootstrapped = release_base.verify_release_base(
+        "b" * 40, [], _ancestor_of({}), bootstrap_allowed=True
+    )
+    assert bootstrapped.ok and bootstrapped.reason == "bootstrap-no-release-history"
 
 
-def test_a_committed_record_is_history(tmp_path: Path) -> None:
-    repo = _repository(tmp_path)
-    (repo / "release").mkdir()
-    (repo / "release" / "1.0.0.json").write_text("{}\n", encoding="utf-8")
+def test_non_ancestor_refuses_even_when_bootstrap_flag_is_passed() -> None:
+    verdict = release_base.verify_release_base(
+        "c" * 40,
+        [_cert(sha="a" * 40)],
+        _ancestor_of({"c" * 40: {"b" * 40}}),
+        bootstrap_allowed=True,
+    )
+    assert not verdict.ok and verdict.reason == "no-gated-ancestor"
+
+
+def test_highest_reachable_calver_including_hotfix_wins() -> None:
+    base_sha = "a" * 40
+    hf_sha = "b" * 40
+    tip_sha = "c" * 40
+    older = _cert(version="v2026.11.01.120000", sha=base_sha)
+    hotfix = _cert(
+        version="v2026.11.01.120000-hf1",
+        sha=hf_sha,
+        hotfix_of="v2026.11.01.120000",
+    )
+    verdict = release_base.verify_release_base(
+        tip_sha,
+        [older, hotfix],
+        _ancestor_of({tip_sha: {hf_sha}, hf_sha: {base_sha}}),
+    )
+    assert verdict.ok
+    assert verdict.base == hotfix
+
+
+def test_load_certified_releases_ignores_foreign_tags_and_rejects_forged_calver_tags(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, first = _repository(tmp_path)
+    _git(repo, "tag", "v0.1.0", first)
+    _git(repo, "tag", "m2-full", first)
+    assert release_base.has_release_history(repo) is False
+    assert release_base.load_certified_releases(repo) == []
+
+    cert = _cert(version="v2026.11.01.120000", sha=first)
+    _git(repo, "tag", "-a", cert.version, "-m", format_tag_message(cert), first)
+    assert release_base.has_release_history(repo) is True
+    assert release_base.load_certified_releases(repo) == [cert]
+
+    (repo / "README.md").write_text("next\n", encoding="utf-8")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-q", "-m", "release: v1.0.0")
+    _git(repo, "commit", "-q", "-m", "next")
+    second = _git(repo, "rev-parse", "HEAD")
 
-    assert release_base.has_release_history(repo, "release") is True
+    assert release_base.main(["--repo", str(repo), "--target", second]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True and payload["base_version"] == "v2026.11.01.120000"
 
-
-def test_a_deleted_record_is_still_history(tmp_path: Path) -> None:
-    repo = _repository(tmp_path)
-    (repo / "release").mkdir()
-    (repo / "release" / "1.0.0.json").write_text("{}\n", encoding="utf-8")
-    _git(repo, "add", ".")
-    _git(repo, "commit", "-q", "-m", "release: v1.0.0")
-    _git(repo, "rm", "-q", "release/1.0.0.json")
-    _git(repo, "commit", "-q", "-m", "chore: drop the record")
-
-    assert not (repo / "release").exists() or not list((repo / "release").iterdir())
-    assert release_base.has_release_history(repo, "release") is True
+    _git(repo, "tag", "v2026.11.01.130000", second)
+    with pytest.raises(ValueError, match="not an annotated tag"):
+        release_base.load_certified_releases(repo)
+    assert release_base.main(["--repo", str(repo), "--target", second]) == 1
+    bad_payload = json.loads(capsys.readouterr().out)
+    assert bad_payload["ok"] is False and bad_payload["reason"] == "invalid-certificate"
