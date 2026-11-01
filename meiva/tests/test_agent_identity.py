@@ -170,7 +170,7 @@ def test_lifecycle_self_actions_refuse_from_launched_script(db_url: str, action:
 
     fn = getattr(meiva.self, action)
     with pytest.raises(RuntimeError, match="can only be called from inside an agent process"):
-        fn("summary") if action == "compact" else fn()
+        fn("summary") if action in {"compact", "restart"} else fn()
 
 
 @pytest.mark.parametrize("action", ["attach", "compact", "restart"])
@@ -180,12 +180,10 @@ def test_native_only_self_actions_refuse_on_external_harness(action: str) -> Non
     pin_agent(1, owns_loop=True, harness=Harness.CLAUDE_CODE)
     fn = getattr(meiva.self, action)
     with pytest.raises(RuntimeError, match="only supported on the native 'meiva' harness"):
-        if action == "compact":
+        if action in {"compact", "restart"}:
             fn("summary")
-        elif action == "attach":
-            fn("some/file.png")
         else:
-            fn()
+            fn("some/file.png")
 
 
 def test_context_exposes_the_bound_identity() -> None:
