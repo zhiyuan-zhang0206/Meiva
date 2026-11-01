@@ -19,6 +19,11 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "runtime_incarnation.py" = "strict"
 "stop_timing.py" = "strict"
 
+# meiva:note
+# `os_platform.py#clock _monotonic()` is a duration source, not a wall-clock moment: it only compares
+# `now >= deadline` inside `_bounded_file_lock` and never records the value. The read stays, and the
+# entry stays booked because the checker has no duration class to book it as — recorded here so the
+# next reader does not "repay" it by threading a clock through 57 lock call sites.
 [debt.ambient-read]
 "os_platform.py#clock _monotonic()" = 1
 "os_platform.py#pid os.getpid" = 1

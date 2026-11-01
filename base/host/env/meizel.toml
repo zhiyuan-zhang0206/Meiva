@@ -12,6 +12,7 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "tests" = ["agent_env.py", "boot_actions.py", "boot_policy.py", "bootstrap.py", "dotenv_content.py", "dotenv_file.py", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]
 
 [roots]
+"dotenv_file.py" = { kinds = ["clock"], why = "the .env backup name carries the HOST clock by decision (docs/decisions/data/backup/2026-09-28-env-backup-names-use-the-host-clock.md): the writer runs before first-start identity, so asking a cluster Clock would mean loading runtime Settings to name a file, and the name must stay this machine's local time" }
 "boot_actions.py" = { kinds = ["environ"], why = "The program-level operations that write this process's own TZ, MEIVA_HOME and config-fetch marker before the first application import; nothing else in base.host.env writes the process environment" }
 "registry.py" = { kinds = ["environ"], why = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding" }
 
@@ -26,7 +27,6 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "process_profile.py" = "strict"
 
 [debt.ambient-read]
-"dotenv_file.py#clock datetime.datetime.now" = 1
 "dotenv_file.py#home base.paths.home.resolve_meiva_home" = 1
 "harness_binaries.py#home base.paths.home.user_home" = 1
 "port_lease.py#pid os.getpid" = 1
