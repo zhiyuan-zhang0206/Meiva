@@ -61,11 +61,17 @@ def _assert_probe_plist(plist: Path, *, roots: JobRoots, interval_s: int = 300) 
 _NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
 
 
-def _launchctl(print_reply: Reply = _NOT_LOADED) -> tuple[FakeCommands, Host]:
+# meiva:note
+# `job_label` is the `XPC_SERVICE_NAME` launchd sets on the job's direct child: the host carries it
+# in the environment the composition root handed it, which is where the registrar now reads it.
+def _launchctl(
+    print_reply: Reply = _NOT_LOADED, *, job_label: str | None = None
+) -> tuple[FakeCommands, Host]:
     commands = FakeCommands()
     commands.on(["launchctl", "print"], print_reply, repeat=True)
     commands.on("launchctl", Reply(), repeat=True)
-    return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
+    environ = {} if job_label is None else {"XPC_SERVICE_NAME": job_label}
+    return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID, environ=environ)
 
 
 def test_register_macos_never_reloads_its_own_launchd_job(
@@ -74,14 +80,13 @@ def test_register_macos_never_reloads_its_own_launchd_job(
     label = "com.meiva.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
-    commands, host = _launchctl()
+    commands, host = _launchctl(job_label=label)
 
     assert (
         health_job.register_macos(
             300,
             host=host,
             roots=_roots(fake_home),
-            current_label=label,
             ancestral_labels=frozenset(),
         )
         == 0
@@ -95,14 +100,13 @@ def test_register_macos_still_reloads_from_another_launchd_job(
 ) -> None:
     plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
-    commands, host = _launchctl()
+    commands, host = _launchctl(job_label="com.meiva.autostart")
 
     assert (
         health_job.register_macos(
             300,
             host=host,
             roots=_roots(fake_home),
-            current_label="com.meiva.autostart",
             ancestral_labels=frozenset(),
         )
         == 0
@@ -375,14 +379,13 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
     label = "com.meiva.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
-    commands, host = _launchctl()
+    commands, host = _launchctl(job_label="0")
 
     assert (
         health_job.register_macos(
             300,
             host=host,
             roots=_roots(fake_home),
-            current_label="0",
             ancestral_labels=frozenset({label}),
         )
         == 0
@@ -396,14 +399,13 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
 ) -> None:
     plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
-    commands, host = _launchctl()
+    commands, host = _launchctl(job_label="0")
 
     assert (
         health_job.register_macos(
             300,
             host=host,
             roots=_roots(fake_home),
-            current_label="0",
             ancestral_labels=frozenset(),
         )
         == 0
