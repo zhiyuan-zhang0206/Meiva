@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, commit, run, write
+from meizel.tests.synthetic import RepoFactory, commit, git, run, write
 
 TREE = {
     "base/__init__.py": "",
@@ -222,3 +223,53 @@ def test_a_ref_that_records_a_retired_code_still_counts(
     out = capsys.readouterr().out
     assert "manifest-cycle" in out
     assert "-2" in out
+
+
+# meiva:note
+# A branch and the main it fell behind: `main` pays the debt in `a/` that the branch never touched,
+# and the branch carries work of its own on top of the commit the two share. `debt diff` compared the
+# branch's tree with `main` alone, so the entry `main` had paid stayed recorded on the branch and was
+# read as the branch's growth, with `main`'s own file named as the change's. What lands is a merge of
+# three trees, so that is what these tests judge; the second one is the guard — a branch that really
+# does record new debt must still fail, and it must fail for the entry it moved even when `main`
+# moved that same entry too.
+def _branch_behind_main(make_repo: RepoFactory, branch_files: Mapping[str, str]) -> Path:
+    root = make_repo(
+        {
+            "a/__init__.py": "",
+            "a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 3\n',
+            "b/__init__.py": "",
+            "b/meizel.toml": '[debt.private-module]\n"x.py -> y.py" = 2\n',
+        }
+    )
+    commit(root)
+    git(root, "branch", "fork")
+    write(root, {"a/meizel.toml": ""})
+    commit(root, "main pays the debt in a")
+    git(root, "checkout", "-q", "fork")
+    write(root, branch_files)
+    commit(root, "the branch")
+    return root
+
+
+def test_a_branch_behind_main_does_not_report_main_s_payment_as_its_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _branch_behind_main(make_repo, {"b/extra.py": "# unrelated work\n"})
+    assert run(root, "debt", "diff", "--against", "main", "--on-growth", "fail") == 0
+    out = capsys.readouterr().out
+    assert "no growth" in out
+    assert "private-name" not in out and "x.py -> y.py#_n" not in out
+    assert "private-module" in out and "+0" in out
+
+
+def test_a_branch_behind_main_still_fails_when_it_records_new_debt(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _branch_behind_main(
+        make_repo, {"a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 4\n'}
+    )
+    assert run(root, "debt", "diff", "--against", "main", "--on-growth", "fail") == 1
+    out = capsys.readouterr()
+    assert "private-name" in out.out and "+4" in out.out
+    assert "grew" in out.err

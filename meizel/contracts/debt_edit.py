@@ -3,10 +3,14 @@
 `record` is the only way a baseline grows. `check` and `bootstrap` never write one.
 """
 
+# meiva:note
+# This module also reads one: `read_baselines` is the read half of `write_baseline`, kept beside it so
+# the one module that knows how a baseline sits in a manifest owns both directions.
+
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
@@ -17,6 +21,7 @@ from meizel.contracts.debt import (
     DebtTable,
     entry_value,
     local_edge,
+    parse_debt,
     set_debt,
     total,
 )
@@ -24,16 +29,45 @@ from meizel.contracts.ledger import resolve_debt_conflicts, tally
 from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
-from meizel.graph.universe import Checkout, EditPlan
+from meizel.graph.universe import Checkout, EditPlan, Universe
 
 __all__ = [
+    "Baselines",
     "created_notice",
-    "plan_baseline_write",
     "prune",
+    "read_baselines",
     "record",
     "resolve",
     "write_baseline",
 ]
+
+
+Baselines = dict[str, DebtTable]
+
+
+def _parse(text: str, where: str) -> DebtTable:
+    problems: list[str] = []
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise MeizelError(f"{where}: invalid TOML: {error}") from error
+    table = parse_debt(document[TABLE_KEY], problems.append) if TABLE_KEY in document else {}
+    if problems:
+        raise MeizelError(f"{where}: " + "; ".join(problems))
+    return table
+
+
+# meiva:note
+# The recorded debt of every directory of the working tree that has any.
+def read_baselines(universe: Universe, texts: Mapping[str, str] | None = None) -> Baselines:
+    found: Baselines = {}
+    for directory in sorted(universe.manifest_dirs):
+        path = manifest_path(directory)
+        raw = texts[path] if texts is not None and path in texts else universe.repo.load_text(path)
+        table = _parse(raw, path)
+        if table:
+            found[directory] = table
+    return found
 
 
 def _within(path: str, targets: list[str]) -> bool:
@@ -67,7 +101,7 @@ def _lowered(entry: DebtEntry, found: int) -> DebtEntry:
     return DebtEntry(min(entry.count, found), entry.owner, entry.until)
 
 
-def plan_baseline_write(
+def _plan_baseline_write(
     repo: Checkout, owner: str, before: str, table: DebtTable
 ) -> tuple[EditPlan, str | None]:
     rel = manifest_path(owner)
@@ -108,7 +142,7 @@ def created_notice(created: Sequence[str]) -> str | None:
 def write_baseline(repo: Checkout, owner: str, table: DebtTable) -> str | None:
     """Rewrite the `[debt]` tables of `owner`'s manifest; the path written, or None if unchanged."""
     before = _manifest_text(repo, owner)
-    plan, changed = plan_baseline_write(repo, owner, before, table)
+    plan, changed = _plan_baseline_write(repo, owner, before, table)
     repo.apply_plan(plan)
     return changed
 

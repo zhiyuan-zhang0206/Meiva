@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, commit, run, write
+from meizel.tests.synthetic import RepoFactory, commit, git, run, write
 
 BASE = (
     "[debt.first-party-patch]\n"
@@ -158,3 +158,32 @@ def test_a_ref_with_a_retired_code_is_still_readable(
 def test_the_exit_status_still_follows_on_growth(make_repo: RepoFactory) -> None:
     root = repo(make_repo)
     assert run(root, "debt", "diff", "--against", "HEAD", "--on-growth", "fail", "--by-target") == 1
+
+
+# meiva:note
+# The same branch and main as `test_debt_report` builds, read per target: main pays a patch entry the
+# branch never touched, and the per-target table used to list that payment under the change.
+def test_a_branch_behind_main_reports_no_target_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            "a/__init__.py": "",
+            "a/meizel.toml": (
+                '[debt.first-party-patch]\n"test_p.py#monkeypatch.setattr lib.mod.helper" = 5\n'
+            ),
+            "b/__init__.py": "",
+        }
+    )
+    commit(root)
+    git(root, "branch", "fork")
+    write(root, {"a/meizel.toml": ""})
+    commit(root, "main pays the patch debt")
+    git(root, "checkout", "-q", "fork")
+    write(root, {"b/extra.py": "# unrelated work\n"})
+    commit(root, "the branch")
+    assert run(root, "debt", "diff", "--against", "main", "--on-growth", "fail", "--by-target") == 0
+    out = capsys.readouterr().out
+    rows = [line.split() for line in out.split("\n\n")[1].strip().splitlines()]
+    assert ["all", "patch", "debt", "0", "0", "+0"] in rows
+    assert not [row for row in rows if row[0] == "lib.mod.helper"]
