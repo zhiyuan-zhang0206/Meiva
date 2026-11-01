@@ -136,7 +136,7 @@ def _seed_native_agent(
     return agent_id
 
 
-def _assert_transferred_db_records(db_conn: psycopg.Connection, agent_id: int) -> None:
+def _assert_transferred_meta_and_cleanup(db_conn: psycopg.Connection, agent_id: int) -> None:
     meta_row = db_conn.execute(
         "SELECT machine, status, runtime_owner, runtime_generation FROM agents_meta WHERE id = %s",
         (agent_id,),
@@ -153,28 +153,29 @@ def _assert_transferred_db_records(db_conn: psycopg.Connection, agent_id: int) -
     ).fetchone()
     assert (open_pages, shell_ttls) == ((0,), (0,))
 
-    inbound = db_conn.execute(
-        "SELECT kind, source, content, payload FROM inbound_messages "
-        "WHERE agent_id = %s ORDER BY id DESC LIMIT 1",
+
+def _assert_transferred_db_records(
+    db_conn: psycopg.Connection, agent_id: int, *, message: str | None = None
+) -> None:
+    _assert_transferred_meta_and_cleanup(db_conn, agent_id)
+    inbounds = db_conn.execute(
+        "SELECT kind, source, content FROM inbound_messages WHERE agent_id = %s ORDER BY id ASC",
         (agent_id,),
-    ).fetchone()
-    assert inbound is not None
-    kind, source, content, payload = inbound
-    assert (kind, source, payload) == (
-        "system_note",
-        "user",
-        {"note_tag": "context", "passive": True},
-    )
-    assert "from machine 'runner-a' to 'runner-b'" in content
-    assert "Relocating Output owner to company-mini" in content
+    ).fetchall()
+    kinds = [row[0] for row in inbounds]
+    assert "resurrect" in kinds and "chat" in kinds
+    chat_inbound = [row for row in inbounds if row[0] == "chat"][-1]
+    assert chat_inbound[1] == "user"
+    assert "Cross-machine transfer from 'runner-a' to 'runner-b'" in chat_inbound[2]
+    if message:
+        assert message in chat_inbound[2]
 
     audit = db_conn.execute(
         "SELECT event_name, source, attributes FROM audit_events "
         "WHERE agent_id = %s AND event_name = 'transfer'",
         (agent_id,),
     ).fetchone()
-    assert audit is not None
-    assert (audit[0], audit[1]) == ("transfer", "user")
+    assert audit is not None and (audit[0], audit[1]) == ("transfer", "user")
     assert (
         audit[2]["from_machine"],
         audit[2]["to_machine"],
@@ -182,7 +183,7 @@ def _assert_transferred_db_records(db_conn: psycopg.Connection, agent_id: int) -
     ) == ("runner-a", "runner-b", ["board"])
 
 
-def test_transfer_idling_agent_moves_workspace_clears_incarnation_and_records_passive_note(
+def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
 ) -> None:
@@ -232,10 +233,12 @@ def test_transfer_idling_agent_moves_workspace_clears_incarnation_and_records_pa
     assert str((ws_b / "collect_link").readlink()) == "reports/collect.sh"
     assert not ws_a.exists()
 
-    _assert_transferred_db_records(db_conn, agent_id)
+    _assert_transferred_db_records(
+        db_conn, agent_id, message="Relocating Output owner to company-mini"
+    )
 
 
-def test_transfer_terminated_agent_without_workspace_preserves_terminated_status(
+def test_transfer_terminated_agent_without_workspace_resurrects_on_target(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
 ) -> None:
@@ -246,15 +249,25 @@ def test_transfer_terminated_agent_without_workspace_preserves_terminated_status
         json={"to_machine": "runner-b"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["agent_status"] == "terminated"
+    assert resp.json()["agent_status"] == "idling"
     assert resp.json()["files_transferred"] == 0
 
     meta_row = db_conn.execute(
-        "SELECT machine, status, termination_source, runtime_owner FROM agents_meta WHERE id = %s",
+        "SELECT machine, status, runtime_owner FROM agents_meta WHERE id = %s",
         (agent_id,),
     ).fetchone()
-    assert meta_row == ("runner-b", "terminated", "exit", None)
+    assert meta_row == ("runner-b", "idling", None)
     assert paths.workspace_path(two_runners.home_b, agent_id).is_dir()
+
+    inbounds = db_conn.execute(
+        "SELECT kind, source, content FROM inbound_messages WHERE agent_id = %s ORDER BY id ASC",
+        (agent_id,),
+    ).fetchall()
+    kinds = [row[0] for row in inbounds]
+    assert "resurrect" in kinds
+    assert "chat" in kinds
+    chat_inbound = [row for row in inbounds if row[0] == "chat"][-1]
+    assert "Cross-machine transfer from 'runner-a' to 'runner-b'" in chat_inbound[2]
 
 
 def test_transfer_refuses_running_external_and_impersonated_agents(
@@ -373,20 +386,10 @@ def test_cutover_cas_conflict_aborts_target_and_keeps_source_intact(
     )
     assert paths.workspace_path(two_runners.home_b, agent_id).is_dir()
 
-    row = db_conn.execute(
-        "SELECT runtime_owner, runtime_generation, last_admission_at, session_index "
-        "FROM agents_meta WHERE id = %s",
-        (agent_id,),
-    ).fetchone()
-    assert row is not None
     snapshot = AgentTransferSnapshot(
         agent_id=agent_id,
         from_machine="runner-a",
         status="idling",
-        runtime_owner=row[0],
-        runtime_generation=row[1],
-        last_admission_at=row[2],
-        session_index=int(row[3]),
     )
 
     db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
