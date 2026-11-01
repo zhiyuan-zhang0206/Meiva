@@ -31,8 +31,6 @@ import {
 } from "@/lib/plugins/plugin-stats";
 import type { StatsDashboard } from "@/lib/contracts/types";
 import {
-  BOTTOM_BAND_CLASS,
-  BOTTOM_BAND_ROW_CLASS,
   FLEX,
   FLEX_COL,
   ICON_SIZE_CLASS,
@@ -325,19 +323,18 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
 
   return (
     // meiva:note
-    // The band primitive, not its own padding: both columns end with the same
-    // band, so their rules are one horizontal line at rest (user ruling
-    // 2026-10-29). They are one line only at rest: the composer's band is
-    // content-sized and its rule rises with a multi-line draft, while this one
-    // keeps the resting height — it follows no other column's geometry (user
-    // report 2026-10-29: a divider that moved with the composer's line read as
-    // an apparatus of its own).
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // The sidebar's own band, sized for its 28px icon row alone: rule (1) +
+    // pt-2 (8) + row (28) + pb-3 (12) = 49px. Its rule and the composer's are
+    // independent and never aligned by design (user ruling 2026-11-01), so
+    // nothing here is derived from the composer's band — no shared primitive,
+    // no minimum row height borrowed from the composer's controls, and no
+    // tracking of the composer's measured height (user report 2026-10-29).
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
     <div
       data-testid="sidebar-footer"
-      className={cn(BOTTOM_BAND_CLASS, "justify-end px-2", FLEX, FLEX_COL)}
+      className="border-t border-border px-2 pt-2 pb-3"
     >
-      <div className={cn(BOTTOM_BAND_ROW_CLASS, "items-center justify-between", FLEX)}>
+      <div className={cn("items-center justify-between", FLEX)}>
         <Popover.Root>
           <Popover.Trigger asChild>
             <button

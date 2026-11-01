@@ -527,16 +527,18 @@ def test_pinned_work_detail_seal(
 
 
 # meiva:note
-# Both home columns end with the same bottom band, so their rules are one
-# horizontal line at rest — and only at rest: the composer's band grows with the
-# draft and the sidebar footer keeps the resting band, so a grown composer leaves
-# the footer's rule where it was (user report 2026-10-29 replaced the day the
-# footer tracked the composer's published height). The gap above the composer's
-# rule is the list's share (`pb-6`, 24px) plus the composer's (`pt-0.5`, 2px).
-# The jsdom half of these contracts is in composer.test.tsx / footer.test.tsx /
-# header-bar.test.tsx — those pin the classes, these measure the pixels.
+# The sidebar footer's rule and the composer's rule are independent and never
+# aligned by design, not even at rest (user ruling 2026-11-01, replacing the
+# 2026-10-29 shared-line ruling): each column sizes its own band, and a grown
+# composer leaves the footer's rule where it was (user report 2026-10-29 removed
+# the day the footer tracked the composer's published height). The gap above the
+# composer's rule is the list's share (`pb-6`, 24px) plus the composer's
+# (`pt-0.5`, 2px). The jsdom half of these contracts is in composer.test.tsx /
+# footer.test.tsx / header-bar.test.tsx — those pin the classes, these measure
+# the pixels.
+# meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
 # meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
-BOTTOM_BAND_VIEWPORTS = [(768, 900), (1024, 900), (1440, 900), (1920, 1080)]
+BOTTOM_RULE_VIEWPORTS = [(768, 900), (1024, 900), (1440, 900), (1920, 1080)]
 BOTTOM_RULE_GAP_PX = 26
 SHELL_ICON_PX = 16
 
@@ -556,8 +558,8 @@ def _open_stubbed(
     return ctx, page
 
 
-@pytest.mark.parametrize("width,height", BOTTOM_BAND_VIEWPORTS)
-def test_bottom_rule_is_one_line(
+@pytest.mark.parametrize("width,height", BOTTOM_RULE_VIEWPORTS)
+def test_bottom_rules_are_independent(
     width: int, height: int, playwright_browser: Browser, frontend_target: str
 ) -> None:
     ctx, page = _open_stubbed(playwright_browser, width, height, frontend_target)
@@ -569,13 +571,12 @@ def test_bottom_rule_is_one_line(
         footer_box = footer.bounding_box()
         band_box = band.bounding_box()
         assert footer_box is not None and band_box is not None
-        assert abs(footer_box["y"] - band_box["y"]) <= 1, (
-            f"bottom rules are {abs(footer_box['y'] - band_box['y']):.2f}px apart at {width}px: "
-            f"sidebar footer y={footer_box['y']}, composer band y={band_box['y']} (tolerance 1px: "
-            "a percentage-wide panel can round a half-pixel box edge per column; two distinct "
-            "painted lines are never closer than 1px)"
+        assert abs(footer_box["y"] - band_box["y"]) > 1, (
+            f"the bottom rules sit within 1px of each other at {width}px: sidebar footer "
+            f"y={footer_box['y']}, composer band y={band_box['y']} — the two rules are "
+            "independent and must not be aligned (user ruling 2026-11-01; 1px is the "
+            "smallest separation two distinct painted lines can have)"
         )
-        assert abs(footer_box["height"] - band_box["height"]) <= 1
         page.locator('[data-testid="composer-input"]').fill("draft line\n" * 10)
         page.wait_for_timeout(300)
         grown = page.locator('[data-testid="composer-band"]').bounding_box()
@@ -587,7 +588,7 @@ def test_bottom_rule_is_one_line(
         assert abs(followed["y"] - footer_box["y"]) <= 1, (
             f"the sidebar rule moved with the composer's: it was y={footer_box['y']} at rest "
             f"and y={followed['y']} under a grown composer, while the band rose to "
-            f"y={grown['y']} (the sidebar keeps the resting band — user report 2026-10-29)"
+            f"y={grown['y']} (the sidebar keeps its own band — user report 2026-10-29)"
         )
     finally:
         ctx.close()
@@ -628,8 +629,8 @@ def test_bottom_rule_gap_is_halved(
 # The second case is the one that can fail: a draft grows the composer band, and a
 # sidebar rule that follows the composer (the coupling the 2026-10-29 report
 # removed) jumps with it. Restoring `min-height: var(--composer-band-height)` on
-# the footer turns that case red; with the coupling gone the footer holds the
-# resting band through the draft and through every chunk.
+# the footer turns that case red; with the coupling gone the footer holds its own
+# band through the draft and through every chunk.
 #
 # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
 STREAM_VIEWPORTS = [(1024, 900), (1440, 900)]

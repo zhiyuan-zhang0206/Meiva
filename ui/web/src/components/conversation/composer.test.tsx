@@ -3,7 +3,6 @@ import { renderWithProviders } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
-import { BOTTOM_BAND_CLASS, BOTTOM_BAND_ROW_CLASS } from "@/lib/layout/layout";
 import { pressEnter } from "@/test-support/enter-key";
 import { Composer } from "./composer";
 
@@ -290,25 +289,24 @@ describe("Composer button mode dispatch", () => {
   // The band grows upward with the draft, and that is the whole story: the
   // composer publishes nothing another column could follow (user report
   // 2026-10-29 — the sidebar's divider tracked this one for a day).
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
   it("publishes no band geometry for another column to track", () => {
     renderComposerTree(<Composer {...baseProps} mode="idle" />);
     expect(document.documentElement.style.getPropertyValue("--composer-band-height")).toBe("");
   });
-  it("draws the shared bottom band: the rule the sidebar footer also draws", () => {
+  it("draws its own bottom band: rule, padding and the 36px control row", () => {
     // meiva:note
-    // Both columns are bottom-anchored, so the two rules land on the same y only
-    // if both bands are composed the same way — hence one primitive, not two
-    // hand-tuned paddings (user ruling 2026-10-29, before: 16px apart). The band
-    // padding box is the 36px control row, not the composer's root.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // The band is the composer's own (user ruling 2026-10-31 for its 24px of
+    // viewport clearance); the sidebar footer draws an independent rule that is
+    // never aligned with this one (user ruling 2026-11-01). The band padding box
+    // is the 36px control row, not the composer's root.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
     renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const band = screen.getByTestId("composer-band");
-    expect(band.className).toContain(BOTTOM_BAND_CLASS);
-    expect(band.className.split(" ")).toContain("border-t");
-    expect(band.className).toContain("pb-6");
+    const bandClasses = band.className.split(" ");
+    for (const cls of ["border-t", "pt-3", "pb-6"]) expect(bandClasses).toContain(cls);
     const row = screen.getByTestId("composer-send").parentElement!;
-    expect(row.className).toContain(BOTTOM_BAND_ROW_CLASS);
+    expect(row.className.split(" ")).toContain("min-h-9");
   });
   it("root maxWidth follows the maxWidthCss prop (setting-derived)", () => {
     renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss="960px" />);

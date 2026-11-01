@@ -15,10 +15,11 @@ height on controls.
 
 ## Footer icon row
 
-The row is the shell's bottom band ([[ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md|Home Shell Chrome]]): it draws the
-same rule, padding and 36px control row the composer draws, and follows the
-composer's measured band height, so the footer's rule and the composer's rule are
-one line at every composer height (user ruling 2026-10-29).
+The row sits in the sidebar's own compact band (rule, `pt-2`, the 28px icon
+row, `pb-3`). Its rule is independent of the composer's and never aligned with
+it by design; it neither shares the composer's band nor follows the composer's
+height (user ruling 2026-11-01;
+[[ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md|Bottom rules]]).
 
 Below the list, one row of shortcuts in a fixed order: the unresolved-alert bell,
 Fleet, Insights, Control, then whatever a plugin contributes (`PluginNavIcons` renders

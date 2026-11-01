@@ -52,28 +52,27 @@ data.
 
 Suite entry points and CI integration: [[tests/docs/tests.meiva.okf.md]].
 
-## The bottom band's two contracts (user ruling 2026-10-29 & 2026-10-31)
+## The bottom rules' contracts (user rulings 2026-10-29, 2026-10-31 & 2026-11-01)
 
-`test_bottom_rule_is_one_line`, `test_bottom_rule_gap_is_halved` and
-`test_shell_icon_size_is_uniform` measure the strip every home column ends with.
-Both columns are bottom-anchored, so the sidebar footer's rule and the composer's
-rule can only be one line if both bands are composed the same way — the code
-shares `BOTTOM_BAND_CLASS` / `BOTTOM_BAND_ROW_CLASS` (`73px` resting height with
-`pt-3 pb-6`) with the composer. They are
-one line at rest and only at rest: the composer's band is content-sized and its
-rule rises with a multi-line draft, while the footer keeps the resting band and
-follows no other column's geometry. The composer published its height as
-`--composer-band-height` and the footer took it as a `min-height` for a day — a
-divider that tracked the composer's line read as an apparatus of its own (user
-report 2026-10-29). The engine test therefore re-measures the pair after filling
-a 10-line draft: a rule that parts as soon as the reader types would be a
-regression the resting-state assertion cannot see.
+`test_bottom_rules_are_independent`, `test_bottom_rule_gap_is_halved` and
+`test_shell_icon_size_is_uniform` measure the strip each home column ends with.
+The sidebar footer's rule and the composer's rule are independent and never
+aligned by design, not even at rest (user ruling 2026-11-01, replacing the
+2026-10-29 shared-line ruling): the composer owns its band (`pt-3 pb-6` around a
+36px control row, 73px at rest) and the sidebar footer owns a compact one
+(`pt-2 pb-3` around its 28px icon row, 49px); no primitive is shared between
+them. The engine test asserts the two rules are more than 1 CSS px apart at rest,
+then fills a 10-line draft and asserts the footer's rule stays where it was. The
+composer published its height as `--composer-band-height` and the footer took it
+as a `min-height` for a day — a divider that tracked the composer's line read as
+an apparatus of its own (user report 2026-10-29); the grown-state assertion is
+the regression check for that coupling.
 
 Tolerance is 1 CSS px, stated at every assertion. Both rules live in one CSS px
 space, but a panel's width is a percentage of the viewport (230.234px at 1440), so
 a box edge can land on a half pixel and round to a different device pixel per
 column; one CSS px is still the smallest separation two *distinct* painted lines
-can have, so the 16px drift this rule replaced fails while device rounding passes.
+can have, so device rounding cannot make two separate rules read as one.
 
 The gap above the rule is one measurement made of two halves — the timeline
 column's `pb-6` (24px) and the composer's `pt-0.5` (2px), 26px together — asserted
@@ -101,7 +100,7 @@ Two cases; only the second can fail:
   1440×900), while the other cases stay green.
 
 Neither case discriminates a stream-only change in the band's own height: the
-stream makes none (the stop control is the same 57px band).
+stream makes none (the stop control sits in the same 73px band).
 
 Icon size: every SVG inside the four control rows (the header bar, the sidebar's
 title row, the sidebar footer, the composer's band) is `ICON_SIZE_CLASS` (16px).
