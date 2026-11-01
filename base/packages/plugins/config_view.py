@@ -113,11 +113,12 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
-def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
+def read_service_config[C: BaseModel](
+    plugin: str, cls: type[C], *, environ: Mapping[str, str]
+) -> C | None:
     from base.host.env.bootstrap import service_plugin_config_packet
-    from base.host.env.registry import process_environment
 
-    packet = service_plugin_config_packet(process_environment())
+    packet = service_plugin_config_packet(environ)
     if packet is None:
         return None
     try:

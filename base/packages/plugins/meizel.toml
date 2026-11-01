@@ -29,7 +29,13 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "plugin_errors.py" = "strict"
 
 [debt.ambient-read]
-"config_view.py#environ base.host.env.registry.process_environment" = 2
+# 1 of the original 2 is repaid: `read_service_config()` takes `environ` from its caller now.
+# The remaining one is `with_cluster_policy()`'s `env=None` fallback, kept (2026-11-01, 405): its
+# only production path is `plugin_providers._declaration` -> `_load_one` -> `build_model_catalog()`,
+# which has 305 call sites across production and tests. Requiring `env` there would move 305
+# construction sites to repay one entry. Reopen when a production caller needs an environment
+# different from the one `build_model_catalog()` runs under.
+"config_view.py#environ base.host.env.registry.process_environment" = 1
 "flags.py#settings base.config.settings" = 1
 
 [debt.any-collaborator]

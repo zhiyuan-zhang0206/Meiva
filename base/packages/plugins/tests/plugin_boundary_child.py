@@ -1,6 +1,7 @@
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,7 @@ def service_snapshot() -> None:
     from base.packages.plugins.config_registration import read_config_image, read_service_config
 
     captured = Config(enabled=True, interval=42)
-    assert read_service_config("fleet", Config) == captured
+    assert read_service_config("fleet", Config, environ=os.environ) == captured
     assert read_config_image(Config, Path(sys.argv[2])).enabled is False
 
 
@@ -30,11 +31,11 @@ def service_carrier() -> None:
 
     expected = sys.argv[2]
     if expected == "absent":
-        assert read_service_config("fleet", Config) is None
+        assert read_service_config("fleet", Config, environ=os.environ) is None
         return
     errors = {"InvalidConfigData": InvalidConfigData, "SchemaDriftError": SchemaDriftError}
     with pytest.raises(errors[expected]):
-        read_service_config("fleet", Config)
+        read_service_config("fleet", Config, environ=os.environ)
 
 
 def unavailable_flag() -> None:

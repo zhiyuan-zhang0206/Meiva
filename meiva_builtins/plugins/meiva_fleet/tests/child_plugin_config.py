@@ -2,8 +2,8 @@
 # Reads the fleet plugin configuration the way a booted unit composes it and prints the outcome as
 # one JSON line: the configuration, or the class and message of the refusal. A test fixes the unit's
 # role and the packets delivered to it through this process's real environment.
-
 import json
+import os
 import sys
 
 from base.packages.plugins.config_registration import (
@@ -24,7 +24,7 @@ try:
             "meiva_fleet", FleetConfig, disk_image_path("meiva_fleet", home=meiva_home())
         )
         if mode == "image"
-        else read_service_config("meiva_fleet", FleetConfig)
+        else read_service_config("meiva_fleet", FleetConfig, environ=os.environ)
     )
 except (InvalidConfigData, SchemaDriftError, TypeError) as refusal:
     print(json.dumps({"refused": type(refusal).__name__, "message": str(refusal)}))
