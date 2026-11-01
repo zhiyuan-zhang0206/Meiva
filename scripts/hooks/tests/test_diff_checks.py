@@ -4,8 +4,13 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+
+import pytest
 
 from scripts.hooks.diff_checks import (
     FIELD_ORDER,
@@ -16,8 +21,28 @@ from scripts.hooks.diff_checks import (
     check,
     child_environment,
     plan,
+    pytest_counts,
     run_child,
 )
+
+
+# meiva:note
+# A fake run still has to leave the artefact the reader now reads: the report file is what these
+# tests stand in for, so the fake writes one instead of printing a summary line.
+def _write_report(argv: Sequence[str], *, passed: int, failed: int = 0, errors: int = 0) -> None:
+    named = next(part for part in argv if part.startswith("--junitxml="))
+    cases = "".join(f'<testcase classname="t" name="p{i}" />' for i in range(passed))
+    cases += "".join(
+        f'<testcase classname="t" name="f{i}"><failure /></testcase>' for i in range(failed)
+    )
+    cases += "".join(
+        f'<testcase classname="t" name="e{i}"><error /></testcase>' for i in range(errors)
+    )
+    Path(named.split("=", 1)[1]).write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        f'<testsuites><testsuite name="pytest" tests="{passed + failed + errors}">'
+        f"{cases}</testsuite></testsuites>"
+    )
 
 
 def _change(*files: str) -> ChangeSet:
@@ -135,7 +160,8 @@ def test_a_blocking_run_that_exits_non_zero_turns_the_receipt_red() -> None:
 def test_a_green_run_reports_the_counts_its_tests_produced_with_their_units() -> None:
     def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
         if "pytest" in str(argv[:3]):
-            return 0, "645 passed in 400s", 400.0
+            _write_report(argv, passed=645)
+            return 0, "", 400.0
         return 0, "0 errors, 0 warnings", 96.0
 
     values, failed = check(
@@ -418,7 +444,8 @@ def test_a_judged_child_loses_the_callers_product_namespace_and_keeps_its_toolch
 def test_errors_are_counted_beside_failures_and_never_folded_into_them() -> None:
     def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
         if "-m" in argv and "pytest" in argv:
-            return 1, "10 passed, 3 errors in 1.20s\n", 1.2
+            _write_report(argv, passed=10, errors=3)
+            return 1, "", 1.2
         return 0, "0 errors, 0 warnings", 1.0
 
     values, failed = check(
@@ -435,3 +462,138 @@ def test_errors_are_counted_beside_failures_and_never_folded_into_them() -> None
 
     skipped, _ = _run({}, ("base/thing.py",))
     assert skipped["errors"] == "n/a(no-test-ran)"
+
+
+# meiva:note
+# A truncated run is not a red one. These pin the three states the `tests` field may carry and the
+# reason each is named: a report that never arrived, a report with fewer results than files were
+# selected, and a whole report whose failures mean what they say.
+def _case(name: str, *, outcome: str = "passed") -> str:
+    inner = "" if outcome == "passed" else f"<{outcome}/>"
+    return f'<testcase classname="t" name="{name}">{inner}</testcase>'
+
+
+def _report(path: Path, cases: list[str]) -> Path:
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        f'<testsuites><testsuite name="pytest" tests="{len(cases)}">{"".join(cases)}</testsuite>'
+        "</testsuites>"
+    )
+    return path
+
+
+def test_a_run_without_a_report_is_broken_not_failed(tmp_path: Path) -> None:
+    counts = pytest_counts(tmp_path / "absent.xml", selected_files=1990, seconds=1.0)
+
+    assert counts.values["tests"] == "broken(no-report)"
+    assert counts.values["failed"] == "n/a(broken)"
+    assert counts.broken is True
+
+
+def test_a_report_that_covers_fewer_files_than_were_selected_is_broken(tmp_path: Path) -> None:
+    report = _report(tmp_path / "short.xml", [_case("a"), _case("b", outcome="failure")])
+
+    counts = pytest_counts(report, selected_files=1990, seconds=1.0)
+
+    assert counts.values["tests"] == "broken(short-run)", (
+        "five results for 1990 files is a run that died, not eighteen failures: the receipt must "
+        "say which one it is"
+    )
+    assert counts.values["passed"] == "n/a(broken)"
+    assert counts.broken is True
+
+
+def test_a_whole_report_counts_what_it_ran(tmp_path: Path) -> None:
+    report = _report(
+        tmp_path / "whole.xml",
+        [_case("a"), _case("b"), _case("c", outcome="failure"), _case("d", outcome="skipped")],
+    )
+
+    counts = pytest_counts(report, selected_files=3, seconds=2.0)
+
+    assert counts.values["tests"] == "RAN(3files)"
+    assert counts.values["passed"] == "2tests(2s)"
+    assert counts.values["failed"] == "1tests"
+    assert counts.values["errors"] == "0tests"
+    assert counts.broken is False
+
+
+# meiva:note
+# The floor is the file count, not the per-file average: a selected file that yields no result at
+# all (fixtures only, a `collect_ignore`, a file-level skip) must not turn a whole run broken. The
+# four files here produced 31 results between them, and the verdict does not move.
+def test_a_file_that_yields_no_result_does_not_make_a_whole_run_broken(tmp_path: Path) -> None:
+    report = _report(tmp_path / "mixed.xml", [_case(f"t{i}") for i in range(31)])
+
+    counts = pytest_counts(report, selected_files=4, seconds=1.0)
+
+    assert counts.values["tests"] == "RAN(4files)"
+    assert counts.broken is False
+
+
+# meiva:note
+# The other way a run produces no evidence: `--junitxml` into a directory that is not there. pytest
+# cannot write the report, nothing counts, and the receipt must say `broken(no-report)` rather than
+# quietly reporting a run of zero results as green.
+def test_a_report_that_cannot_be_written_reads_as_broken(tmp_path: Path) -> None:
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+    # meiva:note
+    # A regular file where the report's directory would go: pytest cannot create it, so the run
+    # ends as a usage error with nothing written -- exactly the shape the reader must not mistake
+    # for a run of zero tests.
+    (tmp_path / "blocked").write_text("not a directory")
+    report = tmp_path / "blocked" / "junit.xml"
+
+    code, _output, seconds = run_child(
+        (sys.executable, "-m", "pytest", "-q", f"--junitxml={report}", "test_ok.py"),
+        tmp_path,
+        environment=child_environment(os.environ),
+    )
+    counts = pytest_counts(report, selected_files=1, seconds=seconds)
+
+    assert code != 0
+    assert counts.values["tests"] == "broken(no-report)"
+    assert counts.broken is True
+
+
+# meiva:note
+# The acceptance case: a session that dies mid-run, its workers with it.
+#
+# The old reader parsed pytest's summary line, so a run that never reached its end still produced
+# a number -- the same number a real failure produces. The report file cannot lie that way: a
+# session killed before it finishes leaves no report, and the receipt says `broken(no-report)`
+# instead of counting what happened to finish.
+def test_a_session_killed_mid_run_reads_as_broken_not_failed(tmp_path: Path) -> None:
+    (tmp_path / "test_slow.py").write_text(
+        "import time\n\n\ndef test_slow():\n    time.sleep(60)\n"
+    )
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+    report = tmp_path / "junit.xml"
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        subprocess.run(  # noqa: S603
+            (
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-n",
+                "2",
+                f"--junitxml={report}",
+                "test_slow.py",
+                "test_ok.py",
+            ),
+            cwd=tmp_path,
+            timeout=8,
+            check=False,
+            env=child_environment(os.environ),
+        )
+
+    counts = pytest_counts(report, selected_files=2, seconds=8.0)
+
+    assert counts.values["tests"] == "broken(no-report)", counts.values["tests"]
+    assert counts.values["failed"] == "n/a(broken)", (
+        "a killed session must never read as `failed=Ntests`: the reader cannot tell that from a "
+        "real failure, and neither can the merge that trusts it"
+    )
+    assert counts.broken is True

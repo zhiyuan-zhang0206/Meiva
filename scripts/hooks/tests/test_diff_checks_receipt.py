@@ -77,6 +77,26 @@ def test_a_run_that_executed_tests_must_report_both_counts_with_units() -> None:
     assert any("passed=<n>tests" in problem for problem in problems)
 
 
+# meiva:note
+# The gate must refuse the third state by name. A `broken` run executed neither the whole selection
+# nor nothing: it is the absence of evidence, and a checker that only looked at RAN/skipped would
+# wave it through because no other rule reads `tests` when it carries a reason instead of a count.
+def test_a_broken_run_is_refused_rather_than_read_as_red_or_green() -> None:
+    for reason in ("no-report", "short-run"):
+        line = _line(
+            tests=f"broken({reason})",
+            passed="n/a(broken)",
+            failed="n/a(broken)",
+            errors="n/a(broken)",
+        )
+
+        problems = findings(parse(line), head="abc123", body="")
+
+        assert any("did not execute the selection" in problem for problem in problems), (
+            f"broken({reason}) is not evidence: the merge must stop here, not count it"
+        )
+
+
 def test_a_receipt_from_another_head_is_refused() -> None:
     problems = findings(parse(GOOD), head="999999", body="")
 

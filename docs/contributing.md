@@ -61,6 +61,12 @@ added afterwards. Check it mechanically:
 `.venv/bin/python scripts/hooks/diff_checks_receipt.py --receipt-file <line> --body-file <body>`
 must exit 0. A receipt added after the merge is a record, not a gate.
 
+The `tests=` field has three states and the checker treats them differently: `RAN(<n>files)` with
+counted `passed`/`failed`/`errors`, `skipped(<why>)` when the change needs no test run, and
+`broken(<why>)` when the run did not execute the selection it was given (`no-report` when pytest
+wrote no report at all, `short-run` when the report holds fewer results than files were selected).
+A `broken` receipt is refused: rerun it, or run a smaller selection, and paste the whole line.
+
 The gate is audited after the fact by
 `.venv/bin/python scripts/hooks/audit_merge_receipts.py --last <n>` (default: every
 commit after the gate itself). Each landed commit is judged by the receipt checker

@@ -137,6 +137,15 @@ def _presence(receipt: Receipt) -> list[str]:
 def _run_claims(receipt: Receipt) -> list[str]:
     problems: list[str] = []
     tests = receipt.get("tests")
+    # meiva:note
+    # A broken run is not a red one and not a green one: it is the absence of evidence, so the gate
+    # refuses it by name. Without this the receipt could say `broken(short-run)` and still be
+    # accepted, because none of the other rules look at `tests` unless it starts with RAN.
+    if tests.startswith("broken"):
+        problems.append(
+            f"the run is {tests}: it did not execute the selection it was asked for, so it is "
+            f"neither red nor green -- rerun it (or run a smaller selection) before merging"
+        )
     if tests.startswith("skipped") and not receipt.get("passed").startswith("n/a("):
         problems.append("a skipped run must not also report a passed count")
     if tests.startswith("RAN") and not (
