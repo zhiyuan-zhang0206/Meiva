@@ -21,6 +21,12 @@ from pathlib import Path
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+# meiva:note
+# The two positions this adapter reads out of the installed writer's row: the gateway's
+# `_FULL_QUERY` puts the facts before `updated_at` first, then machine, owner_plugin, script.
+_UPDATED_AT_COLUMN = 8
+_SCRIPT_COLUMN = 11
+
 
 def script_sha256(script: str) -> str:
     """Digest the UTF-8 stored text without newline conversion."""
@@ -97,7 +103,7 @@ def replace_script(
     from gateway.schedules.router import fetch_full_blocking, update_blocking
 
     previous = fetch_full_blocking(pool, schedule_id)
-    actual = script_sha256(previous[9])
+    actual = script_sha256(previous[_SCRIPT_COLUMN])
     prepared = script_sha256(script)
     if actual == prepared:
         return "unchanged"
@@ -106,8 +112,12 @@ def replace_script(
             f"schedule {schedule_id}: expected old script {expected_sha256}, found {actual}"
         )
     row, _needs_sync = update_blocking(pool, schedule_id, {"script": script})
-    # _FULL_COLS: identity/config/status/history facts precede updated_at/script.
-    if row[:8] != previous[:8] or row[9] != script:
+    # meiva:note
+    # `fetch_full_blocking` returns `_FULL_QUERY`: id, name, description, command, enabled,
+    # status, last_error, created_at, updated_at, machine, owner_plugin, script, then the
+    # placement columns the join adds. Only the script and updated_at may move, so the
+    # comparison takes the facts before updated_at and the script at its own index.
+    if row[:_UPDATED_AT_COLUMN] != previous[:_UPDATED_AT_COLUMN] or (row[_SCRIPT_COLUMN] != script):
         raise RuntimeError(f"schedule {schedule_id}: installed writer changed protected fields")
     return "updated"
 

@@ -178,17 +178,18 @@ def test_versioned_edit_preserves_fields_and_defers_session_work(
                 command="python custom.py",
                 enabled=enabled,
             ),
+            machine="gateway",
         )
         sid = row[0]
         assert (
-            repair.replace_script(pool, sid, "print(2)\n", repair.script_sha256(row[9]))
+            repair.replace_script(pool, sid, "print(2)\n", repair.script_sha256(row[11]))
             == "updated"
         )
         after = router.fetch_full_blocking(pool, sid)
         assert after[:8] == row[:8]
-        assert after[9] == "print(2)\n"
+        assert after[11] == "print(2)\n"
         assert (
-            repair.replace_script(pool, sid, "print(2)\n", repair.script_sha256(row[9]))
+            repair.replace_script(pool, sid, "print(2)\n", repair.script_sha256(row[11]))
             == "unchanged"
         )
     assert db_conn.execute(
@@ -213,11 +214,12 @@ def test_stale_hash_and_syntax_errors_do_not_write(
         row = router.create_blocking(
             pool,
             router.ScheduleCreate(name="stale", script="pass\n"),
+            machine="gateway",
         )
         with pytest.raises(RuntimeError, match="expected old script"):
             repair.replace_script(pool, row[0], "print(2)\n", "0" * 64)
         with pytest.raises(Exception, match="syntax error"):
-            repair.replace_script(pool, row[0], "def broken(\n", repair.script_sha256(row[9]))
+            repair.replace_script(pool, row[0], "def broken(\n", repair.script_sha256(row[11]))
         assert router.fetch_full_blocking(pool, row[0]) == row
     assert db_conn.execute("SELECT note FROM schedule_versions").fetchall() == [("initial",)]
 
@@ -268,6 +270,7 @@ def test_external_file_uses_installed_runtime_and_real_writer(
         row = router.create_blocking(
             pool,
             router.ScheduleCreate(name="external", script="pass\n", enabled=True),
+            machine="gateway",
         )
     external = tmp_path / "operator-tool.py"
     external.write_bytes(Path(repair.__file__).read_bytes())
@@ -287,7 +290,7 @@ def test_external_file_uses_installed_runtime_and_real_writer(
             "--script-file",
             str(script_file),
             "--expected-sha256",
-            repair.script_sha256(row[9]),
+            repair.script_sha256(row[11]),
         ],
         timeout=30,
         cwd=tmp_path,

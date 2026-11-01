@@ -72,7 +72,8 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
             return schedules.create_blocking(
                 pool,
                 schedules.ScheduleCreate(name="concurrent", script="pass"),
-                "create",
+                machine="gateway",
+                key="create",
             )
 
         results = list(workers.map(create, range(4)))
@@ -108,7 +109,10 @@ def test_receipt_failure_rolls_back_created_resource_and_version(
         pytest.raises(psycopg.errors.RaiseException, match="injected fault"),
     ):
         schedules.create_blocking(
-            pool, schedules.ScheduleCreate(name="rollback", script="pass"), "rollback"
+            pool,
+            schedules.ScheduleCreate(name="rollback", script="pass"),
+            machine="gateway",
+            key="rollback",
         )
     assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM schedule_versions").fetchone() == (0,)
@@ -138,12 +142,14 @@ def test_creation_identity_is_bound_to_verified_principal(
         first = schedules.create_blocking(
             pool,
             schedules.ScheduleCreate(name="one", script="pass"),
-            scoped_key("one"),
+            machine="gateway",
+            key=scoped_key("one"),
         )
         second = schedules.create_blocking(
             pool,
             schedules.ScheduleCreate(name="two", script="pass"),
-            scoped_key("two"),
+            machine="gateway",
+            key=scoped_key("two"),
         )
     assert first[0] != second[0]
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (2,)

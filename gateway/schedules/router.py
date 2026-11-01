@@ -23,6 +23,7 @@ from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import plans, receipts, session_control
 from gateway.schedules.placement import MachineSnapshot, PlacementStatus, judge_placement
+from gateway.schedules.receipts import PLACEMENT_COLS
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ScheduleCaptureResult, SpawnAgentRequest
 
@@ -34,21 +35,15 @@ _SCHEDULE_BASE_COLS = (
     "s.id, s.name, s.description, s.command, s.enabled, s.status, s.last_error, "
     "s.created_at, s.updated_at, s.machine, s.owner_plugin"
 )
-_PLACEMENT_COLS = (
-    "m.name IS NOT NULL AS machine_registered, m.paused_at, m.pause_reason, "
-    "m.stopped_at, m.maintenance_reason, mp.online, mp.consecutive_failures"
-)
 _JOIN_CLAUSE = (
     "FROM schedules s "
     "LEFT JOIN machines m ON m.name = s.machine "
     "LEFT JOIN machine_probe mp ON mp.machine_name = s.machine"
 )
 
-_SUMMARY_QUERY = (
-    f"SELECT {_SCHEDULE_BASE_COLS}, {_PLACEMENT_COLS} {_JOIN_CLAUSE} ORDER BY s.id DESC"
-)
+_SUMMARY_QUERY = f"SELECT {_SCHEDULE_BASE_COLS}, {PLACEMENT_COLS} {_JOIN_CLAUSE} ORDER BY s.id DESC"
 _FULL_QUERY = (
-    f"SELECT {_SCHEDULE_BASE_COLS}, s.script, {_PLACEMENT_COLS} {_JOIN_CLAUSE} WHERE s.id = %s"
+    f"SELECT {_SCHEDULE_BASE_COLS}, s.script, {PLACEMENT_COLS} {_JOIN_CLAUSE} WHERE s.id = %s"
 )
 _SCHEDULE_STORE_COLS = (
     "id, name, description, command, enabled, status, last_error, created_at, updated_at, "
@@ -346,10 +341,16 @@ def create_blocking(
                 conn, key, {"resource": "schedule", "body": body.model_dump(), "machine": machine}
             )
             if created is not None:
-                cur.execute(_FULL_QUERY, (created.resource_id,))
-                replay_row = cur.fetchone()
-                if replay_row is not None:
-                    return replay_row
+                return receipts.creation_replay_row(
+                    cur,
+                    created,
+                    name=body.name,
+                    description=body.description,
+                    command=body.command,
+                    enabled=body.enabled,
+                    script=body.script,
+                    machine=machine,
+                )
             cur.execute(
                 "INSERT INTO schedules (name, description, script, command, enabled, machine) "
                 "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",

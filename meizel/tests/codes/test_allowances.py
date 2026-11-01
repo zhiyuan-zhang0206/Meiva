@@ -118,7 +118,12 @@ def test_snapshot_decoder_rejects_every_other_unknown_or_malformed_input(text: s
 # new allowance cannot arrive inside a change that looks local. Bump a number only with its entry.
 def test_repo_policy_allowance_counts_are_pinned() -> None:
     policy = allowances.load(ROOT)
-    assert len(policy.external) == 43
+    # meiva:note
+    # The 44th external site is `base/packages/plugins/loading/schedule_face.py`: it loads the
+    # `schedules` and `ui_stats` faces a discovered plugin declares, and syntax-checks the
+    # schedule scripts they hand over. A plugin's face is external code by definition, so the
+    # one owner that loads it needs the allowance; #8025 added it and moved the count from 43.
+    assert len(policy.external) == 44
     assert len(policy.loads) == 27
 
 
