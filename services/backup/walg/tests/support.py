@@ -35,6 +35,14 @@ from base.paths.tests.homes import point_home
 from services.backup.walg.archive import archive_pg_args
 from services.backup.walg.pg_target import PgTarget
 
+# meiva:note
+# The operating system a launch receipt is written for: `postgres.start` records the value its
+# caller states, and a receipt read back is compared against the boot scope of that same value, not
+# against this host. These tests drive a real Postgres the way the Linux lane does, the stand-in
+# `cli/commands/data_plane/tests/native_cluster.py` names for the same reason.
+CUSTODY_SYSTEM = "linux"
+
+
 FAKE_WALG = Path(__file__).with_name("fake_walg.sh")
 FIXTURES = Path(__file__).with_name("fixtures")
 
@@ -274,6 +282,7 @@ def postgres_instance(
             instance.port,
             argv,
             pg_start_env(),
+            system=CUSTODY_SYSTEM,
             ready=ready,
             retained_children=children,
             timers=SYSTEM_TIMERS,
