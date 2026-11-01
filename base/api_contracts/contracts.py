@@ -387,6 +387,16 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="silent save only: the claimed manifest is published as immutable objects and the original receipt replays under the same key; no inbound is queued",
     ),
+    ("GET", "/api/internal/agent-transfers/{transfer_id}/bundle"): RouteContract(
+        note="read-only: the bytes staged for one in-flight transfer — a repeat re-reads the same "
+        "bundle, and 404 once the import scope that staged it ends",
+    ),
+    ("POST", "/api/agents/{agent_id}/transfer"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="a repeat after the move is refused (`already on machine`) by the precheck before any "
+        "side effect, but the body names a destination and not the observed placement: a retry "
+        "after the agent moved elsewhere transfers it again",
+    ),
 }
 
 
