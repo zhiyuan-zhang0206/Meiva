@@ -50,7 +50,15 @@ def acquire_instance_lock(run_dir: Path, name: str = _LOCK_NAME) -> int:
         raise AlreadyRunningError(
             f"another process already holds the instance lock {lock_path}"
         ) from exc
-    # Record the owning pid for humans; the lock itself is the source of truth.
+    # meiva:note
+    # The pid written here is a note for people reading the lock file; the fd's flock is what decides
+    # ownership. It is read from this process on purpose: the six callers are themselves the process
+    # that holds the tree (the launch driver, the CLI's hold probe, and the root, agent-host and
+    # helper daemons), so a pid handed in would be the same value — and a wrong one would write a
+    # holder into a file whose only job is to be read by a person debugging a stuck home.
+    #
+    # Repaying this entry means the lock starts being taken on another process's behalf; until then
+    # the caller has nothing to contribute that this function does not already know.
     os.ftruncate(fd, 0)
     os.write(fd, f"{os.getpid()}\n".encode())
     _log.info("instance lock acquired at %s", lock_path)
