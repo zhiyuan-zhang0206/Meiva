@@ -113,12 +113,14 @@ def fake_session(
     return backend, backend.launched
 
 
-def _insert(conn: psycopg.Connection, name: str, *, enabled: bool = True) -> int:
+def _insert(
+    conn: psycopg.Connection, name: str, *, enabled: bool = True, machine: str = "gateway"
+) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status) "
-            "VALUES (%s, 'x', 'python schedule.py', %s, 'stopped') RETURNING id",
-            (name, enabled),
+            "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+            "VALUES (%s, 'x', 'python schedule.py', %s, 'stopped', %s) RETURNING id",
+            (name, enabled, machine),
         )
         row = cur.fetchone()
     conn.commit()

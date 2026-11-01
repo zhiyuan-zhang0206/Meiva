@@ -212,3 +212,48 @@ def test_invalid_manifest_names_the_plugin(unit_home: Path) -> None:
     assert r.status_code == 500, r.text
     assert "broken" in r.text
     assert "--nope" in r.text
+
+
+def test_dynamic_stat_cards_from_stats_face(unit_home: Path) -> None:
+    _write_plugin(
+        unit_home,
+        "dyn_stats",
+        {"statsFace": "ui_stats.py"},
+    )
+    pdir = paths.plugins_dir(home=unit_home) / "dyn_stats"
+    (pdir / "ui_stats.py").write_text(
+        "from base.packages.plugins.surface.schedules import StatCardSpec\n\n"
+        "def contribute(config):\n"
+        "    return (\n"
+        "        StatCardSpec(id='dyn-card-1', label='Dynamic Card 1'),\n"
+        "        StatCardSpec(id='dyn-card-2', label='Dynamic Card 2'),\n"
+        "    )\n"
+    )
+    write_local({"plugins": {"dyn_stats": {"enabled": True}}}, home=unit_home)
+
+    with gateway_test_client() as client:
+        stats = _stats(client)
+        assert [(s["plugin"], s["id"], s["label"]) for s in stats] == [
+            ("dyn_stats", "dyn-card-1", "Dynamic Card 1"),
+            ("dyn_stats", "dyn-card-2", "Dynamic Card 2"),
+        ]
+
+
+def test_stats_face_load_failure_is_fail_soft(unit_home: Path) -> None:
+    _write_plugin(
+        unit_home,
+        "broken_dyn",
+        {
+            "stats": [{"id": "static-card", "label": "Static Card"}],
+            "statsFace": "ui_stats.py",
+        },
+    )
+    pdir = paths.plugins_dir(home=unit_home) / "broken_dyn"
+    (pdir / "ui_stats.py").write_text("raise RuntimeError('broken dynamic stats')\n")
+    write_local({"plugins": {"broken_dyn": {"enabled": True}}}, home=unit_home)
+
+    with gateway_test_client() as client:
+        stats = _stats(client)
+        assert [(s["plugin"], s["id"]) for s in stats] == [
+            ("broken_dyn", "static-card"),
+        ]

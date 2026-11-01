@@ -473,8 +473,8 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
             assert row is not None
             agent_id: int = row[0]
             row = admin.execute(
-                "INSERT INTO schedules (name, script, command, enabled) "
-                "VALUES ('poison-probe-schedule', 'print(1)', 'python schedule.py', true) "
+                "INSERT INTO schedules (name, script, command, enabled, machine) "
+                "VALUES ('poison-probe-schedule', 'print(1)', 'python schedule.py', true, 'gateway') "
                 "RETURNING id"
             ).fetchone()
             assert row is not None

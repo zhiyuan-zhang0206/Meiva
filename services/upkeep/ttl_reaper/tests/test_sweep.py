@@ -295,7 +295,7 @@ def test_reap_expired_pages_notifies_only_live_agents(
 def _new_schedule(conn: psycopg.Connection, name: str) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command) VALUES (%s, 'x', 'x') RETURNING id",
+            "INSERT INTO schedules (name, script, command, machine) VALUES (%s, 'x', 'x', 'gateway') RETURNING id",
             (name,),
         )
         row = cur.fetchone()

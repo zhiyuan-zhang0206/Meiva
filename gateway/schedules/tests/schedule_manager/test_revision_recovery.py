@@ -55,9 +55,10 @@ def backend(
     return Backend(provenance)
 
 
-def _insert(conn: psycopg.Connection) -> int:
+def _insert(conn: psycopg.Connection, machine: str = "gateway") -> int:
     row = conn.execute(
-        "INSERT INTO schedules (name, script, command, desired_revision) VALUES ('revision', 'pass', 'python schedule.py', 1) RETURNING id"
+        "INSERT INTO schedules (name, script, command, desired_revision, machine) VALUES ('revision', 'pass', 'python schedule.py', 1, %s) RETURNING id",
+        (machine,),
     ).fetchone()
     assert row is not None
     conn.commit()
@@ -240,7 +241,7 @@ def test_a_failed_schedule_does_not_block_other_queued_revisions(
     backend.hold(session_name(f"schedule-{sid}"), "legacy")
     backend.fail_reap = True
     row = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, desired_revision) VALUES ('other', 'pass', 'python schedule.py', 1) RETURNING id"
+        "INSERT INTO schedules (name, script, command, desired_revision, machine) VALUES ('other', 'pass', 'python schedule.py', 1, 'gateway') RETURNING id"
     ).fetchone()
     assert row is not None
     other = row[0]

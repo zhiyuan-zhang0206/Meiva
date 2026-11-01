@@ -28,7 +28,7 @@ import re
 from typing import Any, TypeGuard
 
 # Contribution types (v1). Closed — see the module docstring.
-UI_KEYS = ("agentInspect", "nav", "stats", "themes")
+UI_KEYS = ("agentInspect", "nav", "stats", "statsFace", "themes")
 
 # How an agent-inspect section's `source` payload is rendered by the host's
 # generic components. `page` is the escape hatch: the section embeds the
@@ -430,6 +430,9 @@ def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
     return themes
 
 
+_STATS_FACE_RE = re.compile(r"^[A-Za-z0-9._~-]+\.py$")
+
+
 def validate_ui_contributions(value: object, errors: list[str]) -> dict[str, object]:
     """Validate `contributions.ui`, appending every problem found to `errors`.
 
@@ -454,6 +457,18 @@ def validate_ui_contributions(value: object, errors: list[str]) -> dict[str, obj
             parsed[key] = _validate_nav(raw, errors)
         elif key == "stats":
             parsed[key] = _validate_stats(raw, errors)
+        elif key == "statsFace":
+            if (
+                not isinstance(raw, str)
+                or raw.startswith(".")
+                or "/" in raw
+                or not _STATS_FACE_RE.match(raw)
+            ):
+                errors.append(
+                    "contributions.ui.statsFace must be a relative Python filename matching ^[A-Za-z0-9._~-]+\\.py$"
+                )
+            else:
+                parsed[key] = raw
         else:
             parsed[key] = _validate_themes(raw, errors)
     return parsed

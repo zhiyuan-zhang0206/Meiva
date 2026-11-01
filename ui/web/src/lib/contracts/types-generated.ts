@@ -1567,6 +1567,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedules/{schedule_id}/launch-env": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_schedule_launch_env_api_schedules__schedule_id__launch_env_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keyed/v1/guide/draft": {
         parameters: {
             query?: never;
@@ -3696,6 +3712,7 @@ export interface components {
             command: string;
             description?: string | null;
             enabled: boolean;
+            machine?: string | null;
         };
         ScheduleDraftRequest: {
             nl: string;
@@ -3724,6 +3741,10 @@ export interface components {
             last_error: string | null;
             created_at: string;
             updated_at: string;
+            machine: string;
+            owner_plugin?: string | null;
+            placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
+            placement_reason?: string | null;
         };
         ScheduleUpdate: {
             name?: string | null;
@@ -3731,6 +3752,7 @@ export interface components {
             command?: string | null;
             description?: string | null;
             enabled?: boolean | null;
+            machine?: string | null;
         };
         ScheduleView: {
             id: number;
@@ -3742,6 +3764,10 @@ export interface components {
             last_error: string | null;
             created_at: string;
             updated_at: string;
+            machine: string;
+            owner_plugin?: string | null;
+            placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
+            placement_reason?: string | null;
             script: string;
         };
         SchemaMismatchStatus: {
@@ -7233,6 +7259,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScheduleDraftResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_launch_env_api_schedules__schedule_id__launch_env_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             422: {

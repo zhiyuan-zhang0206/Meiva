@@ -61,6 +61,7 @@ _AGENT_RUNNER_SESSIONS = {
     "computer-mcp",
     "otel-collector",
     "pty-sessions",
+    "schedule-manager",
 }
 
 

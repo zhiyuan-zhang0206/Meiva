@@ -22,12 +22,13 @@ def _insert_schedule(
     command: str = "python schedule.py",
     enabled: bool = True,
     name: str = "s",
+    machine: str = "gateway",
 ) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status) "
-            "VALUES (%s, %s, %s, %s, 'stopped') RETURNING id",
-            (name, script, command, enabled),
+            "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+            "VALUES (%s, %s, %s, %s, 'stopped', %s) RETURNING id",
+            (name, script, command, enabled, machine),
         )
         row = cur.fetchone()
     conn.commit()

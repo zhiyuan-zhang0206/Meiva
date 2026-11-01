@@ -21,9 +21,10 @@ __all__ = [
     "control_plan",
     "edit_needs_sync",
     "logs_view",
+    "select_declared_secrets",
 ]
 
-UPDATABLE = ("name", "description", "script", "command", "enabled")
+UPDATABLE = ("name", "description", "script", "command", "enabled", "machine")
 
 # meiva:note
 # A logs request always asks the session for at least this many lines, so a small window still
@@ -48,13 +49,13 @@ class ControlPlan:
 
 
 # meiva:note
-# The requested fields that differ from the row (columns: name, description, command,
-# enabled, script, in the router's full-row order).
+# The requested fields that differ from the row (columns: name, description, script,
+# command, enabled, machine, in the router's full-row order).
 def changed_fields(previous: tuple[object, ...], fields: Mapping[str, object]) -> dict[str, object]:
     current = dict(
         zip(
             UPDATABLE,
-            (previous[1], previous[2], previous[9], previous[3], previous[4]),
+            (previous[1], previous[2], previous[11], previous[3], previous[4], previous[9]),
             strict=True,
         )
     )
@@ -62,11 +63,11 @@ def changed_fields(previous: tuple[object, ...], fields: Mapping[str, object]) -
 
 
 # meiva:note
-# Whether an edit must converge the session now: new code on an enabled schedule, or a
-# flipped enabled flag.
+# Whether an edit must converge the session now: new code on an enabled schedule, a
+# flipped enabled flag, or a reassigned machine.
 def edit_needs_sync(changed: Mapping[str, object], *, enabled: bool) -> bool:
     code_changed = "script" in changed or "command" in changed
-    return (code_changed and enabled) or "enabled" in changed
+    return (code_changed and enabled) or "enabled" in changed or "machine" in changed
 
 
 # meiva:note
@@ -122,3 +123,20 @@ def logs_view(
     if last_error:
         return "last_error", last_error.splitlines()
     return "none", []
+
+
+def select_declared_secrets(
+    secret_names: tuple[str, ...],
+    aliases: Mapping[str, str],
+    process_env: Mapping[str, str],
+) -> dict[str, str]:
+    res: dict[str, str] = {}
+    for k in secret_names:
+        if k.startswith("MEIVA_"):
+            continue
+        val = aliases.get(k)
+        if val is None:
+            val = process_env.get(k)
+        if val is not None:
+            res[k] = val
+    return res

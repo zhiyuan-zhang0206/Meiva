@@ -369,6 +369,7 @@ OpKind = Literal[
     "shell_kill",
     "agent_skill_view",
     "shell_capture",
+    "schedule_capture",
     "harness_probe",
     "upload-receive-v1",
     "to_user_read",
@@ -477,6 +478,16 @@ class ShellCapturePayload(BaseModel):
     agent_id: int
     session_id: int
     lines: int = 200
+
+
+class ScheduleCapturePayload(BaseModel):
+    schedule_id: int
+    lines: int = 200
+
+
+class ScheduleCaptureResult(BaseModel):
+    captured: str | None = None
+    transcript: list[str] | None = None
 
 
 # ── per-OpKind result models ──

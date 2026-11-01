@@ -60,9 +60,10 @@ def _bind_schedule_actor(
     )
 
 
-def run(schedule_id: int, revision: int | None = None) -> int:
-    config = ConfigBoot()
-    config.read_process_environment()
+def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | None = None) -> int:
+    if config is None:
+        config = ConfigBoot()
+        config.read_process_environment()
     machine = ConfiguredMachineIdentity(config)
     image = process_context.loaded_code_image()
     version = CodeVersion(image)
@@ -127,6 +128,8 @@ def run(schedule_id: int, revision: int | None = None) -> int:
 
 
 def main(argv: Sequence[str]) -> None:
+    boot = ConfigBoot()
+    boot.boot()
     if len(argv) not in (1, 2):
         logger.error(
             "Usage: python -m services.wake.schedule_manager.runner <schedule_id> [revision]"
@@ -140,7 +143,7 @@ def main(argv: Sequence[str]) -> None:
     revision = int(argv[1]) if len(argv) == 2 else None
     if revision is not None and revision < 0:
         raise SystemExit(2)
-    raise SystemExit(run(int(argv[0]), revision))
+    raise SystemExit(run(int(argv[0]), revision, config=boot))
 
 
 if __name__ == "__main__":

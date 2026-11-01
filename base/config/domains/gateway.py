@@ -8,6 +8,7 @@ from pydantic_settings import NoDecode
 from base.config.base import EnvSettings
 
 _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
+    "capability": "common",
     "restart_required": "schedule",
     "writable": True,
     "sensitive": False,

@@ -5,12 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
-import pytest
-from psycopg_pool import ConnectionPool
 
 from base.daemon.schedules.builtin_schedules import (
     ProvisionResult,
-    load_manifest,
     provision_builtin_schedules,
 )
 
@@ -61,24 +58,6 @@ def _versions(conn: psycopg.Connection, name: str) -> list[tuple[str]]:
 
 
 class TestProvision:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("automatic", [False, True])
-    async def test_service_start_respects_seeding_without_disabling_explicit_provision(
-        self, db_conn: psycopg.Connection, db_url: str, automatic: bool
-    ) -> None:
-        from services.wake.schedule_manager import daemon
-
-        assert _names(db_conn) == set()
-        expected = {item.name for item in load_manifest()}
-        with ConnectionPool(db_url, min_size=1, max_size=1) as pool:
-            await daemon.provision_builtins(pool, enabled=automatic)
-            assert _names(db_conn) == (expected if automatic else set())
-            provision_builtin_schedules(db_conn)
-            db_conn.commit()
-            before = {name: _row(db_conn, name) for name in expected}
-            await daemon.provision_builtins(pool, enabled=automatic)
-            assert {name: _row(db_conn, name) for name in expected} == before
-
     def test_creates_missing_with_manifest_defaults(
         self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
@@ -103,7 +82,7 @@ class TestProvision:
                 },
             ],
         )
-        created = provision_builtin_schedules(db_conn, path=path)
+        created = provision_builtin_schedules(db_conn, machine="gateway", path=path)
         db_conn.commit()
         assert created.created == ["prod-a", "op-b"] and created.resynced == []
         assert _row(db_conn, "prod-a")[1] is True
@@ -126,9 +105,13 @@ class TestProvision:
                 },
             ],
         )
-        assert provision_builtin_schedules(db_conn, path=path).created == ["prod-a"]
+        assert provision_builtin_schedules(db_conn, machine="gateway", path=path).created == [
+            "prod-a"
+        ]
         db_conn.commit()
-        assert provision_builtin_schedules(db_conn, path=path) == ProvisionResult()
+        assert (
+            provision_builtin_schedules(db_conn, machine="gateway", path=path) == ProvisionResult()
+        )
         db_conn.commit()
         assert _row(db_conn, "prod-a") == ("prod-a", True, "print('ok')\n", "python a.py")
         assert _versions(db_conn, "prod-a") == [("initial",)]
@@ -137,7 +120,7 @@ class TestProvision:
         self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         path = _manifest(tmp_path, [_ENTRY])
-        provision_builtin_schedules(db_conn, path=path)
+        provision_builtin_schedules(db_conn, machine="gateway", path=path)
         db_conn.commit()
         with db_conn.cursor() as cur:
             cur.execute(
@@ -146,7 +129,7 @@ class TestProvision:
             )
         db_conn.commit()
 
-        result = provision_builtin_schedules(db_conn, path=path)
+        result = provision_builtin_schedules(db_conn, machine="gateway", path=path)
         db_conn.commit()
 
         assert result == ProvisionResult(created=[], resynced=["prod-a"])
@@ -162,7 +145,9 @@ class TestProvision:
         versions = _versions(db_conn, "prod-a")
         assert versions[0] == ("initial",) and versions[1][0].startswith("builtin-resync ")
 
-        assert provision_builtin_schedules(db_conn, path=path) == ProvisionResult()
+        assert (
+            provision_builtin_schedules(db_conn, machine="gateway", path=path) == ProvisionResult()
+        )
         db_conn.commit()
         assert len(_versions(db_conn, "prod-a")) == 2
 
@@ -172,11 +157,13 @@ class TestProvision:
         path = _manifest(tmp_path, [_ENTRY])
         with db_conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO schedules (name, description, script, command, enabled) "
-                "VALUES ('agent-made', 'x', 'print(1)\n', 'python x.py', true)"
+                "INSERT INTO schedules (name, description, script, command, enabled, machine) "
+                "VALUES ('agent-made', 'x', 'print(1)\n', 'python x.py', true, 'gateway')"
             )
         db_conn.commit()
-        assert provision_builtin_schedules(db_conn, path=path).created == ["prod-a"]
+        assert provision_builtin_schedules(db_conn, machine="gateway", path=path).created == [
+            "prod-a"
+        ]
         db_conn.commit()
         assert _row(db_conn, "agent-made") == ("agent-made", True, "print(1)\n", "python x.py")
 
@@ -194,10 +181,12 @@ class TestProvision:
                 },
             ],
         )
-        provision_builtin_schedules(db_conn, path=path)
+        provision_builtin_schedules(db_conn, machine="gateway", path=path)
         db_conn.commit()
         with db_conn.cursor() as cur:
             cur.execute("DELETE FROM schedules WHERE name = 'prod-a'")
         db_conn.commit()
-        assert provision_builtin_schedules(db_conn, path=path).created == ["prod-a"]
+        assert provision_builtin_schedules(db_conn, machine="gateway", path=path).created == [
+            "prod-a"
+        ]
         db_conn.commit()

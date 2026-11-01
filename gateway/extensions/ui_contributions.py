@@ -27,6 +27,7 @@ from typing import Any, TypeGuard
 from fastapi import APIRouter, HTTPException, Request
 
 from base.packages.plugins import enable_config
+from base.packages.plugins.loading.schedule_face import load_plugin_ui_stats_safe
 from base.packages.plugins.manifest import ManifestError, load_manifest
 from gateway.extensions.schemas import (
     UiContributionsResponse,
@@ -54,17 +55,17 @@ def _str_dict(value: object) -> dict[str, str]:
     return {str(k): str(v) for k, v in value.items()} if _is_str_any_dict(value) else {}
 
 
-def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, dict[str, Any]]]:
-    """`(plugin, contributions.ui)` for every enabled plugin that declares one."""
+def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, Path, dict[str, Any]]]:
     installed = enable_config.installed_plugin_dirs(home=home)
     config = enable_config.load_for_runtime(set(installed), home=home)
-    declarations: list[tuple[str, dict[str, Any]]] = []
+    declarations: list[tuple[str, Path, dict[str, Any]]] = []
     for name in sorted(installed):
+        plugin_dir = installed[name]
         entry = config.plugins.get(name)
         if entry is None or not entry.enabled:
             continue
         try:
-            manifest = load_manifest(installed[name])
+            manifest = load_manifest(plugin_dir)
         except ManifestError as e:
             raise HTTPException(
                 status_code=500,
@@ -73,7 +74,7 @@ def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, dict[str, Any]]]:
         ui = manifest.contributions.get("ui")
         if not _is_str_any_dict(ui):
             continue
-        declarations.append((name, ui))
+        declarations.append((name, plugin_dir, ui))
     return declarations
 
 
@@ -83,7 +84,8 @@ def get_ui_contributions(request: Request) -> UiContributionsResponse:
     themes: list[UiThemeContribution] = []
     nav: list[UiNavContribution] = []
     stats: list[UiStatContribution] = []
-    for plugin, ui in _enabled_ui_declarations(home=request.app.state.gateway_process.home):
+    home = request.app.state.gateway_process.home
+    for plugin, plugin_dir, ui in _enabled_ui_declarations(home=home):
         for theme in _dict_list(ui.get("themes", [])):
             # Absent darkTokens is carried as None, not as an empty map: the
             # picker distinguishes "pins both modes" from "has a dark half",
@@ -107,14 +109,29 @@ def get_ui_contributions(request: Request) -> UiContributionsResponse:
                     page=str(entry["page"]),
                 )
             )
+        seen_stat_ids: set[str] = set()
         for card in _dict_list(ui.get("stats", [])):
             # Declaration half only — the value half is the plugin_stats row
             # the console joins by (plugin, id) (see plugin_stats.py).
+            card_id = str(card["id"])
+            seen_stat_ids.add(card_id)
             stats.append(
                 UiStatContribution(
                     plugin=plugin,
-                    id=str(card["id"]),
+                    id=card_id,
                     label=str(card["label"]),
                 )
             )
+        stats_face = ui.get("statsFace")
+        if isinstance(stats_face, str):
+            for spec in load_plugin_ui_stats_safe(plugin, plugin_dir, home=home):
+                if spec.id not in seen_stat_ids:
+                    seen_stat_ids.add(spec.id)
+                    stats.append(
+                        UiStatContribution(
+                            plugin=plugin,
+                            id=spec.id,
+                            label=spec.label,
+                        )
+                    )
     return UiContributionsResponse(themes=themes, nav=nav, stats=stats)

@@ -267,3 +267,14 @@ def test_every_problem_is_reported_at_once() -> None:
     assert "agentInspect[0].render" in text
     assert "nav[0].location" in text
     assert "nav[0].icon" in text
+
+
+def test_ui_stats_face_valid() -> None:
+    parsed = _ui(statsFace="ui_stats.py")
+    assert parsed == {"statsFace": "ui_stats.py"}
+
+
+def test_ui_stats_face_invalid() -> None:
+    _rejects("statsFace", statsFace="../bad.py")
+    _rejects("statsFace", statsFace=".hidden.py")
+    _rejects("statsFace", statsFace="subdir/ui_stats.py")

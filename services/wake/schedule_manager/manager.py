@@ -48,6 +48,7 @@ from services.wake.schedule_manager.convergence import (
     Reclaim,
     SyncAction,
     launch_command,
+    merge_launch_env,
     plan_sync,
     prepare_verdict,
     reclaim_verdict,
@@ -94,6 +95,8 @@ class ScheduleManager:
         home: Path,
         policy: ManagerPolicy,
         launch_env: Mapping[str, str],
+        machine_name: str,
+        secret_env_resolver: Callable[[int, tuple[str, ...]], Mapping[str, str]] | None = None,
         observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
     ) -> None:
         self._pool = db_pool
@@ -102,6 +105,8 @@ class ScheduleManager:
         self._home = home
         self._policy = policy
         self._launch_env = launch_env
+        self._machine_name = machine_name
+        self._secret_env_resolver = secret_env_resolver
         # meiva:note
         # How this manager sees the running root: `observe_root` unless the caller names another.
         self._observe = observe
@@ -130,6 +135,13 @@ class ScheduleManager:
         self._host_restarts = host_restart.AutoRestartLedger()
         self._host_generation_unknown_logged = -math.inf
 
+    @property
+    def machine_name(self) -> str:
+        return self._machine_name
+
+    def is_active_unit(self) -> bool:
+        return revisions.is_active_unit(self._pool, self._machine_name, self._home)
+
     # ── control (the sync-request consumer calls this) ──────────────────────
 
     # meiva:note
@@ -140,6 +152,8 @@ class ScheduleManager:
     # queued for the next try. A blocked streak is bounded: once the manager
     # gives up it returns True, so the request is consumed and not retried.
     def sync_one(self, schedule_id: int, *, now: float) -> bool:
+        if not self.is_active_unit():
+            return False
         with self._lock:
             self._host_generation = self._read_host_generation()
             converged = self._sync_revision(schedule_id, now)
@@ -156,7 +170,7 @@ class ScheduleManager:
             return self._sync_owned_revision(schedule_id, now)
 
     def _sync_owned_revision(self, schedule_id: int, now: float) -> bool:
-        wanted = revisions.desired(self._pool, schedule_id)
+        wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
         live = (
             wanted is not None
             and wanted.enabled
@@ -175,7 +189,9 @@ class ScheduleManager:
         if not self._reap(schedule_id, now, owned=True):
             return False
         if wanted is not None:
-            revisions.mark_applied(self._pool, schedule_id, wanted.revision)
+            revisions.mark_applied(
+                self._pool, schedule_id, wanted.revision, machine=self._machine_name
+            )
         return True
 
     def _apply_enabled(
@@ -216,7 +232,7 @@ class ScheduleManager:
                 )
                 return False
             self._launch(schedule_id, now)
-        latest = revisions.desired(self._pool, schedule_id)
+        latest = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
         if latest is None or latest.revision != latest.applied:
             self._refuse_launch(schedule_id, "the launch did not record the desired revision")
             return False
@@ -230,6 +246,8 @@ class ScheduleManager:
     # ── reconcile (blocking: session backend + DB, run via asyncio.to_thread) ──
 
     def reconcile(self, *, now: float) -> None:
+        if not self.is_active_unit():
+            return
         with self._lock:
             self._reconcile_locked(now)
 
@@ -265,7 +283,7 @@ class ScheduleManager:
                 self._sync_revision(sid, now)
 
         for sid in sorted(enabled):
-            wanted = revisions.desired(self._pool, sid)
+            wanted = revisions.desired(self._pool, sid, machine=self._machine_name)
             if wanted is not None and (
                 wanted.revision != wanted.applied or (sid in live and wanted.status == "error")
             ):
@@ -303,19 +321,7 @@ class ScheduleManager:
                 self._sync_revision(sid, now)
 
     def _mark_lost(self, schedule_id: int, revision: int) -> None:
-        with write_transaction(self._pool) as conn:
-            changed = conn.execute(
-                "UPDATE schedules SET status = 'error', last_error = %s, updated_at = now() "
-                "WHERE id = %s AND desired_revision = %s AND applied_revision = %s "
-                "AND enabled AND status = 'running'",
-                (
-                    "Schedule process lost; inspect effects and explicitly restart to run again",
-                    schedule_id,
-                    revision,
-                    revision,
-                ),
-            ).rowcount
-        if changed:
+        if revisions.mark_lost(self._pool, schedule_id, revision, self._machine_name):
             _log.warning("schedule %s process lost; automatic relaunch disabled", schedule_id)
 
     # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
@@ -363,10 +369,10 @@ class ScheduleManager:
             return False
         with write_transaction(self._pool) as conn:
             authorized = conn.execute(
-                "UPDATE schedules SET launch_count = 0 WHERE id = %s AND enabled "
+                "UPDATE schedules SET launch_count = 0 WHERE id = %s AND machine = %s AND enabled "
                 "AND status = 'running' AND desired_revision = %s AND applied_revision = %s "
                 "AND launch_generation = %s",
-                (schedule_id, wanted.revision, wanted.applied, launched_in),
+                (schedule_id, self._machine_name, wanted.revision, wanted.applied, launched_in),
             ).rowcount
         if not authorized:
             return False
@@ -394,21 +400,21 @@ class ScheduleManager:
         with write_transaction(self._pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE schedules SET not_live_since = NULL, stall_alerted_at = NULL "
-                "WHERE NOT (id = ANY(%s)) "
+                "WHERE machine = %s AND NOT (id = ANY(%s)) "
                 "AND (not_live_since IS NOT NULL OR stall_alerted_at IS NOT NULL)",
-                (missing,),
+                (self._machine_name, missing),
             )
             cur.execute(
                 "UPDATE schedules SET not_live_since = clock_timestamp() "
-                "WHERE id = ANY(%s) AND not_live_since IS NULL",
-                (missing,),
+                "WHERE machine = %s AND id = ANY(%s) AND not_live_since IS NULL",
+                (self._machine_name, missing),
             )
             cur.execute(
                 "UPDATE schedules SET stall_alerted_at = clock_timestamp() "
-                "WHERE id = ANY(%s) AND stall_alerted_at IS NULL "
+                "WHERE machine = %s AND id = ANY(%s) AND stall_alerted_at IS NULL "
                 "AND not_live_since < clock_timestamp() - make_interval(secs => %s) "
                 "RETURNING id, EXTRACT(EPOCH FROM clock_timestamp() - not_live_since)",
-                (missing, STALL_ALERT_AFTER_S),
+                (self._machine_name, missing, STALL_ALERT_AFTER_S),
             )
             alerts = [(int(r[0]), float(r[1])) for r in cur.fetchall()]
         for schedule_id, stalled_seconds in alerts:
@@ -483,22 +489,10 @@ class ScheduleManager:
         return live
 
     def _close_null_runs(self, schedule_id: int, *, note: str = "interrupted") -> None:
-        """Close a schedule's in-progress run-history rows (ok IS NULL) as
-        'interrupted' — the runner that opened them is gone. Best-effort (run
-        history is severable observability) and idempotent (WHERE ok IS NULL):
-        a row the runner closed itself is untouched. Called when the manager
-        launches or reaps the schedule, the only moments it knows the process
-        is gone; a process killed by something else leaves its row open until
-        then."""
-        with write_transaction(self._pool) as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE schedule_runs SET ok = false, note = %s "
-                "WHERE schedule_id = %s AND ok IS NULL",
-                (note, schedule_id),
-            )
+        revisions.close_null_runs(self._pool, schedule_id, note=note)
 
     def _launch(self, schedule_id: int, now: float) -> None:
-        wanted = revisions.desired(self._pool, schedule_id)
+        wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
         if wanted is None or not wanted.enabled:
             return
         name = session_name(f"schedule-{schedule_id}")
@@ -533,14 +527,19 @@ class ScheduleManager:
         # CLUSTER's clock, not on whatever ambient env the session happens to
         # meiva:note
         # carry. The launch env deliberately excludes cluster-scope keys (a
-        # child is expected to re-source .env at boot), but a unit .env that
-        # misses MEIVA_TIMEZONE silently left the runner on the field default
-        # America/Los_Angeles — 2026-08-21: schedule #3 fired at PT midnight
-        # instead of Shanghai midnight after the 08-12 timezone ruling. Pin the
-        # gateway's own resolved timezone into the spawn env so the fire time is
-        # deterministic; dotenv_boot's authority pass still lets a declared .env
-        # value override it (and never drops it — base/dotenv_boot._force_also).
-        env["MEIVA_TIMEZONE"] = self._policy.timezone
+        resolved: Mapping[str, str] | None = None
+        if wanted.secret_env_vars and self._secret_env_resolver is not None:
+            try:
+                resolved = self._secret_env_resolver(schedule_id, wanted.secret_env_vars)
+            except Exception as exc:
+                _log.error("failed resolving launch secrets for schedule %s: %s", schedule_id, exc)
+        env = merge_launch_env(
+            env,
+            schedule_id=schedule_id,
+            timezone=self._policy.timezone,
+            secret_names=wanted.secret_env_vars,
+            resolved_secrets=resolved,
+        )
         cmd = launch_command(str(self._repo_root), schedule_id, wanted.revision)
         # No shell-TTL row is written here (deliberate exemption, task
         # #2614): agent_shell_ttls rows key on an agent id, and schedule
@@ -581,15 +580,7 @@ class ScheduleManager:
             )
 
     def _mark_running(self, schedule_id: int, revision: int, epoch: str | None) -> None:
-        """Confirm a matching live process without overwriting completion or newer intent."""
-        with write_transaction(self._pool) as conn:
-            conn.execute(
-                "UPDATE schedules SET applied_revision = %s, "
-                "launch_generation = COALESCE(%s, launch_generation), status = CASE "
-                "WHEN applied_revision = %s AND status = 'completed' THEN status ELSE 'running' END, "
-                "last_error = NULL WHERE id = %s AND desired_revision = %s AND enabled",
-                (revision, epoch, revision, schedule_id, revision),
-            )
+        revisions.mark_running(self._pool, schedule_id, revision, epoch, self._machine_name)
 
     def _prepare_launch(
         self, schedule_id: int, name: str, backend: SessionBackend, wanted: Desired, now: float
@@ -625,7 +616,7 @@ class ScheduleManager:
         it clears the give-up and authorizes a fresh bounded streak."""
         if schedule_id not in self._abandoned:
             return False
-        wanted = revisions.desired(self._pool, schedule_id)
+        wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
         if (None if wanted is None else wanted.revision) != self._abandoned[schedule_id]:
             del self._abandoned[schedule_id]
             self._blocked.pop(schedule_id, None)
@@ -641,7 +632,7 @@ class ScheduleManager:
 
     def _give_up(self, schedule_id: int, why: str, blocked_s: float) -> None:
         """Stop retrying: record the schedule as an error, alert, leave the process alone."""
-        wanted = revisions.desired(self._pool, schedule_id)
+        wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
         self._abandoned[schedule_id] = None if wanted is None else wanted.revision
         self._reap_retries.discard(schedule_id)
         self._blocked.pop(schedule_id, None)
@@ -649,8 +640,8 @@ class ScheduleManager:
         with write_transaction(self._pool) as conn:
             conn.execute(
                 "UPDATE schedules SET status = 'error', last_error = %s, updated_at = now() "
-                "WHERE id = %s",
-                (message, schedule_id),
+                "WHERE id = %s AND machine = %s",
+                (message, schedule_id, self._machine_name),
             )
         _log.error("schedule %s: %s", schedule_id, message)
         telemetry.emit(
@@ -692,7 +683,7 @@ class ScheduleManager:
         with revisions.claim_convergence(self._pool, schedule_id) as owned:
             if not owned:
                 return False
-            wanted = revisions.desired(self._pool, schedule_id)
+            wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
             observed = revisions.launched_revision(self._home, schedule_id)
             if wanted is not None and observed == wanted.revision == wanted.applied:
                 self._reap_retries.discard(schedule_id)
@@ -742,9 +733,11 @@ class ScheduleManager:
             # SessionBackend's false verdict means the session survived its
             # own identity-aware kill. Keep metadata truthful until the next
             # bounded retry of the same official path.
-            self._set_status(schedule_id, "running")
+            wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
+            if wanted is not None:
+                self._set_status(schedule_id, "running")
+                self._note_blocked(schedule_id, f"the session {name} survived its reap", now)
             self._log_reap_failure(schedule_id, name, "survived", now)
-            self._note_blocked(schedule_id, f"the session {name} survived its reap", now)
             return False
         self._reap_retries.discard(schedule_id)
         self._reap_failure_logs.pop(schedule_id, None)
@@ -755,46 +748,19 @@ class ScheduleManager:
         # edited-script save does not leave an in-progress "…" row behind (QA
         # P2-2). A kill that does not route through here leaves its row open
         # until the manager next launches or reaps this schedule.
-        self._close_null_runs(schedule_id)
+        wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
+        if wanted is not None:
+            self._close_null_runs(schedule_id)
         _log.info("schedule %s: PTY session %s reaped (%s)", schedule_id, name, mode)
         return True
 
     # ── DB ──────────────────────────────────────────────────────────────────
 
     def _load_enabled(self) -> dict[int, str]:
-        with self._pool.connection() as conn:
-            rows = conn.execute("SELECT id, status FROM schedules WHERE enabled").fetchall()
-        return {row[0]: row[1] for row in rows}
+        return revisions.load_enabled(self._pool, self._machine_name)
 
     def _claim_launch(self, schedule_id: int, revision: int, epoch: str | None) -> bool:
-        """Admit one process attempt before effects; ambiguity consumes the attempt.
-
-        Existing launch_count is a one-attempt latch, reset only by a new
-        explicit revision. Old retry timestamps are retained but never read.
-        """
-        with write_transaction(self._pool) as conn:
-            return (
-                conn.execute(
-                    "UPDATE schedules SET launch_count = 1, applied_revision = %s, "
-                    "launch_generation = %s, status = 'error', last_error = %s WHERE id = %s "
-                    "AND enabled AND desired_revision = %s AND launch_count = 0",
-                    (
-                        revision,
-                        epoch,
-                        "Launch outcome unknown; inspect before explicitly restarting",
-                        schedule_id,
-                        revision,
-                    ),
-                ).rowcount
-                == 1
-            )
+        return revisions.claim_launch(self._pool, schedule_id, revision, epoch, self._machine_name)
 
     def _set_status(self, schedule_id: int, status: str) -> bool:
-        with write_transaction(self._pool) as conn:
-            return (
-                conn.execute(
-                    "UPDATE schedules SET status=%s, updated_at=now() WHERE id=%s",
-                    (status, schedule_id),
-                ).rowcount
-                > 0
-            )
+        return revisions.set_status(self._pool, schedule_id, status, self._machine_name)

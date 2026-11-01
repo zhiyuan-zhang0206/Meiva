@@ -610,6 +610,7 @@ _pin_setting("memory_search_uri", f"http://127.0.0.1:{_memory_search_port}")
 permissions_helper_port = next(_ports)
 _SESSION_PORTS: dict[str, int] = dict(zip(FIXED_PORTS, _ports, strict=True))
 _pin_setting("os_jobs_enabled", False)
+_pin_setting("provision_builtin_schedules", False)
 
 # ── fd budget for detached session children ──
 #

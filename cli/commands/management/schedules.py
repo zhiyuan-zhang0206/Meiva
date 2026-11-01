@@ -57,10 +57,6 @@ def _mutation_headers(access: GatewayAccess, idempotency_key: str) -> dict[str, 
 
 
 def cmd_schedules_ls(access: GatewayAccess) -> int:
-    """`meiva schedules ls` — list every schedule (id / enabled / status / name).
-
-    Disabled schedules are listed too; `status` is the ScheduleManager's live
-    supervision state, `enabled` is the desired state stored on the row."""
     from base.host.net.http_dial import get as dial_get
 
     resp = dial_get(
@@ -75,10 +71,20 @@ def cmd_schedules_ls(access: GatewayAccess) -> int:
 
     id_w = max(len("id"), *(len(str(r["id"])) for r in rows))
     status_w = max(len("status"), *(len(r["status"]) for r in rows))
-    print(f"{'id'.rjust(id_w)}  {'on':<3}  {'status'.ljust(status_w)}  name")
+    machine_w = max(len("machine"), *(len(str(r.get("machine", ""))) for r in rows))
+    placement_w = max(len("placement"), *(len(str(r.get("placement_status", ""))) for r in rows))
+    print(
+        f"{'id'.rjust(id_w)}  {'on':<3}  {'status'.ljust(status_w)}  "
+        f"{'machine'.ljust(machine_w)}  {'placement'.ljust(placement_w)}  name"
+    )
     for r in rows:
         on = "yes" if r["enabled"] else "no"
-        print(f"{str(r['id']).rjust(id_w)}  {on:<3}  {r['status'].ljust(status_w)}  {r['name']}")
+        m_str = str(r.get("machine", ""))
+        p_str = str(r.get("placement_status", ""))
+        print(
+            f"{str(r['id']).rjust(id_w)}  {on:<3}  {r['status'].ljust(status_w)}  "
+            f"{m_str.ljust(machine_w)}  {p_str.ljust(placement_w)}  {r['name']}"
+        )
     return 0
 
 
@@ -105,6 +111,7 @@ def cmd_schedules_create(
     command: str | None,
     description: str | None,
     *,
+    machine: str | None = None,
     disabled: bool = False,
     idempotency_key: str,
 ) -> int:
@@ -126,6 +133,8 @@ def cmd_schedules_create(
         body["command"] = command
     if description is not None:
         body["description"] = description
+    if machine is not None:
+        body["machine"] = machine
 
     resp = dial_post(
         f"{_gateway_base(access)}/api/schedules",
@@ -158,6 +167,7 @@ def cmd_schedules_update(
     command: str | None,
     description: str | None,
     *,
+    machine: str | None = None,
     enabled: bool | None,
     idempotency_key: str,
 ) -> int:
@@ -187,13 +197,15 @@ def cmd_schedules_update(
         body["command"] = command
     if description is not None:
         body["description"] = description
+    if machine is not None:
+        body["machine"] = machine
     if enabled is not None:
         body["enabled"] = enabled
 
     if not body:
         print(
             "at least one of --name / --script / --script-file / --command / "
-            "--description / --enable / --disable is required",
+            "--description / --machine / --enable / --disable is required",
             file=sys.stderr,
         )
         return 1
@@ -359,7 +371,12 @@ def cmd_schedules_runs(access: GatewayAccess, identifier: str, limit: int) -> in
 # ── helpers ──
 
 
-def cmd_schedules_provision(*, database_factory: DatabaseFactory) -> int:
+def cmd_schedules_provision(
+    *,
+    database_factory: DatabaseFactory,
+    machine: str = "gateway",
+    home: Path | None = None,
+) -> int:
     """`meiva schedules provision` — bring the built-in schedules in line with this
     checkout's schedules/manifest.json: create the missing ones (product schedules —
     self-evolution, memory — enabled; cluster-operator schedules, none today,
@@ -374,15 +391,25 @@ def cmd_schedules_provision(*, database_factory: DatabaseFactory) -> int:
     existing schedule are never modified, and a schedule that is not in the manifest
     (an agent-created one) is never read."""
     from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
+    from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
+    from base.paths import meiva_home
 
+    resolved_home = home if home is not None else meiva_home()
     with database_factory().write_transaction() as conn:
-        result = provision_builtin_schedules(conn)
+        result = provision_builtin_schedules(conn, machine=machine)
+        plugin_result = reconcile_plugin_schedules(conn, home=resolved_home)
     if result.created:
         print(f"provisioned built-in schedules: {', '.join(result.created)}")
     if result.resynced:
         print(f"resynced built-in schedule scripts to this checkout: {', '.join(result.resynced)}")
     if not result.created and not result.resynced:
         print("(all built-in schedules already present and current)")
+    if plugin_result.created:
+        print(f"provisioned plugin schedules: {', '.join(plugin_result.created)}")
+    if plugin_result.updated:
+        print(f"resynced plugin schedules: {', '.join(plugin_result.updated)}")
+    if plugin_result.removed:
+        print(f"removed orphaned plugin schedules: {', '.join(plugin_result.removed)}")
     return 0
 
 
@@ -476,6 +503,15 @@ def _print_schedule(row: dict[str, Any], *, with_script: bool) -> None:
     print(f"  command:     {row['command']}")
     print(f"  enabled:     {row['enabled']}")
     print(f"  status:      {row['status']}")
+    if row.get("machine"):
+        print(f"  machine:     {row['machine']}")
+    if row.get("owner_plugin"):
+        print(f"  owner_plugin: {row['owner_plugin']}")
+    if row.get("placement_status"):
+        p_str = row["placement_status"]
+        if row.get("placement_reason"):
+            p_str += f" ({row['placement_reason']})"
+        print(f"  placement:   {p_str}")
     if row.get("last_error"):
         print(f"  last_error:  {row['last_error'].splitlines()[-1]}")
     if with_script:
@@ -509,6 +545,7 @@ def h_schedules_create(args: argparse.Namespace) -> int:
         args.script_file,
         args.command,
         args.description,
+        machine=getattr(args, "machine", None),
         disabled=args.disabled,
         idempotency_key=args.runtime.new_id(),
     )
@@ -525,6 +562,7 @@ def h_schedules_update(args: argparse.Namespace) -> int:
         args.script_file,
         args.command,
         args.description,
+        machine=getattr(args, "machine", None),
         enabled=enabled,
         idempotency_key=args.runtime.new_id(),
     )
@@ -559,4 +597,12 @@ def h_schedules_runs(args: argparse.Namespace) -> int:
 
 
 def h_schedules_provision(args: argparse.Namespace) -> int:
-    return cmd_schedules_provision(database_factory=args.database_factory)
+    machine = getattr(args, "machine", None)
+    if machine is None and hasattr(args, "runtime") and hasattr(args.runtime, "machine"):
+        machine = args.runtime.machine.name()
+    home = getattr(args.runtime, "home", None) if hasattr(args, "runtime") else None
+    return cmd_schedules_provision(
+        database_factory=args.database_factory,
+        machine=machine or "gateway",
+        home=home,
+    )

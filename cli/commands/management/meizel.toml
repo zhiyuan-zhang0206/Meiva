@@ -15,6 +15,7 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "schedules_verify_read_rows.py" = { kinds = ["home"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself" }
 "schedule_verify_child.py" = { kinds = ["cwd"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis" }
 "fleet_gateway.py" = { kinds = ["clock", "random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key; builds the process clock from SYSTEM_TIMERS" }
+"schedules.py" = { kinds = ["home"], why = "CLI schedules command entry: resolves Meiva home for plugin schedule provisioning when not passed explicitly" }
 
 [purity]
 "__init__.py" = "strict"

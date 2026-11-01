@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -33,16 +33,23 @@ def schedule_manager(
     pool: ConnectionPool[Any],
     backend: SessionBackend,
     *,
+    machine_name: str = "gateway",
+    home: Path | None = None,
     policy: ManagerPolicy = POLICY,
     repo_root: Path = REPO_ROOT,
     launch_env: Mapping[str, str] = LAUNCH_ENV,
+    secret_env_resolver: Callable[[int, tuple[str, ...]], Mapping[str, str]] | None = None,
 ) -> ScheduleManager:
+    if home is None:
+        home = meiva_home()
     return ScheduleManager(
         pool,
         backend=backend,
         repo_root=repo_root,
-        home=meiva_home(),
+        home=home,
         policy=policy,
         launch_env=launch_env,
+        machine_name=machine_name,
+        secret_env_resolver=secret_env_resolver,
         observe=observe,
     )

@@ -1,4 +1,4 @@
-exports = ["meiva_fleet"]
+exports = ["meiva_fleet", "meiva_usage"]
 
 [uses]
 "meiva_memory" = ["meiva_code"]

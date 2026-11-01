@@ -1,0 +1,23 @@
+exports = ["runner.py"]
+
+[purity]
+"__init__.py" = "strict"
+"default_config.py" = "strict"
+"formatters.py" = "strict"
+"parsers.py" = "strict"
+"plugin.py" = "strict"
+"schedules.py" = "strict"
+"types.py" = "strict"
+"ui_stats.py" = "strict"
+
+[uses]
+"formatters.py" = ["types.py"]
+"parsers.py" = ["types.py"]
+"probes" = ["default_config.py", "formatters.py", "parsers.py", "types.py"]
+"runner.py" = ["default_config.py", "probes", "types.py"]
+"schedules.py" = ["default_config.py"]
+"tests" = ["default_config.py", "formatters.py", "parsers.py", "plugin.py", "probes", "runner.py", "schedules.py", "types.py"]
+"ui_stats.py" = ["default_config.py"]
+
+[roots]
+"runner.py" = { kinds = ["clock", "environ", "home", "platform"], why = "Schedule runner entrypoint for meiva_usage collectors: reads local clock, platform, home and process environment to execute usage probes" }

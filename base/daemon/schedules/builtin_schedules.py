@@ -125,19 +125,8 @@ def _digest(script: str, command: str) -> str:
 
 
 def provision_builtin_schedules(
-    conn: psycopg.Connection[Any], *, path: Path | None = None
+    conn: psycopg.Connection[Any], *, machine: str, path: Path | None = None
 ) -> ProvisionResult:
-    """Create the manifest schedules that are missing and resync the ones that drifted.
-
-    Idempotent. A row whose ``name`` exists keeps its ``enabled`` state and
-    description; only its ``script`` and ``command`` follow the repo template, and
-    only when they differ from it (compared by content hash).
-
-    Args:
-        conn: an open psycopg connection (autocommit or not; the caller owns
-            the transaction).
-        path: manifest path override (tests inject a fixture manifest).
-    """
     manifest = load_manifest(path)
     manifest_path = (path or MANIFEST_PATH).parent
     result = ProvisionResult()
@@ -147,20 +136,21 @@ def provision_builtin_schedules(
         script_text = (manifest_path / sched.script).read_text()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, script, command FROM schedules WHERE name = %s FOR UPDATE",
+                "SELECT id, script, command, machine FROM schedules WHERE name = %s FOR UPDATE",
                 (sched.name,),
             )
             existing = cur.fetchone()
             if existing is None:
                 cur.execute(
-                    "INSERT INTO schedules (name, description, script, command, enabled) "
-                    "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    "INSERT INTO schedules (name, description, script, command, enabled, machine) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
                     (
                         sched.name,
                         sched.description,
                         script_text,
                         sched.command,
                         sched.default_enabled,
+                        machine,
                     ),
                 )
                 row = cur.fetchone()
@@ -174,7 +164,7 @@ def provision_builtin_schedules(
                 )
                 result.created.append(sched.name)
                 continue
-            schedule_id, current_script, current_command = existing
+            schedule_id, current_script, current_command, existing_machine = existing
             want = _digest(script_text, sched.command)
             if _digest(current_script or "", current_command or "") == want:
                 continue
@@ -190,9 +180,9 @@ def provision_builtin_schedules(
             # Same request the API leaves on a script edit: the schedule-manager
             # kills a live session and relaunches it (when enabled) on the new code.
             cur.execute(
-                "INSERT INTO schedule_sync_requests (schedule_id) VALUES (%s) "
-                "ON CONFLICT (schedule_id) DO UPDATE SET requested_at = clock_timestamp()",
-                (schedule_id,),
+                "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
+                "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
+                (schedule_id, existing_machine),
             )
         result.resynced.append(sched.name)
     return result

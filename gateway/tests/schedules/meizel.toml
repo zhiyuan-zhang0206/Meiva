@@ -1,6 +1,9 @@
 exports = ["api_support.py"]
 
 [uses]
+"test_gateway_multi_machine.py" = ["api_support.py"]
+"test_launch_env.py" = ["api_support.py"]
 "test_operation_receipts.py" = ["api_support.py"]
+"test_plugin_schedules.py" = ["api_support.py"]
 "test_receipt_boundaries.py" = ["api_support.py"]
 "test_update_delivery.py" = ["api_support.py"]

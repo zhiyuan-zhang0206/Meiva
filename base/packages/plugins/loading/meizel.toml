@@ -1,4 +1,4 @@
-exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py", "scaffold.py"]
+exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py", "scaffold.py", "schedule_face.py"]
 
 [uses]
 "faces.py" = ["__init__.py", "discovery.py", "plugin_loader.py", "registry.py"]
@@ -6,6 +6,7 @@ exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py", "scaff
 
 [external]
 "plugin_loader.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
+"schedule_face.py" = "loads discovered plugin schedule and ui_stats faces and syntax-checks contributed schedule scripts"
 
 [purity]
 "__init__.py" = "strict"

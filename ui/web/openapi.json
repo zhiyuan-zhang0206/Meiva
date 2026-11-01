@@ -5168,6 +5168,66 @@
         }
       }
     },
+    "/api/schedules/{schedule_id}/launch-env": {
+      "get": {
+        "summary": "Get Schedule Launch Env",
+        "description": "Deliver process-scoped secret environment variables for a schedule session.",
+        "operationId": "get_schedule_launch_env_api_schedules__schedule_id__launch_env_get",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Schedule Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Schedule Launch Env Api Schedules  Schedule Id  Launch Env Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keyed/v1/guide/draft": {
       "post": {
         "summary": "Guarded Draft Guide",
@@ -16943,6 +17003,17 @@
             "type": "boolean",
             "title": "Enabled",
             "default": true
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
           }
         },
         "type": "object",
@@ -17108,6 +17179,43 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "owner_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plugin"
+          },
+          "placement_status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unregistered",
+              "paused",
+              "stopped",
+              "offline"
+            ],
+            "title": "Placement Status"
+          },
+          "placement_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Reason"
           }
         },
         "type": "object",
@@ -17120,7 +17228,9 @@
           "status",
           "last_error",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "machine",
+          "placement_status"
         ],
         "title": "ScheduleSummary"
       },
@@ -17180,6 +17290,17 @@
               }
             ],
             "title": "Enabled"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
           }
         },
         "type": "object",
@@ -17239,6 +17360,43 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "owner_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plugin"
+          },
+          "placement_status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unregistered",
+              "paused",
+              "stopped",
+              "offline"
+            ],
+            "title": "Placement Status"
+          },
+          "placement_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Reason"
+          },
           "script": {
             "type": "string",
             "title": "Script"
@@ -17255,6 +17413,8 @@
           "last_error",
           "created_at",
           "updated_at",
+          "machine",
+          "placement_status",
           "script"
         ],
         "title": "ScheduleView"

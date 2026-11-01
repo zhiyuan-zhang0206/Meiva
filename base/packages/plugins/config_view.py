@@ -43,7 +43,13 @@ def resolve_agent_plugin_pins(
 # meiva:note
 # A missing plugin cluster projection raises InvalidConfigData only when the plugin declares cluster fields and the unit expects a fetch: not config_source_is_local() and should_fetch_from_gateway(). A unit whose config source is local composes from its own authority image - for the gateway-capable unit that owns its image, a missing packet is its normal state (task #5234). A present projection must equal the declared cluster fields exactly (SchemaDriftError) and the composed model must validate (InvalidConfigData); a local-source unit keeps its own values.
 # meiva:link base/packages/plugins/docs/plugin-config/config-view.meiva.okf.md
-def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
+def with_cluster_policy[C: BaseModel](
+    plugin: str,
+    config: C,
+    *,
+    env: Mapping[str, str] | None = None,
+    env_file: Mapping[str, str] | None = None,
+) -> C:
     from base.config import schema_extra
     from base.host.env.bootstrap import (
         cluster_plugin_config_values,
@@ -57,19 +63,19 @@ def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
     # TODO(config-boot values): the plugin config image is bound deep under the SDK install; its
     # meiva:note
     # root hands the boot facts (environment, `.env` values) down once that install takes them.
-    env = process_environment()
-    env_file = read_env_aliases(process_env_file())
+    effective_env = process_environment() if env is None else env
+    effective_env_file = read_env_aliases(process_env_file()) if env_file is None else env_file
     cluster_fields = {
         name
         for name, info in type(config).model_fields.items()
         if schema_extra(info).get("scope") in {"cluster-pinned", "cluster-default"}
     }
-    projection = cluster_plugin_config_values(env, plugin)
+    projection = cluster_plugin_config_values(effective_env, plugin)
     if projection is None:
         if (
             cluster_fields
-            and not config_source_is_local(env, env_file=env_file)
-            and should_fetch_from_gateway(env, env_file=env_file)
+            and not config_source_is_local(effective_env, env_file=effective_env_file)
+            and should_fetch_from_gateway(effective_env, env_file=effective_env_file)
         ):
             raise InvalidConfigData(f"bootstrap lacks cluster config for plugin {plugin!r}")
         return config
@@ -81,7 +87,9 @@ def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
         composed = type(config).model_validate({**config.model_dump(), **projection})
     except ValidationError as exc:
         raise InvalidConfigData(f"invalid cluster config for plugin {plugin!r}: {exc}") from exc
-    return config if config_source_is_local(env, env_file=env_file) else composed
+    return (
+        config if config_source_is_local(effective_env, env_file=effective_env_file) else composed
+    )
 
 
 def overlay_config_classes(
@@ -135,8 +143,20 @@ def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
         raise InvalidConfigData(f"invalid service plugin config {plugin!r}: {exc}") from exc
 
 
-def read_plugin_config[C: BaseModel](plugin: str, cls: type[C], config_path: Path) -> C:
-    return with_cluster_policy(plugin, read_config_image(cls, config_path))
+def read_plugin_config[C: BaseModel](
+    plugin: str,
+    cls: type[C],
+    config_path: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    env_file: Mapping[str, str] | None = None,
+) -> C:
+    return with_cluster_policy(
+        plugin,
+        read_config_image(cls, config_path),
+        env=env,
+        env_file=env_file,
+    )
 
 
 def plugin_bootstrap_config(*, home: Path) -> str:

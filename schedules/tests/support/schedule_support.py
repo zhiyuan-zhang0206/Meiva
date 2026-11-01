@@ -22,12 +22,14 @@ from base.telemetry import EventPipeline
 __all__ = ["borrowed_inputs", "claimed_slots", "insert_schedule"]
 
 
-def insert_schedule(conn: psycopg.Connection, *, name: str, created_at: datetime) -> int:
+def insert_schedule(
+    conn: psycopg.Connection, *, name: str, created_at: datetime, machine: str = "gateway"
+) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status, created_at) "
-            "VALUES (%s, 'x', 'python schedule.py', true, 'stopped', %s) RETURNING id",
-            (name, created_at),
+            "INSERT INTO schedules (name, script, command, enabled, status, created_at, machine) "
+            "VALUES (%s, 'x', 'python schedule.py', true, 'stopped', %s, %s) RETURNING id",
+            (name, created_at, machine),
         )
         row = cur.fetchone()
     conn.commit()

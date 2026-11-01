@@ -18,6 +18,7 @@ from base.packages.plugins.extensions import (
 )
 from base.packages.plugins.loading.discovery import enabled_plugin_dirs, pkg_of
 from base.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
+from base.packages.plugins.surface.schedules import ScheduleSpec
 from base.packages.skills import names
 
 
@@ -195,6 +196,16 @@ SURFACES: tuple[Surface, ...] = (
             "read as meiva.sdk_surface.settings.plugins.<plugin>; schema drift points at `meiva plugins update`"
         ),
     ),
+    Surface(
+        id="schedules",
+        entry_points=(ScheduleSpec,),
+        manifest_key="schedules",
+        protocol="contribute(config) -> tuple[ScheduleSpec, ...]",
+        note=(
+            "`schedules` of what the plugin's `schedules.py` `contribute()` returns: persistent, supervised sessions "
+            "placed on specific cluster machines; reconciled automatically by the gateway"
+        ),
+    ),
 )
 
 DECLARATION_ONLY_KEYS: frozenset[str] = frozenset(CONTRIBUTION_KEYS) - {
@@ -310,7 +321,8 @@ def build_catalog(*, sampling: SamplingPolicyOwner, home: Path) -> Catalog:
 
 
 def _data_records(*, home: Path) -> dict[str, tuple[Contribution, ...]]:
-    from base.packages.plugins import data_registry
+    from base.packages.plugins import data_registry, load_report
+    from base.packages.plugins.loading import schedule_face
     from base.packages.plugins.loading.plugin_loader import safe_load_plugin_module
 
     records: dict[str, tuple[Contribution, ...]] = {}
@@ -326,6 +338,31 @@ def _data_records(*, home: Path) -> dict[str, tuple[Contribution, ...]]:
             declared = data_registry.load_declaration(name, lambda module=module: module)
             if declared is not None:
                 found.extend(declared.contributions.as_records(name))
+        try:
+            specs = schedule_face.declared_schedules(name, directory, home=home)
+            if specs:
+                for spec in specs:
+                    found.append(
+                        Contribution(
+                            plugin=name,
+                            surface="schedules",
+                            identifier=f"{spec.name}@{spec.machine}",
+                            detail=spec.description,
+                        )
+                    )
+            else:
+                manifest = load_manifest(directory)
+                if "schedules" in manifest.contributions:
+                    found.append(
+                        Contribution(
+                            plugin=name,
+                            surface="schedules",
+                            identifier="<declared>",
+                            detail="declared in manifest",
+                        )
+                    )
+        except Exception as exc:
+            load_report.report_plugin_load_failure(name, exc)
         if found:
             records[name] = tuple(found)
     return records
@@ -365,7 +402,7 @@ def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
     declared = manifest.contributions.get(key)
     if declared is None:
         return set()
-    if key == "config":
+    if key in ("config", "schedules"):
         return {"<declared>"}
     if not _is_object_list(declared):
         raise TypeError(f"contributions.{key} must be a validated list")
@@ -374,6 +411,6 @@ def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
 
 def _registered_identifiers(view: PluginView, surface: Surface) -> set[str]:
     identifiers = {c.identifier for c in view.contributions if c.surface == surface.id}
-    if surface.id == "config":
+    if surface.id in ("config", "schedules"):
         return {"<declared>"} if identifiers else set()
     return identifiers

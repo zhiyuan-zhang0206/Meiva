@@ -60,6 +60,10 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
             "agent_metric_file_cursors",
         ),
     ),
+    ("SELECT, UPDATE", ("schedules",)),
+    ("SELECT, INSERT, UPDATE", ("schedule_runs",)),
+    ("SELECT, DELETE", ("schedule_sync_requests",)),
+    ("SELECT, INSERT", ("schedule_fire_log",)),
     ("ALL", CHECKPOINT_TABLES),
 )
 

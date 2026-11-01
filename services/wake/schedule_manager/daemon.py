@@ -31,14 +31,20 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TypeGuard
 
 from psycopg_pool import ConnectionPool
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import (
+    GatewayAccess,
+    GatewayApiTokenMissing,
+    gateway_bearer,
+)
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon import round_loop
@@ -49,7 +55,10 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.env.dotenv_file import read_env_aliases
 from base.host.exit_codes import hard_exit as _hard_exit
+from base.host.net.auth import bearer_header
+from base.host.net.http_dial import get as dial_get
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home, prod_service_checkout_error
@@ -86,36 +95,6 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     return pidfile_holds_daemon(
         _pidfile(config, runtime=runtime), "services.wake.schedule_manager.daemon"
     )
-
-
-# meiva:note
-# Seed missing built-in schedules and resync drifted ones when ``enabled``.
-#
-# Runs before the first reconcile, so a built-in launches on the checkout's template, not on
-# the snapshot its row was created with. Only ``script`` / ``command`` of an existing row move.
-async def provision_builtins(pool: ConnectionPool[Any], *, enabled: bool) -> None:
-    if not enabled:
-        return
-    from base.daemon.schedules.builtin_schedules import (
-        ProvisionResult,
-        provision_builtin_schedules,
-    )
-
-    def provision() -> ProvisionResult:
-        # Pool acquisition and provisioning both block; keep them off the event loop.
-        with pool.connection() as conn:
-            return provision_builtin_schedules(conn)
-
-    try:
-        result = await asyncio.to_thread(provision)
-        if result.created:
-            _log.info("provisioned built-in schedules: %s", ", ".join(result.created))
-        if result.resynced:
-            _log.info(
-                "resynced built-in schedule scripts to the checkout: %s", ", ".join(result.resynced)
-            )
-    except Exception:
-        _log.warning("built-in schedule provisioning failed", exc_info=True)
 
 
 def manager_policy(config: ConfigBoot) -> ManagerPolicy:
@@ -159,6 +138,86 @@ async def run_loops(
 #
 # ``runtime`` is the home's run directory, the signature the resident services share; the
 # home the manager launches schedule sessions under is its parent.
+def _is_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _fetch_gateway_launch_secrets(
+    access: GatewayAccess,
+    schedule_id: int,
+    missing_names: list[str],
+) -> dict[str, str]:
+    if not missing_names or not access.gateway_url:
+        return {}
+    try:
+        bearer = gateway_bearer(access)
+    except GatewayApiTokenMissing:
+        return {}
+    except Exception as exc:
+        _log.warning("failed generating gateway bearer token: %s", exc, exc_info=True)
+        return {}
+
+    url = f"{access.gateway_url.rstrip('/')}/api/schedules/{schedule_id}/launch-env"
+    result: dict[str, str] = {}
+    try:
+        resp = dial_get(url, timeout=5.0, headers=bearer_header(bearer))
+        if resp.status_code == 200:
+            remote_secrets: object = resp.json()
+            if _is_dict(remote_secrets):
+                for k in missing_names:
+                    remote_val = remote_secrets.get(k)
+                    if isinstance(remote_val, str):
+                        result[k] = remote_val
+    except Exception as exc:
+        _log.warning(
+            "failed fetching launch secrets from gateway for schedule %s: %s",
+            schedule_id,
+            exc,
+            exc_info=True,
+        )
+    return result
+
+
+def _resolve_local_secrets(
+    runtime: Path,
+    process_config: ConfigBoot,
+    secret_names: tuple[str, ...],
+) -> dict[str, str]:
+    dotenv_aliases: Mapping[str, str] = {}
+    try:
+        dotenv_aliases = read_env_aliases(runtime.parent / ".env")
+    except OSError:
+        dotenv_aliases = {}
+    local_env = process_config.process_environment()
+
+    result: dict[str, str] = {}
+    for k in secret_names:
+        if k.startswith("MEIVA_"):
+            continue
+        val = dotenv_aliases.get(k)
+        if val is None:
+            val = local_env.get(k)
+        if val is not None:
+            result[k] = val
+    return result
+
+
+def _build_secret_env_resolver(
+    process_config: ConfigBoot, runtime: Path
+) -> Callable[[int, tuple[str, ...]], Mapping[str, str]]:
+    access = gateway_access_from_boot(process_config)
+
+    def _resolve(schedule_id: int, secret_names: tuple[str, ...]) -> Mapping[str, str]:
+        result = _resolve_local_secrets(runtime, process_config, secret_names)
+        missing = [k for k in secret_names if k not in result and not k.startswith("MEIVA_")]
+        if missing and access.gateway_url:
+            remote = _fetch_gateway_launch_secrets(access, schedule_id, missing)
+            result.update(remote)
+        return result
+
+    return _resolve
+
+
 async def run(
     *,
     process_config: ConfigBoot,
@@ -190,11 +249,7 @@ async def run(
 
     pool = database().pool(max_size=_POOL_MAX_SIZE)
     try:
-        # Automatic seeding is explicit configuration; unseeded previews still use
-        # the schedule APIs without launching background workloads.
-        await provision_builtins(
-            pool, enabled=process_config.view.gateway.provision_builtin_schedules
-        )
+        machine = ConfiguredMachineIdentity(process_config)
         manager = ScheduleManager(
             pool,
             backend=get_shell_backend(home=runtime.parent),
@@ -202,6 +257,8 @@ async def run(
             home=runtime.parent,
             policy=manager_policy(process_config),
             launch_env=forward_env_dict(process_config.process_environment()),
+            machine_name=machine.name(),
+            secret_env_resolver=_build_secret_env_resolver(process_config, runtime),
         )
         await run_loops(pool, manager, liveness)
     finally:
