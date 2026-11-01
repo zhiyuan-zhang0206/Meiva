@@ -1179,6 +1179,22 @@ jobs:
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime
 
+      # This job's population contains native tests that shell out to `node` against
+      # `ui/web/node_modules/typescript` (scripts/content_lint/code_comments/tests/
+      # test_incremental.py and test_typescript_index.py, via typescript.mjs). They are not
+      # static tests, so `--omit-static-tests` does not exclude them: without this install,
+      # any shard that draws one of them fails (#8047 removed it and made shard 3/8 red).
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: npm ci
+
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
@@ -1393,6 +1409,22 @@ jobs:
 
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime
+
+      # This job's population contains native tests that shell out to `node` against
+      # `ui/web/node_modules/typescript` (scripts/content_lint/code_comments/tests/
+      # test_incremental.py and test_typescript_index.py, via typescript.mjs). They are not
+      # static tests, so `--omit-static-tests` does not exclude them: without this install,
+      # any shard that draws one of them fails (#8047 removed it and made shard 3/8 red).
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: npm ci
 
       - name: Download the selected test list
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
