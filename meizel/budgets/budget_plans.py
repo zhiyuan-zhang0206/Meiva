@@ -35,9 +35,12 @@ _APPEND_ONLY = "migrations"
 _IGNORED = frozenset({_CACHE, _APPEND_ONLY})
 _FILE_CEILING_GUIDANCE = (
     "the file budget leaves room for cohesive logic behind a small interface; review "
-    "responsibility boundaries, separate pure decisions from I/O orchestration, and move "
-    "related implementation into a cohesive subpackage with a narrow meizel.toml exports "
-    "door; avoid mechanical _part2 or _helpers splits"
+    "responsibility boundaries, separate pure decisions from I/O orchestration, and "
+    "use one of 3 clean refactoring shapes instead of mechanical shallow splits "
+    "(*_part[0-9].py or naked *_helpers.py): "
+    "(1) extract pure data contracts to contracts.py, "
+    "(2) extract strict Pure Core module, "
+    "(3) create a cohesive subpackage with a narrow meizel.toml exports door"
 )
 _DIRECTORY_CEILING_GUIDANCE = (
     "the entry cap bounds the concepts at one directory, not total project size; directory "
