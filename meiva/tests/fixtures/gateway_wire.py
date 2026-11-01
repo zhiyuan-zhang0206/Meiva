@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from collections.abc import Iterator
@@ -157,6 +158,7 @@ def wire_context(
     agent_id: int | None = None,
 ) -> MeivaContext:
     return MeivaContext(
+        environ=os.environ,
         identity=None if agent_id is None else AgentIdentity(agent_id=agent_id, owns_loop=True),
         clients=ClientSet(
             gateway_url=stub.url,
