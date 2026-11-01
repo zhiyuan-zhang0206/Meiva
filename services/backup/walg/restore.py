@@ -322,7 +322,7 @@ def restored_instance(
             capacity=control_settings(directory, home=home, environ=environ),
             home=home,
         )
-        process = start_foreground_postgres(argv, log=log, env=pg_start_env())
+        process = start_foreground_postgres(argv, log=log, env=pg_start_env(environ))
         timeline = _wait_promoted(process, instance, log, timeout_s)
         report(f"promoted on timeline {timeline} after {time.monotonic() - started:.0f}s")
         yield instance

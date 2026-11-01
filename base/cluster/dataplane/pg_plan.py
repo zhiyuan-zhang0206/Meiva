@@ -55,6 +55,11 @@ class ThrowawayConfig:
     # The home whose vendored Postgres runtime serves the throwaway cluster when `bin_dir` names
     # no directory with the tool.
     home: Path = field(kw_only=True)
+    # meiva:note
+    # The environment a throwaway postmaster starts under, named once by whoever builds this
+    # config (a boot's `process_environment()`, or a test naming its own). The postmaster's
+    # daemon environment is carved from it; nothing downstream reads the process again.
+    environ: Mapping[str, str] = field(kw_only=True)
 
 
 def _format_bytes(n: int) -> str:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import subprocess
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -66,6 +67,7 @@ def owned_pg(
                 machine=command_runtime.machine,
                 system=command_runtime.host.platform.system,
                 timers=command_runtime.timers,
+                environ=os.environ,
             )
             == 0
         )

@@ -62,7 +62,9 @@ def test_native_foreground_is_direct_child_and_reaped_on_context_exit(
     pid = 0
     instance = foreground_root
     outcome = pytest.raises(KeyboardInterrupt) if interrupted else nullcontext()
-    config = ThrowawayConfig(foreground_root, default_root=foreground_root, home=meiva_home())
+    config = ThrowawayConfig(
+        foreground_root, default_root=foreground_root, home=meiva_home(), environ=os.environ
+    )
     with (
         outcome,
         pg_tools.throwaway_postgres(base=foreground_root, foreground=True, config=config) as url,
@@ -103,7 +105,7 @@ def test_startup_failure_reaps_the_native_postmaster(
     process = pg_foreground.start_foreground_postgres(
         [str(pg_tools.pg_tool("postgres", home=meiva_home())), "--meiva-invalid-start-option"],
         log=log,
-        env=pg_tools.pg_start_env(),
+        env=pg_tools.pg_start_env(os.environ),
     )
     try:
         with pytest.raises(RuntimeError, match="foreground Postgres exited"):
@@ -134,7 +136,7 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
     process = pg_foreground.start_foreground_postgres(
         [str(bin_dir / "postgres"), "-D", str(tmp_path / "owned-db")],
         log=log,
-        env=pg_tools.pg_start_env(),
+        env=pg_tools.pg_start_env(os.environ),
     )
     try:
         with pytest.raises(RuntimeError, match="another data directory"):
@@ -161,7 +163,7 @@ def test_a_symlinked_spelling_of_the_reported_data_directory_is_answered(
     link.symlink_to(str(row[0]))
     log = tmp_path / "pg.log"
     process = pg_foreground.start_foreground_postgres(
-        ["/bin/sleep", "30"], log=log, env=pg_tools.pg_start_env()
+        ["/bin/sleep", "30"], log=log, env=pg_tools.pg_start_env(os.environ)
     )
     try:
         pg_foreground.wait_foreground_postgres(process, data=link, log=log, port=port)
@@ -176,7 +178,7 @@ def test_readiness_timeout_is_bounded(tmp_path: Path) -> None:
     process = pg_foreground.start_foreground_postgres(
         [str(bin_dir / "postgres"), "-D", str(tmp_path / "data")],
         log=log,
-        env=pg_tools.pg_start_env(),
+        env=pg_tools.pg_start_env(os.environ),
     )
     try:
         with pytest.raises(TimeoutError, match="did not become ready"):
@@ -272,7 +274,7 @@ def test_unreapable_foreground_retains_data_and_registration(
     process = pg_foreground.start_foreground_postgres(
         [str(bin_dir / "postgres"), "-D", str(data)],
         log=instance / "pg.log",
-        env=pg_tools.pg_start_env(),
+        env=pg_tools.pg_start_env(os.environ),
     )
     try:
         with pytest.raises(subprocess.TimeoutExpired):
@@ -306,6 +308,7 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
         artifact_dir=tmp_path / "artifacts",
         bin_dir=bin_dir,
         home=meiva_home(),
+        environ=os.environ,
     )
     error = subprocess.TimeoutExpired if stop_fails else TimeoutError
     try:
@@ -351,6 +354,7 @@ def test_foreground_start_is_handed_the_built_start_env(
         artifact_dir=tmp_path / "artifacts",
         bin_dir=bin_dir,
         home=meiva_home(),
+        environ=os.environ,
     )
 
     with (
@@ -365,7 +369,7 @@ def test_foreground_start_is_handed_the_built_start_env(
         pytest.fail("readiness never succeeds in this test")
 
     spawned_env = json.loads(env_dump.read_text())
-    expected_env = pg_tools.pg_start_env()
+    expected_env = pg_tools.pg_start_env(config.environ)
     for key, value in expected_env.items():
         assert spawned_env.get(key) == value
     assert bool(spawned_env.get("LC_ALL") or spawned_env.get("LANG"))

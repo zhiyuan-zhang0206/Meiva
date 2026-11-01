@@ -155,7 +155,7 @@ def test_a_postmaster_that_never_becomes_ready_is_refused_on_the_callers_timers(
             data,
             port,
             _argv(data, port),
-            pg_start_env(),
+            pg_start_env(os.environ),
             ready=lambda: False,
             timeout=2.0,
             retained_children=children,
@@ -171,7 +171,7 @@ def test_captured_postmaster_without_pidfile_resumes_full_admission(
     postmaster: tuple[Path, int, list[subprocess.Popen[bytes]]],
 ) -> None:
     data, port, children = postmaster
-    argv, env, ready = _argv(data, port), pg_start_env(), partial(_ready, port)
+    argv, env, ready = _argv(data, port), pg_start_env(os.environ), partial(_ready, port)
     with _startup_gate(data):
         with pytest.raises(RuntimeError, match="did not become ready"):
             pg.start(
@@ -263,7 +263,7 @@ def test_ready_postmaster_still_requires_its_bound_pidfile(
         data,
         port,
         _argv(data, port),
-        pg_start_env(),
+        pg_start_env(os.environ),
         ready=partial(_ready, port),
         timeout=10,
         retained_children=children,
@@ -280,7 +280,7 @@ def test_ready_postmaster_still_requires_its_bound_pidfile(
                 data,
                 port,
                 _argv(data, port),
-                pg_start_env(),
+                pg_start_env(os.environ),
                 ready=partial(_ready, port),
                 timeout=1,
                 expected=owner,
@@ -308,7 +308,7 @@ def test_ready_warm_start_reloads_configuration_before_waiting_for_readiness(
         data,
         port,
         _argv(data, port),
-        pg_start_env(),
+        pg_start_env(os.environ),
         ready=partial(_ready, port),
         timeout=10,
         retained_children=children,
@@ -322,7 +322,7 @@ def test_ready_warm_start_reloads_configuration_before_waiting_for_readiness(
         data,
         port,
         _argv(data, port),
-        pg_start_env(),
+        pg_start_env(os.environ),
         ready=partial(_reloaded, port),
         timeout=10,
         expected=owner,

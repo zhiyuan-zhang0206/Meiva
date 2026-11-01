@@ -3,6 +3,7 @@
 Usage: `child_throwaway_storage.py <scratch directory>`.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -27,7 +28,9 @@ assert settings.data_plane.pg_throwaway_base == str(scratch)
 
 
 throwaway_config = ThrowawayConfig(
-    configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
+    configured_base(process_config.view.data_plane.pg_throwaway_base),
+    home=meiva_home(),
+    environ=os.environ,
 )
 
 

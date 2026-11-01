@@ -26,7 +26,9 @@ def main() -> int:
     config = ConfigBoot()
     config.read_process_environment()
     throwaway = ThrowawayConfig(
-        configured_base(config.view.data_plane.pg_throwaway_base), home=meiva_home()
+        configured_base(config.view.data_plane.pg_throwaway_base),
+        home=meiva_home(),
+        environ=os.environ,
     )
     with throwaway_postgres(config=throwaway) as url:
         u = urlparse(url)

@@ -213,7 +213,9 @@ from base.paths import meiva_home
 config = ConfigBoot()
 config.read_process_environment()
 throwaway = ThrowawayConfig(
-    configured_base(config.view.data_plane.pg_throwaway_base), home=meiva_home()
+    configured_base(config.view.data_plane.pg_throwaway_base),
+    home=meiva_home(),
+    environ=config.process_environment(),
 )
 print(sweep_orphaned_throwaway_clusters(config=throwaway))
 PY

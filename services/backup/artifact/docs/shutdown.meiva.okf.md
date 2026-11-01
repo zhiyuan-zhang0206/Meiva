@@ -12,7 +12,8 @@ worker in an isolated interpreter and new group performs blocking tools;
 requests and results use unique private staging, and secrets travel on stdin.
 For a restore, the controller captures the throwaway-base override once in a
 frozen `ThrowawayConfig` and sends that value in the private request. The child
-uses it for scratch creation and registration; the parent's sanitizer keeps the
+uses it for scratch creation, registration and the environment its postmaster
+starts under; the parent's sanitizer keeps the
 same value for orphan cleanup even if live configuration changes during the job.
 The controller makes a nonempty override absolute in its own working directory
 without resolving symlinks, so the worker's fixed code-root cwd cannot reinterpret

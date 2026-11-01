@@ -17,7 +17,9 @@ if sys.argv[1] == "--hold-lock":
     Path(sys.argv[3]).write_text("")
     time.sleep(600)
 else:
-    cm = pg_tools.throwaway_postgres(config=ThrowawayConfig(Path(sys.argv[1]), home=meiva_home()))
+    cm = pg_tools.throwaway_postgres(
+        config=ThrowawayConfig(Path(sys.argv[1]), home=meiva_home(), environ=os.environ)
+    )
     url = cm.__enter__()
     target = Path(sys.argv[2])
     part = Path(sys.argv[2] + ".part")

@@ -14,6 +14,7 @@ birth's grants target existing tables.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,7 +57,9 @@ def _schema_sql() -> str:
 def runner_db(postgres_access: None, process_config: ConfigBoot) -> Generator[str, None, None]:
     """A throwaway Postgres with schema.sql + checkpoint tables applied."""
     throwaway = ThrowawayConfig(
-        configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
+        configured_base(process_config.view.data_plane.pg_throwaway_base),
+        home=meiva_home(),
+        environ=os.environ,
     )
     with throwaway_postgres(schema_sql=_schema_sql(), config=throwaway) as url:
         yield url

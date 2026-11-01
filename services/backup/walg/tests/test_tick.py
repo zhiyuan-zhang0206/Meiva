@@ -10,6 +10,7 @@ environment handed to wal-g) is the production code.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -133,7 +134,7 @@ def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, 
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None, home=sandbox.home),
+        throwaway=ThrowawayConfig(None, home=sandbox.home, environ=os.environ),
         home=sandbox.home,
         environ=sandbox.environ,
     )
@@ -567,7 +568,7 @@ def _drill_now(sandbox: Sandbox, lines: list[str], platform: tick.Platform | Non
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None, home=sandbox.home),
+        throwaway=ThrowawayConfig(None, home=sandbox.home, environ=os.environ),
         home=sandbox.home,
         environ=sandbox.environ,
     )

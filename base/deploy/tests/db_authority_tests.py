@@ -26,6 +26,7 @@ transaction guard can be exercised.
 from __future__ import annotations
 
 import getpass
+import os
 import subprocess
 import uuid
 from collections.abc import Iterator
@@ -103,7 +104,7 @@ def _restart(data_dir: Path) -> None:
         ],
         check=True,
         capture_output=True,
-        env=pg_start_env(),
+        env=pg_start_env(os.environ),
     )
 
 
@@ -140,7 +141,9 @@ def _authenticate(instance: Instance, tcp: str, data_dir: Path) -> None:
 @pytest.fixture(scope="module")
 def _authority_instance(process_config: ConfigBoot) -> Iterator[Instance]:
     throwaway = ThrowawayConfig(
-        configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
+        configured_base(process_config.view.data_plane.pg_throwaway_base),
+        home=meiva_home(),
+        environ=os.environ,
     )
     with throwaway_postgres(config=throwaway) as url:
         port = urlsplit(url).port

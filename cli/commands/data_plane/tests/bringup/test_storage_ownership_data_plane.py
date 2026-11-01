@@ -50,6 +50,7 @@ def _start(
         tuning=tuning,
         timers=SYSTEM_TIMERS,
         system=NATIVE_TEST_SYSTEM,
+        environ=os.environ,
     )
 
 

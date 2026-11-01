@@ -241,7 +241,9 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
         f'exec {shlex.quote(str(real_pg_ctl))} "$@"\n'
     )
     wrapper.chmod(0o755)
-    config = ThrowawayConfig(None, default_root=scratch_pg_root, bin_dir=bin_dir, home=meiva_home())
+    config = ThrowawayConfig(
+        None, default_root=scratch_pg_root, bin_dir=bin_dir, home=meiva_home(), environ=os.environ
+    )
 
     with (
         pg_tools.throwaway_postgres(config=config) as url,
@@ -250,7 +252,7 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
         assert conn.execute("select 1").fetchone() == (1,)
 
     recorded = json.loads(env_dump.read_text())
-    expected = pg_tools.pg_start_env()
+    expected = pg_tools.pg_start_env(config.environ)
     for key, value in expected.items():
         assert recorded.get(key) == value
 

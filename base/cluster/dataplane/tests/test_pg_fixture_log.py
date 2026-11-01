@@ -10,6 +10,7 @@ shows why the cluster failed to come up.
 
 from __future__ import annotations
 
+import os
 import shutil
 import socket
 import subprocess
@@ -75,6 +76,7 @@ def test_failed_start_preserves_pg_log_into_artifacts(
             artifact_dir=artifact_dir,
             candidate_ports=(port, port, port),
             home=meiva_home(),
+            environ=os.environ,
         )
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
             # __enter__() runs the generator body — the bare call only builds it.
@@ -109,6 +111,7 @@ def test_failure_before_any_pg_log_still_writes_an_artifact(
         artifact_dir=artifact_dir,
         bin_dir=bin_dir,
         home=meiva_home(),
+        environ=os.environ,
     )
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:

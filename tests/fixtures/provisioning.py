@@ -63,7 +63,9 @@ def _catalog_cluster_projection() -> Iterator[None]:
 @pytest.fixture(scope="session")
 def throwaway_config(process_config) -> ThrowawayConfig:
     return ThrowawayConfig(
-        configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
+        configured_base(process_config.view.data_plane.pg_throwaway_base),
+        home=meiva_home(),
+        environ=os.environ,
     )
 
 

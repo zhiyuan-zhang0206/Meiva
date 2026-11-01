@@ -11,6 +11,7 @@ Postgres into a segment path).
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import signal
@@ -281,7 +282,7 @@ def postgres_instance(
             data,
             instance.port,
             argv,
-            pg_start_env(),
+            pg_start_env(os.environ),
             system=CUSTODY_SYSTEM,
             ready=ready,
             retained_children=children,

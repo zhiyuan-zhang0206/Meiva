@@ -66,7 +66,9 @@ def main() -> int:
     config = ConfigBoot()
     config.read_process_environment()
     throwaway = ThrowawayConfig(
-        configured_base(config.view.data_plane.pg_throwaway_base), home=home
+        configured_base(config.view.data_plane.pg_throwaway_base),
+        home=home,
+        environ=config.process_environment(),
     )
     with throwaway_postgres(config=throwaway) as url:
         port = urlsplit(url).port

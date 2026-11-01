@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import shutil
 import tempfile
@@ -240,7 +241,7 @@ def _run(
         lambda _line: None,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(tmp_path, home=sandbox.home),
+        throwaway=ThrowawayConfig(tmp_path, home=sandbox.home, environ=os.environ),
         home=sandbox.home,
         environ=sandbox.environ,
     )
@@ -417,7 +418,7 @@ def _run_drill(
         lines.append,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(scratch_base, home=sandbox.home),
+        throwaway=ThrowawayConfig(scratch_base, home=sandbox.home, environ=os.environ),
         home=sandbox.home,
         **({} if socket_root is None else {"socket_root": socket_root}),
         **space,

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import getpass
+import os
 import subprocess
 
 import psutil
@@ -50,6 +51,7 @@ def _start(
         tuning=StartTuning(bind_wait_s=bind_wait_s),
         timers=SYSTEM_TIMERS,
         system=NATIVE_TEST_SYSTEM,
+        environ=os.environ,
     )
 
 

@@ -57,7 +57,9 @@ def _restore(root: Path, mode: str, base: Path, requested_base: object) -> None:
     captured = Path(requested_base)
     assert captured.is_absolute() and captured.samefile(base), requested_base
     with throwaway_postgres(
-        base=base, foreground=True, config=ThrowawayConfig(base, home=meiva_home())
+        base=base,
+        foreground=True,
+        config=ThrowawayConfig(base, home=meiva_home(), environ=os.environ),
     ) as url:
         with psycopg.connect(url) as conn:
             row = conn.execute("SHOW data_directory").fetchone()
