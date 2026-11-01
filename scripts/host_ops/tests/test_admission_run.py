@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
 
@@ -10,29 +9,11 @@ import pytest
 
 from scripts.host_ops import admission_floor
 from scripts.host_ops import admission_run as admission
-
-
-def _collect(
-    free_gib: float = 26.1,
-    pressure: int = 1,
-    unstable: bool = False,
-    source: str = "disk",
-):
-    def reader() -> admission.Reading:
-        return admission.Reading(
-            free_gib=free_gib, source=source, unstable=unstable, detail="df 84.0%"
-        )
-
-    return reader, lambda: pressure
-
-
-class _Recorder:
-    def __init__(self) -> None:
-        self.calls: list[list[str]] = []
-
-    def __call__(self, command: Sequence[str], context: dict[str, object]) -> int:
-        self.calls.append(list(command))
-        return 0
+from scripts.host_ops.tests.admission_support import (
+    Recorder,
+    collect_reader,
+    run_admission,
+)
 
 
 # meiva:link scripts/host_ops/docs/admission-run/admission-run.meiva.okf.md
@@ -100,29 +81,6 @@ class TestCommandReading:
         assert admission.requested_jobs(argv) == expected
 
 
-def _run(
-    argv: list[str],
-    *,
-    free_gib: float = 26.1,
-    pressure: int = 1,
-    unstable: bool = False,
-    source: str = "disk",
-    tmp_path: Path,
-) -> tuple[int, _Recorder]:
-    recorder = _Recorder()
-    disk, pressure_reader = _collect(free_gib, pressure, unstable, source)
-    code = admission.main(
-        argv,
-        budget_reader=disk,
-        pressure_reader=pressure_reader,
-        psi_reader=lambda: None,
-        gpu_reader=lambda: None,
-        executor=recorder,
-        home=tmp_path,
-    )
-    return code, recorder
-
-
 class TestLedgerRoot:
     # meiva:note
     # The rehearsal root exists so a host can try the gate without writing the machine's real
@@ -135,7 +93,7 @@ class TestLedgerRoot:
     ) -> None:
         default_root = tmp_path / "production"
         rehearsal = tmp_path / "rehearsal"
-        disk, pressure_reader = _collect(26.1, 1, False, "disk")
+        disk, pressure_reader = collect_reader(26.1, 1, False, "disk")
 
         code = admission.main(
             [
@@ -153,7 +111,7 @@ class TestLedgerRoot:
             pressure_reader=pressure_reader,
             psi_reader=lambda: None,
             gpu_reader=lambda: None,
-            executor=_Recorder(),
+            executor=Recorder(),
             home=default_root,
         )
 
@@ -170,7 +128,7 @@ class TestStart:
     def test_a_lowered_start_prints_one_line_and_rewrites_the_flag(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"], tmp_path=tmp_path
         )
 
@@ -182,7 +140,7 @@ class TestStart:
     def test_a_lowered_start_rewrites_the_eval_jobs_spelling(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             [
                 "--peak-mb",
                 "600",
@@ -205,7 +163,7 @@ class TestStart:
     def test_a_job_that_fits_prints_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"], tmp_path=tmp_path
         )
 
@@ -218,7 +176,7 @@ class TestStart:
     def test_an_overcommitted_single_worker_still_says_so(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--peak-mb", "8800", "--", "python", "eval.py", "--jobs", "1"], tmp_path=tmp_path
         )
 
@@ -232,7 +190,7 @@ class TestStart:
     def test_a_single_worker_that_fits_prints_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "1"], tmp_path=tmp_path
         )
 
@@ -244,7 +202,9 @@ class TestStart:
     def test_a_missing_declaration_fails_fast(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(["--", "python", "eval.py", "--jobs", "8"], tmp_path=tmp_path)
+        code, recorder = run_admission(
+            ["--", "python", "eval.py", "--jobs", "8"], tmp_path=tmp_path
+        )
 
         assert code == 2
         assert "declares no memory" in capsys.readouterr().err
@@ -253,7 +213,7 @@ class TestStart:
     def test_an_unstable_disk_read_keeps_the_requested_concurrency(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"],
             unstable=True,
             tmp_path=tmp_path,
@@ -263,10 +223,10 @@ class TestStart:
         assert "unstable sample" in capsys.readouterr().err
         assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
 
-    def test_a_dry_run_prints_the_plan_and_starts_nothing(
+    def test_a_dryrun_admission_prints_the_plan_and_starts_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--peak-mb", "2800", "--dry-run", "--", "python", "eval.py", "--jobs", "8"],
             tmp_path=tmp_path,
         )
@@ -278,7 +238,9 @@ class TestStart:
     def test_the_adjusted_start_leaves_one_event(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        _run(["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"], tmp_path=tmp_path)
+        run_admission(
+            ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"], tmp_path=tmp_path
+        )
         capsys.readouterr()
 
         event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
@@ -292,7 +254,7 @@ class TestBypass:
     def test_a_bypass_without_a_reason_is_refused(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--no-admission", "  ", "--", "python", "eval.py"], tmp_path=tmp_path
         )
 
@@ -300,10 +262,10 @@ class TestBypass:
         assert "needs a reason" in capsys.readouterr().err
         assert recorder.calls == []
 
-    def test_a_bypass_runs_unchanged_and_records_the_reason(
+    def test_a_bypassrun_admissions_unchanged_and_records_the_reason(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code, recorder = _run(
+        code, recorder = run_admission(
             ["--no-admission", "known-good small run", "--", "python", "eval.py", "--jobs", "8"],
             free_gib=13.0,
             tmp_path=tmp_path,
@@ -354,7 +316,7 @@ class TestLinuxReaders:
     def test_an_absent_budget_reader_keeps_the_requested_concurrency(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        recorder = _Recorder()
+        recorder = Recorder()
         code = admission.main(
             ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"],
             budget_reader=lambda: None,
@@ -372,7 +334,7 @@ class TestLinuxReaders:
         assert event["kind"] == "unknown"
 
     def test_the_adjusted_event_carries_the_gpu_and_psi_readings(self, tmp_path: Path) -> None:
-        recorder = _Recorder()
+        recorder = Recorder()
         admission.main(
             ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"],
             budget_reader=lambda: admission.Reading(
@@ -435,7 +397,7 @@ class TestReservations:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         self._entry(tmp_path, pid=os.getpid(), peak_mb=5120)
-        recorder = _Recorder()
+        recorder = Recorder()
         code = admission.main(
             ["--peak-mb", "4096", "--", "python", "eval.py", "--jobs", "2"],
             budget_reader=lambda: admission.Reading(
@@ -562,10 +524,10 @@ class TestOptionalProbesOnAHostWithoutThem:
         )
 
     def test_a_lowered_job_starts_and_records_without_a_gpu_tool(self, tmp_path: Path) -> None:
-        recorder = _Recorder()
+        recorder = Recorder()
         code = admission.main(
             ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"],
-            budget_reader=_collect(26.1)[0],
+            budget_reader=collect_reader(26.1)[0],
             pressure_reader=lambda: 1,
             psi_reader=lambda: None,
             gpu_reader=partial(admission.read_gpu, ("/nonexistent/nvidia-smi",)),
@@ -578,115 +540,3 @@ class TestOptionalProbesOnAHostWithoutThem:
         event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
         assert event["kind"] == "adjusted"
         assert event["gpu_max_used_mib"] is None
-
-
-# meiva:note
-# The disk floor (task #5630): a machine below the refuse line starts nothing, a machine
-# between the two lines starts and says so, and a Linux reading (the kernel's MemAvailable)
-# is not a data volume at all, so the floor does not apply to it.
-class TestDiskFloor:
-    def test_below_the_floor_starts_nothing_and_records_why(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        code, recorder = _run(
-            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
-            free_gib=22.0,
-            tmp_path=tmp_path,
-        )
-
-        err = capsys.readouterr().err
-        assert code == 3
-        assert "refusing to start eval.py" in err
-        assert "23.0 GiB floor" in err
-        assert recorder.calls == []
-        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
-        assert event["kind"] == "refused"
-        assert event["free_gib"] == pytest.approx(22.0)
-        assert event["floor_gib"] == pytest.approx(admission_floor.DEFAULT_DISK_REFUSE_GIB)
-        assert event["source"] == "disk"
-
-    def test_between_the_lines_starts_with_a_warning(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        code, recorder = _run(
-            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
-            free_gib=23.5,
-            tmp_path=tmp_path,
-        )
-
-        assert code == 0
-        assert "warning eval.py" in capsys.readouterr().err
-        assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
-        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
-        assert event["kind"] == "warned"
-
-    # meiva:note
-    # The reverse check: the same 22 GiB host runs once the floor is out of the way.
-    def test_a_zero_floor_lets_the_same_host_start(self, tmp_path: Path) -> None:
-        code, recorder = _run(
-            [
-                "--peak-mb",
-                "600",
-                "--disk-floor-gib",
-                "0",
-                "--disk-warn-gib",
-                "0",
-                "--",
-                "python",
-                "eval.py",
-                "--jobs",
-                "8",
-            ],
-            free_gib=22.0,
-            tmp_path=tmp_path,
-        )
-
-        assert code == 0
-        assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
-
-    def test_a_memory_budget_is_not_a_data_volume(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        # meiva:note
-        # A Linux reading prices MemAvailable, where swap does not grow the volume.
-        code, recorder = _run(
-            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
-            free_gib=4.0,
-            source="memory",
-            tmp_path=tmp_path,
-        )
-
-        assert code == 0
-        assert "refusing" not in capsys.readouterr().err
-        assert len(recorder.calls) == 1
-
-    def test_a_dry_run_prints_its_plan_below_the_floor(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        code, recorder = _run(
-            ["--peak-mb", "600", "--dry-run", "--", "python", "eval.py", "--jobs", "8"],
-            free_gib=22.0,
-            tmp_path=tmp_path,
-        )
-
-        assert code == 0
-        assert "would start" in capsys.readouterr().out
-        assert recorder.calls == []
-
-    @pytest.mark.parametrize(
-        ("free_gib", "refuse_gib", "warn_gib", "expected"),
-        [
-            (22.9, 23.0, 24.0, "refuse"),
-            (23.0, 23.0, 24.0, "warn"),
-            (23.9, 23.0, 24.0, "warn"),
-            (24.0, 23.0, 24.0, "ok"),
-            (0.0, 0.0, 0.0, "ok"),
-        ],
-    )
-    def test_the_verdict_is_the_line_itself(
-        self, free_gib: float, refuse_gib: float, warn_gib: float, expected: str
-    ) -> None:
-        assert (
-            admission_floor.disk_floor(free_gib, refuse_gib=refuse_gib, warn_gib=warn_gib)
-            == expected
-        )
