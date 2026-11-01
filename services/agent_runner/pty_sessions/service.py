@@ -125,9 +125,13 @@ def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
 # overlay entry for either of those two wins.
 #
 # A credential is dropped even when the overlay names it: the rule is that a credential is read
-# from the file that holds it, never carried in a child's environment (task #5864). A caller that
-# needs one reads its home's `.env` or its installed capability, which is the route both the
-# machine token and the cluster secret already take.
+# from the file that holds it, never carried in a child's environment (task #5864).
+#
+# The machine token is the one credential this set must NOT name. A shell inherits
+# `MEIVA_API_TOKEN` from this service's own environment, and that is the only route an agent's
+# session has to the API: the daemon is started with the token its host issues (task #5979), the
+# set below leaves it in place, and every shell it starts presents it. Adding that key here would
+# take the route away with no error — the sessions would simply come up without a bearer again.
 def child_env(overlay: object, *, base_environ: Mapping[str, str]) -> dict[str, str]:
     if not _is_object_dict(overlay):
         raise RequestError(protocol.BAD_REQUEST, "env must be an object of strings")
