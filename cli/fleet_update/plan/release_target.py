@@ -28,7 +28,6 @@ TargetMode = Literal["channel", "release", "track-branch", "commit"]
 
 _CALVER_TAG = re.compile(r"^v(\d{4})\.(\d{2})\.(\d{2})\.(\d{2})(\d{2})(\d{2})(?:-hf([1-9]\d*))?$")
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-_EMPTY_TAGS: Mapping[str, str | None] = {}
 
 
 # meiva:note
@@ -94,7 +93,7 @@ class TargetSnapshot:
     repo_display: str
     peeled_sha: str | None = None
     tag_body: str | None = None
-    candidate_tags: Mapping[str, str | None] = field(default_factory=lambda: _EMPTY_TAGS)
+    candidate_tags: Mapping[str, str | None] = field(default_factory=dict[str, str | None])
     branch_tip_sha: str | None = None
     pinned_sha: str | None = None
     pinned_on_branch: bool = False
@@ -251,14 +250,21 @@ def _decode_certificate_fields(
     gate_run_id = _non_empty_str(payload, "gate_run_id")
     gate_run_url = _non_empty_str(payload, "gate_run_url")
     certified_at = _non_empty_str(payload, "certified_at")
-    if None in (version, sha, source_ref, gate_run_id, gate_run_url, certified_at):
+    if (
+        version is None
+        or sha is None
+        or source_ref is None
+        or gate_run_id is None
+        or gate_run_url is None
+        or certified_at is None
+    ):
         return None, f"tag {tag_name} certificate is missing required fields"
     if version != tag_name:
         return None, f"tag {tag_name} certificate names version {version!r}, not {tag_name!r}"
     if sha != peeled_commit_sha:
         return (
             None,
-            f"tag {tag_name} certificate names commit {(sha or '')[:12]}, "
+            f"tag {tag_name} certificate names commit {sha[:12]}, "
             f"not peeled commit {peeled_commit_sha[:12]}",
         )
     hotfix_of, hotfix_err = _validate_hotfix_lineage(
@@ -273,10 +279,10 @@ def _decode_certificate_fields(
         ReleaseCertificate(
             version=version,
             sha=sha,
-            source_ref=source_ref or "",
-            gate_run_id=gate_run_id or "",
-            gate_run_url=gate_run_url or "",
-            certified_at=certified_at or "",
+            source_ref=source_ref,
+            gate_run_id=gate_run_id,
+            gate_run_url=gate_run_url,
+            certified_at=certified_at,
             hotfix_of=hotfix_of,
             reason=raw_reason,
         ),
