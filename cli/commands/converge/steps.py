@@ -72,11 +72,13 @@ def ensure_pg_binaries_step(
     if ctx.read_config().view.data_plane.is_remote:
         return
     from base.cluster.dataplane.pg_runtime import ensure_pg_runtime
+    from base.cluster.dataplane.runtime_binaries import artifact_system
 
+    host_system, host_machine = artifact_system(ctx.host.platform)
     ensure_pg_runtime(
         home=ctx.meiva_home,
-        system=system,
-        machine=machine,
+        system=host_system if system is None else system,
+        machine=host_machine if machine is None else machine,
         platform_bin_dir=platform_bin_dir,
         path_env=path_env,
     )

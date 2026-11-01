@@ -114,12 +114,14 @@ def run_check(
     token: str,
     home: Path,
     environ: Mapping[str, str],
+    system: str,
+    machine: str,
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> list[Step]:
     return run_check_on(
         path=path,
         token=token,
-        binary_problem=installed(home=home),
+        binary_problem=installed(home=home, system=system, machine=machine),
         admin=probe.admin_connection(home=home),
         home=home,
         environ=environ,

@@ -56,6 +56,8 @@ def cmd_walg_check(
     token: str,
     home: Path,
     environ: Mapping[str, str],
+    system: str,
+    machine: str,
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     steps = check.run_check(
@@ -63,6 +65,8 @@ def cmd_walg_check(
         token=token,
         home=home,
         environ=environ,
+        system=system,
+        machine=machine,
         installed=installed,
     )
     for step in steps:
@@ -89,6 +93,8 @@ def cmd_walg_run(
     clock: Clock,
     home: Path,
     environ: Mapping[str, str],
+    system: str,
+    machine: str,
 ) -> int:
     return tick.run_tick(
         partial(_stamped, clock),
@@ -97,6 +103,8 @@ def cmd_walg_run(
         throwaway=throwaway,
         home=home,
         environ=environ,
+        system=system,
+        machine=machine,
     )
 
 
@@ -113,6 +121,8 @@ def cmd_walg_drill(
     clock: Clock,
     home: Path,
     environ: Mapping[str, str],
+    system: str,
+    machine: str,
 ) -> int:
     return tick.run_drill_now(
         partial(_stamped, clock),
@@ -121,6 +131,8 @@ def cmd_walg_drill(
         throwaway=throwaway,
         home=home,
         environ=environ,
+        system=system,
+        machine=machine,
     )
 
 
@@ -141,13 +153,15 @@ def cmd_walg_restore(
     clock: Clock,
     home: Path,
     environ: Mapping[str, str],
+    system: str,
+    machine: str,
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     path = plane.walg_config_file
     if path is None:
         print("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
-    binary_problem = installed(home=home)
+    binary_problem = installed(home=home, system=system, machine=machine)
     if binary_problem is not None:
         print(f"restore failed: {binary_problem} (meiva converge installs it)", file=sys.stderr)
         return 1
@@ -261,12 +275,12 @@ def _tick_lines(*, home: Path) -> list[str]:
 
 # meiva:note
 # Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0.
-def cmd_walg_status(plane: DataPlaneConfig, *, home: Path) -> int:
+def cmd_walg_status(plane: DataPlaneConfig, *, home: Path, system: str, machine: str) -> int:
     path = plane.walg_config_file
     if path is None:
         print("WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)")
         return 0
-    binary_problem = walg_binary.installed_problem(home=home)
+    binary_problem = walg_binary.installed_problem(home=home, system=system, machine=machine)
     print(f"binary: {binary_problem or f'pinned wal-g {walg_binary.WALG_VERSION}'}")
     for line in (
         *_config_lines(path, home=home),

@@ -92,8 +92,8 @@ def _has_vector_install_script(extension: Path) -> bool:
 def ensure_pg_runtime(
     *,
     home: Path,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     platform_bin_dir: Path | None = None,
     path_env: str | None = None,
     platform_name: str | None = None,
@@ -101,11 +101,7 @@ def ensure_pg_runtime(
     pgvector_artifacts: Mapping[str, tuple[str, str]] | None = None,
     open_url: UrlOpener | None = None,
 ) -> None:
-    supported = (
-        runtime_binaries.vendored_pg_supported()
-        if (system, machine) == (None, None)
-        else runtime_binaries.vendored_pg_supported(system=system, machine=machine)
-    )
+    supported = runtime_binaries.vendored_pg_supported(system=system, machine=machine)
     if not supported:
         server = installed_server(platform_bin_dir=platform_bin_dir, path_env=path_env)
         if server is None:

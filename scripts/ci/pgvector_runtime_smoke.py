@@ -47,10 +47,11 @@ def _assert_platform_supported(system: str, machine: str) -> None:
 
 
 def main() -> int:
-    _assert_platform_supported(platform.system(), platform.machine())
+    system, machine = platform.system(), platform.machine()
+    _assert_platform_supported(system, machine)
     home = meiva_home()
-    bin_dir = rb.ensure_pg_binaries(home=home)
-    rb.ensure_pgvector(home=home)
+    bin_dir = rb.ensure_pg_binaries(home=home, system=system, machine=machine)
+    rb.ensure_pgvector(home=home, system=system, machine=machine)
 
     pg_dir = rb.vendored_pg_dir(home)
     injected_sql = next((pg_dir / "share/postgresql/extension").glob("vector--*.sql"), None)

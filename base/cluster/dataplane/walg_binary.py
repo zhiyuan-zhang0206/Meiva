@@ -11,7 +11,6 @@ from pathlib import Path
 from base.cluster.dataplane.runtime_binaries import (
     download,
     download_with_opener,
-    resolve_host_platform,
     runtime_root,
 )
 from base.host.net.ports import UrlOpener
@@ -42,11 +41,11 @@ _VERSION_PROBE_TIMEOUT_S = 30
 
 def _artifact(
     *,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
 ) -> tuple[str, str]:
-    sys_name, arch = resolve_host_platform(system=system, machine=machine)
+    sys_name, arch = system, machine
     table = artifacts if artifacts is not None else WALG_ARTIFACTS
     if sys_name == "Linux" and arch in ("x86_64", "amd64"):
         return table["linux-x86_64"]
@@ -73,8 +72,8 @@ def _sha256_of(path: Path) -> str | None:
 def installed_problem(
     *,
     home: Path,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
 ) -> str | None:
     try:
@@ -112,8 +111,8 @@ def _require_version(binary: Path) -> None:
 def ensure_walg_binary(
     *,
     home: Path,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
     open_url: UrlOpener | None = None,
 ) -> Path:

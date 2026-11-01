@@ -132,8 +132,8 @@ def valid_config(key_file: Path, **overrides: Any) -> dict[str, Any]:
 # meiva:note
 # The stand-in for `walg_binary.installed_problem` while the fake wal-g is installed: no problem,
 # whichever home is asked about. A test passes it to the entry point that resolves the platform.
-def always_pinned(*, home: Path) -> None:
-    del home
+def always_pinned(*, home: Path, system: str, machine: str) -> None:
+    del home, system, machine
 
 
 def make_sandbox(

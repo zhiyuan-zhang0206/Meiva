@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import assert_never
 
+from base.cluster.dataplane.runtime_binaries import artifact_system
 from base.cluster.dataplane.walg_binary import ensure_walg_binary
 from base.paths.private_dir import ensure_private_dir
 from cli.commands.converge.plans.walg_plan import (
@@ -58,7 +59,8 @@ def execute_walg_plan(
             case RefuseWalg(message=message):
                 raise RuntimeError(message)
             case InstallWalgBinary():
-                ensure_walg_binary(home=ctx.meiva_home)
+                system, machine = artifact_system(ctx.host.platform)
+                ensure_walg_binary(home=ctx.meiva_home, system=system, machine=machine)
             case LoadWalgConfig():
                 walg_config.load_walg_config(path=walg_config_file, home=ctx.meiva_home)
             case PrepareWalgStateDir():

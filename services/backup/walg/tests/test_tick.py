@@ -50,8 +50,10 @@ def test_the_platform_reads_the_installed_binary_through_the_checker_it_is_given
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    installed = tick.ambient_platform(home=sandbox.home)
-    stubbed = tick.ambient_platform(home=sandbox.home, installed=always_pinned)
+    installed = tick.ambient_platform(home=sandbox.home, system="Linux", machine="x86_64")
+    stubbed = tick.ambient_platform(
+        home=sandbox.home, system="Linux", machine="x86_64", installed=always_pinned
+    )
 
     assert installed.binary_problem is not None
     assert stubbed.binary_problem is None
