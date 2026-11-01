@@ -90,7 +90,7 @@ def test_instruction_script_requires_the_agent(
 # Against a real throwaway database no agent holds a lease, so the real attach refuses before
 # anything is read; nothing may reach stdout.
 def test_instruction_script_prints_nothing_when_the_attachment_is_refused(
-    instruction_reader: Any, db_url: str, capsys: pytest.CaptureFixture[str]
+    instruction_reader: Any, prior_context: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with pytest.raises(ValueError, match="no impersonation session 0"):
         instruction_reader.main(["0", "--agent", "405"])

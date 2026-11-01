@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from base.config import ConfigBoot
+from base.config.tests.configuration import data_plane_environment
 from base.db import Database
 from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
@@ -24,7 +25,7 @@ async def test_run_unknown_provider_fails_before_health_server(
     capsys: pytest.CaptureFixture[str], database: Database, tmp_path: Path
 ) -> None:
     health_port = _free_port()
-    boot = ConfigBoot()
+    boot = ConfigBoot(environment=data_plane_environment())
     boot.set_field("embedding_backend", "unknown-provider")
     boot.set_field("memory_indexer_health_port", health_port)
 

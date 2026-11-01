@@ -21,6 +21,7 @@ from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot, get_field
+from base.config.tests.configuration import data_plane_environment
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -215,12 +216,12 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(
     marker = tmp_path / "join.txt"
     home = tmp_path / "home"
     home.mkdir()
+    env = data_plane_environment()
     (home / ".env").write_text(
         f"MEIVA_MACHINE_NAME=resource-join-test\n"
-        f"MEIVA_DB_URL={os.environ['MEIVA_DB_URL']}\n"
-        f"MEIVA_REDIS_URL={os.environ['MEIVA_REDIS_URL']}\n"
+        f"MEIVA_DB_URL={env['MEIVA_DB_URL']}\n"
+        f"MEIVA_REDIS_URL={env['MEIVA_REDIS_URL']}\n"
     )
-    env = os.environ.copy()
     env.update(
         MEIVA_HOME=str(home),
         RESOURCE_JOIN_MARKER=str(marker),
