@@ -50,6 +50,25 @@ def test_legacy_lifecycle_audit_reason_is_not_chat_envelope_grammar(
     assert schema.model_validate(extra | {"source": reason}).model_dump()["source"] == reason
 
 
+# meiva:note
+# #8092 made the restart message mandatory on every entry point. A restart without one is refused at
+# the wire, and the error names `message`: a payload rejected on some other field would send the
+# caller looking in the wrong place.
+def test_restart_without_a_message_is_refused_at_the_message_field() -> None:
+    with pytest.raises(ValidationError) as refused:
+        RestartAgentRequest.model_validate({"source": "user"})
+
+    assert [error["loc"] for error in refused.value.errors()] == [("message",)]
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_restart_refuses_a_blank_message_at_the_message_field(blank: str) -> None:
+    with pytest.raises(ValidationError) as refused:
+        RestartAgentRequest.model_validate({"source": "user", "message": blank})
+
+    assert ("message",) in [error["loc"] for error in refused.value.errors()]
+
+
 @pytest.mark.parametrize("field", ["prompt", "prompt_source", "label"])
 def test_launch_rejects_retired_gateway_birth_fields(field: str) -> None:
     with pytest.raises(ValidationError) as refused:

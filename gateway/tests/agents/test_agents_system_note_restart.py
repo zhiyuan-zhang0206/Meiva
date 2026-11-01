@@ -511,6 +511,91 @@ class TestRestart:
                 assert row2[0] == "meiva"
                 assert row2[1].get("llm_model") == "deepseek-flash"
 
+    # meiva:note
+    # A terminated agent keeps its row, so a switch has nothing to settle first: the preconditions are
+    # about a live turn and an open lease, and a dead agent has neither.
+    def test_a_terminated_agent_switches_harness(self, db_conn: psycopg.Connection) -> None:
+        with gateway_test_client() as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
+                )
+            db_conn.commit()
+
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "switch while terminated",
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == {"status": "enqueued"}
+
+            with db_conn.cursor() as cur:
+                cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+                row = cur.fetchone()
+            assert row is not None and row[0] == "codex"
+
+    # meiva:note
+    # An open or unsettled impersonation lease owns the agent's identity, so a switch must not move it
+    # out from under the impersonator: the refusal comes before any status check.
+    def test_a_switch_under_an_open_lease_is_refused(self, db_conn: psycopg.Connection) -> None:
+        with gateway_test_client() as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO agent_impersonations "
+                    "(id, agent_id, source, machine, status, ttl_seconds, expires_at, activated_at) "
+                    "VALUES (%s, %s, 'external_agent:codex', 'test-machine', 'active', 3600, "
+                    "clock_timestamp() + interval '1 hour', clock_timestamp())",
+                    (str(uuid4()), agent_id),
+                )
+            db_conn.commit()
+
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "switch under a lease",
+                    "config_overlay": {"harness": "codex"},
+                },
+            )
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "Agent has an active impersonation lease"
+
+            with db_conn.cursor() as cur:
+                cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+                row = cur.fetchone()
+            assert row is not None and row[0] == "meiva"
+
+    # meiva:note
+    # A switch tells the agent what happened: the wake prompt opens with
+    # `[Harness switched from '<old>' to '<new>']`, so the first thing the new harness reads names the
+    # transition (ops/lifecycle/__init__.py builds it when the two harnesses differ).
+    def test_a_switch_names_the_transition_in_the_wake_prompt(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with gateway_test_client() as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={
+                    "message": "switching to codex",
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                },
+            )
+            assert resp.status_code == 200, resp.text
+
+        rows = inbound_rows(db_conn, agent_id)
+        [content] = [
+            text
+            for text, _kind, _source in rows
+            if text.startswith("[Harness switched from 'meiva' to 'codex']")
+        ]
+        assert content.endswith("switching to codex")
+
     def test_harness_switch_preconditions(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
