@@ -124,8 +124,9 @@ def seed_package(
     )
 
 
+# meiva:note
+# Give `name` the row shape `meiva skill install` writes: both edit guards set.
 def mirror_installed_hash(name: str) -> None:
-    """Give `name` the row shape `meiva skill install` writes: both edit guards set."""
     with reg.mutate(home=meiva_home()) as registry:
         row = next(p for p in registry.packages if p.name == name)
         row.installed_hash = row.content_hash
