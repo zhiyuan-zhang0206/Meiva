@@ -19,7 +19,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402
+from meizel import allowances, lint_common  # noqa: E402
 from meizel.budgets import limits  # noqa: E402
 from meizel.checkout import load_universe, roles_at  # noqa: E402
 from meizel.contracts.analysis import (  # noqa: E402
@@ -54,13 +54,20 @@ _AST_DIRS = select_packages(
 _STRUCTURE_DIRS = select_packages(ROLES, "application", "standalone", "tests", "tooling")
 
 
-def _scan_file(tree: ast.Module, rel_path: str) -> list[tuple[int, str]]:
+# meiva:note
+# Whether each exempted module still exists, asked once here: the rule answers from a value.
+def existing_files(repo_root: Path, table: decisions.Table) -> set[str]:
+    paths = {path for decision in table.values() for path in decision.allowed}
+    return {path for path in paths if (repo_root / path).is_file()}
+
+
+def _scan_file(tree: ast.Module, rel_path: str, table: decisions.Table) -> list[tuple[int, str]]:
     """Return AST violations as [(lineno, message), ...]."""
     if lint_common.is_test_path(rel_path):
         return []  # tests are outside the AST rules (module docstring)
     out: list[tuple[int, str]] = []
     out.extend(machine_role.violations(tree))
-    out.extend(decisions.allowlist_errors(tree, rel_path, _SCAN_DIRS))
+    out.extend(decisions.allowlist_errors(tree, rel_path, _SCAN_DIRS, table))
     return out
 
 
@@ -73,13 +80,13 @@ def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
 
 
 def _parse_baseline(
-    shards: dict[str, str], *, renames: dict[str, str] | None = None
+    shards: dict[str, str], *, renames: dict[str, str] | None = None, table: decisions.Table
 ) -> dict[str, dict[str, int]]:
     """Validate the remaining site exemptions; any other section is an error."""
     baseline = baseline_shards.merge(shards, _SITE_SECTIONS)
     for kind in _SITE_SECTIONS:
         scope = _AST_DIRS if kind == ambient_state.SECTION else _SCAN_DIRS
-        locality.validate_entries(kind, baseline[kind], _carried_scope(scope, renames or {}))
+        locality.validate_entries(kind, baseline[kind], _carried_scope(scope, renames or {}), table)
     return baseline
 
 
@@ -228,6 +235,7 @@ def _baseline_guard(
     *,
     repo_root: Path,
     base: str,
+    table: decisions.Table,
     renames: dict[str, str] | None = None,
 ) -> list[str]:
     try:
@@ -235,7 +243,7 @@ def _baseline_guard(
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: {exc}"]
     try:
-        previous = _parse_baseline(shards, renames=renames)
+        previous = _parse_baseline(shards, renames=renames, table=table)
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     try:
@@ -273,9 +281,10 @@ def _collect_locality(
     sites: dict[str, locality.Sites],
     scanned: set[str],
     scopes: path_imports.Scopes,
+    table: decisions.Table,
 ) -> None:
     scanned.add(rel)
-    for kind, found in locality.measure(tree, rel, _SCAN_DIRS).items():
+    for kind, found in locality.measure(tree, rel, _SCAN_DIRS, table).items():
         sites[kind].update(found)
     sites[path_imports.SECTION].update(path_imports.measure(tree, rel, scopes))
 
@@ -367,6 +376,7 @@ def _check_ast_and_quality(
     baseline: dict[str, dict[str, int]],
     *,
     repo_root: Path,
+    table: decisions.Table,
     renames: dict[str, str] | None = None,
     parse_ast: Callable[..., ast.Module],
     measure_quality: Callable[[ast.AST, str], dict[str, dict[str, int]]],
@@ -401,8 +411,10 @@ def _check_ast_and_quality(
         if type_rules:
             errors.extend(type_ctx.errors(rel, tree))
         if ast_rules:
-            errors.extend(f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel))
-            _collect_locality(tree, rel, sites, scanned, type_ctx.scopes)
+            errors.extend(
+                f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel, table)
+            )
+            _collect_locality(tree, rel, sites, scanned, type_ctx.scopes, table)
         if ambient:
             errors.extend(ambient_state.collect(tree, rel, ambient_tree, sites, scanned, _AST_DIRS))
         if path in files:
@@ -410,9 +422,11 @@ def _check_ast_and_quality(
                 measurements[kind].update(values)
     errors.extend(quality_budget.quality_errors(measurements))
     errors.extend(
-        locality.site_errors(sites, baseline, scanned=scanned, repo_root=repo_root, renames=renames)
+        locality.site_errors(
+            sites, baseline, scanned=scanned, repo_root=repo_root, table=table, renames=renames
+        )
     )
-    errors.extend(decisions.missing_allowlist_errors(repo_root))
+    errors.extend(decisions.missing_allowlist_errors(existing_files(repo_root, table), table))
     errors.extend(ambient_state.missing_allowlist_errors(ambient_tree))
     return errors
 
@@ -468,8 +482,17 @@ def main(
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1
     targets, directory_targets = _budget_scopes(argv, repo_root)
+    # meiva:note
+    # Rule 5's table, read once per run from the checkout being judged: the decisions a policy
+    # declares and the exemptions it grants are values, so `meizel/owners/decisions.py` opens
+    # nothing and a synthetic root is judged by its own policy.
     try:
-        baseline = _parse_baseline(baseline_shards.read_worktree(repo_root))
+        table = decisions.decision_table(allowances.load(repo_root))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        print(f"{allowances.POLICY}: invalid policy: {exc}", file=sys.stderr)
+        return 1
+    try:
+        baseline = _parse_baseline(baseline_shards.read_worktree(repo_root), table=table)
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(f"{baseline_shards.SHARD_DIR}: invalid baseline: {exc}", file=sys.stderr)
         return 1
@@ -484,7 +507,7 @@ def main(
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"{baseline_shards.SHARD_DIR}: cannot establish baseline comparison: {exc}")
         return 1
-    errors = _baseline_guard(baseline, repo_root=repo_root, base=base, renames=renames)
+    errors = _baseline_guard(baseline, repo_root=repo_root, base=base, table=table, renames=renames)
     try:
         errors.extend(limits.check(targets, directory_targets, repo_root, _STRUCTURE_DIRS))
     except (MeizelError, OSError, subprocess.CalledProcessError, ValueError) as exc:
@@ -496,6 +519,7 @@ def main(
             targets,
             baseline,
             repo_root=repo_root,
+            table=table,
             renames=renames,
             parse_ast=parse_ast,
             measure_quality=measure_quality,

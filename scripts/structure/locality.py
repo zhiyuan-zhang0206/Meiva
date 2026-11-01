@@ -28,18 +28,20 @@ _TEST_DIR = re.compile(r"(^|/)tests?/")
 Sites = dict[str, list[int]]
 
 
-def measure(tree: ast.Module, rel_path: str, roots: tuple[str, ...]) -> dict[str, Sites]:
+def measure(
+    tree: ast.Module, rel_path: str, roots: tuple[str, ...], table: decisions.Table
+) -> dict[str, Sites]:
     if _TEST_DIR.search(rel_path):
         return {kind: {} for kind in SECTIONS if kind not in EXTERNAL_SECTIONS}
-    return {"owner_bypasses": decisions.owner_bypasses(tree, rel_path, roots)}
+    return {"owner_bypasses": decisions.owner_bypasses(tree, rel_path, roots, table)}
 
 
-def _new_site_message(kind: str, target: str) -> str:
+def _new_site_message(kind: str, target: str, table: decisions.Table) -> str:
     if kind == path_imports.SECTION:
         return path_imports.site_message(target)
     if kind == ambient_state.SECTION:
         return ambient_state.site_message(target) or ""
-    return decisions.site_message(target)
+    return decisions.site_message(target, table)
 
 
 def site_errors(
@@ -48,6 +50,7 @@ def site_errors(
     *,
     scanned: set[str],
     repo_root: Path,
+    table: decisions.Table,
     renames: dict[str, str] | None = None,
 ) -> list[str]:
     """Reject every locality/path-import site; guard remaining ambient-state debt."""
@@ -57,22 +60,26 @@ def site_errors(
         if kind in EXTERNAL_SECTIONS:
             continue
         if kind in STRICT_SECTIONS:
-            errors.extend(_growth_errors(kind, sites, {}, {}))
+            errors.extend(_growth_errors(kind, sites, {}, {}, table))
             continue
-        errors.extend(_growth_errors(kind, sites, baseline[kind], sources))
+        errors.extend(_growth_errors(kind, sites, baseline[kind], sources, table))
         errors.extend(_stale_errors(kind, sites, baseline[kind], scanned, repo_root))
     return errors
 
 
 def _growth_errors(
-    kind: str, sites: Sites, frozen: dict[str, int], sources: dict[str, str]
+    kind: str,
+    sites: Sites,
+    frozen: dict[str, int],
+    sources: dict[str, str],
+    table: decisions.Table,
 ) -> list[str]:
     errors: list[str] = []
     for key, lines in sorted(sites.items()):
         if len(lines) <= frozen.get(key, 0):
             continue
         path, _, target = key.partition("::")
-        detail = _new_site_message(kind, target)
+        detail = _new_site_message(kind, target, table)
         if key in frozen:
             detail += f" (grew above its frozen count {frozen[key]})"
         elif path in sources:
@@ -106,9 +113,9 @@ def _entry_scope(kind: str, scope: tuple[str, ...]) -> tuple[str, ...]:
     return (*scope, "tests", "scripts") if kind in EXTERNAL_SECTIONS else scope
 
 
-def _valid_target(kind: str, target: str) -> bool:
+def _valid_target(kind: str, target: str, table: decisions.Table) -> bool:
     if kind == "owner_bypasses":
-        return target in decisions.DECISIONS
+        return target in table
     return (
         ambient_state.site_message(target) is not None
         if kind == ambient_state.SECTION
@@ -124,7 +131,9 @@ def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
 
 
-def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None:
+def validate_entries(
+    kind: str, entries: object, scope: tuple[str, ...], table: decisions.Table
+) -> None:
     if not _is_str_object_dict(entries):
         raise ValueError(f"'{kind}' must be an object")
     for key, count in entries.items():
@@ -138,7 +147,7 @@ def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None
             and path.parts[0] in _entry_scope(kind, scope)
             and path.suffix == ".py"
         )
-        valid_target = _valid_target(kind, target)
+        valid_target = _valid_target(kind, target, table)
         if (
             not valid_path
             or not separator

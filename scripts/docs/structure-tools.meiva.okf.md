@@ -61,7 +61,8 @@ shared parser supplies static facts for structure tools, not a replacement
 architecture checker or Python interpreter.
 
 Debt class, evidence bar, and the graduation path (a leaked decision with a
-confirmed single owner becomes a Rule 5 `DECISIONS` entry, guarded by the
+confirmed single owner becomes a Rule 5 `postgres-dial`-style entry in
+`meizel/owners/decisions.py:decision_table`, guarded by the
 lint from then on) live in the sweeper's own repo skill:
 `docs/conventions/engineering/tech-debt.md`, locality inspection guidance.
 

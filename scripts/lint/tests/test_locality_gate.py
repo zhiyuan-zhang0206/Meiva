@@ -12,6 +12,7 @@ import subprocess
 
 import pytest
 
+from meizel.owners import decisions
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards, locality
 
@@ -128,3 +129,24 @@ def test_a_bypass_line_carries_the_reason_and_the_rule_document(
     assert "second transport posture" in out
     assert "whoever dials here now owns that posture" in out
     assert "docs/conventions/python-conventions.md" in out
+
+
+# meiva:note
+# Presence is a filesystem fact, not a decode: an exempted module that exists but is not UTF-8 still
+# counts as present, so a stale exemption is reported as a deletion rather than as a read failure.
+def test_existing_files_counts_an_undecodable_allowed_module(tmp_path: pathlib.Path) -> None:
+    binary = tmp_path / "gateway" / "binary.py"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"\xff\xfe not utf-8")
+    decision = decisions.Decision(
+        owners=frozenset(),
+        find=lambda _tree, _roots: [],
+        fix="use the owner",
+        why="one owner keeps the posture",
+        allowed={
+            "gateway/binary.py": "historical exemption",
+            "gateway/gone.py": "historical exemption",
+        },
+    )
+
+    assert lcs.existing_files(tmp_path, {"fake-decision": decision}) == {"gateway/binary.py"}

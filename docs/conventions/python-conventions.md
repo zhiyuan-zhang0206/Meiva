@@ -100,17 +100,18 @@ by the existing SDK surface metadata and Installation; do not introduce another 
   skill, `meiva_builtins/skills/` itself, or `meiva_builtins/plugins/`), or any
   file-loader call regardless of its argument, is still a violation. The
   Every measured path-import site fails directly, with no baseline allowance.
-- **Rule 5 — single decision owners.** `meizel/owners/decisions.py:DECISIONS`
+- **Rule 5 — single decision owners.** `meizel/owners/decisions.py:decision_table`
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
   genuinely cannot is listed under `[single-owner.<decision>]` in `meizel.policy.toml` with a one-line
   reason — an allowed module that stops bypassing (or disappears) fails as
   stale, so the map cannot rot into a permission wall. Add a new single-owner
-  decision only once its owner exists: an entry in `DECISIONS` with its owning
-  module(s), a `find(tree, roots)` AST scanner, a `fix` message and the `why`
-  the failure prints — why the decision has one owner and what a site that
-  decides it again takes on.
+  decision only once its owner exists: an entry the table `decision_table(policy)`
+  returns, with its owning module(s), a `find(tree, roots)` AST scanner, a `fix`
+  message and the `why` the failure prints — why the decision has one owner and
+  what a site that decides it again takes on. The table is a value: the caller
+  reads the policy and passes it in, so this module opens nothing.
 
 Rules 5 and 6 reject every measured site directly. The retired
 `private_imports`, `owner_bypasses`, `path_imports` and `patch_targets` baseline fields may not

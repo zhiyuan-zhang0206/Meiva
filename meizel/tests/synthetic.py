@@ -4,19 +4,15 @@ from __future__ import annotations
 
 import subprocess
 import tomllib
-from collections.abc import Callable, Iterator, Mapping
-from dataclasses import replace
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from textwrap import dedent
 from typing import TypeGuard
-
-import pytest
 
 from meizel.contracts.analysis import POLICY, Analysis, DebtEntry, analyze, render_policy
 from meizel.contracts.cli import GitRepo, main
 from meizel.graph.model import Diagnostic
 from meizel.graph.universe import Universe
-from meizel.owners import decisions
 from meizel.state.ambient_state.tests.conftest import (
     synthetic_ambient_allowlists as synthetic_ambient_allowlists,
 )
@@ -37,19 +33,6 @@ STANDALONE_PROJECT = (
 # the condition it waits for, and a test that judges only the number says so here.
 def counts(table: Mapping[str, DebtEntry]) -> dict[str, int]:
     return {key: entry.count for key, entry in table.items()}
-
-
-@pytest.fixture(autouse=True)
-def synthetic_decision_allowlists() -> Iterator[None]:
-    """Keep the real repository's single-owner exemptions out of synthetic roots."""
-    saved = dict(decisions.DECISIONS)
-    for name, decision in saved.items():
-        decisions.DECISIONS[name] = replace(decision, allowed={})
-    try:
-        yield
-    finally:
-        decisions.DECISIONS.clear()
-        decisions.DECISIONS.update(saved)
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:

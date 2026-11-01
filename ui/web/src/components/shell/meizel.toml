@@ -9,4 +9,4 @@ exports = ["context-panel-toggle.tsx", "header-bar.tsx", "home-layout.tsx", "pag
 "visual-viewport-height-sync.test.tsx" = ["visual-viewport-height-sync.tsx"]
 
 [debt.third-party-patch]
-"providers.test.tsx#vi.mock next-themes" = 1
+"providers.test.tsx#vi.mock next-themes" = { count = 1, until = "waits for the test environment to provide matchMedia and localStorage at mount, or for Providers to grow a real theme injection point (a theme prop or a service); a global polyfill is not the answer - it widens the blast radius to every test that renders Providers" }

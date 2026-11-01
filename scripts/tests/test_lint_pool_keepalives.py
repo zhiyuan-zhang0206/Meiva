@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from meizel import allowances
+from meizel.owners import decisions
 from scripts.lint import pool_keepalives as _lint
 
 
@@ -96,11 +98,10 @@ def test_repo_is_clean() -> None:
 
 
 def test_default_scope_is_what_rule_5_does_not_see() -> None:
-    from meizel.owners.decisions import DECISIONS
-
     root = Path(__file__).resolve().parents[2]
+    allowed = decisions.decision_table(allowances.load(root))["postgres-dial"].allowed
     scanned = {path.relative_to(root).as_posix() for path in _lint.default_targets()}
-    assert scanned == {"scripts", "meizel", *DECISIONS["postgres-dial"].allowed}
+    assert scanned == {"scripts", "meizel", *allowed}
 
 
 def test_explicit_missing_target_is_an_error(

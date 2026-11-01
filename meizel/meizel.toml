@@ -13,7 +13,7 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "roles.py" = ["graph"]
 "source_evidence" = ["graph", "lint_common.py"]
 "state" = ["allowances.py", "checkout.py", "lint_common.py", "roles.py"]
-"tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
+"tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "roles.py", "state"]
 
 [purity]
 "." = "strict-to-be"

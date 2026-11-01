@@ -65,9 +65,11 @@ keep production governance separate from the root distribution environment.
   directory and tests a judged path's links. `scripts/lint/code_structure.py`
   drives them.
 - `owners/` — one owner per external capability: `decisions.py` holds Rule 5
-  (`DECISIONS`: each design decision has exactly one owning module, every other
-  site is a bypass, and a listed exemption that goes stale fails; the exemptions
-  are in `meizel.policy.toml`) and
+  (`decision_table(policy)`: each design decision has exactly one owning module,
+  every other site is a bypass, and a listed exemption that goes stale fails; the
+  owners and the exemptions are in `meizel.policy.toml`, and the caller that reads
+  that policy hands the table down, so a run judging another checkout judges it
+  by that checkout's policy) and
   `clock_lattice.py` keeps lattice-vocabulary timing constants in the
   clock-lattice family modules or as aliases of a registered clock.
 - `state/` — dependency injection rules: `ambient_state/` (Rule 9, module-level
