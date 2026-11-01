@@ -6,31 +6,29 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Callable, Coroutine
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import psutil
-import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
 from agent.execution.protocol import STALE_FILE_AGE_S
 from agent.graph.exec._child_boundary import ParentFacts
-from agent.graph.exec._result import ExecLifecycleKind
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.graph.exec.node import (
     ExecCancelled,
     ExecChildError,
     ExecCrashed,
     ExecDone,
-    ExecLifecycle,
     ExecOutputChunkPublisher,
     ExecTimedOut,
 )
 from agent.graph.exec.tests.process_inputs import real_parent
-from base.config import settings
-from base.events.live.tests.live_capture import LiveEvents
+from base.clock import Clock, ClockConfig, Timers
 from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
 from base.native_process.exec_domain import ExecProcessDomain
@@ -38,27 +36,34 @@ from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import logs_dir, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import exec_context
 
-_AGENT_ID = 424242
+AGENT_ID = 424242
 _SLEEP_CHILD = Path(__file__).with_name("sleep_child.py")
 
 
-def _seed_agent_for_self_lifecycle() -> None:
-    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-        cur.execute("INSERT INTO agents (id) VALUES (%s)", (_AGENT_ID,))
+# meiva:note
+# Advances monotonic time past the exec deadline only after `ready()` observes the
+# child running, so timeout tests never depend on wall-clock import speed or sleep.
+# meiva:link agent/graph/exec/docs/subprocess-tests.meiva.okf.md
+class _ExpireAfterReadyTimers:
+    def __init__(self, ready: Callable[[], bool], *, advance_s: float) -> None:
+        self._ready = ready
+        self._advance_s = advance_s
+        self._offset = 0.0
+
+    def monotonic(self) -> float:
+        now = time.monotonic()
+        if self._offset == 0.0 and self._ready():
+            self._offset = self._advance_s
+        return now + self._offset
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+    def asleep(self, seconds: float) -> Coroutine[object, object, None]:
+        return asyncio.sleep(seconds)
 
 
-def _self_inbound_row() -> tuple[str, str, str]:
-    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT content, kind, source FROM inbound_messages WHERE agent_id = %s ORDER BY id",
-            (_AGENT_ID,),
-        )
-        rows = cur.fetchall()
-    assert len(rows) == 1
-    return rows[0]
-
-
-async def _run(
+async def run_exec_child(
     tmp_path: Path,
     code: str,
     *,
@@ -67,6 +72,7 @@ async def _run(
     state: dict[str, Any] | None = None,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
     parent: ParentFacts | None = None,
+    timers: Timers | None = None,
 ):
     cancel_event = asyncio.Event()
     cancel_task: asyncio.Task[None] | None = None
@@ -77,10 +83,14 @@ async def _run(
             cancel_event.set()
 
         cancel_task = asyncio.create_task(_set_cancel())
+    context = exec_context(AGENT_ID)
+    if timers is not None:
+        clock_cfg = ClockConfig("UTC", None, message_timestamp_weekday=False)
+        context = replace(context, clock_factory=lambda: Clock(clock_cfg, timers=timers))
     try:
         result, _payload = await run_in_subprocess(
             code,
-            exec_context(_AGENT_ID),
+            context,
             cancel_event,
             timeout,
             chunk_publisher,
@@ -138,14 +148,14 @@ async def test_assert_tree_gone_rejects_pid_still_running_after_deadline() -> No
 
 
 async def test_subprocess_done(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "print('hello from child')")
+    result = await run_exec_child(tmp_path, "print('hello from child')")
     assert isinstance(result, ExecDone)
     assert "hello from child" in result.output
-    assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
+    assert not list((tmp_path / "exec" / str(AGENT_ID)).iterdir())
 
 
 async def test_a_run_prunes_the_stale_results_of_its_own_agent(tmp_path: Path) -> None:
-    agent_dir = tmp_path / "exec" / str(_AGENT_ID)
+    agent_dir = tmp_path / "exec" / str(AGENT_ID)
     agent_dir.mkdir(parents=True)
     stale = agent_dir / "res-left-behind.json"
     stale.write_text("{}", encoding="utf-8")
@@ -155,7 +165,7 @@ async def test_a_run_prunes_the_stale_results_of_its_own_agent(tmp_path: Path) -
     kept_request.write_text("{}", encoding="utf-8")
     os.utime(kept_request, (long_ago, long_ago))
 
-    await _run(tmp_path, "pass")
+    await run_exec_child(tmp_path, "pass")
 
     assert not stale.exists()
     assert kept_request.exists()
@@ -163,12 +173,12 @@ async def test_a_run_prunes_the_stale_results_of_its_own_agent(tmp_path: Path) -
 
 async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Path) -> None:
     env_path = Path(os.environ["MEIVA_HOME"]) / ".env"
-    original_env = env_path.read_text()
-    log_path = logs_dir(home=resolve_meiva_home()) / f"agent-{_AGENT_ID}.log"
+    original_env = env_path.read_text() if env_path.exists() else None
+    log_path = logs_dir(home=resolve_meiva_home()) / f"agent-{AGENT_ID}.log"
     log_offset = log_path.stat().st_size if log_path.exists() else 0
     upsert_env(env_path, {"MEIVA_TELEMETRY_OTLP_ENABLED": "true"})
     try:
-        result = await _run(
+        result = await run_exec_child(
             tmp_path,
             (
                 "import meiva\n"
@@ -183,7 +193,10 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Pa
             ),
         )
     finally:
-        env_path.write_text(original_env)
+        if original_env is None:
+            env_path.unlink(missing_ok=True)
+        else:
+            env_path.write_text(original_env)
 
     assert isinstance(result, ExecDone)
     assert result.output == "OTLP_ENABLED_IN_CHILD: False\n"
@@ -196,7 +209,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(tmp_pat
     (old_checkout / "agent").mkdir(parents=True)
     (old_checkout / "agent" / "__init__.py").write_text("# old checkout\n")
 
-    result = await _run(
+    result = await run_exec_child(
         tmp_path,
         ("import agent.execution.child as entry\nprint('exec-child', entry.__file__)\n"),
         parent=real_parent(
@@ -210,7 +223,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(tmp_pat
 
 
 async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(tmp_path: Path) -> None:
-    result = await _run(
+    result = await run_exec_child(
         tmp_path,
         (
             "import sys\n"
@@ -228,7 +241,7 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(tmp_p
 
 
 async def test_subprocess_merged_stream_preserves_order(tmp_path: Path) -> None:
-    result = await _run(
+    result = await run_exec_child(
         tmp_path,
         "import sys\nprint('one')\nprint('two', file=sys.stderr)\nprint('three')",
     )
@@ -237,13 +250,13 @@ async def test_subprocess_merged_stream_preserves_order(tmp_path: Path) -> None:
 
 
 async def test_subprocess_output_contains_only_agent_text(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "print('ok')")
+    result = await run_exec_child(tmp_path, "print('ok')")
     assert isinstance(result, ExecDone)
     assert result.output == "ok\n"
 
 
 async def test_subprocess_crashed_carries_child_traceback(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "raise ValueError('boom')")
+    result = await run_exec_child(tmp_path, "raise ValueError('boom')")
     assert isinstance(result, ExecCrashed)
     assert isinstance(result.exc, ExecChildError)
     assert "boom" in (result.exc.exc_msg or "")
@@ -253,7 +266,7 @@ async def test_subprocess_crashed_carries_child_traceback(tmp_path: Path) -> Non
 
 
 async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "import os\nos._exit(5)")
+    result = await run_exec_child(tmp_path, "import os\nos._exit(5)")
     assert isinstance(result, ExecCrashed)
     assert "without writing a result envelope" in str(result.exc)
 
@@ -275,13 +288,11 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code)
+        result = await run_exec_child(tmp_path, code)
         assert isinstance(result, ExecCrashed)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
-        assert not any(
-            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
-        )
+        assert not any(thread.name == f"exec-reader-{AGENT_ID}" for thread in threading.enumerate())
     finally:
         if descendant_pid is None and pid_file.exists():
             descendant_pid = int(pid_file.read_text(encoding="utf-8"))
@@ -311,17 +322,15 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code)
+        result = await run_exec_child(tmp_path, code)
         assert isinstance(result, ExecCrashed)
         assert "without writing a result envelope" in str(result.exc)
         assert "before the fault" in result.output
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
-        assert not any(
-            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
-        )
+        assert not any(thread.name == f"exec-reader-{AGENT_ID}" for thread in threading.enumerate())
 
-        after = await _run(tmp_path, "print('still serving')")
+        after = await run_exec_child(tmp_path, "print('still serving')")
         assert isinstance(after, ExecDone)
         assert after.output == "still serving\n"
     finally:
@@ -332,17 +341,25 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
 
 
 async def test_subprocess_timeout(tmp_path: Path) -> None:
-    result = await _run(
+    ready = tmp_path / "started.ready"
+    code = (
+        "import pathlib, time\n"
+        "print('started', flush=True)\n"
+        f"pathlib.Path({str(ready)!r}).write_text('ok', encoding='utf-8')\n"
+        "time.sleep(60)\n"
+    )
+    result = await run_exec_child(
         tmp_path,
-        "import time\nprint('started', flush=True)\ntime.sleep(60)",
-        timeout=10.0,
+        code,
+        timeout=30.0,
+        timers=_ExpireAfterReadyTimers(ready.exists, advance_s=31.0),
     )
     assert isinstance(result, ExecTimedOut)
     assert "started" in result.output
 
 
 async def test_subprocess_cancel(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "import time\ntime.sleep(60)", cancel_after=0.4)
+    result = await run_exec_child(tmp_path, "import time\ntime.sleep(60)", cancel_after=0.4)
     assert isinstance(result, ExecCancelled)
 
 
@@ -359,13 +376,11 @@ async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(tmp_path: P
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code)
+        result = await run_exec_child(tmp_path, code)
         assert isinstance(result, ExecDone)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
-        assert not any(
-            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
-        )
+        assert not any(thread.name == f"exec-reader-{AGENT_ID}" for thread in threading.enumerate())
     finally:
         if descendant_pid is not None:
             kill_process_tree(descendant_pid, grace_s=0.0)
@@ -387,7 +402,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
     task = asyncio.create_task(
         run_in_subprocess(
             code,
-            exec_context(_AGENT_ID),
+            exec_context(AGENT_ID),
             asyncio.Event(),
             60.0,
             exec_dir=tmp_path / "exec",
@@ -410,10 +425,8 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
             await asyncio.wait_for(task, timeout=15.0)
 
         await _assert_tree_gone(pids)
-        assert not any(
-            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
-        )
-        assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
+        assert not any(thread.name == f"exec-reader-{AGENT_ID}" for thread in threading.enumerate())
+        assert not list((tmp_path / "exec" / str(AGENT_ID)).iterdir())
     finally:
         if not task.done():
             task.cancel()
@@ -426,46 +439,9 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
                 os.waitpid(pids[0], 0)
 
 
-async def test_subprocess_streaming_chunks_published_incrementally(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    publisher = ExecOutputChunkPublisher(live_events.publisher, agent_id=_AGENT_ID, item_id="7.0")
-    result = await _run(
-        tmp_path,
-        "import time\nfor i in range(5):\n    print(f'line {i}')\n    time.sleep(0.15)",
-        timeout=30.0,
-        chunk_publisher=publisher,
-    )
-    assert isinstance(result, ExecDone)
-    chunks = [event for event in await live_events.events() if not event["keepalive"]]
-    assert len(chunks) >= 2
-    assert "".join(event["content"] for event in chunks) == result.output
-    assert all(event["item_id"] == "7.0" for event in chunks)
-
-
-async def test_subprocess_silent_child_publishes_keepalive(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    publisher = ExecOutputChunkPublisher(live_events.publisher, agent_id=_AGENT_ID, item_id="7.0")
-
-    result = await _run(
-        tmp_path,
-        "import time; time.sleep(1.3)",
-        timeout=30.0,
-        chunk_publisher=publisher,
-    )
-
-    assert isinstance(result, ExecDone)
-    assert result.output == ""
-    events = await live_events.events()
-    keepalives = [event for event in events if event["keepalive"] is True]
-    assert keepalives
-    assert all(event["content"] == "" for event in keepalives)
-
-
 async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
     state = {"messages": [HumanMessage(content="snapshot says hi")], "halted": False}
-    result = await _run(
+    result = await run_exec_child(
         tmp_path,
         "import meiva\nprint(meiva.state.messages[0].content)",
         state=state,
@@ -474,73 +450,8 @@ async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
     assert "snapshot says hi" in result.output
 
 
-def _self_lifecycle_code(action: str) -> str:
-    return (
-        "import meiva, os, psycopg\n"
-        "from base.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
-        "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
-        "with psycopg.connect(meiva.DB_URL) as conn:\n"
-        "    assert conn.execute('SELECT current_user').fetchone() == ('meiva_g0_runner',)\n"
-        f"{action}\n"
-    )
-
-
-async def test_subprocess_self_terminate_lifecycle_and_inbound(
-    tmp_path: Path, runner_db_url: str
-) -> None:
-    _seed_agent_for_self_lifecycle()
-
-    result = await _run(
-        tmp_path,
-        _self_lifecycle_code("meiva.self.terminate()"),
-        parent=real_parent(environ={**os.environ, "MEIVA_DB_URL": runner_db_url}),
-    )
-
-    assert isinstance(result, ExecLifecycle)
-    assert result.kind is ExecLifecycleKind.TERMINATION
-    _content, kind, source = _self_inbound_row()
-    assert kind == "terminate"
-    assert source == "self"
-
-
-async def test_subprocess_self_restart_lifecycle_and_inbound(
-    tmp_path: Path, runner_db_url: str
-) -> None:
-    _seed_agent_for_self_lifecycle()
-
-    result = await _run(
-        tmp_path,
-        _self_lifecycle_code('meiva.self.restart("restarting")'),
-        parent=real_parent(environ={**os.environ, "MEIVA_DB_URL": runner_db_url}),
-    )
-
-    assert isinstance(result, ExecLifecycle)
-    assert result.kind is ExecLifecycleKind.RESTART
-    _content, kind, source = _self_inbound_row()
-    assert kind == "restart"
-    assert source == "self"
-
-
-async def test_subprocess_self_compact_lifecycle_and_inbound(
-    tmp_path: Path, runner_db_url: str
-) -> None:
-    _seed_agent_for_self_lifecycle()
-
-    result = await _run(
-        tmp_path,
-        _self_lifecycle_code("meiva.self.compact('audit e2e summary')"),
-        parent=real_parent(environ={**os.environ, "MEIVA_DB_URL": runner_db_url}),
-    )
-
-    assert isinstance(result, ExecLifecycle)
-    assert result.kind is ExecLifecycleKind.SYSTEM_HALT
-    content, kind, _source = _self_inbound_row()
-    assert kind == "compact_summary"
-    assert content == "audit e2e summary"
-
-
 async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> None:
-    result = await _run(
+    result = await run_exec_child(
         tmp_path,
         (
             "from base.agents.lifecycle import LifecycleExit\n"
@@ -559,21 +470,21 @@ async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> Non
 
 async def test_subprocess_kills_process_group_on_timeout(tmp_path: Path) -> None:
     pid_file = tmp_path / "grandchild.pid"
+    pid_tmp = tmp_path / "grandchild.pid.tmp"
     code = (
-        "import subprocess, time\n"
-        f"p = subprocess.Popen(['sleep', '60'])\n"
-        f"open({str(pid_file)!r}, 'w').write(str(p.pid))\n"
+        "import pathlib, subprocess, time\n"
+        "p = subprocess.Popen(['sleep', '60'])\n"
+        f"tmp = pathlib.Path({str(pid_tmp)!r})\n"
+        "tmp.write_text(str(p.pid), encoding='utf-8')\n"
+        f"tmp.replace({str(pid_file)!r})\n"
         "time.sleep(60)\n"
     )
-    result = await _run(tmp_path, code, timeout=10.0)
+    result = await run_exec_child(
+        tmp_path,
+        code,
+        timeout=30.0,
+        timers=_ExpireAfterReadyTimers(pid_file.exists, advance_s=31.0),
+    )
     assert isinstance(result, ExecTimedOut)
     gc_pid = int(pid_file.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        try:
-            os.kill(gc_pid, 0)
-        except ProcessLookupError:
-            break
-        await asyncio.sleep(0.1)
-    else:
-        pytest.fail(f"grandchild pid {gc_pid} survived the exec process-group kill")
+    await _assert_tree_gone([gc_pid])
