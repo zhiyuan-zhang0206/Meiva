@@ -139,6 +139,12 @@ def _refuse_native_data_plane(patch: pytest.MonkeyPatch) -> None:
     stub_everywhere(patch, containers, "redis_server", refuse_container)
 
 
+def _refuse_external_network(patch: pytest.MonkeyPatch) -> None:
+    from tests.fixtures.guards import refuse_external_network
+
+    refuse_external_network(patch)
+
+
 def _select_static_paths(config: pytest.Config, idx: _Ownership) -> None:
     if not idx.static_files:
         raise pytest.UsageError("Static test derivation found no static tests in this checkout.")
@@ -173,6 +179,7 @@ def pytest_configure(config: pytest.Config) -> None:
     patch = pytest.MonkeyPatch()
     config.add_cleanup(patch.undo)
     _refuse_native_data_plane(patch)
+    _refuse_external_network(patch)
 
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:

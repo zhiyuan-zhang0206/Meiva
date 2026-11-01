@@ -127,6 +127,13 @@ def survived_credential_names() -> list[str]:
 if sys.platform == "darwin":
     os.environ.setdefault("LC_ALL", "en_US.UTF-8")
 
+# meiva:note
+# Tests comparing formatted timestamps or relying on local vs UTC times must see
+# a consistent UTC environment regardless of developer machine or CI timezone.
+os.environ["TZ"] = "UTC"
+if hasattr(time, "tzset"):
+    time.tzset()
+
 # ── The unit's home: redirected here, before anything can read it ──
 #
 # `base.paths.home.resolve_meiva_home` reads `MEIVA_HOME` (else `~/.meiva`)

@@ -1,4 +1,5 @@
 [uses]
 "test_env_bootstrap_credentials.py" = ["child_env_bootstrap_credentials.py"]
+"test_env_bootstrap_tz.py" = ["child_env_bootstrap_tz.py"]
 "test_plugin_registrations.py" = ["child_gate_without_agent_layer.py"]
 "test_throwaway_storage.py" = ["child_throwaway_storage.py"]

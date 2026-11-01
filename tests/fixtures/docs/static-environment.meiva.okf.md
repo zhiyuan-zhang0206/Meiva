@@ -46,7 +46,9 @@ file or a directory containing static tests and zero native tests; mixed parents
 native siblings, and escaping symlinks fail closed before execution.
 
 This process keeps unreachable data-plane sentinels, refuses Postgres/Redis
-provisioners and sync/async driver entry points, and never creates a native
+provisioners, sync/async driver entry points, and outbound external network socket
+connections or DNS lookups (`refuse_external_network`, while preserving `AF_UNIX`,
+`socketpair`, and loopback addresses), and never creates a native
 instance or its watchdog. Native processes (`test_native_environment.py`) also
 refuse undeclared driver access; ordinary fixture dependencies admit only their
 requested resources. Static processes never admit requests. Private-home,

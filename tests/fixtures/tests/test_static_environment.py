@@ -1,4 +1,6 @@
+import asyncio
 import os
+import socket
 from pathlib import Path
 
 import psycopg
@@ -58,3 +60,52 @@ async def test_async_data_plane_calls_are_refused_without_native_provisioning(
             pipeline = client.pipeline()
             pipeline.ping()
             await pipeline.execute()
+
+
+async def test_external_network_calls_fail_closed_in_static_mode(
+    pytestconfig: pytest.Config,
+) -> None:
+    if static_mode(pytestconfig):
+        with pytest.raises(
+            pytest.fail.Exception, match="Static tests cannot make external network calls"
+        ):
+            socket.getaddrinfo("example.com", 80)
+        with pytest.raises(
+            pytest.fail.Exception, match="Static tests cannot make external network calls"
+        ):
+            socket.create_connection(("8.8.8.8", 53), timeout=1)
+        with (
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s,
+            pytest.raises(
+                pytest.fail.Exception, match="Static tests cannot make external network calls"
+            ),
+        ):
+            s.connect(("8.8.8.8", 53))
+        with (
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s,
+            pytest.raises(
+                pytest.fail.Exception, match="Static tests cannot make external network calls"
+            ),
+        ):
+            s.connect_ex(("8.8.8.8", 53))
+
+        # meiva:note
+        # Pre-syscall tuple unpacking and IDNA label validation match stdlib socket semantics.
+        with pytest.raises(UnicodeError):
+            socket.getaddrinfo("a" * 64 + ".example", 80)
+
+        # meiva:note
+        # Local socketpair and loopback communication remain available in static mode.
+        assert socket.getaddrinfo("localhost", 80)
+        assert socket.getaddrinfo(b"localhost", 80)
+        p1, p2 = socket.socketpair()
+        try:
+            p1.sendall(b"ping")
+            assert p2.recv(10) == b"ping"
+        finally:
+            p1.close()
+            p2.close()
+
+        # meiva:note
+        # Asyncio event loop boots and executes cleanly under the network guard.
+        await asyncio.sleep(0.001)

@@ -20,7 +20,7 @@ fixture re-export: [[root-conftest.meiva.okf.md]]), apply to every package's tes
 ## Core mechanisms
 
 ### Plugin roster and load order
-- `env_bootstrap` — import-time environment isolation and the session-wide runtime pins; loads **first**
+- `env_bootstrap` — import-time environment isolation and the session-wide runtime pins (including `TZ=UTC` via `time.tzset()`); loads **first**
 - `leak_guard` — names the test that leaves process-global state different (environment, module attributes, cwd, signal handlers); loads **second**, so its fixture sets up first and compares last, after every function-scoped fixture's undo. Warn by default; findings reach CI through the shard JUnit reports: [[test-leak-guard.meiva.okf.md]]
 - `identity_restore` — restores the SDK consumer's explicit `meiva.context` process slot through `sdk_identity`, so the hundreds of tests that call `pin_agent(...)` (`meiva.tests.fixtures.pin_agent`) need no undo; loads **third**, right after the guard: [[test-leak-guard.meiva.okf.md]]
 - `plugin_registrations` — per-test reset of plugin registrations
