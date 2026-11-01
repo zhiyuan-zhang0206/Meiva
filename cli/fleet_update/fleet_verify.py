@@ -32,9 +32,10 @@ from .session import FailedError, Session
 
 
 def machine_names(s: Session, aliases: tuple[str, ...]) -> dict[str, str]:
+    outputs = s.run_all(aliases, lambda alias: s.run(alias, machine_name_command(), effect=False))
     names: dict[str, str] = {}
-    for alias in aliases:
-        reported = machine_name(s.run(alias, machine_name_command(), effect=False))
+    for alias, out in zip(aliases, outputs, strict=True):
+        reported = machine_name(out)
         if reported is None:
             raise FailedError(f"{alias}: the host printed no machine name")
         names[alias] = reported
@@ -86,11 +87,10 @@ def refresh(s: Session, hosts: tuple[str, ...]) -> list[HostFailure]:
     # One host's package refresh failing is that host's line in the report, not the end of the
     # verification: the others are still refreshed and still checked.
     failures: list[HostFailure] = []
-    for alias in hosts:
-        try:
-            out = s.run(alias, refresh_command())
-        except FailedError as exc:
-            failures.append(HostFailure(alias, "packages refresh", str(exc)))
+    outcomes = s.gather(hosts, lambda alias: s.run(alias, refresh_command()))
+    for alias, out in zip(hosts, outcomes, strict=True):
+        if isinstance(out, FailedError):
+            failures.append(HostFailure(alias, "packages refresh", str(out)))
             continue
         if out:
             s.say(f"packages refresh [{alias}] {out.splitlines()[-1].strip()}")
@@ -98,13 +98,15 @@ def refresh(s: Session, hosts: tuple[str, ...]) -> list[HostFailure]:
 
 
 def run_drift_checks(s: Session, gateway: str, hosts: tuple[str, ...]) -> list[HostFailure]:
-    failures: list[HostFailure] = []
-    for check in drift_checks(gateway, hosts):
-        try:
-            s.run(check.alias, drift_command(check.verb), effect=True)
-        except FailedError as exc:
-            failures.append(HostFailure(check.alias, check.verb, str(exc)))
-    return failures
+    checks = drift_checks(gateway, hosts)
+    outcomes = s.gather(
+        checks, lambda check: s.run(check.alias, drift_command(check.verb), effect=True)
+    )
+    return [
+        HostFailure(check.alias, check.verb, str(out))
+        for check, out in zip(checks, outcomes, strict=True)
+        if isinstance(out, FailedError)
+    ]
 
 
 def verify(
@@ -133,15 +135,22 @@ def verify(
         except FailedError as exc:
             failures += [HostFailure(alias, "roster", str(exc)) for alias in hosts]
         else:
-            for step in smoke_plan(rows, names, started):
+            steps = smoke_plan(rows, names, started)
+            for step in steps:
                 if not step.runs:
                     skipped.setdefault(step.owner, "start failed")
-                    continue
-                try:
-                    smoke = smoke_command(step.machine, args.smoke_timeout)
-                    s.run(args.gateway, smoke, stdin=gateway_stdin)
-                except FailedError as exc:
-                    failures.append(HostFailure(step.owner, "smoke", str(exc)))
+            runnable = [step for step in steps if step.runs]
+            outcomes = s.gather(
+                runnable,
+                lambda step: s.run(
+                    args.gateway,
+                    smoke_command(step.machine, args.smoke_timeout),
+                    stdin=gateway_stdin,
+                ),
+            )
+            for step, out in zip(runnable, outcomes, strict=True):
+                if isinstance(out, FailedError):
+                    failures.append(HostFailure(step.owner, "smoke", str(out)))
     failures += refresh(s, hosts)
     failures += run_drift_checks(s, args.gateway, hosts)
     return failures, skipped, commit

@@ -68,7 +68,8 @@ def test_the_leases_are_named_before_the_first_stop(
     # precede every stop, which is the guarantee this test is about.
     before_first_stop = cluster.effects[: cluster.lease_reads[0]]
     assert "stop" not in [kind for kind, _ in before_first_stop], "read after a stop was accepted"
-    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+    stops = [alias for kind, alias in cluster.effects if kind == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 def test_no_active_lease_is_one_line_and_never_waits(
@@ -141,7 +142,8 @@ def test_a_lease_read_that_fails_warns_and_the_update_goes_on(
     assert run("down") == 0
     out = capsys.readouterr().out
     assert "WARNING: active impersonation leases were not read" in out
-    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+    stops = [alias for kind, alias in cluster.effects if kind == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 # meiva:note
@@ -156,7 +158,8 @@ def test_a_lease_program_that_exits_nonzero_warns_and_the_update_goes_on(
     out = capsys.readouterr().out
     assert "WARNING: active impersonation leases were not read" in out
     assert "gw: exit 71" in out
-    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+    stops = [alias for kind, alias in cluster.effects if kind == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 def test_a_negative_window_is_refused_before_any_host_is_contacted(

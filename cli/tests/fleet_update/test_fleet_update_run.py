@@ -16,6 +16,19 @@ from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
 from cli.tests.fleet_update.fleet_update_cluster import Cluster
 
 
+def _effect_aliases(cluster: Cluster, *wanted: str) -> list[str]:
+    return [alias for kind, alias in cluster.effects if kind in wanted]
+
+
+def _assert_wave_order(cluster: Cluster) -> None:
+    stops = _effect_aliases(cluster, "stop")
+    starts = _effect_aliases(cluster, "start", "oneshot")
+    assert set(stops[:-1]) == {"mac", "lin"}
+    assert stops[-1] == "gw"
+    assert starts[0] == "gw"
+    assert set(starts[1:]) == {"mac", "lin"}
+
+
 @pytest.mark.parametrize("command", ["run", "split"])
 def test_runners_stop_first_and_start_last(
     env: tuple[Cluster, Callable[..., int]], command: str
@@ -23,17 +36,29 @@ def test_runners_stop_first_and_start_last(
     cluster, run = env
     for step in ("down", "up") if command == "split" else ("run",):
         assert run(step) == 0
+    _assert_wave_order(cluster)
     kinds = [kind for kind, _ in cluster.effects if not kind.startswith("silence-")]
-    assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
-    assert kinds.index("stop") > kinds.index("fetch") and kinds.index("switch") > max(
-        i for i, k in enumerate(kinds) if k == "stop"
-    )
-    assert [a for k, a in cluster.effects if k in ("start", "oneshot")] == ["gw", "mac", "lin"]
+    assert kinds.index("fetch") < kinds.index("stop") < kinds.index("switch")
     assert kinds[-10:-4] == ["smoke"] * 3 + ["refresh"] * 3
     assert set(kinds[-4:]) == {"schedules-verify", "plugins-verify"}
-    assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
+    assert set(_effect_aliases(cluster, "refresh")) == {"gw", "mac", "lin"}
     assert all(h["up"] and h["head"] == cluster.new for h in cluster.hosts.values())
     assert not cluster.silence_open
+
+
+def test_independent_waves_fan_out_concurrently_without_breaking_gateway_order(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    cluster.barriers = {
+        "stop": ["mac", "lin"],
+        "switch": ["gw", "mac", "lin"],
+        "start": ["mac", "lin"],
+        "smoke": ["gw", "mac", "lin"],
+        "refresh": ["gw", "mac", "lin"],
+    }
+    assert run("run") == 0
+    _assert_wave_order(cluster)
 
 
 @pytest.mark.parametrize("failing", [("stop", "mac"), ("switch", "lin")])
@@ -45,9 +70,15 @@ def test_run_does_not_start_after_a_failed_down(
     cluster, run = env
     cluster.fail[failing] = 1
     assert run("run") == 1
-    assert cluster.effects[-1] == failing
-    assert not {"start", "oneshot", "smoke", "refresh"} & {k for k, _ in cluster.effects}
+    assert failing in cluster.effects
+    assert not {"smoke", "refresh"} & {k for k, _ in cluster.effects}
+    if failing[0] == "stop":
+        assert ("stop", "gw") not in cluster.effects
+        assert "switch" not in {k for k, _ in cluster.effects}
+    else:
+        assert not {"start", "oneshot"} & {k for k, _ in cluster.effects}
     output = capsys.readouterr().out
+    assert "phase: up" not in output
     assert "Failed phase: down" in output and "rerun `down`" in output
     assert cluster.silence_open
 
@@ -64,8 +95,10 @@ def test_run_reports_up_failure_without_repeating_down(
     # A failed smoke or drift check is a partial up (3): the window did not refuse, and every
     # other host is still reported. Down never repeats, which is what this test is about.
     assert run("run") == 3
-    assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
-    assert [a for k, a in cluster.effects if k == "switch"] == ["gw", "mac", "lin"]
+    stops = [a for k, a in cluster.effects if k == "stop"]
+    switches = [a for k, a in cluster.effects if k == "switch"]
+    assert len(stops) == 3 and set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
+    assert len(switches) == 3 and set(switches) == {"gw", "mac", "lin"}
     output = capsys.readouterr().out
     assert "up incomplete" in output and "Failed phase" not in output
     assert not cluster.silence_open
@@ -97,7 +130,8 @@ def test_a_host_that_fails_to_start_does_not_stop_the_others(
 
     assert run("up") == PARTIAL_FAILURE_EXIT
 
-    assert [a for k, a in cluster.effects if k in ("start", "oneshot")] == ["gw", "mac", "lin"]
+    starts = [a for k, a in cluster.effects if k in ("start", "oneshot")]
+    assert starts[0] == "gw" and set(starts[1:]) == {"mac", "lin"}
     output = capsys.readouterr().out
     assert "lin failed at 'permissions helper build + sign + load'" in output
     assert "the login keychain is not unlocked" in output
@@ -179,10 +213,8 @@ def test_the_first_failure_stops_the_half(
     cluster, run = env
     cluster.fail[("stop", "mac")] = 1
     assert run("down") == 1
-    assert [k for k, _ in cluster.effects if k not in ("fetch", "pre-verify")] == [
-        "silence-open",
-        "stop",
-    ]
+    assert ("stop", "gw") not in cluster.effects
+    assert "switch" not in {k for k, _ in cluster.effects}
     assert _STOP_RETRY in capsys.readouterr().out
 
 
@@ -255,7 +287,8 @@ def test_a_silence_that_cannot_open_warns_and_the_update_goes_on(
         f"WARNING: alert silence not open: {reply.removeprefix('SILENCE ')}"
         in capsys.readouterr().out
     )
-    assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
+    stops = [a for k, a in cluster.effects if k == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 def test_the_dry_run_lists_the_silence_without_opening_it(

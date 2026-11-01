@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
+from threading import Lock
 from typing import Protocol
 
 from .plan.host_commands import login_shell
 from .plan.redaction import redact
+
+_MAX_PARALLEL = 8
 
 
 # meiva:note
@@ -77,6 +81,7 @@ class Session:
         self.timers = timers
         self.stamp = f"{now:%Y%m%dT%H%M%S}"
         self.os: dict[str, str] = {}
+        self._lock = Lock()
         log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         path = log_dir / f"{now:%Y%m%dT%H%M%S.%fZ}-{half}.log"
         self.log = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w")
@@ -84,9 +89,36 @@ class Session:
 
     def say(self, line: str) -> None:
         line = redact(line)
-        print(line, flush=True)
-        self.log.write(line + "\n")
-        self.log.flush()
+        with self._lock:
+            print(line, flush=True)
+            self.log.write(line + "\n")
+            self.log.flush()
+
+    # meiva:note
+    # Run one wave of independent host work concurrently, waiting for every task in the wave to
+    # finish before returning its outcome in `items` order so no remote stop, sync or start is
+    # orphaned when a sibling fails. Dry runs stay single-threaded so the printed plan reads in
+    # deterministic order.
+    def gather[I, R](self, items: Sequence[I], work: Callable[[I], R]) -> list[R | FailedError]:
+        def _call(item: I) -> R | FailedError:
+            try:
+                return work(item)
+            except FailedError as exc:
+                return exc
+
+        if len(items) <= 1 or self.dry_run:
+            return [_call(item) for item in items]
+        with ThreadPoolExecutor(max_workers=min(len(items), _MAX_PARALLEL)) as pool:
+            futures = [pool.submit(_call, item) for item in items]
+            return [future.result() for future in futures]
+
+    def run_all[I, R](self, items: Sequence[I], work: Callable[[I], R]) -> list[R]:
+        results: list[R] = []
+        for outcome in self.gather(items, work):
+            if isinstance(outcome, FailedError):
+                raise outcome
+            results.append(outcome)
+        return results
 
     # meiva:note
     # Run one command on a host, saying it first. A read (`effect=False`) always runs; an effect

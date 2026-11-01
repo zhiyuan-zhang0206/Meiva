@@ -58,22 +58,23 @@ remain unchanged throughout the update.
 
 ## The down half, in order
 
-1. Preflight each listed host. OLD (the one commit every host shares that is not
+1. Preflight all listed hosts in parallel. OLD (the one commit every host shares that is not
    NEW) only feeds the `.python-version` refusal.
 2. Read the gateway's active impersonation leases and name them: a stop ends
    every takeover in flight. `--lease-confirm-seconds` holds the stops open
    for that long first.
-3. Fetch NEW on every host, so a host that cannot get it is found before
-   anything stops.
+3. Fetch NEW and probe helper facts across every host in parallel, so a host
+   that cannot get it is found before anything stops.
 4. NEW's offline `meiva schedules verify` over the gateway's stored schedule
    table — a red or an unevaluable check refuses `down` before any stop.
 5. Open the window's Grafana silence on the gateway host.
-6. `meiva stop --yes` with the operator's flags on each runner, then the gateway
+6. `meiva stop --yes` with the operator's flags across all runners in parallel,
+   waiting for every in-flight runner stop to finish before stopping the gateway
    (which also gets `--keep-infra` or `--stop-infra`). A stop must exit 0 and leave
    a completed stop in the host's journal; a failure prints the retry step and brings back, with the
    operator's start selection, the hosts this run already stopped
    ([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
-7. Switch every checkout: check out NEW detached, repair legacy read-only
+7. Switch every checkout in parallel: check out NEW detached, repair legacy read-only
    `.venv` directories (early converge passes left them 0555, which `uv sync`
    cannot write through), `uv sync --frozen --compile-bytecode --reinstall-package meiva`, then require a clean tree. The
    check shows a dirty tree and never cleans it: untracked files are the

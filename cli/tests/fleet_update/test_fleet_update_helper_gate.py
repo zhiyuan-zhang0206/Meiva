@@ -35,7 +35,8 @@ def test_a_helper_every_host_already_carries_lets_the_window_run(
 ) -> None:
     cluster, run = env
     assert run("down") == 0
-    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+    stops = [alias for kind, alias in cluster.effects if kind == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 def test_a_host_with_no_helper_is_no_blind_spot(
@@ -56,7 +57,8 @@ def test_a_host_with_no_helper_is_no_blind_spot(
         if '" stop' in command and "--stop-browser" in command
     }
     assert retired == {"mac"}
-    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+    stops = [alias for kind, alias in cluster.effects if kind == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 def test_the_tracked_table_is_keyed_by_ssh_alias() -> None:
@@ -132,7 +134,8 @@ def test_the_gate_runs_before_its_own_command_is_installed(
     for command in probes:
         assert 'git -C "$S" archive' in command and 'PYTHONPATH="$tmp"' in command
         assert '"$S/scripts/host_ops/tcc/helper-signing.py"' not in command
-    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+    stops = [alias for kind, alias in cluster.effects if kind == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 @pytest.mark.parametrize(
