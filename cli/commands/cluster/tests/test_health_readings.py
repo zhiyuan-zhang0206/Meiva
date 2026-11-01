@@ -376,7 +376,7 @@ def test_a_wal_g_configuration_that_does_not_exist_is_a_failure_without_dialing_
 
 def test_there_is_nothing_to_inspect_without_a_prod_checkout() -> None:
     assert read_editable_violations(None, ()) == ()
-    assert read_source_tree(None) == SourceTreeReading(guard_skipped=False, findings=())
+    assert read_source_tree(None, environ={}) == SourceTreeReading(guard_skipped=False, findings=())
 
 
 def test_a_half_uninstalled_editable_pointer_is_listed_and_never_rewritten(
@@ -412,13 +412,15 @@ def checkout(tmp_path: Path) -> Path:
 
 
 def test_a_clean_checkout_has_no_source_tree_findings(checkout: Path) -> None:
-    assert read_source_tree(checkout) == SourceTreeReading(guard_skipped=False, findings=())
+    assert read_source_tree(checkout, environ={}) == SourceTreeReading(
+        guard_skipped=False, findings=()
+    )
 
 
 def test_an_untracked_file_outside_the_whitelist_is_tampering(checkout: Path) -> None:
     (checkout / "junk.txt").write_text("edited in place")
 
-    assert read_source_tree(checkout) == SourceTreeReading(
+    assert read_source_tree(checkout, environ={}) == SourceTreeReading(
         guard_skipped=False, findings=("untracked outside whitelist: junk.txt",)
     )
 
@@ -426,7 +428,7 @@ def test_an_untracked_file_outside_the_whitelist_is_tampering(checkout: Path) ->
 def test_an_edited_tracked_file_is_tampering(checkout: Path) -> None:
     (checkout / "tracked.py").write_text("x = 2\n")
 
-    reading = read_source_tree(checkout)
+    reading = read_source_tree(checkout, environ={})
 
     assert reading.guard_skipped is False
     assert reading.findings == ("tracked change: M tracked.py",)
@@ -438,7 +440,7 @@ def test_a_directory_that_is_not_a_git_checkout_is_a_blind_guard_not_a_clean_tre
     plain = tmp_path / "plain"
     plain.mkdir()
 
-    assert read_source_tree(plain) == SourceTreeReading(
+    assert read_source_tree(plain, environ={}) == SourceTreeReading(
         guard_skipped=True, findings=("not a git checkout",)
     )
 

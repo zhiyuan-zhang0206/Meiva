@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import fnmatch
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 from base.host.git.gitenv import git_env
@@ -43,8 +44,12 @@ SOURCE_TREE_WHITELIST: tuple[str, ...] = ("frontend/",)
 GUARD_SKIPPED_PREFIX = "guard skipped: "
 
 
+# meiva:note
+# `environ` is the process environment the caller was handed (`Host.environ` where it holds a
+# host): git's posture keys are derived from it, so a guard that reports on a tree the caller
+# named should read the environment that caller runs with, not whatever this process inherited.
 def git(
-    source: Path, *args: str, timeout: float = _READ_TIMEOUT_S
+    source: Path, *args: str, environ: Mapping[str, str], timeout: float = _READ_TIMEOUT_S
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a bounded git command in ``source``; None only when the checkout is
     absent or not a git repo (the caller decides how to treat that)."""
@@ -55,7 +60,7 @@ def git(
             ["git", "-C", str(source), *args],
             capture_output=True,
             text=True,
-            env=git_env(),
+            env=git_env(environ),
             timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
@@ -106,7 +111,7 @@ def validate_whitelist(patterns: tuple[str, ...]) -> None:
                 )
 
 
-def source_tree_violations(repo: Path) -> tuple[str, ...]:
+def source_tree_violations(repo: Path, *, environ: Mapping[str, str]) -> tuple[str, ...]:
     """Human-readable tamper findings for the prod source checkout.
 
     Returns ``()`` only when the guard SAW the tree and found nothing wrong.
@@ -125,7 +130,7 @@ def source_tree_violations(repo: Path) -> tuple[str, ...]:
     source = Path(repo)
     if not (source / ".git").exists():
         return (f"{GUARD_SKIPPED_PREFIX}not a git checkout",)
-    status = git(source, "status", "--porcelain")
+    status = git(source, "status", "--porcelain", environ=environ)
     if status is None or status.returncode != 0:
         return (f"{GUARD_SKIPPED_PREFIX}git unavailable",)
     violations: list[str] = []
