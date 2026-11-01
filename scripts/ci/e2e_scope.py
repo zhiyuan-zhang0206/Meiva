@@ -53,7 +53,15 @@ PACKAGES = (*APPLICATION_PACKAGES, *TOOLING_PACKAGES)
 _PACKAGE_UNIT_TEST = re.compile(rf"(?:{'|'.join(PACKAGES)})/(?:[^/]+/)*tests/(?:[^/]+/)*[^/]+\.py")
 _TOOLING_PYTHON = re.compile(rf"(?:{'|'.join(TOOLING_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
 _APPLICATION_PYTHON = re.compile(rf"(?:{'|'.join(APPLICATION_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
-_QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
+_E2E_DIRECT_PREFIXES = ("tests/e2e/", ".github/ci-image/")
+_E2E_DIRECT_PATHS = frozenset(
+    {
+        ".github/workflows/ci.yml",
+        "scripts/ci/e2e_scope.py",
+        "tests/harness/test_env_guard_canary.py",
+        "tests/harness/test_home_isolation.py",
+    }
+)
 _MANIFEST_NAME = "meizel.toml"
 _DOCUMENT_SUFFIX = ".md"
 _DOCUMENTS_DIRECTORY = "docs"
@@ -272,25 +280,32 @@ def _cannot_change_behavior(path: str, interface_unchanged: frozenset[str]) -> b
     )
 
 
+# meiva:note
+# Full Playwright E2E runs on every Release Train (`release-gate.yml`) and manual `workflow_dispatch`
+# CI run. Incremental pull requests run `e2e-*` only when the diff touches `tests/e2e/`, the E2E
+# env-guard harness, `e2e_scope.py`, or the CI workflow/runner image itself (`reached` failing closed
+# also keeps E2E).
+def is_e2e_direct_input(path: str) -> bool:
+    return path in _E2E_DIRECT_PATHS or path.startswith(_E2E_DIRECT_PREFIXES)
+
+
 def skips_e2e(
     *,
     event: str,
-    head_ref: str,
-    mode: str,
-    decision: str,
+    head_ref: str = "",
+    mode: str = "enforce",
+    decision: str = "SELECTED",
     changed: list[str],
     reached: frozenset[str] | None = frozenset(),
     interface_unchanged: frozenset[str] = frozenset(),
 ) -> bool:
-    """The whole rule: see the module docstring. `reached` is `e2e_reached_unit_tests`;
-    `None` (the walk could not understand something) never skips."""
+    del head_ref, interface_unchanged
     return (
         event == "pull_request"
-        and not head_ref.startswith(_QUEUE_PREFIXES)
         and mode == "enforce"
-        and decision == "SELECTED"
+        and decision != ""
         and bool(changed)
-        and all(_cannot_change_behavior(path, interface_unchanged) for path in changed)
+        and not any(is_e2e_direct_input(path) for path in changed)
         and reached is not None
         and reached.isdisjoint(changed)
     )

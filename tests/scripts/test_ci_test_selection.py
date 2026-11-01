@@ -54,9 +54,17 @@ def _backend_verdict(
     mode: str = "enforce",
     decision: str = "FULL",
     selector: str = "success",
+    run_serial: str = "true",
+    run_pgvector_smoke: str = "true",
+    run_helper_smoke: str = "true",
+    run_host_marks: str = "true",
 ) -> subprocess.CompletedProcess[str]:
     script = script.replace("${{ needs.classify.outputs.backend }}", backend)
     script = script.replace("${{ needs.classify.outputs.selector }}", selector)
+    script = script.replace("${{ needs.classify.outputs.run_serial }}", run_serial)
+    script = script.replace("${{ needs.classify.outputs.run_pgvector_smoke }}", run_pgvector_smoke)
+    script = script.replace("${{ needs.classify.outputs.run_helper_smoke }}", run_helper_smoke)
+    script = script.replace("${{ needs.classify.outputs.run_host_marks }}", run_host_marks)
     for job, result in results.items():
         script = script.replace("${{ needs." + job + ".result }}", result)
     assert "${{" not in script
@@ -94,6 +102,44 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
     ):
         actual = _backend_verdict(script, "true", results | changes, mode=mode, decision=decision)
         assert actual.returncode == expected, actual.stdout
+    optional_skipped = results | {
+        "backend-shard": "skipped",
+        "backend-serial": "skipped",
+        "backend-pgvector-smoke": "skipped",
+        "helper-signing-smoke": "skipped",
+        "host-marks": "skipped",
+    }
+    actual = _backend_verdict(
+        script,
+        "true",
+        optional_skipped,
+        mode="enforce",
+        decision="SELECTED",
+        run_serial="false",
+        run_pgvector_smoke="false",
+        run_helper_smoke="false",
+        run_host_marks="false",
+    )
+    assert actual.returncode == 0, actual.stdout
+    for optional_job in (
+        "backend-serial",
+        "backend-pgvector-smoke",
+        "helper-signing-smoke",
+        "host-marks",
+    ):
+        for bad_outcome in ("failure", "cancelled"):
+            actual = _backend_verdict(
+                script,
+                "true",
+                optional_skipped | {optional_job: bad_outcome},
+                mode="enforce",
+                decision="SELECTED",
+                run_serial="false",
+                run_pgvector_smoke="false",
+                run_helper_smoke="false",
+                run_host_marks="false",
+            )
+            assert actual.returncode == 1, actual.stdout
     for job in results:
         for outcome in ("failure", "cancelled", "skipped"):
             actual = _backend_verdict(script, "true", results | {job: outcome})
@@ -582,7 +628,36 @@ def _changed_repo(repo: Path, paths: tuple[str, ...]) -> str:
     return base
 
 
-def test_native_classify_step_preserves_document_and_queue_routing(tmp_path: Path) -> None:
+def test_heavy_linux_jobs_run_in_digest_pinned_ghcr_runner_container() -> None:
+    jobs = _workflow_jobs()
+    heavy_jobs = (
+        "backend-shard",
+        "backend-selected",
+        "backend-serial",
+        "backend-pgvector-smoke",
+        "e2e-shard",
+        "e2e-hosted",
+        "e2e-env-guard",
+    )
+    for job_name in heavy_jobs:
+        job = jobs[job_name]
+        container = job["container"]
+        assert container["image"].startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:"), (
+            job_name
+        )
+        assert container["options"] == "--shm-size=2g", job_name
+        assert job["defaults"]["run"]["shell"] == "bash", job_name
+        for step in job["steps"]:
+            uses = str(step.get("uses", ""))
+            assert "./.github/actions/install-pg-redis" not in uses
+            assert "./.github/actions/vendor-pg-runtime" not in uses
+            assert "./.github/actions/install-playwright-deps" not in uses
+            assert "astral-sh/setup-uv" not in uses
+            assert "actions/setup-node" not in uses
+            assert "pnpm/action-setup" not in uses
+
+
+def test_native_classify_step_preserves_document_and_dispatch_routing(tmp_path: Path) -> None:
     step = _step(_workflow_jobs()["classify"], "Classify changed paths")
     assert step["env"]["HEAD_REF"] == "${{ github.head_ref }}"
     doc = "scripts/lint/docs/lint.meiva.okf.md"
@@ -601,9 +676,7 @@ def test_native_classify_step_preserves_document_and_queue_routing(tmp_path: Pat
             ("ui/web/tests/docs/data.meiva.okf.md",),
             ("true", "false"),
         ),
-        ("pull_request", "trunk-merge/batch-42", (doc,), ("false", "true")),
-        ("pull_request", "trunk-temp/batch-42", (doc,), ("false", "true")),
-        ("push", "", (doc,), ("true", "true")),
+        ("workflow_dispatch", "", (doc,), ("true", "true")),
     ]
     for index, (event, head_ref, paths, expected) in enumerate(cases):
         repo = tmp_path / f"repo-{index}"

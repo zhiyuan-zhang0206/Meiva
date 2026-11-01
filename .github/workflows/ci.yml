@@ -1,89 +1,37 @@
-# CI — the repo's only gate. GitHub-hosted runners.
+# CI — dual-mode gate on GitHub-hosted runners.
 #
-# Hosted minutes are free and unmetered for public repos and public forks, so one
-# lane runs everywhere with no canonical-vs-fork gating — and the same economics
-# make SHARDING the speed lever: the pytest suite dominates wall clock, so it
-# fans out over whole-file shards (pytest-split's LPT algorithm, balanced via
-# .test_durations and least_duration — refreshes retain all measured tests;
-# unmeasured tests are costed at this run's average). .test_durations is not in
-# the repository: the daily refresh (scripts/ci/refresh_test_durations.py via
-# .github/workflows/refresh-test-durations.yml) measures isolated shards and
-# saves the merged timings as an Actions cache, `classify` resolves the newest
-# one once per run, and every shard restores that exact key. A run with no cache
-# degrades with a warning: shards split by test count and the selector's time estimates
-# are zero (they only report; the selection is the same).
-# There is no self-hosted fleet and no runner provisioner: a hosted runner
-# starts bare, so each job installs its own toolchain inline — uv, Node 22,
-# Postgres 17 + Redis server binaries on PATH (the suite self-provisions
-# throwaway native clusters via base/deploy/tests/containers.py), and Playwright chromium
-# for e2e (browser dir cached; system deps installed per run).
+# Pull requests run fast incremental checks:
+# - `classify` determines whether `frontend`, `backend`, `e2e`, and optional full-only
+#   backend lanes (`backend-serial`, `backend-pgvector-smoke`, `helper-signing-smoke`,
+#   `host-marks`) apply to the PR diff.
+# - `backend-static` runs incremental `ruff`, `clock_lattice_cli --only`, and `basedpyright`
+#   over `meizel impacted` closure (skipping native Postgres/Redis bootstrap unless
+#   `migrations/` or `db/schema.sql` changed, and reserving Grafana native smoke for full
+#   runs).
+# - `backend-structure` runs incremental `pre-commit` structural gates and `meizel check
+#   --changed` (widening to full `meizel check` and debt diff when manifests, policy, or
+#   deletions appear).
+# - `backend-selected` runs the runtime-impact pytest subset inside the pre-baked GHCR
+#   runner container (`ghcr.io/zhiyuan-zhang0206/meiva-ci-runner`).
+# - `frontend` runs `next typegen`, `tsc --noEmit`, and `prepush_frontend.py --base`
+#   (incremental ESLint, conditional Next.js production build, and targeted Vitest).
 #
-# CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
-# diff through base/deploy/git/repo_change.py, and suites skip when their side is untouched:
-# Documentation without runtime readers skips both suites; structure still checks all classes.
-# Frontend-only skips the backend suite,
-# backend-only skips the frontend suite. e2e runs whenever EITHER side changed
-# (it is the integration net). Draft PRs skip CI entirely until
-# ready_for_review. Skipped required checks satisfy branch protection and the
-# merge queue for the same reason.
-#
-# Branch protection and the Trunk queue key on exactly three check names —
-# "backend (pytest + pyright)", "frontend (eslint + tsc + vitest)",
-# "e2e (Playwright happy path)". The backend and e2e names are AGGREGATOR jobs
-# that fan in their shards (and, for backend, combine coverage and apply the
-# gate), so sharding never touches the protection/queue configuration.
-# Flaky-marked backend tests run in their own serial job; the parallel shards
-# exclude them with `-m "not flaky"`, mirroring the frontend flaky isolation.
-#
-# TEST SELECTION (TEST_SELECTION_MODE, default enforce): a real PR runs the selected
-# subset whenever its impact is computable; the Trunk merge queue runs the full suite and
-# is the backstop. When the runtime-impact selector returns SELECTED, backend-selected
-# runs that subset as the backend pytest gate, on as many shards (1 to 8) as its share of
-# the suite needs, and backend-shard (the 8-way fan-out) is skipped. Every other decision
-# — FULL, SKIP, selector failure — keeps the full fan-out. FULL means the impact is
-# unknown (a global, unmapped or deleted-path change), never that the subset is large: no
-# size or time threshold decides anything. Trunk merge-tree branches (trunk-merge/*,
-# trunk-temp/*) always choose FULL by the selector's first rule, so branch protection, the
-# coverage gate, and batched-tree safety are untouched by enforcement. In shadow mode
-# nothing gates on the subset: the fan-out gates and the subset plus comparison report run
-# informational beside it.
+# Manual `workflow_dispatch` runs (and `release-gate.yml` before channel certification)
+# execute the full repository-wide suite across all shards and smoke lanes.
 #
 # MEIVA_DB_URL / MEIVA_REDIS_URL are pointed at unreachable sentinel ports on
 # purpose. The suite must provision its own throwaway cluster; a sentinel turns
 # "a test quietly reached a real data plane" into a connection error rather than
 # a silent pass.
 #
-# `uses:` is pinned to a commit SHA with the version in a trailing comment — a
-# floating tag (@v6) is a mutable pointer the action's owner can repoint, i.e. a
-# supply-chain write into every run. .github/dependabot.yml keeps the pins fresh
-# via reviewable PRs.
-#
-# CI RUNS ON PULL REQUESTS ONLY. There is no push-to-main run: main only advances
-# through the Trunk merge queue, whose `trunk-merge/*` branch is a pull request that
-# runs this whole workflow on the exact tree that lands, so a second run of the
-# same tree after the merge proved nothing and held roughly a quarter of the
-# runner pool. What the main run used to produce moved to its own owners: shard
-# timings to refresh-test-durations.yml (daily measurement), the test-count
-# baseline to queue runs (see backend-test-counts), and warm dependency caches
-# to cache-warm.yml (hosted caches written by a PR ref are invisible to other PRs;
-# only the default branch's are shared).
-#
-# Artifact publishing is transport, not a gate: every `upload-artifact` step in
-# this workflow continues on error, so a 403/500 while finalizing an upload
-# cannot red a job whose tests passed when the required checks fan in those jobs.
-# Per-shard coverage is the one consumed artifact: it retries once, then records
-# a gap explicitly. This follows the 2026-09-22 incident where a green suite's
-# shard 15/16 upload ejected a queued PR from the Trunk merge queue.
+# `uses:` is pinned to a commit SHA with the version in a trailing comment.
+# Every `upload-artifact` step continues on error so transient artifact-service
+# faults cannot fail a job whose tests passed.
 
 name: CI
 
 on:
-  # Dispatch only (user ruling 2026-10-31 15:47): the pull-request face is off, because a run is
-  # 29 jobs of the shared runner pool and the gate that matters is the one before a cluster
-  # update. A dispatch carries no pull-request context, so `classify` defaults to a full run
-  # (`frontend=true`, `backend=true`) and the structure guard compares against the merge-base
-  # with origin/main. Jobs that only exist for a pull request — diff hints, the merged-tree
-  # preview and the selected backend subset — stay skipped by their own `event_name` guards.
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -91,15 +39,11 @@ permissions:
 
 env:
   # Test-selection mode for PR CI — the single revert switch for the
-  # enforcement decision (2026-09-11). enforce (default): a real PR whose
-  # selector decision is SELECTED runs its selected backend subset as the
-  # backend pytest gate, and the 8-shard fan-out is skipped; every other
-  # decision and every Trunk merge-tree branch keeps the full suite (FULL means
-  # the impact is unknown or the run is a queue branch, never that the subset is
-  # large: the merge queue is the full-suite backstop). shadow:
-  # no PR gates on the subset — the full fan-out gates and the subset plus its
-  # comparison report run informational beside it. Set back to "shadow" to
-  # restore that behavior; all routing below derives from this one value.
+  # enforcement decision (2026-09-11). enforce (default): a PR whose selector
+  # decision is SELECTED runs its selected backend subset as the backend pytest
+  # gate, and the 8-shard fan-out is skipped; every other decision keeps the
+  # full suite. shadow: no PR gates on the subset — the full fan-out gates and
+  # the subset plus its comparison report run informational beside it.
   # See docs/conventions/engineering/test-selection.md.
   TEST_SELECTION_MODE: "enforce"
   # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
@@ -118,32 +62,13 @@ concurrency:
 
 jobs:
   classify:
-    # Which sides does this diff touch? Imports base/deploy/git/repo_change.py directly
-    # (stdlib-only — no venv) over the PR's changed paths. A manual dispatch
-    # always reports both sides changed: it has no diff, so it verifies fully.
-    # Trunk branches always verify the full backend, even for documentation.
-    #
-    # The runtime-impact test selector runs here too (it used to be its own
-    # `test-select` job): it needs the same checkout and changed-path list, and
-    # a separate job cost every shard one more runner-queue wait on a busy pool
-    # (classify, then test-select, then shard). It publishes the decision (and the
-    # active mode) that routes the backend jobs: SELECTED + enforce swaps the
-    # shard fan-out for the subset; every other combination — including the
-    # selector step failing, which leaves the decision empty — keeps the full
-    # fan-out. Queue test branches pass through only to record their forced
-    # FULL decision. The selector step is continue-on-error so a parser failure
-    # keeps this required check's meaning (what changed) intact; the `selector`
-    # output carries its outcome and the required backend aggregator fails on it.
     name: classify change
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
-      # Lists the Actions caches to find the newest test timings.
       actions: read
-    # Draft PRs skip CI except Trunk test branches
-    # (trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
@@ -158,14 +83,15 @@ jobs:
       est_seconds: ${{ steps.selector.outputs.est_seconds }}
       full_est_seconds: ${{ steps.selector.outputs.full_est_seconds }}
       reason: ${{ steps.selector.outputs.reason }}
+      run_serial: ${{ steps.lanes.outputs.run_serial }}
+      run_pgvector_smoke: ${{ steps.lanes.outputs.run_pgvector_smoke }}
+      run_helper_smoke: ${{ steps.lanes.outputs.run_helper_smoke }}
+      run_host_marks: ${{ steps.lanes.outputs.run_host_marks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      # The run's test timings, resolved once here so every shard splits with the same ones.
-      # Without a cache the run goes on (the selector's estimates are zero, the shards split
-      # by test count) and a warning says so.
       - name: Resolve the test durations
         id: durations
         uses: ./.github/actions/resolve-test-durations
@@ -197,9 +123,6 @@ jobs:
 
       - name: Select runtime-impact test subset
         id: selector
-        # Only a real (or Trunk) PR with a backend side has a selection to make;
-        # elsewhere the step is skipped and the full fan-out runs. A failure
-        # retains the full-suite net and fails the required backend aggregator.
         if: ${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}
         continue-on-error: true
         env:
@@ -260,9 +183,6 @@ jobs:
               output.write("\n".join(lines) + "\n")
           PY
 
-      # The shards of the selected subset read the list from here. Artifact transport is not a
-      # gate for classify (a failed upload must not red the required classify check): the shard
-      # that cannot download the list is the one that goes red, and it reruns on its own.
       - name: Publish the selected test list
         id: selected-list
         if: ${{ steps.selector.outputs.decision == 'SELECTED' }}
@@ -284,18 +204,128 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-      # The e2e jobs are the integration net for product behavior; a change that only edits
-      # package-internal unit tests, tooling, a locality manifest (`meizel.toml`) or documentation
-      # prose (a `.md` with a `docs` path segment, never an OKF bundle) cannot change it. The rule
-      # is fixed in scripts/ci/e2e_scope.py (enforced SELECTED subset, every changed path one of
-      # those kinds, never on a Trunk queue branch); an empty output (a selector failure, a non-PR
-      # event) keeps e2e.
+      - name: Select optional backend lanes
+        id: lanes
+        env:
+          EVENT: ${{ github.event_name }}
+          BACKEND: ${{ steps.decide.outputs.backend }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MODE: ${{ steps.selector.outputs.mode }}
+          DECISION: ${{ steps.selector.outputs.decision }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            {
+              echo "run_serial=true"
+              echo "run_pgvector_smoke=true"
+              echo "run_helper_smoke=true"
+              echo "run_host_marks=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$BACKEND" != "true" ]; then
+            {
+              echo "run_serial=false"
+              echo "run_pgvector_smoke=false"
+              echo "run_helper_smoke=false"
+              echo "run_host_marks=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          out = Path(os.environ["GITHUB_OUTPUT"])
+          try:
+              base_merge = subprocess.check_output(
+                  ["git", "merge-base", os.environ["BASE_SHA"], "HEAD"], text=True
+              ).strip()
+              changed = [
+                  line
+                  for line in subprocess.check_output(
+                      ["git", "diff", "--name-only", f"{base_merge}...HEAD"], text=True
+                  ).splitlines()
+                  if line
+              ]
+              mode = os.environ.get("MODE", "")
+              decision = os.environ.get("DECISION", "")
+
+              def file_mentions(paths: list[str], needle: str) -> bool:
+                  for rel in paths:
+                      if not rel.endswith(".py"):
+                          continue
+                      candidate = Path(rel)
+                      if candidate.is_file() and needle in candidate.read_text(encoding="utf-8", errors="ignore"):
+                          return True
+                  return False
+
+              full_fanout = mode != "enforce" or decision != "SELECTED"
+              run_serial = (
+                  full_fanout
+                  or any(
+                      p in {"pyproject.toml", "conftest.py", ".github/workflows/ci.yml"}
+                      or p.startswith(".github/ci-image/")
+                      for p in changed
+                  )
+                  or file_mentions(changed, "flaky")
+              )
+              run_pgvector_smoke = any(
+                  p.startswith(("base/cluster/dataplane/", "db/", "migrations/", ".github/ci-image/"))
+                  or p in {"scripts/ci/pgvector_runtime_smoke.py", ".github/workflows/ci.yml"}
+                  for p in changed
+              )
+              run_helper_smoke = any(
+                  p.startswith(
+                      (
+                          "services/desktop/permissions_helper/",
+                          "base/helper_chain_guard",
+                          "scripts/ci/helper_smoke/",
+                      )
+                  )
+                  or p == ".github/workflows/ci.yml"
+                  for p in changed
+              )
+              run_host_marks = (
+                  any(
+                      p.startswith("scripts/structure/platform_lane")
+                      or p
+                      in {
+                          "tests/fixtures/host_platform.py",
+                          "scripts/ci/host_marks_census.py",
+                          "scripts/lint/host_platform_marks.py",
+                          ".github/workflows/ci.yml",
+                      }
+                      for p in changed
+                  )
+                  or file_mentions(changed, "requires_host")
+              )
+          except Exception as exc:
+              print(f"::warning::Optional backend lane selector failed ({type(exc).__name__}); running all lanes")
+              run_serial = True
+              run_pgvector_smoke = True
+              run_helper_smoke = True
+              run_host_marks = True
+
+          lines = [
+              f"run_serial={'true' if run_serial else 'false'}",
+              f"run_pgvector_smoke={'true' if run_pgvector_smoke else 'false'}",
+              f"run_helper_smoke={'true' if run_helper_smoke else 'false'}",
+              f"run_host_marks={'true' if run_host_marks else 'false'}",
+          ]
+          for line in lines:
+              print(f"optional-lane: {line}")
+          with out.open("a", encoding="utf-8") as handle:
+              handle.write("\n".join(lines) + "\n")
+          PY
+
       - name: Decide whether e2e can be skipped
         id: e2e
-        if: ${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}
+        if: ${{ github.event_name == 'pull_request' && (steps.decide.outputs.frontend == 'true' || steps.decide.outputs.backend == 'true') }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
+          BACKEND: ${{ steps.decide.outputs.backend }}
           MODE: ${{ steps.selector.outputs.mode }}
           DECISION: ${{ steps.selector.outputs.decision }}
         run: |
@@ -303,26 +333,25 @@ jobs:
           trap 'rm -rf "$SCOPE_TMP"' EXIT
           BASE_MERGE="$(git merge-base "$BASE_SHA" HEAD)"
           git diff --name-only "$BASE_MERGE"...HEAD > "$SCOPE_TMP/changed.txt"
+          effective_mode="$MODE"
+          effective_decision="$DECISION"
+          if [ "$BACKEND" != "true" ]; then
+            effective_mode="$TEST_SELECTION_MODE"
+            effective_decision="FRONTEND_ONLY"
+          fi
           python3 scripts/ci/e2e_scope.py \
             --changed-files "$SCOPE_TMP/changed.txt" \
             --base-ref "$BASE_MERGE" \
             --event pull_request \
             --head-ref "$HEAD_REF" \
-            --mode "$MODE" \
-            --decision "$DECISION" | tee -a "$GITHUB_OUTPUT"
+            --mode "$effective_mode" \
+            --decision "$effective_decision" | tee -a "$GITHUB_OUTPUT"
 
   repo-language:
-    # The no-CJK gate must fire on EVERY PR, including docs-only and
-    # skills-only diffs: classify skips the suites for docs-only changes, so a
-    # CJK-only change would otherwise reach main with no language gate. The
-    # gate is stdlib-only (python3 + git ls-files) and scans the whole tree in seconds, so it runs
-    # as its own cheap job rather than being gated behind backend/frontend.
     name: repo language (no raw CJK)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Draft PRs skip CI except Trunk test branches
-    # (trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -342,16 +371,10 @@ jobs:
         run: python3 scripts/lint/locks/package_lock.py
 
   diff-hints:
-    # The backstop for the diff hints (scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md).
-    # The commit-msg and pre-push hooks ask; `--no-verify` and a clone without the hooks skip
-    # them. This job runs the pre-push check on the pull request's own commits and writes every
-    # `Hint-Ack` into the job summary (a directory-wide one marked broad) for the reviewer.
-    # Stdlib only, full history for the merge base. Real pull requests only: a merge-queue
-    # branch carries other pull requests' commits, which were judged on their own.
     name: diff hints
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false && !startsWith(github.head_ref, 'trunk-') }}
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -366,18 +389,10 @@ jobs:
             --base "$BASE_SHA" --head "$HEAD_SHA" --summary "$GITHUB_STEP_SUMMARY"
 
   core-content-manifests:
-    # The content-channel gate (tasks #2915/#3267): core manifests' declared
-    # ranges + requires_commit must hold against the repo's derived host
-    # version. Classify-independent like repo-language above — the check also
-    # catches a range whose bound the calendar has crossed with no file edit —
-    # and it needs FULL history (`git merge-base --is-ancestor`), so
-    # fetch-depth: 0. Seconds-fast, venv-only.
     name: core-content manifests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Draft PRs skip CI except Trunk test branches
-    # (trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -396,25 +411,10 @@ jobs:
         run: uv run python scripts/content_lint/lint_core_content_manifests.py
 
   doc-lints:
-    # The doc-lint family must fire on EVERY PR — including docs-only diffs,
-    # where a doc reference is most likely to go stale: classify skips the
-    # suites for docs-only changes, and these hooks are otherwise carried only
-    # by the classify-gated backend-structure / merged-tree-structure jobs.
-    # Same classify-independent pattern as repo-language above and secret-scan
-    # below. The family is every markdown/skill/OKF-facing hook that is
-    # venv-only, node-free, seconds-fast: doc references, narrative facts,
-    # doc symbols / anchors / roster, AGENTS.md + SKILL.md ceilings and
-    # descriptions, and the OKF graph (membership rationale: task #3222 / the
-    # PR description). Whole-tree by design, not changed-files: that is the
-    # hooks' own contract (`pass_filenames: false` in .pre-commit-config.yaml —
-    # a link goes stale from a move anywhere, not just an edit to the doc
-    # citing it). Not a bare python3 job: the hooks run from the locked venv.
     name: doc lints (pre-commit family)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Draft PRs skip CI except Trunk test branches
-    # (trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -428,9 +428,6 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Run the doc-lint family (--all-files)
-        # `pre-commit run` takes a single hook id, so run one per id and collect
-        # failures — every hook reports in one job run instead of stopping at
-        # the first failure.
         run: |
           status=0
           for hook in check-doc-references check-narrative-facts lint-doc-symbols lint-doc-anchors lint-doc-roster lint-agents-md-size lint-skill-descriptions lint-skill-md-size lint-meiva-okf; do
@@ -439,19 +436,10 @@ jobs:
           exit $status
 
   secret-scan:
-    # Run independently of classify: a secret can be introduced by any file,
-    # including a docs-only change that skips the backend and frontend suites.
-    # Scans only the commits this change adds (a PR, a Trunk merge-queue branch,
-    # or a workflow_dispatch branch against origin/main; a direct manual dispatch
-    # on main scans a bounded recent window of 50 commits). Scanning full history
-    # on every dispatch took 12 minutes (720s) and is re-proved nightly in
-    # secret-scan-history.yml. The job name is a required check.
     name: secret scan (Gitleaks)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # Draft PRs skip CI except Trunk test branches
-    # (trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -469,10 +457,6 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
-            # The checkout is the PR's merge commit: its first parent is the base
-            # this run was built against, so BASE..HEAD is exactly the PR's own
-            # commits (plus the merge). A checkout that is not a merge commit
-            # falls back to the merge-base with the event's base sha, as classify does.
             if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
               base="$(git rev-parse --verify HEAD^1)"
             else
@@ -484,10 +468,6 @@ jobs:
             exit 0
           fi
 
-          # Manual dispatch (workflow_dispatch) or non-PR run:
-          # Fetch origin/main so the common ancestor can be determined.
-          # Note: actions/checkout uses fetch-depth: 0, so the clone is complete unless
-          # configured otherwise. Guard against shallow repositories just in case.
           if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
             git fetch --unshallow origin +refs/heads/main:refs/remotes/origin/main
           else
@@ -499,28 +479,18 @@ jobs:
           : "${merge_base:?unable to resolve merge-base with origin/main}"
 
           if [ "$merge_base" != "$head_sha" ]; then
-            # On a branch diverged from origin/main: scan only the branch's added commits.
             echo "scanning ${merge_base}..HEAD"
             gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${merge_base}..HEAD" .
           else
-            # Direct run on main (or commit reachable from origin/main): scan a bounded recent
-            # window (-n 50). Full repository history is re-scanned nightly in secret-scan-history.yml.
             echo "merge-base equals HEAD; scanning bounded recent window (-n 50)"
             gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="-n 50" .
           fi
 
   dependency-audit:
-    # Informational first: dependency findings are visible in every CI run but
-    # do not block delivery until the remediation policy is ready to enforce.
-    # Nobody reads a green-by-construction job, so the weekly
-    # dependency-audit.yml run is what turns high/critical findings (and
-    # behind binary pins) into a tracked issue.
     name: dependency audit (informational)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Draft PRs skip CI except Trunk test branches
-    # (trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -528,8 +498,6 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 0.13.1
-          # This job installs no project dependencies. Do not let it publish
-          # an incomplete cache under the lockfile key used by install jobs.
           enable-cache: false
 
       - name: Audit locked Python dependencies
@@ -563,6 +531,36 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Resolve PR base and static scope
+        if: github.event_name == 'pull_request'
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=2 origin "$(git rev-parse HEAD)"
+          base=""
+          if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            base="$(git rev-parse --verify --quiet 'HEAD^1^{commit}' || true)"
+          fi
+          if [ -z "$base" ]; then
+            base="$EVENT_BASE_SHA"
+          fi
+          git fetch --depth=1 origin "$base"
+          resolved_base="$(git rev-parse FETCH_HEAD^{commit})"
+          echo "STATIC_BASE_SHA=$resolved_base" >> "$GITHUB_ENV"
+          changed_file="$RUNNER_TEMP/backend-static-changed.txt"
+          git diff --name-only --no-renames "$resolved_base" HEAD > "$changed_file"
+          echo "STATIC_CHANGED_FILE=$changed_file" >> "$GITHUB_ENV"
+          run_mig="false"
+          while IFS= read -r path; do
+            case "$path" in
+              migrations/*|db/schema.sql|scripts/ci/migration_smoke.py|scripts/ci/test_migrations_apply.sh)
+                run_mig="true"
+                break
+                ;;
+            esac
+          done < "$changed_file"
+          echo "RUN_MIGRATION_SMOKE=$run_mig" >> "$GITHUB_ENV"
+
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -570,6 +568,7 @@ jobs:
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
+        if: ${{ github.event_name != 'pull_request' || env.RUN_MIGRATION_SMOKE == 'true' }}
         uses: ./.github/actions/install-pg-redis
 
       - name: Install Python deps
@@ -579,15 +578,18 @@ jobs:
         run: uv lock --check
 
       - name: Vendored Postgres runtime (production's server build)
+        if: ${{ github.event_name != 'pull_request' || env.RUN_MIGRATION_SMOKE == 'true' }}
         uses: ./.github/actions/vendor-pg-runtime
 
       - name: Cache native Grafana 13.2.3
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/grafana_13.2.3_36482603486_linux_amd64.tar.gz
           key: grafana-native-13.2.3-36482603486-linux-amd64
 
       - name: Validate native Grafana alert provisioning and Trace navigation (no Docker)
+        if: ${{ github.event_name != 'pull_request' }}
         shell: bash
         run: |
           archive="$RUNNER_TEMP/grafana_13.2.3_36482603486_linux_amd64.tar.gz"
@@ -607,30 +609,161 @@ jobs:
             uv run pytest tests/integration/test_grafana_native_runtime.py -q
 
       - name: Run ruff check
+        if: ${{ github.event_name != 'pull_request' }}
         run: uv run ruff check
+
+      - name: Run ruff check (incremental PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          full=false
+          files=()
+          while IFS= read -r path; do
+            case "$path" in
+              pyproject.toml|ruff.toml|.ruff.toml) full=true ;;
+              *.py|*.pyi) [[ -f "$path" ]] && files+=("$path") ;;
+            esac
+          done < "$STATIC_CHANGED_FILE"
+          if [[ "$full" == true ]]; then
+            uv run ruff check
+          elif [[ "${#files[@]}" -gt 0 ]]; then
+            uv run ruff check "${files[@]}"
+          else
+            echo "No changed Python files; skipping ruff check."
+          fi
+
       - name: Run ruff format check
+        if: ${{ github.event_name != 'pull_request' }}
         run: uv run ruff format --check
+
+      - name: Run ruff format check (incremental PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          full=false
+          files=()
+          while IFS= read -r path; do
+            case "$path" in
+              pyproject.toml|ruff.toml|.ruff.toml) full=true ;;
+              *.py|*.pyi) [[ -f "$path" ]] && files+=("$path") ;;
+            esac
+          done < "$STATIC_CHANGED_FILE"
+          if [[ "$full" == true ]]; then
+            uv run ruff format --check
+          elif [[ "${#files[@]}" -gt 0 ]]; then
+            uv run ruff format --check "${files[@]}"
+          else
+            echo "No changed Python files; skipping ruff format --check."
+          fi
+
       - name: Lint migrations
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # On a pull request, a merged migration must be byte-identical in the
-          # base revision THIS event was built against and in the checked-out
-          # merge ref.
           args=()
           if [ "$EVENT" = "pull_request" ]; then
-            git fetch --depth=1 origin "$BASE_SHA"
-            args=(--base "$(git rev-parse FETCH_HEAD^{commit})")
+            if [ -n "${STATIC_BASE_SHA:-}" ]; then
+              args=(--base "$STATIC_BASE_SHA")
+            else
+              git fetch --depth=1 origin "$BASE_SHA"
+              args=(--base "$(git rev-parse FETCH_HEAD^{commit})")
+            fi
           fi
           uv run python scripts/content_lint/lint_migrations.py "${args[@]}"
+
       - name: Lint clock lattice
+        if: ${{ github.event_name != 'pull_request' }}
         run: uv run python -m meizel.owners.clock_lattice_cli
+
+      - name: Lint clock lattice (incremental PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          full=false
+          files=()
+          while IFS= read -r path; do
+            case "$path" in
+              meizel.policy.toml|meizel/owners/*) full=true ;;
+              *.py) [[ -f "$path" ]] && files+=("$path") ;;
+            esac
+          done < "$STATIC_CHANGED_FILE"
+          if [[ "$full" == true ]]; then
+            uv run python -m meizel.owners.clock_lattice_cli
+          elif [[ "${#files[@]}" -gt 0 ]]; then
+            uv run python -m meizel.owners.clock_lattice_cli --only "${files[@]}"
+          else
+            echo "No changed Python files; skipping clock lattice check."
+          fi
+
       - name: Apply migrations to fresh DB + trigger smoke
-        run: uv run python scripts/ci/migration_smoke.py
+        if: ${{ github.event_name != 'pull_request' || env.RUN_MIGRATION_SMOKE == 'true' }}
+        run: |
+          if [ -n "${CI_VENDORED_RUNTIME_ROOT:-}" ] && [ -d "$CI_VENDORED_RUNTIME_ROOT" ]; then
+            mkdir -p "$HOME/.meiva"
+            ln -sfn "$CI_VENDORED_RUNTIME_ROOT" "$HOME/.meiva/runtime"
+          fi
+          uv run python scripts/ci/migration_smoke.py
+
       - name: Run pyright
+        if: ${{ github.event_name != 'pull_request' }}
         # Pyright rejects --stats with --threads; time retains elapsed/CPU cost.
         run: time uv run basedpyright --threads 2
+
+      - name: Run pyright (impacted closure)
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          full=false
+          changed=()
+          while IFS= read -r path; do
+            [[ -n "$path" ]] || continue
+            changed+=("$path")
+            case "$path" in
+              pyproject.toml|pyrightconfig.json|uv.lock|.python-version|typings/*)
+                full=true
+                ;;
+              *.py|*.pyi)
+                if [[ ! -f "$path" ]]; then
+                  full=true
+                fi
+                ;;
+            esac
+          done < "$STATIC_CHANGED_FILE"
+
+          if [[ "$full" == true ]]; then
+            echo "Global typecheck input or deleted Python module detected; running full basedpyright."
+            time uv run basedpyright --threads 2
+            exit 0
+          fi
+          if [[ "${#changed[@]}" -eq 0 ]]; then
+            echo "No changed paths; skipping basedpyright."
+            exit 0
+          fi
+
+          impacted_file="$RUNNER_TEMP/pyright-impacted.txt"
+          set +e
+          uv run python -m meizel impacted "${changed[@]}" > "$impacted_file"
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            echo "::warning::meizel impacted exited $status; widening to full basedpyright"
+            time uv run basedpyright --threads 2
+            exit 0
+          fi
+
+          targets=()
+          while IFS= read -r mod; do
+            [[ -n "$mod" && -f "$mod" ]] && targets+=("$mod")
+          done < "$impacted_file"
+
+          if [[ "${#targets[@]}" -eq 0 ]]; then
+            echo "No Python modules in meizel impacted closure; skipping basedpyright."
+            exit 0
+          fi
+          echo "Running basedpyright on ${#targets[@]} impacted module(s)."
+          time uv run basedpyright --threads 2 "${targets[@]}"
 
   backend-static-tests:
     name: backend static tests (no native data plane)
@@ -674,8 +807,6 @@ jobs:
         if: needs.classify.outputs.backend == 'true'
         env:
           COVERAGE_FILE: coverage-data-static
-        # The plugin owns this lane and the native exclusions. No data plane
-        # is provisioned; all private-home and host-effect guards stay active.
         run: |
           mkdir -p tmp
           uv run pytest --test-environment=static -q -n 4 --dist=loadfile \
@@ -719,10 +850,6 @@ jobs:
       - name: Upload coverage data
         id: coverage-upload
         if: needs.classify.outputs.backend == 'true'
-        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
-        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
-        # The retry absorbs that transient service fault; the note below records
-        # the outcome for the coverage gate's arrival check.
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -731,10 +858,6 @@ jobs:
 
       - name: Retry coverage data upload
         id: coverage-upload-retry
-        # One immediate retry, bounded: transient 403/500 from the artifact
-        # service is the observed failure mode, and a failed upload is the only
-        # copy of the data — a failed download can be retried by re-running the
-        # aggregator, a lost upload cannot.
         if: ${{ steps.coverage-upload.outcome == 'failure' }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -753,16 +876,6 @@ jobs:
           fi
 
   backend-structure:
-    # Structure and typed code-comment checks run on every change. Node/pnpm
-    # supplies the source parser; the four codegen freshness hooks run only
-    # when the PR diff matches their configured files:
-    # regexes. Manual dispatch and selector errors run B; a no-match PR logs STEP SKIPPED.
-    # Other CI jobs own ruff/pyright/migrations/clock, frontend gates and core
-    # manifests. Pre-push-only pyright/tsc/eslint/vitest remain redundant SKIP entries.
-    # Runs for every eligible change class, including documentation: directory
-    # structure is independent of test-suite classification. Manual dispatch
-    # runs all four hooks; the merge queue re-evaluates the same selector on
-    # the combined tree before landing, and that tree is what main receives.
     name: backend structure (pre-commit lint + codegen freshness)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -770,8 +883,6 @@ jobs:
     if: ${{ needs.classify.result == 'success' }}
     permissions:
       contents: read
-      # Reads the pull request(s) a Trunk batch tests: the queue's own body carries no declaration,
-      # and the one that answers its removals is in those pull requests.
       pull-requests: read
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
@@ -791,22 +902,6 @@ jobs:
       - name: Fetch base revision for structure guard
         if: github.event_name == 'pull_request'
         run: |
-          # Pin the comparison to the base revision THIS event was built
-          # against — the same revision as the checked-out merge ref: HEAD^1 is
-          # that base (the merge commit's first parent). The checkout is
-          # depth-1, so the parent object is absent and the merge commit must
-          # be deepened one level first (its parents are base and head). Note
-          # that a failed plain rev-parse echoes its own argument: the literal
-          # string would reach the fetch below as an invalid refspec (run
-          # 37081265642), hence --verify. The event's base.sha lags the merge
-          # ref's base for a stale branch (it is the head-to-base sync point),
-          # and comparing the current tree against that older shard set fails
-          # hard once a section retires (task #4903, run 37076721939 on
-          # #3631); pinning the base branch's *current* tip instead would
-          # report a phantom "raised" for every in-between shrink while the
-          # run waits in the queue (task #4597, run 35859679689 on #3238).
-          # base.sha stays only as the fallback for a checkout that is not a
-          # merge ref.
           git fetch --depth=2 origin "$(git rev-parse HEAD)"
           base=""
           if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
@@ -821,8 +916,6 @@ jobs:
       - name: Fetch comparison ancestry for manual structure guard
         if: github.event_name == 'workflow_dispatch'
         run: |
-          # Manual refs are source commits, not synthesized PR merge refs.
-          # Fetch their full ancestry to compare against the actual common base.
           git fetch --unshallow origin "$(git rev-parse HEAD)" \
             refs/heads/main:refs/remotes/origin/main
           base="$(git merge-base -- HEAD refs/remotes/origin/main)"
@@ -848,10 +941,7 @@ jobs:
         run: bash scripts/content_lint/code_comments/check.sh changed "${LINT_STRUCTURE_BASELINE_BASE:?missing comparison base}"
 
       - name: Check every source note link in the repository
-        # The changed check scans the pull request's own sources so a commit costs what it
-        # touched; a link broken in a file the change does not touch would otherwise reach
-        # main unchecked. `validate` is that whole-tree sweep — every parsed note link, no
-        # prose migration — and it is why the narrowed scan is safe.
+        if: github.event_name != 'pull_request'
         run: bash scripts/content_lint/code_comments/check.sh validate
 
       - name: Test TypeScript comment parser
@@ -865,84 +955,104 @@ jobs:
           key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml', '.python-version', 'uv.lock') }}
 
       - name: Run pre-commit structural gates (--all-files)
-        # Segment A: keep the existing exclusions and move only codegen to B.
+        if: github.event_name != 'pull_request'
         env:
           SKIP: check-code-comments,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
         run: env -u VIRTUAL_ENV uv run pre-commit run --all-files
 
-      - name: Locality gate (meizel check, whole repository)
-        run: env -u VIRTUAL_ENV uv run python -m meizel check
+      - name: Run pre-commit structural gates (incremental PR)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          SKIP: check-code-comments,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
+        run: |
+          path_file="$(mktemp)"
+          trap 'rm -f "$path_file"' EXIT
+          git diff --name-only --no-renames -z "${LINT_STRUCTURE_BASELINE_BASE:?missing comparison base}" HEAD > "$path_file"
+          widen=false
+          files=()
+          while IFS= read -r -d '' path; do
+            if [[ ! -e "$path" && ! -L "$path" ]]; then
+              widen=true
+              continue
+            fi
+            case "$path" in
+              -*|.pre-commit-config.yaml|scripts/lint/*|scripts/structure/*|scripts/content_lint/*|meizel/owners/*)
+                widen=true
+                ;;
+            esac
+            files+=("$path")
+          done < "$path_file"
+
+          if [[ "$widen" == true ]]; then
+            echo "Structural tooling or file deletion detected; widening pre-commit to --all-files."
+            env -u VIRTUAL_ENV uv run pre-commit run --all-files
+          elif [[ "${#files[@]}" -gt 0 ]]; then
+            env -u VIRTUAL_ENV uv run pre-commit run --files "${files[@]}"
+          else
+            echo "No changed files in PR diff; skipping pre-commit structural hooks."
+          fi
+
+      - name: Locality gate (meizel check)
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "MEIZEL_FULL_CHECK=true" >> "$GITHUB_ENV"
+            env -u VIRTUAL_ENV uv run python -m meizel check
+            exit 0
+          fi
+          path_file="$(mktemp)"
+          trap 'rm -f "$path_file"' EXIT
+          git diff --name-only --no-renames -z "${LINT_STRUCTURE_BASELINE_BASE:?missing comparison base}" HEAD > "$path_file"
+          full=false
+          changed=()
+          while IFS= read -r -d '' path; do
+            if [[ ! -e "$path" && ! -L "$path" ]]; then
+              full=true
+              continue
+            fi
+            case "$path" in
+              meizel.toml|*/meizel.toml|meizel.policy.toml|meizel/*)
+                full=true
+                ;;
+              *.py|*.sh|*.toml|*.yaml|*.yml)
+                changed+=("./$path")
+                ;;
+            esac
+          done < "$path_file"
+
+          if [[ "$full" == true ]]; then
+            echo "Manifest, policy, meizel source, or file deletion detected; running full meizel check."
+            echo "MEIZEL_FULL_CHECK=true" >> "$GITHUB_ENV"
+            env -u VIRTUAL_ENV uv run python -m meizel check
+          elif [[ "${#changed[@]}" -gt 0 ]]; then
+            echo "MEIZEL_FULL_CHECK=false" >> "$GITHUB_ENV"
+            env -u VIRTUAL_ENV uv run python -m meizel check --changed "${changed[@]}"
+          else
+            echo "MEIZEL_FULL_CHECK=false" >> "$GITHUB_ENV"
+            echo "No Python, manifest, or role-list input changed; skipping meizel."
+          fi
 
       - name: Allowance policy removals need a declaration
-        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
-        # meizel.policy.toml is the one closed list of allowances, so a removed entry is the one
-        # change in the repository that narrows what the gates report and still passes every one of
-        # them: `check` finds nothing left to say, and `debt diff` sees debt disappear, the one
-        # direction it allows. So a removal declares itself in the pull request body — whose text
-        # is the squash message that lands — with one line per table or entry:
-        #
-        #   Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <replacement or gap>
-        #
-        # A Trunk batch is the exception: the queue writes the batch's body itself, and its branch
-        # keeps each member's own commit behind a queue merge that this job's shallow checkout never
-        # walks to, so a batch's record is the pull request(s) the batch names and tests, read through
-        # `gh`. A batch with a removal standing that cannot read them names the record it could not
-        # read and fails; with nothing removed it never reads a record at all. A local run reads the
-        # commits; --record names a file to read. Added entries are
-        # reported in the summary and never asked about: a widening is what the reviewer reads in the
-        # diff, not a declaration to write.
-        #
-        # A batch also tests the batches queued before it (the queue merges each one onto the tree it
-        # tested last), and their changes are not in its body. A removal this batch does not answer
-        # is therefore followed to the commit that took the declaration away, and answered by that
-        # commit's own pull request; nothing else may answer it. The step fetches the batch's whole
-        # history for that, and only when a removal is left to attribute. Unreadable, or a commit no
-        # pull request names, the removal stays unanswered and the run fails naming it (run
-        # 40874861817 rejected #7693 the other way, over a removal #7603 had already declared).
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' && env.MEIZEL_FULL_CHECK == 'true' }}
         env:
-          # The token `gh` reads the batch's pull requests with. Without it a batch with a removal
-          # to judge fails naming the record it could not read; with nothing removed it is untouched.
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The record is also written out: the steps after this one read the same text, so a
-          # `Symbol-Move` line and the `Policy-Removal` lines can never come from two different
-          # descriptions of the same change.
           env -u VIRTUAL_ENV uv run python scripts/lint/policy_removal.py \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-removal=fail \
             --event "${GITHUB_EVENT_PATH:-}" --summary "$GITHUB_STEP_SUMMARY" \
             --record-out "$RUNNER_TEMP/pull-request-record.md"
 
       - name: Detection surface against the base (listed, never required)
-        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
-        # What the checker can still report is decided by this repository's meizel.policy.toml and by
-        # every directory's meizel.toml `[roots]` and `[state]`; only a *removal* of one has a gate
-        # (the step above). An added allowance, an added `unless` clause and an added root all narrow
-        # the surface quietly: every gate still passes and nothing is printed anywhere. So the whole
-        # comparison is printed here as one block, by direction - narrower, wider, moved, unknown -
-        # and it never fails a run. The block exists so a reviewer sees a quiet narrowing, not so a
-        # run stops on one.
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' && env.MEIZEL_FULL_CHECK == 'true' }}
         run: |
           env -u VIRTUAL_ENV uv run python -m meizel policy surface \
             --against "$LINT_STRUCTURE_BASELINE_BASE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Recorded locality debt against the base (fails on growth)
-        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
-        # Strict-to-be debt may only shrink. The one exception is a rule change (it edits meizel's
-        # rule code, its policy, or a manifest's declarations, which decide what is an acquisition):
-        # the tool runs the new device on the base's content and reports the change it causes there,
-        # which widening a rule makes unavoidable, and fails the growth the content causes. The base
-        # may be main or a merge-queue parent; the comparison does not depend on which, so a queued
-        # PR is not blamed for the one ahead of it. Nobody judges it by eye.
-        #
-        # A change that moves a top-level function or class between files declares it in the same
-        # record, one line per move:
-        #
-        #   Symbol-Move: <old file>::<name> -> <new file> — <why>
-        #
-        # The base's replay then reads that symbol at its new home, so the same site is measured once
-        # instead of twice — once under the old name, which no longer exists, and once under the new
-        # one. Only a declared move applies, only when the diff really made it, and every rewrite is
-        # copied to the summary: a gate that repairs the tree it measures has to say so.
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' && env.MEIZEL_FULL_CHECK == 'true' }}
         run: |
           set -o pipefail
           moves="$RUNNER_TEMP/pull-request-record.md"
@@ -965,7 +1075,6 @@ jobs:
 
       - name: Select codegen freshness from changed files
         id: codegen
-        # Selector failures run B; only the freshness hooks gate the result.
         continue-on-error: true
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -1025,155 +1134,25 @@ jobs:
           env -u VIRTUAL_ENV uv run pre-commit run events-registry-fresh --all-files
           env -u VIRTUAL_ENV uv run pre-commit run config-lite-table-fresh --all-files
 
-
-  merged-tree-structure:
-    # #1584 caught a file-size violation only after the Trunk Merge Queue
-    # combined main and a PR. This previews that merged tree at PR time.
-    # Informational during its observation phase: findings do not block the
-    # workflow or become a required status; the queue remains authoritative.
-    name: merged tree structure (informational)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    needs: [classify]
-    if: ${{ github.event_name == 'pull_request' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') }}
-    env:
-      MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
-      MEIVA_REDIS_URL: redis://127.0.0.1:1/0
-      # Same hook set as backend-structure: hooks already covered by other
-      # jobs are skipped here too; freshness runs unconditionally on this tree.
-      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Materialize merged tree (origin/main into head, no commit)
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/merged-tree"
-          # No combined tree exists when the required source checks already
-          # cover a head that contains main. Keep the queue checks unchanged.
-          if git merge-base --is-ancestor origin/main HEAD; then
-            echo "Source head already contains origin/main." > "$RUNNER_TEMP/merged-tree/merge.out"
-            echo "STATUS=unchanged" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          # Hosted runners ship without a git identity, and merge --no-commit
-          # still insists on one — pin the GitHub Actions bot identity locally
-          # (this checkout is ephemeral).
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Real 3-way merge with NO commit: --no-commit stages the merged tree
-          # in the index / working tree, --no-ff forces it even when main is a
-          # merge-base match. A conflict exits non-zero — recorded and skipped
-          # (the queue surfaces it anyway). The restore step below always resets
-          # index + worktree and clears the in-progress merge state, so nothing
-          # leaks from this job.
-          if git merge --no-commit --no-ff origin/main > "$RUNNER_TEMP/merged-tree/merge.out" 2>&1; then
-            echo "STATUS=merged" >> "$GITHUB_ENV"
-          else
-            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/merged-tree/conflicts.txt" 2>&1 || true
-            echo "::warning::Merged-tree lint skipped — origin/main does not merge cleanly into the PR head"
-            echo "STATUS=conflict" >> "$GITHUB_ENV"
-          fi
-
-      - name: Install uv
-        if: ${{ env.STATUS == 'merged' }}
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: 0.13.1
-          enable-cache: true
-
-      - name: Install Python deps
-        if: ${{ env.STATUS == 'merged' }}
-        uses: ./.github/actions/uv-sync
-
-      - name: Install Node
-        if: ${{ env.STATUS == 'merged' }}
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-
-      - name: Install pnpm
-        if: ${{ env.STATUS == 'merged' }}
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: "11.9.0"
-          cache: true
-          cache_dependency_path: ui/web/pnpm-lock.yaml
-
-      - name: Install frontend deps (codegen freshness)
-        if: ${{ env.STATUS == 'merged' }}
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
-
-      - name: Run pre-commit structural gates on merged tree (--all-files)
-        if: ${{ env.STATUS == 'merged' }}
-        continue-on-error: true
-        # The real index holds the staged merged tree — --all-files enumerates it.
-        run: uv run pre-commit run --all-files 2>&1 | tee "$RUNNER_TEMP/merged-tree/pre-commit.log"
-
-      - name: Restore head state (no leftover merge state)
-        if: ${{ always() }}
-        run: |
-          git reset --hard HEAD
-          git clean -fd
-
-      - name: Upload merged-tree lint report
-        if: ${{ always() }}
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: merged-tree-structure
-          path: ${{ runner.temp }}/merged-tree/
-          if-no-files-found: ignore
-
-      - name: Write job summary (informational)
-        if: ${{ always() }}
-        run: |
-          {
-            echo "### merged tree structure (informational)"
-            case "${STATUS:-none}" in
-              merged)   echo "Merged-tree lint completed — full log in artifact \`merged-tree-structure\`." ;;
-              unchanged) echo "Skipped: source head already contains origin/main; required source and queue checks cover this tree." ;;
-              conflict) echo "Skipped: origin/main does not merge cleanly into the PR head." ;;
-              *)        echo "Skipped: merged tree was not materialized." ;;
-            esac
-          } >> "$GITHUB_STEP_SUMMARY"
-
   backend-shard:
     name: backend shard (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 20
-    # Skipped only on the enforced-subset path (mode==enforce and the selector
-    # returned SELECTED — backend-selected takes over as the gate). Shadow
-    # mode, FULL/SKIP decisions, selector failures (empty decision) and
-    # non-PR events all run the full fan-out.
     needs: [classify]
-    # The status check prevents a skipped selector (a manual dispatch runs none)
-    # from skipping the full suite, while allowing workflow cancellation to stop it.
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.classify.outputs.mode != 'enforce' || needs.classify.outputs.decision != 'SELECTED') }}
     strategy:
       fail-fast: false
-      # 8 shards (was 16, 12 before that). The sizing metric is throughput, not queue
-      # wait: the hosted pool runs about 20 jobs at once and a CI run is ~38 jobs, so
-      # when PRs are waiting the pool is the bottleneck and a run's cost in job-minutes
-      # decides how many runs land per hour. Every shard repeats ~1.75 job-min of fixed
-      # work (~0.65 toolchain setup plus ~1.1 whole-repo collection that builds the file
-      # plan) against ~2.1 job-min of tests, so 16 shards cost ~62 job-min and 8 cost ~48
-      # (-14 of a ~110 job-min run, about +14% runs/hour). With the pool idle a single PR is
-      # ~2 min slower (shard ~6.0 vs ~3.9 min); once two PRs compete (<=10 slots each) the
-      # 8-way run is faster, as 16 shards no longer fit in one wave. Measured 2026-10-13 on
-      # queue run 38444981762. Sizing for waiting time alone (the #5425 decision) is what
-      # this replaces.
       matrix:
         group: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
-      # One data file per shard so the aggregator can `coverage combine` them.
       COVERAGE_FILE: coverage-data-${{ matrix.group }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1183,37 +1162,22 @@ jobs:
         with:
           key: ${{ needs.classify.outputs.durations_key }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: 0.13.1
-          enable-cache: true
-
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
-
-      # This job's population contains native tests that shell out to `node` against
-      # `ui/web/node_modules/typescript` (scripts/content_lint/code_comments/tests/
-      # test_incremental.py and test_typescript_index.py, via typescript.mjs). They are not
-      # static tests, so `--omit-static-tests` does not exclude them: without this install,
-      # any shard that draws one of them fails (#8047 removed it and made shard 3/8 red).
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version: 22
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: "11.9.0"
-          cache: true
-          cache_dependency_path: ui/web/pnpm-lock.yaml
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript source parser)
         working-directory: ui/web
@@ -1222,23 +1186,6 @@ jobs:
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
-        # Native pytest failure makes this job red; JUnit validation also
-        # catches missing evidence and a success exit with recorded failures.
-        # Hang forensics (task #3328): the canary shard has stalled silently
-        # ~17 min at ~96% until the 20-min cap killed it (e.g. run 34779755502
-        # — dead output, workers idle). -o faulthandler_timeout=300 uses the
-        # built-in faulthandler plugin (no new dependency) to arm a per-test
-        # dump in every xdist worker: the next stall prints the stuck worker's
-        # stacks — test frames included — into this log. 300s is ~8x the
-        # slowest backend test (.test_durations max 37s, refreshed nightly
-        # from these runners) and re-arms per test, so a healthy slow run
-        # cannot false-positive. A stall outside any test (controller, or a
-        # worker between items) produces no dump — the cap stays its backstop.
-        #
-        # Fresh complete collection follows pyproject.toml's testpaths on this
-        # runner. Checked whole-file groups retain every eligible node and its
-        # fixture closure; workers only import their group's files. Planning or
-        # collection validation errors cannot fall back to a different split.
         run: |
           set -e
           set -o pipefail
@@ -1267,9 +1214,6 @@ jobs:
             echo "::warning title=backend shard ${{ matrix.group }} attempt-1 failure::pytest exit $status, retried once"
             echo "FLAKE-RETRY group=${{ matrix.group }} attempt=1 exit=$status"
             echo "retried=true" >> "$GITHUB_OUTPUT"
-            # Attempt 1's partial coverage would append into attempt 2's data
-            # file (coverage.py appends by default) and flatten the combine;
-            # drop it so the retry writes a clean per-shard file.
             rm -f "$COVERAGE_FILE"
             uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 --dist=loadfile \
               -p scripts.ci.file_shard_shadow --file-shard-execute \
@@ -1285,11 +1229,6 @@ jobs:
           exit "$status"
 
       - name: Report executed test counts
-        # What this shard actually ran, from the JUnit report pytest already wrote
-        # (the -q log has no test ids): the total and the count per tests/ directory,
-        # in this log and the job summary. The last attempt's report wins. It is also a
-        # gate: no JUnit report (pytest died before writing one, e.g. a plugin failed
-        # to import) or no executed test at all reds the shard.
         if: ${{ !cancelled() }}
         run: >
           python3 scripts/ci/shard_counts.py shard --group ${{ matrix.group }}
@@ -1298,7 +1237,6 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
 
       - name: Upload executed test counts
-        # Input of the `backend test counts` job; informational, never a gate.
         if: ${{ !cancelled() }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1337,10 +1275,6 @@ jobs:
 
       - name: Upload coverage data
         id: coverage-upload
-        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
-        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
-        # The retry absorbs that transient service fault; the note below records
-        # the outcome for the coverage gate's arrival check.
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -1349,10 +1283,6 @@ jobs:
 
       - name: Retry coverage data upload
         id: coverage-upload-retry
-        # One immediate retry, bounded: transient 403/500 from the artifact
-        # service is the observed failure mode, and a failed upload is the only
-        # copy of the data — a failed download can be retried by re-running the
-        # aggregator, a lost upload cannot.
         if: ${{ steps.coverage-upload.outcome == 'failure' }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1376,36 +1306,24 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pg-fixture-logs-shard-${{ matrix.group }}
-          # The fixture only writes logs when it fails to bring pg up, so an
-          # empty dir is the normal case and must not fail the upload.
           if-no-files-found: ignore
           path: tmp/pg-fixture-logs/
 
   backend-selected:
-    # Enforce mode: the backend pytest gate for a SELECTED pull request
-    # (backend-shard is skipped in that same combination). Shadow mode: it
-    # stays informational and the full fan-out gates — the mode split is
-    # exactly the continue-on-error expression below. It never contributes
-    # coverage artifacts: the coverage gate lives on the full fan-out, which
-    # every queue test branch still runs.
-    #
-    # The subset runs on as many shards as its share of the suite needs at the size of
-    # one full shard (classify publishes `shards` and `groups`; the selector owns the
-    # arithmetic), so a subset that is the whole suite is as wide as the fan-out above
-    # and a small one is a single short job. Each shard splits the list with the same
-    # whole-file planner the full fan-out uses, restricted to the selected files.
     name: backend selected subset (${{ matrix.group }}/${{ needs.classify.outputs.shards }})
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 20
-    # In shadow mode checkout, provisioning, and artifact faults stay
-    # informational as well; in enforce mode the job is a real gate.
     continue-on-error: ${{ needs.classify.outputs.mode != 'enforce' }}
     needs: [classify]
     if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.backend == 'true' && needs.classify.outputs.decision == 'SELECTED' }}
     strategy:
       fail-fast: false
-      # `groups` is empty on every run that selects nothing; the job `if` above skips those
-      # before the matrix is used, and the fallback only keeps the expression valid.
       matrix:
         group: ${{ fromJSON(needs.classify.outputs.groups || '[1]') }}
     env:
@@ -1419,37 +1337,22 @@ jobs:
         with:
           key: ${{ needs.classify.outputs.durations_key }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: 0.13.1
-          enable-cache: true
-
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
-
-      # This job's population contains native tests that shell out to `node` against
-      # `ui/web/node_modules/typescript` (scripts/content_lint/code_comments/tests/
-      # test_incremental.py and test_typescript_index.py, via typescript.mjs). They are not
-      # static tests, so `--omit-static-tests` does not exclude them: without this install,
-      # any shard that draws one of them fails (#8047 removed it and made shard 3/8 red).
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version: 22
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: "11.9.0"
-          cache: true
-          cache_dependency_path: ui/web/pnpm-lock.yaml
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript source parser)
         working-directory: ui/web
@@ -1472,13 +1375,6 @@ jobs:
 
       - name: Run selected pytest subset
         id: run-subset
-        # Native pytest failure makes this job red; JUnit validation also catches
-        # missing evidence. Only the existing shadow mode keeps it informational.
-        # The planner collects just the selected files and splits them into this
-        # run's shard count with the full fan-out's duration-balanced file planner;
-        # its pytest overrides, markers and options must equal the execute step's,
-        # which the plan digest enforces. Planning or collection errors cannot fall
-        # back to a different split.
         shell: bash
         run: |
           set -e
@@ -1539,9 +1435,15 @@ jobs:
   backend-serial:
     name: backend serial (flaky)
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 25
     needs: [classify]
-    if: ${{ needs.classify.outputs.backend == 'true' }}
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && needs.classify.outputs.run_serial == 'true' }}
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -1549,20 +1451,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: 0.13.1
-          enable-cache: true
-
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
-
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
 
       - name: Run flaky pytest bucket serially
         id: pytest-serial
@@ -1575,17 +1473,12 @@ jobs:
             --cov=ops --cov=services --cov=meiva_builtins \
             --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
           status=$?
-          # This explicitly optional bucket may contain no tests (pytest exit 5).
-          # The report guard still requires valid, failure-free JUnit evidence.
           if [ "$status" = 5 ]; then
             exit 0
           fi
           exit "$status"
 
       - name: Report executed test counts
-        # The flaky bucket's tests count with the shards' (see backend-shard). The bucket
-        # may legitimately be empty (pytest exits 5 and still writes a report), so only
-        # a missing JUnit report reds it.
         if: ${{ !cancelled() }}
         run: >
           python3 scripts/ci/shard_counts.py shard --group serial
@@ -1621,10 +1514,6 @@ jobs:
 
       - name: Upload coverage data
         id: coverage-upload
-        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
-        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
-        # The retry absorbs that transient service fault; the note below records
-        # the outcome for the coverage gate's arrival check.
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -1633,10 +1522,6 @@ jobs:
 
       - name: Retry coverage data upload
         id: coverage-upload-retry
-        # One immediate retry, bounded: transient 403/500 from the artifact
-        # service is the observed failure mode, and a failed upload is the only
-        # copy of the data — a failed download can be retried by re-running the
-        # aggregator, a lost upload cannot.
         if: ${{ steps.coverage-upload.outcome == 'failure' }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1663,30 +1548,31 @@ jobs:
           if-no-files-found: ignore
           path: tmp/pg-fixture-logs/
 
-  # Hard gate on the vendored-runtime provisioning path (CTO acceptance red
-  # line): the pinned Linux PG tree + injected pgvector deb must actually run
-  # `CREATE EXTENSION` + a distance query. Deliberately does NOT use the
-  # install-pg-redis action — the point is that the vendored tree alone
-  # suffices (initdb/pg_ctl/postgres come from the zonky jar). A standalone
-  # script, not a pytest test: the test suite's session fixture provisions its
-  # own Postgres via pg_tool, so a vendored-only job cannot run pytest at all.
   backend-pgvector-smoke:
     name: backend vendored pgvector smoke (Linux)
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 15
     needs: [classify]
-    if: ${{ needs.classify.outputs.backend == 'true' }}
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && needs.classify.outputs.run_pgvector_smoke == 'true' }}
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: 0.13.1
-          enable-cache: true
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
@@ -1699,7 +1585,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     needs: [classify]
-    if: ${{ needs.classify.outputs.backend == 'true' }}
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && needs.classify.outputs.run_helper_smoke == 'true' }}
     env:
       MEIVA_DB_URL: ""
       MEIVA_REDIS_URL: ""
@@ -1725,14 +1611,6 @@ jobs:
 
       - name: Two-section chain smoke (keeper semantics)
         run: |
-          # The macOS adapter's behavioral gate (task #3209): launchd -> helper
-          # -> root -> unit parentage, the helper-crash conflict path (the
-          # relaunched helper finds the orphan root, refuses to stop it, and
-          # the orphan closes its own tree so the helper can reseed a fresh
-          # root). Root custody refusal and reconciliation phases are removed.
-          # The F11 tccd-attribution phase is
-          # skipped here because hosted runners restrict `log show`; run the
-          # script without --skip-attribution on a dev host for that phase.
           uv run python -m scripts.ci.helper_smoke --skip-attribution
 
       - name: Tear down helper launchd job
@@ -1743,25 +1621,14 @@ jobs:
           if [[ -n "$label" ]]; then
             launchctl bootout "gui/$(id -u)/$label" || true
           fi
-          # The two-section smoke's own throwaway job (task #3209); the script
-          # tears it down itself, this is the belt-and-braces path for a step
-          # killed mid-run.
           launchctl bootout "gui/$(id -u)/com.meiva.test.two-section-chain-smoke" || true
 
-  # The darwin lane (task #5531). `scripts/structure/platform_lanes.toml` names this job and
-  # `scripts/structure/platform_lane_coverage.py` reads it back from this file, so a rename
-  # here without the registry fails the structure lane rather than silently uncovering the
-  # tests. `-m requires_host` selects the declarations; the rest of the suite stays out
-  # because a hosted macOS runner has no data plane to give it.
-  #
-  # Blocking on purpose: a job with continue-on-error runs these tests and judges none of
-  # them, which the lane gate refuses to count as coverage.
   host-marks:
     name: host marks (macOS)
     runs-on: macos-15
     timeout-minutes: 25
     needs: [classify]
-    if: ${{ needs.classify.outputs.backend == 'true' }}
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && needs.classify.outputs.run_host_marks == 'true' }}
     env:
       MEIVA_DB_URL: ""
       MEIVA_REDIS_URL: ""
@@ -1783,17 +1650,12 @@ jobs:
           echo "MEIVA_HOME=$RUNNER_TEMP/meiva-home" >> "$GITHUB_ENV"
 
       - name: Census the selection
-        # Before the run, so an empty selection fails as an empty selection rather than as a
-        # green job: the junit of a lane that collected nothing reads exactly like a lane
-        # that ran everything it was asked to.
         run: uv run python -m scripts.ci.host_marks_census
 
       - name: Run the host declarations
         run: uv run pytest -m requires_host -q --junit-xml=tmp/junit-host-marks.xml
 
       - name: Upload census and report
-        # Transport is diagnostic, not gating: the census step above already refused an empty
-        # selection, and the tests' own verdict is the run's.
         if: ${{ always() }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1805,37 +1667,31 @@ jobs:
             tmp/junit-host-marks.xml
 
   backend:
-    # The aggregator carrying the branch-protection check name. Skipped
-    # (= satisfied) when the diff has no backend side and structure succeeded;
-    # non-backend structure failures propagate without installing test tooling.
-    # A classify failure must fail this required check; an intentional draft skip stays skipped.
-    # With a backend side, green iff the
-    # static and native smoke jobs are green and the enforced pytest path is
-    # green — the selected subset when mode==enforce and the selector returned
-    # SELECTED (shards skipped), the 8-shard fan-out in every other case.
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [classify, backend-static, backend-static-tests, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke, host-marks]
     if: ${{ !cancelled() && (needs.classify.result == 'failure' || (needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success'))) }}
     env:
-      # Every coverage-data file the combine expects: all backend-shard matrix
-      # groups plus the serial and static buckets. tests/scripts/test_ci_artifact_policy.py
-      # pins this against the matrix.
       COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 serial static"
     steps:
       - name: Verify backend job results
         env:
           DECISION: ${{ needs.classify.outputs.decision }}
         run: |
-          # One required check covers both pytest paths: the enforced subset
-          # when mode==enforce and the selector returned SELECTED, the full
-          # fan-out otherwise. A job that should have run and did not leaves a
-          # non-success result, which fails here rather than silently
-          # satisfying the check.
           ok=true
           fail() { echo "::error::$1"; ok=false; }
           check() { if [ "$2" != "success" ]; then fail "$1: $2"; fi; }
+          check_lane() {
+            if [ "$3" = "true" ]; then
+              check "$1" "$2"
+            else
+              case "$2" in
+                skipped|success) ;;
+                *) fail "$1: $2 (expected skipped)";;
+              esac
+            fi
+          }
           check classify "${{ needs.classify.result }}"
           check backend-structure "${{ needs.backend-structure.result }}"
           if [ "${{ needs.classify.outputs.backend }}" != "true" ]; then
@@ -1848,14 +1704,12 @@ jobs:
           esac
           check backend-static "${{ needs.backend-static.result }}"
           check backend-static-tests "${{ needs.backend-static-tests.result }}"
-          check backend-serial "${{ needs.backend-serial.result }}"
-          check backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}"
-          check helper-signing-smoke "${{ needs.helper-signing-smoke.result }}"
-          check host-marks "${{ needs.host-marks.result }}"
+          check_lane backend-serial "${{ needs.backend-serial.result }}" "${{ needs.classify.outputs.run_serial }}"
+          check_lane backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}" "${{ needs.classify.outputs.run_pgvector_smoke }}"
+          check_lane helper-signing-smoke "${{ needs.helper-signing-smoke.result }}" "${{ needs.classify.outputs.run_helper_smoke }}"
+          check_lane host-marks "${{ needs.host-marks.result }}" "${{ needs.classify.outputs.run_host_marks }}"
           if [ "$TEST_SELECTION_MODE" = "enforce" ] && [ "$DECISION" = "SELECTED" ]; then
             check backend-selected "${{ needs.backend-selected.result }}"
-            # Shards should be skipped here; a shard run that failed anyway is
-            # a real failure and must not be masked by a green subset.
             case "${{ needs.backend-shard.result }}" in
               failure|cancelled) fail "backend-shard: ${{ needs.backend-shard.result }} (enforce+SELECTED)";;
             esac
@@ -1880,7 +1734,6 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Download shard coverage
-        # Artifact transport is non-gating; the combine step records gaps below.
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1888,10 +1741,6 @@ jobs:
           merge-multiple: true
 
       - name: Combine coverage + gate
-        # Skipped on the enforced-subset path: a SELECTED PR runs no shards,
-        # so there is nothing to combine. The 85% full-tree gate lives on the
-        # full fan-out runs instead — every queue test branch runs one, as
-        # does every non-SELECTED PR.
         if: ${{ !(env.TEST_SELECTION_MODE == 'enforce' && needs.classify.outputs.decision == 'SELECTED') }}
         env:
           BACKEND_COVERAGE_THRESHOLD: "85"
@@ -1920,32 +1769,11 @@ jobs:
               echo "A gate failure while coverage data is incomplete may be caused by missing data, not a coverage regression."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-          # 90.5% combined coverage on 2026-08-23 supports an 85% gate: about
-          # five points of buffer for shard-drop/flake variance. Do not aim for
-          # 100% — line coverage is not quality; this gate only sees shard data
-          # that reached the combine step (including coverage-data-serial).
-          #
-          # Two tiers, enforced by scripts/ci/coverage_gates.py:
-          # - the combined 85% gate over the core domains
-          #   agent/meiva/cli/gateway/base/ui (cli joined 2026-08-25, tech
-          #   audit P1 — measured 82% standalone);
-          # - per-risk-domain minimum line floors for ops/services/meiva_builtins
-          #   (tech audit 2026-08-24 finding #10, Task #1570): the
-          #   high-incident operational domains (deploy/backup/watchdog/ops)
-          #   are measured into the same coverage data but never scored by the
-          #   85% gate — their standalone coverage (ops 48% via tests/ops;
-          #   services/meiva_builtins lower) would take the combined rate below
-          #   threshold even though their tests run in every shard.
           uv run coverage combine coverage-data-*
           uv run coverage json -o coverage.json
           uv run python scripts/ci/coverage_gates.py coverage.json
 
   backend-test-counts:
-    # How many tests CI executed, and how that moved. Adds the native shards, flaky
-    # bucket and static lane counts up and compares them with the previous queue run's total, so a test
-    # that moved, or fell out of the suite, shows as a change in one line instead of
-    # being proved by counting around every batch. Purely informational: the job cannot
-    # fail the run, and nothing needs it. Same fan-out condition as backend-shard.
     name: backend test counts (all shards)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1956,8 +1784,6 @@ jobs:
       contents: read
       actions: read
     env:
-      # Every count file the total expects: the backend-shard matrix groups and the
-      # serial and static buckets. tests/ci/test_shard_counts.py pins this against the matrix.
       COUNT_GROUPS: "1 2 3 4 5 6 7 8 serial static"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1970,20 +1796,16 @@ jobs:
           path: shard-counts
           merge-multiple: true
 
-      - name: Fetch the previous queue total
-        # The total of the latest green Trunk merge-queue run that left one: a
-        # queue branch tests the tree about to land on main, so it is the nearest
-        # thing to "the previous main run" now that main itself runs no CI. None
-        # yet is not an error.
+      - name: Fetch the previous baseline total
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p baseline
-          candidates="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event pull_request --status success --limit 100 --json databaseId,headBranch --jq '[.[] | select(.headBranch | startswith("trunk-merge/")) | .databaseId][:8][]')"
+          candidates="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event workflow_dispatch --branch main --status success --limit 20 --json databaseId --jq '.[].databaseId')"
           for run_id in $candidates; do
             if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name test-count-baseline --dir baseline; then
-              echo "baseline: queue run $run_id"
+              echo "baseline: main full run $run_id"
               break
             fi
           done
@@ -1998,9 +1820,6 @@ jobs:
           --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
 
       - name: Upload the leak report
-        # What the root leak guard (tests/fixtures/leak_guard.py) found across every shard: the
-        # full list behind the one `leak guard` annotation of the step above, so a leak is
-        # read from this job and its artifact, never from the shards' logs.
         if: ${{ !cancelled() }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -2010,8 +1829,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Record the total as the next baseline
-        # Only queue runs' totals are baselines; a PR reads them and leaves none.
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && startsWith(github.head_ref, 'trunk-merge/') }}
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -2020,18 +1838,9 @@ jobs:
           if-no-files-found: ignore
 
   test-selection-shadow-report:
-    # The shadow-mode measurement point. It only exists while the mode is
-    # shadow: it observes the full backend result and the informational subset
-    # and records divergence without becoming a required check or changing
-    # either result. Under enforce there is no full pytest result on a SELECTED
-    # PR to compare against, so the report stands down; flipping
-    # TEST_SELECTION_MODE back to shadow revives it.
     name: test selection shadow report
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # The report compares against backend-shard, the complete non-flaky pytest
-    # population. The backend aggregator remains recorded separately because it
-    # also includes static, coverage, flaky, and pgvector gates.
     continue-on-error: true
     needs: [classify, backend, backend-shard, backend-selected]
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && needs.classify.outputs.mode != 'enforce' }}
@@ -2052,7 +1861,6 @@ jobs:
         run: |
           set +e
           mkdir -p tmp
-          # A sharded subset has no single exit status: its job result is the verdict.
           case "$SUBSET_RESULT" in
             success) SUBSET_STATUS=0 ;;
             failure) SUBSET_STATUS=1 ;;
@@ -2128,6 +1936,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Resolve PR base for incremental frontend checks
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=2 origin "$(git rev-parse HEAD)"
+          base=""
+          if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            base="$(git rev-parse --verify --quiet 'HEAD^1^{commit}' || true)"
+          fi
+          if [ -z "$base" ]; then
+            base="$EVENT_BASE_SHA"
+          fi
+          git fetch --depth=1 origin "$base"
+          echo "FRONTEND_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
+
       - name: Install Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -2143,38 +1967,42 @@ jobs:
       - name: Install frontend deps
         working-directory: ui/web
         run: pnpm install --frozen-lockfile
-      # typedRoutes: `Route` is the app dir's literal union only once
-      # `next typegen` has written .next/types, and .next is gitignored — so a
-      # clean checkout resolves it to a widened `string`. Without this step CI
-      # checks every route link against that widened type, and a typed-route
-      # regression cannot fail the build. It also makes CI disagree with the
-      # local `frontend tsc --noEmit` pre-push hook, which runs typegen
-      # first: the same line is then flagged in one environment and not the
-      # other. Generating the types here is what makes the two agree.
+
       - name: Generate Next.js route types (typedRoutes)
         working-directory: ui/web
         run: pnpm exec next typegen
+
       - name: TypeScript typecheck (tsc --noEmit)
         working-directory: ui/web
         run: pnpm exec tsc --noEmit
+
+      - name: Incremental frontend lint, conditional build, and targeted vitest
+        if: ${{ github.event_name == 'pull_request' }}
+        run: python3 scripts/provision/prepush_frontend.py --base "$FRONTEND_BASE"
+
       - name: Production build
+        if: ${{ github.event_name != 'pull_request' }}
         working-directory: ui/web
         run: pnpm run build
+
       - name: Production bundle integrity (minifier side-effect tripwires)
+        if: ${{ github.event_name != 'pull_request' }}
         working-directory: ui/web
         run: pnpm run check:bundle-integrity
+
       - name: ESLint
+        if: ${{ github.event_name != 'pull_request' }}
         working-directory: ui/web
         run: pnpm run lint
+
       - name: Unit tests (vitest run)
         id: vitest
+        if: ${{ github.event_name != 'pull_request' }}
         working-directory: ui/web
         run: pnpm exec vitest run --config tests/vitest.config.mts --coverage
-      # vitest.config.mts already emits json-summary for this gate. Timing-sensitive
-      # src/**/flaky/** tests run serially below with coverage disabled, so this
-      # checks the stable parallel denominator. Raise toward the measured value
-      # over time (tests/README.md), never toward 100: line coverage is not quality.
+
       - name: Frontend coverage gate
+        if: ${{ github.event_name != 'pull_request' }}
         working-directory: ui/web
         env:
           FRONTEND_COVERAGE_THRESHOLD: "81"
@@ -2193,23 +2021,22 @@ jobs:
                   f"Frontend coverage {coverage}% is below threshold {threshold}%"
               )
           EOF
-      # Timing-sensitive tests (src/**/flaky/**) run serially in
-      # their own vitest process — see ui/web/tests/vitest.flaky.config.mts.
+
       - name: Flaky unit tests (vitest run, serial)
         id: vitest-flaky
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         working-directory: ui/web
         run: pnpm exec vitest run --config tests/vitest.flaky.config.mts
 
       - name: Validate native test results
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         uses: ./.github/actions/require-test-gate
         with:
           test-outcome: ${{ steps.vitest.outcome }}
           junit-patterns: '["ui/web/junit.xml"]'
 
       - name: Validate flaky frontend results
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         uses: ./.github/actions/require-test-gate
         with:
           test-outcome: ${{ steps.vitest-flaky.outcome }}
@@ -2217,7 +2044,7 @@ jobs:
           min-tests: '0'
 
       - name: Upload native test reports
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -2230,11 +2057,14 @@ jobs:
   e2e-shard:
     name: e2e shard (${{ matrix.group }}/4)
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 30
     needs: [classify]
-    # e2e is the integration net: it runs whenever EITHER side changed, except for a change that
-    # edits nothing a browser can observe (`skip_e2e`, scripts/ci/e2e_scope.py: package unit tests,
-    # tooling, an unchanged application interface, a locality manifest, prose under docs/).
     if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     strategy:
       fail-fast: false
@@ -2251,77 +2081,48 @@ jobs:
         with:
           key: ${{ needs.classify.outputs.durations_key }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: 0.13.1
-          enable-cache: true
-
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: "11.9.0"
-          cache: true
-          cache_dependency_path: ui/web/pnpm-lock.yaml
-
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
       - name: Install frontend deps
         working-directory: ui/web
         run: pnpm install --frozen-lockfile
 
-      # restore/save split rather than the combined `actions/cache`: the combined
-      # action's post step saves on cache miss even when the job failed, so a run
-      # killed mid-download would pin a half-populated ~/.cache/ms-playwright
-      # under this key and every later hit would keep serving it. Saving only
-      # after a green browser install keeps the key pointing at a complete dir.
       - name: Restore Playwright chromium cache
         id: playwright-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
       - name: Install Playwright chromium
-        # Split from the system-deps pass so each half carries its own bound and
-        # a stall names its half: a cached browser makes this half seconds. The
-        # apt half is the separate step below — the 2026-10-02/03 ten-minute
-        # timeouts all sat in its azure.archive downloads. Neither half holds
-        # the job (nor the run's rerun eligibility) toward the 30-minute ceiling.
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
         run: timeout 300 uv run playwright install chromium
+
       - name: Save Playwright chromium cache
         if: success() && steps.playwright-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-      - name: Install Playwright system deps
-        # The class of hang install-pg-redis is hardened against; inside the
-        # action: bounded attempts, restorable .deb cache, dpkg fallback.
-        uses: ./.github/actions/install-playwright-deps
-        timeout-minutes: 15
 
       - name: Run e2e tests
         id: pytest-e2e
-        # tests/e2e shares .test_durations with the backend suite (pytest-split
-        # filters the file to this run's node ids; the nightly refresh measures
-        # both suites), so the split is duration-balanced once e2e entries land.
-        # With only ~27 tests, least_duration (LPT) balances far better than the
-        # sequential duration_based_chunks default: a 2026-08-30 run measured
-        # 40/93/157/83s per group under the count-based split, vs 93/93/93/93s
-        # once e2e carries refreshed durations + LPT. Before any e2e entry
-        # lands, absent tests cost the average = an even split by count.
         shell: bash
         run: |
           uv run pytest tests/e2e/ -v -n 2 \
@@ -2357,10 +2158,14 @@ jobs:
   e2e-hosted:
     name: e2e hosted (agent-runner-as-server happy path)
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 30
     needs: [classify]
-    # Focused host acceptance scenarios alongside the complete e2e shards:
-    # message flow, self-restart and self-terminate through the real daemon.
     if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
@@ -2368,65 +2173,48 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: 0.13.1
-          enable-cache: true
-
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: "11.9.0"
-          cache: true
-          cache_dependency_path: ui/web/pnpm-lock.yaml
-
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
       - name: Install frontend deps
         working-directory: ui/web
         run: pnpm install --frozen-lockfile
 
-      # Same restore/save split as the e2e-shard job above.
       - name: Restore Playwright chromium cache
         id: playwright-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
       - name: Install Playwright chromium
-        # Same split + hardened apt pass as the e2e-shard job (see ci.yml).
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
         run: timeout 300 uv run playwright install chromium
+
       - name: Save Playwright chromium cache
         if: success() && steps.playwright-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-      - name: Install Playwright system deps
-        uses: ./.github/actions/install-playwright-deps
-        timeout-minutes: 15
 
       - name: Run hosted e2e tests
         id: pytest-hosted
-        # Five tests, one worker: each test starts its own function-scoped
-        # gateway + ops + agent-host, so serial keeps the run simple and the
-        # logs unambiguous. message_flow / self_restart / self_terminate are
-        # the original hosted net; compact and resurrect ride the same
-        # in-process channels (compact routes INIT_CONTEXT inside the turn;
-        # resurrect flips the row + wakes the dispatcher) and lock them too.
         run: >
           uv run pytest
           tests/e2e/flow/test_message_flow.py
@@ -2463,19 +2251,14 @@ jobs:
           path: tmp/e2e-logs/
 
   e2e-env-guard:
-    # Trimmed per task #2446 (analysis #2411): the home-isolation leak detectors
-    # only speak when something ran before them in the SAME pytest process, and
-    # their warmup minimum is (a) the e2e package fixture e2e_process_env firing
-    # and (b) one MEIVA_LLM_OVERRIDE scenario fixture (scenario_env) having run —
-    # one representative scenario-marked test provides both. The alerts-desktop
-    # test is the chosen representative: fast, process-shaped, drives gateway +
-    # agent + scenario env on the real e2e net. tests/harness/test_env_guard_canary.py
-    # proves this trimmed shape still catches a simulated leak. The historical
-    # full-suite serial shape ran beside it as the non-gating e2e-env-guard-full
-    # shadow for its comparison window (2026-09-03 - 2026-09-18); the window's
-    # reds were all classified environment flakes and the shadow was removed.
     name: e2e env guard (serial)
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 30
     needs: [classify]
     if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
@@ -2485,66 +2268,48 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: 0.13.1
-          enable-cache: true
-
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: "11.9.0"
-          cache: true
-          cache_dependency_path: ui/web/pnpm-lock.yaml
-
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
       - name: Install frontend deps
         working-directory: ui/web
         run: pnpm install --frozen-lockfile
 
-      # Same restore/save split as the e2e-shard job above.
       - name: Restore Playwright chromium cache
         id: playwright-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
       - name: Install Playwright chromium
-        # Same split + hardened apt pass as the e2e-shard job (see ci.yml).
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
         run: timeout 300 uv run playwright install chromium
+
       - name: Save Playwright chromium cache
         if: success() && steps.playwright-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-      - name: Install Playwright system deps
-        uses: ./.github/actions/install-playwright-deps
-        timeout-minutes: 15
 
       - name: Run env-guard warmup + home-isolation in one serial process
         id: pytest-env-guard
-        # The whole point is ONE process: the package-scoped e2e_process_env
-        # fixture must fire and its teardown must land BEFORE the isolation
-        # detectors read the environment. One scenario-marked test covers the
-        # warmup minimum (package fixture + MEIVA_LLM_OVERRIDE scenario fixture);
-        # the canary test plus the detectors ride the same serial worker.
-        # -n 1 keeps it in-process; the sharded jobs never collect
-        # tests/harness/test_home_isolation.py.
         run: >
           uv run pytest
           tests/e2e/visual/test_alerts_no_horizontal_overflow.py::test_alerts_table_no_horizontal_scroll_desktop
@@ -2579,8 +2344,6 @@ jobs:
           path: tmp/e2e-logs/
 
   e2e:
-    # Aggregator carrying the branch-protection check name; skipped
-    # (= satisfied) on docs-only diffs.
     name: e2e (Playwright happy path)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
