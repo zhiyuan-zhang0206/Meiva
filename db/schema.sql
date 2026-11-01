@@ -2579,6 +2579,20 @@ INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');
 -- Current reset anchor: the previous 8 migration names are folded into this schema.
 INSERT INTO schema_migrations (name) VALUES ('20261101T170000_schema-baseline');
 
+-- The eight deltas the 2026-11-01 reset folded into this file, stamped so a fresh
+-- database never replays them. Three of them also ship as post-baseline files: the
+-- deployments that predate the reset never ran them, and a file is the only thing
+-- that can apply their effects there. A stamped name is skipped, so the files are
+-- inert on a fresh database and the whole 8-name generation is present either way.
+INSERT INTO schema_migrations (name) VALUES ('20261026T091500_schema-baseline');
+INSERT INTO schema_migrations (name) VALUES ('20261027T191344_task-reminders-pause');
+INSERT INTO schema_migrations (name) VALUES ('20261029T101641_drop-impersonation-capability-columns');
+INSERT INTO schema_migrations (name) VALUES ('20261029T224800_signal-state');
+INSERT INTO schema_migrations (name) VALUES ('20261031T172218_machine-placed-schedules');
+INSERT INTO schema_migrations (name) VALUES ('20261101T050900_unified-file-upload');
+INSERT INTO schema_migrations (name) VALUES ('20261101T081023_harness-switch-and-external-messages');
+INSERT INTO schema_migrations (name) VALUES ('20261101T091332_retire-display-and-timeline-settings');
+
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN
     IF OLD.status IN ('requested','accepted','active')
