@@ -63,6 +63,14 @@ _FRAMES_JS = """
       .find((node) => node.textContent?.includes(text));
     return row?.getBoundingClientRect().top ?? null;
   };
+  // meiva:note
+  // Sample one painted frame, not one animation-frame callback: a rAF callback runs before the
+  // frame is painted, so it can read a DOM state a React commit plus its layout effects replace
+  // before the browser draws it. A reading position that only ever existed in that gap is not
+  // something the reader can see, and asserting on it fails a correct compensation.
+  function afterPaint(sample) {
+    requestAnimationFrame(() => setTimeout(sample, 0));
+  }
   function sample() {
     const text = root.textContent ?? '';
     frames.push({ phase: state.phase,
@@ -74,10 +82,10 @@ _FRAMES_JS = """
       secondNarration: text.includes('TRANSITION_SECOND_NARRATION'),
       ranks: [...new Set([...root.querySelectorAll('[data-display-rank]')]
         .map((node) => node.getAttribute('data-display-rank')))] });
-    if (state.active) requestAnimationFrame(sample);
+    if (state.active) afterPaint(sample);
   }
   window.__compactTransitionFrames = state;
-  requestAnimationFrame(sample);
+  afterPaint(sample);
 })();
 """
 
