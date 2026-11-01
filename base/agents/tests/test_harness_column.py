@@ -88,6 +88,21 @@ def test_changing_the_harness_to_an_unknown_value_is_rejected(
     assert _harness_of(db_conn, 506) == "codex"
 
 
+# meiva:note
+# The frozen-after-birth trigger is gone for every write path, not only the plain UPDATE: a switch
+# that arrives through an upsert reaches the column too.
+def test_an_upsert_may_switch_the_harness(db_conn: psycopg.Connection) -> None:
+    _birth(db_conn, 507, "codex")
+
+    with db_conn.transaction():
+        db_conn.execute(
+            "INSERT INTO agents_meta (id, status, harness) VALUES (507, 'idling', 'meiva') "
+            "ON CONFLICT (id) DO UPDATE SET harness = EXCLUDED.harness"
+        )
+
+    assert _harness_of(db_conn, 507) == "meiva"
+
+
 def test_other_updates_leave_the_harness_alone(db_conn: psycopg.Connection) -> None:
     _birth(db_conn, 505, "antigravity")
 
