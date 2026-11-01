@@ -31,7 +31,7 @@ default home and can target a running deployment.
 ## Change and verify
 
 Implement a focused change with its related tests and current documentation.
-**The change record is the PR.** The merge queue squashes a PR into one commit on `main`
+**The change record is the PR.** A merged pull request becomes one commit on `main`
 whose title is the PR title and whose message is the PR description. That commit is the entry
 a reader meets in `git log`, in the release notes page generated from a commit range
 (`gh compare`), and in the commit `git blame` lands on, so the description is the permanent
@@ -40,13 +40,25 @@ debt, the behavior that changes and how it was verified) and keep it true when t
 changes. The commit messages inside the branch do not reach `main`, and a branch holds no
 merge commit. There is no changelog file to append to and no per-entry file to add.
 
-Since 2026-10-27 the queue squashes — squash is the only merge method now — and the
-landed message is the description with its prose re-wrapped at 72 columns (a table
-row or another block line keeps its own length), under a subject that is the title
-with ` (#<n>)` appended. Before that date the queue rebased, so each commit there is
-one landed change carrying its own message. Read both when you trace history; write
-for the new one. `git commit --amend` no longer writes the record: it only rewrites a
-local commit that never lands.
+Since 2026-10-27 squash is the only merge method, and the landed message is the
+description with its prose re-wrapped at 72 columns (a table row or another block line
+keeps its own length), under a subject that is the title with ` (#<n>)` appended.
+Before that date each landed change carried its own message. Read both when you trace
+history; write for the new one. `git commit --amend` no longer writes the record: it
+only rewrites a local commit that never lands.
+
+Merge directly once the pull request's own checks are green. There is no merge queue
+to join: the pre-merge Trunk queue was retired on 2026-11-01
+([decision](decisions/engineering/tooling/2026-11-01-release-train-and-channels.md)),
+because running the full matrix in a serialized queue *and* again on the release train
+doubled runner spend without adding coverage. What replaced it: `ci.yml` runs
+impact-selected checks on the pull request, `release-gate.yml` re-runs the full suite on
+`main` every six hours and mints the release certificate, and
+`scripts/host_ops/release/bisect_train.py` localizes a cross-PR break to its first bad
+commit. Branch protection currently requires review but no status checks, so the pull
+request's checks are a convention rather than a gate: the evidence you put in its
+description is the only record that the change was verified, and skipping the checks
+skips the only pre-merge verification there is.
 
 When a pull request is merged by hand, do not pass `--subject` to `gh pr merge`: it
 replaces the title outright and GitHub then appends no ` (#<n>)`, so `git log` stops
@@ -81,7 +93,7 @@ not synthesized, so write that one in the description or it does not reach `main
 test -n "$(gh pr view --json body -q .body)" \
   || echo "the PR description becomes the commit body on main: write it"
 
-# The message the queue will put on `main`: subject, blank line, description.
+# The message a squash merge will put on `main`: subject, blank line, description.
 gh pr view --json number,title,body -q '"\(.title) (#\(.number))\n\n\(.body)"'
 
 # After it lands, that same text read back from the commit it produced.
@@ -230,7 +242,8 @@ release notes see; write them as one (see [the change record](#change-and-verify
 a file tree or control-flow explanation when it helps readers understand a larger
 change; no fixed template is required.
 Address relevant CI failures and review feedback. Distinguish successful execution
-from missing, skipped or incomplete verification. The queue squashes the PR once the checks pass.
+from missing, skipped or incomplete verification. Squash-merge the pull request once its
+checks pass.
 
 Keep the checkout while it contains needed work. Before removing a worktree,
 check for live sessions or processes anchored there with
