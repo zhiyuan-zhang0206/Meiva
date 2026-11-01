@@ -300,21 +300,32 @@ PRE_RESET_SET = frozenset(
 
 def assert_reset_history(applied: set[str], required: set[str]) -> None:
     """Refuse partial generations before deleting any applied-set evidence."""
+    # meiva:note
+    # A name that still exists in `migrations/` is not frozen history: this run
+    # applies it before the reset it belongs to, so it cannot strand a schema
+    # effect. Only a name with no file left can never run again -- that is what a
+    # gap means, and what this guard exists to catch.
+    #
+    # Counting a restored file as history would also refuse every later start:
+    # crossing the anchor keeps the names that still have files and squashes the
+    # rest, so a database that legitimately converged would carry a permanent
+    # "partial generation" and never start again.
     for generation, history in (
         ("2026-08-14", V010_PRE_RESET_SET),
         ("2026-09-23", SEP2026_PRE_RESET_SET),
         ("2026-10-26", OCT2026_PRE_RESET_SET),
         ("2026-11-01", PRE_RESET_SET),
     ):
-        present = applied & history
-        missing = history - applied
+        frozen = history - required
+        present = applied & frozen
+        missing = frozen - applied
         crossing = (
             history is PRE_RESET_SET and RESET_ANCHOR in required and RESET_ANCHOR not in applied
         )
         if missing and (present or crossing):
             raise MigrationHistoryGap(
                 f"cannot converge across {generation}: DB applied "
-                f"{len(present)}/{len(history)} pre-reset migrations "
+                f"{len(present)}/{len(frozen)} pre-reset migrations "
                 f"(missing={sorted(missing)[:5]}{'...' if len(missing) > 5 else ''}). "
                 "Upgrade through the release immediately before this reset so "
                 "the full history is applied, then upgrade across the reset."
