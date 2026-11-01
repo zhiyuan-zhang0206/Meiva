@@ -254,6 +254,41 @@ def test_sync_prune_leaves_a_debt_table_alone(make_repo: RepoFactory) -> None:
     assert debt_of(root, "pkg") != {}
 
 
+def test_prune_and_record_keep_a_note_that_sits_above_the_next_section(
+    make_repo: RepoFactory,
+) -> None:
+    manifest = (
+        '[uses]\n"a.py" = ["b.py"]\n\n'
+        "[debt.private-name]\n"
+        '"a.py -> b.py#_other" = 1\n'
+        '"a.py -> b.py#_secret" = 2\n\n'
+        "# meiva:note\n# pkg records these until the names are exported\n"
+        '[purity]\n"b.py" = "strict"\n'
+    )
+    root = make_repo({**DIRTY, "pkg/meizel.toml": manifest})
+    assert run(root, "debt", "prune") == 0
+    assert (root / "pkg/meizel.toml").read_text() == manifest
+    write(root, {"pkg/a.py": "from pkg.b import _secret\nfrom pkg.b import _secret as again\n"})
+    assert run(root, "debt", "prune") == 0
+    pruned = (root / "pkg/meizel.toml").read_text()
+    assert pruned == (
+        '[uses]\n"a.py" = ["b.py"]\n\n'
+        '[debt.private-name]\n"a.py -> b.py#_secret" = 2\n\n'
+        "# meiva:note\n# pkg records these until the names are exported\n"
+        '[purity]\n"b.py" = "strict"\n'
+    )
+    write(
+        root,
+        {"pkg/a.py": "from pkg.b import _secret, _other\nfrom pkg.b import _secret as again\n"},
+    )
+    assert record(root, "pkg") == 0
+    recorded = (root / "pkg/meizel.toml").read_text()
+    assert recorded.index("# meiva:note") < recorded.index("[purity]")
+    assert debt_of(root, "pkg") == {
+        "private-name": {"a.py -> b.py#_other": 1, "a.py -> b.py#_secret": 2}
+    }
+
+
 def test_bootstrap_carries_recorded_debt_into_its_mirror(
     make_repo: RepoFactory, tmp_path: Path
 ) -> None:
@@ -279,6 +314,65 @@ def test_set_debt_replaces_only_the_debt_block() -> None:
     assert tomllib.loads(set_debt("", quoted))["debt"]["restricted-python"] == {
         'f.py#mock.patch "a.b"': 1
     }
+
+
+def test_set_debt_keeps_the_tables_where_the_manifest_had_them() -> None:
+    text = (
+        '[uses]\n"a.py" = ["b.py"]\n\n'
+        '[debt.private-name]\n"a.py -> b.py#_secret" = 1\n\n'
+        '[purity]\n"b.py" = "strict"\n'
+    )
+    assert set_debt(text, {}) == '[uses]\n"a.py" = ["b.py"]\n\n[purity]\n"b.py" = "strict"\n'
+    kept = {Code.PRIVATE_NAME: {"a.py -> b.py#_secret": DebtEntry(2)}}
+    assert set_debt(text, kept) == text.replace("= 1\n", "= 2\n")
+
+
+def test_set_debt_keeps_a_note_that_sits_above_the_next_section() -> None:
+    text = (
+        '[uses]\n"a.py" = ["b.py"]\n\n'
+        '[debt.private-name]\n"a.py -> b.py#_secret" = 1\n\n'
+        "# meiva:note\n# the root below reads the environment once, at boot\n"
+        '[roots]\n"b.py" = { kinds = ["environ"], why = "boot" }\n'
+    )
+    assert set_debt(text, {}) == (
+        '[uses]\n"a.py" = ["b.py"]\n\n'
+        "# meiva:note\n# the root below reads the environment once, at boot\n"
+        '[roots]\n"b.py" = { kinds = ["environ"], why = "boot" }\n'
+    )
+    kept = {Code.PRIVATE_NAME: {"a.py -> b.py#_secret": DebtEntry(1)}}
+    assert set_debt(text, kept) == text
+
+
+def test_set_debt_keeps_a_comment_above_its_table_and_above_its_entry() -> None:
+    text = (
+        "# why this directory carries debt\n"
+        '[debt.private-name]\n"a.py -> b.py#_other" = 1\n'
+        "# the secret is paid down two names at a time\n"
+        '"a.py -> b.py#_secret" = 2\n'
+    )
+    kept = {
+        Code.PRIVATE_NAME: {
+            "a.py -> b.py#_other": DebtEntry(1),
+            "a.py -> b.py#_secret": DebtEntry(5),
+        }
+    }
+    assert set_debt(text, kept) == (
+        "# why this directory carries debt\n"
+        '[debt.private-name]\n"a.py -> b.py#_other" = 1\n'
+        "# the secret is paid down two names at a time\n"
+        '"a.py -> b.py#_secret" = 5\n'
+    )
+
+
+def test_set_debt_keeps_the_comment_of_an_entry_it_drops() -> None:
+    text = (
+        '[debt.private-name]\n"a.py -> b.py#_other" = 1\n'
+        "# this one waits for the rename\n"
+        '"a.py -> b.py#_secret" = 2\n'
+    )
+    assert set_debt(text, {Code.PRIVATE_NAME: {"a.py -> b.py#_other": DebtEntry(1)}}) == (
+        '[debt.private-name]\n"a.py -> b.py#_other" = 1\n\n# this one waits for the rename\n'
+    )
 
 
 def test_untracked_work_is_not_seen_by_the_baseline_until_staged(make_repo: RepoFactory) -> None:

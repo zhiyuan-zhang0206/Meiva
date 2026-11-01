@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 from meizel.contracts.debt.entry import (
     DebtEntry,
@@ -117,6 +118,9 @@ _ENTRY_FIELDS = ("count", "owner", "until")
 _SEPARATOR = " -> "
 _DEBT_HEADER = re.compile(r"^\s*\[\s*debt\s*(?:\.[^\]]*)?\]\s*(?:#.*)?$")
 _ANY_HEADER = re.compile(r"^\s*\[[^\]]*\]\s*(?:#.*)?$")
+_DEBT_CODE = re.compile(r"^\s*\[\s*debt\s*\.\s*([^\]]*?)\s*\]")
+_DEBT_ROW = re.compile(r'^\s*("(?:[^"\\]|\\.)*")\s*=')
+_COMMENT = re.compile(r"^\s*#")
 
 
 def _within(owner: str, path: str) -> str:
@@ -230,24 +234,145 @@ def _render_entry(entry: DebtEntry) -> str:
 
 
 # meiva:note
-# `text` with its `[debt.*]` tables replaced by `table`; everything else is kept as written.
+# Where a manifest keeps its debt tables: from the first `[debt.*]` header to the next section, or
+# the end of the file. `(-1, -1)` when the manifest records none.
+def _debt_span(lines: list[str]) -> tuple[int, int]:
+    start = next((i for i, line in enumerate(lines) if _DEBT_HEADER.match(line)), -1)
+    if start < 0:
+        return -1, -1
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(lines))
+            if _ANY_HEADER.match(lines[index]) and not _DEBT_HEADER.match(lines[index])
+        ),
+        len(lines),
+    )
+    return start, end
+
+
+# meiva:note
+# The entries `table` records under `name`, sorted, or None when it records none: a code the manifest
+# has and the table does not is a table the rewrite drops.
+def _entries_named(table: DebtTable, name: str) -> list[tuple[str, DebtEntry]] | None:
+    for code, rows in table.items():
+        if str(code) == name:
+            return sorted(rows.items()) if rows else None
+    return None
+
+
+# meiva:note
+# `lines` without the blank lines at either end: a blank line separates two blocks of the section, so
+# it belongs to neither.
+def _trim(lines: list[str]) -> list[str]:
+    first = next((index for index, line in enumerate(lines) if line.strip()), len(lines))
+    last = next((index for index in range(len(lines) - 1, -1, -1) if lines[index].strip()), -1)
+    return lines[first : last + 1]
+
+
+def _row(key: str, entry: DebtEntry) -> str:
+    return f"{json.dumps(key, ensure_ascii=False)} = {_render_entry(entry)}"
+
+
+# meiva:note
+# A manifest's debt section as it was written: the tables in the order it had them, the comment above
+# each one, each entry's own comment, and the comments that follow the last table.
+@dataclass(frozen=True, slots=True)
+class _Written:
+    names: list[str]
+    above: dict[str, list[str]]
+    rows: dict[str, dict[str, list[str]]]
+    tail: list[str]
+
+
+def _read_section(section: list[str]) -> _Written:
+    names: list[str] = []
+    above: dict[str, list[str]] = {}
+    rows: dict[str, dict[str, list[str]]] = {}
+    pending: list[str] = []
+    name = ""
+    for line in section:
+        header = _DEBT_CODE.match(line)
+        row = _DEBT_ROW.match(line)
+        if header is not None:
+            name = header.group(1)
+            if name not in names:
+                names.append(name)
+            above[name] = _trim(pending)
+            pending = []
+        elif row is not None and name:
+            rows.setdefault(name, {})[json.loads(row.group(1))] = _trim(pending)
+            pending = []
+        elif _COMMENT.match(line) or not line.strip():
+            pending.append(line.rstrip())
+    return _Written(names, above, rows, _trim(pending))
+
+
+# meiva:note
+# One table's lines: its comment, its header, each entry under the comment it had, and the comments of
+# the entries the rewrite drops after the ones that remain. `prune` deletes an entry, not the reason
+# somebody wrote it down, so a dropped entry leaves its comment behind.
+def _table_block(
+    name: str, entries: list[tuple[str, DebtEntry]], written: dict[str, list[str]], lead: list[str]
+) -> list[str]:
+    kept = [*lead, f"[debt.{name}]"]
+    for key, entry in entries:
+        kept.extend(written.get(key, []))
+        kept.append(_row(key, entry))
+    surviving = {key for key, _ in entries}
+    dropped = [line for key in written if key not in surviving for line in written[key]]
+    return [*kept, "", *dropped] if dropped else kept
+
+
+# meiva:note
+# The debt section rewritten to `table`. A comment above a table or above one entry stays above it; a
+# table the rewrite drops leaves its comments where the table was; and the comments after the last
+# table are the section's tail, so a note above the next section stays above it --
+# `base/telemetry/meizel.toml` states why its one root reads the environment in exactly that place.
+# Entries come out sorted, as `_render_debt` writes them; blank lines inside the section are re-emitted
+# one between blocks, and the blank line that separates the section from its neighbours belongs to the
+# caller.
+def _rewrite_section(section: list[str], table: DebtTable) -> list[str]:
+    written = _read_section(section)
+    blocks: list[str] = []
+    for name in written.names:
+        entries = _entries_named(table, name)
+        rows = written.rows.get(name, {})
+        block = (
+            [*written.above[name], *(line for key in rows for line in rows[key])]
+            if entries is None
+            else _table_block(name, entries, rows, written.above[name])
+        )
+        if block:
+            blocks.append("\n".join(block))
+    for added in sorted({str(code) for code in table} - set(written.names)):
+        entries = _entries_named(table, added)
+        if entries:
+            blocks.append("\n".join(_table_block(added, entries, {}, [])))
+    if written.tail:
+        blocks.append("\n".join(written.tail))
+    return "\n\n".join(blocks).splitlines() if blocks else []
+
+
+# meiva:note
+# `text` with its `[debt.*]` tables replaced by `table`; everything else is kept as written, and the
+# tables stay where the manifest had them. This used to rewrite them at the end of the file, which
+# moved a `[roots]` table above its own debt and dropped the notes that sat in between.
 def set_debt(text: str, table: DebtTable) -> str:
-    kept: list[str] = []
-    inside = False
-    for line in text.splitlines():
-        if _DEBT_HEADER.match(line):
-            inside = True
-        elif _ANY_HEADER.match(line):
-            inside = False
-        if not inside:
-            kept.append(line)
-    while kept and not kept[-1].strip():
-        kept.pop()
-    base = "\n".join(kept)
-    debt = _render_debt(table)
-    if not debt:
-        return base + "\n" if base else ""
-    return f"{base}\n\n{debt}" if base else debt
+    lines = text.splitlines()
+    start, end = _debt_span(lines)
+    if start < 0:
+        debt = _render_debt(table)
+        body = text.rstrip("\n")
+        if not debt:
+            return f"{body}\n" if body else ""
+        return f"{body}\n\n{debt}" if body else debt
+    section = _rewrite_section(lines[start:end], table)
+    tail = [""] if section and end < len(lines) and not lines[end - 1].strip() else []
+    merged = [*lines[:start], *section, *tail, *lines[end:]]
+    while merged and not merged[-1].strip():
+        merged.pop()
+    return "\n".join(merged) + "\n" if merged else ""
 
 
 PATCH_WHAT = {
