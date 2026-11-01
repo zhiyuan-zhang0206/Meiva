@@ -70,7 +70,11 @@ def _sys_platform(platform: str | None = None) -> str:
 # platform has, and (on macOS) the private monotonic one. Narrow enough that a test hands the two
 # readings and no live handle.
 class CreateTimeProcess(Protocol):
-    pid: int
+    # meiva:note
+    # `pid` is a read-only property here, not an attribute: psutil exposes it as a property, and a
+    # mutable attribute in a protocol is invariant, so the real `psutil.Process` would be refused.
+    @property
+    def pid(self) -> int: ...
 
     def create_time(self) -> float: ...
 
