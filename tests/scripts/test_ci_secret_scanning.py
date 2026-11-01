@@ -34,7 +34,15 @@ def _assert_secret_scan_job_runs_gitleaks(workflow: dict[object, Any]) -> None:
         in scan
     )
     assert "git rev-parse --verify HEAD^1" in scan
-    assert "gitleaks git --config .gitleaks.toml --redact --no-banner ." in scan
+    assert "git fetch origin +refs/heads/main:refs/remotes/origin/main" in scan
+    assert "git merge-base -- HEAD refs/remotes/origin/main" in scan
+    assert (
+        'gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${merge_base}..HEAD" .'
+        in scan
+    )
+    assert 'gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="-n 50" .' in scan
+    assert "unable to resolve merge-base with origin/main" in scan
+    assert "gitleaks git --config .gitleaks.toml --redact --no-banner .\n" not in scan
 
 
 def _assert_nightly_scan_covers_full_history() -> None:
@@ -107,3 +115,26 @@ def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
     _assert_gitleaks_policy_allowlists()
 
     assert not (_REPO_ROOT / ".gitguardian.yml").exists()
+
+
+def test_secret_scan_workflow_dispatch_contract() -> None:
+    workflow = _load_yaml(_WORKFLOW)
+    secret_scan = workflow["jobs"]["secret-scan"]
+    scan_script = secret_scan["steps"][2]["run"]
+    env = secret_scan["steps"][2]["env"]
+
+    assert env["EVENT"] == "${{ github.event_name }}"
+    assert 'if [ "$EVENT" = "pull_request" ]; then' in scan_script
+    assert "git fetch origin +refs/heads/main:refs/remotes/origin/main" in scan_script
+    assert "git merge-base -- HEAD refs/remotes/origin/main" in scan_script
+    assert ': "${merge_base:?unable to resolve merge-base with origin/main}"' in scan_script
+    assert 'if [ "$merge_base" != "$head_sha" ]; then' in scan_script
+    assert (
+        'gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${merge_base}..HEAD" .'
+        in scan_script
+    )
+    assert (
+        'gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="-n 50" .'
+        in scan_script
+    )
+    assert "gitleaks git --config .gitleaks.toml --redact --no-banner .\n" not in scan_script

@@ -86,7 +86,8 @@ report with an older installed toolchain. PR-time CI uses the installed pinned
 A nightly schedule (plus manual dispatch, main only) runs `gitleaks git` over
 every fetched ref's whole history with the same `.gitleaks.toml` as the PR
 check. The required `secret scan (Gitleaks)` check in `ci.yml` scans only a
-change's own commits, so this loop is what catches a secret that reached a ref
+change's own commits (or a bounded recent window of 50 commits on manual
+dispatch on `main`), so this loop is what catches a secret that reached a ref
 without passing that check. A finding keeps the run red; there is no marker
 issue.
 
