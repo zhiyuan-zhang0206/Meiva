@@ -1147,7 +1147,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -1328,7 +1328,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -1393,6 +1393,13 @@ jobs:
           mkdir -p "$MEIVA_PG_THROWAWAY_BASE"
           echo "MEIVA_PG_THROWAWAY_BASE=$MEIVA_PG_THROWAWAY_BASE" >> "$GITHUB_ENV"
 
+      # Diagnostic only, not a gate: the orphaned-process suites this branch exists for.
+      - name: Diagnostic - orphaned-process suites (not a gate)
+        continue-on-error: true
+        run: |
+          uv run pytest -c pyproject.toml --rootdir=. -q -p no:cacheprovider \
+            base/sessions/tests/test_posixproc.py \
+            cli/commands/data_plane/tests/pooler/test_pgbouncer_ensure.py || true
       - name: Run selected pytest subset
         id: run-subset
         shell: bash
@@ -1457,7 +1464,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -1579,7 +1586,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -2085,7 +2092,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -2186,7 +2193,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -2281,7 +2288,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash

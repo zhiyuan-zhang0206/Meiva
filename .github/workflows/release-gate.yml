@@ -118,7 +118,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -299,7 +299,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -356,7 +356,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash
@@ -443,7 +443,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
-      options: --shm-size=2g
+      options: --init --shm-size=2g
     defaults:
       run:
         shell: bash

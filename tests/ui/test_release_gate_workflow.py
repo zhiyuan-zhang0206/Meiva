@@ -55,7 +55,7 @@ def test_every_leg_runs_on_the_commit_the_precheck_resolved_and_skips_idle_train
     for container_leg in ("static-and-structure", "backend", "e2e", "platform-smoke"):
         container = jobs[container_leg]["container"]
         assert container["image"].startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:")
-        assert container["options"] == "--shm-size=2g"
+        assert container["options"] == "--init --shm-size=2g"
         assert jobs[container_leg]["defaults"]["run"]["shell"] == "bash"
 
 
