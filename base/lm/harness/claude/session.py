@@ -94,8 +94,8 @@ def _load_sdk() -> ClaudeSdkProtocol:
     # The adapter extra is optional because the wheel bundles a ~240MB Claude Code
     # CLI that most machines never run. The import stays inside this function so
     # `import base.lm.harness` (the shared half) never touches it; a machine
-    # without the extra still imports the package and fails only when it builds a
-    # session, with the install command in the message.
+    # without the extra still imports the package, still selects this harness, and
+    # fails only when the session starts, with the install command in the message.
     # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
     try:
         import claude_agent_sdk
@@ -123,7 +123,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         clock: SessionClock,
     ) -> None:
         super().__init__(config, binding=binding, probe=probe, clock=clock)
-        self._sdk: ClaudeSdkProtocol = sdk if sdk is not None else _load_sdk()
+        self._sdk: ClaudeSdkProtocol | None = sdk
         self._environ = dict(environ)
         # meiva:note
         # The SDK resolves a bare `claude` with `shutil.which` against this process's own
@@ -146,7 +146,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if self._closed:
             raise SessionClosedError("session is closed")
         resume = self._resolve_resume(resume)
-        client = self._sdk.ClaudeSDKClient(options=self._build_options(resume))
+        client = self._require_sdk().ClaudeSDKClient(options=self._build_options(resume))
         await client.connect()
         self._client = client
         self._cli_pid = client_pid(client)
@@ -232,8 +232,18 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             ),
         )
 
+    def _require_sdk(self) -> ClaudeSdkProtocol:
+        # meiva:note
+        # The extra is imported where a session starts, never where one is built. `open_session`
+        # answers "claude_code" from the configuration alone, and a machine that has the extra
+        # installed nowhere else must still be able to report which harness the selector picked
+        # (#5935): the missing-extra failure belongs to the first start, not to the choice.
+        if self._sdk is None:
+            self._sdk = _load_sdk()
+        return self._sdk
+
     def _build_options(self, resume: str | None) -> object:
-        options = self._sdk.ClaudeAgentOptions
+        options = self._require_sdk().ClaudeAgentOptions
         return options(
             **option_values(
                 self.config,
