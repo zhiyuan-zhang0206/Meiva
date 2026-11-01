@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -345,12 +346,23 @@ async def handle_fatal_llm_error(
 
 
 def graph_config(
-    agent_id: int, tags: list[str], metadata: dict[str, object], checkpoint_interval: int
+    agent_id: int,
+    tags: list[str],
+    metadata: dict[str, object],
+    checkpoint_interval: int,
+    *,
+    runtime_generation: UUID | None = None,
 ) -> RunnableConfig:
     """LangGraph invoke config: thread_id + the turn's checkpoint interval + infinite recursion
     limit + the trace fields (run_name / metadata / tags) for backend filtering."""
+    configurable: dict[str, object] = {
+        "thread_id": str(agent_id),
+        CHECKPOINT_INTERVAL_KEY: checkpoint_interval,
+    }
+    if runtime_generation is not None:
+        configurable["runtime_generation"] = runtime_generation
     return {
-        "configurable": {"thread_id": str(agent_id), CHECKPOINT_INTERVAL_KEY: checkpoint_interval},
+        "configurable": configurable,
         "recursion_limit": _RECURSION_LIMIT_INF,
         "run_name": f"meiva-agent-{agent_id}",
         "metadata": metadata,

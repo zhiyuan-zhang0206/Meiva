@@ -8,6 +8,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from base.api_contracts.agent_contract import ReconstructionScope
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 # meiva:note
@@ -17,6 +18,7 @@ class TurnCheckpoints:
     saver: AsyncPostgresSaver
     graph: CompiledStateGraph[Any, Any, Any, Any]
     reconstruction: ReconstructionScope[AsyncPostgresSaver] | None = None
+    incarnation: RuntimeIncarnation | None = None
 
     def bind(self, scope: ReconstructionScope[AsyncPostgresSaver] | None) -> "TurnCheckpoints":
         if scope is None:
@@ -25,4 +27,9 @@ class TurnCheckpoints:
         # meiva:note
         # LangGraph's public copy preserves nodes, channels, compile options and
         # serializer allowlists. Only this admission's checkpointer changes.
-        return TurnCheckpoints(reader, self.graph.copy({"checkpointer": reader}), scope)
+        return TurnCheckpoints(
+            reader,
+            self.graph.copy({"checkpointer": reader}),
+            scope,
+            incarnation=self.incarnation,
+        )

@@ -321,9 +321,9 @@ class AgentHost:
                 with recovery_reconstruction_scope(
                     self._checkpointer, str(agent_id)
                 ) as reconstruction:
-                    checkpoints = TurnCheckpoints(self._checkpointer, self._graph).bind(
-                        reconstruction
-                    )
+                    checkpoints = TurnCheckpoints(
+                        self._checkpointer, self._graph, incarnation=incarnation
+                    ).bind(reconstruction)
                     await publish_agent_updated(self._bus, agent_id)
                     slices = self._policy.resolve_slices(pins, plugin_pins, self._plugin_configs)
                     runtime = await self._runtime_for(
@@ -674,11 +674,15 @@ class AgentHost:
     ) -> TurnOutcome:
         """Invoke each work once; persistence failure never re-enters the graph."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
+        generation = (
+            ctx.original_incarnation.generation if ctx.original_incarnation is not None else None
+        )
         config = graph_config(
             agent_id,
             ["meiva", f"agent-{agent_id}", "hosted"],
             {"agent_id": agent_id, "hosted": True},
             ctx.require_agent().kernel.checkpoint_interval,
+            runtime_generation=generation,
         )
         turn = 0
         while True:

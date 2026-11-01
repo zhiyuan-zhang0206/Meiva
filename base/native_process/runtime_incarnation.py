@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from uuid import UUID
 
 
+# meiva:note
+# Raised when a checkpoint write or runtime operation is attempted with a stale or unadmitted runtime generation.
+class StaleIncarnationError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class RuntimeIncarnation:
     agent_id: int

@@ -1,19 +1,33 @@
 ---
 type: doc
 title: Hosted checkpoint write integrity
-description: Exact parent validation and atomic upstream checkpoint writes on one pool lease.
+description: Exact parent validation, runtime generation fencing, and atomic upstream checkpoint writes on one pool lease.
 tags: []
 ---
 
 # Hosted checkpoint write integrity
 
 `services/agent_runner/agent_host/pooled_checkpoint.py:PooledPostgresSaver`
-owns the hosted checkpoint persistence boundary. Each `aput` borrows one
-exclusive pool connection and enters a PostgreSQL transaction. A config naming
-a parent must find that exact `(thread_id, checkpoint_ns, checkpoint_id)` row.
-The `FOR KEY SHARE` lock remains held until the child transaction commits. A
-first checkpoint without a parent is legal; another namespace's or thread's row
-does not satisfy the check.
+owns the hosted checkpoint persistence boundary. Each `aput` and `aput_writes`
+borrows one exclusive pool connection and enters a PostgreSQL transaction.
+
+Before writing checkpoint, blob or intermediate write rows, the write transaction
+atomically verifies the runner's fencing token against `agents_meta`:
+```sql
+SELECT runtime_generation, status FROM agents_meta WHERE id = %s FOR SHARE
+```
+The row lock (`FOR SHARE`) prevents concurrent takeover or status transition from
+completing until the write commits. When the admitted runner holds an incarnation,
+its `runtime_generation` must match `agents_meta` and the agent must still be
+`running`. If Runner B took over and rotated `runtime_generation`, or if an unfenced
+write targets an active agent, the transaction raises `StaleIncarnationError` and
+rolls back immediately, persisting zero rows to `checkpoints`, `checkpoint_blobs`,
+or `checkpoint_writes`.
+
+Within the same transaction, a config naming a parent must find that exact
+`(thread_id, checkpoint_ns, checkpoint_id)` row. The `FOR KEY SHARE` lock remains
+held until the child transaction commits. A first checkpoint without a parent is
+legal; another namespace's or thread's row does not satisfy the check.
 
 The connection-bound upstream `AsyncPostgresSaver` still owns serialization,
 blob/checkpoint inserts, pipeline synchronization and cursor cleanup. The outer

@@ -117,8 +117,9 @@ class _CheckpointWritingGraph(ScriptedGraph):
         self, _input: dict[str, Any], *, config: dict[str, Any], context: Any
     ) -> dict[str, Any]:
         thread = config["configurable"]["thread_id"]
+        configurable = {**config.get("configurable", {}), "thread_id": thread, "checkpoint_ns": ""}
         saved = await self._saver.aput(
-            cast(RunnableConfig, {"configurable": {"thread_id": thread, "checkpoint_ns": ""}}),
+            cast(RunnableConfig, {**config, "configurable": configurable}),
             empty_checkpoint(),
             {"source": "input", "step": -1, "parents": {}},
             {},
