@@ -1,0 +1,251 @@
+# Build, smoke-test, and publish the pre-baked Ubuntu 24.04 CI runner image
+# (`ghcr.io/<owner>/meiva-ci-runner`) so heavy data-plane and Playwright E2E
+# jobs do not run per-job `apt-get` or re-extract the vendored Postgres tree.
+#
+# Pull requests that touch the image or its pinned inputs build and run the
+# non-root (UID 1001) smoke suite without pushing. Pushes and manual dispatches
+# on `main` push `:main` and `:sha-<commit>`, export BuildKit `type=gha` cache
+# layers, and verify the published `image@sha256:...` digest inside a real
+# GitHub Actions `container:` job.
+
+name: CI Runner Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ci-image/**'
+      - '.github/workflows/ci-runner-image.yml'
+      - '.github/actions/install-pg-redis/**'
+      - '.github/actions/install-playwright-deps/**'
+      - 'base/cluster/dataplane/runtime_binaries.py'
+      - 'base/host/brew_pin.py'
+      - '.python-version'
+  pull_request:
+    paths:
+      - '.github/ci-image/**'
+      - '.github/workflows/ci-runner-image.yml'
+      - '.github/actions/install-pg-redis/**'
+      - '.github/actions/install-playwright-deps/**'
+      - 'base/cluster/dataplane/runtime_binaries.py'
+      - 'base/host/brew_pin.py'
+      - '.python-version'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-runner-image-{0}', github.ref) || format('ci-runner-image-{0}-{1}', github.ref, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: build and smoke-test runner image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      pushed: ${{ steps.publish-meta.outputs.pushed }}
+      image_repo: ${{ steps.meta.outputs.image_repo }}
+      digest: ${{ steps.push.outputs.digest }}
+      digest_ref: ${{ steps.publish-meta.outputs.digest_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compute lowercase GHCR image tags
+        id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          repo="ghcr.io/${owner}/meiva-ci-runner"
+          echo "image_repo=${repo}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${repo}:main"
+            echo "${repo}:sha-${SHA}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image into local Docker for smoke testing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: .github/ci-image/Dockerfile
+          platforms: linux/amd64
+          load: true
+          provenance: false
+          tags: meiva-ci-runner:local
+          cache-from: type=gha
+
+      - name: Smoke test image as UID 1001 (runner)
+        id: smoke
+        env:
+          EXPECTED_PYTHON: ${{ hashFiles('.python-version') }}
+        run: |
+          set -euo pipefail
+          py_ver="$(tr -d '[:space:]' < .python-version)"
+          t0="$(date +%s)"
+          docker run --rm --shm-size=2g --user 1001:1001 \
+            -e EXPECTED_PY="${py_ver}" \
+            meiva-ci-runner:local bash -euo pipefail -c '
+              test "$(id -u)" = "1001"
+              test "$(id -g)" = "1001"
+              sudo -n true
+
+              git --version
+              uv --version | grep -Eq "^uv 0\.13\.1(\s|$)"
+              python3 --version | grep -Fq "${EXPECTED_PY}"
+              node --version | grep -Eq "^v22\."
+              npm --version
+
+              # GitHub Actions container jobs override HOME=/github/home (empty at
+              # start); verify pnpm works cleanly with an empty HOME.
+              empty_home="$(mktemp -d)"
+              HOME="${empty_home}" pnpm --version
+              rm -rf "${empty_home}"
+
+              postgres --version | grep -Eq "17\."
+              psql --version | grep -Eq "17\."
+              redis-server --version | grep -Eq "v=8\.2\."
+              pgbouncer --version | grep -Fq "PgBouncer 1.26.0"
+              test "$(dpkg-query -W -f="\${Version}" pgbouncer)" = "1.26.0-1.pgdg24.04+1"
+
+              # Ephemeral Redis 8.2 smoke
+              redis_dir="$(mktemp -d /dev/shm/smoke-redis.XXXXXX)"
+              redis-server --port 16399 --bind 127.0.0.1 --save "" --appendonly no --dir "${redis_dir}" --daemonize yes
+              test "$(redis-cli -h 127.0.0.1 -p 16399 ping)" = "PONG"
+              redis-cli -h 127.0.0.1 -p 16399 shutdown nosave
+              rm -rf "${redis_dir}"
+
+              # Vendored Zonky Postgres + pgvector smoke (initdb refuses UID 0)
+              test -n "${CI_VENDORED_RUNTIME_ROOT}"
+              vendored_bin="$(ls -d "${CI_VENDORED_RUNTIME_ROOT}"/pg/*/bin | head -n 1)"
+              test -x "${vendored_bin}/initdb"
+              pg_tmp="$(mktemp -d /dev/shm/smoke-pg.XXXXXX)"
+              "${vendored_bin}/initdb" -D "${pg_tmp}/data" -U meiva -A trust --no-sync --encoding=UTF8 --locale=C >/dev/null
+              "${vendored_bin}/pg_ctl" -D "${pg_tmp}/data" -l "${pg_tmp}/pg.log" -w -t 30 start \
+                -o "-p 15499 -c listen_addresses=127.0.0.1 -c unix_socket_directories=${pg_tmp} -c fsync=off" >/dev/null
+              psql "postgresql://meiva@127.0.0.1:15499/postgres" -v ON_ERROR_STOP=1 \
+                -c "CREATE EXTENSION vector; SELECT '\''[1,2,3]'\''::vector;" >/dev/null
+              "${vendored_bin}/pg_ctl" -D "${pg_tmp}/data" -m immediate stop >/dev/null
+              rm -rf "${pg_tmp}"
+              echo "All non-root (UID 1001) container smoke assertions passed."
+            '
+          t1="$(date +%s)"
+          uncompressed_bytes="$(docker image inspect meiva-ci-runner:local --format '{{.Size}}')"
+          echo "smoke_seconds=$((t1 - t0))" >> "$GITHUB_OUTPUT"
+          echo "uncompressed_mb=$((uncompressed_bytes / 1024 / 1024))" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push verified image to GHCR
+        id: push
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: .github/ci-image/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record image digest and summary
+        id: publish-meta
+        env:
+          IMAGE_REPO: ${{ steps.meta.outputs.image_repo }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          SMOKE_SECONDS: ${{ steps.smoke.outputs.smoke_seconds }}
+          UNCOMPRESSED_MB: ${{ steps.smoke.outputs.uncompressed_mb }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DIGEST}" ]; then
+            digest_ref="${IMAGE_REPO}@${DIGEST}"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "digest_ref=${digest_ref}" >> "$GITHUB_OUTPUT"
+            compressed_bytes="$(
+              docker buildx imagetools inspect --raw "${digest_ref}" \
+                | jq 'if .layers then ([.config.size, (.layers[].size)] | add) else ([.manifests[].size] | add) end'
+            )"
+            compressed_mb="$((compressed_bytes / 1024 / 1024))"
+            {
+              echo "### Published CI Runner Image"
+              echo ""
+              echo "- **Immutable reference**: \`${digest_ref}\`"
+              echo "- **Tags**: \`${IMAGE_REPO}:main\`, \`${IMAGE_REPO}:sha-${SHA}\`"
+              echo "- **Compressed layer total**: \`${compressed_mb} MiB\` (\`${UNCOMPRESSED_MB} MiB\` uncompressed)"
+              echo "- **UID 1001 smoke duration**: \`${SMOKE_SECONDS}s\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Published ${digest_ref} (${compressed_mb} MiB compressed, ${UNCOMPRESSED_MB} MiB uncompressed)"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "digest_ref=" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Verified CI Runner Image (PR / non-push build)"
+              echo ""
+              echo "- **Uncompressed size**: \`${UNCOMPRESSED_MB} MiB\`"
+              echo "- **UID 1001 smoke duration**: \`${SMOKE_SECONDS}s\`"
+              echo "- **Push**: skipped (only \`main\` publishes to GHCR)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  verify-job-container:
+    name: verify GitHub Actions container job compatibility
+    needs: [build]
+    if: needs.build.outputs.pushed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ${{ needs.build.outputs.digest_ref }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --shm-size=2g
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify runtime inside GitHub Actions job container
+        run: |
+          set -euo pipefail
+          echo "uid=$(id -u) gid=$(id -g) HOME=${HOME} WORKSPACE=${GITHUB_WORKSPACE}"
+          test "$(id -u)" = "1001"
+          test -w "${HOME}"
+          test -w "${GITHUB_WORKSPACE}"
+          git status --short
+          uv --version
+          python3 --version
+          node --version
+          npm --version
+          pnpm --version
+          redis-server --version
+          pgbouncer --version
+          vendored_bin="$(ls -d "${CI_VENDORED_RUNTIME_ROOT}"/pg/*/bin | head -n 1)"
+          pg_tmp="$(mktemp -d /dev/shm/job-container-pg.XXXXXX)"
+          "${vendored_bin}/initdb" -D "${pg_tmp}/data" -U meiva -A trust --no-sync --encoding=UTF8 --locale=C >/dev/null
+          "${vendored_bin}/pg_ctl" -D "${pg_tmp}/data" -l "${pg_tmp}/pg.log" -w -t 30 start \
+            -o "-p 15498 -c listen_addresses=127.0.0.1 -c unix_socket_directories=${pg_tmp} -c fsync=off" >/dev/null
+          psql "postgresql://meiva@127.0.0.1:15498/postgres" -v ON_ERROR_STOP=1 \
+            -c "CREATE EXTENSION vector; SELECT '[1,2,3]'::vector;" >/dev/null
+          "${vendored_bin}/pg_ctl" -D "${pg_tmp}/data" -m immediate stop >/dev/null
+          rm -rf "${pg_tmp}"

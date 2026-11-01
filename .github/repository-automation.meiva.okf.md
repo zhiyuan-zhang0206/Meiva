@@ -44,6 +44,19 @@ or `.github/actions/`) and on manual dispatch. It runs the same install steps as
 packages, the vendored Postgres runtime, Playwright), so the next PRs restore
 warm caches instead of each building its own. It runs no tests.
 
+## `workflows/ci-runner-image.yml`
+
+Builds, smoke-tests, and publishes the pre-baked Ubuntu 24.04 Linux CI runner
+image (`ghcr.io/<owner>/meiva-ci-runner`, defined in `ci-image/Dockerfile`) with
+PostgreSQL 17 host tools, pinned PgBouncer and Redis 8.2, the vendored Zonky
+PostgreSQL + pgvector runtime (`CI_VENDORED_RUNTIME_ROOT`), pinned `uv` and
+CPython (`.python-version`), Node.js 22 (`npm` and Corepack `pnpm`), Playwright
+Chromium OS libraries, and a non-root `runner` user (`UID 1001` / `GID 1001`).
+Pull requests touching the image or its pinned inputs build and run the UID 1001
+smoke suite without pushing; pushes and manual dispatches on `main` publish
+`:main` and `:sha-<commit>`, record the immutable `sha256` digest, and verify
+the published image inside a GitHub Actions `container:` job.
+
 ## `workflows/update-model-pricing.yml`
 
 A daily schedule (plus manual dispatch) runs the strict provider adapters in

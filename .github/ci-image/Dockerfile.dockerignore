@@ -1,0 +1,8 @@
+# Keep the Docker build context minimal so source edits outside the CI runner
+# image inputs never invalidate BuildKit layer caching.
+*
+!.github/ci-image/**
+!.github/actions/install-pg-redis/ACCC4CF8.asc
+!.github/actions/install-pg-redis/redis-archive-keyring.asc
+!.python-version
+!base/cluster/dataplane/runtime_binaries.py

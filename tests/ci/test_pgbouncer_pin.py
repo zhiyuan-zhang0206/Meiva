@@ -22,3 +22,12 @@ def test_ci_installs_the_canonical_pgbouncer() -> None:
     assert re.findall(r'^\s*pgbouncer_version="([^"]+)"$', text, re.MULTILINE) == [
         brew_pin.PGBOUNCER_APT_VERSION
     ]
+
+
+def test_ci_runner_image_installs_and_holds_the_canonical_pgbouncer() -> None:
+    text = (_REPO_ROOT / ".github/ci-image/Dockerfile").read_text(encoding="utf-8")
+    assert re.findall(r'^ARG PGBOUNCER_APT_VERSION="([^"]+)"$', text, re.MULTILINE) == [
+        brew_pin.PGBOUNCER_APT_VERSION
+    ]
+    assert '"pgbouncer=${PGBOUNCER_APT_VERSION}"' in text
+    assert "apt-mark hold pgbouncer" in text

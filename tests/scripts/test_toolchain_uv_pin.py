@@ -35,6 +35,11 @@ def test_toolchain_embeds_the_canonical_version() -> None:
     assert match.group(1) == brew_pin.UV_VERSION
 
 
+def test_ci_runner_image_pins_the_canonical_uv_version() -> None:
+    text = (_REPO_ROOT / ".github" / "ci-image" / "Dockerfile").read_text(encoding="utf-8")
+    assert re.findall(r'^ARG UV_VERSION="([^"]+)"$', text, re.MULTILINE) == [brew_pin.UV_VERSION]
+
+
 def test_toolchain_sha256_map_matches_the_canonical_set() -> None:
     text = _TOOLCHAIN.read_text(encoding="utf-8")
     embedded = dict(_TAG_SHA_ARM.findall(text))
