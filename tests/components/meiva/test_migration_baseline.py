@@ -245,3 +245,54 @@ def test_the_fencing_retirement_drops_an_upgraded_clusters_storage_and_keeps_its
         "SELECT count(*) FROM pg_trigger "
         "WHERE tgname = 'inbound_messages_lifecycle_pointer_done_guard'"
     ).fetchone() == (0,)
+
+
+# meiva:note
+# Verify the high-churn tables have HOT fillfactor and aggressive autovacuum configured.
+@pytest.mark.parametrize("table_name", ["agents_meta", "inbound_messages"])
+def test_high_churn_tables_storage_tuning(db_conn: psycopg.Connection, table_name: str) -> None:
+    row = db_conn.execute(
+        "SELECT reloptions FROM pg_class WHERE relname = %s",
+        (table_name,),
+    ).fetchone()
+    assert row is not None and row[0] is not None
+    options = set(row[0])
+    expected = {
+        "fillfactor=85",
+        "autovacuum_vacuum_scale_factor=0.05",
+        "autovacuum_vacuum_cost_limit=1000",
+        "autovacuum_vacuum_cost_delay=2",
+    }
+    assert expected.issubset(options)
+
+
+# meiva:note
+# Verify the watchdog partial index on inbound_messages pending rows exists.
+def test_inbound_watchdog_partial_index_present(db_conn: psycopg.Connection) -> None:
+    assert db_conn.execute(
+        "SELECT to_regclass('public.idx_inbound_pending_created_at')"
+    ).fetchone() != (None,)
+
+
+# meiva:note
+# Verify the retired task-cost columns are absent from agent_tasks.
+def test_retired_task_cost_columns_are_absent(db_conn: psycopg.Connection) -> None:
+    cols = [
+        row[0]
+        for row in db_conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'agent_tasks' "
+            "AND column_name = ANY(%s)",
+            (
+                [
+                    "token_budget",
+                    "usd_budget",
+                    "token_used",
+                    "usd_used",
+                    "token_budget_notified_at",
+                    "usd_budget_notified_at",
+                ],
+            ),
+        ).fetchall()
+    ]
+    assert cols == []

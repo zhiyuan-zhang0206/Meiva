@@ -77,15 +77,13 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 from base.deploy.schema.migration_history import (
+    OCT2026_PRE_RESET_SET,
     PRE_RESET_SET,
     RESET_ANCHOR,
     SEP2026_PRE_RESET_SET,
     V010_PRE_RESET_SET,
 )
-from base.deploy.schema.migrations import (
-    BASELINE_NAME,
-    FILENAME_RE,
-)
+from base.deploy.schema.migrations import BASELINE_NAME, FILENAME_RE
 from base.deploy.schema.rollback_snapshot import is_rollback_snapshot_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -734,7 +732,7 @@ def _check_merged_migrations_immutable(
     if result.returncode != 0:
         return [f"cannot read migrations/ at {base}: {result.stderr.strip()}"]
     current = {entry.name: entry for entry in migrations_dir.rglob("*.sql")}
-    folded = PRE_RESET_SET | SEP2026_PRE_RESET_SET | V010_PRE_RESET_SET
+    folded = PRE_RESET_SET | OCT2026_PRE_RESET_SET | SEP2026_PRE_RESET_SET | V010_PRE_RESET_SET
     has_reset_anchor = f"{RESET_ANCHOR}.sql" in current
     errors: list[str] = []
     for record in result.stdout.split("\0"):
