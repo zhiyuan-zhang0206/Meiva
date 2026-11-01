@@ -97,6 +97,7 @@ meiva.ensure_plugins_loaded(
         machine=machine,
         clients=clients,
         meiva_home=root,
+        environ=config.process_environment(),
     ),
 )
 exec(sys.argv[2])

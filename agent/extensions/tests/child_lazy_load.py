@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -35,7 +36,7 @@ def _bind_home() -> None:
     from base.paths.home import resolve_meiva_home
     from meiva.sdk_surface import process_context
 
-    process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home()))
+    process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home(), environ=os.environ))
 
 
 def _executions(counter: Path) -> int:
@@ -130,7 +131,9 @@ def agent_process(counter: Path) -> dict[str, Any]:
     from base.agents.context.identity import AgentIdentity
     from meiva.sdk_surface import process_context
 
-    process_context.bind_context(MeivaContext(identity=AgentIdentity(agent_id=7, owns_loop=True)))
+    process_context.bind_context(
+        MeivaContext(identity=AgentIdentity(agent_id=7, owns_loop=True), environ=os.environ)
+    )
     return {
         "error": _attribute_error(lambda: sdk_namespace(meiva, "nope_xyz")),
         "executions": _executions(counter),
