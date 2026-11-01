@@ -378,7 +378,7 @@ def test_update_title_and_note_on_parent_with_in_progress_child(
     assert updated.status == "in_progress"
     assert updated.title == "edited-parent"
     assert updated.results is not None
-    assert updated.results.splitlines()[-1].endswith("still active")
+    assert [line for line in updated.results.splitlines() if line][-1].endswith("still active")
 
 
 def test_log_appends_timestamped_lines(
@@ -391,7 +391,7 @@ def test_log_appends_timestamped_lines(
     task_registry.log(task.id, "second note", operation_key=str(uuid4()))
     results = task_registry.get(task.id).results
     assert results is not None
-    lines = results.splitlines()
+    lines = [line for line in results.splitlines() if line]
     assert len(lines) == 2
     assert lines[0].endswith("first note")
     assert lines[1].endswith("second note")
@@ -437,9 +437,52 @@ def test_log_preserves_replaced_results(
     task_registry.log(task.id, "appended", operation_key=str(uuid4()))
     results = task_registry.get(task.id).results
     assert results is not None
-    lines = results.splitlines()
+    lines = [line for line in results.splitlines() if line]
     assert lines[0] == "prior log without newline"
     assert lines[1].endswith("appended")
+    assert results.startswith("prior log without newline\n\n")
+    assert results.endswith("appended\n\n")
+
+
+# meiva:note
+# Appending a note normalizes prior results to exactly double newline separation, regardless
+# of how many trailing newlines were previously present.
+def test_log_idempotent_prefix_normalization(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    agent_id = seed_agent(db_conn)
+    pin_agent(agent_id)
+
+    task1 = task_registry.create("t1", "d", parent=root_task_id, operation_key=str(uuid4()))
+    task_registry.update(task1.id, results="note with single newline\n", operation_key=str(uuid4()))
+    task_registry.log(task1.id, "appended 1", operation_key=str(uuid4()))
+    res1 = task_registry.get(task1.id).results
+    assert res1 is not None
+    assert res1.startswith("note with single newline\n\n")
+    assert res1.endswith("appended 1\n\n")
+    assert "note with single newline\n\n\n" not in res1
+
+    task2 = task_registry.create("t2", "d", parent=root_task_id, operation_key=str(uuid4()))
+    task_registry.update(
+        task2.id, results="note with double newline\n\n", operation_key=str(uuid4())
+    )
+    task_registry.log(task2.id, "appended 2", operation_key=str(uuid4()))
+    res2 = task_registry.get(task2.id).results
+    assert res2 is not None
+    assert res2.startswith("note with double newline\n\n")
+    assert res2.endswith("appended 2\n\n")
+    assert "note with double newline\n\n\n" not in res2
+
+    task3 = task_registry.create("t3", "d", parent=root_task_id, operation_key=str(uuid4()))
+    task_registry.update(
+        task3.id, results="note with triple newline\n\n\n", operation_key=str(uuid4())
+    )
+    task_registry.log(task3.id, "appended 3", operation_key=str(uuid4()))
+    res3 = task_registry.get(task3.id).results
+    assert res3 is not None
+    assert res3.startswith("note with triple newline\n\n")
+    assert res3.endswith("appended 3\n\n")
+    assert "note with triple newline\n\n\n" not in res3
 
 
 # meiva:note
