@@ -185,13 +185,22 @@ def test_ci_shards_never_record_or_upload_durations(suite: str) -> None:
 
 
 # meiva:note
-# All TypeScript compiler/accounting contracts run in the static lane (backend-static-tests).
-# The measured backend population has no Node/npm dependency; measure-e2e retains its browser setup.
+# Both measured populations carry tests that shell out to node: the backend one runs the
+# TypeScript comment-parser tests against ui/web/node_modules/typescript, the e2e one builds
+# the frontend. A measurement job without the install fails every shard that draws one of
+# them and the durations never refresh (task #5479, regressed by #8047).
 def test_measurement_jobs_frontend_dependencies() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
     backend_steps = jobs["measure-backend"]["steps"]
-    assert not [step for step in backend_steps if "Install Node" in str(step.get("name"))]
-    assert not [step for step in backend_steps if step.get("run") == "npm ci"]
+    node = _step(backend_steps, "Install Node")
+    assert node["uses"].startswith("actions/setup-node@")
+    assert node["with"]["node-version"] == 22
+    installs = [
+        step
+        for step in backend_steps
+        if step.get("working-directory") == "ui/web" and step.get("run") == "npm ci"
+    ]
+    assert len(installs) == 1, "measure-backend must install ui/web deps exactly once"
 
     e2e_steps = jobs["measure-e2e"]["steps"]
     node = _step(e2e_steps, "Install Node")
