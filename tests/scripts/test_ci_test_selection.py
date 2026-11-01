@@ -79,7 +79,13 @@ def _backend_verdict(
 
 def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
     results = dict.fromkeys(["classify", *dependencies], "success")
-    non_backend = dict.fromkeys(results, "skipped") | {"classify": "success"}
+    _assert_structure_outcomes(script, dict.fromkeys(results, "skipped") | {"classify": "success"})
+    _assert_mode_outcomes(script, results)
+    _assert_optional_skips(script, results)
+    _assert_required_dependencies(script, results)
+
+
+def _assert_structure_outcomes(script: str, non_backend: dict[str, str]) -> None:
     for outcome in ("success", "failure", "cancelled", "skipped"):
         actual = _backend_verdict(script, "false", non_backend | {"backend-structure": outcome})
         assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
@@ -88,6 +94,9 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
             script, "false", non_backend | {"classify": outcome, "backend-structure": "success"}
         )
         assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
+
+
+def _assert_mode_outcomes(script: str, results: dict[str, str]) -> None:
     for mode, decision, changes, expected in (
         ("enforce", "FULL", {}, 0),
         ("shadow", "SELECTED", {"backend-shard": "failure"}, 1),
@@ -102,6 +111,9 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
     ):
         actual = _backend_verdict(script, "true", results | changes, mode=mode, decision=decision)
         assert actual.returncode == expected, actual.stdout
+
+
+def _assert_optional_skips(script: str, results: dict[str, str]) -> None:
     optional_skipped = results | {
         "backend-shard": "skipped",
         "backend-serial": "skipped",
@@ -140,11 +152,16 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
                 run_host_marks="false",
             )
             assert actual.returncode == 1, actual.stdout
+
+
+def _assert_required_dependencies(script: str, results: dict[str, str]) -> None:
     for job in results:
         for outcome in ("failure", "cancelled", "skipped"):
             actual = _backend_verdict(script, "true", results | {job: outcome})
+            # meiva:note
             # FULL has no enforced subset; every required dependency must succeed.
             assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
+    # meiva:note
     # The selector step is continue-on-error inside classify; its outcome is an output.
     # A failed or cancelled selector keeps the full net but fails the required check;
     # a skipped one (no PR, or no backend side) is not a failure.

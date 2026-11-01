@@ -127,15 +127,19 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "keeps .github/actions/install-pg-redis and scripts/provision/database.sh on one PgBouncer pin",
     ),
-    "tests/ci/test_prepush_branch_diff.py": (
+    "tests/ci/prepush/test_prepush_branch_diff.py": (
         "contract",
         "runs scripts/hooks/prepush-branch-lint.sh and its scratch-checkout runner in throwaway repositories",
+    ),
+    "tests/ci/prepush/test_prepush_hook_runs.py": (
+        "contract",
+        "runs the scripts/prepush-*.sh and precommit-eslint.sh wrappers against .pre-commit-config.yaml in throwaway repositories",
     ),
     "tests/ci/test_prepush_hooks.py": (
         "contract",
         "runs .pre-commit-config.yaml and the scripts/prepush-*.sh hooks as processes",
     ),
-    "tests/ci/test_prepush_selection.py": (
+    "tests/ci/prepush/test_prepush_selection.py": (
         "contract",
         "runs the scripts/prepush-*.sh and precommit-eslint.sh hooks against .pre-commit-config.yaml in throwaway repositories",
     ),

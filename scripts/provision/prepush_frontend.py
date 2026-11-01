@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parents[1]
@@ -209,63 +210,78 @@ def run_ci_incremental(base: str) -> int:
         {test for prefix, test in _DISK_CONSUMERS if any(p.startswith(prefix) for p in paths)}
     )
     existing = [p for p in web if Path(p).is_file()]
-    global_or_deleted = any(p in _GLOBAL or not Path(p).is_file() for p in web)
+    full = any(p in _GLOBAL or not Path(p).is_file() for p in web)
+    return _first_failure(
+        (
+            *_lint_commands(web, existing, full=full),
+            *_build_commands(web, existing),
+            *_test_commands(existing, disk, full=full),
+        )
+    )
 
-    if global_or_deleted or any(p.startswith("ui/web/eslint-rules/") for p in web):
-        status = _run_ci_pnpm("run", "lint")
-        if status:
+
+# meiva:note
+# One command per step and the first failure wins: each step below decides only which `pnpm`
+# invocations it contributes, so the sequence stays readable as the three phases a push runs.
+def _first_failure(commands: Iterable[tuple[str, ...]]) -> int:
+    for command in commands:
+        if status := _run_ci_pnpm(*command):
             return status
-    else:
-        code_files = [p.removeprefix(_WEB) for p in existing if p.endswith(_CODE)]
-        if code_files:
-            status = _run_ci_pnpm(
-                "exec", "eslint", "--no-warn-ignored", "--max-warnings", "0", *code_files
-            )
-            if status:
-                return status
+    return 0
 
-    if _touches_rsc_or_build(web, existing):
-        for script_name in ("build", "check:bundle-integrity"):
-            status = _run_ci_pnpm("run", script_name)
-            if status:
-                return status
 
-    if global_or_deleted:
-        status = _run_ci_pnpm("exec", "vitest", "run", "--config", "tests/vitest.config.mts")
-        if status:
-            return status
-        return _run_ci_pnpm("exec", "vitest", "run", "--config", "tests/vitest.flaky.config.mts")
+def _lint_commands(web: list[str], existing: list[str], *, full: bool) -> list[tuple[str, ...]]:
+    if full or any(p.startswith("ui/web/eslint-rules/") for p in web):
+        return [("run", "lint")]
+    code_files = [p.removeprefix(_WEB) for p in existing if p.endswith(_CODE)]
+    if not code_files:
+        return []
+    return [("exec", "eslint", "--no-warn-ignored", "--max-warnings", "0", *code_files)]
 
+
+def _build_commands(web: list[str], existing: list[str]) -> list[tuple[str, ...]]:
+    if not _touches_rsc_or_build(web, existing):
+        return []
+    return [("run", "build"), ("run", "check:bundle-integrity")]
+
+
+def _test_commands(existing: list[str], disk: list[str], *, full: bool) -> list[tuple[str, ...]]:
+    if full:
+        return [
+            ("exec", "vitest", "run", "--config", "tests/vitest.config.mts"),
+            ("exec", "vitest", "run", "--config", "tests/vitest.flaky.config.mts"),
+        ]
     direct = [t for t in _direct_tests(existing, disk) if "/flaky/" not in f"/{t}"]
     sources = _related_sources(existing, direct)
+    commands: list[tuple[str, ...]] = []
     if direct:
-        status = _run_ci_pnpm(
-            "exec",
-            "vitest",
-            "run",
-            "--config",
-            "tests/vitest.config.mts",
-            "--passWithNoTests=false",
-            *direct,
+        commands.append(
+            (
+                "exec",
+                "vitest",
+                "run",
+                "--config",
+                "tests/vitest.config.mts",
+                "--passWithNoTests=false",
+                *direct,
+            )
         )
-        if status:
-            return status
     if sources:
-        status = _run_ci_pnpm(
-            "exec",
-            "vitest",
-            "related",
-            "--run",
-            "--config",
-            "tests/vitest.config.mts",
-            "--passWithNoTests",
-            *sources,
+        commands.append(
+            (
+                "exec",
+                "vitest",
+                "related",
+                "--run",
+                "--config",
+                "tests/vitest.config.mts",
+                "--passWithNoTests",
+                *sources,
+            )
         )
-        if status:
-            return status
     if any("/flaky/" in p for p in existing):
-        return _run_ci_pnpm("exec", "vitest", "run", "--config", "tests/vitest.flaky.config.mts")
-    return 0
+        commands.append(("exec", "vitest", "run", "--config", "tests/vitest.flaky.config.mts"))
+    return commands
 
 
 if __name__ == "__main__":

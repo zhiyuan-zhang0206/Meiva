@@ -1,0 +1,5 @@
+exports = ["prepush_probe.py"]
+
+[uses]
+"test_prepush_hook_runs.py" = ["prepush_probe.py"]
+"test_prepush_selection.py" = ["prepush_probe.py"]
