@@ -48,7 +48,7 @@ def test_update_note_with_cancel_appends_to_results(
     )
     results = task_registry.get(task.id).results
     assert results is not None
-    lines = results.splitlines()
+    lines = [line for line in results.splitlines() if line]
     assert len(lines) == 2
     assert lines[0].endswith("work started")
     assert lines[1].endswith("no longer needed")
@@ -113,7 +113,7 @@ def test_update_note_with_results_overwrite_appends_after(
     )
     results = task_registry.get(task.id).results
     assert results is not None
-    lines = results.splitlines()
+    lines = [line for line in results.splitlines() if line]
     assert lines[0] == "final notes"
     assert lines[1].endswith("out of scope")
 
@@ -553,7 +553,7 @@ def test_sdk_task_timestamps_are_bare_cluster_zone(
     # The results notes use the same bare convention — one object, one
     # convention end to end.
     assert got.results is not None
-    for line in got.results.splitlines():
+    for line in (line for line in got.results.splitlines() if line):
         assert re.match(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ", line), (
             f"note line is not bare: {line!r}"
         )

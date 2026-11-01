@@ -67,27 +67,29 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str, clock: Clock) -> int:
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT t.id, a.id FROM agent_tasks t "
+                "SELECT t.id, a.id, t.results FROM agent_tasks t "
                 "JOIN agents_meta a ON t.owner = a.id "
                 "WHERE a.machine = %s AND a.status != 'terminated' "
                 "AND t.status = 'in_progress'",
                 (name,),
             )
             rows = cur.fetchall()
-        for task_id, owner_id in rows:
-            note = task_note_line(
+        for task_id, owner_id, results in rows:
+            line = task_note_line(
                 f"machine {name} paused \u2014 owner agent #{owner_id} "
                 f"terminated; task reassigned to drain owner #{_MACHINE_PAUSE_DRAIN_OWNER} "
                 f"(see `meiva cluster resume {name}`)",
                 clock=clock,
                 now=clock.now(),
             )
+            current: str = results or ""
+            prefix = (current.rstrip("\n") + "\n\n") if current else ""
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agent_tasks SET owner = %s, updated_at = now(), "
-                    "results = COALESCE(results, '') || %s "
+                    "results = %s "
                     "WHERE id = %s",
-                    (_MACHINE_PAUSE_DRAIN_OWNER, "\n" + note, task_id),
+                    (_MACHINE_PAUSE_DRAIN_OWNER, prefix + line, task_id),
                 )
         conn.commit()
     return len(rows)
