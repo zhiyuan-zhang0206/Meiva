@@ -71,11 +71,13 @@ def stop_command(flags: str) -> str:
 
 # meiva:note
 # Check NEW out detached, repair legacy read-only `.venv` directories (early converge passes left
-# them 0555, which `uv sync` cannot write through), sync, and require a clean tree.
+# them 0555, which `uv sync` cannot write through), sync (reinstalling the editable `meiva` wheel so
+# `force-include` trees like `schedules/` and `migrations/` in `site-packages` refresh even when
+# `uv.lock` is unchanged), and require a clean tree.
 def switch_command(new: str) -> str:
     return (
         f"{HOME}; git checkout -q --detach {new} && {_VENV_DIRS} && "
-        f"env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode && {CLEAN}"
+        f"env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode --reinstall-package meiva && {CLEAN}"
     )
 
 

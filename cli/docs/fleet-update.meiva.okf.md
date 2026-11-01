@@ -73,7 +73,7 @@ remain unchanged throughout the update.
    ([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
 7. Switch every checkout: check out NEW detached, repair legacy read-only
    `.venv` directories (early converge passes left them 0555, which `uv sync`
-   cannot write through), `uv sync --frozen`, then require a clean tree. The
+   cannot write through), `uv sync --frozen --compile-bytecode --reinstall-package meiva`, then require a clean tree. The
    check shows a dirty tree and never cleans it: untracked files are the
    operator's to move (not delete), never the update's.
 

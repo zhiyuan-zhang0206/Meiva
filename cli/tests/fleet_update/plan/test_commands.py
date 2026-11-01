@@ -45,7 +45,10 @@ def test_the_switch_checks_new_out_detached_syncs_the_venv_and_requires_a_clean_
     steps = command.split(" && ")
     assert steps[0].endswith(f"git checkout -q --detach {_NEW}")
     assert steps[1].startswith("find .venv/bin .venv/lib") and "chmod u+w" in steps[1]
-    assert steps[2] == "env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode"
+    assert (
+        steps[2]
+        == "env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode --reinstall-package meiva"
+    )
     assert steps[3] == CLEAN
 
 

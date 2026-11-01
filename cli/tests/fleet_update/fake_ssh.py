@@ -55,7 +55,7 @@ class Sim:
     def _switch(self, host: State, command: str) -> None:
         assert not host["up"] and self.s["new"] in command, "switched a running host"
         assert self.s["clean"] in shlex.split(command)[2], "no clean-tree check after switch"
-        assert "uv sync --frozen --compile-bytecode" in command
+        assert "uv sync --frozen --compile-bytecode --reinstall-package meiva" in command
         host["head"] = self.s["new"]
 
     def _start(self, kind: str, alias: str, host: State) -> int:

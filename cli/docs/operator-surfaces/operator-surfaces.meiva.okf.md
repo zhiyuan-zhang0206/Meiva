@@ -99,7 +99,8 @@ tags:
   also runs at every schedule-manager start;
   it creates missing rows and resyncs a built-in row whose script differs from the template.
   `meiva schedules verify` reads each stored script through the gateway (which must be
-  reachable; `--rows-file` and `--check-file` read none) and checks its imports, the names
+  reachable; `--rows-file` and `--check-file` read none, and `--rows-file` overlays
+  `schedules/manifest.json` templates for built-in rows that `up` resyncs) and checks its imports, the names
   it reads and its calls into repo code in this checkout.
 - `meiva trace ship`
 - `meiva lgtm on/off/status`: observability-stack toggle on this host, represented
