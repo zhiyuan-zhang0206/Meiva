@@ -135,6 +135,12 @@ bootstrap() {
   echo "→ verifying …"
   { [ -d .venv ] && [ ! -L .venv ]; } || die ".venv must be a real directory inside $REPO_ROOT, never a symlink"
   [ -x .venv/bin/python ] || die ".venv/bin/python is missing"
+  # meiva:note
+  # The Python-side hooks run the TypeScript analyzer, which loads the frontend dependencies of
+  # this checkout; without them every hook fails with a module-not-found stack that reads like a
+  # regression in the change being checked (#8085 moved ui/web to pnpm).
+  [ -d ui/web/node_modules ] \
+    || die "ui/web/node_modules is missing after the frontend install — run: (cd ui/web && pnpm install --frozen-lockfile)"
   python3 "$SCRIPT_DIR/host_ops/guard_editable_venv.py" "$REPO_ROOT"
   if [ "$(git status --porcelain)" != "$before" ]; then
     git status --short >&2
