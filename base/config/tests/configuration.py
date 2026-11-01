@@ -7,6 +7,20 @@ from base.config import ConfigBoot, field_domain, field_names, get_field, settin
 from base.host.env.agent_slices import ModelOverrides
 
 
+# meiva:note
+# The environment a reader that takes a mapping is handed: this process's own, carrying the
+# throwaway data plane the test requested. A boot built inside a test and a child process it starts
+# are told what to read instead of the request window publishing on the process environment, so the
+# value reaches exactly the readers the test names — and a test that requested no resource still
+# carries the unreachable sentinel.
+def data_plane_environment() -> dict[str, str]:
+    return {
+        **os.environ,
+        "MEIVA_DB_URL": str(get_field("db_url")),
+        "MEIVA_REDIS_URL": str(get_field("redis_url")),
+    }
+
+
 def snapshot_process_config() -> ConfigBoot:
     authority = settings.env_boot
     values = {name: get_field(name) for name in field_names()}

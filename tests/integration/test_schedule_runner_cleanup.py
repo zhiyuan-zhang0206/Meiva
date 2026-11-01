@@ -19,6 +19,8 @@ import psutil
 import psycopg
 import pytest
 
+from base.config.tests.configuration import data_plane_environment
+
 _CHILD = Path(__file__).with_name("child_schedule_runner.py")
 
 
@@ -224,7 +226,7 @@ def test_runner_hard_exit_child_ownership(
             stdout=log,
             stderr=log,
             process_group=sibling.pid,
-            env={**os.environ, "MEIVA_SCHEDULE_STALL_TIMEOUT_SECONDS": "0.15"},
+            env={**data_plane_environment(), "MEIVA_SCHEDULE_STALL_TIMEOUT_SECONDS": "0.15"},
         )
         tracked.append(psutil.Process(runner.pid))
         owned = _capture_children(root, runner.pid)
@@ -308,7 +310,8 @@ def test_stall_exit_bounds_failure_records(
                 str(tmp_path),
                 str(schedule_id),
                 str(run_id),
-            ]
+            ],
+            env=data_plane_environment(),
         ) as runner:
             try:
                 _await_file(tmp_path / "started")
@@ -352,7 +355,8 @@ def test_a_script_that_returns_during_the_stall_action_cannot_complete(
                 "completion_during_stall",
                 str(tmp_path),
                 str(schedule_id),
-            ]
+            ],
+            env=data_plane_environment(),
         ) as runner:
             try:
                 _await_blocked_write(db_conn, "schedules")

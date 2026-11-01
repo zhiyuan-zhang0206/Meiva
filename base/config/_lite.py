@@ -343,6 +343,10 @@ class ConfigBoot:
         name = self.get_field("timezone") if self.field_explicitly_set("timezone") else None
         apply_process_timezone(name)
 
+    # meiva:note
+    # An owner constructed with an explicit environment captures what it was handed: that mapping
+    # is a handoff, not this process's launch, so the live-environment scrub stays with the process
+    # that owns the live environment.
     def read_process_environment(self) -> None:
         """Capture an existing startup delivery without delivering it again.
 
@@ -355,12 +359,12 @@ class ConfigBoot:
                 if self.environment is not None:
                     return
                 raise RuntimeError("configuration owner was already prepared")
-            if os.environ.get("MEIVA_HARNESS_HANDLE"):
+            if self.environment is None and os.environ.get("MEIVA_HARNESS_HANDLE"):
                 for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
                     os.environ.pop(key, None)
                 if not os.environ.get("MEIVA_DB_URL"):
                     load_meiva_env(os.environ, home=resolve_meiva_home())
-            environment = dict(os.environ)
+            environment = dict(self.process_environment())
             profile = environment.get(MEIVA_PROCESS_PROFILE_ENV)
             parsed_profile = None if profile is None else parse_process_profile(profile)
             for _name, row in LITE_FIELDS.items():

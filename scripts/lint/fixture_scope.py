@@ -34,9 +34,10 @@
 # `conftest.py` loads it once per pytest process, so "the session" and "my directory" are
 # the same blast radius. Its session-scoped fixtures establish the runner's own baseline
 # there — the catalog projection plants the plugin configuration and takes it back at the
-# end — while the data-plane delivery lives in its function-scoped windows: `provisioned_db`
-# / `provisioned_redis` enter `MEIVA_DB_URL` / `MEIVA_REDIS_URL` and the fixture's own
-# teardown restores the unreachable sentinel, which is where a per-test value belongs.
+# end. The data-plane delivery does not go through the process environment at all: its
+# function-scoped windows set the settings field and the home's private `.env`, and a reader
+# that takes a mapping is handed `data_plane_environment()` (base/config/tests/configuration)
+# by the test that needs it.
 #
 # Anywhere deeper, session scope plus a process-global mutation is a contradiction by
 # construction: the fixture exists to serve one subtree and its teardown cannot fire
