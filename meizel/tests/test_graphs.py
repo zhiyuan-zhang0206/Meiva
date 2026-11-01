@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from meizel.contracts.cli import GitRepo
+from meizel.graph import ReachabilityScope, reachability_analysis
 from meizel.graph import universe as model
 from meizel.graph.graphs import feedback_edges, strongly_connected, unneeded_back_edges
+from meizel.graph.model import Code
 from meizel.tests.synthetic import RepoFactory, commit, run, write
 
 PYPROJECT = '[tool.pytest.ini_options]\ntestpaths = ["tests", "pkg/**/tests", "app/**/tests", "base/**/tests"]\n'
@@ -357,3 +359,166 @@ def test_cli_tests_subcommand_reports_lanes_and_strict_cutoff_selection(
     )
     native_only = json.loads(capsys.readouterr().out)
     assert native_only["tests"] == ["app/tests/test_app_native.py"]
+
+
+def test_reachability_pure_traversal_and_ancestor_inits(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": ROLES,
+            "app/meizel.toml": '[roots]\n"main.py" = { kinds = ["environ"], why = "entry" }\n',
+            "app/__init__.py": "from app.helper import boot_helper\n",
+            "app/helper.py": "def boot_helper(): pass\n",
+            "app/main.py": "import pkg.calc\n",
+            "pkg/__init__.py": "",
+            "pkg/calc.py": "def add(a, b): return a + b\n",
+        }
+    )
+    commit(root, "initial")
+
+    repo = GitRepo(root)
+    universe = repo.universe()
+    from meizel.contracts.analysis import analyze
+
+    analysis = analyze(universe)
+    report = reachability_analysis(
+        universe,
+        facts=analysis.facts,
+        manifests=analysis.manifests,
+        scope=ReachabilityScope(target_roles=("application",)),
+    )
+
+    assert report.is_clean
+    assert "app/main.py" in report.reachable_production
+    assert "app/helper.py" in report.reachable_production
+    assert "pkg/calc.py" in report.reachable_production
+    assert not report.disconnected_islands
+    assert not report.fake_test_islands
+
+    report_with_inits = reachability_analysis(
+        universe,
+        facts=analysis.facts,
+        manifests=analysis.manifests,
+        scope=ReachabilityScope(target_roles=("application",), include_inits=True),
+    )
+    assert "app/__init__.py" in report_with_inits.reachable_production
+    assert "pkg/__init__.py" in report_with_inits.reachable_production
+
+
+def test_reachability_detects_disconnected_islands_and_clusters(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": ROLES,
+            "app/meizel.toml": '[roots]\n"main.py" = { kinds = ["environ"], why = "entry" }\n',
+            "app/__init__.py": "",
+            "app/main.py": "print('live')\n",
+            "pkg/__init__.py": "",
+            "pkg/dead_a.py": "import pkg.dead_b\n",
+            "pkg/dead_b.py": "import pkg.dead_a\n",
+            "pkg/lonely_dead.py": "x = 42\n",
+        }
+    )
+    commit(root, "initial")
+
+    repo = GitRepo(root)
+    universe = repo.universe()
+    from meizel.contracts.analysis import analyze
+
+    analysis = analyze(universe)
+    report = reachability_analysis(
+        universe,
+        facts=analysis.facts,
+        manifests=analysis.manifests,
+        scope=ReachabilityScope(target_roles=("application",)),
+    )
+
+    assert not report.is_clean
+    assert set(report.disconnected_islands) == {
+        "pkg/dead_a.py",
+        "pkg/dead_b.py",
+        "pkg/lonely_dead.py",
+    }
+    assert not report.fake_test_islands
+
+    cluster_files = [set(c.files) for c in report.clusters]
+    assert {"pkg/dead_a.py", "pkg/dead_b.py"} in cluster_files
+    assert {"pkg/lonely_dead.py"} in cluster_files
+
+    diags_by_path = {d.path: d for d in report.diagnostics}
+    diag_a = diags_by_path["pkg/dead_a.py"]
+    assert diag_a.code is Code.DISCONNECTED_ISLAND
+    assert "disconnected dead code island" in diag_a.message
+    assert any("safely delete this module (GC)" in h for h in diag_a.hints)
+    assert any("island cluster (2 files)" in h for h in diag_a.hints)
+
+
+def test_reachability_distinguishes_fake_test_preserved_islands(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": ROLES,
+            "app/meizel.toml": '[roots]\n"main.py" = { kinds = ["environ"], why = "entry" }\n',
+            "app/__init__.py": "",
+            "app/main.py": "print('live')\n",
+            "pkg/__init__.py": "",
+            "pkg/preserved_feature.py": "def feature_logic(): return True\n",
+            "pkg/dead_completely.py": "pass\n",
+            "tests/test_fake.py": "from pkg.preserved_feature import feature_logic\ndef test_it(): assert feature_logic()\n",
+        }
+    )
+    commit(root, "initial")
+
+    repo = GitRepo(root)
+    universe = repo.universe()
+    from meizel.contracts.analysis import analyze
+
+    analysis = analyze(universe)
+    report = reachability_analysis(
+        universe,
+        facts=analysis.facts,
+        manifests=analysis.manifests,
+        scope=ReachabilityScope(target_roles=("application",)),
+    )
+
+    assert "pkg/preserved_feature.py" in report.fake_test_islands
+    assert "pkg/dead_completely.py" in report.disconnected_islands
+
+    diags_by_path = {d.path: d for d in report.diagnostics}
+    fake_diag = diags_by_path["pkg/preserved_feature.py"]
+    assert fake_diag.code is Code.FAKE_TEST_ONLY_ISLAND
+    assert "preserved only by tests" in fake_diag.message
+    assert any("tests/test_fake.py" in h for h in fake_diag.hints)
+
+    dead_diag = diags_by_path["pkg/dead_completely.py"]
+    assert dead_diag.code is Code.DISCONNECTED_ISLAND
+
+
+def test_reachability_cli_execution_and_gating(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": ROLES,
+            "app/meizel.toml": '[roots]\n"main.py" = { kinds = ["environ"], why = "entry" }\n',
+            "app/__init__.py": "",
+            "app/main.py": "print('live')\n",
+            "pkg/__init__.py": "",
+            "pkg/dead.py": "pass\n",
+        }
+    )
+    commit(root, "initial")
+
+    assert run(root, "reachability") == 0
+    out = capsys.readouterr().out
+    assert "meizel reachability:" in out
+    assert "pkg/dead.py:1: [disconnected-island]" in out
+
+    assert run(root, "reachability", "--json") == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["roots"] == ["app/main.py"]
+    assert payload["disconnected_islands"] == ["pkg/dead.py"]
+
+    assert run(root, "reachability", "pkg/dead.py", "--check") == 1
+    assert run(root, "reachability", "app/main.py", "--check") == 0
