@@ -43,6 +43,7 @@ _IGNORED_ENV = {
     "UV_DEFAULT_INDEX",
     "UV_FROZEN",
     "UV_LOCKED",
+    "UV_COMPILE_BYTECODE",
     "UV_NO_VERIFY_HASHES",
     "UV_OVERRIDE",
     "UV_CONSTRAINT",
@@ -151,6 +152,7 @@ def install(
     repo: Path,
     *,
     no_dev: bool = False,
+    compile_bytecode: bool = True,
     verbose: bool = False,
     interpreter: str | None = None,
     reinstall_package: str | None = None,
@@ -171,10 +173,14 @@ def install(
     env = {key: value for key, value in configured.items() if key not in _IGNORED_ENV}
     flags = (["--no-dev"] if no_dev else []) + (["--verbose"] if verbose else [])
     python_args = ["--python", interpreter] if interpreter else []
-    # `--compile-bytecode` is explicit on every install step: `--no-config` makes uv ignore
-    # `[tool.uv]`, and an uncompiled venv makes each service pay the compile on first import.
-    # Only steps that can create the environment carry the pin; the universal
-    # offline export must not need the pinned interpreter before uv can fetch it.
+    # meiva:note
+    # Bytecode compilation is explicit on every install step (`--compile-bytecode` by default,
+    # `--no-compile-bytecode` for ephemeral worktrees): `--no-config` makes uv ignore `[tool.uv]`,
+    # and `UV_COMPILE_BYTECODE` in the caller's environment must not override the chosen mode.
+    # Only steps that can create the environment carry the pin; the universal offline export must
+    # not need the pinned interpreter before uv can fetch it.
+    # meiva:link cli/docs/python-install.meiva.okf.md
+    bytecode_flag = "--compile-bytecode" if compile_bytecode else "--no-compile-bytecode"
     request = _python_request(repo, interpreter)
     pinned = ["--python", request]
     # uv sync can recreate an interpreter-drifted venv before checking freshness.
@@ -203,7 +209,9 @@ def install(
         if result:
             return result
         if index == PYPI_INDEX:
-            return _sync_from_pypi(repo, env, [*flags, *pinned], reinstall_package, run)
+            return _sync_from_pypi(
+                repo, env, [bytecode_flag, *flags, *pinned], reinstall_package, run
+            )
         return _install_from_mirror(
             repo,
             env,
@@ -211,6 +219,7 @@ def install(
             requirements=requirements,
             interpreter=interpreter,
             request=request,
+            bytecode_flag=bytecode_flag,
             verbose=verbose,
             reinstall_package=reinstall_package,
             run=run,
@@ -233,7 +242,6 @@ def _sync_from_pypi(
             "--locked",
             "--inexact",
             "--no-config",
-            "--compile-bytecode",
             *flags,
             *reinstall,
         ],
@@ -250,6 +258,7 @@ def _install_from_mirror(
     requirements: Path,
     interpreter: str | None,
     request: str,
+    bytecode_flag: str,
     verbose: bool,
     reinstall_package: str | None,
     run: UvRunner,
@@ -265,7 +274,7 @@ def _install_from_mirror(
         "pip",
         "install",
         "--no-config",
-        "--compile-bytecode",
+        bytecode_flag,
         "--python",
         str(target),
         "--no-deps",
@@ -290,6 +299,7 @@ def main() -> int:
     parser.add_argument("--locked", action="store_true", help="Always enforced")
     parser.add_argument("--inexact", action="store_true", help="Always enforced")
     parser.add_argument("--no-dev", action="store_true")
+    parser.add_argument("--compile-bytecode", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--python")
     parser.add_argument("--reinstall-package")
@@ -299,6 +309,7 @@ def main() -> int:
         return install(
             args.repo.resolve(),
             no_dev=args.no_dev,
+            compile_bytecode=args.compile_bytecode,
             verbose=args.verbose,
             interpreter=args.python,
             reinstall_package=args.reinstall_package,

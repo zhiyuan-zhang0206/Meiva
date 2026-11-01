@@ -74,8 +74,9 @@ worktree its own in seconds.
 
 `scripts/setup-worktree.sh <task>` is the one command that makes a worktree. It
 fetches `origin/main`, adds `.worktrees/<task>` on branch `meiva-<task>` (`--branch`
-and `--base` override), builds the worktree's own real `.venv`, runs the locked
-install and `npm ci`, and verifies the shared git hooks and the editable-install
+and `--base` override), creates the worktree's own real `.venv` and installs the
+locked Python graph in one uncompiled pass (`cli/python_install.py --locked --inexact --no-compile-bytecode`),
+runs `npm ci`, and verifies the shared git hooks and the editable-install
 guard (an inherited `VIRTUAL_ENV` is cleared) — without creating a cluster.
 Re-running it only re-bootstraps; after a failure, run it again with no argument
 inside the worktree. A worktree made by another tool (Claude Code's

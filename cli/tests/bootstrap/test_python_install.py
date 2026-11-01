@@ -126,17 +126,24 @@ def test_fresh_mirror_install_preserves_graph_hashes_markers_and_editable(
     assert (python_mirror.repo / "uv.lock").read_bytes() == python_mirror.lock
 
 
-def _assert_installs_precompile(calls: list[list[str]], *, expected: int) -> None:
-    """`--no-config` hides `[tool.uv] compile-bytecode`, so every installing step carries the flag."""
+# meiva:note
+# `--no-config` hides `[tool.uv] compile-bytecode`, and `UV_COMPILE_BYTECODE` may be set in the
+# caller's shell, so every installing step carries the chosen bytecode flag explicitly.
+# meiva:link cli/docs/python-install.meiva.okf.md
+def _assert_installs_bytecode_flag(
+    calls: list[list[str]], *, expected: int, flag: str = "--compile-bytecode"
+) -> None:
+    opposite = "--no-compile-bytecode" if flag == "--compile-bytecode" else "--compile-bytecode"
     installing = [argv for argv in calls if argv[1] == "sync" or argv[1:3] == ["pip", "install"]]
     assert len(installing) == expected
-    assert all("--compile-bytecode" in argv for argv in installing)
-    assert not any("--compile-bytecode" in argv for argv in calls if argv not in installing)
+    assert all(flag in argv and opposite not in argv for argv in installing)
+    assert not any(flag in argv or opposite in argv for argv in calls if argv not in installing)
 
 
+@pytest.mark.parametrize("compile_bytecode", [True, False])
 @pytest.mark.parametrize("mirror_host", [True, False])
 def test_environment_creation_names_the_checkout_python_pin(
-    tmp_path: Path, mirror_host: bool
+    tmp_path: Path, mirror_host: bool, compile_bytecode: bool
 ) -> None:
     from cli import python_install
     from cli.tests.bootstrap._python_install_fixture import ROOT
@@ -171,7 +178,12 @@ def test_environment_creation_names_the_checkout_python_pin(
 
     assert (
         python_install.install(
-            repo, run=record, environment=clean_env, user_home=tmp_path / "user", platform="linux"
+            repo,
+            compile_bytecode=compile_bytecode,
+            run=record,
+            environment=clean_env,
+            user_home=tmp_path / "user",
+            platform="linux",
         )
         == 0
     )
@@ -183,7 +195,21 @@ def test_environment_creation_names_the_checkout_python_pin(
     # The offline export needs no interpreter; the pin must not block a later fetch.
     assert calls[0][1] == "export"
     assert "--python" not in calls[0]
-    _assert_installs_precompile(calls, expected=1 + int(mirror_host))
+    _assert_installs_bytecode_flag(
+        calls,
+        expected=1 + int(mirror_host),
+        flag="--compile-bytecode" if compile_bytecode else "--no-compile-bytecode",
+    )
+
+
+def test_no_compile_bytecode_skips_pyc_generation_even_when_env_requests_it(
+    python_mirror: PythonMirror,
+) -> None:
+    python_mirror.env["UV_COMPILE_BYTECODE"] = "1"
+    result = python_mirror.install("--no-dev", "--no-compile-bytecode")
+    assert result.returncode == 0, result.stderr
+    assert list((python_mirror.repo / ".venv").rglob("*.pyc")) == []
+    assert python_mirror.inspect()["packages"]["probe-runtime"] == "1.0.0"
 
 
 def _declare_host_mirror_python(python_mirror: PythonMirror, tmp_path: Path) -> str:
