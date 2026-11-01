@@ -110,6 +110,51 @@ def test_branch_lint_runs_whatever_the_load_and_without_a_lock(tmp_path: Path) -
     ]  # fmt: skip
 
 
+# meiva:note
+# prepush-meizel.sh runs meizel once at the pre-push stage, so prepush-branch-lint.sh appends
+# meizel-check-changed to SKIP without dropping any hooks the caller already asked pre-commit to skip.
+@pytest.mark.parametrize(
+    ("caller_skip", "expected_skip"),
+    [
+        (None, "meizel-check-changed"),
+        ("ruff,trailing-whitespace", "ruff,trailing-whitespace,meizel-check-changed"),
+    ],
+)
+def test_branch_lint_skips_commit_meizel_and_preserves_caller_skip(
+    tmp_path: Path, caller_skip: str | None, expected_skip: str
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo_with_origin_main(repo)
+    (repo / "change.py").write_text("x = 1\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "change"], check=True)
+    skip_log = tmp_path / "pre-commit-skip.json"
+    fake = repo / ".venv/bin/pre-commit"
+    fake.parent.mkdir(parents=True)
+    fake.write_text(
+        f"#!{sys.executable}\nimport json, os\njson.dump(os.environ.get('SKIP'), open({str(skip_log)!r}, 'w'))\n"
+    )
+    fake.chmod(0o755)
+    (repo / ".venv/bin/python").symlink_to(sys.executable)
+    (repo / "scripts/provision").mkdir(parents=True)
+    shutil.copy(MODULE, repo / "scripts/provision/prepush_branch_diff.py")
+    env = {name: value for name, value in os.environ.items() if name != "SKIP"}
+    if caller_skip is not None:
+        env["SKIP"] = caller_skip
+    result = subprocess.run(
+        ["bash", str(BRANCH_LINT)],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(skip_log.read_text()) == expected_skip
+
+
 def test_eslint_keeps_commit_hook_and_scopes_push_contribution() -> None:
     """Keep the existing commit check and CI-compatible push hook ID."""
     hooks = _hooks()

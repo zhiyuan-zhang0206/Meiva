@@ -175,3 +175,52 @@ def test_the_changed_check_reads_only_the_sources_it_selected(
     reported = capsys.readouterr().out
     assert "linked.py" in reported and "note-link" in reported
     assert "unparsed.py" in reported and "source-parse" in reported
+
+
+# meiva:note
+# Local verification before staging compares tracked working-tree edits against HEAD without
+# grandfathering new prose, while keeping untouched legacy comments in the same file outside strict
+# scope and leaving default `changed` strict about snapshot mismatches.
+# meiva:link scripts/content_lint/code_comments/docs/incremental.meiva.okf.md
+def test_worktree_changed_catches_unstaged_new_prose_while_preserving_legacy_notes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    initialize(
+        tmp_path,
+        "# Legacy explanation\ndef f():\n    return 1\n",
+    )
+    source = tmp_path / "core.py"
+    source.write_text("# Legacy explanation\n# Unstaged free comment\ndef f():\n    return 2\n")
+    assert main(["--repo", str(tmp_path), "changed"]) == 2
+    capsys.readouterr()
+    assert main(["--repo", str(tmp_path), "changed", "--worktree"]) == 1
+    assert "free-comment" in capsys.readouterr().out
+    source.write_text("# Legacy explanation\ndef f():\n    return 2\n")
+    assert main(["--repo", str(tmp_path), "changed", "--worktree"]) == 0
+    assert "0 new or rewritten notes in 1 changed sources" in capsys.readouterr().out
+
+
+def test_worktree_changed_against_base_spans_committed_and_unstaged_edits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = initialize(tmp_path, "# Legacy explanation\nvalue = 1\n")
+    base = git(tmp_path, "rev-parse", "HEAD")
+    source = tmp_path / "core.py"
+    source.write_text("# Legacy explanation\n# Committed free comment\nvalue = 2\n")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-qm", "committed prose")
+    source.write_text(
+        "# Legacy explanation\n# Committed free comment\n# Unstaged free comment\nvalue = 3\n"
+    )
+    assert main(["--repo", str(tmp_path), "changed", base, "--worktree"]) == 1
+    output = capsys.readouterr().out
+    assert "core.py:2: [free-comment]" in output
+    assert "core.py:3: [free-comment]" in output
+    assert "{'free-comment': 2}" in output
+    with pytest.raises(ValueError, match="optional base revision"):
+        snapshot(repo, from_ref=base, to_ref="HEAD", worktree=True)
+    source.unlink()
+    (tmp_path / "target").write_text("value = 1\n")
+    source.symlink_to("target")
+    with pytest.raises(ValueError, match="not a regular source file"):
+        snapshot(repo, worktree=True)

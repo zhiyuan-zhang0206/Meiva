@@ -32,4 +32,7 @@ base_sha="$(bash "$(dirname "$0")/prepush-base.sh")"
 
 [[ -x .venv/bin/pre-commit ]] || skip "missing .venv/bin/pre-commit; run env -u VIRTUAL_ENV uv sync"
 
+# prepush-meizel.sh already judges meizel once at the pre-push stage.
+export SKIP="${SKIP:+$SKIP,}meizel-check-changed"
+
 exec .venv/bin/python scripts/provision/prepush_branch_diff.py "$base_sha" "${PRE_COMMIT_TO_REF:-}"

@@ -93,6 +93,11 @@ def main(argv: list[str] | None = None) -> int:
     changed.add_argument("base", nargs="?")
     changed.add_argument("--from-ref")
     changed.add_argument("--to-ref")
+    changed.add_argument(
+        "--worktree",
+        action="store_true",
+        help="compare tracked working-tree files against base or HEAD without requiring a clean index",
+    )
     dump = commands.add_parser("corpus", help="extract every source note for review")
     dump.add_argument("--format", choices=["jsonl", "markdown"], default="jsonl")
     dump.add_argument("--output", type=Path)
@@ -108,7 +113,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             load_index(repo, content)
         notes = (
-            incremental_notes(repo, args.base, from_ref=args.from_ref, to_ref=args.to_ref)
+            incremental_notes(
+                repo,
+                args.base,
+                from_ref=args.from_ref,
+                to_ref=args.to_ref,
+                worktree=args.worktree,
+            )
             if args.command == "changed"
             else None
         )

@@ -55,25 +55,21 @@ naming the pull request the commit came from (2026-10-31: `2308d918a` and
 pull request" rather than as "pushed directly": `gh pr view <n> --json mergeCommit`,
 or `gh api repos/<owner>/<repo>/commits/<sha>/pulls`, answers it.
 
-**The receipt comes before the merge.** A hand merge requires the `diff-checks/v1`
-receipt line in the pull request body before `gh pr merge` runs, not as a record
-added afterwards. Check it mechanically:
-`.venv/bin/python scripts/hooks/diff_checks_receipt.py --receipt-file <line> --body-file <body>`
-must exit 0. A receipt added after the merge is a record, not a gate.
+**Scoped local checks.** Run `.venv/bin/python scripts/hooks/diff_checks.py` for an
+optional change-scoped local check summary before pushing (`--mode incremental` by
+default, running `meizel`'s transitive reverse-import closure typecheck,
+`meizel check --changed` when manifests and policy are untouched, JUnit XML pytest
+counting, and clean-tree sub-check caching across `git commit --amend`; pass
+`--mode full` for a pre-release whole-tree sweep or `--no-cache` to bypass the cache).
+Before staging, `bash scripts/content_lint/code_comments/check.sh changed --worktree`
+(or `changed origin/main --worktree`) checks working-tree source notes without
+requiring a clean index.
 
-The `tests=` field has three states and the checker treats them differently: `RAN(<n>files)` with
-counted `passed`/`failed`/`errors`, `skipped(<why>)` when the change needs no test run, and
-`broken(<why>)` when the run did not execute the selection it was given (`no-report` when pytest
-wrote no report at all, `short-run` when the report holds fewer results than files were selected).
-A `broken` receipt is refused: rerun it, or run a smaller selection, and paste the whole line.
-
-The gate is audited after the fact by
-`.venv/bin/python scripts/hooks/audit_merge_receipts.py --last <n>` (default: every
-commit after the gate itself). Each landed commit is judged by the receipt checker
-**its own tree carried**, so a vocabulary that grew later cannot turn honest history into
-a violation. It reports `passed`, `no-receipt` and `rejected` as violations, and
-`no-pull-request`, `not-gated` (commits the cluster did not push) and `unverified` as
-classes that are not; a commit it cannot judge exits 2 rather than passing silently.
+The `tests=` field in `diff_checks.py` reports three states: `RAN(<n>files)` with
+counted `passed`/`failed`/`errors`, `skipped(<why>)` when the change needs no test run,
+and `broken(<why>)` when pytest wrote no report (`no-report`) or produced fewer results
+than files were selected (`short-run`). A `broken` run exits non-zero rather than
+passing as green.
 
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from
