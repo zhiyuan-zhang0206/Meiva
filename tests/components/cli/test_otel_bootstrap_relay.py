@@ -52,6 +52,8 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         }
     )
     owner.ensure_eager()
+    owner.set_field("machine_name", "relay-test-gateway")
+    owner.set_field("provision_builtin_schedules", False)
     owner.set_field("machine_host", "10.0.0.10")
     owner.set_field("db_url", config.settings.data_plane.db_url)
     owner.set_field("telemetry_otlp_port", gateway_port)

@@ -50,6 +50,11 @@ _SUMMARY_QUERY = (
 _FULL_QUERY = (
     f"SELECT {_SCHEDULE_BASE_COLS}, s.script, {_PLACEMENT_COLS} {_JOIN_CLAUSE} WHERE s.id = %s"
 )
+_MACHINE_PLACEMENT_QUERY = sql.SQL(
+    "SELECT {} FROM (SELECT %s::text AS target) t "
+    "LEFT JOIN machines m ON m.name = t.target "
+    "LEFT JOIN machine_probe mp ON mp.machine_name = t.target"
+).format(sql.SQL(_PLACEMENT_COLS))
 _SCHEDULE_STORE_COLS = (
     "id, name, description, command, enabled, status, last_error, created_at, updated_at, "
     "machine, owner_plugin, script"
@@ -206,16 +211,14 @@ def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sq
 
 
 def _refuse_plugin_mutation(owner_plugin: str | None, changed: dict[str, Any]) -> None:
-    if owner_plugin is not None:
-        forbidden = set(changed) - {"enabled"}
-        if forbidden:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"schedule is owned by plugin '{owner_plugin}'; "
-                    "only enabled may be toggled directly"
-                ),
-            )
+    if owner_plugin is not None and (set(changed) - {"enabled"}):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"schedule is owned by plugin '{owner_plugin}'; "
+                "only enabled may be toggled directly"
+            ),
+        )
 
 
 def _apply_schedule_update(
@@ -316,7 +319,6 @@ def update_blocking(
 # meiva:note
 # The interpolated column list is a module constant; the values it filters on stay parameterized.
 def _list_blocking(pool: ConnectionPool[Any]) -> list[ScheduleSummary]:
-
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_SUMMARY_QUERY)
         return [_summary(r) for r in cur.fetchall()]
@@ -327,8 +329,34 @@ def _list_blocking(pool: ConnectionPool[Any]) -> list[ScheduleSummary]:
     description="List all schedules (enabled and disabled), newest first. Omits `script`.",
 )
 async def list_schedules(request: Request) -> list[ScheduleSummary]:
-
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
+
+
+def _reconstruct_created_row(
+    cur: psycopg.Cursor[Any],
+    created: creation_receipts.Creation,
+    body: ScheduleCreate,
+    machine: str,
+) -> tuple[Any, ...]:
+    cur.execute(_MACHINE_PLACEMENT_QUERY, (machine,))
+    placement = cur.fetchone()
+    if placement is None:
+        raise RuntimeError("LEFT JOIN against scalar target returned no row")
+    return (
+        created.resource_id,
+        body.name,
+        body.description,
+        body.command,
+        body.enabled,
+        "stopped",
+        None,
+        created.created_at,
+        created.updated_at,
+        machine,
+        None,
+        body.script,
+        *placement,
+    )
 
 
 # meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
@@ -338,7 +366,6 @@ def create_blocking(
     machine: str,
     key: str | None = None,
 ) -> tuple[Any, ...]:
-
     _validate_script(body.script)
     try:
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -346,10 +373,7 @@ def create_blocking(
                 conn, key, {"resource": "schedule", "body": body.model_dump(), "machine": machine}
             )
             if created is not None:
-                cur.execute(_FULL_QUERY, (created.resource_id,))
-                replay_row = cur.fetchone()
-                if replay_row is not None:
-                    return replay_row
+                return _reconstruct_created_row(cur, created, body, machine)
             cur.execute(
                 "INSERT INTO schedules (name, description, script, command, enabled, machine) "
                 "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
@@ -380,11 +404,9 @@ def create_blocking(
     description="Create a schedule. 400 on a script syntax error, 409 on a name clash.",
 )
 async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleView:
-
     machine = request.app.state.machine.name() if body.machine is None else body.machine.strip()
     if not machine:
         raise HTTPException(status_code=400, detail="machine cannot be empty")
-
     row = await asyncio.to_thread(
         create_blocking,
         request.app.state.db_pool,
@@ -392,7 +414,6 @@ async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleVie
         machine,
         creation_receipts.operation_key(request),
     )
-
     return _view(row)
 
 
@@ -401,7 +422,6 @@ async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleVie
     description="Get one schedule (with its script). 404 if it does not exist.",
 )
 async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
-
     row = await asyncio.to_thread(fetch_full_blocking, request.app.state.db_pool, schedule_id)
     return _view(row)
 
@@ -411,16 +431,13 @@ async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
     description="Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). An enabled-flag value change also converges immediately, so disable\nreaps the session and enable creates it; a same-value update leaves the\nsession intact. 400 on a script syntax error, 404 if missing, 409 on a name\nclash.",
 )
 async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpdate) -> ScheduleView:
-
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
-
     if "machine" in fields:
         if not isinstance(fields["machine"], str) or not fields["machine"].strip():
             raise HTTPException(status_code=400, detail="machine cannot be empty")
         fields["machine"] = fields["machine"].strip()
-
     row, needs_sync = await asyncio.to_thread(
         update_blocking,
         request.app.state.db_pool,
@@ -434,7 +451,6 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
 
 
 def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> str:
-
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("SELECT owner_plugin FROM schedules WHERE id = %s", (schedule_id,))
         row = cur.fetchone()
@@ -467,7 +483,6 @@ async def _wait_consumed(request: Request, schedule_id: int, machine: str | None
 
 
 def _remove_schedule_dir(home: Path, schedule_id: int) -> None:
-
     shutil.rmtree(home / "schedules" / str(schedule_id), ignore_errors=True)
 
 
@@ -476,7 +491,6 @@ def _remove_schedule_dir(home: Path, schedule_id: int) -> None:
     description="Delete a schedule. 404 if missing. The reconcile loop kills its (now\norphaned) session; its work dir is removed.",
 )
 async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
-
     pool = request.app.state.db_pool
     machine = await asyncio.to_thread(delete_blocking, pool, schedule_id)
     await _wait_consumed(request, schedule_id, machine=machine)
@@ -491,7 +505,6 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     description="Enable + launch the schedule now. 404 if missing.",
 )
 async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
-
     return await _control_and_sync(request, schedule_id, action="start")
 
 
@@ -500,7 +513,6 @@ async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
     description="Disable + kill the schedule's session now. 404 if missing.",
 )
 async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
-
     return await _control_and_sync(request, schedule_id, action="stop")
 
 
@@ -509,14 +521,12 @@ async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
     description="Relaunch the schedule's session now (reloading its script), clearing crash\nbackoff. 404 if missing, 409 if the schedule is disabled.",
 )
 async def restart_schedule(request: Request, schedule_id: int) -> ScheduleView:
-
     return await _control_and_sync(request, schedule_id, action="restart")
 
 
 def _read_transcript_blocking(
     backend: SessionBackend, schedule_id: int, lines: int
 ) -> list[str] | None:
-
     log_path = backend.session_log_path(session_name(f"schedule-{schedule_id}"))
     if log_path is None or not log_path.exists():
         return None
@@ -699,27 +709,6 @@ async def _control_and_sync(
     return _view(row)
 
 
-def _launch_env_blocking(
-    pool: ConnectionPool[Any], schedule_id: int
-) -> tuple[bool, tuple[str, ...]]:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT enabled, secret_env_vars FROM schedules WHERE id = %s",
-            (schedule_id,),
-        )
-        row = cur.fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-    enabled = bool(row[0])
-    raw_secrets: object = row[1]
-    secrets_list: list[str] = []
-    if _is_sequence(raw_secrets):
-        for item in raw_secrets:
-            if isinstance(item, str):
-                secrets_list.append(item)
-    return enabled, tuple(secrets_list)
-
-
 def _is_sequence(val: object) -> TypeGuard[Sequence[object]]:
     return isinstance(val, (list, tuple))
 
@@ -728,30 +717,40 @@ def _is_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 
+def _launch_env_blocking(
+    pool: ConnectionPool[Any], schedule_id: int
+) -> tuple[bool, tuple[str, ...]]:
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT enabled, secret_env_vars FROM schedules WHERE id = %s", (schedule_id,))
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+    secrets = (
+        tuple(item for item in row[1] if isinstance(item, str)) if _is_sequence(row[1]) else ()
+    )
+    return bool(row[0]), secrets
+
+
+def _coerce_env(raw: object) -> dict[str, str]:
+    if not _is_dict(raw):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
+
+
 def _read_env_aliases_sync(config_authority: object) -> dict[str, str]:
     read_fn = getattr(config_authority, "read_env_aliases", None)
     if not callable(read_fn):
         return {}
     try:
-        raw_aliases: object = read_fn()
+        return _coerce_env(read_fn())
     except OSError:
         return {}
-    if not _is_dict(raw_aliases):
-        return {}
-    return {k: v for k, v in raw_aliases.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def _read_process_env(process: object) -> dict[str, str]:
     config = getattr(process, "config", None)
-    if config is None:
-        return {}
-    proc_env_fn = getattr(config, "process_environment", None)
-    if not callable(proc_env_fn):
-        return {}
-    raw_env: object = proc_env_fn()
-    if not _is_dict(raw_env):
-        return {}
-    return {k: v for k, v in raw_env.items() if isinstance(k, str) and isinstance(v, str)}
+    proc_env_fn = getattr(config, "process_environment", None) if config is not None else None
+    return _coerce_env(proc_env_fn()) if callable(proc_env_fn) else {}
 
 
 async def _read_gateway_secret_sources(

@@ -145,13 +145,14 @@ async def sync_startup_schedules(
     db_pool: ConnectionPool[Any],
     *,
     home: Path,
-    machine: str,
+    resolve_machine: Callable[[], str],
     provision_builtins: bool,
 ) -> None:
     if provision_builtins:
         from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
 
         try:
+            machine = resolve_machine()
             await asyncio.to_thread(
                 _run_with_conn,
                 db_pool,
