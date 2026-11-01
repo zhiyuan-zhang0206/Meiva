@@ -148,7 +148,11 @@ def test_a_due_slot_is_claimed_and_the_callbacks_result_comes_back(
         schedule_id=schedule_id,
     )
 
-    assert tick == LoopTick(120.0, _FIVE, Fired(_FIVE, (_FIVE, None)))
+    # meiva:note
+    # The fields, not the whole tick: a `Fired` payload's type argument cannot be solved from a class
+    # another module defines under the impacted-closure typecheck (`LoopTick` reads as `LoopTick[Unknown]`
+    # there), and `Fired` is invariant, so the whole-object form is unprovable without a cast.
+    assert (tick.sleep, tick.floor, tick.fired) == (120.0, _FIVE, Fired(_FIVE, (_FIVE, None)))
     assert claimed_slots(db_conn, schedule_id) == [_FIVE]
 
 
