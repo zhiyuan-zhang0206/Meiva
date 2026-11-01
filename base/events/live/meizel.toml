@@ -18,4 +18,10 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 "bus.py" = ["bus"]
 
 [debt.ambient-read]
+# Kept, not repaid (2026-11-01): `EventBus.from_settings` is the convenience constructor for this
+# process's bus, and 187 call sites build a bus through it -- 4 in production
+# (page_server, delivery_watchdog, heartbeat, meiva_fleet/task_maintenance) and 183 in tests and
+# fixtures. Moving 187 construction sites to repay one entry is not a trade worth making; the entry
+# goes to zero only when `from_settings` itself is deleted, and then all 187 sites move in that one
+# change.
 "bus.py#settings base.config.settings" = 1
