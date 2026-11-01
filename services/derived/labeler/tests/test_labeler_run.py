@@ -17,7 +17,12 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from services.derived.labeler import daemon
 from services.derived.labeler.tests.db_faults import table_missing
-from services.derived.labeler.tests.service_probe import assert_released, our_backends, wait_serving
+from services.derived.labeler.tests.service_probe import (
+    assert_released,
+    our_backends,
+    wait_connected,
+    wait_serving,
+)
 
 
 @pytest.fixture
@@ -60,7 +65,7 @@ async def test_run_serves_while_it_polls_and_releases_everything_when_stopped(
     )
     try:
         await wait_serving(port, pidfile)
-        assert our_backends(observer, application_name=application_name) > 0
+        await wait_connected(observer, application_name=application_name)
     finally:
         service.cancel()
         await asyncio.gather(service, return_exceptions=True)
