@@ -12,8 +12,7 @@ exports = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py",
 "endpoints.py" = ["endpoints"]
 
 [roots]
-"health.py" = { kinds = ["pid"], why = "start_health_server publishes \"this process is alive\" into a health record, and the pid in that record names the writer at the moment it beats: that is the fact the reader checks liveness against, so a value handed in at start-up would report a process that may no longer be the one writing" }
+"health.py" = { kinds = ["pid", "clock"], why = "the health record also carries the instant the server started, read where the record is created: no caller knows that moment better, and handing it in would only move the same read one frame up. start_health_server publishes \"this process is alive\" into a health record, and the pid in that record names the writer at the moment it beats: that is the fact the reader checks liveness against, so a value handed in at start-up would report a process that may no longer be the one writing" }
 
 [debt.ambient-read]
-"health.py#clock time.time" = 1
 "loop_health.py#clock datetime.datetime.now" = 1

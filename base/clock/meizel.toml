@@ -10,8 +10,10 @@ exports = ["configuration.py", "ids.py", "tests"]
 "ids.py" = []
 "tests" = ["__init__.py", "configuration.py", "ids.py"]
 
+[roots]
+"__init__.py" = { kinds = ["clock"], why = "the wall clock's owner: every component that needs the time asks this module (Clock, Timers, SYSTEM_TIMERS), so the one read of the host clock happens here and nowhere below it. A caller can still hand in its own `Clock` — the constructor takes the `now` callable — but the default that other modules must not re-derive lives at this door" }
+
 [debt.ambient-read]
-"__init__.py#clock datetime.datetime.now" = 1
 "__init__.py#settings base.config.settings" = 1
 
 [debt.impure-call]

@@ -26,11 +26,10 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 
 [roots]
 "_full.py" = { kinds = ["environ"], why = "the eager builder reads MEIVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py" }
-"_lite.py" = { kinds = ["environ"], why = "the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py" }
+"_lite.py" = { kinds = ["environ", "clock"], why = "the boot-lite resolution layer IS the Settings bootstrap, and it reads the wall clock once for a bootstrap fetch TTL: `base.clock` builds a `Clock` from Settings, so asking it here would be a cycle.  it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py" }
 
 [debt.ambient-read]
 "_full.py#home base.paths.home.resolve_meiva_home" = 1
-"_lite.py#clock time.time" = 1
 "_lite.py#home base.paths.home.resolve_meiva_home" = 2
 "_lite.py#pid threading.get_ident" = 3
 "base.py#home base.paths.home.resolve_meiva_home" = 1
