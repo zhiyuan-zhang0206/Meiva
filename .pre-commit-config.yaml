@@ -511,6 +511,16 @@ repos:
         entry: .venv/bin/python scripts/lint/termination_source.py --only
         files: \.py$
 
+      # Hermetic database transactions: forbid external I/O (network/HTTP, LLM,
+      # subprocess, or sleep) while holding a database transaction open.
+      # Holding transactions open during external I/O exhausts connection pools
+      # and causes cluster-wide latency cascades (DDIA §7 & §8).
+      - id: lint-hermetic-transactions
+        name: lint hermetic db transactions (no external network, llm, subprocess or sleep in tx)
+        language: system
+        entry: .venv/bin/python scripts/lint/diagnostics/hermetic_transactions.py --only
+        files: \.py$
+
       # Postgres (`audit_events`) is the system of record for category=audit
       # events; Loki is a projection that sheds and expires. An emit site that
       # builds or enqueues an audit event without record_audit /
