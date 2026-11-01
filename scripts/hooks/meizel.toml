@@ -1,7 +1,8 @@
-exports = ["diff_checks.py", "diff_checks_receipt.py", "tests"]
+exports = ["diff_checks.py", "diff_checks_pytest.py", "diff_checks_receipt.py", "tests"]
 
 [uses]
-"diff_checks.py" = ["diff_closure.py"]
+"diff_checks.py" = ["diff_closure.py", "diff_checks_pytest.py"]
+"diff_checks_pytest.py" = []
 "tests" = ["audit_merge_receipts.py", "diff_checks.py", "diff_checks_receipt.py"]
 
 [loads]

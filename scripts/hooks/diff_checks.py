@@ -26,6 +26,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # question from scheduling and grew past the file budget here.
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from scripts.hooks.diff_checks_pytest import (  # noqa: E402
+    pytest_argv,
+    pytest_counts,
+    spell_seconds,
+)
 from scripts.hooks.diff_closure import closure  # noqa: E402
 
 RECEIPT_VERSION = "diff-checks/v1"
@@ -90,7 +95,8 @@ class Trigger:
 # meiva:note
 # The fields of a receipt, in the order a reader meets them, and the whole vocabulary a value may
 # use: the count a layer measured, `n/a(<why>)` for a check this change cannot need, `skipped(<why>)`
-# for one it needs and did not run, and `unreadable(<why>)` for output the runner could not read.
+# for one it needs and did not run, `unreadable(<why>)` for output the runner could not read, and
+# `broken(<why>)` for a run that did not happen as asked -- a truncated run is not a red one.
 # There is no bare `none` anywhere: "did not apply" and "ran, found nothing" must never read the
 # same to the person merging on this line. No value carries a space -- the line is split on
 # whitespace, so a reason joins its words with `-`.
@@ -359,11 +365,6 @@ def changed_files(base: str, root: Path) -> tuple[str, ...]:
     return tuple(line.strip() for line in listing.splitlines() if line.strip())
 
 
-def _spell(seconds: float) -> str:
-    whole = round(seconds)
-    return f"{whole // 60}m{whole % 60:02d}s" if whole >= 60 else f"{whole}s"
-
-
 # meiva:note
 # The selector's decision for this change: the files it chose, whether it covered the change
 # whole (`FULL`), and the changed files it admits it cannot map. `blind` is reported rather than
@@ -417,11 +418,6 @@ def select_tests(change: ChangeSet) -> Selection:
         tests=tuple(payload.get("tests", ())),
         blind=tuple(str(name) for name in payload.get("blind_changed", ())),
     )
-
-
-def _count(output: str, word: str) -> int:
-    found = re.search(rf"(\d+) {word}\b", output)
-    return int(found.group(1)) if found else 0
 
 
 # meiva:note
@@ -495,7 +491,7 @@ def _meizel_field(code: int, output: str, seconds: float) -> str:
         parts.append(f"{manifests.group(1)}manifests")
     if edges is not None:
         parts.append(f"{edges.group(1)}edges")
-    return f"{'ok' if code == 0 else 'failed'}({','.join(parts)})({_spell(seconds)})"
+    return f"{'ok' if code == 0 else 'failed'}({','.join(parts)})({spell_seconds(seconds)})"
 
 
 def _debt_field(code: int, output: str, seconds: float) -> str:
@@ -516,15 +512,15 @@ def _debt_field(code: int, output: str, seconds: float) -> str:
     # or `<sha>~1`, and the column labelled `tree` is what this tree records. A change that edits a
     # rule or a declaration prints one more column before `tree`, which the label absorbs.
     if not header or header[0] != "code" or "tree" not in header:
-        return f"unreadable(no-table)({_spell(seconds)})"
+        return f"unreadable(no-table)({spell_seconds(seconds)})"
     tree_column = header.index("tree") - 1
     ambient = rows.get("ambient-read")
     total = rows.get("total")
     if ambient is None or total is None or len(total) <= tree_column or len(ambient) <= tree_column:
-        return f"unreadable(no-totals)({_spell(seconds)})"
+        return f"unreadable(no-totals)({spell_seconds(seconds)})"
     return (
         f"{verdict}(ambient-read{ambient[0]}->{ambient[tree_column]},"
-        f"total{total[0]}->{total[tree_column]})({_spell(seconds)})"
+        f"total{total[0]}->{total[tree_column]})({spell_seconds(seconds)})"
     )
 
 
@@ -535,18 +531,18 @@ def _docs_refs_field(code: int, output: str, seconds: float) -> str:
     verdict = "ok" if code == 0 else f"failed({code})"
     found = re.search(r"(\d+) docs checked, (\d+) dangling reference", output)
     if found is None:
-        return f"unreadable(no-summary)({_spell(seconds)})"
-    return f"{verdict}({found.group(1)}docs,{found.group(2)}dangling)({_spell(seconds)})"
+        return f"unreadable(no-summary)({spell_seconds(seconds)})"
+    return f"{verdict}({found.group(1)}docs,{found.group(2)}dangling)({spell_seconds(seconds)})"
 
 
 def _docs_okf_field(code: int, output: str, seconds: float) -> str:
     verdict = "ok" if code == 0 else f"failed({code})"
     found = re.search(r"(\d+) files checked, (\d+) error\(s\), (\d+) warning\(s\)", output)
     if found is None:
-        return f"unreadable(no-summary)({_spell(seconds)})"
+        return f"unreadable(no-summary)({spell_seconds(seconds)})"
     return (
         f"{verdict}({found.group(1)}files,{found.group(2)}errors,"
-        f"{found.group(3)}warnings)({_spell(seconds)})"
+        f"{found.group(3)}warnings)({spell_seconds(seconds)})"
     )
 
 
@@ -566,13 +562,13 @@ def _pyright_fields(output: str, seconds: float, change: ChangeSet) -> dict[str,
     errors = _error_count(output)
     if errors == 0:
         return {
-            "pyright": f"0err({_spell(seconds)})",
+            "pyright": f"0err({spell_seconds(seconds)})",
             "err_in_this_diff": str(_errors_in_diff(output, change)),
         }
     reached = closure(change.root, change.files)
     if reached is None:
         return {
-            "pyright": f"{errors}err({_spell(seconds)})",
+            "pyright": f"{errors}err({spell_seconds(seconds)})",
             "closure": "unknown",
             "_over_baseline": "1",
         }
@@ -597,7 +593,7 @@ def _pyright_fields(output: str, seconds: float, change: ChangeSet) -> dict[str,
     return {
         "pyright": (
             f"{errors}err({len(inside)}in-closure,{len(outside)}elsewhere:{tail})"
-            f"({_spell(seconds)})"
+            f"({spell_seconds(seconds)})"
         ),
         "err_in_this_diff": str(_errors_in_diff(output, change)),
         "_over_baseline": "1" if inside else "0",
@@ -631,7 +627,7 @@ def _fields_for(
     if run.label == "vitest-app":
         ran = _vitest_tests(output)
         verdict = "ok" if code == 0 else f"failed({code})"
-        return {"vitest-app": f"{verdict}({ran}tests)({_spell(seconds)})"}
+        return {"vitest-app": f"{verdict}({ran}tests)({spell_seconds(seconds)})"}
     if run.label == "debt":
         return {"debt": _debt_field(code, output, seconds)}
     if run.label == "docs-refs":
@@ -641,7 +637,7 @@ def _fields_for(
     if run.label == "refusal-loss":
         return {"refusal-loss": _refusal_field(output)}
     verdict = "ok" if code == 0 else f"failed({code})"
-    return {run.label: f"{verdict}({_spell(seconds)})"}
+    return {run.label: f"{verdict}({spell_seconds(seconds)})"}
 
 
 # meiva:note
@@ -720,14 +716,11 @@ def check(
         values["failed"] = "n/a(no-test-ran)"
         values["errors"] = "n/a(no-test-ran)"
         return values, failed
-    code, output, seconds = execute(
-        (sys.executable, "-m", "pytest", "-q", *selection.tests), change.root
-    )
-    values["tests"] = f"RAN({len(selection.tests)}files)"
-    values["passed"] = f"{_count(output, 'passed')}tests({_spell(seconds)})"
-    values["failed"] = f"{_count(output, 'failed')}tests"
-    values["errors"] = f"{_error_count(output)}tests"
-    return values, failed or code != 0
+    report = Path(tempfile.mkdtemp(prefix="diff-checks-")) / "pytest-report.xml"
+    code, _output, seconds = execute(pytest_argv(report, selection.tests), change.root)
+    counts = pytest_counts(report, selected_files=len(selection.tests), seconds=seconds)
+    values.update(counts.values)
+    return values, failed or code != 0 or counts.broken
 
 
 def build_receipt(values: dict[str, str], sha: str, base: str) -> str:
