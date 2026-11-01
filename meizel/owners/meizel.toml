@@ -13,7 +13,5 @@ exports = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_j
 "decisions.py" = "strict-to-be"
 
 [debt.impure-call]
-"clock_lattice.py#Path.is_file" = 1
-"clock_lattice.py#Path.resolve" = 1
 "decisions.py#Path.is_file" = 1
 "decisions.py#Path.resolve" = 1

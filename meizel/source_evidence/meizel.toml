@@ -8,7 +8,4 @@ exports = []
 
 [purity]
 "." = "strict"
-"loader.py" = "strict-to-be"
-
-[debt.impure-call]
-"loader.py#Path.resolve" = 3
+"loader.py" = "strict"

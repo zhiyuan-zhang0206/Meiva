@@ -18,14 +18,36 @@ from pathlib import Path
 
 import pytest
 
-from meizel.owners import clock_lattice as _lint
+from meizel.owners import clock_lattice
+from meizel.owners import clock_lattice_cli as _lint
 from meizel.owners.clock_lattice_cli import SCAN_DIRS as _SCAN_DIRS
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
 # pyright: reportUnknownArgumentType = warning
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _TEST_CLOCKS = frozenset({"NO_PROGRESS_TIMEOUT_S"})
+_FAMILY = ("base/deploy/timing.py", "base/native_process/stop_timing.py")
+_INDEPENDENT = {
+    ("base/host/proc.py", "_TERMINATE_GRACE_S"): "independent: TERM->KILL ladder, no neighbour",
+}
+
+
+# meiva:note
+# The lattice a test hands the rule: a declaration of this fixture tree, never the repository's.
+def _lattice(
+    *,
+    family: tuple[str, ...] = _FAMILY,
+    independent: dict[tuple[str, str], str] | None = None,
+    registered: frozenset[str] = _TEST_CLOCKS,
+) -> clock_lattice.Lattice:
+    return clock_lattice.Lattice(
+        family, _INDEPENDENT if independent is None else independent, registered
+    )
+
+
+_TEST_LATTICE = _lattice()
 
 
 @pytest.fixture()
@@ -43,7 +65,7 @@ def _write(scan_tmp: Path, rel: str, body: str) -> Path:
 
 def _errors(scan_tmp: Path, rel: str, body: str) -> list[str]:
     p = _write(scan_tmp, rel, body)
-    return _lint.scan_file(p, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS)
+    return _lint.scan_file(p, repo_root=scan_tmp, lattice=_TEST_LATTICE)
 
 
 def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp) -> None:
@@ -137,9 +159,7 @@ def test_explicit_missing_target_is_an_error(
     good = _write(scan_tmp, "ok.py", "value = 1\n")
     missing = tmp_path / "typo.py"
     assert (
-        _lint.main(
-            [str(missing)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
-        )
+        _lint.main([str(missing)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, lattice=_TEST_LATTICE)
         == 1
     )
     assert str(missing) in capsys.readouterr().err
@@ -148,7 +168,7 @@ def test_explicit_missing_target_is_an_error(
             [str(good), str(missing)],
             scan_dirs=_SCAN_DIRS,
             repo_root=scan_tmp,
-            registered_clocks=_TEST_CLOCKS,
+            lattice=_TEST_LATTICE,
         )
         == 1
     )
@@ -162,10 +182,7 @@ def test_directory_with_dangling_symlink_member_is_skipped(scan_tmp: Path) -> No
     (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (pkg / "dangling.py").symlink_to(pkg / "missing.py")
     assert (
-        _lint.main(
-            [str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
-        )
-        == 0
+        _lint.main([str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, lattice=_TEST_LATTICE) == 0
     )
 
 
@@ -182,18 +199,13 @@ def test_explicit_outside_repo_and_relative_targets_are_scanned(
     bad = outside / "bad.py"
     bad.write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
     assert (
-        _lint.main(
-            [str(bad)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
-        )
-        == 1
+        _lint.main([str(bad)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, lattice=_TEST_LATTICE) == 1
     )
     prev_cwd = Path.cwd()
     try:
         os.chdir(outside)
         assert (
-            _lint.main(
-                ["bad.py"], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
-            )
+            _lint.main(["bad.py"], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, lattice=_TEST_LATTICE)
             == 1
         )
     finally:
@@ -212,17 +224,11 @@ def test_directory_with_non_utf8_member_is_skipped(
     (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (pkg / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
     assert (
-        _lint.main(
-            [str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
-        )
-        == 0
+        _lint.main([str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, lattice=_TEST_LATTICE) == 0
     )
     (pkg / "viol.py").write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
     assert (
-        _lint.main(
-            [str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS
-        )
-        == 1
+        _lint.main([str(pkg)], scan_dirs=_SCAN_DIRS, repo_root=scan_tmp, lattice=_TEST_LATTICE) == 1
     )
     assert "_MY_STALL_TIMEOUT_S" in capsys.readouterr().err
 
@@ -231,25 +237,27 @@ def test_directory_with_non_utf8_member_is_skipped(
 
 
 def test_real_allowlists_are_current() -> None:
-    assert _lint.stale_allowlist_entries() == []
+    assert _lint.stale_entries(_REPO_ROOT, _lint.lattice_of(_REPO_ROOT)) == []
 
 
-def test_exemption_for_a_deleted_file_is_stale(scan_tmp: Path) -> None:
-    errs = _lint.stale_allowlist_entries(
-        {("base/gone.py", "_REAP_S"): "why"},
-        repo_root=scan_tmp,
-        family_modules=(),
+def test_exemption_for_a_deleted_file_is_stale() -> None:
+    errs = clock_lattice.stale_allowlist_entries(
+        set(),
+        {},
+        lattice=_lattice(family=(), independent={("base/gone.py", "_REAP_S"): "why"}),
     )
     assert len(errs) == 1
     assert "base/gone.py" in errs[0] and "_REAP_S" in errs[0]
 
 
 def test_exemption_for_a_removed_constant_is_stale(scan_tmp: Path) -> None:
-    _write(scan_tmp, "base/host/proc.py", "_OTHER_GRACE_S = 1.0\n")
-    errs = _lint.stale_allowlist_entries(
-        {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"},
-        repo_root=scan_tmp,
-        family_modules=(),
+    path = _write(scan_tmp, "base/host/proc.py", "_OTHER_GRACE_S = 1.0\n")
+    errs = clock_lattice.stale_allowlist_entries(
+        {"base/host/proc.py"},
+        {"base/host/proc.py": path.read_text(encoding="utf-8")},
+        lattice=_lattice(
+            family=(), independent={("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
+        ),
     )
     assert len(errs) == 1
     assert "no module-level _TERMINATE_GRACE_S" in errs[0]
@@ -259,10 +267,10 @@ def test_live_exemption_and_family_module_are_current(scan_tmp: Path) -> None:
     _write(scan_tmp, "base/host/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
     _write(scan_tmp, "base/deploy/timing.py", "CLOCKS = {}\n")
     assert (
-        _lint.stale_allowlist_entries(
-            {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"},
-            repo_root=scan_tmp,
-            family_modules=("base/deploy/timing.py",),
+        clock_lattice.stale_allowlist_entries(
+            {"base/host/proc.py", "base/deploy/timing.py", "base/native_process/stop_timing.py"},
+            {"base/host/proc.py": "_TERMINATE_GRACE_S: float = 1.0\n"},
+            lattice=_lattice(),
         )
         == []
     )
@@ -279,9 +287,7 @@ def test_full_scan_fails_on_a_stale_family_module(
             [],
             scan_dirs=_SCAN_DIRS,
             repo_root=scan_tmp,
-            registered_clocks=_TEST_CLOCKS,
-            family_modules=("base/retired_timing.py",),
-            independent={},
+            lattice=_lattice(family=("base/retired_timing.py",), independent={}),
         )
         == 1
     )
@@ -292,9 +298,7 @@ def test_full_scan_fails_on_a_stale_family_module(
             [str(ok)],
             scan_dirs=_SCAN_DIRS,
             repo_root=scan_tmp,
-            registered_clocks=_TEST_CLOCKS,
-            family_modules=("base/retired_timing.py",),
-            independent={},
+            lattice=_lattice(family=("base/retired_timing.py",), independent={}),
         )
         == 0
     )
@@ -361,17 +365,21 @@ def test_a_family_module_may_bind_literals(scan_tmp) -> None:
 def test_an_audited_exemption_lets_a_binding_stand(scan_tmp: Path) -> None:
     body = "def go(cfg):\n    return cfg(claude_thinking_budget_tokens=0)\n"
     path = _write(scan_tmp, "ops/z.py", body)
-    assert _lint.scan_file(path, independent={}, repo_root=scan_tmp) != []
+    assert _lint.scan_file(path, repo_root=scan_tmp, lattice=_lattice(independent={})) != []
     reason = {("ops/z.py", "claude_thinking_budget_tokens"): "a token budget, not a time value"}
-    assert _lint.scan_file(path, independent=reason, repo_root=scan_tmp) == []
+    assert _lint.scan_file(path, repo_root=scan_tmp, lattice=_lattice(independent=reason)) == []
 
 
 def test_an_exemption_that_binds_nothing_any_more_is_stale(scan_tmp: Path) -> None:
-    _write(scan_tmp, "ops/z.py", "def go(cfg):\n    return cfg(limit=3)\n")
+    path = _write(scan_tmp, "ops/z.py", "def go(cfg):\n    return cfg(limit=3)\n")
     gone = {("ops/z.py", "claude_thinking_budget_tokens"): "a token budget, not a time value"}
     stale = [
         m
-        for m in _lint.stale_allowlist_entries(independent=gone, repo_root=scan_tmp)
+        for m in clock_lattice.stale_allowlist_entries(
+            {"ops/z.py"},
+            {"ops/z.py": path.read_text(encoding="utf-8")},
+            lattice=_lattice(family=(), independent=gone),
+        )
         if "claude_thinking" in m
     ]
     assert len(stale) == 1 and "drop the exemption" in stale[0]
@@ -381,8 +389,10 @@ def test_a_family_module_that_is_not_utf8_still_exists(scan_tmp: Path) -> None:
     binary = scan_tmp / "base" / "binary.py"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"\xff\xfe not utf-8")
-    errs = _lint.stale_allowlist_entries(
-        {}, repo_root=scan_tmp, family_modules=("base/binary.py", "base/gone.py")
+    errs = clock_lattice.stale_allowlist_entries(
+        {"base/binary.py"},
+        {},
+        lattice=_lattice(family=("base/binary.py", "base/gone.py"), independent={}),
     )
     assert errs == ["base/gone.py: stale FAMILY_MODULES entry — the file no longer exists"]
 
@@ -428,9 +438,7 @@ def _run_lint(root: Path) -> int:
         [],
         scan_dirs=("pkg",),
         repo_root=root,
-        registered_clocks=_TEST_CLOCKS,
-        family_modules=("pkg/family.py",),
-        independent={},
+        lattice=_lattice(family=("pkg/family.py",), independent={}),
     )
 
 

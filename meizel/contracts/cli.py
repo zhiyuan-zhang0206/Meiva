@@ -16,7 +16,7 @@ from meizel.contracts.policy import Surface, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import sync_manifests
 from meizel.graph.model import Diagnostic, MeizelError
-from meizel.source_evidence import load_report
+from meizel.source_evidence import Evidence, load_report
 
 __all__ = ["main"]
 
@@ -25,13 +25,18 @@ __all__ = ["main"]
 # meiva:link meizel/docs/checker/checker.meiva.okf.md
 _DESCRIPTION = "Command line: check, explain, sync --prune, bootstrap, debt and roles."
 
+# meiva:note
+# The installation this process runs from: the one seat that answers where the checker's own files
+# are, read once here and handed down as a value (`source_evidence.Evidence`).
+_TOOL_ROOT = Path(__file__).resolve().parents[2]
+
 
 # meiva:note
 # A repository-relative POSIX path for a path given relative to `base`.
 def _relative_target(root: Path, base: Path, raw: str) -> str:
     resolved = (base / raw).resolve()
     try:
-        rel = resolved.relative_to(root.resolve())
+        rel = resolved.relative_to(root)
     except ValueError as error:
         raise MeizelError(f"{raw}: outside the repository {root}") from error
     return "" if str(rel) == "." else rel.as_posix()
@@ -309,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         # commands are handed instead of a path they would build their own from. A command that
         # judges reads a snapshot of it (`repo.universe()`).
         repo = GitRepo(args.repo if args.repo is not None else toplevel(base))
-        root = repo.root
+        root = repo.root.resolve()
         if args.command == "check":
             return _run_check(repo, base, args.paths, args.limit, args.jobs, args.changed)
         if args.command == "debt":
@@ -325,7 +330,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "explain":
             analysis = analyze(repo.universe(), jobs=args.jobs)
             node = _relative_target(root, base, args.path)
-            report = load_report(root, set(analysis.universe.files), node, args.typescript_index)
+            report = load_report(
+                Evidence(root=root, tool=_TOOL_ROOT),
+                set(analysis.universe.files),
+                node,
+                args.typescript_index,
+            )
             print(explain(analysis, node, report))
             return 0
         if args.command == "roles":
