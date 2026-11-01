@@ -19,7 +19,7 @@ tags:
   that role so every object is role-owned); tests build standalone DBs the same
   way. It stamps
   the sentinel `00000000T000000_baseline` and current reset anchor
-  `20261026T091500_schema-baseline` into `schema_migrations`.
+  `20261101T170000_schema-baseline` into `schema_migrations`.
   **A schema change must be reflected here in the same commit.**
 - **`migrations/YYYY/MM/DD/HH/YYYYMMDDTHHMMSS_<kebab-name>.sql`** — post-baseline deltas. There
   are no down migrations; a merged migration name and its SQL bytes are immutable; directory-only moves retain both
