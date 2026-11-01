@@ -6,7 +6,7 @@ Keep the 2026-08-14 inventory until older backup/PITR restores are ruled out.
 
 from base.deploy.schema.migration_errors import MigrationHistoryGap
 
-RESET_ANCHOR = "20261026T091500_schema-baseline"
+RESET_ANCHOR = "20261101T170000_schema-baseline"
 
 # The 59 timestamped migrations squashed into db/schema.sql at the v0.1.0
 # release (2026-08-14 schema reset). Frozen at reset time — do not bump. A DB
@@ -185,7 +185,7 @@ SEP2026_PRE_RESET_SET = frozenset(
 )
 
 
-PRE_RESET_SET = frozenset(
+OCT2026_PRE_RESET_SET = frozenset(
     {
         "20260922T053200_impersonation-delivery-budget",
         "20260922T075826_impersonation-delivery-config",
@@ -284,12 +284,27 @@ PRE_RESET_SET = frozenset(
 )
 
 
+PRE_RESET_SET = frozenset(
+    {
+        "20261026T091500_schema-baseline",
+        "20261027T191344_task-reminders-pause",
+        "20261029T101641_drop-impersonation-capability-columns",
+        "20261029T224800_signal-state",
+        "20261031T172218_machine-placed-schedules",
+        "20261101T050900_unified-file-upload",
+        "20261101T081023_harness-switch-and-external-messages",
+        "20261101T091332_retire-display-and-timeline-settings",
+    }
+)
+
+
 def assert_reset_history(applied: set[str], required: set[str]) -> None:
     """Refuse partial generations before deleting any applied-set evidence."""
     for generation, history in (
         ("2026-08-14", V010_PRE_RESET_SET),
         ("2026-09-23", SEP2026_PRE_RESET_SET),
-        ("2026-10-26", PRE_RESET_SET),
+        ("2026-10-26", OCT2026_PRE_RESET_SET),
+        ("2026-11-01", PRE_RESET_SET),
     ):
         present = applied & history
         missing = history - applied

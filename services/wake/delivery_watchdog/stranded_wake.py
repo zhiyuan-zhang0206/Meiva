@@ -88,6 +88,12 @@ class StrandedOwner:
 # human" and is not this loop's business, so it never suppresses a stranded wake
 # whose own repair already ran. A system notice queued for a dead owner is read on
 # a later life and never wakes one.
+#
+# meiva:note
+# Concurrency safety: SELECT DISTINCT ON precludes `FOR UPDATE SKIP LOCKED` in Postgres
+# (FeatureNotSupported: FOR UPDATE is not allowed with DISTINCT clause). `select_stranded`
+# is a read-only candidate pass; concurrency is serialized downstream by `claim_stranded`'s
+# atomic UPDATE ... RETURNING id.
 def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOwner]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
