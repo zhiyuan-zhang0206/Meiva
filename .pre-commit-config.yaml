@@ -137,6 +137,14 @@ repos:
         language: system
         files: ^(meizel\.policy\.toml|.*\.py)$
 
+      # Callee must not provide ambient fallbacks (code-placement-and-purity.md#L55).
+      # Defaults on parameters are reserved for pure constants and tuning numbers.
+      - id: lint-no-ambient-fallback
+        name: lint anti-ambient-fallback (no ambient fallbacks for None parameters)
+        entry: .venv/bin/python scripts/lint/diagnostics/no_ambient_fallback.py --only
+        language: system
+        files: ^(agent|meiva|meiva_builtins|base|cli|gateway|ops|services|schedules)/.*\.py$
+
       # A test that judges the code by the real wall clock: a bound loose enough not to flake
       # passes the defect it was written to catch (#7725 kept `elapsed < 0.5` green under a probe
       # re-consuming its budget per segment). Assert a counted fact, or buy silence per line with
