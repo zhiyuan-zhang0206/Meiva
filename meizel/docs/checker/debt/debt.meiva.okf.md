@@ -65,6 +65,15 @@ cycle any more, or is no longer declared, its entries are `debt-paid`. A malform
 `[debt]` is `manifest-debt`. Unresolved imports, stale declarations and manifest
 syntax errors cannot be recorded.
 
+A rewrite keeps the manifest's shape. `record`, `prune`, `carry` and `resolve`
+replace the `[debt.*]` tables where they sit, never at the end of the file, and a
+comment above a table or above one entry stays above it. The comment of an entry a
+rewrite drops stays in its table, after the entries that remain: `prune` deletes
+the entry, not the reason somebody wrote it down. A table a rewrite drops leaves
+its comments where the table was, and the comments after the last table — a note
+above the section that follows, as in `base/telemetry/meizel.toml` — stay at the
+section's end.
+
 ## What one entry says
 
 A `[debt.<code>]` line records a count, and may name the owner paying it down and the condition it
