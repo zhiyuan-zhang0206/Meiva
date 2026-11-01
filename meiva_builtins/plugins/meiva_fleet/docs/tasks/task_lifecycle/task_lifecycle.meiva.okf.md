@@ -62,14 +62,14 @@ Modify task fields, **pass only what you want to change**—omitted fields remai
 - `owner`: pass an agent id to transfer/claim; **not passing or passing `None` both mean "unchanged"**—a task always has an owner, `owner=None` no longer releases a task.
 - `remind_interval_seconds`: **not passing or passing `None` both mean "unchanged"**—reminders cannot be disabled; only passing a positive integer (≤24h) changes it, exceeding raises `ValueError`.
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).
-- `note`: appends a line `[YYYY-MM-DD HH:MM:SS] <note>` to `results`, can be used alongside any status change or alone as a substitute for `log()`. The stamp is built by `base.agents.tasks.notes.task_note_line` — the same agent-facing representation and the same timezone as every other timestamp an agent reads, shared with the gateway's drain writer so the two cannot drift.
+- `note`: appends a line `[YYYY-MM-DD HH:MM:SS] <note>\n\n` to `results`, can be used alongside any status change or alone as a substitute for `log()`. The stamp is built by `base.agents.tasks.notes.task_note_line` — the same agent-facing representation and the same timezone as every other timestamp an agent reads, shared with the gateway's drain writer so the two cannot drift. Trailing double newlines (`\n\n`) and idempotent prefix normalization preserve consecutive entries as distinct Markdown paragraphs under CommonMark instead of collapsing soft single newlines into spaces.
 - A write that is activity on the task resets the reminder window (`last_reminded_at` / `reminder_count` / `escalated_at` zeroed): a change to the work, and by default a note. A title-only, description-only or interval-only write does not (Fleet `task_reminder_reset_on`). Silencing a task with `reminders_paused_until` is not a change to the work either: it zeroes nothing and moves neither `updated_at` nor the counters — it only stops delivery until the deadline. Parking is SDK-only (`update(reminders_paused_until=...)`): the HTTP `PATCH` surface has no field for it.
 - Each fresh committed write publishes `task_updated` (SSE, board invalidates and refetches).
 - `operation_key`: [[task_update_receipts.meiva.okf.md|explicit agent/task-scoped replay]] skips repeated task effects; changed effective inputs with the same key raise `ValueError`.
 
 ### `log(task_id, message, *, operation_key) -> None`
 
-Append a line `[YYYY-MM-DD HH:MM:SS] message` to `results`—**delegates to `update(task_id, note=message, operation_key=operation_key)`**, same timestamped append, same reminder counter reset.
+Append a double-newline-terminated block `[YYYY-MM-DD HH:MM:SS] message\n\n` to `results`—**delegates to `update(task_id, note=message, operation_key=operation_key)`**, same timestamped append, same reminder counter reset.
 
 **Common operation patterns**:
 
