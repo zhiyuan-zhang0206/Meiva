@@ -16,6 +16,11 @@ _SHELL_SETUP = (
     'print(f"SHELL_SID={sid}")\n'
 )
 
+_TALL_PROSE = "\n\n".join(
+    f"Paragraph {i:03d}: filling the conversation surface for history scroll restoration."
+    for i in range(80)
+)
+
 SHELL_HISTORY_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
         content="Filling the timeline.",
@@ -27,7 +32,7 @@ SHELL_HISTORY_SCRIPT: tuple[AIMessage, ...] = (
         tool_calls=[{"id": "call_shell", "name": "execute_code", "args": {"code": _SHELL_SETUP}}],
         usage_metadata=_USAGE,
     ),
-    AIMessage(content="DONE", usage_metadata=_USAGE),
+    AIMessage(content=f"{_TALL_PROSE}\n\nDONE", usage_metadata=_USAGE),
 )
 
 

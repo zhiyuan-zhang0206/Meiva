@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Timeline sticky scroll
-description: Sticky-bottom follow pins and scrollTop ownership (echo-attributed performed scrolls, wheel and touch zones, the pull reserve, the scroll-anchoring opt-out) plus the pinned work and detail headers, which stay pinned for the whole gesture.
+description: Sticky-bottom follow pins and scrollTop ownership (echo-attributed performed scrolls, wheel and touch zones, the pull reserve, the scroll-anchoring opt-out) plus bounded inner TurnBlock scroll isolation and non-sticky header flow.
 tags:
 - frontend
 ---
@@ -80,36 +80,25 @@ the window. A reader who is not following has the bookmark's anchor re-applied
 after the reflow, so they stay on the row they were reading; a reader in the
 bottom zone pins as before (user report 2026-10-20).
 
-## Header scrolling scope
-Human-message and agent-reply titles stay in normal flow, including historical,
-streaming and interrupted replies. Expanded work blocks retain their sticky
-header below HeaderBar. Their expanded detail cards retain a second sticky line
-below the work header, using its measured `--turn-header-h`. Collapsed headers
-stay in flow. The frosted pane and geometry tracking apply only to those work
-and detail headers.
-
-The pin is unconditional and speed-independent. It once carried a fast-scroll
-escape — past ~1.8 px/ms the title dropped back into flow and re-pinned after a
-settling delay — which meant a quick flick reliably lost the header of the
-block being read while a slow drag looked correct (user report 2026-10-17).
-`updateStuckHeader` therefore runs on every scroll frame regardless of speed,
-so the frosted stuck variant stays truthful for the whole gesture; the release
-also forced a second state source (a `data-fast-scrolling` flag on the
-timeline wrapper) whose consumers are gone.
+## Non-sticky headers and bounded TurnBlock scroll
+Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay
+in normal document flow without `position: sticky` (user ruling 2026-11-01,
+replacing frosted sticky work and detail headers). Instead of pinning headers
+below `HeaderBar`, every expanded `TurnBlock` (both historical and active
+`Working`) wraps its indented body in a shared auto-hiding `ScrollArea` whose
+viewport (`data-testid="turn-scroll-viewport"`) is capped at 50% of the visible
+timeline message area via `--timeline-turn-max-h` (synced on mount and
+`ResizeObserver` from `(viewport.clientHeight - BAR_HEIGHT_PX) * 0.5` in
+`useTimelineViewport`, fallback `50dvh`). Short turns shrink-wrap naturally
+without an inner scrollbar (`scrollHeight <= clientHeight`); tall turns scroll
+internally while wheel and touch gestures inside an overflowing `TurnBlock`
+(`scrollHeight > clientHeight + 1`) stay isolated from outer sticky-bottom
+detachment and history-pull triggers.
 
 Event timestamps remain visible in message-card headers at narrow widths;
 headers and timestamp text wrap when needed. Standing context notes continue
 to omit timestamps according to their timeline item metadata.
 
-
-```meiva-contract
-id = "sticky-header-pin"
-kind = "invariant"
-statement = "An expanded work block's header, and its nested detail-card headers, stay pinned below HeaderBar for the whole gesture: no scroll speed, direction or settle timer releases them, so a pinned header's only state change is stuck versus resting presentation."
-code = ["ui/web/src/components/timeline/view/card-summary.tsx:STICKY_HEADER_CLS", "ui/web/src/components/timeline/card.tsx:STICKY_CHILD_HEADER_CLS"]
-tests = ["ui/web/src/components/timeline/timeline.test.tsx::TimelineView sticky work block (task #2601)::keeps an expanded work block pinned through a rapid scroll burst", "ui/web/src/components/timeline/pinned-titles-autofollow.test.tsx::TimelineView pinned titles during auto-follow::keeps the pin when the reader leaves the bottom at speed"]
-```
-
 ## Relationship to Other Nodes
 
-- [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]] — the renderer whose scroll surface and pinned headers this node owns.
+- [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]] — the renderer whose scroll surface and bounded turn scroll this node owns.

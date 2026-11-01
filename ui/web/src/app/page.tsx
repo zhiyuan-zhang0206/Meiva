@@ -65,7 +65,10 @@ function HomePageWiring() {
   const [contextPanelOpen, setContextPanelOpen] = useContextPanelOpen();
   const alerts = useAlerts();
   const timeline = useTimeline(agents.activeId, showError, agents.activeAgent?.status);
-  const tokenUsage = useTokenUsage(agents.activeId, showError);
+  // meiva:note
+  // Populates `useTimelineStore` token-usage fields read by InspectorPanel's Context section.
+  // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/section-details.meiva.okf.md
+  useTokenUsage(agents.activeId, showError);
   const store = useMemo(
     () => ({ focusComposer, composerFocusToken, setMobileSidebarOpen }),
     [focusComposer, composerFocusToken, setMobileSidebarOpen],
@@ -86,7 +89,6 @@ function HomePageWiring() {
       settings={settings}
       timeline={timeline}
       timelineStore={timelineStore}
-      tokenUsage={tokenUsage}
       bfcacheId={bfcacheId}
       unresolvedAlerts={alerts.data?.meta.unresolved_count ?? 0}
       contextPanel={contextPanel}

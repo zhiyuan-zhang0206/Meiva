@@ -92,7 +92,7 @@ export function ContextSection({ agentId }: { agentId: number }) {
             maxContextTokens={maxContextTokens}
             softCompactTokens={softCompactTokens}
             hardCompactTokens={hardCompactTokens}
-            showText={false}
+            showText={!hasWindow}
           />
         </div>
         <div className="grid grid-cols-2 gap-1">

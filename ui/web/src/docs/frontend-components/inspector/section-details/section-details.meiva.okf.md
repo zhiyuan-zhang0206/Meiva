@@ -25,17 +25,18 @@ cast.
 
 **Activity** carries the cost, TPS and duration cells in its own node: [[ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md|Activity section]].
 
-**Context** is the selected agent's context-window occupancy: a wide gauge (the
-same `ContextMeter` the composer used to carry, ticks at the soft and hard
-thresholds) with the header badge showing occupancy as a percentage, then one
-row of two side-by-side cells — used / window, and soft / hard limit in tokens
-(user ruling 2026-10-18: one row, not two stacked blocks). Clicking the gauge
-opens the shared floating breakdown above it. It reads the
-timeline store's token slice, the values `useTokenUsage` keeps for the selected
-agent, so the panel never disagrees with the timeline about whose window it is
-showing. The section renders nothing before the first LLM call (all zeros).
-Moved here from the composer (user ruling 2026-10-17); the composer now shows it
-only when `display.composer_context_meter` is opted in, and then as a bare gauge.
+**Context** is the selected agent's context-window occupancy: a wide gauge
+(`ContextMeter`, fixed at its comfortable `w-32` track width outside the
+full-width Inspector slot, ticks at the soft and hard thresholds) with the
+header badge showing occupancy as a percentage, then one row of two
+side-by-side cells — used / window, and soft / hard limit in tokens (user ruling
+2026-10-18: one row, not two stacked blocks). Clicking the gauge opens the
+shared floating breakdown above it. It reads the timeline store's token slice,
+the values `useTokenUsage` keeps for the selected agent, so the panel never
+disagrees with the timeline about whose window it is showing. The section
+renders nothing before the first LLM call (all zeros). Context occupancy lives
+exclusively in the Inspector and on `/insights/run/{agentId}` — the composer
+carries no context meter (user ruling 2026-11-01).
 
 **Page** lists the agent's open pages as external links (title or name plus the
 URL), hidden entirely when none is open; the read is `useAgentPages`.

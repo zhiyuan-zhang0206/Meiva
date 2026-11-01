@@ -53,18 +53,9 @@ export {
 } from "./types-events";
 
 export {
-  COLOR_FAMILIES,
-  COLOR_SLOT_IDS,
   DEFAULT_DATE_FORMAT,
-  TIMELINE_COLOR_ITEMS,
   USER_SETTING_DEFAULTS,
-  type ColorFamily,
-  type ColorItemSpec,
-  type ColorShape,
-  type ColorSlotId,
-  type ContextMeterWidth,
   type DateFormat,
-  type FamilyClasses,
   type NotificationCategoriesResponse,
   type NotificationCategoryItem,
   type TaskFields,

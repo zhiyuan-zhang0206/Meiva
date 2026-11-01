@@ -29,7 +29,6 @@ import type { Harness } from "@/lib/harness/harness";
 import { PRIORITY_RANK } from "@/lib/notifications/notices";
 import { useNotices } from "@/lib/notifications/use-notices";
 import type { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
-import type { TokenUsageState } from "@/lib/inspector/use-token-usage";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import type { useBreakpoint } from "@/lib/layout/breakpoint";
 import type { Store } from "@/lib/state/store";
@@ -94,10 +93,6 @@ type TimelineViewState = Pick<
   | "loadingNewer"
   | "retryTimeline"
 >;
-type TokenUsageView = Pick<
-  TokenUsageState,
-  "contextTokens" | "maxContextTokens" | "softCompactTokens" | "hardCompactTokens" | "contextPending"
->;
 
 // meiva:note
 // Every field is one source's value, read once by the route: a hook's result narrowed to what the
@@ -115,7 +110,6 @@ export interface HomePageProps {
   settings: SettingsView;
   timeline: TimelineViewState;
   timelineStore: TimelineStoreView;
-  tokenUsage: TokenUsageView;
   bfcacheId: string;
   unresolvedAlerts: number;
   contextPanel: { open: boolean; setOpen: (open: boolean) => void };
@@ -145,7 +139,6 @@ export function HomePageView(props: HomePageProps) {
     TimelineView,
     timeline,
     timelineStore,
-    tokenUsage,
     unresolvedAlerts,
     UploadButton,
   } = props;
@@ -251,7 +244,6 @@ export function HomePageView(props: HomePageProps) {
         store={store}
         timeline={timeline}
         timelineStore={timelineStore}
-        tokenUsage={tokenUsage}
         bfcacheId={bfcacheId}
         unresolvedAlerts={unresolvedAlerts}
         HeaderBar={HeaderBar}
@@ -311,7 +303,6 @@ interface HomeContentProps {
   store: StoreView;
   timeline: TimelineViewState;
   timelineStore: TimelineStoreView;
-  tokenUsage: TokenUsageView;
   bfcacheId: string;
   unresolvedAlerts: number;
   HeaderBar: HeaderBarSlot;
@@ -335,7 +326,6 @@ function HomeContent({
   store,
   timeline,
   timelineStore,
-  tokenUsage,
   bfcacheId,
   unresolvedAlerts,
   HeaderBar,
@@ -388,7 +378,6 @@ function HomeContent({
     loadingNewer,
     retryTimeline,
   } = timeline;
-  const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = tokenUsage;
   const pendingMessages = usePendingMessages(activeId, showError);
   const visiblePendingMessages = useMemo(
     () => withoutTimelineDuplicates(pendingMessages, items),
@@ -524,15 +513,9 @@ function HomeContent({
               onUploadSent={() => timelineStore.requestScrollToBottom()}
               onUploadError={handleUploadError}
               focusToken={store.composerFocusToken}
-              contextTokens={contextTokens}
-              maxContextTokens={maxContextTokens}
-              softCompactTokens={softCompactTokens}
-              hardCompactTokens={hardCompactTokens}
-              contextPending={contextPending}
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
               suggestions={replySuggestion}
-              showContextMeter={activeAgent?.harness === "meiva" && userSettings["display.composer_context_meter"] === true}
             >
               <UploadButton
                 agentId={activeId}

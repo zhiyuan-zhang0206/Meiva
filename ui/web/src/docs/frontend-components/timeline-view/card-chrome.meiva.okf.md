@@ -10,8 +10,8 @@ tags:
 
 `components/timeline/row.tsx` — `TimelineRow` — renders three visual tiers:
 1. **Human message** (`inbound_chat` with `inboundKind(source) === "human"`): a right-aligned conversational bubble (`data-testid="user-message-bubble"`, `max-w-[85%] sm:max-w-[min(70%,34rem)]`, stripped `<header>\n\n` envelope) with a right-aligned hover chrome band (`CARD_FOOTER_CLS`) below it.
-2. **Agent reply** (`agent_chat` with `user_facing !== false`): unboxed Markdown prose directly on the canvas (`data-testid="agent-message-prose"`, with a subtle pulsing `streaming-cursor` while `partial` is true) and a left-aligned hover chrome band (`CARD_FOOTER_LEFT_CLS`) below it.
-3. **Secondary work item** (thinking, tool call, tool output, system prompt, attach, notes, inter-agent / system inbound, and non-user-facing `agent_chat` with `user_facing === false`): a borderless `MessageCard` + `CardHeader` (`ChevronRight` + icon + summary/title) inside a `TurnBlock` or the Live Activity Window. Secondary items omit below-card timestamps and mount an inline top-right Copy button only when `config.copy` is true (inter-agent / external-agent messages and non-user-facing `agent_chat`).
+2. **Agent reply** (`agent_chat` with `user_facing !== false`): unboxed Markdown prose directly on the canvas (`data-testid="agent-message-prose"`, with a subtle pulsing `streaming-cursor` while `partial` is true) and a right-aligned hover chrome band (`CARD_FOOTER_CLS`) below it (user ruling 2026-11-01 — primary timestamps and Copy align uniformly on the right).
+3. **Secondary work item** (thinking, tool call, tool output, system prompt, attach, notes, inter-agent / system inbound, and non-user-facing `agent_chat` with `user_facing === false`): a borderless `MessageCard` + `CardHeader` (`ChevronRight` + icon + summary/title) inside an inline `TurnBlock`. Secondary items omit below-card timestamps and float a hover-revealed Copy pill inside the expanded body's bottom-right corner (`bottom-1 right-1 justify-end`, keeping uniform `pb-1.5` spacing with sibling blocks) only when `config.copy` is true (inter-agent / external-agent messages and non-user-facing `agent_chat`).
 
 Copy is **decided per block kind**, in `messageCardConfig`'s `copy` field — a
 whitelist, not "everything except …", so a kind added later has to opt in rather
@@ -26,7 +26,7 @@ mount no copy control anywhere in the block: the band's button and the
 body-level one are the same decision (`PythonCode` gets `copy={false}`, the
 code-output envelope has none), and a body-level button is no longer a way to
 "keep" Copy on a kind the whitelist excludes. A still-streaming primary reply
-keeps its stamp (`justify-start`) but never Copy. A kind that offers neither Copy
+keeps its stamp (`justify-end`) but never Copy. A kind that offers neither Copy
 nor a stamp mounts no band at all, so there is never an empty strip under a block.
 
 For primary messages, the band **sits symmetrically in the 20px gap below the
@@ -68,21 +68,8 @@ band comes up for `TOUCH_REVEAL_MS` and drops again, instead of standing painted
 under every message for good (user 2026-10-22 — the always-visible band was the
 bug). A mouse press does not take that path.
 
-```meiva-contract
-id = "card-actions-overlay"
-kind = "invariant"
-statement = "A primary timeline message's timestamp and Copy stand in the gap below the message (right-aligned under user bubbles via CARD_FOOTER_CLS, left-aligned under agent prose via CARD_FOOTER_LEFT_CLS), outside the message box and inside `.timeline-item`'s 1rem bottom padding / -1rem margin hand-back so block-to-block spacing stays uniform and the stamp stays unclipped inside every clipping ancestor. Secondary items inside TurnBlocks omit below-card timestamps and offer Copy only for agent-authored inbound_chat; Copy is scoped to settled message text (human/agent inbound_chat, agent_chat), and the chrome is invisible and click-through until hovered, focused, or touch-revealed."
-code = ["ui/web/src/components/timeline/row.tsx:TimelineRow", "ui/web/src/components/timeline/card.tsx:CARD_FOOTER_CLS", "ui/web/src/components/timeline/card.tsx:CARD_FOOTER_LEFT_CLS"]
-tests = ["ui/web/src/components/timeline/view/timeline-copy-and-boundaries.test.tsx::Copy is scoped to message text (per-kind whitelist)", "tests/e2e/visual/test_work_block_chrome.py::test_last_block_timestamp_is_not_clipped"]
-```
-
 Parent: [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]].
 
-### Waiting for model output
+### Silent model keepalives (`llm_keepalive`)
 
-An empty `llm_keepalive` creates a transient, visible waiting card for its
-message position when no real block exists. It uses the reasoning card's live
-clock presentation with a distinct "Waiting for model" label and empty body;
-it is not a reasoning summary or a counted reasoning block. Repeated heartbeats
-keep the same item reference and never append text. Real content, terminal
-events and committed snapshots remove the waiting card.
+An empty `llm_keepalive` creates a transient `agent_reasoning` item (`llmWaiting: true`, empty payload) for its message position when no real block exists. It classifies as secondary (`runs.classifyItem`) so it folds inside the active `TurnBlock` rather than breaking out into a standalone block, renders with the reasoning card's live `"Thinking for {duration}"` clock presentation (`ThinkingSummary`), and suppresses an empty body wrapper when expanded (`TimelineRow`). Repeated heartbeats keep the same item reference and never append text; real content, terminal events and committed snapshots replace or remove it.

@@ -8,7 +8,6 @@ import { vi } from "vitest";
 import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
-import { useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { transport } from "@/test-support/fake-api";
@@ -86,8 +85,17 @@ function syncDisplayLimitsCache() {
     env_var,
     current_value,
   }));
+  const view: Record<string, unknown> = {};
+  Object.defineProperty(view, "fields", {
+    get() {
+      settingsState.reads += 1;
+      return fields;
+    },
+    enumerable: true,
+    configurable: true,
+  });
   act(() => {
-    timelineQueryClient.setQueryData(["config", null], { fields });
+    timelineQueryClient.setQueryData(["config", null], view);
   });
 }
 
@@ -111,18 +119,24 @@ export function ScrollAreaMock({
   viewportTestId?: string;
   onScrollCapture?: React.UIEventHandler<HTMLDivElement>;
   "data-activity-scroll"?: string;
+  "data-turn-scroll"?: string;
 }) {
   const isActivity = rest["data-activity-scroll"] === "true";
+  const isTurnScroll = rest["data-turn-scroll"] === "true";
   return (
     <div
-      data-testid={isActivity ? "activity-scroll-area" : "scroll-area"}
+      data-testid={isActivity ? "activity-scroll-area" : isTurnScroll ? "turn-scroll-area" : "scroll-area"}
       data-activity-scroll={rest["data-activity-scroll"]}
+      data-turn-scroll={rest["data-turn-scroll"]}
       onScrollCapture={onScrollCapture}
       className={className}
     >
       <div
         ref={viewportRef}
-        data-testid={viewportTestId ?? (isActivity ? "activity-scroll-viewport" : "scroll-viewport")}
+        data-testid={
+          viewportTestId ??
+          (isActivity ? "activity-scroll-viewport" : isTurnScroll ? "turn-scroll-viewport" : "scroll-viewport")
+        }
         data-slot="scroll-area-viewport"
         className={viewportClassName}
       >
@@ -132,28 +146,25 @@ export function ScrollAreaMock({
   );
 }
 
-export const toggleState = {
-  detailsMode: "all" as "all" | "last" | "none",
-  isLoading: false,
+export const settingsState = {
   reads: 0,
 };
 
 export const userSettingsState: Record<string, unknown> = {
   "display.show_timestamp_weekday": true,
   "display.clock_format": "24h",
-  "display.show_timezone": false,
 };
 
 function buildSettingsSnapshot(): Record<string, unknown> {
-  const mode = toggleState.detailsMode;
+  const clockFormat = userSettingsState["display.clock_format"];
   const snap: Record<string, unknown> = {
     ...USER_SETTING_DEFAULTS,
     ...userSettingsState,
   };
-  Object.defineProperty(snap, "display.expand_runs_mode", {
+  Object.defineProperty(snap, "display.clock_format", {
     get() {
-      toggleState.reads += 1;
-      return mode;
+      settingsState.reads += 1;
+      return clockFormat;
     },
     enumerable: true,
     configurable: true,
@@ -168,23 +179,8 @@ function syncSettingsCache() {
   transport.getSettings.mockImplementation(() => new Promise(() => undefined));
   transport.getConfig.mockImplementation(() => new Promise(() => undefined));
   act(() => {
-    if (toggleState.isLoading) {
-      timelineQueryClient.removeQueries({ queryKey: SETTINGS_QUERY_KEY });
-    } else {
-      timelineQueryClient.setQueryData(SETTINGS_QUERY_KEY, buildSettingsSnapshot());
-    }
+    timelineQueryClient.setQueryData(SETTINGS_QUERY_KEY, buildSettingsSnapshot());
   });
-}
-
-export function setToggleState(patch: Partial<typeof toggleState>) {
-  Object.assign(toggleState, patch);
-  syncSettingsCache();
-}
-
-export function resetToggleState() {
-  toggleState.detailsMode = "all";
-  toggleState.isLoading = false;
-  useContentToggleReset.setState({ resetPending: false });
 }
 
 export function setUserSettings(settings: Record<string, unknown>) {
@@ -198,7 +194,6 @@ export function resetUserSettings() {
   }
   userSettingsState["display.show_timestamp_weekday"] = true;
   userSettingsState["display.clock_format"] = "24h";
-  userSettingsState["display.show_timezone"] = false;
 }
 
 syncSettingsCache();
@@ -206,7 +201,6 @@ syncDisplayLimitsCache();
 
 export function cleanupTimelineTest() {
   cleanup();
-  resetToggleState();
   resetUserSettings();
   displayLimits.clear();
   syncSettingsCache();
@@ -246,6 +240,11 @@ export function makeItem(
 }
 
 export function revealCollapsedCards() {
+  for (const btn of screen.queryAllByTestId("turn-toggle")) {
+    if (btn.getAttribute("data-expanded") === "false" || btn.getAttribute("aria-expanded") === "false") {
+      fireEvent.click(btn);
+    }
+  }
   for (const btn of screen.queryAllByTestId("card-toggle")) {
     if (btn.getAttribute("data-expanded") === "false") fireEvent.click(btn);
   }

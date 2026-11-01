@@ -23,7 +23,7 @@ zone the reader was watching the tail, so it says "follow the bottom" and the
 return lands on the newest message however much arrived meanwhile; above it the
 reader keeps the visible message coordinate and viewport offset, and returning
 materializes the prefix before restoring that anchor. Work/detail expansion
-choices are retained under the same identity and Details mode. An item bookmark
+choices are retained under the same identity. An item bookmark
 survives resize, tail repair and trim until the reader scrolls or explicitly
 requests the bottom; a tail bookmark follows the end as the thread grows.
 Sending still jumps to the latest message; a first visit starts at the bottom.
@@ -35,9 +35,9 @@ refresh jumps to the current bottom and resumes following incoming messages.
 Finishing removes only the ring, without moving messages. The position is saved before the pull hook's cleanup removes its native reserve. Older paging retains its separate top pull circle. Cold views
 without retained rows keep the existing initial-load UI.
 
-## Scroll ownership and pinned headers
+## Scroll ownership and bounded turn scroll
 
-While following the tail, content growth pins the viewport down in the same pre-paint tick, and the follow flag has a single owner (`lib/layout/sticky.ts:createStickyController`) fed by DOM events, with every performed scroll reported back so a pin's echo is a no-op. Expanded work and detail headers pin below HeaderBar and locally suppress under fast reader movement, with separate entry and exit speeds so it cannot flicker at the threshold. The pull reserve, the wheel and touch zones, and the scroll-anchoring opt-out live in [[ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md|Timeline sticky scroll]].
+While following the tail, content growth pins the viewport down in the same pre-paint tick, and the follow flag has a single owner (`lib/layout/sticky.ts:createStickyController`) fed by DOM events, with every performed scroll reported back so a pin's echo is a no-op. Work and detail headers stay in normal document flow without `position: sticky` (user ruling 2026-11-01); instead, every expanded `TurnBlock` wraps its body in an inner auto-hiding `ScrollArea` capped at 50% of the visible timeline message area (`--timeline-turn-max-h`, synced from `(viewport.clientHeight - BAR_HEIGHT_PX) * 0.5` in `useTimelineViewport`, fallback `50dvh`), chaining upward/downward wheel and touch scrolling cleanly to the outer message list once the inner scrollport hits its top or bottom boundary. The pull reserve, the wheel and touch zones, and the scroll-anchoring opt-out live in [[ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md|Timeline sticky scroll]].
 
 ## Continuous segments
 
@@ -57,17 +57,11 @@ row retention are described in [[ui/web/src/docs/frontend-components/timeline-vi
 
 Long histories mount only the viewport plus one viewport of buffer on each side: [[ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md|Timeline bounded window]].
 
-After a compact, `display.compact_history_sessions` controls automatic history pages above the new summary: 0 skips them, positive values fetch that many pages, and -1 walks all available pages serially. The store edge and retention hook live in [[ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md|Selected Timeline State]].
+After a compact, `useCompactHistoryRetention` automatically walks all available older pages above the new summary serially (`unlimited` retention, user ruling 2026-11-01). The store edge and retention hook live in [[ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md|Selected Timeline State]].
 
-## Deep collapse & Live Activity Window
+## Deep collapse & Unified TurnBlock
 
-Secondary items (thinking, code, output and the other detail kinds) group into `TurnBlock`s. Historical turns collapse by default unless Details All is selected (Details All/Last/None drives secondary item defaults, and a turn's pinned expansion map plus opposite-of-default per-item overrides survive default flips and auto-collapse). While `turnActive` is true and the trailing group is a `TurnBlock`, it renders as a fixed-height (`h-56`) independently scrollable **Live Activity Window** (`data-live-activity-window="true"`, using the shared auto-hiding `ScrollArea` scrollbar and feeding its inner detached state into the single outer `ScrollToBottomButton`), preceded by `PendingLiveActivityWindow` immediately after a human prompt before the first work item arrives. The classifier and expansion state are in [[ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md|Timeline deep collapse]].
-
-## Turn timer
-
-The collapsed historical turn strip is one fixed-height line: the summary truncates and the SDK-call chips are expanded-only, because a block carrying chips stood up to 38px taller than one without and those strips sit between messages (user report 2026-10-21).
-
-The turn header's timer reads ONE basis in both states — `summarizeTurn.workedMs`, the sum of the turn's block durations — with the active Live Activity Window header ("Working…") displaying `totalWorkedMs` (`workedMs` plus the in-flight block's elapsed) and transitioning cleanly to "Worked for Xs" when the turn completes. Wall-clock across a turn is never displayed: a turn is a maximal run of secondary items and can span an idle gap (a restart, a wake-up the agent had not picked up yet).
+Secondary items group into unboxed inline `TurnBlock`s whose classifier, expansion defaults, turn timer, and bounded `ScrollArea` (`--timeline-turn-max-h`) live in [[ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md|Timeline deep collapse]].
 
 ## Column geometry
 

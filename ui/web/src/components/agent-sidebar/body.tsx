@@ -44,7 +44,7 @@ function sortAgentsFlat(agents: AgentRow[], sort: SidebarSort): AgentRow[] {
 }
 
 
-export function SidebarBody(props: InnerProps & { wide: boolean }) {
+export function SidebarBody(props: InnerProps) {
   const t = useTranslations("sidebar");
   const {
     agents,
@@ -59,7 +59,9 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
   // lives in the floating SearchOverlay (#723), not inline in the sidebar.
   const searchQuery = useStore((s) => s.searchQuery);
   const { sort } = useSidebarSort();
-  // Quiet defaults (RCS): both are opt-in (`=== true`, default off).
+  // meiva:note
+  // Quiet defaults (RCS): opt-in (`=== true`, default off).
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
   const { settings: userSettings } = useUserSettings();
   const showAgentStatus = userSettings["display.show_agent_status"] === true;
 
@@ -71,7 +73,7 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
 
   const rosterPending = isLoading;
 
-  const treeProps: InnerProps & { wide: boolean } = hasPending
+  const treeProps: InnerProps = hasPending
     ? { ...props, activeId: null }
     : props;
 
@@ -124,7 +126,6 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
                 label={agent.label ?? undefined}
                 active={treeProps.activeId === agent.agent_id}
                 pending={treeProps.pendingActions[agent.agent_id]}
-                wide={treeProps.wide}
                 depth={0}
                 ancestorsIsLast={[]}
                 onSelect={() => treeProps.onSelect(agent.agent_id)}
@@ -198,7 +199,6 @@ function SpawningRow({ active, showStatus }: { active: boolean; showStatus: bool
 }
 
 interface TreeNodeProps extends InnerProps {
-  wide: boolean;
   node: AgentNode;
   depth: number;
   ancestorsIsLast: readonly boolean[];
@@ -213,7 +213,6 @@ function TreeNode({ node, depth, ancestorsIsLast, ...rest }: TreeNodeProps) {
         label={node.agent.label ?? undefined}
         active={rest.activeId === node.agent.agent_id}
         pending={rest.pendingActions[node.agent.agent_id]}
-        wide={rest.wide}
         depth={depth}
         ancestorsIsLast={childAncestors}
         onSelect={() => rest.onSelect(node.agent.agent_id)}

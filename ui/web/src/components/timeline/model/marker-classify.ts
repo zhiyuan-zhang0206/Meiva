@@ -48,3 +48,11 @@ export function classifyMarker(source: string | null): MarkerClass {
   if (source !== null && NOTE_SOURCES.has(source)) return { kind: "note" };
   return { kind: "ephemeral" };
 }
+
+export function isSilentEphemeralPayload(payload: string): boolean {
+  return (
+    payload === "compact_done" ||
+    payload === "cancelled" ||
+    payload.startsWith("compact_request:")
+  );
+}

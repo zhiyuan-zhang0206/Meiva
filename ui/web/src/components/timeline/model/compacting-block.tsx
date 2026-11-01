@@ -19,7 +19,6 @@ import { FLEX } from "@/lib/layout/layout";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { useWallNow } from "@/lib/transport/transport-context";
 import type { LiveCompact } from "@/lib/timeline/timeline-store";
-import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 import { cn } from "@/lib/format/utils";
 import { useNow } from "./reasoning-clock";
 
@@ -52,7 +51,6 @@ export function CompactingBlock() {
 
 function CompactingBlockBody({ compact }: { compact: LiveCompact }) {
   const t = useTranslations("timeline");
-  const colors = useTimelineColors();
 
   const startedMs = compact.startedAt === null ? null : Date.parse(compact.startedAt);
   const finishedMs = compact.finishedAt === null ? null : Date.parse(compact.finishedAt);
@@ -90,9 +88,7 @@ function CompactingBlockBody({ compact }: { compact: LiveCompact }) {
       data-status={compact.status ?? "running"}
       className={cn(
         FLEX,
-        "items-center gap-2 rounded-lg border px-3 py-2 text-xs",
-        colors.inbound_system.border,
-        colors.inbound_system.bg,
+        "items-center gap-2 rounded-lg border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
       )}
     >
       {settled ? null : (

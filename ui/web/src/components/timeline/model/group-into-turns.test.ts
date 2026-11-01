@@ -227,4 +227,17 @@ describe("groupIntoTurns", () => {
     expect(summary.lastLiveKind).toBe("output");
     expect(summary.lastLiveStartedAt).toBe(123_456);
   });
+
+  it("skips silent markers (compact_done, cancelled, compact_request:*) and [files] companions without splitting turns", () => {
+    const items = [
+      item("agent_reasoning"),
+      item("system_marker", null, undefined, { payload: "compact_done" }),
+      item("system_marker", null, undefined, { payload: "cancelled" }),
+      item("system_marker", null, undefined, { payload: "compact_request:now" }),
+      item("inbound_chat", "user", undefined, { payload: "user [2026-11-01]:\n\n[files]" }),
+      item("agent_code"),
+    ];
+    const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+    expect(kinds(groups)).toEqual(["turn(2@0)"]);
+  });
 });

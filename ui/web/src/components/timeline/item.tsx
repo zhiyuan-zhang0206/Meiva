@@ -34,7 +34,7 @@ import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 import { EphemeralSystemMarker, MarkerBody } from "./markers";
 import { classifyMarker } from "./model/marker-classify";
 import { isLiveReasoning } from "./model/reasoning-clock";
-import { inboundKind } from "./model/runs";
+import { inboundKind, splitEnvelope } from "./model/runs";
 import { FLEX } from "@/lib/layout/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
@@ -62,19 +62,6 @@ export function streamingParseIntervalMs(payloadLength: number): number {
     STREAM_PARSE_INTERVAL_MAX_MS,
     Math.max(STREAM_PARSE_INTERVAL_BASE_MS, steps * STREAM_PARSE_INTERVAL_BASE_MS),
   );
-}
-
-// envelope wrap is always "<header>:\n\n<body>" (envelope.py wrap_inbound /
-// exec/output.py wrap_code_output both follow this). Split out the header as a metadata
-// label and the body as the main content — preserve raw text, only layer
-// visually. Empty header then entire payload is body.
-export function splitEnvelope(payload: string): { header: string; body: string } {
-  const idx = payload.indexOf("\n\n");
-  if (idx > 0 && idx < 200) {
-    // Cap header at 200 chars so a long stdout first paragraph is not mistaken for the header
-    return { header: payload.slice(0, idx), body: payload.slice(idx + 2) };
-  }
-  return { header: "", body: payload };
 }
 
 // meiva:note

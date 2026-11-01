@@ -13,7 +13,6 @@ from playwright.sync_api import Request
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
-from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.compact_transition import (
     BETWEEN_REPLY,
     BETWEEN_TAIL,
@@ -96,13 +95,7 @@ def _compact(env: E2EEnv, narration: str, *, database: Database) -> None:
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
 
-def _prepare_history_view(e2e_env: E2EEnv, retention: int) -> list[str]:
-    setting = httpx.put(
-        f"{e2e_env.gateway_url}/api/settings/display.compact_history_sessions",
-        json={"value": retention},
-        timeout=30.0,
-    )
-    setting.raise_for_status()
+def _prepare_history_view(e2e_env: E2EEnv) -> list[str]:
     config = httpx.get(f"{e2e_env.gateway_url}/api/config", timeout=30.0)
     config.raise_for_status()
     depth = next(
@@ -119,15 +112,12 @@ def _prepare_history_view(e2e_env: E2EEnv, retention: int) -> list[str]:
             before_requests.append(url)
 
     e2e_env.page.on("request", record_history_request)
-    pin_expand_runs_all(e2e_env.gateway_url)
     e2e_env.page.goto(e2e_env.agent_url)
     e2e_env.page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=15_000)
     return before_requests
 
 
-def _place_nonsticky_reply(env: E2EEnv, retention: int, reply: str) -> dict[str, Any] | None:
-    if retention == 0:
-        return None
+def _place_nonsticky_reply(env: E2EEnv, reply: str) -> dict[str, Any]:
     # meiva:note
     # Rows below the viewport are virtualized spacers at their ESTIMATED height,
     # so a target computed against them can exceed the real maximum and clamp to
@@ -147,11 +137,7 @@ def _place_nonsticky_reply(env: E2EEnv, retention: int, reply: str) -> dict[str,
     return position
 
 
-def _assert_settled_anchor(
-    env: E2EEnv, retention: int, ranks: str, reply: str, position: dict[str, Any] | None
-) -> None:
-    if retention == 0:
-        return
+def _assert_settled_anchor(env: E2EEnv, ranks: str, reply: str, position: dict[str, Any]) -> None:
     env.page.wait_for_function(
         "expected => [...new Set([...document.querySelectorAll('[data-display-rank]')]"
         ".map(node => node.dataset.displayRank))].join(',') === expected && "
@@ -160,7 +146,7 @@ def _assert_settled_anchor(
         timeout=30_000,
     )
     top = env.page.evaluate("reply => window.__compactTransitionFrames.replyTop(reply)", reply)
-    assert position is not None and top is not None
+    assert top is not None
     assert abs(top - position["top"]) < 4, (position, top)
 
 
@@ -181,11 +167,10 @@ def _assert_phase_frames(
 
 def _assert_retained_frames(
     frames: list[dict[str, Any]],
-    first_position: dict[str, Any] | None,
-    between_position: dict[str, Any] | None,
+    first_position: dict[str, Any],
+    between_position: dict[str, Any],
     before_requests: list[str],
 ) -> None:
-    assert first_position is not None and between_position is not None
     _assert_phase_frames(frames, "first", "firstNarration", ("first",), "firstTop", first_position)
     _assert_phase_frames(
         frames, "second", "secondNarration", ("first", "between"), "betweenTop", between_position
@@ -194,32 +179,25 @@ def _assert_retained_frames(
     assert before_requests
 
 
-@pytest.mark.parametrize("retention", [-1, 0], ids=["all", "zero"])
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.compact_transition:build")
-def test_two_compact_painted_history_transition(
-    transition_env: E2EEnv, retention: int, database: Database
-) -> None:
+def test_two_compact_painted_history_transition(transition_env: E2EEnv, database: Database) -> None:
     env = transition_env
-    before_requests = _prepare_history_view(env, retention)
+    before_requests = _prepare_history_view(env)
     _send(env, "first message", FIRST_REPLY)
     _send(env, "first tail message", FIRST_TAIL)
     env.page.evaluate(_FRAMES_JS)
-    first_position = _place_nonsticky_reply(env, retention, FIRST_REPLY)
+    first_position = _place_nonsticky_reply(env, FIRST_REPLY)
     env.page.evaluate("window.__compactTransitionFrames.phase = 'first'")
     _compact(env, FIRST_NARRATION, database=database)
-    _assert_settled_anchor(env, retention, "1,0", FIRST_REPLY, first_position)
+    _assert_settled_anchor(env, "1,0", FIRST_REPLY, first_position)
     env.page.evaluate("window.__compactTransitionFrames.phase = 'between'")
     _send(env, "between message", BETWEEN_REPLY)
     _send(env, "between tail message", BETWEEN_TAIL)
-    between_position = _place_nonsticky_reply(env, retention, BETWEEN_REPLY)
+    between_position = _place_nonsticky_reply(env, BETWEEN_REPLY)
     env.page.evaluate("window.__compactTransitionFrames.phase = 'second'")
     _compact(env, SECOND_NARRATION, database=database)
-    _assert_settled_anchor(env, retention, "2,1,0", BETWEEN_REPLY, between_position)
+    _assert_settled_anchor(env, "2,1,0", BETWEEN_REPLY, between_position)
     frames: list[dict[str, Any]] = env.page.evaluate(
         "() => { const state = window.__compactTransitionFrames; state.active = false; return state.frames; }"
     )
-    if retention == -1:
-        _assert_retained_frames(frames, first_position, between_position, before_requests)
-    else:
-        assert before_requests == []
-        assert not env.page.get_by_text(FIRST_REPLY, exact=False).count()
+    _assert_retained_frames(frames, first_position, between_position, before_requests)

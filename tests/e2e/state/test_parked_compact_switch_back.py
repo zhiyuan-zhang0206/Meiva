@@ -14,7 +14,6 @@ from base.config import settings
 from base.db import Database
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
-from tests.e2e._settings import pin_compact_history_off, pin_expand_runs_all
 from tests.e2e.fakes.scenarios.parked_compact import (
     POST_COMPACT_NARRATION,
     REPLY_1,
@@ -87,9 +86,6 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(
     try:
         _wait_idle_intent(agent_b)
 
-        pin_expand_runs_all(gateway_url)
-        pin_compact_history_off(gateway_url)
-
         page.goto(e2e_env.agent_url)
         page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
@@ -149,10 +145,21 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(
             "(neither /timeline nor /conversation-snapshot; witnessed in-page and as a request event)"
         )
 
-        page.wait_for_selector("text=Compact request", timeout=15_000)
         page.wait_for_selector(f"text={POST_COMPACT_NARRATION}", timeout=15_000)
-        expect(page.get_by_text(REPLY_2)).to_have_count(0, timeout=15_000)
-        expect(page.get_by_text(REPLY_3)).to_have_count(0, timeout=15_000)
+        page.evaluate(
+            """() => {
+              for (const btn of document.querySelectorAll('[data-testid="turn-toggle"][data-expanded="false"]')) {
+                btn.click();
+              }
+            }"""
+        )
+        page.wait_for_selector("text=Compact request", timeout=15_000)
+        expect(page.locator('[data-display-rank="0"]').filter(has_text=REPLY_2)).to_have_count(
+            0, timeout=15_000
+        )
+        expect(page.locator('[data-display-rank="0"]').filter(has_text=REPLY_3)).to_have_count(
+            0, timeout=15_000
+        )
     finally:
         with contextlib.suppress(httpx.HTTPError):
             httpx.post(f"{gateway_url}/api/agents/{agent_b}/terminate", timeout=5.0)

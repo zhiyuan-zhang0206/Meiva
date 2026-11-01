@@ -79,12 +79,38 @@ describe("continuous compact history", () => {
       );
     expect(renderedOrder).toEqual([
       "s2.older-boundary.0.0",
-      "s2.older-boundary.1.0",
       "s2.older-boundary.2.0",
       "s1.newer-boundary.0.0",
       "s1.newer-boundary.1.0",
       "1.0",
     ]);
+    const mergedFirstTurn = container.querySelector('[data-item-id="s2.older-boundary.0.0"]');
+    expect(mergedFirstTurn?.getAttribute("data-turn-member-ids")).toBe(
+      "s2.older-boundary.0.0 s2.older-boundary.1.0",
+    );
+  });
+  it("merges adjacent secondary items across compact summaries, historical segments, and silent markers into one single TurnBlock", () => {
+    const items = [
+      makeItem({ item_id: "s1.prev.0.0", kind: "system_marker", source: "memory", payload: "mem 1" }),
+      makeItem({ item_id: "s1.prev.0.1", kind: "system_marker", source: "timezone", payload: "tz" }),
+      makeItem({ item_id: "s1.prev.1.0", kind: "inbound_compact_summary", payload: "summary 1" }),
+      makeItem({ item_id: "s1.prev.2.0", kind: "agent_reasoning", payload: "t1", reasoning_ms: 4_000 }),
+      makeItem({ item_id: "s1.prev.2.1", kind: "agent_code", payload: "x = 1", code_elapsed_ms: 2_000 }),
+      makeItem({ item_id: "s1.prev.2.2", kind: "code_output", payload: "ok", exec_ms: 1_000 }),
+      makeItem({ item_id: "_marker.compact_done", kind: "system_marker", source: null, payload: "compact_done" }),
+      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "sys" }),
+      makeItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "summary 2" }),
+      makeItem({ item_id: "2.0", kind: "system_marker", source: "memory", payload: "mem 2" }),
+      makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "t2", reasoning_ms: 3_000 }),
+      makeItem({ item_id: "3.1", kind: "agent_chat", payload: "internal note", user_facing: false }),
+    ];
+    const { container } = render(<TimelineView items={items} />);
+    const turns = container.querySelectorAll("[data-turn-id]");
+    expect(turns).toHaveLength(1);
+    expect(turns[0].getAttribute("data-turn-member-ranks")).toContain("1:s1.prev.0.0");
+    expect(turns[0].getAttribute("data-turn-member-ranks")).toContain("0:3.1");
+    expect(turns[0].textContent).toContain("Worked for 10s");
+    expect(turns[0].textContent).toContain("2 compact summaries");
   });
   it("keeps the oldest segment visible when it has no summary", () => {
     const items = [
@@ -237,6 +263,7 @@ describe("ItemView: inbound_chat images", () => {
         ]}
       />,
     );
+    fireEvent.click(screen.getByTestId("turn-toggle"));
     const img = screen.getByAltText("attached image");
     expect(img.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
     expect(screen.getByText(/render.png/)).toBeTruthy();
@@ -315,18 +342,18 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     const all = Array.from(document.body.querySelectorAll("*"));
     return all.indexOf(el);
   };
+  const renderAttach = (item: ReturnType<typeof makeItem>) => {
+    render(<TimelineView items={[item]} />);
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+  };
   it("interleaves label line → thumbnail → label line → thumbnail", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload,
-            images: [IMG1, IMG2],
-            image_captions: [LINE1, LINE2],
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload,
+        images: [IMG1, IMG2],
+        image_captions: [LINE1, LINE2],
+      }),
     );
     const line1 = screen.getByText(LINE1);
     const line2 = screen.getByText(LINE2);
@@ -338,17 +365,13 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
   });
   it("renders a skipped (no-image) line in place without shifting alignment", () => {
     const skipped = "- [2] notes.pdf (application/pdf, 2.0 KiB) — not delivered: your model cannot receive pdf";
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload: `${NOTICE}\n${LINE1}\n${skipped}\n${LINE2}`,
-            images: [IMG1, IMG2],
-            image_captions: [LINE1, LINE2],
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload: `${NOTICE}\n${LINE1}\n${skipped}\n${LINE2}`,
+        images: [IMG1, IMG2],
+        image_captions: [LINE1, LINE2],
+      }),
     );
     const line1 = screen.getByText(LINE1);
     const sk = screen.getByText(skipped);
@@ -360,17 +383,13 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(orderOf(line2)).toBeLessThan(orderOf(img2));
   });
   it("clicking a thumbnail opens the lightbox; backdrop click and Escape close it", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload,
-            images: [IMG1, IMG2],
-            image_captions: [LINE1, LINE2],
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload,
+        images: [IMG1, IMG2],
+        image_captions: [LINE1, LINE2],
+      }),
     );
     expect(screen.queryByTestId("attach-lightbox")).toBeNull();
     expect(screen.getAllByTestId("attach-thumbnail")[0].querySelector("img")?.getAttribute("loading")).toBe("lazy");
@@ -386,17 +405,13 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(screen.queryByTestId("attach-lightbox")).toBeNull();
   });
   it("lightbox traps focus while open and returns it to the trigger on close", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload,
-            images: [IMG1, IMG2],
-            image_captions: [LINE1, LINE2],
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload,
+        images: [IMG1, IMG2],
+        image_captions: [LINE1, LINE2],
+      }),
     );
     const [thumb0, thumb1] = screen.getAllByTestId("attach-thumbnail");
     fireEvent.click(thumb0);
@@ -413,17 +428,13 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(document.activeElement).toBe(screen.getByTestId("attach-lightbox"));
   });
   it("mounts the lightbox at document.body so the backdrop is not clipped by the contained timeline row", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload,
-            images: [IMG1, IMG2],
-            image_captions: [LINE1, LINE2],
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload,
+        images: [IMG1, IMG2],
+        image_captions: [LINE1, LINE2],
+      }),
     );
     fireEvent.click(screen.getAllByTestId("attach-thumbnail")[0]);
     const lightbox = screen.getByTestId("attach-lightbox");
@@ -432,17 +443,13 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(lightbox.className).toContain("fixed inset-0 z-50");
   });
   it("enlarged image is capped at 80% of the viewport (contain, no upscale)", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload,
-            images: [IMG1, IMG2],
-            image_captions: [LINE1, LINE2],
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload,
+        images: [IMG1, IMG2],
+        image_captions: [LINE1, LINE2],
+      }),
     );
     fireEvent.click(screen.getAllByTestId("attach-thumbnail")[0]);
     const img = screen.getByTestId("attach-lightbox").querySelector("img");
@@ -451,17 +458,13 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(img?.className).toContain("object-contain");
   });
   it("reserves the thumbnail's max box so lazy img load never shifts layout (QA review-955)", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload,
-            images: [IMG1],
-            image_captions: [LINE1],
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload,
+        images: [IMG1],
+        image_captions: [LINE1],
+      }),
     );
     const thumb = screen.getByTestId("attach-thumbnail");
     expect(thumb.className).toContain("relative");
@@ -477,17 +480,13 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(img!.className).toContain("object-contain");
   });
   it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "attach",
-            payload,
-            images: [IMG1, IMG2],
-            image_captions: null,
-          }),
-        ]}
-      />,
+    renderAttach(
+      makeItem({
+        kind: "attach",
+        payload,
+        images: [IMG1, IMG2],
+        image_captions: null,
+      }),
     );
     expect(imgs()).toHaveLength(2);
     expect(document.body.querySelector('a[href^="data:image"]')).toBeNull();

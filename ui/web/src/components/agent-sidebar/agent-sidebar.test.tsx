@@ -252,10 +252,6 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
 });
 
 describe("tree nesting", () => {
-  // meiva:note
-  // `wide` used to be asserted through the stub row's data-wide. The real row declares the prop
-  // and never reads it (`agent-row.tsx`), so there is no rendered signal to assert and the
-  // attribute was the stub's own invention; the dead prop is reported for removal separately.
   it("fork child nests under its source in the tree", () => {
     state.agents = [
       makeAgent({ agent_id: 1, spawner: "user" }),

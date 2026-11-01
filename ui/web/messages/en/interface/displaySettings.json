@@ -4,8 +4,6 @@
   "agentListDisplay": "Agent list display",
   "showStatusDot": "Show agent status dot",
   "showStatusDotDesc": "Show a status color dot (running/idle/…) on each sidebar agent row; off by default to keep the list static and quiet",
-  "showActivityLine": "Show activity line",
-  "showActivityLineDesc": "In wide-sidebar mode, show a second line of the agent's activity; off by default",
   "showTerminated": "Show terminated agents",
   "showTerminatedDesc": "Show terminated agents (red status dot) in the sidebar; off shows only live agents",
   "showWeekday": "Show weekday in timestamps",
@@ -22,14 +20,6 @@
   "timeline": "Timeline",
   "timelineMaxWidth": "Timeline max width",
   "timelineMaxWidthDesc": "Max width of the conversation column in pixels ({min}px–{max}px). The column fills its pane up to this ceiling and centers with side gutters when wider. Default {def}px.",
-  "collapseDetails": "Collapse details by default",
-  "collapseDetailsDesc": "A newly-toggled work block starts collapsed instead of open. Flipping this (or the header's Details chip) expands/collapses every work block at once",
-  "contextBar": "Context usage bar",
-  "usageBarWidth": "Usage bar width",
-  "usageBarWidthDesc": "Width of the collapsed context-usage bar at the bottom of the composer; the expanded breakdown panel is unaffected",
-  "compact": "Compact",
-  "comfortable": "Comfortable (default)",
-  "wide": "Wide",
   "notifications": "Notifications",
   "awaitingReply": "Awaiting-reply notification",
   "awaitingReplyDesc": "Show a red dot + count badge in the sidebar for agents awaiting reply; off by default — check the Fleet page when you want to know",
@@ -46,8 +36,6 @@
   "modelPicker": "Model picker",
   "english": "English",
   "chinese": "中文",
-  "composerContextMeter": "Context window in the composer",
-  "composerContextMeterDesc": "Show a context-window gauge beside the composer. Off by default — the numbers live in the inspector's Context section, and an enabled gauge is a bare bar with no text.",
   "categories": {
     "coreNeedsInput": "Agent is waiting on your answer"
   }

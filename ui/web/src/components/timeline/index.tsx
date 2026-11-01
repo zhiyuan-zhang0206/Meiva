@@ -147,11 +147,6 @@ export const TimelineView = memo(function TimelineView({
   const [activityScrollSeq, setActivityScrollSeq] = useState(0);
 
   const {
-    stuckRafRef,
-    activeStuckHeaderId,
-    activeStuckChildId,
-    updateStuckHeader,
-    effectiveDetailsMode,
     turnOverrides,
     toggleTurn,
     overrides,
@@ -159,9 +154,6 @@ export const TimelineView = memo(function TimelineView({
   } = useTimelineExpansion({
     scrollMemoryKey,
     threadKey,
-    items,
-    wrapperRef,
-    viewportRef,
   });
 
   const stickyThresholds = useStickyThresholds();
@@ -389,13 +381,11 @@ export const TimelineView = memo(function TimelineView({
     prependEchoRef,
     coldFillRef,
     scrollMemoryRef,
-    stuckRafRef,
     restoreInFlight,
     measureAtBottom,
     maybeColdFill,
     pinToBottom,
     trimFollowing,
-    updateStuckHeader,
     prepareHistoryPull,
     historyPullActive,
     pullScroll,
@@ -446,14 +436,13 @@ export const TimelineView = memo(function TimelineView({
     prevLoadingOlderReleaseRef.current = loadingOlder;
   }, [loadingOlder, finishHistoryPull, historyPullActive, controller, pendingAnchorRef]);
 
-  const { groups, groupEntries, virtualEnabled, virtualRange, rowRange } = useTimelineGroupWindow({
+  const { groups, groupEntries, virtualEnabled, virtualRange, turnRows } = useTimelineGroupWindow({
     canonicalItems,
     compactBuffer,
     bufferedItems,
     currentItems,
     threadKey,
     turnOverrides,
-    effectiveDetailsMode,
     turnActive,
     viewportRef,
     contentRef,
@@ -523,10 +512,7 @@ export const TimelineView = memo(function TimelineView({
             compactBuffer={compactBuffer}
             streamingCode={streamingCode}
             turnActive={turnActive}
-            effectiveDetailsMode={effectiveDetailsMode}
             overrides={overrides}
-            activeStuckHeaderId={activeStuckHeaderId}
-            activeStuckChildId={activeStuckChildId}
             toggleExpanded={toggleExpanded}
             toggleTurn={toggleTurn}
             onActivityAtBottomChange={setActivityAtBottom}
@@ -535,7 +521,7 @@ export const TimelineView = memo(function TimelineView({
             groupEntries={groupEntries}
             virtualEnabled={virtualEnabled}
             virtualRange={virtualRange}
-            rowRange={rowRange}
+            turnRows={turnRows}
           />
           <CompactingBlock />
           <div ref={endRef} />

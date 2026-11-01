@@ -75,7 +75,6 @@ export function ComposerMock({
   onSend,
   onStop,
   stageQueue,
-  showContextMeter,
   children,
   details,
   maxWidthCss,
@@ -86,7 +85,6 @@ export function ComposerMock({
   onSend: (s: string, fileIds: string[], clientMessageId: string) => Promise<boolean>;
   onStop: () => void;
   stageQueue?: { seq: number; files: readonly File[] } | null;
-  showContextMeter?: boolean;
   children?: React.ReactNode;
   details?: React.ReactNode;
   maxWidthCss?: string;
@@ -95,7 +93,6 @@ export function ComposerMock({
     <div
       data-testid="composer"
       data-mode={mode}
-      data-context-meter={String(showContextMeter ?? false)}
       data-max-width={maxWidthCss ?? "undefined"}
       data-suggestion={suggestions?.join("|") ?? ""}
       data-stage-seq={String(stageQueue?.seq ?? 0)}
@@ -246,13 +243,6 @@ export function homePageProps(): HomePageProps {
       retryTimeline: state.retryTimeline,
     },
     timelineStore: { requestScrollToBottom: state.requestScrollToBottom },
-    tokenUsage: {
-      contextTokens: 0,
-      maxContextTokens: 0,
-      softCompactTokens: 0,
-      hardCompactTokens: 0,
-      contextPending: false,
-    },
     bfcacheId: state.bfcacheId,
     unresolvedAlerts: state.unresolvedAlerts,
     contextPanel: { open: state.contextPanelOpen, setOpen: state.contextPanelSetOpen },

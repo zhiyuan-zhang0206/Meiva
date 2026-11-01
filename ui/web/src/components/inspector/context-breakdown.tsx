@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
-import { ContextMeter, useContextMeterWidthClass } from "@/components/inspector/context-meter";
+import { ContextMeter } from "@/components/inspector/context-meter";
 import { cn } from "@/lib/format/utils";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -19,9 +19,9 @@ export interface ContextButtonProps {
   /** The active agent, or null. Without one there is nothing to break down, so
    * the readout renders non-interactively. */
   agentId: number | null;
-  /** Controlled expansion state. The composer owns it (single popover state)
-   * so at most one of its upward popovers — this panel / the slash-command
-   * dropdown — is open at a time: opening one closes the other. */
+  // meiva:note
+  // Controlled expansion state owned by InspectorPanel.
+  // meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contextTokens: number;
@@ -31,37 +31,25 @@ export interface ContextButtonProps {
   showText?: boolean;
 }
 
-/** The collapsed readout's numeric text hides below sm (QA sweep 2026-09-18
- *  F3): at 390px the composer meta row is shared with the upload button and
- *  the Details control, and the text truncated to "Co". The gauge stays — its
- *  aria-label carries used/max/soft/hard — and the popup shows the numbers in
- *  full. */
 const READOUT_TEXT_CLASS = "hidden sm:inline";
 
-/** The composer's context readout as a button: the inline `ContextMeter` gauge
- * that, when clicked, expands the breakdown panel in place (lazy-loaded on
- * expand).
- *
- * Deliberately NOT a modal: the panel is absolutely positioned against the
- * composer's meta row (composer.tsx marks that row `relative` as the anchor —
- * same contract as SlashAutocomplete's dropdown) and grows *upward*
- * (`bottom-full`) over the bottom of the timeline. The composer below stays
- * fully visible and interactive, nothing reflows, and the rest of the page is
- * never blocked. Escape, an outside click, the close button, or clicking the
- * meter again collapses it. The open state is controlled by the composer
- * (single popover state — mutually exclusive with the slash dropdown). */
+// meiva:note
+// The inspector's context readout as a button: the inline `ContextMeter` gauge
+// that, when clicked, expands the breakdown popover in place (lazy-loaded on
+// expand). Escape, an outside click, the close button, or clicking the meter
+// again collapses it.
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
 export function ContextButton(props: ContextButtonProps) {
   const { agentId, open, onOpenChange, ...meter } = props;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const barWidthClassName = useContextMeterWidthClass();
   const t = useTranslations("contextBreakdown");
 
+  // meiva:note
   // Escape / outside pointer-down collapse the panel. Document-level listeners
   // exist only while open; the closing outside click still lands on its target
-  // (non-modal — nothing is swallowed). An Escape a lower layer already
-  // consumed (defaultPrevented — e.g. the composer closing the slash dropdown)
-  // is skipped so one keypress never closes two layers.
+  // (non-modal — nothing is swallowed).
+  // meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -86,7 +74,7 @@ export function ContextButton(props: ContextButtonProps) {
   }, [open, onOpenChange]);
 
   if (agentId == null) {
-    return <ContextMeter {...meter} barWidthClassName={barWidthClassName} textClassName={READOUT_TEXT_CLASS} />;
+    return <ContextMeter {...meter} textClassName={READOUT_TEXT_CLASS} />;
   }
 
   return (
@@ -99,7 +87,7 @@ export function ContextButton(props: ContextButtonProps) {
         aria-expanded={open}
         className={cn("rounded-sm text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring", MIN_W_0)}
       >
-        <ContextMeter {...meter} barWidthClassName={barWidthClassName} textClassName={READOUT_TEXT_CLASS} />
+        <ContextMeter {...meter} textClassName={READOUT_TEXT_CLASS} />
       </button>
       {open ? (
         // bottom-full anchors the panel's bottom to the meta row's top, so it

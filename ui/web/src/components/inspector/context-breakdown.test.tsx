@@ -1,10 +1,11 @@
+// meiva:note
 // ContextButton / breakdown panel tests — the readout is a button that expands
 // an anchored panel in place (NOT a modal dialog), lazily loading the
 // per-category context breakdown; failure renders inside the panel (classified
 // server-error vs unreachable, with Retry); empty data gets explicit copy.
 //
-// The component is controlled (the Composer owns the single popover state);
-// the harness below supplies the state a la the composer.
+// The component is controlled (the Inspector owns the open state);
+// the harness below supplies the state.
 //
 // happy-dom + RTL — vitest globals=false; explicit cleanup.
 
@@ -23,10 +24,6 @@ beforeEach(() => {
 
 
 const getContextBreakdown = transport.getContextBreakdown;
-const getSettings = transport.getSettings;
-// display.context_meter_width unset — useUserSettings falls back to its
-// USER_SETTING_DEFAULTS entry ("comfortable"), same as an unconfigured user.
-getSettings.mockResolvedValue({ settings: [] });
 
 afterEach(() => {
   cleanup();
@@ -256,27 +253,12 @@ describe("ContextButton", () => {
     expect(panel.className).toContain("left-0");
   });
 
-  it("resets the inherited white-space: nowrap from the composer's truncate meta-row span, so panel text wraps instead of clipping", async () => {
+  it("resets the inherited white-space: nowrap from a truncate ancestor, so panel text wraps instead of clipping", async () => {
     getContextBreakdown.mockResolvedValue(breakdown);
     wrap(<Harness agentId={7} {...meterProps} />);
     fireEvent.click(screen.getByTestId("context-meter-button"));
     const panel = await screen.findByTestId("context-breakdown-panel");
-    // The composer wraps this panel in a `truncate` span for the collapsed
-    // meter's own text; `white-space` is inherited, so without this reset
-    // every non-truncate paragraph in the panel (the summary line, the
-    // description) would refuse to wrap and get clipped by overflow-x-hidden
-    // instead of flowing across lines like the rest of the panel.
     expect(panel.className).toContain("whitespace-normal");
-  });
-
-  it("applies the display.context_meter_width setting to the collapsed meter's gauge track", async () => {
-    getSettings.mockResolvedValueOnce({
-      settings: [
-        { key: "display.context_meter_width", value: "wide", updated_at: "2026-01-01T00:00:00Z" },
-      ],
-    });
-    wrap(<Harness agentId={null} {...meterProps} />);
-    await waitFor(() => expect(screen.getByRole("img").className).toContain("w-48"));
   });
 
   it("hides the collapsed readout's numeric text below sm — the gauge carries the value (QA sweep 2026-09-18 F3)", () => {

@@ -77,10 +77,6 @@ export interface AgentRowProps {
   label: string | undefined; // undefined → default `#N`
   active: boolean;
   pending: PendingAction | undefined;
-  /** Wide sidebar mode (width past the threshold) — reveals a second line
-   *  per row showing the agent's self-reported activity (or its lifecycle
-   *  status when no activity is set). Narrow mode stays single-line. */
-  wide: boolean;
   /** Tree depth (top level = 0); drives left-side indent. */
   depth: number;
   /** Whether each ancestor on the chain is its parent's last child —

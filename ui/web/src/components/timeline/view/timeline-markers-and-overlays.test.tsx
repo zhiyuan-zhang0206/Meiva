@@ -15,14 +15,17 @@ describe("ItemView: system_marker → LifecycleChip", () => {
   });
   it("source='lifecycle_restart' → Restarted chip", () => {
     render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_restart", payload: "[ts] You have been restarted" })]} />);
+    revealCollapsedCards();
     expect(screen.getByText("Restarted")).toBeTruthy();
   });
   it("source='lifecycle_resurrect' → Resurrected chip", () => {
     render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_resurrect", payload: "[ts] resurrected" })]} />);
+    revealCollapsedCards();
     expect(screen.getByText("Resurrected")).toBeTruthy();
   });
   it("source='lifecycle_fork' → Forked chip", () => {
     render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_fork", payload: "[ts] forked from agent:7" })]} />);
+    revealCollapsedCards();
     expect(screen.getByText("Forked")).toBeTruthy();
   });
   it("source='lifecycle_unknown' → UnknownMarkerChip red alarm", () => {
@@ -138,6 +141,7 @@ describe("ItemView: system_marker → system_note chip", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByText("Note")).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });

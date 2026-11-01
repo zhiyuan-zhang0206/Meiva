@@ -8,8 +8,7 @@ tags:
 
 # Timeline continuous segments
 
-Historical ranks group separately for turn grouping and scroll anchors. Compact
-boundaries add no separator, label, gap, or virtual height to the message stream.
+Compact boundaries add no separator, label, gap, or virtual height to the message stream, and turn grouping runs in one continuous pass across compact summaries, historical checkpoint ranks, and live transition buffers so adjacent secondary items always fold into a single `TurnBlock` while retaining per-member `(source, rank)` metadata (`data-turn-member-ranks`, `data-turn-member-sources`) for scroll anchors.
 Original messages remain readable in order across each boundary. Older pages
 load after a fresh pull at the top ends, as described below.
 

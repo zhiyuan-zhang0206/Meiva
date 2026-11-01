@@ -93,10 +93,11 @@ export function usePrependAnchor({
       null;
     if (!viewport) return;
     const escapedId = CSS.escape(anchor.id);
+    const escapedRankId = CSS.escape(`${anchor.rank}:${anchor.id}`);
     const findNode = () =>
       viewport.querySelector<HTMLElement>(`.timeline-item[data-item-id="${escapedId}"][data-display-rank="${anchor.rank}"]`) ??
       viewport.querySelector<HTMLElement>(`[data-turn-expanded="false"][data-item-id="${escapedId}"][data-display-rank="${anchor.rank}"]`) ??
-      viewport.querySelector<HTMLElement>(`[data-turn-member-ids~="${escapedId}"][data-display-rank="${anchor.rank}"]`);
+      viewport.querySelector<HTMLElement>(`[data-turn-member-ranks~="${escapedRankId}"], [data-turn-member-ids~="${escapedId}"][data-display-rank="${anchor.rank}"]`);
 
     const headNoteIds = standingHeadNoteIds(items);
     const frontRealId = items.find(

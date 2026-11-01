@@ -21,15 +21,42 @@ interface CompactAnchor {
 
 export type CompactPin = Pick<CompactAnchor, "rank" | "msg" | "block">;
 
+function parseMemberTriples(
+  node: HTMLElement,
+  includeMembers: boolean,
+): { source: string; rank: number; id: string }[] {
+  if (includeMembers && node.dataset.turnMemberSources) {
+    return node.dataset.turnMemberSources
+      .split(" ")
+      .filter(Boolean)
+      .flatMap((token) => {
+        const firstColon = token.indexOf(":");
+        const secondColon = firstColon > 0 ? token.indexOf(":", firstColon + 1) : -1;
+        if (firstColon <= 0 || secondColon <= firstColon + 1) return [];
+        const source = token.slice(0, firstColon);
+        const rank = Number(token.slice(firstColon + 1, secondColon));
+        const id = token.slice(secondColon + 1);
+        return id && !Number.isNaN(rank) ? [{ source, rank, id }] : [];
+      });
+  }
+  const source = node.dataset.timelineSource ?? "canonical";
+  const rank = Number(node.dataset.displayRank);
+  const ids = [
+    node.dataset.itemId,
+    ...(includeMembers ? node.dataset.turnMemberIds?.split(" ") ?? [] : []),
+  ];
+  return ids
+    .filter((id): id is string => !!id)
+    .map((id) => ({ source, rank, id }));
+}
+
 function nodeCoordinates(
   node: HTMLElement,
   bufferedCoordinates: ReadonlyMap<string, CompactCoordinate>,
   includeMembers = false,
 ): (CompactCoordinate | null)[] {
-  const ids = [node.dataset.itemId, ...(includeMembers ? node.dataset.turnMemberIds?.split(" ") ?? [] : [])];
-  const rank = Number(node.dataset.displayRank);
-  return ids.filter((id): id is string => !!id).map((id) =>
-    node.dataset.timelineSource === "buffer"
+  return parseMemberTriples(node, includeMembers).map(({ source, rank, id }) =>
+    source === "buffer"
       ? bufferedCoordinates.get(`${rank}:${id}`) ?? null
       : parseItemIdParts(id),
   );
@@ -41,9 +68,14 @@ function matchesAnchor(
   bufferedCoordinates: ReadonlyMap<string, CompactCoordinate>,
   includeMembers = false,
 ): boolean {
-  return Number(node.dataset.displayRank) === anchor.rank &&
-    nodeCoordinates(node, bufferedCoordinates, includeMembers)
-      .some((parts) => parts?.msg === anchor.msg && parts.block === anchor.block);
+  if (!includeMembers && Number(node.dataset.displayRank) !== anchor.rank) return false;
+  return nodeCoordinates(node, bufferedCoordinates, includeMembers).some(
+    (parts) =>
+      parts !== null &&
+      parts.rank === anchor.rank &&
+      parts.msg === anchor.msg &&
+      parts.block === anchor.block,
+  );
 }
 
 /** Resolve auto-sized rows before using a newly keyed anchor's position. */
@@ -108,27 +140,28 @@ export function useCompactTransitionAnchor(options: {
     )) {
       const box = node.getBoundingClientRect();
       if (box.bottom < rect.top || box.top > rect.bottom) continue;
-      const id = node.dataset.itemId;
-      const parts = id ? parseItemIdParts(id) : null;
-      if (!id || !parts) continue;
-      const rank = Number(node.dataset.displayRank);
-      const bufferedRow = node.dataset.timelineSource === "buffer"
-        ? change.buffer?.rows.find((row) => row.rank === rank && row.item.item_id === id)
-        : null;
-      const real = node.dataset.timelineSource === "buffer"
-        ? bufferedRow?.needsCanonicalRow
-        : change.items.some((item) => item.item_id === id && !item.partial &&
-            !isReattachedTimelineContext(item) && !oldHeadNotes.has(id));
-      if (!real) continue;
-      const canonicalCoordinate = bufferedRow ? canonicalBufferCoordinate(bufferedRow) : null;
-      anchorRef.current = {
-        rank: rank + change.rankShift,
-        msg: canonicalCoordinate?.msg ?? parts.msg - (rank === 0 && change.rankShift > 0 ? 1 : 0),
-        block: parts.block,
-        screenTop: box.top,
-      };
-      setPin({ rank: anchorRef.current.rank, msg: anchorRef.current.msg, block: anchorRef.current.block });
-      return;
+      const includeMembers = node.dataset.turnExpanded === "false";
+      for (const candidate of parseMemberTriples(node, includeMembers)) {
+        const parts = parseItemIdParts(candidate.id);
+        if (!parts) continue;
+        const bufferedRow = candidate.source === "buffer"
+          ? change.buffer?.rows.find((row) => row.rank === candidate.rank && row.item.item_id === candidate.id)
+          : null;
+        const real = candidate.source === "buffer"
+          ? bufferedRow?.needsCanonicalRow
+          : change.items.some((item) => item.item_id === candidate.id && !item.partial &&
+              !isReattachedTimelineContext(item) && !oldHeadNotes.has(candidate.id));
+        if (!real) continue;
+        const canonicalCoordinate = bufferedRow ? canonicalBufferCoordinate(bufferedRow) : null;
+        anchorRef.current = {
+          rank: candidate.rank + change.rankShift,
+          msg: canonicalCoordinate?.msg ?? parts.msg - (candidate.rank === 0 && change.rankShift > 0 ? 1 : 0),
+          block: parts.block,
+          screenTop: box.top,
+        };
+        setPin({ rank: anchorRef.current.rank, msg: anchorRef.current.msg, block: anchorRef.current.block });
+        return;
+      }
     }
   }), [controller, viewportRef, prependAnchorRef]);
 

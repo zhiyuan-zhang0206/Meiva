@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setToggleState, setUserSettings } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setUserSettings } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
@@ -121,6 +121,7 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
   for (const { label, item, copy } of cases) {
     it(`${label}: ${copy ? "offers" : "offers no"} copy control`, () => {
       render(<TimelineView items={[item]} />);
+      revealCollapsedCards();
       const copies = screen.queryAllByRole("button", { name: /copy/i });
       expect(copies).toHaveLength(copy ? 1 : 0);
       if (copy) expect(screen.getByLabelText("Copy message")).toBeTruthy();
@@ -131,6 +132,7 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
     const { container } = render(
       <TimelineView items={[makeItem({ kind: "system_prompt", payload: "prompt" })]} />,
     );
+    revealCollapsedCards();
     const row = container.querySelector(".timeline-item");
     expect(row?.className).not.toContain("group/msgcard");
     expect(screen.queryByTestId("card-chrome")).toBeNull();
@@ -140,6 +142,7 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
   it("secondary items such as thinking mount neither Copy nor a below-card timestamp", () => {
     const item = makeItem({ kind: "agent_reasoning", payload: "thinking" });
     render(<TimelineView items={[item]} />);
+    revealCollapsedCards();
     expect(screen.queryByTestId("card-chrome")).toBeNull();
     expect(screen.queryAllByRole("button", { name: /copy/i })).toHaveLength(0);
   });
@@ -148,7 +151,7 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
     const item = makeItem({ kind: "agent_chat", payload: "streaming", partial: true });
     render(<TimelineView items={[item]} />);
     const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
-    expect(stamp.parentElement?.className).toContain("justify-start");
+    expect(stamp.parentElement?.className).toContain("justify-end");
     expect(stamp.parentElement?.querySelectorAll("button")).toHaveLength(0);
   });
 });
@@ -167,6 +170,26 @@ describe("block-level copy actions (hover band)", () => {
     );
     const band = screen.getByLabelText("Copy message").parentElement;
     expect(band?.querySelectorAll("button")).toHaveLength(1);
+  });
+  it("floats Copy inside expanded non-user-facing agent_chat without inflating bottom spacing", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thought" }),
+          makeItem({ item_id: "1.1", kind: "agent_chat", payload: "internal reply", user_facing: false }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    const band = screen.getByLabelText("Copy message").parentElement;
+    expect(band?.getAttribute("data-testid")).toBe("card-chrome");
+    expect(band?.parentElement?.className).toContain("relative");
+    expect(band?.parentElement?.className).toContain("pb-1.5");
+    expect(band?.parentElement?.className).not.toContain("pb-5");
+    expect(band?.className).toContain("bottom-1");
+    expect(band?.className).toContain("right-1");
+    expect(band?.className).toContain("justify-end");
+    expect(band?.className).not.toContain("top-1");
   });
   it("copy button carries no title tooltip (aria-label only)", () => {
     render(
@@ -194,7 +217,7 @@ describe("block-level copy actions (hover band)", () => {
     const [humanCopy, agentCopy] = screen.getAllByLabelText("Copy message");
     expect(humanCopy.parentElement?.className).toContain("justify-end");
     const band = agentCopy.parentElement;
-    expect(band?.className).toContain("justify-start");
+    expect(band?.className).toContain("justify-end");
     expect(band?.className).toContain("opacity-0");
     expect(band?.className).toContain("pointer-events-none");
     expect(band?.className).toContain("group-hover/msgcard:opacity-100");
@@ -249,6 +272,7 @@ describe("splitEnvelope boundary", () => {
     render(
       <TimelineView items={[makeItem({ kind: "code_output", payload })]} />,
     );
+    revealCollapsedCards();
     const bodyEl = screen.getByText(/body-200-boundary/);
     expect(bodyEl.textContent).toContain(header);
   });
@@ -258,6 +282,7 @@ describe("splitEnvelope boundary", () => {
     render(
       <TimelineView items={[makeItem({ kind: "code_output", payload })]} />,
     );
+    revealCollapsedCards();
     const bodyEl = screen.getByText("body-199");
     expect(bodyEl.textContent).toBe("body-199");
   });
@@ -300,7 +325,7 @@ describe("UnknownMarkerChip source render", () => {
   });
 });
 
-describe("formatItemTime: clock format and zone name", () => {
+describe("formatItemTime: clock format without zone name", () => {
   it("renders 24-hour text with no zone name by default", () => {
     render(
       <TimelineView
@@ -315,8 +340,8 @@ describe("formatItemTime: clock format and zone name", () => {
     );
     expect(screen.getByText("2026-05-15 Fri 12:00:00")).toBeTruthy();
   });
-  it("renders a 12-hour clock and the zone name when the viewer turns them on", () => {
-    setUserSettings({ "display.clock_format": "12h", "display.show_timezone": true });
+  it("renders a 12-hour clock with no zone name when the viewer selects 12h", () => {
+    setUserSettings({ "display.clock_format": "12h" });
     render(
       <TimelineView
         items={[
@@ -328,68 +353,38 @@ describe("formatItemTime: clock format and zone name", () => {
         ]}
       />,
     );
-    expect(screen.getByText("2026-05-15 Fri 12:00:00 PM UTC")).toBeTruthy();
+    expect(screen.getByText("2026-05-15 Fri 12:00:00 PM")).toBeTruthy();
   });
 });
 
-describe("ContentToggle deps completeness (mid-mount toggle)", () => {
-  it("rerender with detailsMode flip → visibleItems re-filtered", () => {
-    setToggleState({ detailsMode: "all" });
-    const items = [
-      makeItem({ item_id: "1", kind: "agent_chat", payload: "chat" }),
-      makeItem({ item_id: "2", kind: "agent_reasoning", payload: "deep thought" }),
-    ];
-    const { rerender } = render(<TimelineView items={items} />);
-    expect(screen.getByText("chat")).toBeTruthy();
-    expect(screen.getByText("deep thought")).toBeTruthy();
-    setToggleState({ detailsMode: "none" });
-    rerender(<TimelineView items={items} />);
-    expect(screen.getByText("chat")).toBeTruthy();
-    expect(screen.queryByText("deep thought")).toBeNull();
-  });
-  it('rerender with detailsMode "last" → primary items always visible, detail turn collapsed without turnActive', () => {
-    setToggleState({ detailsMode: "all" });
+describe("turnActive transition expansion", () => {
+  it("rerender from turnActive=true to false collapses the trailing detail turn while keeping primary items visible", () => {
     const items = [
       makeItem({ item_id: "1", kind: "agent_chat", payload: "first" }),
       makeItem({ item_id: "2", kind: "agent_code", payload: "last_code()" }),
     ];
-    const { rerender } = render(<TimelineView items={items} />);
+    const { rerender } = render(<TimelineView turnActive items={items} />);
     expect(screen.getByText("first")).toBeTruthy();
     expect(screen.getByTestId("python-code")).toBeTruthy();
-    setToggleState({ detailsMode: "last" });
     rerender(<TimelineView items={items} />);
     expect(screen.getByText("first")).toBeTruthy();
     expect(screen.queryByTestId("python-code")).toBeNull();
-  });
-  it('detailsMode="last" with turnActive → last detail turn auto-expanded', () => {
-    setToggleState({ detailsMode: "last" });
-    render(
-      <TimelineView
-        turnActive
-        items={[
-          makeItem({ item_id: "1", kind: "agent_chat", payload: "first" }),
-          makeItem({ item_id: "2", kind: "agent_code", payload: "streaming_code()" }),
-        ]}
-      />,
-    );
-    expect(screen.getByText("first")).toBeTruthy();
-    expect(screen.getByTestId("python-code")).toBeTruthy();
   });
 });
 
 describe("ItemView memo comparator: streaming prop flip is visible", () => {
   it("streamingCode false → true rerender, last agent_code data-streaming should update to 1", () => {
     const items = [makeItem({ kind: "agent_code", payload: "x" })];
-    const { rerender } = render(<TimelineView items={items} streamingCode={false} />);
+    const { rerender } = render(<TimelineView turnActive items={items} streamingCode={false} />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("0");
-    rerender(<TimelineView items={items} streamingCode />);
+    rerender(<TimelineView turnActive items={items} streamingCode />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
   });
   it("streamingCode true → false rerender, last agent_code data-streaming should update to 0", () => {
     const items = [makeItem({ kind: "agent_code", payload: "x" })];
-    const { rerender } = render(<TimelineView items={items} streamingCode />);
+    const { rerender } = render(<TimelineView turnActive items={items} streamingCode />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
-    rerender(<TimelineView items={items} streamingCode={false} />);
+    rerender(<TimelineView turnActive items={items} streamingCode={false} />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("0");
   });
 });
@@ -422,6 +417,7 @@ describe("splitEnvelope idx === 0 boundary", () => {
     render(
       <TimelineView items={[makeItem({ kind: "code_output", payload })]} />,
     );
+    revealCollapsedCards();
     const bodyEl = screen.getByText(/the-body-text/);
     expect(bodyEl.textContent).toBe("\n\nthe-body-text");
   });

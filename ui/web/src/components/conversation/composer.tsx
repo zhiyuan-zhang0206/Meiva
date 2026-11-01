@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ComposerAttachmentStrip,
@@ -80,12 +80,6 @@ interface Props {
   onUploadError?: (msg: string) => void;
   filesUploading?: boolean;
   focusToken?: number;
-  contextTokens: number;
-  contextPending?: boolean;
-  maxContextTokens?: number;
-  softCompactTokens?: number;
-  hardCompactTokens?: number;
-  showContextMeter?: boolean;
   agentId?: number | null;
   agentTerminated?: boolean;
   maxWidthCss?: string;
@@ -104,14 +98,8 @@ export function Composer({
   onUploadError,
   filesUploading = false,
   focusToken,
-  contextTokens,
-  contextPending = false,
-  maxContextTokens = 0,
-  softCompactTokens = 0,
-  hardCompactTokens = 0,
   agentId = null,
   agentTerminated = false,
-  showContextMeter = false,
   maxWidthCss,
   suggestions = null,
   children,
@@ -194,14 +182,6 @@ export function Composer({
   });
   const taRef = useRef<HTMLTextAreaElement>(null);
   const acRef = useRef<SlashAutocompleteHandle>(null);
-  const [breakdownOpen, setBreakdownOpen] = useState(false);
-  const handleBreakdownOpenChange = useCallback((open: boolean) => {
-    setBreakdownOpen(open);
-    if (open) acRef.current?.close();
-  }, []);
-  const handleAutocompleteOpenChange = useCallback((open: boolean) => {
-    if (open) setBreakdownOpen(false);
-  }, []);
   const pendingCaret = useRef<number | null>(null);
   const syncCaret = (ta: HTMLTextAreaElement) => setCaret(ta.selectionStart);
 
@@ -436,18 +416,7 @@ export function Composer({
         data-testid="composer-band"
         className={cn("gap-2", COMPOSER_BAND_CLASS, FLEX, FLEX_COL)}
       >
-        <ComposerMetaRow
-          commandHint={commandHint}
-          showContextMeter={showContextMeter}
-          contextTokens={contextTokens}
-          contextPending={contextPending}
-          agentId={agentId}
-          breakdownOpen={breakdownOpen}
-          onBreakdownOpenChange={handleBreakdownOpenChange}
-          maxContextTokens={maxContextTokens}
-          softCompactTokens={softCompactTokens}
-          hardCompactTokens={hardCompactTokens}
-        />
+        <ComposerMetaRow commandHint={commandHint} />
         {filesUploading || deliveryInFlight ? (
           <div
             role="status"
@@ -479,7 +448,6 @@ export function Composer({
             commands={commands}
             query={query}
             onSelect={runCommand}
-            onOpenChange={handleAutocompleteOpenChange}
           />
           <div className={cn("gap-2 items-end", COMPOSER_BAND_ROW_CLASS, FLEX)}>
             {children}

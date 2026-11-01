@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 
-import { TurnBlock } from "../run-block";
+import { PendingLiveActivityWindow, TurnBlock } from "../run-block";
 import type { TurnSummary } from "../model/runs";
 
 afterEach(cleanup);
@@ -57,8 +57,8 @@ describe("TurnBlock component", () => {
     expect(methods).toEqual(["agents.spawn", "files.read", "files.write", "shell.run"]);
   });
 
-  it("renders collapsed turn block with data attributes and no sticky classes", () => {
-    render(
+  it("renders collapsed turn block without sticky classes or inner scrollport", () => {
+    const { container } = render(
       <TurnBlock
         id="turn-1"
         memberIds={["1.0", "1.1"]}
@@ -72,67 +72,63 @@ describe("TurnBlock component", () => {
 
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("false");
-    expect(toggle.getAttribute("data-stuck")).toBe("false");
     expect(toggle.className).not.toContain("sticky");
-    expect(toggle.className).not.toContain("shadow-[");
+    expect(container.querySelector('[data-turn-scroll="true"]')).toBeNull();
   });
 
-  it("renders expanded turn block with sticky classes", () => {
-    render(
+  it("renders expanded turn block with unified unboxed header and max-height bounded scrollport", () => {
+    const { container } = render(
       <TurnBlock
         id="turn-1"
         memberIds={["1.0", "1.1"]}
         summary={sampleSummary}
         expanded={true}
-        isStuck={false}
         onToggle={vi.fn()}
       >
         <div data-testid="detail-content">detail rows</div>
       </TurnBlock>,
     );
 
+    const root = container.firstElementChild!;
+    expect(root.className).not.toContain("rounded-xl");
+    expect(root.className).not.toContain("border");
+
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
-    expect(toggle.getAttribute("data-stuck")).toBe("false");
-    expect(toggle.className).toContain("sticky");
-    expect(toggle.className).toContain("top-11");
-    expect(toggle.className).toContain("z-10");
-    expect(toggle.className).toContain("before:content-['']");
-    expect(toggle.className).toContain("before:bg-transparent");
-    expect(toggle.className).toContain("before:backdrop-blur-none");
+    expect(toggle.className).not.toContain("sticky");
+
+    const viewport = screen.getByTestId("turn-scroll-viewport");
+    expect(viewport.className).toContain("max-h-[var(--timeline-turn-max-h,50dvh)]");
   });
 
-  it("renders stuck active styling when expanded and isStuck is true", () => {
-    render(
+  it("shares the identical unboxed chrome when liveWindow is true", () => {
+    const { container } = render(
       <TurnBlock
-        id="turn-1"
-        memberIds={["1.0", "1.1"]}
+        id="turn-live"
+        memberIds={["1.0"]}
         summary={sampleSummary}
         expanded={true}
-        isStuck={true}
+        turnActive={true}
+        liveWindow={true}
         onToggle={vi.fn()}
       >
-        <div data-testid="detail-content">detail rows</div>
+        <div>live row</div>
       </TurnBlock>,
     );
 
-    const toggle = screen.getByTestId("turn-toggle");
-    expect(toggle.getAttribute("data-expanded")).toBe("true");
-    expect(toggle.getAttribute("data-stuck")).toBe("true");
-    expect(toggle.className).toContain("hover:bg-transparent");
-    expect(toggle.className).not.toContain("hover:bg-accent/30");
-    expect(toggle.className).toContain("before:backdrop-blur-md");
-    expect(toggle.className).toContain("before:bg-background/95");
-    expect(toggle.className).toContain("hover:before:bg-accent/30");
-    expect(toggle.className).toContain("before:bottom-0");
-    expect(toggle.className).toContain("before:-z-10");
-    expect(toggle.className).toContain("16px_0_0_0_var(--background)");
-    expect(toggle.className).toContain("before:-top-[2px]");
-    expect(toggle.className).toContain("after:bottom-0");
-    expect(toggle.className).toContain("after:h-px");
-    expect(toggle.className).not.toContain("after:top-full");
-    expect(toggle.className).not.toContain("-mb-px");
-    expect(toggle.className).toContain("motion-reduce:transition-none");
+    const root = container.firstElementChild!;
+    expect(root.getAttribute("data-live-activity-window")).toBe("true");
+    expect(root.className).not.toContain("rounded-xl");
+    expect(screen.getByTestId("activity-scroll-viewport").className).toContain(
+      "max-h-[var(--timeline-turn-max-h,50dvh)]",
+    );
+  });
+
+  it("renders PendingLiveActivityWindow as an inline unboxed header row", () => {
+    render(<PendingLiveActivityWindow />);
+    const pending = screen.getByTestId("pending-live-activity-window");
+    expect(pending.className).not.toContain("rounded-xl");
+    expect(pending.textContent).toContain("Working…");
   });
 
   it("skips re-rendering when a regroup rebuilds equal member ids and summary", () => {
@@ -192,55 +188,6 @@ describe("TurnBlock component", () => {
     expect(onToggle).toHaveBeenCalledWith("turn-7", false);
   });
 
-  it("calls onToggle when clicked in stuck state", () => {
-    const onToggle = vi.fn();
-    render(
-      <TurnBlock
-        id="turn-1"
-        memberIds={["1.0", "1.1"]}
-        summary={sampleSummary}
-        expanded={true}
-        isStuck={true}
-        onToggle={onToggle}
-      >
-        <div data-testid="detail-content">detail rows</div>
-      </TurnBlock>,
-    );
-
-    const toggle = screen.getByTestId("turn-toggle");
-    fireEvent.click(toggle);
-    expect(onToggle).toHaveBeenCalledTimes(1);
-  });
-
-  it("observes the header's full border box for the nested pin offset", () => {
-    const observe = vi.fn();
-    class FakeResizeObserver {
-      observe = observe;
-      disconnect = vi.fn();
-    }
-    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
-    try {
-      render(
-        <TurnBlock
-          id="turn-1"
-          memberIds={["1.0", "1.1"]}
-          summary={sampleSummary}
-          expanded={true}
-          isStuck={false}
-          onToggle={vi.fn()}
-        >
-          <div data-testid="detail-content">detail rows</div>
-        </TurnBlock>,
-      );
-      expect(observe).toHaveBeenCalledWith(
-        screen.getByTestId("turn-toggle"),
-        { box: "border-box" },
-      );
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
   it("locks the collapse wrapper shrinkable on the inline axis (#3305)", () => {
     const { container } = render(
       <TurnBlock
@@ -248,7 +195,6 @@ describe("TurnBlock component", () => {
         memberIds={["1.0"]}
         summary={sampleSummary}
         expanded={true}
-        isStuck={false}
         onToggle={vi.fn()}
       >
         <div>detail rows</div>
@@ -257,7 +203,7 @@ describe("TurnBlock component", () => {
     const grid = container.querySelector('[class*="grid-template-rows"]');
     const clip = grid?.firstElementChild;
     expect(grid).not.toBeNull();
-    expect(clip?.className).toContain("overflow-clip");
+    expect(clip?.className).toContain("overflow-hidden");
     expect(clip?.className).toContain("min-w-0");
   });
 });

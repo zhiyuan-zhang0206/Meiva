@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Home shell chrome
-description: The home columns' title bars and where the timeline's Details mode lives now.
+description: The home columns' title bars, bottom rules, icon sizing, edge-pinned controls, and resizable column frame.
 tags:
 - frontend
 ---
@@ -96,21 +96,6 @@ writes nothing.
 The conversation's own side of the same report — a width change re-wraps every
 row, so the reader's pixel offset no longer points at their row — belongs to
 [sticky scroll](../timeline-view/sticky-scroll.meiva.okf.md).
-
-## Details mode
-
-The Details mode has one writer and one surface: the Display settings row bound to
-`display.expand_runs_mode` (`/control#display-timeline`, "Timeline details"), which
-keeps all three modes (All / Last / None) reachable. Picking a mode — including the
-one already stored — re-applies it and collapses manual expansions. Because the
-picker's page unmounts the timeline, the reset is recorded as a pending flag in
-`lib/layout/content-toggle-store.ts` and consumed by whichever timeline mounts
-next; the token alone could not survive that gap.
-
-The composer carries no Details affordance: the read-only summary chip was
-removed on 2026-10-18, so nothing on the home screen renders the mode or writes
-it. The chip's absence is deliberate — a control that cannot change the value is
-not worth a row in the composer.
 
 The home frame tests run the local resizable wrappers and real `useDefaultLayout`
 storage path. Only the third-party measured layout primitives are substituted;

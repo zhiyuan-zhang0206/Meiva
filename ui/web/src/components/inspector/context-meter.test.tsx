@@ -1,4 +1,5 @@
-// ContextMeter tests — the composer's context readout: a gauge whose fill
+// meiva:note
+// ContextMeter tests — the inspector's context readout: a gauge whose fill
 // crosses amber past the soft (wind-down) threshold and red past the hard
 // (force-compact) ceiling, with tick marks at both, plus a numeric summary.
 //
@@ -9,17 +10,13 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
-import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
-
 import { ContextButton, type ContextButtonProps } from "./context-breakdown";
 import { ContextBreakdownCard } from "./context-breakdown-body";
-import { ContextMeter, ContextMeterGhost, resolveContextMeterWidth } from "./context-meter";
+import { ContextMeter } from "./context-meter";
 import { renderWithApi as render } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
-  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
 });
 
 
@@ -108,49 +105,9 @@ describe("ContextMeter", () => {
     expect(screen.getByTestId("context-meter").textContent).toBe("Context: 26.0k/1.00M tokens");
   });
 
-  it("defaults the gauge track to the compact width when no barWidthClassName is given", () => {
+  it("renders the gauge track at the default w-32 width", () => {
     render(<ContextMeter {...full} />);
-    expect(screen.getByRole("img").className).toContain("w-16");
-  });
-
-  it("applies a caller-supplied bar width class (the display.context_meter_width tiers)", () => {
-    render(<ContextMeter {...full} barWidthClassName="w-48" />);
-    const gauge = screen.getByRole("img");
-    expect(gauge.className).toContain("w-48");
-    expect(gauge.className).not.toContain("w-16");
-  });
-});
-
-describe("resolveContextMeterWidth", () => {
-  it("passes through each valid tier", () => {
-    expect(resolveContextMeterWidth("compact")).toBe("compact");
-    expect(resolveContextMeterWidth("comfortable")).toBe("comfortable");
-    expect(resolveContextMeterWidth("wide")).toBe("wide");
-  });
-
-  it("falls back to comfortable for an unset or stale/invalid setting value", () => {
-    expect(resolveContextMeterWidth(undefined)).toBe("comfortable");
-    expect(resolveContextMeterWidth(null)).toBe("comfortable");
-    expect(resolveContextMeterWidth("huge")).toBe("comfortable");
-  });
-});
-
-describe("ContextMeterGhost", () => {
-  it("renders a decorative pulsing track in the meter's geometry", () => {
-    wrap(<ContextMeterGhost />);
-    const ghost = screen.getByTestId("context-meter-ghost");
-    expect(ghost.getAttribute("aria-hidden")).toBe("true");
-    const track = ghost.querySelector("span");
-    expect(track?.className).toContain("h-1.5");
-    expect(track?.className).toContain("animate-pulse");
-    // Unset setting -> the comfortable tier (w-32), the meter default.
-    expect(track?.className).toContain("w-32");
-  });
-
-  it("follows the display.context_meter_width setting", () => {
-    wrap(<ContextMeterGhost />, { "display.context_meter_width": "wide" });
-    const track = screen.getByTestId("context-meter-ghost").querySelector("span");
-    expect(track?.className).toContain("w-48");
+    expect(screen.getByRole("img").className).toContain("w-32");
   });
 });
 
@@ -197,9 +154,8 @@ function Harness(props: Omit<ContextButtonProps, "open" | "onOpenChange">) {
   return <ContextButton {...props} open={open} onOpenChange={setOpen} />;
 }
 
-function wrap(ui: React.ReactElement, settings: Record<string, unknown> = {}) {
+function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...settings });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 

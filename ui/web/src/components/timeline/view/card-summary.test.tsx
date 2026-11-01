@@ -37,13 +37,13 @@ function renderWithQuery(ui: React.ReactElement, overrides: Record<string, unkno
 }
 
 describe("CardHeader rich summaries", () => {
-  it("labels an empty model wait without claiming a reasoning summary", () => {
+  it("renders a pre-token model wait as live Thinking", () => {
     const waiting = item("agent_reasoning", { llmWaiting: true, reasoningStartedAt: Date.now() - 3000 });
     const { container } = renderWithQuery(
       <CardHeader item={waiting} config={messageCardConfig(waiting)!} expanded={false} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("Waiting for model");
-    expect(container.textContent).not.toContain("Thinking for");
+    expect(container.textContent).toContain("Thinking for");
+    expect(container.textContent).not.toContain("Waiting for model");
   });
 
   it("renders rich summary for agent_reasoning with committed duration", () => {
@@ -58,7 +58,7 @@ describe("CardHeader rich summaries", () => {
     expect(container.textContent).toContain("Thought for 8s");
   });
 
-  it("reasoning with reasoning_tokens shows token count", () => {
+  it("reasoning with reasoning_tokens omits the token count", () => {
     const rItem = item("agent_reasoning", {
       payload: "x",
       reasoning_ms: 5000,
@@ -68,7 +68,8 @@ describe("CardHeader rich summaries", () => {
     const { container } = renderWithQuery(
       <CardHeader item={rItem} config={cfg} expanded={false} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("1.5k tokens");
+    expect(container.textContent).toContain("Thought for 5s");
+    expect(container.textContent).not.toContain("tokens");
   });
 
   it("reasoning with live clock (reasoningStartedAt)", () => {
@@ -196,7 +197,7 @@ describe("CardHeader rich summaries", () => {
     }
   });
 
-  it("agent_code without SDK calls → line count", () => {
+  it("agent_code without SDK calls or timing falls back to 'Code' without a line count", () => {
     const cItem = item("agent_code", {
       payload: "x = 1\ny = 2\nz = 3",
     });
@@ -204,7 +205,8 @@ describe("CardHeader rich summaries", () => {
     const { container } = renderWithQuery(
       <CardHeader item={cItem} config={cfg} expanded={false} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("3 lines of code");
+    expect(container.textContent).toContain("Code");
+    expect(container.textContent).not.toContain("lines");
   });
 
   it("agent_code without sdk_calls never scans the payload for call names", () => {
@@ -215,12 +217,13 @@ describe("CardHeader rich summaries", () => {
     const { container } = renderWithQuery(
       <CardHeader item={cItem} config={cfg} expanded={false} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("2 lines of code");
+    expect(container.textContent).toContain("Code");
+    expect(container.textContent).not.toContain("lines");
     expect(container.textContent).not.toContain("files.read");
     expect(container.textContent).not.toContain("shell.run");
   });
 
-  it("agent_code with external tool source renders tool name and line count without 'of code'", () => {
+  it("agent_code with external tool source renders tool name without a line count", () => {
     const cItem = item("agent_code", {
       source: "Bash",
       payload: "git status\ngit diff",
@@ -231,12 +234,13 @@ describe("CardHeader rich summaries", () => {
     const { container } = renderWithQuery(
       <CardHeader item={cItem} config={cfg} expanded={false} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("Bash · 2 lines");
+    expect(container.textContent).toContain("Bash");
+    expect(container.textContent).not.toContain("lines");
     expect(container.textContent).not.toContain("of code");
     expect(container.textContent).not.toContain("× 1");
   });
 
-  it("code_output with exec_ms shows duration", () => {
+  it("code_output with exec_ms shows duration without a line count", () => {
     const oItem = item("code_output", {
       payload: "line1\nline2",
       exec_ms: 8000,
@@ -246,10 +250,10 @@ describe("CardHeader rich summaries", () => {
       <CardHeader item={oItem} config={cfg} expanded={false} onToggle={noop} />,
     );
     expect(container.textContent).toContain("Ran in 8s");
-    expect(container.textContent).toContain("2 lines");
+    expect(container.textContent).not.toContain("lines");
   });
 
-  it("code_output with error text → same chip as any other output", () => {
+  it("code_output with error text → neutral 'Output' label without error styling or line count", () => {
     const oItem = item("code_output", {
       payload: "ValueError: something went wrong",
     });
@@ -257,9 +261,10 @@ describe("CardHeader rich summaries", () => {
     const { container } = renderWithQuery(
       <CardHeader item={oItem} config={cfg} expanded={false} onToggle={noop} />,
     );
+    expect(container.textContent).toContain("Output");
     expect(container.textContent).not.toContain("Error");
     expect(container.querySelector(".text-destructive")).toBeNull();
-    expect(container.textContent).toContain("1 line");
+    expect(container.textContent).not.toContain("line");
   });
 
   it("code_output live execution (execStartedAt, no exec_ms)", () => {
@@ -275,109 +280,19 @@ describe("CardHeader rich summaries", () => {
   });
 });
 
-describe("CardHeader sticky header (task #3136)", () => {
+describe("CardHeader non-sticky header", () => {
   const chatItem = item("agent_chat", { payload: "hello" });
 
-  it("plain cards (stickyHeader unset) keep the resting header — no sticky classes", () => {
-    const cfg = messageCardConfig(chatItem)!;
-    const { container } = renderWithQuery(
-      <CardHeader item={chatItem} config={cfg} expanded={true} onToggle={noop} />,
-    );
-    const btn = container.querySelector("button")!;
-    expect(btn.className).not.toContain("sticky");
-    expect(btn.getAttribute("data-stuck")).toBe("false");
-  });
-
-  it("expanded sticky card pins the header at top-11 while resting", () => {
-    const cfg = messageCardConfig(chatItem)!;
-    const { container } = renderWithQuery(
-      <CardHeader item={chatItem} config={cfg} expanded={true} onToggle={noop} stickyHeader="top" />,
-    );
-    const btn = container.querySelector("button")!;
-    expect(btn.className).toContain("sticky");
-    expect(btn.className).toContain("top-11");
-    expect(btn.className).toContain("z-10");
-    expect(btn.getAttribute("data-stuck")).toBe("false");
-    expect(btn.className).not.toContain("backdrop-blur-md");
-    expect(btn.className).toContain("before:content-['']");
-    expect(btn.className).toContain("before:bg-transparent");
-    expect(btn.className).toContain("before:backdrop-blur-none");
-    expect(btn.className).toContain("before:transition-[background-color,backdrop-filter]");
-  });
-
-  it("collapsed sticky card does not pin (the rest position stays in flow)", () => {
-    const cfg = messageCardConfig(chatItem)!;
-    const { container } = renderWithQuery(
-      <CardHeader item={chatItem} config={cfg} expanded={false} onToggle={noop} stickyHeader="top" />,
-    );
-    const btn = container.querySelector("button")!;
-    expect(btn.className).not.toContain("sticky");
-  });
-
-  it("stuck state switches to the elevated mask styling", () => {
-    const cfg = messageCardConfig(chatItem)!;
-    const { container } = renderWithQuery(
-      <CardHeader
-        item={chatItem}
-        config={cfg}
-        expanded={true}
-        onToggle={noop}
-        stickyHeader="top"
-        isStuck={true}
-      />,
-    );
-    const btn = container.querySelector("button")!;
-    expect(btn.getAttribute("data-stuck")).toBe("true");
-    expect(btn.className).toContain("hover:bg-transparent");
-    expect(btn.className).not.toContain("hover:bg-accent/30");
-    expect(btn.className).toContain("before:backdrop-blur-md");
-    expect(btn.className).toContain("before:bg-background/95");
-    expect(btn.className).toContain("hover:before:bg-accent/30");
-    expect(btn.className).toContain("before:bottom-0");
-    expect(btn.className).toContain("before:-z-10");
-    expect(btn.className).toContain("16px_0_0_0_var(--background)");
-    expect(btn.className).toContain("before:-top-[2px]");
-    expect(btn.className).toContain("after:bottom-0");
-    expect(btn.className).toContain("after:h-px");
-    expect(btn.className).not.toContain("after:top-full");
-    expect(btn.className).not.toContain("-mb-px");
-    expect(btn.className).toContain("motion-reduce:transition-none");
-  });
-
-  it("stays clickable while stuck — the toggle still fires", () => {
+  it("keeps card headers in normal flow without sticky classes and stays clickable", () => {
     const onToggle = vi.fn();
     const cfg = messageCardConfig(chatItem)!;
     const { container } = renderWithQuery(
-      <CardHeader
-        item={chatItem}
-        config={cfg}
-        expanded={true}
-        onToggle={onToggle}
-        stickyHeader="top"
-        isStuck={true}
-      />,
-    );
-    fireEvent.click(container.querySelector("button")!);
-    expect(onToggle).toHaveBeenCalledTimes(1);
-  });
-
-  it("nested sticky (work-block child) pins under the block header, not at the bar line", () => {
-    const cItem = item("agent_reasoning", { payload: "thinking...", reasoning_ms: 8000 });
-    const cfg = messageCardConfig(cItem)!;
-    const { container } = renderWithQuery(
-      <CardHeader
-        item={cItem}
-        config={cfg}
-        expanded={true}
-        onToggle={noop}
-        stickyHeader="nested"
-      />,
+      <CardHeader item={chatItem} config={cfg} expanded={true} onToggle={onToggle} />,
     );
     const btn = container.querySelector("button")!;
-    expect(btn.className).toContain("sticky");
-    expect(btn.className).toContain("top-[calc(2.75rem_+_var(--turn-header-h,0px))]");
-    expect(btn.className).toContain("z-[5]");
-    expect(btn.className).not.toContain("top-11");
+    expect(btn.className).not.toContain("sticky");
+    fireEvent.click(btn);
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });
 

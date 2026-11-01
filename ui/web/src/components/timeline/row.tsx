@@ -1,30 +1,24 @@
 "use client";
 
-// Per-item card-config cache + the memoized row renderer. Split out of
-// index.tsx (outlier cleanup, task #1010) so the view file stays under the
-// 800-line budget; behavior is identical.
-
 import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { cn } from "@/lib/format/utils";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
-import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import { CopyButton } from "./buttons";
 import { ItemTimestamp } from "./timestamp";
 import {
   CARD_FOOTER_CLS,
-  CARD_FOOTER_LEFT_CLS,
   type CardConfig,
   CardHeader,
   MessageCard,
   messageCardConfig,
 } from "./card";
-import { copyPayloadFor, ItemView, splitEnvelope } from "./item";
+import { copyPayloadFor, ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
-import { inboundKind } from "./model/runs";
+import { inboundKind, isSilentTimelineItem } from "./model/runs";
 
 // meiva:note
 // How long a touch keeps the chrome band up: long enough to read the time and
@@ -32,34 +26,25 @@ import { inboundKind } from "./model/runs";
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 const TOUCH_REVEAL_MS = 6000;
 
-// Per-item card-config cache. messageCardConfig is pure over `item`, and the
-// store preserves object identity for items unchanged across a commit (its
-// slice()-based reducers replace only the changed item), so a WeakMap keyed on
-// the item reference hands back a STABLE config object for every unchanged row.
-// That stability — combined with the memoized TimelineRow below — is what lets
-// an unchanged row skip re-render on every streaming chunk: the items ARRAY
-// identity changes each chunk, but the individual item refs (and thus their
-// configs) do not. Recomputed only when an item's reference — or the
-// resolved color map — changes: the config now depends on the user's
-// timeline-color settings, and `useTimelineColors` keeps its result
-// reference-stable while no color setting changes.
-const configCache = new WeakMap<
-  BackendTimelineItem,
-  { colors: TimelineColors; config: CardConfig | null }
->();
-export function cardConfigFor(
-  item: BackendTimelineItem,
-  colors: TimelineColors = DEFAULT_TIMELINE_COLORS,
-): CardConfig | null {
-  const hit = configCache.get(item);
-  if (hit?.colors === colors) return hit.config;
-  const config = messageCardConfig(item, colors);
-  configCache.set(item, { colors, config });
+// meiva:note
+// Per-item card-config WeakMap cache keyed on item reference so unchanged rows
+// receive a reference-stable CardConfig across streaming commits and preserve
+// TimelineRow's memo.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/streaming-rows.meiva.okf.md
+const configCache = new WeakMap<BackendTimelineItem, CardConfig | null>();
+export function cardConfigFor(item: BackendTimelineItem): CardConfig | null {
+  if (configCache.has(item)) return configCache.get(item) ?? null;
+  const config = messageCardConfig(item);
+  configCache.set(item, config);
   return config;
 }
 
 // meiva:note
-// One timeline row, memoized so an unchanged item skips its entire subtree (card container + header summary scan + body) on every streaming chunk. Every prop is either a primitive or a reference stable across commits for an unchanged item: `item` (store-preserved ref), `config` (WeakMap cache), `expanded`/`streaming`/`copyable` (booleans) and `onToggle` (parent's stable useCallback). config === null is the ephemeral system marker, which renders bare (no card, not collapsible).
+// Memoized timeline row renderer: primary human messages render as right-aligned
+// bubbles, user-facing agent_chat renders as unboxed canvas Markdown prose (both
+// sharing right-aligned CARD_FOOTER_CLS below the block), secondary items render
+// as collapsible MessageCard rows inside TurnBlocks, and config === null renders
+// bare ephemeral markers.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 export const TimelineRow = memo(function TimelineRow({
   item,
@@ -67,8 +52,6 @@ export const TimelineRow = memo(function TimelineRow({
   streaming,
   expanded,
   copyable,
-  stickyHeader = false,
-  isStuck,
   onToggle,
   timelineSource = "canonical",
   displayRank,
@@ -78,35 +61,22 @@ export const TimelineRow = memo(function TimelineRow({
   streaming: boolean;
   expanded: boolean;
   // meiva:note
-  // The body is expanded and settled. Copy joins the timestamp in the card's
-  // hover footer only when the KIND also offers it (config.copy — the whitelist
-  // in card.tsx: a human's or an agent's message, and the agent's own reply).
+  // True when a secondary item's body is expanded and settled; combined with
+  // config.copy to gate the inline Copy button on secondary message cards.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   copyable: boolean;
-  /** Where this row's header pins while expanded: `"top"` below the HeaderBar
-   *  (top-level message cards) or `"nested"` under its expanded work block's
-   *  header (work-block children, task #3215; see runs.classifyItem). false
-   *  for rows with no pin. */
-  stickyHeader?: "top" | "nested" | false;
-  /** The header is currently pinned at the sticky line (task #3136). */
-  isStuck: boolean;
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
 }) {
-  // Bound toggle for the header. Created inside the memoized row, so it stays
-  // stable across the PARENT's re-renders (the row re-renders only when its own
-  // props change) — that is what keeps CardHeader's own memo intact.
   const handleToggle = useCallback(
     () => onToggle(item.item_id, item.kind),
     [onToggle, item.item_id, item.kind],
   );
 
   // meiva:note
-  // A touch pointer has no hover, so the band is revealed by touching the block
-  // and hides itself again after a few seconds: leaving it painted put a
-  // timestamp and Copy under every message on a phone, which is what the user
-  // reported. A mouse never takes this path — hover and focus already gate it.
+  // Coarse touch pointers lack hover, so touching a primary message or copyable
+  // secondary card reveals its chrome band temporarily and hides it again after TOUCH_REVEAL_MS.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const [touchRevealed, setTouchRevealed] = useState(false);
   const revealTimer = useRef<number | null>(null);
@@ -136,15 +106,12 @@ export const TimelineRow = memo(function TimelineRow({
   }
 
   // meiva:note
-  // Built inside the memoized row (not passed in from the parent's per-render `renderRow` closure) so the JSX element stays a fresh object only when THIS row's own props change — passing it down from renderRow would recreate the node on every TimelineView render and defeat TimelineRow's memo for every row, not just this one.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
-  //
-  // meiva:note
   // Top-level primary messages (human inbound_chat bubble + user-facing agent_chat
-  // canvas prose) mount the hover chrome band below the message carrying the
-  // timestamp and Copy. Secondary work items inside TurnBlocks / the Live Activity
-  // Window omit timestamps and render an inline top-right Copy button only when
-  // `config.copy` is true (inter-agent messages and non-user-facing agent_chat).
+  // canvas prose) mount the right-aligned hover chrome band below the message
+  // carrying the timestamp and Copy. Secondary work items inside TurnBlocks omit
+  // below-card timestamps and float a hover-revealed Copy pill inside the
+  // expanded body's bottom-right corner when `config.copy` is true (inter-agent
+  // messages and non-user-facing agent_chat) so inter-card spacing stays uniform.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const isUploadRow =
     item.kind === "inbound_chat" &&
@@ -154,13 +121,7 @@ export const TimelineRow = memo(function TimelineRow({
   const isAgentProse = item.kind === "agent_chat" && item.user_facing !== false;
   const isPrimaryMessage = isHumanBubble || isAgentProse;
 
-  if (
-    item.kind === "inbound_chat" &&
-    item.source === "user" &&
-    !item.files?.length &&
-    !item.images?.length &&
-    splitEnvelope(item.payload).body === "[files]"
-  ) {
+  if (isSilentTimelineItem(item)) {
     return null;
   }
 
@@ -232,7 +193,7 @@ export const TimelineRow = memo(function TimelineRow({
         {primaryFooter ? (
           <div
             data-testid="card-chrome"
-            className={cn(CARD_FOOTER_LEFT_CLS, touchRevealed && "pointer-events-auto opacity-100")}
+            className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}
           >
             {primaryFooter}
           </div>
@@ -241,30 +202,19 @@ export const TimelineRow = memo(function TimelineRow({
     );
   }
 
-  // Sticky only while expanded — a collapsed row has nothing to scroll under
-  // its header. The level decides the scan bucket + the pin line: a work
-  // block's child row joins the nested pass (data-turn-child) instead of the
-  // level-1 scan (findClosestStuckHeaderId, run-block.tsx).
-  const sticky = Boolean(stickyHeader) && expanded;
-  const nestedSticky = stickyHeader === "nested";
+  const showExpandedBody =
+    expanded && !(item.kind === "agent_reasoning" && item.payload === "" && !item.interrupted);
+  const secondaryCopy = showExpandedBody ? copy : null;
 
   return (
-    // data-card-sticky marks a row whose header may pin — the scan target for
-    // findClosestStuckHeaderId (see run-block.tsx); expanded is required for
-    // the pin, so a collapsed row drops out of the scan by itself.
     <div
       data-item-id={item.item_id}
       data-timeline-source={timelineSource}
       data-display-rank={displayRank}
-      data-card-sticky={sticky}
-      data-turn-child={nestedSticky ? "true" : undefined}
       aria-live="off"
-      className={cn("timeline-item", copy ? "group/msgcard" : null)}
-      onPointerDown={copy ? revealForTouch : undefined}
+      className={cn("timeline-item", secondaryCopy ? "group/msgcard" : null)}
+      onPointerDown={secondaryCopy ? revealForTouch : undefined}
     >
-      {/* Boundary wraps header + content together: the header's summary
-          derivation parses the payload too, so a malformed payload must
-          not escape the per-item fallback. */}
       <ItemErrorBoundary resetKey={item.payload}>
         <MessageCard config={config}>
           <CardHeader
@@ -272,27 +222,25 @@ export const TimelineRow = memo(function TimelineRow({
             config={config}
             expanded={expanded}
             onToggle={handleToggle}
-            stickyHeader={stickyHeader}
-            isStuck={isStuck}
           />
-          {copy ? (
-            <div
-              data-testid="card-chrome"
-              className={cn(
-                "absolute top-1 right-1.5 z-10 items-center",
-                "pointer-events-none opacity-0 transition-opacity duration-150 motion-reduce:transition-none",
-                "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
-                "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
-                touchRevealed && "pointer-events-auto opacity-100",
-                FLEX,
-              )}
-            >
-              {copy}
-            </div>
-          ) : null}
-          {expanded ? (
-            <div className="pl-5 pr-1 pb-1.5 pt-0.5">
+          {showExpandedBody ? (
+            <div className="relative pl-5 pr-1 pt-0.5 pb-1.5">
               <ItemView item={item} streaming={streaming} />
+              {secondaryCopy ? (
+                <div
+                  data-testid="card-chrome"
+                  className={cn(
+                    "absolute bottom-1 right-1 z-10 items-center justify-end rounded border border-border/60 bg-background/90 px-1.5 py-1 shadow-2xs backdrop-blur-xs",
+                    "pointer-events-none opacity-0 transition-opacity duration-150 motion-reduce:transition-none",
+                    "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
+                    "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
+                    touchRevealed && "pointer-events-auto opacity-100",
+                    FLEX,
+                  )}
+                >
+                  {secondaryCopy}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </MessageCard>

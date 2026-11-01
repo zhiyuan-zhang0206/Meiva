@@ -1,12 +1,30 @@
 import { useEffect, type RefObject } from "react";
 
+import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 import type { SavedScroll } from "@/lib/layout/scroll-memory";
 import { isAtBottom, type StickyController, type StickyThresholds } from "@/lib/layout/sticky";
 
 import { rememberTimelinePosition, watchReadingNavigation } from "../model/reading-position";
 
-function isInsideActivityScroll(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest('[data-activity-scroll="true"]') !== null;
+function findScrollableTurnViewport(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const turnScroll = target.closest<HTMLElement>('[data-turn-scroll="true"]');
+  if (!turnScroll) return null;
+  const innerViewport = turnScroll.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+  if (!innerViewport || innerViewport.scrollHeight <= innerViewport.clientHeight + 1) return null;
+  return innerViewport;
+}
+
+function canScrollViewportInDirection(viewport: HTMLElement, deltaY: number): boolean {
+  if (deltaY < 0) return viewport.scrollTop > 0;
+  if (deltaY > 0) return viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1;
+  return false;
+}
+
+function normalizeWheelDeltaY(event: WheelEvent, pageHeight: number): number {
+  if (event.deltaMode === 1) return event.deltaY * 16;
+  if (event.deltaMode === 2) return event.deltaY * pageHeight;
+  return event.deltaY;
 }
 
 export function useTimelineViewport({
@@ -21,13 +39,11 @@ export function useTimelineViewport({
   prependEchoRef,
   coldFillRef,
   scrollMemoryRef,
-  stuckRafRef,
   restoreInFlight,
   measureAtBottom,
   maybeColdFill,
   pinToBottom,
   trimFollowing,
-  updateStuckHeader,
   prepareHistoryPull,
   historyPullActive,
   pullScroll,
@@ -51,13 +67,11 @@ export function useTimelineViewport({
   prependEchoRef: RefObject<boolean>;
   coldFillRef: RefObject<{ pages: number; open: boolean; inFlight: boolean; sawLoading: boolean }>;
   scrollMemoryRef: RefObject<{ entryKey: string; contentKey: string } | null>;
-  stuckRafRef: RefObject<number | null>;
   restoreInFlight: () => boolean;
   measureAtBottom: () => void;
   maybeColdFill: () => void;
   pinToBottom: (viewport: HTMLElement, freshRun?: boolean) => void;
   trimFollowing: () => void;
-  updateStuckHeader: () => void;
   prepareHistoryPull: (viewport: HTMLElement) => void;
   historyPullActive: () => boolean;
   pullScroll: (viewport: HTMLElement) => boolean;
@@ -80,9 +94,26 @@ export function useTimelineViewport({
       clientHeight: viewport.clientHeight,
     });
 
+    // meiva:note
+    // Cap every expanded TurnBlock's inner ScrollArea at half of the visible
+    // timeline message area (excluding the floating HeaderBar when measured).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+    const syncTurnMaxHeight = () => {
+      if (!wrapperRef.current || viewport.clientHeight <= 0) return;
+      const visibleHeight =
+        viewport.clientHeight > BAR_HEIGHT_PX * 2
+          ? viewport.clientHeight - BAR_HEIGHT_PX
+          : viewport.clientHeight;
+      wrapperRef.current.style.setProperty(
+        "--timeline-turn-max-h",
+        `${Math.max(160, Math.floor(visibleHeight * 0.5))}px`,
+      );
+    };
+    syncTurnMaxHeight();
+
     const onScroll = () => {
       const boundaryCorrection = pullScroll(viewport);
-      if (historyPullActive()) { updateStuckHeader(); return; }
+      if (historyPullActive()) return;
       const direction = holdRestoredPositionRef.current && !pendingRestoreRef.current ? "none" : controller.handleScroll(snapshot());
       if (direction === "up") coldFillRef.current.open = false;
 
@@ -102,10 +133,6 @@ export function useTimelineViewport({
       if (mem && !restoreInFlight()) {
         rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller);
       }
-      stuckRafRef.current ??= requestAnimationFrame(() => {
-        stuckRafRef.current = null;
-        updateStuckHeader();
-      });
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
     const onScrollEnd = (event: Event) => { if (event.target === viewport) pullScrollEnd(); };
@@ -113,12 +140,33 @@ export function useTimelineViewport({
     const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => { holdRestoredPositionRef.current = false; });
 
     // meiva:note
-    // Wheel and touch gestures inside the fixed-height Live Activity Window
-    // belong exclusively to its inner scrollport and must not disengage the
-    // outer timeline's sticky-bottom controller or pull older history.
+    // Wheel and touch gestures inside an overflowing expanded TurnBlock scroll
+    // its inner scrollport while it still has travel in that direction; once the
+    // inner scrollport reaches its top or bottom boundary, subsequent scrolling
+    // chains seamlessly to the outer message list (breaking any compositor wheel
+    // latch on the inner viewport and updating the outer sticky-bottom controller).
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
     const onWheel = (e: WheelEvent) => {
-      if (isInsideActivityScroll(e.target)) return;
+      const innerViewport = findScrollableTurnViewport(e.target);
+      if (innerViewport) {
+        if (e.ctrlKey || e.deltaY === 0 || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+        const pixelDeltaY = normalizeWheelDeltaY(e, viewport.clientHeight);
+        if (canScrollViewportInDirection(innerViewport, pixelDeltaY)) return;
+        holdRestoredPositionRef.current = false;
+        controller.handleWheel(pixelDeltaY, snapshot());
+        if (!controller.isSticky() && !isAtBottom(snapshot(), stickyThresholds)) {
+          pendingRestoreRef.current = null;
+        }
+        if (canScrollViewportInDirection(viewport, pixelDeltaY)) {
+          if (e.cancelable) {
+            e.preventDefault();
+            viewport.scrollTop += pixelDeltaY;
+          }
+          return;
+        }
+        pullWheel(e, viewport);
+        return;
+      }
       if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) holdRestoredPositionRef.current = false;
       if (!e.ctrlKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) controller.handleWheel(e.deltaY, snapshot());
       if (e.deltaY !== 0 && !controller.isSticky() && !isAtBottom(snapshot(), stickyThresholds)) pendingRestoreRef.current = null;
@@ -126,30 +174,42 @@ export function useTimelineViewport({
     };
     viewport.addEventListener("wheel", onWheel, { passive: false });
 
-    let touchInActivityScroll = false;
+    let touchInnerViewport: HTMLElement | null = null;
+    let touchStartY: number | null = null;
     const onTouchStart = (e: TouchEvent) => {
-      touchInActivityScroll = isInsideActivityScroll(e.target);
-      if (touchInActivityScroll) return;
+      touchInnerViewport = findScrollableTurnViewport(e.target);
+      touchStartY = e.touches.length > 0 ? e.touches[0].clientY : null;
+      if (touchInnerViewport) return;
       holdRestoredPositionRef.current = false;
       controller.handleTouchStart();
       pullTouchStart(e, viewport);
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (touchInActivityScroll || isInsideActivityScroll(e.target)) return;
+      if (touchInnerViewport) {
+        const currentY = e.touches.length > 0 ? e.touches[0].clientY : touchStartY;
+        const deltaY = touchStartY !== null && currentY !== null ? touchStartY - currentY : 0;
+        if (deltaY === 0 || canScrollViewportInDirection(touchInnerViewport, deltaY)) return;
+        touchInnerViewport = null;
+        holdRestoredPositionRef.current = false;
+        controller.handleTouchStart();
+        pullTouchStart(e, viewport);
+      }
       pullTouchMove(e, viewport);
     };
 
     const onTouchEnd = () => {
-      if (touchInActivityScroll) {
-        touchInActivityScroll = false;
+      touchStartY = null;
+      if (touchInnerViewport) {
+        touchInnerViewport = null;
         return;
       }
       controller.handleTouchEnd(snapshot());
       pullTouchEnd();
     };
     const onTouchCancel = () => {
-      if (touchInActivityScroll) {
-        touchInActivityScroll = false;
+      touchStartY = null;
+      if (touchInnerViewport) {
+        touchInnerViewport = null;
         return;
       }
       controller.handleTouchEnd(snapshot());
@@ -162,6 +222,7 @@ export function useTimelineViewport({
     viewport.addEventListener("touchcancel", onTouchCancel, { passive: true });
 
     const ro = new ResizeObserver(() => {
+      syncTurnMaxHeight();
       const probe = restoreProbeRef.current;
       if (probe.height === viewport.scrollHeight) probe.passes += 1;
       else { probe.height = viewport.scrollHeight; probe.passes = 1; }
@@ -208,13 +269,11 @@ export function useTimelineViewport({
     prependEchoRef,
     coldFillRef,
     scrollMemoryRef,
-    stuckRafRef,
     restoreInFlight,
     measureAtBottom,
     maybeColdFill,
     pinToBottom,
     trimFollowing,
-    updateStuckHeader,
     prepareHistoryPull,
     historyPullActive,
     pullScroll,

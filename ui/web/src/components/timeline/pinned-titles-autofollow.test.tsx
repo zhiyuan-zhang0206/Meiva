@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { render as wallClockRender } from "@/lib/transport/tests/wall-clock-render";
 import { ApiTestProvider } from "@/test-support/fake-api";
 import type { ReactNode } from "react";
@@ -16,9 +16,19 @@ vi.mock("../content/markdown", () => ({
 }));
 
 vi.mock("../ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: ReactNode }) => (
+  ScrollArea: ({
+    children,
+    viewportClassName,
+    viewportTestId,
+  }: {
+    children: ReactNode;
+    viewportClassName?: string;
+    viewportTestId?: string;
+  }) => (
     <div>
-      <div data-slot="scroll-area-viewport">{children}</div>
+      <div data-slot="scroll-area-viewport" data-testid={viewportTestId} className={viewportClassName}>
+        {children}
+      </div>
     </div>
   ),
 }));
@@ -31,28 +41,14 @@ function makeItems(): BackendTimelineItem[] {
   ];
 }
 
-function mockRect(top: number, bottom: number, height: number): DOMRect {
-  return {
-    top,
-    bottom,
-    height,
-    left: 0,
-    right: 400,
-    width: 400,
-    x: 0,
-    y: top,
-    toJSON: () => undefined,
-  };
-}
-
-function setupStuckBlock() {
+function setupExpandedBlock() {
   const highlighter = createLazyChunk({
     name: "test-highlighter",
     importModule: () => new Promise<never>(() => undefined),
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(["config", null], { fields: [] });
-  qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.expand_runs_mode": "all" });
+  qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS });
   const { container } = wallClockRender(
     <QueryClientProvider client={qc}>
       <PythonCodeHighlighterProvider value={highlighter}>
@@ -61,13 +57,15 @@ function setupStuckBlock() {
     </QueryClientProvider>,
     { wrapper: ApiTestProvider },
   );
+  const toggle = screen.getByTestId("turn-toggle");
+  fireEvent.click(toggle);
+  for (const btn of screen.queryAllByTestId("card-toggle")) {
+    if (btn.getAttribute("data-expanded") === "false") fireEvent.click(btn);
+  }
   const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
   Object.defineProperty(viewport, "scrollHeight", { value: 2000, configurable: true });
   Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-  vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
-  const turnEl = container.querySelector<HTMLElement>('[data-turn-expanded="true"]')!;
-  vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(mockRect(10, 700, 690));
-  return { container, viewport, toggle: screen.getByTestId("turn-toggle") };
+  return { container, viewport, toggle };
 }
 
 afterEach(() => {
@@ -75,37 +73,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("TimelineView pinned titles during auto-follow", () => {
+describe("TimelineView bounded work blocks during scroll", () => {
   it("renders its code blocks from the injected pending chunk", async () => {
     // meiva:note
     // The setup injects a chunk whose import never resolves so the code item stays plain text while the test drives scroll geometry; a macrotask is long enough for the real prism chunk to load, so a tree that lost its provider would show .token spans here.
     // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
-    const { container } = setupStuckBlock();
+    const { container } = setupExpandedBlock();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(container.querySelector("[data-testid='python-code'] .token")).toBeNull();
   });
 
-  it("keeps the pinned header through an auto-follow growth pin", async () => {
-    const { viewport, toggle } = setupStuckBlock();
-    expect(toggle.getAttribute("data-stuck")).toBe("false");
-
-    viewport.scrollTop = 1400;
-    act(() => { fireEvent.scroll(viewport); });
-
-    await waitFor(() => expect(toggle.getAttribute("data-stuck")).toBe("true"));
-    expect(toggle.className).toContain("backdrop-blur-md");
-  });
-
-  it("keeps the pin when the reader leaves the bottom at speed", async () => {
-    const { container, viewport, toggle } = setupStuckBlock();
+  it("keeps work headers non-sticky across rapid scroll gestures while bounding the inner scrollport", () => {
+    const { container, viewport, toggle } = setupExpandedBlock();
+    expect(toggle.className).not.toContain("sticky");
+    expect(screen.getByTestId("turn-scroll-viewport").className).toContain(
+      "max-h-[var(--timeline-turn-max-h,50dvh)]",
+    );
 
     viewport.scrollTop = 1400;
     act(() => { fireEvent.scroll(viewport); });
     viewport.scrollTop = 1000;
     act(() => { fireEvent.scroll(viewport); });
 
-    await waitFor(() => expect(toggle.getAttribute("data-stuck")).toBe("true"));
-    expect(toggle.className).toContain("sticky");
+    expect(toggle.className).not.toContain("sticky");
     expect(container.querySelector("[data-fast-scrolling]")).toBeNull();
   });
 });

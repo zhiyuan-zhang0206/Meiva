@@ -474,6 +474,17 @@ describe("InspectorPanel Context section", () => {
     expect(qc.getQueryState(key)?.status).toBe("success");
   });
 
+  it("keeps the breakdown trigger visible when the model ceiling is unknown", async () => {
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(2_900, 0, 0, 0, 0);
+    });
+    render(<InspectorPanel agentId={1} />);
+    const trigger = await screen.findByTestId("context-meter-button");
+    expect(trigger.textContent).toContain("Context: 2.9k tokens");
+    fireEvent.click(trigger);
+    expect(await screen.findByTestId("context-breakdown-panel")).toBeTruthy();
+  });
+
   it("renders no Context section before the first LLM call", async () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());

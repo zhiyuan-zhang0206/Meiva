@@ -4,8 +4,6 @@
   "agentListDisplay": "Agent 列表显示",
   "showStatusDot": "显示 agent 状态点",
   "showStatusDotDesc": "在侧边栏每个 agent 行上显示状态颜色点（运行/空闲/…）；默认关闭以保持列表静态安静",
-  "showActivityLine": "显示活动行",
-  "showActivityLineDesc": "宽侧边栏模式下，显示 agent 活动的第二行；默认关闭",
   "showTerminated": "显示已终止 agent",
   "showTerminatedDesc": "在侧边栏显示已终止 agent（红色状态点）；关闭则只显示存活 agent",
   "showWeekday": "时间戳显示星期",
@@ -22,14 +20,6 @@
   "timeline": "时间线",
   "timelineMaxWidth": "时间线最大宽度",
   "timelineMaxWidthDesc": "对话列的最大像素宽度（{min}px–{max}px）。对话列会填满所在面板直至该上限，更宽时居中留白。默认 {def}px。",
-  "collapseDetails": "默认折叠详情",
-  "collapseDetailsDesc": "新展开的工作块默认折叠而非打开。切换此项（或顶部的 Details 标签）会同时展开/折叠所有工作块",
-  "contextBar": "上下文用量条",
-  "usageBarWidth": "用量条宽度",
-  "usageBarWidthDesc": "输入栏底部折叠上下文用量条的宽度；展开的详情面板不受影响",
-  "compact": "紧凑",
-  "comfortable": "舒适（默认）",
-  "wide": "宽",
   "notifications": "通知",
   "awaitingReply": "等待回复通知",
   "awaitingReplyDesc": "在侧边栏为等待回复的 agent 显示红点+数量徽标；默认关闭——需要时查看 Fleet 页面",
@@ -46,8 +36,6 @@
   "modelPicker": "模型选择器",
   "english": "English",
   "chinese": "中文",
-  "composerContextMeter": "在输入区显示上下文窗口",
-  "composerContextMeterDesc": "在输入框旁显示上下文窗口进度条。默认关闭——具体数字在右侧检查器的「上下文」区；开启后也只显示进度条，不显示文字。",
   "categories": {
     "coreNeedsInput": "等你回答"
   }

@@ -51,10 +51,16 @@ describe("inboundKind", () => {
 });
 
 describe("classifyItem", () => {
-  it("keeps a model wait visible with collapsed details without counting reasoning", () => {
-    const waiting = item("agent_reasoning", null, "5.0", { llmWaiting: true });
-    expect(classifyItem(waiting)).toBe("primary");
-    expect(summarizeTurn([waiting]).thinking).toBe(0);
+  it("folds a pre-token model wait into the secondary turn without counting a completed reasoning round", () => {
+    const waiting = item("agent_reasoning", null, "5.0", {
+      llmWaiting: true,
+      reasoningStartedAt: 1000,
+    });
+    expect(classifyItem(waiting)).toBe("secondary");
+    const summary = summarizeTurn([waiting]);
+    expect(summary.thinking).toBe(0);
+    expect(summary.lastLiveKind).toBe("reasoning");
+    expect(summary.lastLiveStartedAt).toBe(1000);
   });
 
   it("agent_chat, human inbound and system:upload are primary; non-user-facing agent_chat is secondary", () => {

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Visual shell layout invariants
-description: The real-engine half of the shell layout defense — the Playwright suite's tiers, scroll-surface reveal, on-screen-keyboard and frosted-pane contracts over the stubbed Home page.
+description: The real-engine half of the shell layout defense — the Playwright suite's tiers, scroll-surface reveal, on-screen-keyboard and bounded work-block scroll contracts over the stubbed Home page.
 tags:
 - evaluation
 - quality-assurance
@@ -33,7 +33,7 @@ The shared ScrollArea track stays hit-testable at opacity 0 and reveals on hover
 
 With the on-screen keyboard up the composer stays inside the visible band: the viewport meta asks Chrome to resize content (interactive-widget=resizes-content, the Android half, which Safari ignores) and the shell pins <html> to the shrunken visualViewport height (the iOS half). A shortfall below the 150px keyboard threshold and a pinch-zoom leave the shell unpinned, and closing the keyboard restores the layout height.
 
-The frosted pinned-header pane fades between stuck and unstuck, so its ::before background is read only after one full live transition-duration plus a bounded stability poll — a mid-fade read was the #3464 CI flake — and a genuine regression still fails at the poll deadline instead of hanging. The sealed pane stays behind its label (z -10, blur 12px, tint, separator) and hover changes nothing but the tint.
+Every expanded `TurnBlock` stays in normal document flow without `position: sticky` on either its turn header (`turn-toggle`) or its child detail headers (`card-toggle`), and wraps its indented body in a shared auto-hiding `ScrollArea` whose viewport (`turn-scroll-viewport`) is capped at 50% of the visible timeline message area (`--timeline-turn-max-h`), scrolling internally when child content exceeds that cap (`test_expanded_work_block_bounded_scroll_and_no_sticky`).
 
 One more suite drives the same stubbed page for a chrome measurement rather than a
 shell invariant: `test_work_block_chrome.py` opens `stubbed_home.work_block_items()`
@@ -60,7 +60,7 @@ The sidebar footer's rule and the composer's rule are independent and never
 aligned by design, not even at rest (user ruling 2026-11-01, replacing the
 2026-10-29 shared-line ruling): the composer owns its band (`pt-3 pb-6` around a
 36px control row, 73px at rest) and the sidebar footer owns a compact one
-(`pt-2 pb-3` around its 28px icon row, 49px); no primitive is shared between
+(`py-1` around its 28px icon row, 37px); no primitive is shared between
 them. The engine test asserts the two rules are more than 1 CSS px apart at rest,
 then fills a 10-line draft and asserts the footer's rule stays where it was. The
 composer published its height as `--composer-band-height` and the footer took it

@@ -64,10 +64,9 @@ floor and the one-color-per-kind rule.
 
 Neither is cosmetic, and neither is fixed by choosing colours:
 
-- neutral blocks inside the timeline (`ui/web/src/lib/timeline/timeline-colors.ts`,
-  the `gray` family) paint with `--muted` / `--muted-foreground` on dark instead of
-  Tailwind's cool gray ramp, because a cool patch on a warm canvas reads as a
-  rendering bug;
+- neutral blocks inside the timeline (human message bubbles and muted surfaces)
+  paint with `--muted` / `--muted-foreground` on dark instead of Tailwind's cool
+  gray ramp, because a cool patch on a warm canvas reads as a rendering bug;
 - timestamps use `text-muted-foreground/80`, not `/60` — at 10px, `/60` measured
   3.3–3.6:1, below the 4.5:1 floor for small text.
 

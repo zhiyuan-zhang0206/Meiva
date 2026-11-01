@@ -8,7 +8,6 @@ import { useState } from "react";
 import { Section } from "@/components/inspector/inspector-section";
 import { cardConfigFor, TimelineRow } from "@/components/timeline/row";
 import { buttonVariants } from "@/components/ui/button";
-import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { FLEX } from "@/lib/layout/layout";
 import type { BackendTimelineItem, RunTimelineMessage, RunTimelineMessagePart, RunTimelineUnit } from "@/lib/contracts/types";
@@ -50,7 +49,7 @@ function partItem(message: RunTimelineMessage, part: RunTimelineMessagePart, ind
 
 function PartRow({ item }: { item: BackendTimelineItem }) {
   const [expanded, setExpanded] = useState(true);
-  const config = cardConfigFor(item, useTimelineColors());
+  const config = cardConfigFor(item);
   return (
     <TimelineRow
       item={item}
@@ -58,7 +57,6 @@ function PartRow({ item }: { item: BackendTimelineItem }) {
       streaming={false}
       expanded={expanded}
       copyable
-      isStuck={false}
       onToggle={() => setExpanded((open) => !open)}
     />
   );

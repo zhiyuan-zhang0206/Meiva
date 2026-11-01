@@ -4,64 +4,38 @@ import { GitFork, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
-import { DEFAULT_TIMELINE_COLORS, type ColorSlotId, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import { cn } from "@/lib/format/utils";
 
-import type { LifecycleTag, MarkerClass } from "./model/marker-classify";
+import { isSilentEphemeralPayload, type LifecycleTag, type MarkerClass } from "./model/marker-classify";
 
 
 export interface MarkerVisual {
   readonly icon: LucideIcon;
   readonly title: string;
   readonly titleKey?: string;
-  readonly titleClass: string;
-  readonly border: string;
-  readonly bg: string;
-  readonly text: string;
 }
-
-const LABEL_CLS = "uppercase tracking-widest";
 
 const LIFECYCLE_META: Record<
   LifecycleTag,
-  { icon: LucideIcon; title: string; titleKey: string; slot: ColorSlotId }
+  { icon: LucideIcon; title: string; titleKey: string }
 > = {
-  lifecycle_terminate: { icon: PowerOff, title: "Terminated", titleKey: "terminated", slot: "lifecycle_terminate" },
-  lifecycle_restart: { icon: RotateCw, title: "Restarted", titleKey: "restarted", slot: "lifecycle_restart" },
-  lifecycle_resurrect: { icon: RotateCw, title: "Resurrected", titleKey: "resurrected", slot: "lifecycle_resurrect" },
-  lifecycle_fork: { icon: GitFork, title: "Forked", titleKey: "forked", slot: "lifecycle_fork" },
+  lifecycle_terminate: { icon: PowerOff, title: "Terminated", titleKey: "terminated" },
+  lifecycle_restart: { icon: RotateCw, title: "Restarted", titleKey: "restarted" },
+  lifecycle_resurrect: { icon: RotateCw, title: "Resurrected", titleKey: "resurrected" },
+  lifecycle_fork: { icon: GitFork, title: "Forked", titleKey: "forked" },
 };
 
-const MEMORY_META = { icon: NotebookText, title: "Memory", titleKey: "memory", slot: "memory" } as const;
-const NOTE_META = { icon: Info, title: "Note", titleKey: "note", slot: "note" } as const;
+const MEMORY_META: MarkerVisual = { icon: NotebookText, title: "Memory", titleKey: "memory" };
+const NOTE_META: MarkerVisual = { icon: Info, title: "Note", titleKey: "note" };
 
-function slotVisual(
-  meta: { icon: LucideIcon; title: string; titleKey: string; slot: ColorSlotId },
-  colors: TimelineColors,
-): MarkerVisual {
-  const c = colors[meta.slot];
-  return {
-    icon: meta.icon,
-    title: meta.title,
-    titleKey: meta.titleKey,
-    titleClass: `${c.text ?? ""} ${LABEL_CLS}`.trim(),
-    border: c.border,
-    bg: c.bg ?? "",
-    text: c.text ?? "",
-  };
-}
-
-export function markerVisual(
-  cls: MarkerClass,
-  colors: TimelineColors = DEFAULT_TIMELINE_COLORS,
-): MarkerVisual {
+export function markerVisual(cls: MarkerClass): MarkerVisual {
   switch (cls.kind) {
     case "lifecycle":
-      return slotVisual(LIFECYCLE_META[cls.tag], colors);
+      return LIFECYCLE_META[cls.tag];
     case "memory":
-      return slotVisual(MEMORY_META, colors);
+      return MEMORY_META;
     case "note":
-      return slotVisual(NOTE_META, colors);
+      return NOTE_META;
     case "ephemeral":
       throw new Error("markerVisual called on an ephemeral marker");
   }
@@ -119,9 +93,7 @@ export function EphemeralSystemMarker({
   payload: string;
 }) {
   const t = useTranslations("markers");
-  if (payload === "compact_done") return null;
-  if (payload === "cancelled") return null;
-  if (payload.startsWith("compact_request:")) return null;
+  if (isSilentEphemeralPayload(payload)) return null;
   if (payload.startsWith("error:")) {
     const content = payload.slice("error:".length);
     return <EphemeralMarker label={t("errorPrefix", { content })} isError />;

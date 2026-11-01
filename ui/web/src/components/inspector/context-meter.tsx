@@ -3,38 +3,8 @@
 import { useTranslations } from "next-intl";
 
 import { formatTokens } from "@/lib/format/format-number";
-import type { ContextMeterWidth } from "@/lib/contracts/types";
-import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
 import { OVERFLOW_HIDDEN } from "@/lib/layout/layout";
-
-// Width classes for the gauge track, keyed by the `display.context_meter_width`
-// setting. "compact" is the original fixed width (w-16); "wide" is 3x that —
-// at tens of thousands of tokens the occupancy fill inside a 64px bar reads as
-// a single pixel-wide dot, so the setting's default is one tier above compact.
-export const CONTEXT_METER_WIDTH_CLASS: Record<ContextMeterWidth, string> = {
-  compact: "w-16",
-  comfortable: "w-32",
-  wide: "w-48",
-};
-
-/** Narrows an opaque `user_settings` value (JSONB — could be stale, from an
- *  older client, or unset) to a valid ContextMeterWidth, falling back to the
- *  setting's default rather than trusting an unsound cast. */
-export function resolveContextMeterWidth(value: unknown): ContextMeterWidth {
-  return value === "compact" || value === "comfortable" || value === "wide" ? value : "comfortable";
-}
-
-/** The gauge-width class for the user's `display.context_meter_width` setting —
- *  one resolution path for every consumer of the meter geometry: the
- *  ContextButton, the breakdown panel, and the composer's loading ghost (so the
- *  ghost occupies exactly the meter's footprint it stands in for). */
-export function useContextMeterWidthClass(): string {
-  const { settings } = useUserSettings();
-  return CONTEXT_METER_WIDTH_CLASS[
-    resolveContextMeterWidth(settings["display.context_meter_width"])
-  ];
-}
 
 export interface ContextMeterProps {
   /** Current context-window occupancy (the last LLM call's input_tokens). */
@@ -45,35 +15,30 @@ export interface ContextMeterProps {
   softCompactTokens: number;
   /** Force-compact ceiling (hard) — 0 when unknown. */
   hardCompactTokens: number;
-  /** Gauge track width class — one of CONTEXT_METER_WIDTH_CLASS. Defaults to
-   *  "compact" (the original fixed size) for callers that don't read the
-   *  display setting. */
-  barWidthClassName?: string;
   showText?: boolean;
-  /** Extra classes for the numeric text. The composer passes a narrow-hide
-   *  class (QA sweep 2026-09-18 F3: at 390px the readout truncated to "Co"
-   *  beside the Details control); the values stay reachable via the gauge's
-   *  aria-label and the breakdown popup. */
+  // meiva:note
+  // Extra classes for the numeric text.
   textClassName?: string;
   className?: string;
 }
 
-/** The composer's context readout: a thin gauge whose fill turns amber past the
- * soft (wind-down) threshold and red past the hard (force-compact) ceiling, with
- * tick marks at both, plus a numeric summary. The soft/hard values are the
- * agent model's own — a fraction of its context window (see
- * `base/lm/context_budget.py`), so a 200K-window model shows smaller marks
- * than a 1M-window one.
- *
- * The caller only mounts this once `contextTokens > 0` (an agent that has run at
- * least one LLM call). When `maxContextTokens` is 0 (a model with no known
- * window) the gauge and thresholds are omitted and only the raw count shows. */
+// meiva:note
+// The inspector's context readout: a fixed-width (`w-32`) gauge whose fill
+// turns amber past the soft (wind-down) threshold and red past the hard
+// (force-compact) ceiling, with tick marks at both, plus an optional numeric
+// summary. The soft/hard values are the agent model's own — a fraction of its
+// context window (see `base/lm/context_budget.py`), so a 200K-window model
+// shows smaller marks than a 1M-window one.
+//
+// The caller only mounts this once `contextTokens > 0` (an agent that has run at
+// least one LLM call). When `maxContextTokens` is 0 (a model with no known
+// window) the gauge and thresholds are omitted and only the raw count shows.
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
 export function ContextMeter({
   contextTokens,
   maxContextTokens,
   softCompactTokens,
   hardCompactTokens,
-  barWidthClassName = CONTEXT_METER_WIDTH_CLASS.compact,
   showText = true,
   textClassName,
   className,
@@ -122,8 +87,7 @@ export function ContextMeter({
           role="img"
           aria-label={label}
           className={cn(
-            "relative inline-block h-1.5 shrink-0 rounded-full bg-muted",
-            barWidthClassName,
+            "relative inline-block h-1.5 w-32 shrink-0 rounded-full bg-muted",
             OVERFLOW_HIDDEN
           )}
         >
@@ -157,29 +121,6 @@ export function ContextMeter({
             : " tokens"}
         </span>
       ) : null}
-    </span>
-  );
-}
-
-/** The composer's loading placeholder for the context readout: the same gauge
- *  geometry as ContextMeter's track (width from the same
- *  display.context_meter_width setting, so the readout's footprint is stable
- *  while the first snapshot is in flight), pulsing and decorative only —
- *  aria-hidden, no role, no numbers, not a button. */
-export function ContextMeterGhost({ className }: { className?: string }) {
-  const barWidthClassName = useContextMeterWidthClass();
-  return (
-    <span
-      aria-hidden="true"
-      data-testid="context-meter-ghost"
-      className={cn("inline-flex items-center gap-1.5", className)}
-    >
-      <span
-        className={cn(
-          "inline-block h-1.5 shrink-0 animate-pulse rounded-full bg-muted",
-          barWidthClassName,
-        )}
-      />
     </span>
   );
 }

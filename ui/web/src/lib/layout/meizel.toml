@@ -1,9 +1,8 @@
-exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", "layout.ts", "panel-layout-storage.ts", "scroll-memory.ts", "sticky.ts", "switch-budget.ts", "use-client-ready.ts", "use-document-visible.ts", "use-media-query.ts"]
+exports = ["breakpoint.ts", "compact-transition.ts", "layout.ts", "panel-layout-storage.ts", "scroll-memory.ts", "sticky.ts", "switch-budget.ts", "use-client-ready.ts", "use-document-visible.ts", "use-media-query.ts"]
 
 [uses]
 "breakpoint.test.ts" = ["breakpoint.ts"]
 "breakpoint.ts" = ["use-media-query.ts"]
-"content-toggle-store.test.ts" = ["content-toggle-store.ts"]
 "layout.ts" = ["primitives"]
 "panel-layout-storage.test.ts" = ["panel-layout-storage.ts"]
 "sticky-switch-race.test.ts" = ["sticky.ts"]

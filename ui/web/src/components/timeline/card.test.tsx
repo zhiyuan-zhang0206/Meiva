@@ -18,7 +18,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
-import { resolveTimelineColors } from "@/lib/timeline/timeline-colors";
 import { formatItemTime } from "./timestamp";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
@@ -71,10 +70,12 @@ describe("messageCardConfig", () => {
     expect(cfg).toBeNull();
   });
 
-  it("system_prompt → rich=system_prompt, fixed default collapsed", () => {
+  it("system_prompt → monochrome System prompt label, fixed default collapsed", () => {
     const cfg = messageCardConfig(item("system_prompt", { payload: "hello" }));
     expect(cfg).not.toBeNull();
-    expect(cfg!.rich).toBe("system_prompt");
+    expect(cfg!.rich).toBeNull();
+    expect(cfg!.title).toBe("System prompt");
+    expect(cfg!.titleKey).toBe("timeline.systemPrompt");
     expect(cfg!.fixedDefault).toBe(false);
   });
 
@@ -104,7 +105,7 @@ describe("messageCardConfig", () => {
     expect(cfg!.rich).toBe("output");
   });
 
-  it("agent_chat → no rich, title='Meiva ▸', expanded when user-facing and collapsed when not", () => {
+  it("agent_chat → no rich, title='Meiva ▸', expanded by default in both primary and secondary contexts", () => {
     const cfg = messageCardConfig(item("agent_chat"));
     expect(cfg!.rich).toBeNull();
     expect(cfg!.title).toBe("Meiva ▸");
@@ -112,7 +113,7 @@ describe("messageCardConfig", () => {
     expect(cfg!.copy).toBe(true);
 
     const internalCfg = messageCardConfig(item("agent_chat", { user_facing: false }));
-    expect(internalCfg!.fixedDefault).toBe(false);
+    expect(internalCfg!.fixedDefault).toBe(true);
     expect(internalCfg!.copy).toBe(true);
   });
 
@@ -126,16 +127,14 @@ describe("messageCardConfig", () => {
     expect(cfg!.title).toContain("(streaming interrupted)");
   });
 
-  it("inbound_chat source=user → Human, gray border", () => {
+  it("inbound_chat source=user → Human", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "user" }));
     expect(cfg!.title).toBe("Human");
-    expect(cfg!.border).toContain("gray");
   });
 
-  it("inbound_chat source=agent:42 → Agent 42, violet border", () => {
+  it("inbound_chat source=agent:42 → Agent 42", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "agent:42" }));
     expect(cfg!.title).toBe("Agent 42");
-    expect(cfg!.border).toContain("violet");
   });
 
   it("inbound_chat ui:page → Human", () => {
@@ -145,39 +144,34 @@ describe("messageCardConfig", () => {
     expect(cfg!.title).toBe("Human");
   });
 
-  it("inbound_chat unknown source → System, sky border", () => {
+  it("inbound_chat unknown source → System", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "kernel" }));
     expect(cfg!.title).toBe("System");
-    expect(cfg!.border).toContain("sky");
   });
 
-  it("inbound_compact → differentiated labels, sky border", () => {
+  it("inbound_compact → differentiated labels", () => {
     const cfgSummary = messageCardConfig(item("inbound_compact_summary"));
     expect(cfgSummary!.title).toBe("Compact summary");
-    expect(cfgSummary!.border).toContain("sky");
 
     const cfgRequest = messageCardConfig(item("inbound_compact_request"));
     expect(cfgRequest!.title).toBe("Compact request");
-    expect(cfgRequest!.border).toContain("sky");
   });
 
-  it("system_marker lifecycle_terminate → Terminated, rose border", () => {
+  it("system_marker lifecycle_terminate → Terminated with monochrome header", () => {
     const cfg = messageCardConfig(
       item("system_marker", { source: "lifecycle_terminate" }),
     );
     expect(cfg!.title).toBe("Terminated");
-    expect(cfg!.border).toContain("rose");
   });
 
-  it("system_marker memory → Memory, violet border", () => {
+  it("system_marker memory → Memory with monochrome header (no purple override)", () => {
     for (const src of ["memory", "agent_memory"]) {
       const cfg = messageCardConfig(item("system_marker", { source: src }));
       expect(cfg!.title).toBe("Memory");
-      expect(cfg!.border).toContain("violet");
     }
   });
 
-  it("system_marker note → Note", () => {
+  it("system_marker note → Note with monochrome header", () => {
     for (const src of [
       "sdk_hint",
       "memory_write_check",
@@ -190,42 +184,6 @@ describe("messageCardConfig", () => {
       expect(cfg!.title).toBe("Note");
     }
   });
-
-  // ── Configurable palette (tasks #3304 / #3312) ──────────────────────────
-  // Inbound defaults are pinned above (gray / violet / sky / rose). These pin
-  // the changed defaults + the override path — overrides arrive as a resolved
-  // color map from the settings hook, exactly like the timeline passes them.
-
-  it("agent_code default → cyan-500/70 border", () => {
-    const cfg = messageCardConfig(item("agent_code"));
-    expect(cfg!.border).toBe("border-cyan-500/70");
-  });
-
-  it("agent_code with a recorded override → the family drives the border", () => {
-    const colors = resolveTimelineColors({ "display.color.agent_code": "pink" });
-    const cfg = messageCardConfig(item("agent_code"), colors);
-    expect(cfg!.border).toBe("border-pink-500/70");
-  });
-
-  it("agent_reasoning default → blue-400/40 border + blue bg", () => {
-    const cfg = messageCardConfig(item("agent_reasoning"));
-    expect(cfg!.border).toBe("border-blue-400/40");
-    expect(cfg!.bg).toBe("bg-blue-50/60 dark:bg-blue-900/20");
-  });
-
-  it("note default → teal border/bg/text tint", () => {
-    const cfg = messageCardConfig(item("system_marker", { source: "sdk_hint" }));
-    expect(cfg!.border).toBe("border-teal-500/40");
-    expect(cfg!.bg).toBe("bg-teal-50/40 dark:bg-teal-950/15");
-    expect(cfg!.cardText).toBe("text-teal-700 dark:text-teal-300");
-  });
-
-  it("note with a recorded override → fuchsia family", () => {
-    const colors = resolveTimelineColors({ "display.color.note": "fuchsia" });
-    const cfg = messageCardConfig(item("system_marker", { source: "sdk_hint" }), colors);
-    expect(cfg!.border).toBe("border-fuchsia-500/40");
-    expect(cfg!.cardText).toBe("text-fuchsia-700 dark:text-fuchsia-300");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -237,8 +195,6 @@ describe("MessageCard", () => {
     rich: null,
     icon: null,
     title: "Test",
-    border: "border-red-500",
-    bg: "bg-red-50",
     fixedDefault: true,
     showTimestamp: false,
     copy: false,
@@ -353,7 +309,7 @@ describe("CardHeader", () => {
     expect(focusImport).toHaveBeenCalledTimes(1);
   });
 
-  it("renders rich summary for system_prompt kind", () => {
+  it("renders plain 'System prompt' label without a line count", () => {
     const sysItem = item("system_prompt", {
       payload: "line1\nline2\nline3",
     });
@@ -362,6 +318,6 @@ describe("CardHeader", () => {
       <CardHeader item={sysItem} config={cfg} expanded={false} onToggle={noop} />,
     );
     expect(container.textContent).toContain("System prompt");
-    expect(container.textContent).toContain("3 lines");
+    expect(container.textContent).not.toContain("lines");
   });
 });

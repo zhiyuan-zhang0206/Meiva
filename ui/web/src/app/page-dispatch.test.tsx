@@ -166,22 +166,12 @@ describe("model capability notice & unified file staging", () => {
     expect(screen.getByTestId("composer").getAttribute("data-stage-files")).toBe("picked.txt");
   });
 
-  it.each(["claude_code", "codex"] as const)("hides native context meter for %s while keeping file staging", (harness) => {
+  it.each(["claude_code", "codex"] as const)("keeps file staging for %s harnesses", (harness) => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, harness, supports_vision: true })];
-    hooksState.settings["display.composer_context_meter"] = true;
     wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("false");
     fireEvent.click(screen.getByTestId("upload-button"));
     expect(screen.getByTestId("composer").getAttribute("data-stage-files")).toBe("picked.txt");
-  });
-
-  it("enables the native context meter for a meiva agent when opted in", () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: true })];
-    hooksState.settings["display.composer_context_meter"] = true;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("true");
   });
 });
 

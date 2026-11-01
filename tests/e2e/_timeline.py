@@ -74,7 +74,7 @@ def wait_for_parked_tail(page: Page, item_id: str, payload: str) -> None:
             if attempt:
                 raise AssertionError(
                     (
-                        "the timeline never rendered expanded rows — the details setting did not reach the page",
+                        "the timeline never rendered primary message rows",
                         attempts,
                     )
                 ) from None

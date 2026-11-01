@@ -32,10 +32,9 @@ does not produce an error toast or clear the new view's loading state.
 
 A compact replacement preserves the upstream retention edge: `compactReplaceSeq`
 and `compactReplaceAgent` trigger reattachment through the same cancellable
-history-page read. `display.compact_history_sessions` defaults to one automatic
-page, accepts 0 to skip automatic reads, and accepts -1 to restore every
-available page serially. A completed page with `has_more=false` ends an All
-walk; an unready window before the post-compact tail read settles does not.
+history-page read, walking every available older page serially (`unlimited`
+retention, user ruling 2026-11-01). A completed page with `has_more=false` ends
+the walk; an unready window before the post-compact tail read settles does not.
 Both the SSE reset-window snapshot and a reconnect GET that crosses an unseen
 compact capture the previously displayed rows in `compactBuffer` while canonical
 `items` takes the new current window. The buffer owns a thread/epoch, each row's
@@ -50,9 +49,8 @@ historical checkpoint reader omits its system prompt; older historical segments
 keep their existing coordinates. Partial rows, prompt/summary, and re-attached
 head notes do not require a match.
 Canonical historical rows stay masked while the buffer is displayed. A covering
-page releases the buffer in its store update; terminal paging or a finite page
-budget releases any uncovered rows at settlement. Zero retention skips buffering
-and preserves the immediate swap. Switch clears the buffer; hide and reconnect
+page releases the buffer in its store update; terminal paging releases any
+uncovered rows at settlement. Switch clears the buffer; hide and reconnect
 invalidate a page owner's epoch while preserving it; a newer compact captures
 the current display at a new epoch. Late pages cannot enter a newer epoch.
 

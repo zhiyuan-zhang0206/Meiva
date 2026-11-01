@@ -17,7 +17,6 @@ export function registerUseTimelineCompactTests(ctx: UseTimelineTestContext): vo
     timelineReads,
     turnStarts,
     resolves,
-    seedSettings,
     pushEvent,
     snapshotItem,
     postWindow,
@@ -25,11 +24,10 @@ export function registerUseTimelineCompactTests(ctx: UseTimelineTestContext): vo
     wrapper,
   } = ctx;
 
-describe("useTimeline compact history sessions", () => {
-  it("walks newest-first across two previous segments when display.compact_history_sessions = 2", async () => {
+describe("useTimeline compact history retention", () => {
+  it("walks newest-first across two previous segments until has_more=false", async () => {
 
     const showError = vi.fn();
-    seedSettings({ "display.compact_history_sessions": 2 });
     const pageFor = (opts?: { before?: string; limit?: number }): TimelineResponse => {
       if (opts?.before === "2.0") {
         return tlResp(
@@ -88,8 +86,7 @@ describe("useTimeline compact history sessions", () => {
     expect(showError).not.toHaveBeenCalled();
   });
 
-  it("All walks through a long segment and more than three previous pages, then stops at has_more=false", async () => {
-    seedSettings({ "display.compact_history_sessions": -1 });
+  it("walks through a long segment and more than three previous pages, then stops at has_more=false", async () => {
     const pages: Record<string, TimelineResponse> = {
       "2.0": tlResp([snapshotItem({ item_id: "1.5", payload: "same long segment" })], true),
       "1.5": tlResp([snapshotItem({ item_id: "s1.a.0.0", kind: "inbound_compact_summary", payload: "first" })], true),
@@ -114,8 +111,7 @@ describe("useTimeline compact history sessions", () => {
     expect(beforeCalls()).toHaveLength(5);
   });
 
-  it("All waits for the post-compact tail read before deciding whether older history exists", async () => {
-    seedSettings({ "display.compact_history_sessions": -1 });
+  it("waits for the post-compact tail read before deciding whether older history exists", async () => {
     let postTailResolve: ((value: TimelineResponse) => void) | null = null;
     timeline.always(resolves(tlResp([
       snapshotItem({ item_id: "90.0", payload: "before compact" }),
@@ -135,8 +131,7 @@ describe("useTimeline compact history sessions", () => {
     expect(timelineReads.filter((read) => read.before)).toHaveLength(1);
   });
 
-  it("All retries a failed history page and stops after the successful terminal page", async () => {
-    seedSettings({ "display.compact_history_sessions": -1 });
+  it("retries a failed history page and stops after the successful terminal page", async () => {
     timeline.always(resolves(tlResp(postWindow(), true)));
     wireReplies.set("/api/agents/42/timeline?before=2.0", [
       { kind: "json", status: 503, body: { detail: "transient" } },
@@ -153,30 +148,6 @@ describe("useTimeline compact history sessions", () => {
     await waitFor(() => expect(result.current.items.some((item) => item.payload === "recovered")).toBe(true));
     expect(olderAttempts()).toBe(2);
     expect(showError).toHaveBeenCalledWith("Failed to load older messages: transient");
-  });
-
-  it("display.compact_history_sessions = 0 keeps the legacy clear-on-compact behavior (no retention fetch)", async () => {
-    const showError = vi.fn();
-    seedSettings({ "display.compact_history_sessions": 0 });
-    const postItems = [
-      snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-      snapshotItem({ item_id: "1.0", kind: "agent_chat", payload: "post-compact" }),
-    ];
-    timeline.always(resolves(tlResp(postItems, true)));
-    timeline.queue(
-      resolves(tlResp([snapshotItem({ item_id: "90.0", kind: "inbound_chat", payload: "pre-compact" })], true)),
-    );
-
-    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(result.current.items).toHaveLength(1));
-
-    pushEvent({ role: "compact_done", agent_id: 42 });
-    pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 2, items: postItems });
-    await ctx.delay(20);
-
-    const beforeCalls = timelineReads.filter((read) => read.before !== undefined);
-    expect(beforeCalls).toHaveLength(0);
-    expect(result.current.items.map((i) => i.item_id)).toEqual(["0.0", "1.0"]);
   });
 
   it("the post-compact snapshot also invalidates the agent's inspect / pending / token-usage caches (task #1959)", async () => {

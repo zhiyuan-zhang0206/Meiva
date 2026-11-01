@@ -1,23 +1,22 @@
 "use client";
 
+// meiva:note
 // Compact-history retention (task #3698; user ruling 2026-09-17): a compact
 // wholesale-replaces the active timeline, and the new summary must not clear
-// the view — older history pages re-attach automatically above it through
-// the same cross-segment fetch as scroll-up. How many pages stay visible is
-// controlled by `display.compact_history_sessions` (default 1, -1 restores all
-// available history). The fetch may need the post-compact GET to settle
-// first (`hasMoreOlder` only turns true with it), so a pending request
-// retries as the window state changes; misses are budgeted, then dropped.
+// the view — all older history pages re-attach automatically above it through
+// the same cross-segment fetch as scroll-up. The fetch may need the
+// post-compact GET to settle first (`hasMoreOlder` only turns true with it),
+// so a pending request retries as the window state changes; misses are
+// budgeted, then dropped.
+// meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import {
-  normalizeCompactHistorySessions,
   type OlderLoadOrigin,
   type OlderSegmentLoadResult,
 } from "./timeline-plan";
 import { useTimelineStore } from "./timeline-store";
-import { useUserSettings } from "../state/use-user-settings";
 
 const RETENTION_MAX_ATTEMPTS = 5;
 
@@ -48,17 +47,7 @@ export function useCompactHistoryRetention(options: {
   const compactReplaceSeq = useTimelineStore((s) => s.compactReplaceSeq);
   const compactReplaceAgent = useTimelineStore((s) => s.compactReplaceAgent);
 
-  // Retention knob: how many older pages to restore after a compact rewrites
-  // the active history. Default 1; 0 clears, -1 restores all available pages.
-  const { settings } = useUserSettings();
-  const compactHistorySessions = normalizeCompactHistorySessions(
-    settings["display.compact_history_sessions"],
-  );
-  useLayoutEffect(() => {
-    useTimelineStore.getState().setCompactHistoryPages(compactHistorySessions);
-  }, [compactHistorySessions]);
-
-  const retentionRef = useRef<{ thread: number; epoch: number; remaining: number; attempts: number } | null>(
+  const retentionRef = useRef<{ thread: number; epoch: number; attempts: number } | null>(
     null,
   );
   const retentionInFlightRef = useRef<{ pending: object } | null>(null);
@@ -85,6 +74,7 @@ export function useCompactHistoryRetention(options: {
     const st = useTimelineStore.getState();
     if (st.activeThreadId !== agentId || st.compactEpoch !== pending.epoch) return;
     if (!st.hasMoreOlder) {
+      // meiva:note
       // False before the tail GET is unready; false after it is terminal.
       if (compactTailReady) {
         retentionRef.current = null;
@@ -114,17 +104,10 @@ export function useCompactHistoryRetention(options: {
             return;
           }
           current.attempts = 0;
-          if (current.remaining === -1) {
-            // Yield between pages: an unlimited walk must leave room for
-            // selection/visibility changes and browser rendering.
-            await new Promise<void>((resolve) => setTimeout(resolve, 0));
-            continue;
-          }
-          current.remaining -= 1;
-          if (current.remaining <= 0) {
-            retentionRef.current = null;
-            useTimelineStore.getState().finishCompactTransition(agentId, pending.epoch);
-          }
+          // meiva:note
+          // Yield between pages: an unlimited walk must leave room for
+          // selection/visibility changes and browser rendering.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       } finally {
         if (retentionInFlightRef.current === run) retentionInFlightRef.current = null;
@@ -134,15 +117,14 @@ export function useCompactHistoryRetention(options: {
   useEffect(() => {
     if (compactReplaceSeq === lastRetentionSeqRef.current) return;
     lastRetentionSeqRef.current = compactReplaceSeq;
-    if (agentId == null || compactReplaceAgent !== agentId || compactHistorySessions === 0) return;
+    if (agentId == null || compactReplaceAgent !== agentId) return;
     retentionRef.current = {
       thread: agentId,
       epoch: useTimelineStore.getState().compactEpoch,
-      remaining: compactHistorySessions,
       attempts: 0,
     };
     runRetention();
-  }, [compactReplaceSeq, compactReplaceAgent, agentId, compactHistorySessions, runRetention]);
+  }, [compactReplaceSeq, compactReplaceAgent, agentId, runRetention]);
   // Retry a pending retention as the post-replace window settles: the GET
   // refetch flips hasMoreOlder on, prepends change the item count — either
   // can make a previously-blocked attempt loadable.
