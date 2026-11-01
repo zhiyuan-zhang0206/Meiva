@@ -60,6 +60,12 @@ listed name at its top level is followed, and so is a module that imports it fro
 an alias assigned to a variable is not. A reader has one kind, the one a caller asks for:
 `resolve_meiva_home()` reads the environment and the user's home, and is listed as `home`.
 
+The list is not the whole surface: a function that acquires the world and is called
+from the repository carries its read into every caller that hands it nothing, and no
+`[ambient-readers]` entry covers that unless one is written for it by hand. `meizel debt
+propagation` measures those call sites without recording them — see
+[[meizel/docs/checker/debt/propagation.meiva.okf.md|world reads that travel through a function]].
+
 ## Which functions belong in the list
 
 A reader returns something the world decides (the environment, a home path, the platform, a process

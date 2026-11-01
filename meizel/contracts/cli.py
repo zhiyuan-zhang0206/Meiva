@@ -11,6 +11,7 @@ from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
 from meizel.contracts.debt_carry import renames_since, run_debt
+from meizel.contracts.debt_sites import propagation
 from meizel.contracts.explain import explain
 from meizel.contracts.policy import Surface, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
@@ -257,6 +258,13 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     )
     listing.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
     listing.add_argument("paths", nargs="*", help="only files under these paths")
+    travelling = modes.add_parser(
+        "propagation",
+        help="measure the world reads that travel through a function (counted, not in the ledger)",
+    )
+    travelling.add_argument(
+        "--top", type=int, default=10, help="how many of the widest wrappers to show"
+    )
     approving = modes.add_parser(
         "approved", help="list the files approved to patch, with the patches each holds now"
     )
@@ -317,6 +325,20 @@ def _run_impacted(
     for path in sorted(reached):
         print(path)
     return 0
+
+
+# meiva:note
+# `meizel debt ...`: the commands that read or write recorded debt, and the one that measures the
+# world reads a baseline cannot hold. Kept out of `_dispatch` so the dispatch stays a list of commands.
+def _run_debt(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+    if args.debt_mode == "propagation":
+        analysis = analyze(repo.universe(), jobs=args.jobs)
+        print(
+            propagation(analysis.universe, analysis.manifests, analysis.scans).render(top=args.top)
+        )
+        return 0
+    targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
+    return run_debt(repo, targets, args, args.jobs)
 
 
 def _run_sync(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
@@ -380,8 +402,7 @@ def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -
     if cmd == "check":
         return _run_check(repo, root, base, args)
     if cmd == "debt":
-        targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
-        return run_debt(repo, targets, args, args.jobs)
+        return _run_debt(repo, root, base, args)
     if cmd == "policy":
         return _run_policy(repo, args)
     if cmd == "explain":
