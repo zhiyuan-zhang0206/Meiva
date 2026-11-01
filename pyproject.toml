@@ -57,16 +57,13 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.30",
     "pyyaml>=6.0.3",
     "httpx[socks]>=0.28",
-    # --- Common libraries pre-installed for the agent runtime (task #630) ---
-    # Imported by shipped code or tooling (Pillow, requests, bs4, mdit,
-    # cryptography, lark, websockets, oss2) and kept in the runtime set. The data
-    # analysis half of that promise lives in the `user-code` default group below:
-    # no module imports it, so a service profile can leave it out.
-    # Still excluded outright: torch / tensorflow / jax / transformers / opencv /
-    # numba / dask.
+    # --- Common runtime libraries ---
+    # Imported directly by first-party code (Pillow, requests, mdit,
+    # cryptography, lark, websockets, oss2).
+    # Heavy ML/numerical libraries are excluded outright: torch / tensorflow / jax /
+    # transformers / opencv / numba / dask.
     "Pillow>=10.4.0",  # image processing (PIL)
     "requests>=2.32.0",  # sync HTTP client
-    "beautifulsoup4>=4.12.3",  # HTML parsing
     "mdit-py-plugins>=0.6",  # GFM footnote references in shared documents
     "markdown-it-py>=4.0",  # Markdown document reference parsing
     "cryptography>=42.0.0",  # crypto primitives
@@ -132,14 +129,12 @@ exclude = ["**/tests/**"]
 
 [tool.uv]
 package = true
-# `dev` builds the product, `user-code` is what agents import from execute_code,
-# and `skill-tools` is what the built-in skill scripts run. Naming all three keeps
-# every `uv sync` (developer, CI, fleet update) installing the same set as before
-# these groups existed, so no existing venv loses a library. A service profile
-# excludes them explicitly: `uv sync --only-group svc-X` installs that service's
-# face alone, and `--no-group user-code --no-group skill-tools` is the one-machine
-# built without either.
-default-groups = ["dev", "user-code", "skill-tools"]
+# `dev` builds the product and `skill-tools` is what the built-in skill scripts run.
+# Naming both keeps every `uv sync` (developer, CI, fleet update) installing the same
+# set, so no existing venv loses a library. A service profile excludes them explicitly:
+# `uv sync --only-group svc-X` installs that service's face alone, and
+# `--no-group skill-tools` is the one-machine build without the skill scripts.
+default-groups = ["dev", "skill-tools"]
 
 [dependency-groups]
 dev = [
@@ -162,39 +157,7 @@ dev = [
     "httpx2>=2.3.0",
     "mutmut>=3.5.0",
     "pytest-split",
-    # Same pin as the `harness-claude` extra, stated twice on purpose: the
-    # adapter imports the SDK inside a function so a runtime install without the
-    # extra still works, but pyright resolves that import while checking, so the
-    # development environment has to carry it.
-    "claude-agent-sdk>=0.2.168,<0.3",
-]
-
-# Installed by default, because `[tool.uv] default-groups` names it: this is the
-# set `execute_code` code may import, not part of the application's own import
-# graph. Kept out of `[project.dependencies]` so a deployment that runs no agent
-# code can build without it:
-#     uv sync --no-group user-code
-#     uv export --no-group user-code
-# No first-party module imports any member (tests/contracts/test_user_code_group.py
-# re-derives that on every run); removing or adding one changes the measured
-# install face, so update that test with the group.
-user-code = [
-    "pandas>=2.2.3",  # tabular data — DataFrame
-    "scipy>=1.14.1",  # scientific computing
-    "scikit-learn>=1.5.0",  # machine learning
-    "statsmodels>=0.14.4",  # statistics / regression
-    "matplotlib>=3.9.0",  # plotting
-    "openpyxl>=3.1.2",  # Excel .xlsx read/write
-    "xlsxwriter>=3.2.0",  # Excel .xlsx writing
-    "python-docx>=1.1.0",  # Word .docx
-    "pypdf>=4.2.0",  # PDF text extraction
-    "lxml>=5.2.0",  # fast XML/HTML parsing
-    "python-dateutil>=2.9.0",  # date parsing
-    "aiohttp>=3.9.0",  # async HTTP client
-    "rich>=13.7.0",  # terminal formatting
-    "tqdm>=4.66.0",  # progress bars
-    "tabulate>=0.9.0",  # table formatting
-    "watchdog>=6.0.0",  # filesystem events in agent-authored code
+    "beautifulsoup4>=4.12.3",  # HTML parsing for scripts/model_registry/update_model_pricing.py
 ]
 
 # Installed by default, because `[tool.uv] default-groups` names it: the libraries the
@@ -204,7 +167,7 @@ user-code = [
 #     uv sync --only-group svc-gateway     # a service face: this group is not in it
 #     uv sync --no-group skill-tools       # a one-machine build without the skill scripts
 # Default membership does not leak into a service face: `uv export --only-group svc-X` emits
-# that group's closure only, never another default group's (proved beside it by `user-code`).
+# that group's closure only, never another default group's.
 # A skill script that finds a member missing raises MissingSkillToolError
 # (meiva_builtins/skills/toolbox.py), which names this group and the install command.
 skill-tools = [
@@ -688,6 +651,8 @@ exclude = [
 ]
 # Libraries with incomplete third-party stubs — temporarily lenient.
 reportMissingTypeStubs = false
+# Type stubs in typings/ may stand in for optional provider SDKs absent from basic venv.
+reportMissingModuleSource = false
 # tests deliberately import internal helpers prefixed with underscore (_handle_compact_if_any
 # etc.) for unit tests, not as implementation users.
 reportPrivateUsage = "none"
