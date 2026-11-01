@@ -9,7 +9,7 @@ import pytest
 
 from scripts.provision import prepush_branch_diff
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 BRANCH_LINT = ROOT / "scripts/hooks/prepush-branch-lint.sh"
 MODULE = ROOT / "scripts/provision/prepush_branch_diff.py"
 
