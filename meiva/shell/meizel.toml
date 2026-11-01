@@ -5,7 +5,7 @@ exports = ["background.py", "background_plan.py", "coding_tools", "log_ring.py",
 "background.py" = ["background_plan.py", "handle.py", "log_ring.py", "session_env.py", "sessions.py"]
 "sessions.py" = ["handle.py", "session_env.py", "session_plan.py", "ttl_store.py"]
 "coding_tools" = ["session_env.py", "sessions.py", "tests"]
-"tests" = ["background.py", "background_plan.py", "handle.py", "log_ring.py", "session_env.py", "session_plan.py", "sessions.py"]
+"tests" = ["background.py", "background_plan.py", "handle.py", "log_ring.py", "session_env.py", "session_plan.py", "sessions.py", "ttl_store.py"]
 
 [purity]
 "background_plan.py" = "strict"

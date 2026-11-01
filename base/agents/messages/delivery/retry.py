@@ -62,8 +62,10 @@ def retryable_database_error(error: Exception) -> bool:
     from psycopg import OperationalError
     from psycopg_pool import PoolTimeout
 
+    from base.db.protocols import RestoreAbandonedError
+
     return (
-        isinstance(error, PoolTimeout)
+        isinstance(error, (PoolTimeout, RestoreAbandonedError))
         or (type(error) is OperationalError and error.sqlstate is None)
         or (
             isinstance(error, OperationalError)

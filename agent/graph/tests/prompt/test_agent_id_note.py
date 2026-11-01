@@ -4,7 +4,7 @@ import os
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -280,6 +280,140 @@ def test_own_label_propagates_a_context_without_a_database() -> None:
 def test_note_propagates_a_label_failure() -> None:
     with pytest.raises(OperationalError, match="label connection is unavailable"):
         agent_id_note(_context(ClientSet(database=_unreachable)))
+
+
+@pytest.mark.usefixtures("labelled_agent")
+def test_own_label_recovers_from_a_half_open_cached_connection(database: Database) -> None:
+    closed_stale = 0
+
+    class _HalfOpenCursor:
+        def __enter__(self) -> _HalfOpenCursor:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def execute(self, *_args: object) -> None:
+            raise OperationalError(
+                "consuming input failed: could not receive data from server: Operation timed out"
+            )
+
+    class _HalfOpenConn:
+        closed = False
+        broken = False
+
+        def cursor(self) -> _HalfOpenCursor:
+            return _HalfOpenCursor()
+
+        def close(self) -> None:
+            nonlocal closed_stale
+            closed_stale += 1
+            self.closed = True
+
+    calls = 0
+
+    class _FlakyThenRealDb:
+        def connect(self, *, autocommit: bool = False) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return _HalfOpenConn()
+            return database.connect(autocommit=autocommit)
+
+    owned = ClientSet(database=cast(Any, _FlakyThenRealDb))
+    try:
+        _ = owned.sql._get()
+        assert own_label(_context(owned), 29) == "memory steward"
+        assert closed_stale == 1
+        assert calls == 2
+    finally:
+        owned.close()
+
+
+def test_own_label_does_not_retry_statement_timeout() -> None:
+    attempts = 0
+
+    class _SlowCursor:
+        def __enter__(self) -> _SlowCursor:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def execute(self, *_args: object) -> None:
+            nonlocal attempts
+            attempts += 1
+            raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
+
+    class _SlowConn:
+        closed = False
+        broken = False
+
+        def cursor(self) -> _SlowCursor:
+            return _SlowCursor()
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _SlowDb:
+        def connect(self, *, autocommit: bool = False) -> Any:
+            del autocommit
+            return _SlowConn()
+
+    owned = ClientSet(database=cast(Any, _SlowDb))
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        own_label(_context(owned), 29)
+    assert attempts == 1
+
+
+def test_cluster_facts_retries_after_a_half_open_sql_connection(
+    db_conn: psycopg.Connection[Any],
+    database: Database,
+) -> None:
+    from types import SimpleNamespace
+
+    from agent.graph._init_context import cluster_facts
+
+    db_conn.execute(
+        "INSERT INTO machines (name, role, description) "
+        "VALUES ('company-mini', ARRAY['agent-runner'], 'Mini runner') "
+        "ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description"
+    )
+    db_conn.commit()
+    calls = 0
+
+    class _HalfOpenCursor:
+        def __enter__(self) -> _HalfOpenCursor:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def execute(self, *_args: object) -> None:
+            raise OperationalError("consuming input failed: Operation timed out")
+
+    def _connect(*, autocommit: bool = False) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return SimpleNamespace(
+                closed=False, broken=False, cursor=_HalfOpenCursor, close=lambda: None
+            )
+        return database.connect(autocommit=autocommit)
+
+    owned = ClientSet(database=cast(Any, lambda: SimpleNamespace(connect=_connect)))
+    try:
+        _ = owned.sql._get()
+        ctx = MeivaContext(
+            identity=AgentIdentity(agent_id=29, owns_loop=True),
+            ops_pool=cast(Any, object()),
+            clients=owned,
+        )
+        facts = cluster_facts(ctx)
+        assert any(f.machine == "company-mini" and "Mini runner" in f.role for f in facts)
+        assert calls == 2
+    finally:
+        owned.close()
 
 
 def test_machine_clause_states_the_machine_name() -> None:

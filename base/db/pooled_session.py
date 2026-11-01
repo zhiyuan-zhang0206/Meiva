@@ -22,6 +22,7 @@ import psycopg
 from psycopg.rows import tuple_row
 
 from base.db.code_version_gate import ProcessDbGate
+from base.db.protocols import RestoreAbandonedError as RestoreAbandonedError
 
 # meiva:note
 # Statement-level ceiling for every query through the sanctioned entry points
@@ -220,13 +221,30 @@ def _socket_fd(conn: psycopg.Connection | psycopg.AsyncConnection) -> int | None
 
 
 # meiva:note
-# Raised when a restore ran past its client deadline. It is a TimeoutError so a
-# caller that already treats a timed-out borrow as a retryable stall keeps doing
-# so; the pool counts any check failure as a failed connection and replaces it,
-# and the cut above has already made that connection unusable, so no further
-# close() is attempted here.
-class RestoreAbandonedError(TimeoutError):
-    pass
+# True when a database failure is a transient transport drop, client-deadline cut, or
+# SQLSTATE Class 08 connection exception (excluding server-side statement/transaction
+# cancellations on caller queries).
+def retryable_connection_error(error: BaseException) -> bool:
+    return (
+        isinstance(error, RestoreAbandonedError)
+        or (type(error) is psycopg.OperationalError and error.sqlstate is None)
+        or (
+            isinstance(error, psycopg.OperationalError)
+            and error.sqlstate is not None
+            and error.sqlstate.startswith("08")
+        )
+    )
+
+
+# meiva:note
+# True when a baseline session restore failed on a stalled or dead pooled backend.
+# Matches psycopg_pool's check-failure replacement posture: a restore whose own
+# statement_timeout, transaction_timeout, or client_deadline fired replaces the
+# borrowed connection.
+def retryable_restore_error(error: BaseException) -> bool:
+    return retryable_connection_error(error) or isinstance(
+        error, (psycopg.errors.QueryCanceled, psycopg.errors.TransactionTimeout)
+    )
 
 
 # meiva:note
