@@ -13,6 +13,7 @@ from pathlib import Path
 
 import psutil
 
+from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.paths import run_dir
 from base.sessions.pty import client
@@ -45,6 +46,7 @@ _SESSION_CREATE_TIME_TOLERANCE_S = 2.0
 # different process (start-time mismatch), does not count. Neither does a
 # pty-sessions service that does not answer: there is then no evidence either way.
 def hosting_supervised_session(home: Path) -> str | None:
+    macos = is_macos()
     try:
         me = psutil.Process()
         lineage = {me.pid} | {p.pid for p in me.parents()}
@@ -61,7 +63,7 @@ def hosting_supervised_session(home: Path) -> str | None:
                 is_record_process = record.identifies(record.pid) is True
             else:
                 is_record_process = (
-                    abs(stable_create_time(proc) - record.create_time)
+                    abs(stable_create_time(proc, macos=macos) - record.create_time)
                     <= _SESSION_CREATE_TIME_TOLERANCE_S
                 )
             if is_record_process:

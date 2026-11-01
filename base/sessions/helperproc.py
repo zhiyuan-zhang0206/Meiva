@@ -24,7 +24,7 @@ from base.host.permissions_helper.client import (
 )
 from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
-from base.native_process.os_platform import Platform
+from base.native_process.os_platform import Platform, is_macos
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_path, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
@@ -68,13 +68,17 @@ def _process_is_live(process: psutil.Process) -> bool:
 
 def _process_for_record(record: SessionRecord) -> psutil.Process | None:
     """Resolve the live process identified by a persistent session record."""
+    macos = is_macos()
     try:
         process = psutil.Process(record.pid)
         if not _process_is_live(process):
             return None
         if record.starttime is not None:
             return process if record.identifies(record.pid) is True else None
-        if abs(stable_create_time(process) - record.create_time) > _CREATE_TIME_TOLERANCE_S:
+        if (
+            abs(stable_create_time(process, macos=macos) - record.create_time)
+            > _CREATE_TIME_TOLERANCE_S
+        ):
             return None
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
@@ -247,7 +251,7 @@ class HelperProcSessionBackend(SessionBackend):
 
         try:
             proc = psutil.Process(child_pid)
-            create_time = stable_create_time(proc)
+            create_time = stable_create_time(proc, macos=is_macos())
             started_at = proc.create_time()
         except psutil.NoSuchProcess:
             create_time = _DEAD_CHILD_SENTINEL
@@ -307,6 +311,7 @@ class HelperProcSessionBackend(SessionBackend):
         return True, mode
 
     def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
+        macos = is_macos()
         record = _read_record(name, self._home)
         if record is None or (expected is not None and record != expected):
             return False
@@ -318,7 +323,8 @@ class HelperProcSessionBackend(SessionBackend):
             # record-resolution tolerance, so a drifted reading never refuses
             # the process it resolved.
             if expected is not None and (
-                abs(stable_create_time(process) - expected.create_time) > _CREATE_TIME_TOLERANCE_S
+                abs(stable_create_time(process, macos=macos) - expected.create_time)
+                > _CREATE_TIME_TOLERANCE_S
                 or _read_record(name, self._home) != expected
             ):
                 return False

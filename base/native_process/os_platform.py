@@ -50,22 +50,24 @@ class Platform:
     def current(cls) -> Platform:
         """The platform of this process."""
         return cls.from_sys_platform(
-            _sys_platform(), machine=platform.machine(), executable=sys.executable
+            sys.platform, machine=platform.machine(), executable=sys.executable
         )
 
 
-def _sys_platform() -> str:
-    return sys.platform
-
-
+# meiva:note
+# `is_macos()` and `is_linux()` are the named door to `sys.platform`, not pure functions: each call
+# builds `Platform.current()` and so reads the host. The read happens once, there; a caller outside
+# a composition root is still reading the environment. They are not listed under
+# `[ambient-readers.platform]` yet — naming them would red the ~40 existing call sites — so the
+# question "do these two doors converge into the root" belongs to #5701 batch 2.
 def is_macos() -> bool:
     """Whether this process runs on macOS, queried directly from Python."""
-    return _sys_platform() == "darwin"
+    return Platform.current().system == "darwin"
 
 
 def is_linux() -> bool:
     """Whether this process runs on Linux, queried directly from Python."""
-    return _sys_platform().startswith("linux")
+    return Platform.current().system == "linux"
 
 
 # meiva:note
