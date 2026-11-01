@@ -40,7 +40,7 @@ def test_env_example_has_no_blank_typed_fields() -> None:
     typed_aliases = {
         f.alias: f.annotation
         for f in FIELD_INFOS.values()
-        if f.alias and f.annotation in (int, bool, float)
+        if f.alias and isinstance(f.annotation, type) and f.annotation in (int, bool, float)
     }
 
     offenders = [
