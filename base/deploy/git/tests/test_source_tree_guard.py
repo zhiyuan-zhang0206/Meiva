@@ -46,14 +46,14 @@ def _commit(source: Path, content: str, msg: str) -> str:
 def test_clean_checkout_reports_no_violations(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
 
-    assert stg.source_tree_violations(repo) == ()
+    assert stg.source_tree_violations(repo, environ={}) == ()
 
 
 def test_untracked_file_outside_whitelist_is_a_violation(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
     (repo / "junk.txt").write_text("j")
 
-    violations = stg.source_tree_violations(repo)
+    violations = stg.source_tree_violations(repo, environ={})
 
     assert any("junk.txt" in v for v in violations)
 
@@ -63,7 +63,7 @@ def test_untracked_dir_outside_whitelist_is_a_violation(tmp_path: Path) -> None:
     (repo / "junkdir").mkdir()
     (repo / "junkdir" / "inner.txt").write_text("i")
 
-    violations = stg.source_tree_violations(repo)
+    violations = stg.source_tree_violations(repo, environ={})
 
     assert any("junkdir" in v for v in violations)
 
@@ -75,7 +75,7 @@ def test_whitelisted_runtime_artifacts_are_not_violations(tmp_path: Path) -> Non
     (repo / "frontend" / ".next" / "build.txt").write_text("b")
     (repo / "frontend" / "tsconfig.tsbuildinfo").write_text("t")
 
-    assert stg.source_tree_violations(repo) == ()
+    assert stg.source_tree_violations(repo, environ={}) == ()
 
 
 def test_gitignored_paths_are_not_violations(tmp_path: Path) -> None:
@@ -89,14 +89,14 @@ def test_gitignored_paths_are_not_violations(tmp_path: Path) -> None:
     (repo / "scripts" / "ci" / "ci_usage").mkdir(parents=True)
     (repo / "scripts" / "ci" / "ci_usage" / "ledger.jsonl").write_text("{}\n")
 
-    assert stg.source_tree_violations(repo) == ()
+    assert stg.source_tree_violations(repo, environ={}) == ()
 
 
 def test_tracked_modification_is_a_violation(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
     (repo / "tracked.txt").write_text("changed")
 
-    violations = stg.source_tree_violations(repo)
+    violations = stg.source_tree_violations(repo, environ={})
 
     assert any("tracked change" in v and "tracked.txt" in v for v in violations)
 
@@ -108,7 +108,7 @@ def test_head_move_alone_is_not_a_violation(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
     _commit(repo, "y", "c2")
 
-    assert stg.source_tree_violations(repo) == ()
+    assert stg.source_tree_violations(repo, environ={}) == ()
 
 
 def test_non_git_checkout_signals_guard_skipped(tmp_path: Path) -> None:
@@ -117,17 +117,17 @@ def test_non_git_checkout_signals_guard_skipped(tmp_path: Path) -> None:
     repo = tmp_path / "plain"
     repo.mkdir()
 
-    assert stg.source_tree_violations(repo) == ("guard skipped: not a git checkout",)
+    assert stg.source_tree_violations(repo, environ={}) == ("guard skipped: not a git checkout",)
 
 
 def test_git_unavailable_signals_guard_skipped(tmp_path: Path) -> None:
     """A broken git (binary missing / command error / timeout) makes the
     detector blind — the probe must alert on the blind guard, never pass it."""
     repo = _init_source(tmp_path / "source")
-    assert stg.git(repo, "-c", "alias.hang=!sleep 10", "hang", timeout=0.05) is None
+    assert stg.git(repo, "-c", "alias.hang=!sleep 10", "hang", environ={}, timeout=0.05) is None
     (repo / ".git" / "HEAD").write_text("corrupt\n")
 
-    assert stg.source_tree_violations(repo) == ("guard skipped: git unavailable",)
+    assert stg.source_tree_violations(repo, environ={}) == ("guard skipped: git unavailable",)
 
 
 def test_git_command_failure_signals_guard_skipped(tmp_path: Path) -> None:
@@ -136,7 +136,7 @@ def test_git_command_failure_signals_guard_skipped(tmp_path: Path) -> None:
     repo.mkdir()
     (repo / ".git").write_text("gitdir: /nonexistent\n")
 
-    assert stg.source_tree_violations(repo) == ("guard skipped: git unavailable",)
+    assert stg.source_tree_violations(repo, environ={}) == ("guard skipped: git unavailable",)
 
 
 # --- whitelist self-check ---
