@@ -1,1 +1,1 @@
-exports = ["killed_converge.py", "source_bindings.py", "uv_support.py"]
+exports = ["killed_converge.py", "packages_host.py", "packages_repo.py", "source_bindings.py", "uv_support.py"]

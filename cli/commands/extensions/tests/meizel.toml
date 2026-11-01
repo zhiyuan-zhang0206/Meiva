@@ -4,6 +4,7 @@
 "test_external_skills_crash_safety.py" = ["support"]
 "test_guide_package.py" = ["support"]
 "test_manifest_gate.py" = ["support"]
+"test_packages_refresh.py" = ["support"]
 "test_mcp_install.py" = ["support"]
 "test_plugins_install.py" = ["support"]
 "test_skill_supply_chain.py" = ["support"]

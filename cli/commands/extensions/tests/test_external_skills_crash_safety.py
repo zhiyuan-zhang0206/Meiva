@@ -313,13 +313,18 @@ def test_unsupported_cleanup_never_changes_directory_permissions(tmp_path: Path)
     outside.mkdir()
     outside.chmod(0o755)
     outside_before = outside.stat()
+    # meiva:note
+    # The invariant is "the cleanup changed nothing", so the mode is read before the call and
+    # compared with itself: `mkdir` yields `0o777 & ~umask`, and asserting a literal `0o755`
+    # would test the machine's umask (0o775 here, 0o755 in CI) instead of the cleanup.
+    residue_before = stat.S_IMODE(residue.stat().st_mode)
 
     with pytest.raises(bridge_fs.ClientConflictError):
         bridge_fs.remove_manifest_subset(residue, manifest)
 
     assert nested.is_dir()
     assert stat.S_IMODE(nested.stat().st_mode) == 0o500
-    assert stat.S_IMODE(residue.stat().st_mode) == 0o755
+    assert stat.S_IMODE(residue.stat().st_mode) == residue_before
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
 
 
