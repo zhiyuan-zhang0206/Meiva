@@ -184,11 +184,29 @@ def test_process_metadata_records_the_script_of_a_node_ancestor() -> None:
 
 
 # meiva:note
-# The facts name this very process, and `CODEX_HOME` is recorded only when the caller hands it in.
+# The facts name the process the caller named, and `CODEX_HOME` is recorded only when the caller
+# hands it in.
 def test_process_metadata_names_the_caller_and_records_the_codex_home_it_was_given() -> None:
-    given = proc_tree.process_metadata(codex_home="/codex")
-    absent = proc_tree.process_metadata(codex_home=None)
+    given = proc_tree.process_metadata(pid=os.getpid(), codex_home="/codex")
+    absent = proc_tree.process_metadata(pid=os.getpid(), codex_home=None)
 
     assert given["pid"] == absent["pid"] == os.getpid()
     assert given["codex_home"] == "/codex"
     assert "codex_home" not in absent
+
+
+# meiva:note
+# The caller's id is handed in, not re-derived: a tree rooted at another process names that process
+# and walks up from it. A reader that falls back to its own id would record this test process.
+def test_process_metadata_roots_the_tree_at_the_pid_it_is_given() -> None:
+    child = subprocess.Popen(["sleep", "60"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        metadata = proc_tree.process_metadata(pid=child.pid, codex_home=None)
+        ancestors: Any = metadata["ancestors"]
+
+        assert metadata["pid"] == child.pid
+        assert ancestors
+        assert ancestors[0]["pid"] == os.getpid()
+    finally:
+        child.kill()
+        child.wait()
