@@ -97,10 +97,13 @@ describe("UploadButton rendering", () => {
     render(<UploadButton {...baseProps} error="Network error" />);
 
     const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const clickSpy = vi.spyOn(input, "click");
+    let opened = 0;
+    input.addEventListener("click", () => {
+      opened += 1;
+    });
 
     fireEvent.click(screen.getByRole("button"));
-    expect(clickSpy).toHaveBeenCalled();
+    expect(opened).toBe(1);
   });
 
   it("progress=0 still shows 0%", () => {
@@ -115,10 +118,13 @@ describe("UploadButton interaction", () => {
     render(<UploadButton {...baseProps} onUpload={onUpload} />);
 
     const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const clickSpy = vi.spyOn(input, "click");
+    let opened = 0;
+    input.addEventListener("click", () => {
+      opened += 1;
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
-    expect(clickSpy).toHaveBeenCalled();
+    expect(opened).toBe(1);
   });
 
   it("after selecting one file → calls onUpload([file]) and clears input.value", () => {

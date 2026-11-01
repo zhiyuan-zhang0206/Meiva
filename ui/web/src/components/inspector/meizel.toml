@@ -16,6 +16,3 @@ exports = ["context-breakdown-body.tsx", "context-breakdown.tsx", "context-meter
 "inspector-panel.tsx" = ["inspector-cost-section.tsx", "inspector-live-sections.tsx", "inspector-panel-skeleton.tsx", "inspector-widgets.tsx"]
 "inspector-widgets.test.tsx" = ["inspector-widgets.tsx"]
 "inspector-widgets.tsx" = ["inspector-section.tsx"]
-
-[debt.unresolved-patch]
-"inspector-panel-notices.test.tsx#vi.spyOn queryClient.\"invalidateQueries\"" = 1
