@@ -36,7 +36,9 @@ and start choices are forwarded unchanged, never checked against the diff.
   `--keep-no-services`, `--mode smooth|force`, `--stop-timeout` (as `--timeout`),
   `--message TEXT` (non-blank natural-language explanation for live agents and
   closed busy shells, also appended to the Grafana silence comment) or
-  `--no-message`. `--keep-infra|--stop-infra` goes to the gateway's stop only.
+  `--no-message` (omitted from a host's stop command when its pre-switch
+  checkout predates `--no-message`, while still appended to the silence comment).
+  `--keep-infra|--stop-infra` goes to the gateway's stop only.
   `--yes` is always sent (non-interactive SSH).
 - `down` / `run`, for the fleet itself: `--allow-python-change|--refuse-python-change`,
   `--allow-red-schedules|--refuse-red-schedules`, `--silence-hours`,

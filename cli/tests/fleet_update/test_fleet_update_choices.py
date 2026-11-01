@@ -254,3 +254,20 @@ def test_message_is_shell_quoted_to_every_host_and_recorded_in_silence_comment(
         idx = tokens.index("--message")
         assert tokens[idx + 1] == note
     assert f"({note})" in cluster.silence_comment
+
+
+def test_legacy_stop_hosts_omit_message_flags_while_silence_keeps_note(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    import shlex
+
+    cluster, run = env
+    cluster.hosts["mac"]["stop_message"] = "no"
+    cluster.hosts["gw"]["stop_message"] = "no"
+    note = "First rollout past #8006"
+    assert run("run", "--message", note) == 0
+    stops = {a: shlex.split(c)[2] for a, c in cluster.commands if 'meiva" stop' in c}
+    assert "--message" not in stops["mac"] and "--no-message" not in stops["mac"]
+    assert "--message" not in stops["gw"] and "--no-message" not in stops["gw"]
+    assert f"--message {shlex.quote(note)}" in stops["lin"]
+    assert f"({note})" in cluster.silence_comment

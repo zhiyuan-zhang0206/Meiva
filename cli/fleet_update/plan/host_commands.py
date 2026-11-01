@@ -38,6 +38,7 @@ printf '%s\\n' "head=$(git rev-parse HEAD)"
 printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
+grep -q -- --no-message "$S/cli/parsers/host.py" 2>/dev/null && echo stop_message=yes || echo stop_message=no
 printf '%s\\n' "op=$(cat "$H/run/lifecycle-op.json" 2>/dev/null)"
 "$S/.venv/bin/python" -c 'import fcntl, sys
 try:

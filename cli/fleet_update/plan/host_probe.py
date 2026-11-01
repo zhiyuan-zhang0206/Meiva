@@ -42,6 +42,16 @@ def host_refusals(alias: str, facts: Mapping[str, str]) -> tuple[str, ...]:
 
 
 # meiva:note
+# Whether the host's pre-switch `meiva stop` accepts `--message` / `--no-message`. A pre-#8006
+# checkout lacks those flags; omitting them lets the first wave past #8006 stop cleanly while
+# keeping the probe word fail-closed.
+def supports_stop_message(alias: str, facts: Mapping[str, str]) -> bool:
+    if "stop_message" not in facts:
+        raise ValueError(f"{alias}: the probe did not report stop_message")
+    return probe_flag(f"{alias}.stop_message", facts["stop_message"]) is ProbeFlag.YES
+
+
+# meiva:note
 # Whether the host was serving when the window began. A host is already stopped only when its last
 # lifecycle operation is a completed, successful stop and its meiva-root is not running; any other
 # host was up, and a failed window brings it back.
