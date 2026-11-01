@@ -1,4 +1,5 @@
-"""Exercise process ownership through real pytest collection and execution."""
+# meiva:note
+# Exercises automatic static/native process ownership through real pytest collection and execution.
 
 import os
 import shlex
@@ -9,24 +10,24 @@ from pathlib import Path
 import pytest
 import yaml
 
+from meizel.checkout import lanes_at
+
 
 @pytest.fixture
 def owned_tree(tmp_path: Path) -> Path:
     (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (tmp_path / "conftest.py").write_text(
-        "from tests.fixtures import static_environment as environment\n"
-        "environment.STATIC_TEST_PATHS = ('tools/tests', 'canaries/test_boundary.py')\n"
-        "environment.NATIVE_TEST_PATHS = ()\n"
-        "pytest_plugins = ['tests.fixtures.env_bootstrap', "
-        "'tests.fixtures.static_environment']\n",
+        "pytest_plugins = [\n"
+        "    'tests.fixtures.env_bootstrap',\n"
+        "    'tests.fixtures.static_environment',\n"
+        "    'tests.fixtures.provisioning',\n"
+        "]\n",
         encoding="utf-8",
     )
     for rel in (
         "tools/tests/test_tool.py",
         "tools/tests/nested/test_child.py",
         "canaries/test_boundary.py",
-        "native/test_database.py",
-        "tools/tests_backup/test_neighbor.py",
     ):
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,6 +39,18 @@ def owned_tree(tmp_path: Path) -> Path:
         path.write_text(
             f"import os\ndef test_contract():\n    assert {assertion}\n", encoding="utf-8"
         )
+    native_db = tmp_path / "native/test_database.py"
+    native_db.parent.mkdir(parents=True, exist_ok=True)
+    native_db.write_text(
+        "def test_contract(db_url):\n    assert db_url\n",
+        encoding="utf-8",
+    )
+    native_neighbor = tmp_path / "tools/tests_backup/test_neighbor.py"
+    native_neighbor.parent.mkdir(parents=True, exist_ok=True)
+    native_neighbor.write_text(
+        "def test_contract(redis_url):\n    assert redis_url\n",
+        encoding="utf-8",
+    )
     (tmp_path / "tools/tests/conftest.py").write_text(
         "import pytest\n"
         "@pytest.fixture(autouse=True)\n"
@@ -105,14 +118,21 @@ def test_static_selection_refuses_unowned_and_escaping_paths(owned_tree: Path, p
     assert "Static processes accept only owned static test paths" in result.stderr
 
 
-def test_missing_ownership_and_conflicting_modes_fail_before_execution(owned_tree: Path) -> None:
+def test_empty_static_population_and_conflicting_modes_fail_before_execution(
+    owned_tree: Path,
+) -> None:
     conflict = _run(owned_tree, "--test-environment=static", "--omit-static-tests")
     assert conflict.returncode == pytest.ExitCode.USAGE_ERROR, conflict.stdout + conflict.stderr
     assert "cannot omit its own tests" in conflict.stderr
-    (owned_tree / "canaries/test_boundary.py").unlink()
-    missing = _run(owned_tree, "--test-environment=static")
-    assert missing.returncode == pytest.ExitCode.USAGE_ERROR, missing.stdout + missing.stderr
-    assert "Static test ownership names missing paths" in missing.stderr
+    for rel in (
+        "tools/tests/test_tool.py",
+        "tools/tests/nested/test_child.py",
+        "canaries/test_boundary.py",
+    ):
+        (owned_tree / rel).unlink()
+    empty = _run(owned_tree, "--test-environment=static")
+    assert empty.returncode == pytest.ExitCode.USAGE_ERROR, empty.stdout + empty.stderr
+    assert "Static test derivation found no static tests" in empty.stderr
 
 
 def test_static_collection_refuses_a_descendant_symlink_to_native_tests(owned_tree: Path) -> None:
@@ -120,6 +140,22 @@ def test_static_collection_refuses_a_descendant_symlink_to_native_tests(owned_tr
     result = _run(owned_tree, "--test-environment=static", "--collect-only")
     assert result.returncode == pytest.ExitCode.USAGE_ERROR, result.stdout + result.stderr
     assert "Non-static tests reached the static process" in result.stderr
+
+
+# meiva:note
+# A module that dynamically looks up `containers` inside `sys.modules` to bypass static imports
+# still hits the process-level container stub installed by `_refuse_native_data_plane`.
+def test_static_process_refuses_container_provisioners_at_runtime(owned_tree: Path) -> None:
+    (owned_tree / "canaries/test_boundary.py").write_text(
+        "import pytest\nimport sys\n"
+        "def test_refused():\n"
+        "    containers = sys.modules['base.deploy.tests.containers']\n"
+        "    with pytest.raises(pytest.fail.Exception, match='Static tests cannot use'):\n"
+        "        containers.redis_server()\n",
+        encoding="utf-8",
+    )
+    result = _run(owned_tree, "--test-environment=static", "canaries/test_boundary.py")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_actual_ci_warning_policy_rejects_background_native_driver_calls(owned_tree: Path) -> None:
@@ -154,18 +190,17 @@ def test_actual_ci_warning_policy_rejects_background_native_driver_calls(owned_t
     assert "Static tests cannot use Postgres or Redis" in result.stdout + result.stderr
 
 
-def test_compiler_file_routes_to_native_without_losing_static_python(owned_tree: Path) -> None:
-    root = Path(__file__).resolve().parents[3]
+def test_mixed_directory_routes_native_file_without_losing_static_siblings(
+    owned_tree: Path,
+) -> None:
     directory = owned_tree / "tools/tests/explain"
     directory.mkdir()
-    for name in ("test_python.py", "test_typescript.py"):
-        (directory / name).write_text(
-            (root / "meizel/tests/explain" / name).read_text(), encoding="utf-8"
-        )
-    conftest = owned_tree / "conftest.py"
-    conftest.write_text(
-        conftest.read_text()
-        + "environment.NATIVE_TEST_PATHS = ('tools/tests/explain/test_typescript.py',)\n",
+    (directory / "test_python.py").write_text(
+        "def test_pure_python():\n    assert 1 + 1 == 2\n",
+        encoding="utf-8",
+    )
+    (directory / "test_native_sibling.py").write_text(
+        "def test_needs_db(db_url):\n    assert db_url\n",
         encoding="utf-8",
     )
     (owned_tree / "pytest.ini").write_text(
@@ -178,28 +213,29 @@ def test_compiler_file_routes_to_native_without_losing_static_python(owned_tree:
     assert whole == static | native
     assert static.isdisjoint(native)
     python = {node for node in whole if "/explain/test_python.py::" in node}
-    assert python and python <= static
-    expected = {
-        "test_fixed_six_source_receipt",
-        "test_loader_refuses_invalid_identity_and_source_sets",
-        "test_cli_explicit_index_and_no_request_states",
-        "test_parse_failure_is_unavailable_instead_of_empty_safe",
-        "test_frozen_holder_keeps_collection_surface_and_literal_path_separate",
-    }
-    runtime = {node for node in native if "/explain/test_typescript.py::" in node}
-    assert {node.split("::")[-1] for node in runtime} == expected
+    assert python == {"tools/tests/explain/test_python.py::test_pure_python"}
+    assert python <= static
+    runtime = {node for node in native if "/explain/test_native_sibling.py::" in node}
+    assert runtime == {"tools/tests/explain/test_native_sibling.py::test_needs_db"}
     assert _collected(owned_tree, "--omit-static-tests", "tools/tests") == runtime
     refused = _run(
         owned_tree,
         "--collect-only",
         "--test-environment=static",
-        "tools/tests/explain/test_typescript.py",
+        "tools/tests/explain/test_native_sibling.py",
     )
     assert refused.returncode == pytest.ExitCode.USAGE_ERROR
     assert "Static processes accept only owned static test paths" in refused.stderr
 
 
-def test_production_static_environment_has_empty_native_test_paths() -> None:
+def test_production_static_environment_derives_lanes_without_manual_lists() -> None:
     from tests.fixtures import static_environment as environment
 
-    assert environment.NATIVE_TEST_PATHS == ()
+    assert not hasattr(environment, "STATIC_TEST_PATHS")
+    assert not hasattr(environment, "NATIVE_TEST_PATHS")
+    repo_root = Path(__file__).resolve().parents[3]
+    lanes = lanes_at(repo_root)
+    assert lanes.static.isdisjoint(lanes.native)
+    assert "tests/fixtures/tests/test_static_environment.py" in lanes.static
+    assert "tests/fixtures/tests/test_static_environment_selection.py" in lanes.static
+    assert "tests/fixtures/tests/test_native_environment.py" in lanes.native

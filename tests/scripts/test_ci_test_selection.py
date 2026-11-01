@@ -511,6 +511,10 @@ def test_static_contracts_job_has_no_native_toolchain() -> None:
     static_job = _workflow_jobs()["backend-static-tests"]
     assert static_job["needs"] == ["classify"]
     assert static_job["if"] == "${{ needs.classify.outputs.backend == 'true' }}"
+    assert static_job["container"]["options"] == "--init --shm-size=2g"
+    assert static_job["strategy"]["matrix"]["group"] == (
+        "${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4]') }}"
+    )
     assert "continue-on-error" not in static_job
     assert not any(
         step.get("uses")
@@ -535,7 +539,7 @@ def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
     static = _step(jobs["backend-static-tests"], "Run static pytest contracts")
     assert static["if"] == "needs.classify.outputs.backend == 'true'"
     assert "--test-environment=static" in static["run"]
-    assert "--junit-xml=tmp/junit-backend-static.xml" in static["run"]
+    assert "--junit-xml=tmp/junit-backend-static-${{ matrix.group }}.xml" in static["run"]
     assert "-o junit_family=xunit1" in static["run"]
     assert "continue-on-error" not in static
     assert (
@@ -648,6 +652,7 @@ def _changed_repo(repo: Path, paths: tuple[str, ...]) -> str:
 def test_heavy_linux_jobs_run_in_digest_pinned_ghcr_runner_container() -> None:
     jobs = _workflow_jobs()
     heavy_jobs = (
+        "backend-static-tests",
         "backend-shard",
         "backend-selected",
         "backend-serial",

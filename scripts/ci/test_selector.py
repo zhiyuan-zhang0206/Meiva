@@ -20,8 +20,10 @@ if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
 from base.deploy.git.repo_change import (  # noqa: E402
     is_doc_path,
 )
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import lanes_at, roles_at  # noqa: E402
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402
+from meizel.test_graph.cutoff import package_local_tests  # noqa: E402
+from meizel.test_graph.impact import TREE_SCAN_PINS as TREE_SCAN_TESTS  # noqa: E402
 from scripts.ci.shard_counts import (  # noqa: E402
     estimate_seconds,
     load_durations,
@@ -112,21 +114,6 @@ _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 # on tests/contracts/test_lint_event_kinds.py).
 _TREE_SCAN_FILE_PATTERN = re.compile(r"test_lint_.*\.py$")
 _REGISTRY_MARKER = "pytest.mark.registry"
-TREE_SCAN_TESTS = frozenset(
-    {
-        "scripts/ci/pull_requests/tests/test_ci_job_rerun.py",
-        "tests/harness/test_ci_rerun_workflow.py",
-        "scripts/ci/pull_requests/tests/test_ci_monitor.py",
-        "tests/contracts/test_db_check_enum_sync.py",
-        "tests/harness/test_pool_keepalives.py",
-        "tests/harness/test_env_guard_canary.py",
-        "scripts/ci/tests/test_harness_imports.py",
-        "tests/components/cli/test_main_dispatch_contract.py",
-        "tests/components/base/test_crash_row_writers.py",
-        "tests/integration/test_impersonation_audit_root_inventory.py",
-        "tests/scripts/test_alert_single_path.py",
-    }
-)
 
 
 class PathClass(StrEnum):
@@ -245,6 +232,15 @@ def collectable_test_paths(repo_root: Path) -> set[str]:
     }
 
 
+def lane_tests(repo_root: Path, lane: str) -> frozenset[str]:
+    lanes = lanes_at(repo_root.resolve())
+    if lane == "static":
+        return lanes.static
+    if lane == "native":
+        return lanes.native
+    raise ValueError(f"Unsupported test lane: {lane!r}")
+
+
 # meiva:note
 # Repository-wide scan tests that every SELECTED subset includes: the `test_lint_*.py` family, the
 # explicit `TREE_SCAN_TESTS`, and the tests marked `pytest.mark.registry`, which assert that a table
@@ -332,18 +328,9 @@ def package_tests(path: str, checkout: Checkout) -> set[str]:
     sibling ``tests`` beside an ancestor) owns the path, and every collectable test
     below it is the package's test set.
     """
-    directory = path.rpartition("/")[0]
-    while True:
-        tests_dir = (
-            directory
-            if directory.rpartition("/")[2] == "tests"
-            else f"{directory}/tests".lstrip("/")
-        )
-        if tests_dir in checkout.test_dirs:
-            return {test for test in checkout.collectable if test.startswith(f"{tests_dir}/")}
-        if not directory:
-            return set()
-        directory = directory.rpartition("/")[0]
+    return package_local_tests(
+        path, checkout.test_dirs, checkout.collectable, include_root_tests=True
+    )
 
 
 def _conftest_tests(path: str, checkout: Checkout) -> set[str]:
@@ -501,6 +488,7 @@ def select_tests(
     head_ref: str = "",
     base_ref: str | None = None,
     members: tuple[int, ...] | None = None,
+    lane: str | None = None,
 ) -> SelectionResult:
     """Apply the ordered conservative test-selection rules to one changed-file list."""
     repo_root = repo_root.resolve()
@@ -510,7 +498,7 @@ def select_tests(
     full_estimate = estimate_seconds(checkout.collectable, durations)
 
     if event != "pull_request":
-        return _result("FULL", "non-pr-event", full_estimate=full_estimate)
+        return SelectionResult("FULL", "non-pr-event", full_est_seconds=full_estimate)
     # meiva:note
     # A batch changes what the union of its members changes, and `changed.txt` is already that union,
     # so the ordinary rules can measure it; a batch whose member list cannot be read keeps everything.
@@ -519,21 +507,21 @@ def select_tests(
     if on_queue:
         unanswered = _batch_full_reason(members, changed)
         if unanswered is not None:
-            return _result("FULL", unanswered, full_estimate=full_estimate)
+            return SelectionResult("FULL", unanswered, full_est_seconds=full_estimate)
     if all(
         _is_documentation_path(path, checkout.hosts) for path in changed
     ) and not documentation_runtime_tests(list(changed), repo_root=repo_root, base_ref=base_ref):
-        return _result("SKIP", "docs-only", full_estimate=full_estimate)
+        return SelectionResult("SKIP", "docs-only", full_est_seconds=full_estimate)
 
     local = _local_config_paths(changed, checkout, base_ref)
     classes = _classify_changed(changed, checkout, local)
     if on_queue:
         domains = _batch_domains(classes)
         if domains is not None:
-            return _result(
+            return SelectionResult(
                 "FULL",
                 "cross-domain-batch",
-                full_estimate=full_estimate,
+                full_est_seconds=full_estimate,
                 diagnostics=(domains,),
             )
     forced = _forced_full(classes, full_estimate)
@@ -546,14 +534,19 @@ def select_tests(
     candidate_tests, source_count, diagnostics = candidates
     # Tree-scan tests are unreachable through the owner rules; pin them so a
     # SELECTED run keeps the repo-wide gates (task #4183).
-    tests = tuple(sorted((candidate_tests | tree_scan_tests(repo_root)) & checkout.collectable))
+    allowed = (
+        checkout.collectable & lane_tests(repo_root, lane)
+        if lane is not None
+        else checkout.collectable
+    )
+    tests = tuple(sorted((candidate_tests | tree_scan_tests(repo_root)) & allowed))
     estimate = estimate_seconds(tests, durations, reference_paths=set(checkout.collectable))
-    return _result(
+    return SelectionResult(
         "SELECTED",
         "owner-tests",
         tests=tests,
         est_seconds=estimate,
-        full_estimate=full_estimate,
+        full_est_seconds=full_estimate,
         map_source_count=source_count,
         diagnostics=diagnostics,
         shards=subset_shard_count(len(tests), estimate, full_estimate, len(checkout.collectable)),
@@ -631,10 +624,10 @@ def _runtime_candidates(
     elif any(kind is PathClass.DELETED for kind in classes.values()):
         # A removed dependency is only visible in the base tree: without it no
         # subset can name the tests that lost an input.
-        return _result(
+        return SelectionResult(
             "FULL",
             "incomplete-impact",
-            full_estimate=full_estimate,
+            full_est_seconds=full_estimate,
             map_source_count=len(reverse_map),
             diagnostics=tuple(
                 sorted(
@@ -674,22 +667,25 @@ def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> Selecti
     """FULL for a global path or, as the runtime safety net, an unowned path."""
     global_paths = tuple(path for path, kind in classes.items() if kind is PathClass.GLOBAL)
     if global_paths:
-        return _result(
+        return SelectionResult(
             "FULL",
             f"global-path:{global_paths[0]}",
-            full_estimate=full_estimate,
+            full_est_seconds=full_estimate,
             forced_roots=global_paths,
         )
     unmapped = tuple(path for path, kind in classes.items() if kind is PathClass.UNMAPPED)
     if unmapped:
-        return _result("FULL", "unmapped", full_estimate=full_estimate, blind_changed=unmapped)
+        return SelectionResult(
+            "FULL", "unmapped", full_est_seconds=full_estimate, blind_changed=unmapped
+        )
     return None
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the selector CLI and print either JSON or a concise audit summary."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--changed-files", type=Path, required=True)
+    parser.add_argument("--changed-files", type=Path)
+    parser.add_argument("--lane", choices=("static", "native"))
     parser.add_argument("--head-ref", default="")
     parser.add_argument("--event", default="pull_request")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
@@ -703,6 +699,17 @@ def main(argv: list[str] | None = None) -> int:
         help="GitHub event payload whose pull request names the members a batch tests",
     )
     args = parser.parse_args(argv)
+    if args.changed_files is None and args.lane is None:
+        parser.error("one of --changed-files or --lane is required")
+    if args.changed_files is None:
+        paths = sorted(lane_tests(args.repo_root, args.lane))
+        if args.json:
+            print(
+                json.dumps({"count": len(paths), "lane": args.lane, "tests": paths}, sort_keys=True)
+            )
+        elif paths:
+            print("\n".join(paths))
+        return 0
 
     try:
         changed_files = args.changed_files.read_text().splitlines()
@@ -716,6 +723,7 @@ def main(argv: list[str] | None = None) -> int:
         head_ref=args.head_ref,
         base_ref=args.base_ref,
         members=members,
+        lane=args.lane,
     )
     mode = selection_mode(os.environ)
     for diagnostic in result.diagnostics:
@@ -766,33 +774,6 @@ def _plugin_files(repo_root: Path) -> set[str]:
     """
     index = ModuleIndex(repo_root)
     return {file for module in _plugin_modules(repo_root) for file in module_files(module, index)}
-
-
-def _result(
-    decision: str,
-    reason: str,
-    *,
-    tests: tuple[str, ...] = (),
-    est_seconds: float = 0.0,
-    full_estimate: float,
-    blind_changed: tuple[str, ...] = (),
-    forced_roots: tuple[str, ...] = (),
-    map_source_count: int = 0,
-    diagnostics: tuple[str, ...] = (),
-    shards: int = 0,
-) -> SelectionResult:
-    return SelectionResult(
-        decision=decision,
-        reason=reason,
-        tests=tests,
-        est_seconds=est_seconds,
-        full_est_seconds=full_estimate,
-        blind_changed=blind_changed,
-        forced_roots=forced_roots,
-        map_source_count=map_source_count,
-        diagnostics=diagnostics,
-        shards=shards,
-    )
 
 
 if __name__ == "__main__":

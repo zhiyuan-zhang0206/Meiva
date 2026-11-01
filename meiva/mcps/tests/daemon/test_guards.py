@@ -121,19 +121,26 @@ DAEMON_LAUNCH = ["-m", "meiva.mcps._daemon"]
 
 
 # meiva:note
-# A real process that sleeps with the given extra argv (so its command line is exactly what the reaper reads), run from `cwd` with `MEIVA_HOME=home`. It is killed when the block ends.
+# A real process that sleeps with the given extra argv (so its command line is exactly what the
+# reaper reads), run from `cwd` with `MEIVA_HOME=home`. Waiting for its `ready` line guarantees
+# Linux `execve` has populated `/proc/<pid>/cmdline` before `psutil` inspects it.
 @contextmanager
 def sleeper(argv_tail: list[str], *, cwd: Path, home: Path) -> Generator[subprocess.Popen[bytes]]:
     proc = subprocess.Popen(  # noqa: S603
-        [sys.executable, str(IDLE), *argv_tail],
+        [sys.executable, str(IDLE), "--ready-on-stdout", *argv_tail],
         cwd=cwd,
         env={**os.environ, "MEIVA_HOME": str(home)},
+        stdout=subprocess.PIPE,
     )
     try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline() == b"ready\n"
         yield proc
     finally:
         proc.kill()
         proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 def test_process_facts_of_a_daemon_launch_carry_its_unit(short_dir: Path) -> None:

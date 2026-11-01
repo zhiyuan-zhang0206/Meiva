@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import Counter
 from collections.abc import Collection, Sequence
 from pathlib import Path
 
-from meizel.checkout import GitRepo, read_roles, toplevel
+from meizel.checkout import GitRepo, read_roles, read_text, toplevel
 from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
@@ -25,7 +26,9 @@ __all__ = ["main"]
 # meiva:note
 # This text is consumed by argparse as native CLI help, not discarded source prose.
 # meiva:link meizel/docs/checker/checker.meiva.okf.md
-_DESCRIPTION = "Command line: check, explain, impacted, sync --prune, bootstrap, debt and roles."
+_DESCRIPTION = (
+    "Command line: check, explain, impacted, tests, sync --prune, bootstrap, debt and roles."
+)
 
 # meiva:note
 # The installation this process runs from: the one seat that answers where the checker's own files
@@ -165,6 +168,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="select Python reverse-import closure (default)",
     )
     impacted.add_argument("paths", nargs="*", help="changed repository paths")
+    tests_cmd = commands.add_parser(
+        "tests",
+        help="query derived static/native test lanes and changed-file impacted tests",
+    )
+    tests_cmd.add_argument(
+        "--lane",
+        choices=["static", "native"],
+        help="filter or list collectable tests belonging to the static or native lane",
+    )
+    tests_cmd.add_argument(
+        "--changed",
+        nargs="*",
+        metavar="path",
+        help="select collectable tests impacted by these changed repository paths",
+    )
+    tests_cmd.add_argument(
+        "--changed-files",
+        metavar="file",
+        help="read newline-delimited changed repository paths from this file",
+    )
+    tests_cmd.add_argument(
+        "--base-ref",
+        metavar="ref",
+        help="git base ref for deleted-file recovery and strict public-interface cutoff",
+    )
+    tests_cmd.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="print machine-readable JSON output",
+    )
     sync = commands.add_parser("sync", help="maintain manifests")
     sync.add_argument("--prune", action="store_true", help="remove stale declared edges")
     sync.add_argument(
@@ -397,6 +431,91 @@ def _run_explain(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace
     return 0
 
 
+def _print_lane_query(repo: GitRepo, lane: str, *, as_json: bool) -> int:
+    lanes = repo.test_lanes()
+    chosen = sorted(lanes.static if lane == "static" else lanes.native)
+    if as_json:
+        payload: dict[str, object] = {"lane": lane, "count": len(chosen), "tests": chosen}
+        if lane == "native":
+            payload["reasons"] = dict(lanes.reasons)
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    for item in chosen:
+        print(item)
+    return 0
+
+
+def _read_changed_targets(
+    root: Path,
+    base: Path,
+    raw_changed: Sequence[str] | None,
+    changed_file: str | None,
+) -> list[str]:
+    collected_raw: list[str] = list(raw_changed or ())
+    if changed_file is not None:
+        try:
+            file_text = read_text(base, changed_file)
+        except OSError as error:
+            raise MeizelError(f"{changed_file}: cannot read changed-files list: {error}") from error
+        collected_raw.extend(line.strip() for line in file_text.splitlines() if line.strip())
+    return [_relative_target(root, base, p) for p in collected_raw]
+
+
+def _print_selection_query(
+    repo: GitRepo,
+    rel_changed: Sequence[str],
+    *,
+    base_ref: str | None,
+    lane: str | None,
+    as_json: bool,
+) -> int:
+    selection = repo.select_tests(rel_changed, base_ref=base_ref)
+    selected = list(selection.tests)
+    if lane is not None:
+        lanes = repo.test_lanes()
+        allowed = lanes.static if lane == "static" else lanes.native
+        selected = [t for t in selected if t in allowed]
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "decision": selection.decision,
+                    "reason": selection.reason,
+                    "lane": lane,
+                    "count": len(selected),
+                    "tests": selected,
+                    "diagnostics": list(selection.diagnostics),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    if selection.decision == "FULL":
+        print(f"meizel: full suite required ({selection.reason})", file=sys.stderr)
+    for item in selected:
+        print(item)
+    return 0
+
+
+def _run_tests(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+    lane: str | None = args.lane
+    raw_changed: list[str] | None = args.changed
+    changed_file: str | None = args.changed_files
+    if lane is None and raw_changed is None and changed_file is None:
+        raise MeizelError("tests requires --lane, --changed, or --changed-files")
+    if raw_changed is None and changed_file is None:
+        return _print_lane_query(repo, str(lane), as_json=bool(args.as_json))
+    rel_changed = _read_changed_targets(root, base, raw_changed, changed_file)
+    return _print_selection_query(
+        repo,
+        rel_changed,
+        base_ref=args.base_ref,
+        lane=lane,
+        as_json=bool(args.as_json),
+    )
+
+
 def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
     cmd = str(args.command)
     if cmd == "check":
@@ -409,6 +528,8 @@ def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -
         return _run_explain(repo, root, base, args)
     if cmd == "impacted":
         return _run_impacted(repo, root, base, args.paths, args.jobs)
+    if cmd == "tests":
+        return _run_tests(repo, root, base, args)
     if cmd == "roles":
         return enumerations.run_roles(
             repo, read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))

@@ -1,11 +1,11 @@
-exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state", "tests"]
+exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state", "test_graph", "tests"]
 
 [uses]
 "__init__.py" = ["graph"]
 "__main__.py" = ["contracts"]
 "allowances.py" = ["checkout.py", "graph"]
 "budgets" = ["checkout.py", "lint_common.py"]
-"checkout.py" = ["graph", "roles.py"]
+"checkout.py" = ["graph", "roles.py", "test_graph"]
 "contracts" = ["allowances.py", "checkout.py", "graph", "language", "lint_common.py", "roles.py", "source_evidence"]
 "language" = ["allowances.py", "checkout.py", "graph", "lint_common.py"]
 "lint_common.py" = ["__init__.py", "checkout.py", "graph", "roles.py"]
@@ -13,6 +13,7 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "roles.py" = ["graph"]
 "source_evidence" = ["graph", "lint_common.py"]
 "state" = ["allowances.py", "checkout.py", "lint_common.py", "roles.py"]
+"test_graph" = ["roles.py"]
 "tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "roles.py", "state"]
 
 [purity]

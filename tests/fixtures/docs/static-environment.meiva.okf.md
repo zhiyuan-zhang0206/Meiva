@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Static Test Environment"
-description: "Process-scoped execution for owned pure unit contracts: refused data-plane effects, retained isolation guards and required CI artifacts."
+description: "Process-scoped execution for meizel-derived static unit contracts: automatic fixture/import lane derivation, refused data-plane effects, retained isolation guards and required CI artifacts."
 tags:
 - evaluation
 - quality-assurance
@@ -9,41 +9,52 @@ tags:
 
 # Static Test Environment
 
-`pytest --test-environment=static` runs the paths owned by `STATIC_TEST_PATHS`:
-`scripts/audit/tests`, `scripts/content_lint/tests`, `scripts/lint/tests`,
-`scripts/lint/diagnostics/tests`, `scripts/lint/locks/tests`,
-`scripts/lint/plugins/tests`, `meizel`,
-`scripts/structure/tests`, `scripts/ci/tests`, `scripts/ci/pull_requests/tests`, `scripts/ci/helper_smoke/tests`, `tests/ci`, `base/paths/tests`,
-`base/sessions/pty/tests/test_pty_sessions_screen.py`, and the environment boundary
-and selection canaries.
-Directory ownership includes descendant tests and their existing local fixtures,
-including all `meizel` compiler-contract files (the TypeScript scanner, AST,
-language parity, holder-evidence, `[roots]`-warning scope tests and the whole-tree
-test-code accounting table). These contracts run in the static lane because
-`backend-static-tests` installs Node and the locked TypeScript package, eliminating
-the prior `NATIVE_TEST_PATHS` exceptions that ran under native shards.
-Native `--omit-static-tests` omits the entire `meizel` tree along with the other
-owned static suites. The older Python explain contracts stay static.
-The tool contracts inspect ASTs, files, workflow definitions, synthetic reports
-and temporary Git repositories. Path contracts operate on their private home;
-the PTY screen model consumes byte/ANSI sequences through pyte without starting
-the shell-session service. These owners do not require a native data plane. Native
-PTY service, lifecycle and database integration tests remain in their own lane.
-New tests in an owned component inherit that
-execution requirement and fail if they attempt Postgres or Redis access.
-Explicit non-owned paths fail before collection. This process keeps unreachable
-data-plane sentinels, refuses Postgres/Redis provisioners and sync/async driver
-entry points, and never creates a native instance or its watchdog. Native
-processes also refuse undeclared driver access; ordinary fixture dependencies
-admit only their requested resources. Static processes never admit requests.
-Private-home, identity,
-plugin, leak and host-effect guards remain active for the entire process.
-The ownership list is an execution requirement, not a lint exemption. A parent
-directory, similarly named sibling or symlink escaping ownership is refused.
-Keep integration tests that require the data plane outside these owned paths;
-do not temporarily enable drivers inside a static process.
+`pytest --test-environment=static` runs every non-e2e backend test file that
+`meizel` derives into the `static` lane (`python -m meizel tests --lane static`,
+backed by `meizel.checkout.lanes_at` and cached in
+`<git-common-dir>/meizel-scan-cache-v1.sqlite3`). There is no manual
+`STATIC_TEST_PATHS` or `NATIVE_TEST_PATHS` list to maintain.
 
-Required CI runs this lane once inside `backend-static-tests` with four xdist
+`meizel.test_graph.lanes` classifies each collectable test file deterministically
+from its AST, fixture-resolution scope (`conftest.py` ancestors, `pytest_plugins`,
+`path_scopes.toml` declarations, and re-exported fixtures), and transitive module
+dependency closure:
+
+- Any test that requests (directly, via `autouse`, via `@pytest.mark.usefixtures`,
+  or via `request.getfixturevalue`) a native data-plane fixture (`db_url`,
+  `database`, `redis_url`, `event_bus`, `postgres_access`, `redis_access`,
+  `gateway_data_plane`, etc.), carries a host/serial marker (`requires_host`,
+  `flaky`, `native_permissions_helper`), performs an unresolvable dynamic fixture
+  or module load, or transitively imports native Postgres/Redis/PgBouncer
+  provisioning or host-binary tooling (`base/deploy/tests/containers.py`,
+  `base/deploy/tests/pgbouncer.py`, `base/cluster/dataplane/pg_tools.py`,
+  `base/cluster/dataplane/pg_foreground.py`, or the CI runtime smoke runners) is
+  classified `native`.
+- Every remaining collectable backend test file is classified `static` —
+  including all `meizel` compiler contracts, pure unit suites across `agent`,
+  `base`, `cli`, `gateway`, `meiva`, `meiva_builtins`, `ops`, `schedules`,
+  `scripts`, `services`, and `tests`, and the static environment boundary and
+  selection canaries (`test_static_environment.py`,
+  `test_static_environment_selection.py`).
+
+Mixed `tests/` directories partition cleanly at the file level: in default whole-lane
+runs, `--test-environment=static` collects only derived static files while skipping
+native siblings and native-only subtrees, and `--omit-static-tests` collects only
+derived native files. Explicit CLI paths passed to `--test-environment=static` must
+resolve inside the checkout without symlink traversal to either a derived static test
+file or a directory containing static tests and zero native tests; mixed parents,
+native siblings, and escaping symlinks fail closed before execution.
+
+This process keeps unreachable data-plane sentinels, refuses Postgres/Redis
+provisioners and sync/async driver entry points, and never creates a native
+instance or its watchdog. Native processes (`test_native_environment.py`) also
+refuse undeclared driver access; ordinary fixture dependencies admit only their
+requested resources. Static processes never admit requests. Private-home,
+identity, plugin, leak and host-effect guards remain active for the entire
+process.
+
+Required CI runs this lane inside `backend-static-tests` (4 shards on full runs,
+or 1 shard filtered to selected static files on `SELECTED` pull requests) with four xdist
 workers, using `--dist=loadfile` to keep whole test files on a single worker and
 avoid duplicate module fixture calculations across workers, each retaining the
 process-lifetime native refusal and isolation guards. JUnit validation, executed counts
@@ -55,7 +66,7 @@ TypeScript compiler contracts) without Postgres/Redis binaries, Grafana, or brow
 setup. It runs alongside `backend-static`, which retains ruff,
 types, migration and native Grafana smoke checks, and the existing structure job.
 The required backend aggregator checks both jobs. Native full, selected and flaky commands use
-`--omit-static-tests` from the same owner; combined counts and coverage include
+`--omit-static-tests` from the same `meizel` owner; combined counts and coverage include
 the static artifacts. Local pytest remains native unless explicitly selected.
 Nightly duration refresh uses the native environment with `--omit-static-tests`;
 it does not measure this lane's static population or its execution cost.

@@ -184,20 +184,63 @@ jobs:
           env -u VIRTUAL_ENV uv run pre-commit run --all-files
           env -u VIRTUAL_ENV uv run python -m meizel check
 
+  backend-static:
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true'
+    name: Backend static contracts (${{ matrix.group }}/4)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.precheck.outputs.sha }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install locked Python environment
+        uses: ./.github/actions/uv-sync
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: pnpm install --frozen-lockfile
+
       - name: Run static pytest contracts
         id: pytest-static
         run: |
           mkdir -p tmp
           uv run pytest --test-environment=static -q -n 4 --dist=loadfile \
+            --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration \
             -W error::pytest.PytestUnhandledThreadExceptionWarning \
-            --junit-xml=tmp/junit-release-static.xml -o junit_family=xunit1
+            --junit-xml=tmp/junit-release-static-${{ matrix.group }}.xml -o junit_family=xunit1
 
       - name: Validate static test results
         if: ${{ !cancelled() }}
         uses: ./.github/actions/require-test-gate
         with:
           test-outcome: ${{ steps.pytest-static.outcome }}
-          junit-patterns: '["tmp/junit-release-static.xml"]'
+          junit-patterns: '["tmp/junit-release-static-${{ matrix.group }}.xml"]'
 
   frontend:
     needs: precheck
@@ -468,7 +511,7 @@ jobs:
         run: uv run python scripts/ci/pgvector_runtime_smoke.py
 
   certify:
-    needs: [precheck, static-and-structure, frontend, backend, e2e, platform-smoke]
+    needs: [precheck, static-and-structure, backend-static, frontend, backend, e2e, platform-smoke]
     if: success() && needs.precheck.outputs.skip_train != 'true'
     name: Certify and publish channel/latest
     runs-on: ubuntu-24.04

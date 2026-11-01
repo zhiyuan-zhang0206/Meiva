@@ -319,7 +319,7 @@ def _index(steps: list[dict[str, Any]], name: str) -> int:
     [
         ("backend-shard", "${{ matrix.group }}"),
         ("backend-serial", "serial"),
-        ("backend-static-tests", "static"),
+        ("backend-static-tests", "static-${{ matrix.group }}"),
     ],
 )
 def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: str) -> None:
@@ -335,13 +335,19 @@ def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: 
     # After the test step, ahead of the native JUnit validator, for every outcome.
     run_step = next(i for i, step in enumerate(steps) if "pytest" in str(step.get("run", "")))
     gate_name = (
-        "Validate static test results" if group == "static" else "Validate native test results"
+        "Validate static test results"
+        if group.startswith("static")
+        else "Validate native test results"
     )
     gate = _index(steps, gate_name)
     assert run_step < _index(steps, "Report executed test counts") < gate
     condition = "${{ !cancelled() }}"
-    if group == "static":
-        condition = "${{ !cancelled() && needs.classify.outputs.backend == 'true' }}"
+    if group.startswith("static"):
+        condition = (
+            "${{ !cancelled() && needs.classify.outputs.backend == 'true' "
+            "&& !(github.event_name == 'pull_request' "
+            "&& needs.classify.outputs.decision == 'SELECTED') }}"
+        )
     assert report["if"] == upload["if"] == condition
 
 
@@ -366,7 +372,9 @@ def test_the_shard_report_reads_the_junit_file_the_shard_writes() -> None:
 def test_the_total_job_expects_every_native_and_static_bucket() -> None:
     job = _JOBS["backend-test-counts"]
     shard_groups = _JOBS["backend-shard"]["strategy"]["matrix"]["group"]
-    assert job["env"]["COUNT_GROUPS"] == " ".join([*map(str, shard_groups), "serial", "static"])
+    assert job["env"]["COUNT_GROUPS"] == " ".join(
+        [*map(str, shard_groups), "serial", *(f"static-{g}" for g in (1, 2, 3, 4))]
+    )
 
 
 def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
