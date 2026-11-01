@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString, cast
 
 import psycopg
 import pytest
@@ -270,7 +270,7 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN_ORPHAN,))
 
 
-@pytest.mark.parametrize("applied_count", [0, 1, 7])
+@pytest.mark.parametrize("applied_count", [0, 1])
 def test_current_reset_refuses_missing_history_without_mutation(
     db_conn: psycopg.Connection,
     applied_count: int,
@@ -292,6 +292,101 @@ def test_current_reset_refuses_missing_history_without_mutation(
                 home=resolve_meiva_home(),
             )
         assert applied_migration_names(conn) == before
+
+
+def test_current_reset_converges_when_the_missing_names_still_have_files(
+    db_url: str,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    # meiva:note
+    # The 2026-11-01 reset folded eight deltas and deleted their files; three were
+    # re-issued as post-baseline files because the running databases had never
+    # applied them. A name that still has a file is pending work, not a gap: this
+    # run applies it. Counting it as history instead would refuse here, and would
+    # also refuse every later start (crossing keeps the file-backed names and
+    # squashes the rest, so the "partial generation" would never clear).
+    from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
+    from base.deploy.schema.migrations import applied_migration_names
+    from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
+
+    _ = db_url
+    file_backed = {
+        "20261101T050900_unified-file-upload",
+        "20261101T081023_harness-switch-and-external-messages",
+        "20261101T091332_retire-display-and-timeline-settings",
+    }
+    assert file_backed <= PRE_RESET_SET
+    before = {BASELINE_NAME, *sorted(PRE_RESET_SET)[:7]}
+    with throwaway_database("reset_partial_files") as url:
+        with psycopg.connect(url, autocommit=True) as c:
+            c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            c.execute("DELETE FROM schema_migrations")
+            for name in sorted(before):
+                c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
+        with psycopg.connect(url) as conn:
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
+            assert RESET_ANCHOR in applied
+            after = applied_migration_names(conn)
+            assert after & file_backed == file_backed & before | (file_backed - before)
+            assert (set(PRE_RESET_SET) - file_backed) & after == set()
+
+
+def test_current_reset_converges_the_shape_the_deleted_files_left_behind(
+    db_url: str,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    # meiva:note
+    # The live shape on 2026-11-02: the five deltas whose files were folded away are
+    # applied, the three re-issued ones are not, and the anchor is absent. Building
+    # it means removing what the three create, because a database built from
+    # `db/schema.sql` already carries their effects while the running databases
+    # never ran them. Then the same apply the next start would run must converge
+    # instead of raising.
+    from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
+    from base.deploy.schema.migrations import applied_migration_names
+    from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
+
+    _ = db_url
+    file_backed = {
+        "20261101T050900_unified-file-upload",
+        "20261101T081023_harness-switch-and-external-messages",
+        "20261101T091332_retire-display-and-timeline-settings",
+    }
+    before = {BASELINE_NAME, *(set(PRE_RESET_SET) - file_backed)}
+    with throwaway_database("reset_live_shape") as url:
+        with psycopg.connect(url, autocommit=True) as c:
+            c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            c.execute("DROP TABLE IF EXISTS upload_staged_files CASCADE")
+            c.execute("DROP TABLE IF EXISTS agent_harness_messages CASCADE")
+            c.execute(
+                "ALTER TABLE upload_delivery_batches"
+                " DROP COLUMN IF EXISTS protocol,"
+                " DROP COLUMN IF EXISTS send_directory,"
+                " DROP COLUMN IF EXISTS message"
+            )
+            c.execute("DELETE FROM schema_migrations")
+            for name in sorted(before):
+                c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
+        with psycopg.connect(url) as conn:
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
+            assert set(applied) >= file_backed
+            assert RESET_ANCHOR in applied
+            assert conn.execute(
+                "SELECT to_regclass('public.upload_staged_files'),"
+                "       to_regclass('public.agent_harness_messages')"
+            ).fetchone() == ("upload_staged_files", "agent_harness_messages")
+            after = applied_migration_names(conn)
+            assert (set(PRE_RESET_SET) - file_backed) & after == set()
 
 
 def test_current_reset_converges_complete_history(
