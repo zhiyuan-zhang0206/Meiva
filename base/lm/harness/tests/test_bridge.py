@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import random
+import sys
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -697,3 +698,32 @@ def registration(
         expires_at=expires_at or "2027-10-19T08:00:00+00:00",
         status="attached",
     )
+
+
+def test_selecting_the_claude_adapter_needs_no_claude_extra(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # meiva:note
+    # The selector answers "claude_code" from the configuration alone, so a machine that never
+    # installed the adapter extra must still get that answer: the extra's absence is a start-time
+    # failure (`MissingClaudeSdkError` names the install command), never a selection-time one.
+    # Without this the parametrized case above passes on every machine that has the extra and the
+    # choice silently stops being verifiable where it matters (#5935).
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    claude = binary_dir / "claude"
+    claude.write_text("#!/bin/sh\nexit 0\n")
+    claude.chmod(0o755)
+    session = open_session(
+        Harness.CLAUDE_CODE,
+        agent_id=72,
+        cwd=tmp_path,
+        registry=FileSessionRegistry(tmp_path / "sessions"),
+        environ={"HOME": str(tmp_path), "PATH": str(binary_dir)},
+        clock=system_clock(),
+        model="claude-opus-5-5",
+        reasoning_effort="low",
+    )
+    assert isinstance(session, ClaudeSession)
+    assert session.config.model == "claude-opus-5-5"

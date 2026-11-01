@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -245,10 +246,11 @@ def test_a_missing_extra_names_the_install_command(
     # actually used — with the exact install command, not an ImportError traceback.
     # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    session = ClaudeSession(
+        BridgeConfig(cwd=tmp_path), environ={}, binding=SessionBinding(), clock=system_clock()
+    )
     with pytest.raises(MissingClaudeSdkError, match=r"pip install 'meiva\[harness-claude\]'"):
-        ClaudeSession(
-            BridgeConfig(cwd=tmp_path), environ={}, binding=SessionBinding(), clock=system_clock()
-        )
+        asyncio.run(session.start())
 
 
 def test_the_shared_package_does_not_reach_into_an_adapter() -> None:
