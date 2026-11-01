@@ -270,6 +270,11 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN_ORPHAN,))
 
 
+# meiva:note
+# 7 is absent on purpose. That shape used to refuse and now converges, because the
+# one name it is missing still has a file; dropping it from this list without a word
+# would read as "7 was never tested". It is covered by
+# `test_current_reset_converges_when_the_missing_names_still_have_files` below (#8150).
 @pytest.mark.parametrize("applied_count", [0, 1])
 def test_current_reset_refuses_missing_history_without_mutation(
     db_conn: psycopg.Connection,
