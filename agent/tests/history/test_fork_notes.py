@@ -81,20 +81,19 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     msgs = guarded_add_messages(
         [SystemMessage(content="sys"), HumanMessage(content="inherited tail")], delta
     )
-    tail_note = msgs[-1]
+    tail_note = msgs[-2]
     assert isinstance(tail_note, HumanMessage)
     assert isinstance(tail_note.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "EXTRA SKILL BODY" in tail_note.content
     assert "## meiva.skills.extra" in tail_note.content
     assert tail_note.additional_kwargs.get("meiva_note_tag") == "preloaded_skills"  # pyright: ignore[reportUnknownMemberType]
-    # The graft sits AFTER the fork marker: [RemoveMessage, sys, inherited, marker, ..., delta]
     tags = [
         m.additional_kwargs.get("meiva_note_tag")  # pyright: ignore[reportUnknownMemberType]
         for m in msgs
         if isinstance(m, HumanMessage) and m.additional_kwargs.get("meiva_note_tag")  # pyright: ignore[reportUnknownMemberType]
     ]
     assert tags[0] == "lifecycle_fork"
-    assert tags[-1] == "preloaded_skills"
+    assert tags[-2:] == ["preloaded_skills", "non_human_wake"]
     # Prefix untouched: sys + inherited tail keep their order at the head.
     first_two = list(msgs[0:2])
     assert [m.content for m in first_two] == ["sys", "inherited tail"]  # pyright: ignore[reportUnknownMemberType]

@@ -177,11 +177,13 @@ describe("block-level copy actions (hover band)", () => {
         items={[
           makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thought" }),
           makeItem({ item_id: "1.1", kind: "agent_chat", payload: "internal reply", user_facing: false }),
+          makeItem({ item_id: "2.0", kind: "agent_chat", payload: "final reply", user_facing: true }),
         ]}
       />,
     );
     fireEvent.click(screen.getByTestId("turn-toggle"));
-    const band = screen.getByLabelText("Copy message").parentElement;
+    const copyButtons = screen.getAllByLabelText("Copy message");
+    const band = copyButtons[0].parentElement;
     expect(band?.getAttribute("data-testid")).toBe("card-chrome");
     expect(band?.parentElement?.className).toContain("relative");
     expect(band?.parentElement?.className).toContain("pb-1.5");

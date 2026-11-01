@@ -228,16 +228,61 @@ describe("groupIntoTurns", () => {
     expect(summary.lastLiveStartedAt).toBe(123_456);
   });
 
-  it("skips silent markers (compact_done, cancelled, compact_request:*) and [files] companions without splitting turns", () => {
+  it("skips silent markers (compact_done, cancelled, compact_request:*, non_human_wake) and [files] companions without splitting turns", () => {
     const items = [
       item("agent_reasoning"),
       item("system_marker", null, undefined, { payload: "compact_done" }),
       item("system_marker", null, undefined, { payload: "cancelled" }),
       item("system_marker", null, undefined, { payload: "compact_request:now" }),
+      item("system_marker", "non_human_wake", undefined, { payload: "Non-human wake: ..." }),
       item("inbound_chat", "user", undefined, { payload: "user [2026-11-01]:\n\n[files]" }),
       item("agent_code"),
     ];
     const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
     expect(kinds(groups)).toEqual(["turn(2@0)"]);
+  });
+
+  it("promotes the timeline's last non-empty agent_chat even when user_facing is false, and refolds it once a newer agent_chat arrives", () => {
+    const trailingInternal = [
+      item("inbound_chat", "user", "1.0", { payload: "deploy" }),
+      item("inbound_chat", "agent:10", "2.0", { payload: "done" }),
+      item("agent_chat", null, "3.0", { user_facing: false, payload: "internal ack" }),
+      item("inbound_chat", "agent:11", "4.0", { payload: "all green" }),
+      item("agent_chat", null, "5.0", { user_facing: false, payload: "Release shipped." }),
+      item("agent_reasoning", null, "6.0", { payload: "post-check" }),
+    ];
+    expect(kinds(groupIntoTurns(trailingInternal, { collapseTurns: true, liveIndex: null }))).toEqual([
+      "single(inbound_chat@0)",
+      "turn(3@1)",
+      "single(agent_chat@4)",
+      "turn(1@5)",
+    ]);
+
+    const superseded = [
+      ...trailingInternal,
+      item("agent_chat", null, "7.0", { user_facing: false, payload: "Cleanup finished." }),
+    ];
+    expect(kinds(groupIntoTurns(superseded, { collapseTurns: true, liveIndex: null }))).toEqual([
+      "single(inbound_chat@0)",
+      "turn(5@1)",
+      "single(agent_chat@6)",
+    ]);
+  });
+
+  it("does not prematurely promote a streaming non-human-wake agent_chat while typing the Meiva agent to user: header", () => {
+    const partialHeader = [
+      item("agent_chat", null, "1.0", { user_facing: false, payload: "Earlier note" }),
+      item("agent_reasoning", null, "2.0", { payload: "thinking" }),
+      item("agent_chat", null, "2.1", {
+        user_facing: false,
+        payload: "Meiva agent ",
+        rawChatPayload: "Meiva agent ",
+        nonHumanWake: true,
+      }),
+    ];
+    expect(kinds(groupIntoTurns(partialHeader, { collapseTurns: true, liveIndex: 2 }))).toEqual([
+      "single(agent_chat@0)",
+      "turn(2@1)",
+    ]);
   });
 });

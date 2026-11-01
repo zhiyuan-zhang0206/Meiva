@@ -637,3 +637,32 @@ def resolve_non_human_wake(
     if dispatched and all(_is_continuation_item(item) for item in dispatched):
         return state.non_human_wake
     return state.non_human_wake if (state.turn_active and not state.halted) else True
+
+
+def should_append_non_human_wake_reminder(
+    state: _state.AgentState,
+    batch: Sequence[ClaimedInbound],
+    routing: Routing,
+    st: BatchState,
+    *,
+    resolved_non_human_wake: bool,
+    goto: object,
+) -> bool:
+    if (
+        not resolved_non_human_wake
+        or st.restart_requested
+        or st.compact_payload is not None
+        or goto != BEFORE_LLM
+    ):
+        return False
+    if state.turn_active and not state.halted and state.non_human_wake:
+        return False
+    dispatched = [
+        item for item in batch if _is_dispatched_for_polarity(item, routing, has_compact=False)
+    ]
+    return not (
+        state.turn_active
+        and state.non_human_wake
+        and dispatched
+        and all(_is_continuation_item(item) for item in dispatched)
+    )

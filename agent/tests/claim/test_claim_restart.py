@@ -23,6 +23,7 @@ from agent.tests.claim.claim_status_support import (
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -77,13 +78,15 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
 
     assert cmd.goto == "before_llm"
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
     note = msgs[0]
     assert isinstance(note, HumanMessage)
     assert 'Task #1 "my task" is now assigned to you (by agent #405).' in note.content  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("meiva_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("meiva_task_id") == 1  # pyright: ignore[reportUnknownMemberType]
+    wake_note = cast(AnyMessage, msgs[1])
+    assert read_meiva_kwargs(wake_note).get("meiva_note_tag") == "non_human_wake"
     # The inbound row is consumed (done at claim, like other lifecycle kinds).
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (inbound_id,))
@@ -130,7 +133,12 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
     assert cmd.goto == "before_llm"
     assert cmd.update is not None
     notes = cast(list[AnyMessage], cmd.update["messages"])
-    assert [note.additional_kwargs.get("meiva_task_id") for note in notes] == [1, 2]
+    assert [
+        note.additional_kwargs.get("meiva_task_id")
+        for note in notes
+        if note.additional_kwargs.get("meiva_note_tag") == "task"
+    ] == [1, 2]
+    assert notes[-1].additional_kwargs.get("meiva_note_tag") == "non_human_wake"
 
 
 async def test_claim_system_note_unknown_tag_fails_loud(

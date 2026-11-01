@@ -103,6 +103,7 @@ describe("continuous compact history", () => {
       makeItem({ item_id: "2.0", kind: "system_marker", source: "memory", payload: "mem 2" }),
       makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "t2", reasoning_ms: 3_000 }),
       makeItem({ item_id: "3.1", kind: "agent_chat", payload: "internal note", user_facing: false }),
+      makeItem({ item_id: "4.0", kind: "agent_chat", payload: "final user reply", user_facing: true }),
     ];
     const { container } = render(<TimelineView items={items} />);
     const turns = container.querySelectorAll("[data-turn-id]");

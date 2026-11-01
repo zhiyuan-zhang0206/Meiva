@@ -53,7 +53,7 @@ from agent.graph._attach_drain import build_attach_drain
 from agent.graph.node_log import StallConfig, flush_node_exit_aggregate, node_lifecycle
 from agent.impersonation import claim_gate
 from agent.impersonation_handoff import resume_note_pending
-from agent.messages import has_conversation
+from agent.messages import NoteTag, has_conversation, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -63,12 +63,18 @@ from base.agents.history.harness_messages import (
 )
 from base.agents.history.timeline import build_timeline_items
 from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.messages.reply_intent import NON_HUMAN_WAKE_REMINDER
 from base.api_contracts.agent_contract import Harness
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TimelineSnapshot
 
 from ._decide import decide
-from ._dispatch import BatchState, dispatch_batch, resolve_non_human_wake
+from ._dispatch import (
+    BatchState,
+    dispatch_batch,
+    resolve_non_human_wake,
+    should_append_non_human_wake_reminder,
+)
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
 # here so existing `from agent.graph.claim.node import ...` call sites (tests)
@@ -232,14 +238,33 @@ async def settle_claimed_batch(
     # reaches END via reset.resume. The two channels are mutually exclusive by construction:
     # restart_requested is only ever set by the hosted restart branch, which never flips the row.
     update = dict(outcome.command.update or {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    resolved_non_human_wake = resolve_non_human_wake(state, batch, routing, st)
     update["turn_active"] = True
-    update["non_human_wake"] = resolve_non_human_wake(state, batch, routing, st)
+    update["non_human_wake"] = resolved_non_human_wake
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
     update["restart_requested"] = st.restart_requested
     if state.interrupted_by_restart:
         # meiva:note
         # The claim that takes the restart has read the mark; it describes one interrupt.
         update["interrupted_by_restart"] = False
+    if should_append_non_human_wake_reminder(
+        state,
+        batch,
+        routing,
+        st,
+        resolved_non_human_wake=resolved_non_human_wake,
+        goto=outcome.command.goto,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    ):
+        now = ctx.require_clock().now()
+        st.new_msgs.append(
+            system_note_message(
+                content=NON_HUMAN_WAKE_REMINDER,
+                tag=NoteTag.NON_HUMAN_WAKE,
+                picked_up_at=now,
+                created_at=now,
+            )
+        )
+        update["messages"] = st.new_msgs
 
     if ctx.harness is not Harness.MEIVA:
         await _settle_external_harness_batch(

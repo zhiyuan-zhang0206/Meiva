@@ -6,9 +6,10 @@
 // secondary items into collapsible TurnBlocks.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
 
+import { USER_REPLY_HEADER } from "@/lib/contracts/constants-generated";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
-import type { BackendTimelineItem } from "@/lib/contracts/types";
 import enMessages from "../../../../messages/en";
 
 import { classifyMarker, isSilentEphemeralPayload } from "./marker-classify";
@@ -65,6 +66,9 @@ export function splitEnvelope(payload: string): { header: string; body: string }
 // mounting empty vertical padding gaps.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
 export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
+  if (item.kind === "system_marker" && item.source === "non_human_wake") {
+    return true;
+  }
   if (
     item.kind === "system_marker" &&
     classifyMarker(item.source).kind === "ephemeral" &&
@@ -82,6 +86,41 @@ export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
     return true;
   }
   return false;
+}
+
+// meiva:note
+// Fallback visibility predicate for the timeline's latest `agent_chat`: an empty block or an
+// uncommitted SSE stream still typing `Meiva agent to user:` without body text is excluded so
+// neither empty placeholders nor half-streamed headers flash on the main canvas.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+export function isFallbackVisibleAgentChat(item: BackendTimelineItem): boolean {
+  if (item.kind !== "agent_chat" || item.payload.trim().length === 0) {
+    return false;
+  }
+  if (item.rawChatPayload !== undefined) {
+    const trimmed = item.rawChatPayload.trimStart();
+    if (USER_REPLY_HEADER.startsWith(trimmed)) {
+      return false;
+    }
+    if (
+      trimmed.startsWith(USER_REPLY_HEADER) &&
+      trimmed.slice(USER_REPLY_HEADER.length).trim().length === 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function findLastVisibleAgentChat(
+  items: readonly BackendTimelineItem[],
+): BackendTimelineItem | null {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (isFallbackVisibleAgentChat(items[i])) {
+      return items[i];
+    }
+  }
+  return null;
 }
 
 export function classifyItem(item: BackendTimelineItem): ItemClass {
@@ -303,6 +342,7 @@ export function groupIntoTurns(
     return items.map((item, index) => ({ kind: "single", item, index }));
   }
 
+  const promotedChat = findLastVisibleAgentChat(items);
   const groups: TimelineGroup[] = [];
   let run: BackendTimelineItem[] = [];
   let runStart = 0;
@@ -315,7 +355,7 @@ export function groupIntoTurns(
 
   items.forEach((item, index) => {
     if (isSilentTimelineItem(item)) return;
-    const cls = classifyItem(item);
+    const cls = item === promotedChat ? "primary" : classifyItem(item);
     const groupable = cls === "secondary";
 
     if (groupable) {

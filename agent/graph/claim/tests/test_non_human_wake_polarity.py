@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import ClaimedInbound
@@ -16,6 +17,7 @@ from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -225,14 +227,109 @@ async def test_claim_node_impl_idle_reset_and_handoff_resume_polarity(
     assert cmd_handoff.update is not None
     assert cmd_handoff.update.get("non_human_wake") is False
 
+
+async def test_settle_claimed_batch_appends_recency_reminder_only_on_fresh_non_human_wake(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    del redis_url, db_conn
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+
     peer_cmd = await settle_claimed_batch(
         runtime.context,
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
         tid,
         [ClaimedInbound(id=501, agent_id=tid, content="peer ping", kind="chat", source="agent:8")],
     )
-    assert peer_cmd.update is not None
-    assert peer_cmd.update.get("non_human_wake") is True
+    peer_update = cast(dict[str, object], peer_cmd.update)
+    assert peer_update.get("non_human_wake") is True
+    peer_msgs = cast(list[BaseMessage], peer_update["messages"])
+    assert len(peer_msgs) == 2
+    assert read_meiva_kwargs(peer_msgs[-1]).get("meiva_note_tag") == "non_human_wake"
+    assert "Meiva agent to user: " in str(peer_msgs[-1].content)
+
+    mid_run_cmd = await settle_claimed_batch(
+        runtime.context,
+        AgentState(
+            messages=[SystemMessage(content="sys")],
+            halted=False,
+            turn_active=True,
+            non_human_wake=True,
+        ),
+        tid,
+        [
+            ClaimedInbound(
+                id=502, agent_id=tid, content="peer follow-up", kind="chat", source="agent:9"
+            )
+        ],
+    )
+    mid_run_update = cast(dict[str, object], mid_run_cmd.update)
+    assert mid_run_update.get("non_human_wake") is True
+    mid_run_msgs = cast(list[BaseMessage], mid_run_update["messages"])
+    assert len(mid_run_msgs) == 1
+    assert read_meiva_kwargs(mid_run_msgs[0]).get("meiva_note_tag") is None
+
+    human_cmd = await settle_claimed_batch(
+        runtime.context,
+        AgentState(messages=[SystemMessage(content="sys")], halted=True),
+        tid,
+        [ClaimedInbound(id=503, agent_id=tid, content="hello", kind="chat", source="user")],
+    )
+    human_update = cast(dict[str, object], human_cmd.update)
+    assert human_update.get("non_human_wake") is False
+    human_msgs = cast(list[BaseMessage], human_update["messages"])
+    assert len(human_msgs) == 1
+    assert read_meiva_kwargs(human_msgs[0]).get("meiva_note_tag") is None
+
+
+async def test_external_harness_non_human_wake_includes_recency_reminder_and_keeps_turn_key(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    from dataclasses import replace
+
+    from base.api_contracts.agent_contract import Harness
+
+    del redis_url, db_conn
+    tid = spawn_agent(
+        harness="claude_code",
+        config={"llm_model": "claude-sonnet-5-5", "reasoning_effort": "high"},
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    ext_ctx = replace(runtime.context, harness=Harness.CLAUDE_CODE)
+    cmd = await settle_claimed_batch(
+        ext_ctx,
+        AgentState(messages=[SystemMessage(content="handoff")], halted=True),
+        tid,
+        [ClaimedInbound(id=601, agent_id=tid, content="done", kind="chat", source="watcher:4")],
+    )
+    update = cast(dict[str, object], cmd.update)
+    assert update.get("non_human_wake") is True
+    pending = cast(dict[str, str], update["harness_pending_input"])
+    assert pending["key"] == "inbound-601"
+    assert "Meiva agent to user: " in pending["prompt"]
 
 
 def _run_background_harness_turn(live_events: LiveEvents) -> list[object]:

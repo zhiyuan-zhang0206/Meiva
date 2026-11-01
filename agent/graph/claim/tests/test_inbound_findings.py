@@ -159,11 +159,14 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
         database=database,
     )
 
-    task_note, note = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
+    task_note, note, wake_note = _delta(
+        await _claim(aops_pool, agent_id, database_gate=database_gate)
+    )
 
     assert read_meiva_kwargs(task_note).get("meiva_note_tag") == NoteTag.TASK.value
     assert _is_security_note(note)
     assert "inbound.system_note:agent:405" in str(note.content)
+    assert read_meiva_kwargs(wake_note).get("meiva_note_tag") == NoteTag.NON_HUMAN_WAKE.value
 
 
 async def test_each_flagged_message_in_a_batch_gets_its_own_note(
