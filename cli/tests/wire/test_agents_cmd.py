@@ -407,3 +407,112 @@ def test_agents_compact_parser_dispatches() -> None:
     args = parser.parse_args(["agents", "compact", "7"])
     assert args.agent_id == 7
     assert args.func.__name__ == "_h_agents_compact"
+
+
+def test_agents_transfer_posts_and_renders_summary(
+    wire: PublicGateway, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = wire.respond(
+        "post",
+        {
+            "agent_id": 2697,
+            "from_machine": "macmini",
+            "to_machine": "company-mini",
+            "agent_status": "idling",
+            "files_transferred": 14,
+            "bytes_transferred": 4096,
+            "killed_shell_sessions": [0, 2],
+            "closed_pages": ["dashboard"],
+        },
+    )
+    assert (
+        wire.run(
+            "agents",
+            "transfer",
+            "2697",
+            "--to",
+            "company-mini",
+            "--source",
+            "user",
+            "--message",
+            "Move Output owner to company-mini",
+        )
+        == 0
+    )
+    assert seen["url"] == f"{wire.url}/api/agents/2697/transfer"
+    assert seen["json"] == {
+        "to_machine": "company-mini",
+        "source": "user",
+        "message": "Move Output owner to company-mini",
+    }
+    out = capsys.readouterr().out
+    assert "agent 2697 transfer: macmini -> company-mini (idling, 14 file(s), 4096 B)" in out
+    assert "killed 2 shell session(s): 0, 2" in out
+    assert "closed 1 page(s)" in out
+
+
+def test_agents_transfer_no_message_and_error_body(
+    wire: PublicGateway, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = wire.respond(
+        "post",
+        {
+            "agent_id": 2697,
+            "from_machine": "macmini",
+            "to_machine": "company-mini",
+            "agent_status": "terminated",
+            "files_transferred": 0,
+            "bytes_transferred": 0,
+            "killed_shell_sessions": [],
+            "closed_pages": [],
+        },
+    )
+    assert wire.run("agents", "transfer", "2697", "--to", "company-mini", "--no-message") == 0
+    assert seen["json"] == {"to_machine": "company-mini"}
+    assert "macmini -> company-mini (terminated, 0 file(s), 0 B)" in capsys.readouterr().out
+
+    wire.respond("post", {"detail": "agent 2697 is currently running on 'macmini'"}, 409)
+    assert (
+        wire.run(
+            "agents",
+            "transfer",
+            "2697",
+            "--to",
+            "company-mini",
+            "--no-message",
+            expect="http",
+            status=409,
+            path="/api/agents/2697/transfer",
+        )
+        == 0
+    )
+    assert "currently running" in capsys.readouterr().err
+
+
+def test_agents_transfer_parser_requires_target_and_message_choice(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.parsers import build_parser
+
+    for bad in (
+        ["agents", "transfer", "2697", "--no-message"],
+        ["agents", "transfer", "2697", "--to", "   ", "--no-message"],
+        ["agents", "transfer", "2697", "--to", "company-mini"],
+        ["agents", "transfer", "2697", "--to", "company-mini", "--message", "  "],
+        [
+            "agents",
+            "transfer",
+            "2697",
+            "--to",
+            "company-mini",
+            "--message",
+            "ok",
+            "--no-message",
+        ],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            build_parser().parse_args(bad)
+        assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "--to" in err
+    assert "one of the arguments --message --no-message is required" in err

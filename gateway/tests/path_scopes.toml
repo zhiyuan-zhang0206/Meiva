@@ -7,6 +7,7 @@
 "base.cluster.machine.tests.identity" = ["."]
 "base.packages.tests.model_catalog" = [
     "test_agents_endpoints.py",
+    "transfer/test_agent_transfer.py",
 ]
 "base.config.tests.config_authority" = [
     "test_agent_inspect.py",
@@ -15,6 +16,7 @@
     "test_idempotency.py",
     "routers/cluster_endpoints/test_status_cluster.py",
     "history/test_understanding_build_endpoints.py",
+    "transfer/test_agent_transfer.py",
 ]
 "meiva.tests.fixtures.sdk" = [
     ".",

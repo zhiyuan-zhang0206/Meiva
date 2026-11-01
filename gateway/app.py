@@ -47,6 +47,8 @@ from gateway.agents.reply_suggestion.configuration import reply_suggestion_polic
 from gateway.agents.reply_suggestion.service import ReplySuggestionService
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
+from gateway.agents.transfer import router as agents_transfer_router
+from gateway.agents.transfer.bundle_store import TransferBundleStore
 from gateway.alerts import router as alerts_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
@@ -533,6 +535,7 @@ def create_app(
     app.state.gateway_process = process
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
+    app.state.agent_transfer_bundles = TransferBundleStore()
     app.middleware("http")(cluster_auth_middleware)
 
     app.middleware("http")(latency.latency_middleware)
@@ -560,6 +563,7 @@ def create_app(
         to_user_router.router,
         agents_launch_retry_router.router,
         agents_lifecycle_router.router,
+        agents_transfer_router.router,
         agents_understanding_router.router,
         agents_state_router.router,
         agent_events_router.router,

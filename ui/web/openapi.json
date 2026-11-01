@@ -985,6 +985,58 @@
         }
       }
     },
+    "/api/agents/{agent_id}/transfer": {
+      "post": {
+        "summary": "Post Agent Transfer",
+        "description": "Transfer a settled (`idling` or `terminated`) native Meiva agent — including its workspace directory and central placement — to another live `agent-runner` machine. Running agents, external-harness agents, and agents with open or unsettled impersonation leases are refused with HTTP 409.",
+        "operationId": "post_agent_transfer_api_agents__agent_id__transfer_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferAgentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferAgentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/sessions": {
       "get": {
         "summary": "Get Agent Sessions",
@@ -19473,6 +19525,105 @@
         ],
         "title": "TraceCheckpointMessagesResponse",
         "description": "GET /api/agents/{id}/traces/{trace_id}/messages response — the full\nmessage list (incl. the system prompt) of the turn that produced one OTel\ntrace, resolved on demand from the checkpoints table.\n\nSpans are metadata-only (trace v2): this endpoint is how content comes\nback. `pruned` distinguishes the two absence shapes:\n- pruned=true, checkpoint_id=None — no checkpoint carries this trace id\n  (the link predates the feature, or the turn committed no checkpoint), so\n  there is no content to return; the span metadata in the mirror still\n  exists. Checkpoints are never deleted. Callers render this as absent\n  content rather than an error.\n- pruned=false — the checkpoint exists; messages is its `messages` channel\n  (the full conversation at that point, system prompt included).\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` — the same raw\nshape as GET /api/agents/{id}/messages."
+      },
+      "TransferAgentRequest": {
+        "properties": {
+          "to_machine": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "To Machine"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "default": "user"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "to_machine"
+        ],
+        "title": "TransferAgentRequest"
+      },
+      "TransferAgentResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "from_machine": {
+            "type": "string",
+            "title": "From Machine"
+          },
+          "to_machine": {
+            "type": "string",
+            "title": "To Machine"
+          },
+          "status": {
+            "type": "string",
+            "const": "transferred",
+            "title": "Status",
+            "default": "transferred"
+          },
+          "agent_status": {
+            "type": "string",
+            "enum": [
+              "idling",
+              "terminated"
+            ],
+            "title": "Agent Status"
+          },
+          "files_transferred": {
+            "type": "integer",
+            "title": "Files Transferred"
+          },
+          "bytes_transferred": {
+            "type": "integer",
+            "title": "Bytes Transferred"
+          },
+          "killed_shell_sessions": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Killed Shell Sessions"
+          },
+          "closed_pages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Closed Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "agent_id",
+          "from_machine",
+          "to_machine",
+          "agent_status",
+          "files_transferred",
+          "bytes_transferred"
+        ],
+        "title": "TransferAgentResponse"
       },
       "UiContributionsResponse": {
         "properties": {

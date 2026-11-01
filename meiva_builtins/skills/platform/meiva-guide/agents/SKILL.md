@@ -21,6 +21,11 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
   same `agent_id`.
 - `resurrect` — wake a `terminated` agent with its full conversation state
   intact (must include a `prompt` telling it why it was woken).
+- `transfer` (CLI only: `meiva agents transfer <id> --to <machine> --message "..."`
+  or `--no-message`) — move an `idling` or `terminated` native agent and its
+  workspace directory to another machine. Running agents are refused (`409`);
+  to relocate yourself, ask a peer or operator to transfer you after calling
+  `meiva.self.terminate()`.
 
 State machine: `idling (unclaimed) → running ⇄ idling → terminated`.
 

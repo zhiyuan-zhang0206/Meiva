@@ -18,4 +18,5 @@ exports = ["agents", "auth", "extensions", "routers", "test_agents_endpoints.py"
 "test_agents_endpoints.py" = ["auth", "support"]
 "test_error_envelope.py" = ["auth"]
 "test_idempotency.py" = ["auth", "support"]
+"transfer" = ["auth", "support", "upload_delivery"]
 "upload_delivery" = ["auth", "events", "support"]

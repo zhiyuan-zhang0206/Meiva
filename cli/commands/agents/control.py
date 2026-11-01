@@ -22,9 +22,10 @@ from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
 from base.host.net.resilience import ExponentialBackoff, Policy, retry
-from ops.rpc_schemas import CancelAgentResponse, CompactAgentResponse
+from ops.rpc_schemas import CancelAgentResponse, CompactAgentResponse, TransferAgentResponse
 
 _TIMEOUT_S = 15.0
+_TRANSFER_TIMEOUT_S = 120.0
 
 
 # meiva:note
@@ -461,4 +462,53 @@ def cmd_agents_compact(access: GatewayAccess, agent_id: int) -> int:
     resp.raise_for_status()
     queued = CompactAgentResponse.model_validate(resp.json())
     print(f"  ✓ agent {agent_id} compact requested: inbound {queued.inbound_id}")
+    return 0
+
+
+# meiva:note
+# `meiva agents transfer <id> --to <machine>` — POST /api/agents/{id}/transfer.
+#
+# Moves a quiescent (`idling` or `terminated`) native agent and its runner workspace to
+# `to_machine` with a fenced Postgres cutover. Surfaces HTTP 4xx/5xx bodies on stderr
+# before raising so operators see why a transfer was refused (e.g. running turn or open
+# impersonation lease).
+def cmd_agents_transfer(
+    access: GatewayAccess,
+    agent_id: int,
+    *,
+    to_machine: str,
+    source: str | None = None,
+    message: str | None = None,
+) -> int:
+    cleaned_machine = to_machine.strip()
+    if not cleaned_machine:
+        raise ValueError("to_machine cannot be empty")
+    payload: dict[str, object] = {
+        "to_machine": cleaned_machine,
+        **_explicit_caller(source),
+        **({"message": message} if message is not None else {}),
+    }
+    resp = http_dial.post(
+        _api(access, f"agents/{agent_id}/transfer"),
+        json=payload,
+        timeout=_TRANSFER_TIMEOUT_S,
+        headers=gateway_auth_headers(access),
+    )
+    if resp.status_code >= 400:
+        print(resp.text, file=sys.stderr)
+    resp.raise_for_status()
+    ans = TransferAgentResponse.model_validate(resp.json())
+    extras: list[str] = []
+    if ans.killed_shell_sessions:
+        extras.append(
+            f"killed {len(ans.killed_shell_sessions)} shell session(s): "
+            f"{', '.join(str(s) for s in ans.killed_shell_sessions)}"
+        )
+    if ans.closed_pages:
+        extras.append(f"closed {len(ans.closed_pages)} page(s)")
+    rider = f" — {'; '.join(extras)}" if extras else ""
+    print(
+        f"  ✓ agent {agent_id} transfer: {ans.from_machine} -> {ans.to_machine} "
+        f"({ans.agent_status}, {ans.files_transferred} file(s), {ans.bytes_transferred} B){rider}"
+    )
     return 0

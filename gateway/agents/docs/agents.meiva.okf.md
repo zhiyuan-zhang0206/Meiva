@@ -42,4 +42,5 @@ propagate. Configured compact-history depth still bounds accessible segments.
 - [[gateway/agents/docs/reply-suggestion/reply-suggestion.meiva.okf.md]] — gated, drafted reply shown in the empty composer.
 - [[gateway/agents/docs/notice-receipts.meiva.okf.md]] — notice operation receipts.
 - [[gateway/agents/docs/completion-notice-digest.meiva.okf.md]] — completion notice reads and digest ownership.
+- [[gateway/agents/docs/agent-transfer.meiva.okf.md]] — cross-machine workspace and ownership transfer for quiescent native agents.
 - [[gateway/agents/task_assignment/docs/task-assignment.meiva.okf.md]] — compound task and agent acceptance with independent launch recovery.

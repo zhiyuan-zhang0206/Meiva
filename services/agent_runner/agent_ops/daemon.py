@@ -68,6 +68,7 @@ from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_f
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.agent_runner.agent_ops.to_user_resource import resource_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
+from services.agent_runner.agent_ops.workspace_export import workspace_export_route
 
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 
@@ -597,6 +598,16 @@ async def serve_ops_daemon(
                 ),
                 ("POST", "/to-user/resource"): functools.partial(
                     resource_route,
+                    pool=pool,
+                    machine=our_machine,
+                    home=home,
+                    executor=executor,
+                    dispatch_sem=dispatch_sem,
+                    requests=requests,
+                    workers=workers,
+                ),
+                ("POST", "/workspace/export"): functools.partial(
+                    workspace_export_route,
                     pool=pool,
                     machine=our_machine,
                     home=home,
