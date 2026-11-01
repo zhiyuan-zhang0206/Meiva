@@ -101,6 +101,11 @@ def test_existing_agent_projection_survives_provider_failure(
     assert detail.status_code == 200, detail.text
     assert detail.json()["supports_vision"] is None
     assert detail.json()["status"] == "idling"
+    dashboard = client.get("/api/stats/dashboard")
+    assert dashboard.status_code == 200, dashboard.text
+    assert dashboard.json()["live_count"] == 1
+    assert dashboard.json()["openai_cost_usd"] is None
+    assert dashboard.json()["anthropic_cost_usd"] is None
 
 
 def test_model_requests_report_unavailable(

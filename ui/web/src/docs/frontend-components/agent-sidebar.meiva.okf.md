@@ -33,11 +33,24 @@ restore button (desktop) or its menu button (phone drawer) instead of vanishing
 ## Status popover
 
 The chart icon at the head of the footer row opens the Status popover: a quick
-status of the whole cluster, not a statistics report. It is a small panel rather
-than a toolbar: the 2×3 status grid (live agents, tokens, cache hit, cost,
-average turn time, warnings/errors), the window selector and the plugin-declared
-status cards live there, so the closed sidebar spends no height on numbers a
-reader checks occasionally (the old inline bar occupied a row permanently).
+status of the whole cluster, not a statistics report. Mirroring the Inspector
+panel's split between point-in-time state and time-aggregated activity, the
+popover separates its unwindowed state above from its windowed `Usage` section
+below:
+
+- **Point-in-time section** (above the rule, never governed by a window picker):
+  `Live agents` and any plugin-declared status cards (`contributions.ui.stats`,
+  such as provider balances and subscription quota windows).
+- **Windowed `Usage` section** (below the rule, headed by `Usage` and its own
+  `WindowSelect` offering `5m` / `1h` / `6h` / `24h` / `3d` / `7d` / `30d`): a
+  2×3 grid of `Tokens`, `Cache hit`, total metered API `Cost`, `Warnings / errors`,
+  and metered `OpenAI API` and `Anthropic API` spend slices (excluding
+  subscription harnesses so monthly API credit consumption stays distinct from
+  subscription quotas).
+
+Keeping the panel behind the footer trigger means the closed sidebar spends no
+height on numbers a reader checks occasionally (the old inline bar occupied a
+row permanently).
 
 ## Display settings popover
 

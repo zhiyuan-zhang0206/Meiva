@@ -6797,7 +6797,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `openai_cost_usd` / `anthropic_cost_usd`: the window's\n  `llm_usage` rows in `telemetry_events` (cost is each row's usage-time snapshot\n  excluding subscription harnesses; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / openai_cost_usd / anthropic_cost_usd 0.0. The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -7093,7 +7093,7 @@
     "/api/fleet/graph": {
       "get": {
         "summary": "Get Fleet Graph",
-        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\n`total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10];\nomitted = the configured default ``display.fleet_graph_decay_lambda`` -\n0.5 out of the box) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` rows in the window. `total_tokens` is the sum of\nthe same two fields over the retained 7d window. Both are read in parts\n(`gateway/routers/fleet/fleet_tokens.py`): raw rows of the newest two days, the\nday-grain ledger before them, and for the all-time score the folded\n`agent_model_tokens_total`, so the read does not scan history.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
+        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\n`total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168/720 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10];\nomitted = the configured default ``display.fleet_graph_decay_lambda`` -\n0.5 out of the box) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` rows in the window. `total_tokens` is the sum of\nthe same two fields over the retained 7d window. Both are read in parts\n(`gateway/routers/fleet/fleet_tokens.py`): raw rows of the newest two days, the\nday-grain ledger before them, and for the all-time score the folded\n`agent_model_tokens_total`, so the read does not scan history.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
         "operationId": "get_fleet_graph_api_fleet_graph_get",
         "parameters": [
           {
@@ -18335,16 +18335,29 @@
             "minimum": 0.0,
             "title": "Cost Usd"
           },
-          "avg_turn_seconds": {
+          "openai_cost_usd": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Avg Turn Seconds"
+            "title": "Openai Cost Usd"
+          },
+          "anthropic_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anthropic Cost Usd"
           },
           "warnings": {
             "type": "integer",
@@ -18392,7 +18405,6 @@
           "window_hours",
           "tokens",
           "cost_usd",
-          "avg_turn_seconds",
           "warnings",
           "errors",
           "alert_classes_active",
@@ -18400,7 +18412,7 @@
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n  events that pre-date the snapshot field contribute 0\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw event totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether an active dismissal in `event_dismissals`\n  cancels the class — exact, or a wildcard row with an empty `process`.\n  The sidebar card shows `alert_classes_active`; the classes themselves\n  are `GET /api/stats/alert-classes`, which reads the same rows.\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
+        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `openai_cost_usd` /\n`anthropic_cost_usd` / `warnings` / `errors`) aggregate over the\n`applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed metered API spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`\n  excluding subscription harnesses; events that pre-date the snapshot field\n  contribute 0\n- `openai_cost_usd` / `anthropic_cost_usd`: the OpenAI and Anthropic slices\n  of `cost_usd`, resolved via the gateway model catalog (`None` only when\n  the model catalog failed to load)\n- `warnings` / `errors`: raw event totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether an active dismissal in `event_dismissals`\n  cancels the class — exact, or a wildcard row with an empty `process`.\n  The sidebar card shows `alert_classes_active`; the classes themselves\n  are `GET /api/stats/alert-classes`, which reads the same rows.\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
       },
       "StatsTokens": {
         "properties": {
@@ -18451,10 +18463,10 @@
           6,
           24,
           72,
-          168
+          168,
+          720
         ],
-        "title": "StatsWindowHours",
-        "description": "Whitelisted `?hours=` windows for stats, inspect, and fleet — 0 = last\n5 minutes / 1h / 6h / 24h / 3d / 7d. An enum (not `int` + range check)\nso FastAPI 422s any other value instead of silently aggregating an arbitrary window.\n(A `Literal[1, 6, ...]` won't do: query params arrive as strings and\nint-literal validation doesn't coerce them, 422ing even valid values.)"
+        "title": "StatsWindowHours"
       },
       "SystemNoteIn": {
         "properties": {

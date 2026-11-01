@@ -3933,7 +3933,8 @@ export interface components {
             applied_window_hours?: number | null;
             tokens: components["schemas"]["StatsTokens"];
             cost_usd: number;
-            avg_turn_seconds: number | null;
+            openai_cost_usd?: number | null;
+            anthropic_cost_usd?: number | null;
             warnings: number;
             errors: number;
             alert_classes_active: number;
@@ -3947,7 +3948,7 @@ export interface components {
             cache_read: number;
             cache_hit_pct: number | null;
         };
-        StatsWindowHours: 0 | 1 | 6 | 24 | 72 | 168;
+        StatsWindowHours: 0 | 1 | 6 | 24 | 72 | 168 | 720;
         SystemNoteIn: {
             content: string;
             source: string;
