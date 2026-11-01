@@ -22,7 +22,7 @@ import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -232,7 +232,7 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
     try:
         loaded = load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
         assert [name for name, _ in loaded.registry.plugins] == ["faced"]
-        assert settings.plugins.faced.knob == 7
+        assert cast(Any, settings.plugins.faced).knob == 7
         with pytest.raises(RuntimeError, match="no ModelCatalog"):
             settings.model_catalog()
         with pytest.raises(RuntimeError, match="no ConfigAuthority"):

@@ -11,6 +11,8 @@ process resource; the default database factory refuses it before a connection ca
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol, overload
 
+from pydantic import BaseModel
+
 from base.agents.context.clients import DatabaseHandle
 from base.clock import Clock
 from base.config import settings
@@ -117,7 +119,7 @@ def bus() -> _EventBus:
 
 
 class _PluginConfigReader(Protocol):
-    def config_for(self, name: str) -> object: ...
+    def config_for(self, name: str) -> BaseModel: ...
 
 
 # meiva:note
@@ -186,10 +188,9 @@ class _PluginsView:
     so typos / "bind hasn't run yet" are immediately visible.
     """
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> BaseModel:
         if name.startswith("_"):
             raise AttributeError(name)
-        from pydantic import BaseModel
 
         installation = installed()
         configs: Mapping[str, BaseModel] = {} if installation is None else installation.configs
