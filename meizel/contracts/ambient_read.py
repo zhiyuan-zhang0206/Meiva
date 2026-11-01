@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 from collections.abc import Iterable, Mapping
 
 from meizel.contracts.debt import file_key
@@ -28,6 +30,7 @@ from meizel.graph.model import (
     Unless,
 )
 from meizel.graph.universe import Universe
+from meizel.language import cached_module_imports, load_cached_sources, store_cached_sources
 from meizel.language.scan import FileScan, module_bindings
 from meizel.lint_common import is_test_path
 
@@ -85,9 +88,24 @@ def _module_of(directory: str, file: str) -> str:
     return ".".join(part for part in parts if part)
 
 
+def _state_digest(manifests: Mapping[str, Manifest]) -> str:
+    entries = [
+        [
+            directory,
+            [[file, [k.value for k in kinds]] for file, kinds in sorted(manifest.state.items())],
+        ]
+        for directory, manifest in sorted(manifests.items())
+        if manifest.state
+    ]
+    return hashlib.sha256(json.dumps(entries, separators=(",", ":")).encode()).hexdigest()
+
+
 # meiva:note
 # The state a repository keeps: modules that declare `[state]`, and the policy's names for it.
 def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Universe) -> Sources:
+    cache_key, cached = load_cached_sources(universe, _state_digest(manifests), policy)
+    if cached is not None:
+        return cached
     names: dict[str, AmbientKind] = {}
     calls: dict[str, AmbientKind] = {}
     for directory, manifest in manifests.items():
@@ -99,10 +117,13 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Un
                         calls[f"{module}.{name.removesuffix(_CALL_MARK)}"] = kind
                     else:
                         names[f"{module}.{name}"] = kind
-    calls.update(_followed(universe, _readers(policy, call=True)))
-    readers = _followed(universe, _readers(policy, call=False))
+    parsed: dict[str, dict[str, str]] = {}
+    calls.update(_followed(universe, _readers(policy, call=True), parsed))
+    readers = _followed(universe, _readers(policy, call=False), parsed)
     names.update(readers)
-    return Sources(names, calls, frozenset(readers), _spared(universe, policy))
+    result = Sources(names, calls, frozenset(readers), _spared(universe, policy))
+    store_cached_sources(universe, cache_key, result)
+    return result
 
 
 # meiva:note
@@ -417,11 +438,13 @@ def _spread(
     exported: _Spellings,
     parsed: dict[str, dict[str, str]],
 ) -> bool:
+    ordered = sorted(candidates)
+    missing = [path for path in ordered if path not in parsed]
+    if missing:
+        parsed.update(cached_module_imports(universe, missing, _imports))
     grew = False
-    for path in sorted(candidates):
+    for path in ordered:
         module = _module_of(*path.rpartition("/")[::2])
-        if path not in parsed:
-            parsed[path] = _imports(universe, path)
         for local, origin in parsed[path].items():
             for tail, kind in list(exported.get(origin, {}).items()):
                 spelled = exported.setdefault(f"{module}.{local}", {})
@@ -435,17 +458,21 @@ def _spread(
 # The readers and every spelling a module gives them by importing them at its top level: a call
 # through a re-export is still the call of the reader. Only the non-test sources that mention one
 # of the names are read, so the cost follows the readers, not the repository.
-def _followed(universe: Universe, readers: Mapping[str, AmbientKind]) -> dict[str, AmbientKind]:
+def _followed(
+    universe: Universe,
+    readers: Mapping[str, AmbientKind],
+    parsed: dict[str, dict[str, str]] | None = None,
+) -> dict[str, AmbientKind]:
     exported = _origins(universe, readers)
     repo = universe.repo
     seen: set[str] = set()
     candidates: set[str] = set()
-    parsed: dict[str, dict[str, str]] = {}
+    known = {} if parsed is None else parsed
     for _ in range(_REEXPORT_HOPS + 1):
         tokens = {origin.rpartition(".")[2] for origin in exported} - seen
         seen |= tokens
         candidates.update(p for p in repo.grep_words(tokens, ".py") if not is_test_path(p))
-        if not _spread(universe, candidates, exported, parsed):
+        if not _spread(universe, candidates, exported, known):
             break
     else:
         raise MeizelError(

@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import re
-from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from meizel.contracts.ambient_read import (
@@ -34,21 +31,20 @@ from meizel.contracts.policy import POLICY, Policy, load_policy, render_policy
 from meizel.contracts.policy import check as check_policy
 from meizel.contracts.rule import (
     Projection,
-    judge,
+    judge_facts,
     paid_strict_to_be,
-    project,
     purity_diagnostics,
     stale_exports,
 )
+from meizel.graph import python_reverse_closure
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch, Sources
-from meizel.graph.universe import Universe
+from meizel.graph.universe import Universe, parent_of
+from meizel.language import scan_all
 from meizel.language.fixtures import FixtureIndex, fixture_facts, is_test_file
 from meizel.language.scan import (
     EXTERNAL_FORMS,
     FileScan,
     mount_facts,
-    scan_file,
-    scan_typescript_files,
     typescript_files,
     typescript_scopes,
 )
@@ -66,6 +62,8 @@ __all__ = [
     "exempt_test_modules",
     "load_manifests",
     "load_policy",
+    "manifest_diagnostics",
+    "python_reverse_closure",
     "read_entry",
     "render_policy",
     "scan_all",
@@ -73,9 +71,6 @@ __all__ = [
     "type_checking_in_scope",
     "type_checking_violations",
 ]
-
-_PARALLEL_FROM = 200
-_WORKER: dict[str, tuple[Universe, Sources]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,39 +127,6 @@ class Analysis:
 
 def _all_source_files(universe: Universe, policy: Policy) -> tuple[str, ...]:
     return (*universe.python_files, *typescript_files(universe, policy))
-
-
-def _init_worker(universe: Universe, sources: Sources) -> None:
-    _WORKER["scan"] = (universe, sources)
-
-
-def _scan_in_worker(path: str) -> FileScan:
-    universe, sources = _WORKER["scan"]
-    return scan_file(universe, path, sources)
-
-
-def scan_all(
-    universe: Universe,
-    sources: Sources,
-    jobs: int | None = None,
-    paths: Sequence[str] | None = None,
-    *,
-    policy: Policy,
-) -> dict[str, FileScan]:
-    selected = _all_source_files(universe, policy) if paths is None else paths
-    ts_paths = [p for p in selected if not p.endswith(".py")]
-    scans = scan_typescript_files(universe, ts_paths, sources, policy)
-    paths = [p for p in selected if p.endswith(".py")]
-    workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
-    if workers <= 1 or len(paths) < _PARALLEL_FROM:
-        scans.update((p, scan_file(universe, p, sources)) for p in paths)
-        return scans
-    with ProcessPoolExecutor(
-        workers, initializer=_init_worker, initargs=(universe, sources)
-    ) as pool:
-        scanned = pool.map(_scan_in_worker, paths, chunksize=max(1, len(paths) // (workers * 8)))
-        scans.update((scan.path, scan) for scan in scanned)
-    return scans
 
 
 def _load_facts(manifests: dict[str, Manifest]) -> list[Fact]:
@@ -479,43 +441,55 @@ def _stale_diagnostics(
     return found
 
 
+def _ancestor_conftests(universe: Universe, path: str) -> list[str]:
+    found: list[str] = []
+    directory = parent_of(path)
+    while True:
+        candidate = f"{directory}/conftest.py" if directory else "conftest.py"
+        if candidate in universe.files:
+            found.append(candidate)
+        if not directory:
+            return found
+        directory = parent_of(directory)
+
+
+def _needed_conftests(universe: Universe, scans: Mapping[str, FileScan]) -> list[str]:
+    needed: set[str] = set()
+    for scan in scans.values():
+        if scan.fixtures.requests or scan.fixtures.plugins:
+            needed.update(_ancestor_conftests(universe, scan.path))
+    return sorted(needed - scans.keys())
+
+
+def _missing_plugins(universe: Universe, scans: Mapping[str, FileScan]) -> list[str]:
+    found: set[str] = set()
+    for scan in scans.values():
+        for name, _ in scan.fixtures.plugins:
+            mod = universe.resolve_module(name)
+            if mod is not None and mod.file is not None and mod.file not in scans:
+                found.add(mod.file)
+    return sorted(found)
+
+
+# meiva:note
+# Scans only changed source files first, pulling in ancestor conftest.py files and transitive
+# pytest_plugins modules only when a changed file requests fixtures or declares plugins.
 def _scan_changed(
     universe: Universe, sources: Sources, changed: Collection[str], jobs: int | None, policy: Policy
 ) -> dict[str, FileScan]:
-    """The changed Python files, plus what resolving their fixture requests needs."""
-    wanted = {
-        p for p in _all_source_files(universe, policy) if p in changed or p.endswith("conftest.py")
-    }
-    scans = scan_all(universe, sources, jobs, sorted(wanted), policy=policy)
-    while True:
-        modules = (
-            universe.resolve_module(n) for s in scans.values() for n, _ in s.fixtures.plugins
-        )
-        more = sorted({m.file for m in modules if m is not None and m.file and m.file not in scans})
-        if not more:
-            return scans
+    initial = sorted(p for p in _all_source_files(universe, policy) if p in changed)
+    scans = scan_all(universe, sources, jobs, initial, policy=policy)
+    conftests = _needed_conftests(universe, scans)
+    if conftests:
+        scans.update(scan_all(universe, sources, jobs, conftests, policy=policy))
+    while more := _missing_plugins(universe, scans):
         scans.update(scan_all(universe, sources, jobs, more, policy=policy))
+    return scans
 
 
 def _distinct(diagnostics: list[Diagnostic]) -> list[Diagnostic]:
     """One diagnostic per site and message, as `check` prints them."""
     return list({(d.path, d.line, d.code, d.message): d for d in diagnostics}.values())
-
-
-def _judge_facts(
-    facts: list[Fact], manifests: dict[str, Manifest]
-) -> tuple[list[Projection], list[Diagnostic], dict[tuple[str, str, str], list[Fact]]]:
-    """Project every fact edge and judge it against the manifests."""
-    projections = [p for p in map(project, facts) if p is not None]
-    found: list[Diagnostic] = []
-    needed: dict[tuple[str, str, str], list[Fact]] = defaultdict(list)
-    for proj in projections:
-        found.extend(judge(proj, manifests))
-        manifest = manifests.get(proj.lca)
-        if not proj.exempt and manifest is not None:
-            for source, target in manifest.covering(*proj.relative()):
-                needed[(proj.lca, source, target)].append(proj.fact)
-    return projections, found, dict(needed)
 
 
 def _type_cast_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
@@ -595,7 +569,7 @@ def _any_collaborator_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]
             f"{'typing.Any' if scan.path.endswith('.py') else 'any'} {site.role} annotation on {site.qualname}.{site.slot} at byte column {site.column}",
             (
                 "why: an unrestricted Any type disables checking across collaborator boundaries",
-                "instead: use a concrete collaborator type, an interface, or a checked unknown value",
+                "instead: use a concrete collaborator type, a Protocol, or narrow object/Mapping values with TypeGuard/TypeIs or isinstance (do not use typing.cast, which [type-cast] forbids)",
                 "see: meizel/docs/checker/any-collaborator.meiva.okf.md",
             ),
             DebtKey(
@@ -659,7 +633,7 @@ def _type_checking_diagnostics(
 # meiva:note
 # The diagnostics a single file produces on its own, without whole-repository facts.
 def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) -> list[Diagnostic]:
-    _, found, _ = _judge_facts(scan.facts, manifests)
+    _, found, _ = judge_facts(scan.facts, manifests)
     loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     found.extend(_source_diagnostics([scan], loaders, externals))
     found.extend(_patch_diagnostics([scan], _approved(policy), scan.facts))
@@ -717,9 +691,9 @@ def _inert_roots(
     return found
 
 
-def analyze(
-    universe: Universe, *, jobs: int | None = None, changed: Collection[str] | None = None
-) -> Analysis:
+def _load_declarations(
+    universe: Universe, scope: frozenset[str] | None
+) -> tuple[dict[str, Manifest], Policy, list[Diagnostic]]:
     manifests, diagnostics = load_manifests(universe)
     policy, policy_problems = load_policy(universe)
     diagnostics.extend(policy_problems)
@@ -728,8 +702,22 @@ def analyze(
     diagnostics.extend(legal_read_recorded(manifests))
     diagnostics.extend(_approval_problems(policy))
     root_manifest = manifests.get("")
-    diagnostics.extend(check_roles(universe, root_manifest.roles if root_manifest else {}))
+    diagnostics.extend(
+        check_roles(universe, root_manifest.roles if root_manifest else {}, changed=scope)
+    )
+    return manifests, policy, diagnostics
+
+
+def manifest_diagnostics(universe: Universe) -> list[Diagnostic]:
+    _, _, diagnostics = _load_declarations(universe, None)
+    return _distinct(diagnostics)
+
+
+def analyze(
+    universe: Universe, *, jobs: int | None = None, changed: Collection[str] | None = None
+) -> Analysis:
     scope = None if changed is None else frozenset(changed)
+    manifests, policy, diagnostics = _load_declarations(universe, scope)
     sources = sources_from(manifests, policy, universe)
     scans = (
         scan_all(universe, sources, jobs, policy=policy)
@@ -746,7 +734,7 @@ def analyze(
     mounts, unmounted = mount_facts(universe, scope)
     facts.extend(mounts)
     diagnostics.extend(unmounted)
-    projections, found, needed = _judge_facts(facts, manifests)
+    projections, found, needed = judge_facts(facts, manifests)
     diagnostics.extend(found)
     diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals))
     diagnostics.extend(_patch_diagnostics(judged_scans, _approved(policy), facts))

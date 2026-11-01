@@ -1,6 +1,7 @@
 exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state", "tests"]
 
 [uses]
+"__init__.py" = ["graph"]
 "__main__.py" = ["contracts"]
 "allowances.py" = ["checkout.py", "graph"]
 "budgets" = ["checkout.py", "lint_common.py"]

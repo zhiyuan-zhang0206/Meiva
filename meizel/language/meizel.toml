@@ -1,13 +1,15 @@
 exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py"]
 
 [uses]
+"__init__.py" = ["scan_cache.py"]
 "ambient.py" = ["fake_entropy.py", "patching.py"]
 "no_script_sibling_imports.py" = ["script_siblings.py"]
 "patching.py" = ["bindings.py", "fixtures.py", "purity.py", "python_commands.py", "restricted.py"]
 "purity.py" = ["purity_structure.py"]
 "python_commands.py" = ["restricted.py"]
 "scan.py" = ["ambient.py", "bindings.py", "fixtures.py", "input_mutations.py", "mounts.py", "purity.py", "restricted.py", "typescript.py"]
-"tests" = ["no_script_sibling_imports.py", "path_imports.py", "script_siblings.py", "typescript.py"]
+"scan_cache.py" = ["fixtures.py", "input_mutations.py", "scan.py", "typescript.py"]
+"tests" = ["fixtures.py", "input_mutations.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py", "scan_cache.py", "script_siblings.py", "typescript.py"]
 "typescript.py" = ["typescript_compiler"]
 "typescript_compiler" = ["fixtures.py"]
 

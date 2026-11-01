@@ -74,7 +74,9 @@ def is_imported_binding(bindings: Bindings, name: str) -> bool:
 # meiva:note
 # The bindings of the tracked `file` in `universe`; an untracked, unreadable or unparsable file is
 # treated as dynamic.
-def module_bindings(universe: Universe, file: str) -> Bindings:
+def module_bindings(universe: Universe, file: str, *, seen: set[str] | None = None) -> Bindings:
+    if seen is not None:
+        seen.add(file)
     if file not in universe.files:
         return Bindings(frozenset(), dynamic=True)
     try:
@@ -267,29 +269,41 @@ def _class_facts(tree: ast.Module, scope: Scope, file: str) -> tuple[ClassFacts,
 # The class a dotted name refers to, wherever a chain of re-exports defines it. None when the
 # name is not a first-party class: an unknown module, a name the module does not define, or a
 # chain of re-exports longer than `hops`.
-def find_class(universe: Universe, dotted: str, hops: int = _REEXPORT_HOPS) -> ClassFacts | None:
+def find_class(
+    universe: Universe,
+    dotted: str,
+    hops: int = _REEXPORT_HOPS,
+    *,
+    seen: set[str] | None = None,
+) -> ClassFacts | None:
     if hops == 0 or not universe.is_first_party_name(dotted):
         return None
     owner, _, name = dotted.rpartition(".")
     module = universe.resolve_module(owner) if owner else None
     if module is None or module.file is None:
         return None
-    read = module_bindings(universe, module.file)
+    read = module_bindings(universe, module.file, seen=seen)
     for facts in read.classes:
         if facts.name == name:
             return facts
     origin = dict(read.reexports).get(name)
-    return None if origin is None or origin == dotted else find_class(universe, origin, hops - 1)
+    return (
+        None
+        if origin is None or origin == dotted
+        else find_class(universe, origin, hops - 1, seen=seen)
+    )
 
 
 # meiva:note
 # The methods a class defines or inherits from first-party classes (dunders excluded).
-def overridable_methods(universe: Universe, facts: ClassFacts) -> frozenset[str]:
+def overridable_methods(
+    universe: Universe, facts: ClassFacts, *, seen: set[str] | None = None
+) -> frozenset[str]:
     found = set(facts.methods)
     pending = [(base, _REEXPORT_HOPS) for base in facts.bases]
     while pending:
         base, hops = pending.pop()
-        parent = find_class(universe, base)
+        parent = find_class(universe, base, seen=seen)
         if parent is not None and hops > 0:
             found |= parent.methods
             pending.extend((origin, hops - 1) for origin in parent.bases)

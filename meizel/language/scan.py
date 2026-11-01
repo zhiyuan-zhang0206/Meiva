@@ -176,6 +176,7 @@ class FileScan:
     any_collaborators: list[AnyCollaboratorSite] = field(default_factory=list[AnyCollaboratorSite])
     type_checking: tuple[int, ...] = ()
     symbols: tuple[tuple[str, int, int], ...] = ()
+    deps: tuple[str, ...] = ()
 
 
 class Scanner(AmbientAccess):
@@ -246,6 +247,7 @@ class Scanner(AmbientAccess):
             type_casts=self.type_casts,
             any_collaborators=self.any_collaborators,
             type_checking=tuple(self.type_checking),
+            deps=tuple(sorted(self.binding_files - {self.path})),
         )
 
     def visit_if(self, node: ast.If) -> None:

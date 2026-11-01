@@ -11,7 +11,8 @@ import pytest
 
 from meizel.contracts.cli import main
 from meizel.contracts.sync import remove_entries
-from meizel.tests.synthetic import RepoFactory, verdict
+from meizel.graph import python_reverse_closure
+from meizel.tests.synthetic import RepoFactory, git, seat, verdict
 
 SOURCES = {
     "pkg/__init__.py": "",
@@ -311,3 +312,85 @@ def test_bootstrap_carries_the_root_roles_into_its_mirror(
     shutil.copy(out / "pkg/meizel.toml", root / "pkg/meizel.toml")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)  # noqa: S603 - fixed argv
     assert verdict(root) == set()
+
+
+def test_check_warns_on_stderr_when_untracked_sources_exist_until_git_add_n(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo({**SOURCES, **MANIFESTS})
+    (root / "pkg/untracked.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    assert run(root, "check") == 0
+    captured = capsys.readouterr()
+    assert "meizel: warning: 1 untracked source/manifest file(s) are invisible" in captured.err
+    assert "pkg/untracked.py" in captured.err
+    assert "git add -N" in captured.err
+
+    git(root, "add", "-N", "pkg/untracked.py")
+    assert run(root, "check") == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_impacted_computes_transitive_relative_package_and_deleted_closure(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "from .core import VALUE\n",
+            "pkg/core.py": "VALUE = 1\n",
+            "pkg/mid.py": "from . import core\n",
+            "pkg/top.py": "from pkg import mid\n",
+            "app/__init__.py": "",
+            "app/use_pkg.py": "from pkg import VALUE\n",
+            "app/unrelated.py": "OTHER = 2\n",
+        }
+    )
+
+    assert run(root, "impacted", "--python", "pkg/core.py") == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == [
+        "app/use_pkg.py",
+        "pkg/__init__.py",
+        "pkg/core.py",
+        "pkg/mid.py",
+        "pkg/top.py",
+    ]
+    assert "pkg.py" not in out_lines
+
+    assert python_reverse_closure(seat(root), ["pkg/__init__.py"], jobs=1) == frozenset(
+        {
+            "app/use_pkg.py",
+            "pkg/__init__.py",
+            "pkg/core.py",
+            "pkg/mid.py",
+            "pkg/top.py",
+        }
+    )
+
+    (root / "pkg/core.py").unlink()
+    git(root, "add", "-A")
+    assert python_reverse_closure(seat(root), ["pkg/core.py"], jobs=1) == frozenset(
+        {
+            "app/use_pkg.py",
+            "pkg/__init__.py",
+            "pkg/mid.py",
+            "pkg/top.py",
+        }
+    )
+
+
+def test_impacted_fails_closed_on_syntax_error(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "",
+            "pkg/good.py": "VALUE = 1\n",
+            "pkg/broken.py": "def broken(:\n",
+        }
+    )
+    assert python_reverse_closure(seat(root), ["pkg/good.py"], jobs=1) is None
+    assert run(root, "impacted", "pkg/good.py") == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot compute impacted Python files" in captured.err

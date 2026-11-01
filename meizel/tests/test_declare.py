@@ -315,3 +315,31 @@ def test_declare_after_a_move_removes_the_old_names_and_declares_the_new_ones(
     root = make_repo(files)
     assert declare(root, "pkg") == 0
     assert toml_of(root, "pkg")["uses"] == {"a.py": ["b.py"]}
+
+
+@pytest.mark.parametrize("flag", ["--prune", "--declare"])
+def test_sync_refuses_when_untracked_source_or_manifest_exists(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], flag: str
+) -> None:
+    manifest = (
+        'exports = ["a.py", "new_mod.py"]\n\n[uses]\n"a.py" = ["b.py"]\n"new_mod.py" = ["b.py"]\n'
+    )
+    root = make_repo(
+        {**BASE, "pkg/meizel.toml": manifest, "meizel.toml": '[uses]\n"app" = ["pkg"]\n'}
+    )
+    commit(root)
+    (root / "pkg/new_mod.py").write_text("from pkg import b\n", encoding="utf-8")
+
+    assert run(root, "sync", flag) == 2
+    err = capsys.readouterr().err
+    assert "untracked" in err
+    assert "pkg/new_mod.py" in err
+    assert "git add -N" in err
+    assert (root / "pkg/meizel.toml").read_text(encoding="utf-8") == manifest
+
+    git(root, "add", "-N", "pkg/new_mod.py")
+    assert run(root, "sync", flag) == 0
+    assert toml_of(root, "pkg") == {
+        "exports": ["a.py", "new_mod.py"],
+        "uses": {"a.py": ["b.py"], "new_mod.py": ["b.py"]},
+    }

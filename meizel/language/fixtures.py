@@ -276,20 +276,28 @@ class FixtureIndex:
     universe: Universe
     defined: dict[str, set[str]]
     plugins: dict[str, list[str]]
+    _plugin_cache: dict[str, list[str]] = field(
+        default_factory=dict[str, list[str]], init=False, repr=False, compare=False
+    )
 
     def names(self, path: str) -> set[str]:
         return self.defined.get(path) or set()
 
     def plugin_files(self, path: str, seen: set[str] | None = None) -> list[str]:
-        seen = set() if seen is None else seen
+        if seen is None and path in self._plugin_cache:
+            return self._plugin_cache[path]
+        top = seen is None
+        active: set[str] = set() if seen is None else seen
         found: list[str] = []
         for dotted in self.plugins.get(path, ()):
             module = self.universe.resolve_module(dotted)
-            if module is None or module.file is None or module.file in seen:
+            if module is None or module.file is None or module.file in active:
                 continue
-            seen.add(module.file)
+            active.add(module.file)
             found.append(module.file)
-            found.extend(self.plugin_files(module.file, seen))
+            found.extend(self.plugin_files(module.file, active))
+        if top:
+            self._plugin_cache[path] = found
         return found
 
     def candidates(self, name: str, test_path: str) -> tuple[list[str], frozenset[str]]:

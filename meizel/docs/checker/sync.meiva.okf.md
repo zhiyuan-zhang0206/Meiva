@@ -14,6 +14,9 @@ tags:
 A manifest is an exact map of how a directory's children depend on each other.
 A change that adds, moves or removes a dependency has to update it in the
 directory where the two sides meet. `sync` does the mechanical part of that.
+Both `--prune` and `--declare` refuse (exit 2) when untracked source or manifest
+files exist so hand-written declarations for untracked files are never pruned;
+run `git add -N <path>` first.
 
 ## `sync --prune`
 

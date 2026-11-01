@@ -27,8 +27,13 @@ from meizel.contracts.debt_edit import (
     write_baseline,
 )
 from meizel.contracts.debt_edit import prune as prune_debt
-from meizel.contracts.debt_report import by_target, diff, summarize, totals_at
-from meizel.contracts.debt_rules import measurement_lines, rule_change, rule_diff
+from meizel.contracts.debt_report import by_target, diff, manifest_texts_at, summarize, totals_at
+from meizel.contracts.debt_rules import (
+    declarations_changed,
+    measurement_lines,
+    rule_change,
+    rule_diff,
+)
 from meizel.contracts.debt_sites import approved, format_approved, format_sites, sites
 from meizel.contracts.debt_symbol import (
     SymbolMove,
@@ -285,10 +290,15 @@ def carry(
 
 # meiva:note
 # The two measures' inputs, named: each rule file, manifest declaration and policy entry it edits.
-def _measured(repo: Checkout, ref: str, extra: Collection[str]) -> list[str]:
+def _measured(
+    repo: Checkout,
+    ref: str,
+    extra: Collection[str],
+    changed_decls: list[str] | None = None,
+) -> list[str]:
     return [
         "meizel: what this change edits in the measurement:",
-        *(f"  {line}" for line in measurement_lines(repo, ref, extra)),
+        *(f"  {line}" for line in measurement_lines(repo, ref, extra, changed_decls=changed_decls)),
     ]
 
 
@@ -322,17 +332,26 @@ _GROWTH_GUIDE = (
 
 def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     symbols = _declared_symbols(repo, args.symbol_moves_file)
-    rules_changed = rule_change(repo, ref, args.waive_if_changed) or bool(symbols)
+    base_texts = manifest_texts_at(repo, ref)
+    changed_decls = declarations_changed(repo, ref, before=base_texts)
+    rules_changed = rule_change(
+        repo, ref, args.waive_if_changed, changed_decls=changed_decls
+    ) or bool(symbols)
     if rules_changed:
         result = rule_diff(
-            repo, ref, totals_at(repo, ref), renames_since(repo, ref), args.jobs, symbols
+            repo,
+            ref,
+            totals_at(repo, ref, texts=base_texts),
+            renames_since(repo, ref),
+            args.jobs,
+            symbols,
         )
         print("\n".join(result.lines()))
-        print("\n".join(_measured(repo, ref, args.waive_if_changed)))
+        print("\n".join(_measured(repo, ref, args.waive_if_changed, changed_decls)))
         print("\n".join(result.explanation()))
         grew = result.content_grew
     else:
-        lines, grew = diff(repo, ref)
+        lines, grew = diff(repo, ref, texts=base_texts)
         print("\n".join(lines))
         print(
             "meizel: totals only: this change edits no rule code, policy or declaration, "

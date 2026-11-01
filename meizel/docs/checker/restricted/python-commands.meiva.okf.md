@@ -57,4 +57,4 @@ shrink; `[loads]` and `[external]` exempt a file as before. To repay: move the s
 file in the directory of the code it imports, run it by literal path or `-m`, and pass what
 varies as arguments.
 
-Parent: [[meizel/docs/checker/checker.meiva.okf.md|the checker]].
+Parent: [[meizel/docs/checker/restricted/restricted.meiva.okf.md|restricted Python]].

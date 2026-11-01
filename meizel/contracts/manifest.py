@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import tomllib
@@ -111,6 +112,24 @@ class Manifest:
         default_factory=list[tuple[str, str | None, str | None]]
     )
     lines: list[str] = field(default_factory=list[str])
+    _by_edge: dict[tuple[str, str], tuple[tuple[str, str], ...]] = field(
+        default_factory=dict[tuple[str, str], tuple[tuple[str, str], ...]],
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _export_set: set[str] = field(
+        default_factory=set[str],
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    @property
+    def export_set(self) -> set[str]:
+        if not self._export_set and self.exports:
+            self._export_set.update(self.exports)
+        return self._export_set
 
     @property
     def path(self) -> str:
@@ -118,10 +137,12 @@ class Manifest:
 
     def line_of(self, key: str) -> int:
         """Line of `key` in the file, or 1 when it cannot be located."""
-        pattern = re.compile(rf"""^\s*["']?{re.escape(key)}["']?\s*=""")
+        candidates = (f'"{key}"', f"'{key}'", key)
         for number, text in enumerate(self.lines, 1):
-            if pattern.match(text):
-                return number
+            stripped = text.lstrip()
+            for prefix in candidates:
+                if stripped.startswith(prefix) and stripped[len(prefix) :].lstrip().startswith("="):
+                    return number
         return 1
 
     def debt_line(self, code: Code, key: str) -> int:
@@ -151,13 +172,30 @@ class Manifest:
         """Every declared `(source path, target path)`, each relative to this directory."""
         return [(source, target) for source, targets in self.uses.items() for target in targets]
 
+    def _edges_for(self, cf: str, ct: str) -> tuple[tuple[str, str], ...]:
+        if not self._by_edge and self.uses:
+            grouped: dict[tuple[str, str], list[tuple[str, str]]] = {}
+            for source, targets in self.uses.items():
+                cf_src = first(source)
+                for target in targets:
+                    grouped.setdefault((cf_src, first(target)), []).append((source, target))
+            for edge, pairs in grouped.items():
+                self._by_edge[edge] = tuple(pairs)
+        return self._by_edge.get((cf, ct), ())
+
     def covering(self, src: str, dst: str) -> list[tuple[str, str]]:
         """The declared pairs a fact from `src` to `dst` (relative paths) falls under."""
-        return [(s, d) for s, d in self.pairs() if within(src, s) and within(dst, d)]
+        cf, ct = first(src), first(dst)
+        edges = self._edges_for(cf, ct)
+        if edges == ((cf, ct),):
+            return [(cf, ct)]
+        return [
+            (s, d) for s, d in edges if (s == cf or within(src, s)) and (d == ct or within(dst, d))
+        ]
 
     def narrowed(self, cf: str, ct: str) -> list[tuple[str, str]]:
         """The declared pairs of the edge `cf -> ct` that name something deeper than a child."""
-        return [(s, d) for s, d in self.pairs() if (first(s), first(d)) == (cf, ct)]
+        return list(self._edges_for(cf, ct))
 
     def back_edges(self) -> list[tuple[str, str]]:
         """The declared edges whose facts are recorded as closing a cycle."""
@@ -582,24 +620,55 @@ class _Reader:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class _CachedManifest:
+    manifest: Manifest | None
+    diagnostics: tuple[Diagnostic, ...]
+
+
+def _shape_digest(universe: Universe) -> str:
+    hasher = hashlib.sha256()
+    for path in sorted(universe.files):
+        if path.rsplit("/", 1)[-1] != MANIFEST:
+            hasher.update(f"f:{path}\0".encode())
+    for directory in sorted(universe.dirs):
+        hasher.update(f"d:{directory}\0".encode())
+    return hasher.hexdigest()
+
+
+def _parse_one_manifest(universe: Universe, directory: str, text: str) -> _CachedManifest:
+    reader = _Reader(universe, directory, text.splitlines())
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        reader.report(1, Code.MANIFEST_SYNTAX, f"invalid TOML: {error}")
+        return _CachedManifest(None, tuple(reader.diagnostics))
+    reader.read(document)
+    return _CachedManifest(reader.manifest, tuple(reader.diagnostics))
+
+
 def load_manifests(
     universe: Universe, texts: Mapping[str, str] | None = None
 ) -> tuple[dict[str, Manifest], list[Diagnostic]]:
     manifests: dict[str, Manifest] = {}
     diagnostics: list[Diagnostic] = []
+    shape = _shape_digest(universe)
+    repo = universe.repo
     for directory in sorted(universe.manifest_dirs):
         path = manifest_path(directory)
-        text = texts[path] if texts is not None and path in texts else universe.repo.load_text(path)
-        reader = _Reader(universe, directory, text.splitlines())
-        try:
-            document = tomllib.loads(text)
-        except tomllib.TOMLDecodeError as error:
-            reader.report(1, Code.MANIFEST_SYNTAX, f"invalid TOML: {error}")
-            diagnostics.extend(reader.diagnostics)
-            continue
-        reader.read(document)
-        manifests[directory] = reader.manifest
-        diagnostics.extend(reader.diagnostics)
+        text = texts[path] if texts is not None and path in texts else repo.load_text(path)
+        key = f"manifest:v1:{shape}:{directory}:{hashlib.sha256(text.encode()).hexdigest()}"
+        memo = repo.memo_get(key)
+        entry = (
+            memo
+            if isinstance(memo, _CachedManifest)
+            else _parse_one_manifest(universe, directory, text)
+        )
+        if not isinstance(memo, _CachedManifest):
+            repo.memo_put(key, entry)
+        if entry.manifest is not None:
+            manifests[directory] = entry.manifest
+        diagnostics.extend(entry.diagnostics)
     return manifests, diagnostics
 
 

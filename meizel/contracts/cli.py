@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from meizel.checkout import GitRepo, read_roles, toplevel
@@ -15,6 +15,7 @@ from meizel.contracts.explain import explain
 from meizel.contracts.policy import Surface, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import sync_manifests
+from meizel.graph import python_reverse_closure
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.source_evidence import Evidence, load_report
 
@@ -23,7 +24,7 @@ __all__ = ["main"]
 # meiva:note
 # This text is consumed by argparse as native CLI help, not discarded source prose.
 # meiva:link meizel/docs/checker/checker.meiva.okf.md
-_DESCRIPTION = "Command line: check, explain, sync --prune, bootstrap, debt and roles."
+_DESCRIPTION = "Command line: check, explain, impacted, sync --prune, bootstrap, debt and roles."
 
 # meiva:note
 # The installation this process runs from: the one seat that answers where the checker's own files
@@ -75,21 +76,42 @@ def _print_verdict(diagnostics: list[Diagnostic], limit: int | None) -> None:
     print(f"meizel: {len(diagnostics)} violations{omitted} [{detail}]", file=sys.stderr)
 
 
-def _run_check(
-    repo: GitRepo,
-    base: Path,
-    raw_paths: list[str],
-    limit: int | None,
-    jobs: int | None,
-    changed: list[str] | None = None,
-) -> int:
+def _untracked_warning(untracked: Sequence[str]) -> str:
+    sample = ", ".join(untracked[:3])
+    return (
+        f"meizel: warning: {len(untracked)} untracked source/manifest file(s) are invisible "
+        f"to git-indexed analysis (e.g. {sample}); run 'git add -N {untracked[0]}' to include them"
+    )
+
+
+def _untracked_for_targets(
+    untracked: Sequence[str], targets: list[str], directories: Collection[str]
+) -> list[str]:
+    if not targets:
+        return list(untracked)
+    return [
+        p
+        for p in untracked
+        if _within(p, targets)
+        or any(
+            t and t not in directories and t.rpartition("/")[0] == p.rpartition("/")[0]
+            for t in targets
+        )
+    ]
+
+
+def _run_check(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+    raw_paths: list[str] = args.paths
+    changed: list[str] | None = args.changed
     if changed is not None and raw_paths:
         raise MeizelError("--changed judges the files it names; it cannot be combined with paths")
-    root = repo.root
     targets = [_relative_target(root, base, p) for p in raw_paths]
     only = None if changed is None else frozenset(_relative_target(root, base, p) for p in changed)
-    analysis = analyze(repo.universe(), jobs=jobs, changed=only)
+    analysis = analyze(repo.universe(), jobs=args.jobs, changed=only)
     known = analysis.universe
+    untracked = _untracked_for_targets(repo.untracked_files(), targets, known.dirs)
+    if untracked:
+        print(_untracked_warning(untracked), file=sys.stderr)
     for raw, target in zip(raw_paths, targets, strict=True):
         if target and target not in known.files and target not in known.dirs:
             raise MeizelError(f"{raw}: not a tracked file or directory")
@@ -103,7 +125,7 @@ def _run_check(
         if _reports(manifest, targets, known.dirs):
             print(warning, file=sys.stderr)
     if diagnostics:
-        _print_verdict(diagnostics, limit)
+        _print_verdict(diagnostics, args.limit)
         return 1
     print(analysis.ok_line())
     return 0
@@ -132,6 +154,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="explicit additional holder-evidence index; ordinary analysis still uses the compiler",
     )
+    impacted = commands.add_parser(
+        "impacted",
+        help="print tracked Python files in the reverse-import closure of changed files",
+    )
+    impacted.add_argument(
+        "--python",
+        action="store_true",
+        help="select Python reverse-import closure (default)",
+    )
+    impacted.add_argument("paths", nargs="*", help="changed repository paths")
     sync = commands.add_parser("sync", help="maintain manifests")
     sync.add_argument("--prune", action="store_true", help="remove stale declared edges")
     sync.add_argument(
@@ -273,13 +305,29 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     )
 
 
-def _run_sync(repo: GitRepo, base: Path, args: argparse.Namespace) -> int:
+def _run_impacted(
+    repo: GitRepo, root: Path, base: Path, raw_paths: list[str], jobs: int | None
+) -> int:
+    targets = [_relative_target(root, base, p) for p in raw_paths]
+    reached = python_reverse_closure(repo.universe(), targets, jobs=jobs)
+    if reached is None:
+        raise MeizelError(
+            "cannot compute impacted Python files: a tracked Python file could not be read or parsed"
+        )
+    for path in sorted(reached):
+        print(path)
+    return 0
+
+
+def _run_sync(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
     if not (args.prune or args.declare):
         raise MeizelError("sync needs --prune or --declare")
     if args.paths and not args.declare:
         raise MeizelError("paths narrow --declare only")
-    root = repo.root
     targets = [_relative_target(root, base, p) for p in args.paths] if args.paths else None
+    untracked = repo.untracked_files()
+    if untracked:
+        print(_untracked_warning(untracked), file=sys.stderr)
     lines, left = sync_manifests(repo, targets, args.jobs, do_declare=bool(args.declare))
     for line in lines:
         print(line)
@@ -305,6 +353,51 @@ def _run_surface(repo: GitRepo, against: str) -> int:
     return 0
 
 
+def _run_policy(repo: GitRepo, args: argparse.Namespace) -> int:
+    if args.policy_mode == "surface":
+        return _run_surface(repo, args.against)
+    universe = repo.universe()
+    for line in policy_changes(policy_at(universe, args.against), load_policy(universe)[0]):
+        print(line)
+    return 0
+
+
+def _run_explain(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+    analysis = analyze(repo.universe(), jobs=args.jobs)
+    node = _relative_target(root, base, args.path)
+    report = load_report(
+        Evidence(root=root, tool=_TOOL_ROOT),
+        set(analysis.universe.files),
+        node,
+        args.typescript_index,
+    )
+    print(explain(analysis, node, report))
+    return 0
+
+
+def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+    cmd = str(args.command)
+    if cmd == "check":
+        return _run_check(repo, root, base, args)
+    if cmd == "debt":
+        targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
+        return run_debt(repo, targets, args, args.jobs)
+    if cmd == "policy":
+        return _run_policy(repo, args)
+    if cmd == "explain":
+        return _run_explain(repo, root, base, args)
+    if cmd == "impacted":
+        return _run_impacted(repo, root, base, args.paths, args.jobs)
+    if cmd == "roles":
+        return enumerations.run_roles(
+            repo, read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))
+        )
+    if cmd == "sync":
+        return _run_sync(repo, root, base, args)
+    print(bootstrap(repo, args.out, args.jobs))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -314,38 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         # commands are handed instead of a path they would build their own from. A command that
         # judges reads a snapshot of it (`repo.universe()`).
         repo = GitRepo(args.repo if args.repo is not None else toplevel(base))
-        root = repo.root.resolve()
-        if args.command == "check":
-            return _run_check(repo, base, args.paths, args.limit, args.jobs, args.changed)
-        if args.command == "debt":
-            targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
-            return run_debt(repo, targets, args, args.jobs)
-        if args.command == "policy" and args.policy_mode == "surface":
-            return _run_surface(repo, args.against)
-        if args.command == "policy":
-            universe = repo.universe()
-            for line in policy_changes(policy_at(universe, args.against), load_policy(universe)[0]):
-                print(line)
-            return 0
-        if args.command == "explain":
-            analysis = analyze(repo.universe(), jobs=args.jobs)
-            node = _relative_target(root, base, args.path)
-            report = load_report(
-                Evidence(root=root, tool=_TOOL_ROOT),
-                set(analysis.universe.files),
-                node,
-                args.typescript_index,
-            )
-            print(explain(analysis, node, report))
-            return 0
-        if args.command == "roles":
-            return enumerations.run_roles(
-                repo, read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))
-            )
-        if args.command == "sync":
-            return _run_sync(repo, base, args)
-        print(bootstrap(repo, args.out, args.jobs))
-        return 0
+        return _dispatch(repo, repo.root.resolve(), base, args)
     except MeizelError as error:
         print(f"meizel: {error}", file=sys.stderr)
         return 2

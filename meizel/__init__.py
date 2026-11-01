@@ -4,7 +4,15 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-__all__ = ["is_repo_test_file", "is_test_path", "restrict", "split_only"]
+from meizel.graph import python_reverse_closure
+
+__all__ = [
+    "is_repo_test_file",
+    "is_test_path",
+    "python_reverse_closure",
+    "restrict",
+    "split_only",
+]
 
 _TEST_DIR = re.compile(r"(^|/)tests?/")
 _ONLY_FLAG = "--only"

@@ -197,14 +197,21 @@ def plan_declare_writes(root: Path, texts: Mapping[str, str], plan: Plan) -> Edi
 
 
 def declare(
-    repo: Checkout, targets: list[str] | None, jobs: int | None = None
+    repo: Checkout,
+    targets: list[str] | None,
+    jobs: int | None = None,
+    *,
+    analysis: Analysis | None = None,
 ) -> tuple[list[str], list[str]]:
     """Declare the legal new dependencies under `targets` (default: the changed files).
 
     Returns a line per declaration and a line per dependency left as an error.
     """
     scope = targets if targets is not None else changed_files(repo)
-    plan = _plan(analyze(repo.universe(), jobs=jobs), scope)
+    current = analyze(repo.universe(), jobs=jobs) if analysis is None else analysis
+    plan = _plan(current, scope)
+    if not plan.uses and not plan.exports:
+        return plan.lines, plan.left
     directories = sorted(set(plan.uses) | set(plan.exports))
     texts = {d: repo.load_text(manifest_path(d), default="") for d in directories}
     repo.apply_plan(plan_declare_writes(repo.root, texts, plan))

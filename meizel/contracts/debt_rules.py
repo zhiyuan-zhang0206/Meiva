@@ -30,8 +30,8 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import TypeGuard
 
-from meizel.contracts.analysis import Analysis, analyze
-from meizel.contracts.debt import TABLE_KEY, set_debt, total
+from meizel.contracts.analysis import Analysis, manifest_diagnostics
+from meizel.contracts.debt import CYCLE_EDGE, TABLE_KEY, set_debt, total
 from meizel.contracts.debt_edit import Baselines, read_baselines, record
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_report import Recorded, manifest_texts_at, recorded_when_merged
@@ -40,11 +40,11 @@ from meizel.contracts.declare import declare
 from meizel.contracts.policy import POLICY, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import prepare_policy_snapshot, prune
-from meizel.graph.model import Code, MeizelError
+from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import MANIFEST, Checkout, EditPlan, Universe
 from meizel.language.scan import invalidate_policy_caches
 
-__all__ = ["RuleDiff", "declarations_changed", "rule_change", "rule_diff"]
+__all__ = ["RuleDiff", "declarations_changed", "measurement_lines", "rule_change", "rule_diff"]
 
 # A manifest or policy this checker cannot read says nothing about the base: counting it as no debt
 # would let any rule change that breaks the format pass as clean.
@@ -187,8 +187,8 @@ def _excess(tree: Recorded, found: Baselines) -> list[tuple[str, str, str, int, 
     return out
 
 
-def _refuse_unreadable(analysis: Analysis, ref: str) -> None:
-    unreadable = [d for d in analysis.diagnostics if d.code in _UNREADABLE]
+def _refuse_unreadable(diagnostics: Sequence[Diagnostic], ref: str) -> None:
+    unreadable = [d for d in diagnostics if d.code in _UNREADABLE]
     if unreadable:
         shown = "\n".join(d.render() for d in unreadable[:5])
         raise MeizelError(
@@ -242,8 +242,10 @@ def _entries(value: object) -> dict[str, object]:
 # meiva:note
 # One line per declaration added, removed or changed between `ref` and the working tree, written
 # `<manifest> [<table>] <key> <sign>`, so a reviewer reads what the two measures came from.
-def declarations_changed(repo: Checkout, ref: str) -> list[str]:
-    before = manifest_texts_at(repo, ref)
+def declarations_changed(
+    repo: Checkout, ref: str, *, before: Mapping[str, str] | None = None
+) -> list[str]:
+    base_texts = manifest_texts_at(repo, ref) if before is None else before
     files = repo.universe().files
     after = {
         path: repo.load_text(path, default="")
@@ -251,8 +253,8 @@ def declarations_changed(repo: Checkout, ref: str) -> list[str]:
         if path.rsplit("/", 1)[-1] == MANIFEST
     }
     lines: list[str] = []
-    for path in sorted(before.keys() | after.keys()):
-        was = _declarations(before.get(path, ""))
+    for path in sorted(base_texts.keys() | after.keys()):
+        was = _declarations(base_texts.get(path, ""))
         now = _declarations(after.get(path, ""))
         for table in sorted(was.keys() | now.keys(), key=str):
             old = _entries(was[table]) if table in was else {}
@@ -269,7 +271,13 @@ def declarations_changed(repo: Checkout, ref: str) -> list[str]:
 # What a change edits in the measuring device, item by item: every rule file and every pathspec the
 # caller adds, the policy's own diff for its entries, and one line per manifest declaration; a reviewer
 # reads the two measures' inputs instead of taking a total on trust.
-def measurement_lines(repo: Checkout, ref: str, extra: Collection[str] = ()) -> list[str]:
+def measurement_lines(
+    repo: Checkout,
+    ref: str,
+    extra: Collection[str] = (),
+    *,
+    changed_decls: Sequence[str] | None = None,
+) -> list[str]:
     universe = repo.universe()
     entries = [
         f"{POLICY} {line}"
@@ -277,17 +285,25 @@ def measurement_lines(repo: Checkout, ref: str, extra: Collection[str] = ()) -> 
     ]
     if not entries and POLICY in _changed_under(repo, ref, [POLICY]):
         entries = [POLICY]
+    decls = declarations_changed(repo, ref) if changed_decls is None else changed_decls
     return [
         *_changed_under(repo, ref, [*RULE_CODE, *extra]),
-        *declarations_changed(repo, ref),
+        *decls,
         *entries,
     ]
 
 
 # meiva:note
 # Whether the interval changes what is measured, not only what the recorded number says.
-def rule_change(repo: Checkout, ref: str, extra: Collection[str] = ()) -> bool:
-    if declarations_changed(repo, ref):
+def rule_change(
+    repo: Checkout,
+    ref: str,
+    extra: Collection[str] = (),
+    *,
+    changed_decls: Sequence[str] | None = None,
+) -> bool:
+    decls = declarations_changed(repo, ref) if changed_decls is None else changed_decls
+    if decls:
         return True
     if extra and _changed_under(repo, ref, list(extra)):
         return True
@@ -305,19 +321,24 @@ def regenerated(base: Checkout, ref: str, jobs: int | None) -> Baselines:
     # checker would write for the base, and it would not write an export for a file that does not
     # exist. The refusal after it still stops a manifest that is malformed rather than merely ahead of
     # the base's content, which is what it is for.
-    prune(base, jobs)
-    _refuse_unreadable(analyze(base.universe(), jobs=jobs), ref)
-    prune_debt(base, jobs)
-    declare(base, [""], jobs)
-    base.stage_all()  # the checker reads tracked files only, and these commands create manifests
-    record(base, [""], jobs)
-    base.stage_all()
-    record(base, [""], jobs)
-    base.stage_all()
-    prune_debt(base, jobs)
-    # meiva:note
-    # The commands above wrote manifests and staged them: the index is rebuilt from the new tree.
-    return read_baselines(base.universe())
+    _, analysis = prune(base, jobs)
+    _refuse_unreadable(analysis.diagnostics, ref)
+    lowered = prune_debt(base, jobs, analysis=analysis)
+    cached: Analysis | None = None if lowered else analysis
+    declared, _ = declare(base, [""], jobs, analysis=cached)
+    if declared:
+        base.stage_all()
+        cached = None
+    _, created, _ = record(base, [""], jobs, analysis=cached)
+    if created:
+        base.stage_all()
+    baselines = read_baselines(base.universe())
+    if created or any(CYCLE_EDGE in table for table in baselines.values()):
+        record(base, [""], jobs)
+        base.stage_all()
+        prune_debt(base, jobs)
+        baselines = read_baselines(base.universe())
+    return baselines
 
 
 # meiva:note
@@ -377,7 +398,6 @@ def _apply_declarations(repo: Checkout, base: Checkout) -> None:
     if not writes and not deletes:
         return
     base.apply_plan(EditPlan(writes=writes, deletes=deletes, dirs=tuple(p.parent for p in writes)))
-    base.stage_all()
 
 
 # meiva:note
@@ -460,12 +480,12 @@ def rule_diff(
         # meiva:note
         # Normalizing the snapshot rewrites its policy, so the index is read after it: a universe
         # is a snapshot of the tree that was there when it was built.
-        _refuse_unreadable(analyze(checkout.universe(), jobs=jobs), ref)
+        _refuse_unreadable(manifest_diagnostics(checkout.universe()), ref)
         _apply_renames(checkout, moved)
         _sync_rule_files(repo, ref, checkout)
         _apply_declarations(repo, checkout)
+        checkout.stage_all()
         rewritten, ignored = _apply_symbol_moves(repo, ref, checkout, symbols)
         invalidate_policy_caches()
-        checkout.stage_all()
         found = regenerated(checkout, ref, jobs)
     return RuleDiff(base, found, recorded_when_merged(repo, ref), ref, rewritten, ignored)

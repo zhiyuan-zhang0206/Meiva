@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from meizel.contracts.debt import PURITY_CODES, file_key, source_of
 from meizel.contracts.manifest import Manifest, effective_purity, manifest_path, within
@@ -18,7 +19,7 @@ from meizel.language.scan import FileScan
 __all__ = [
     "Projection",
     "is_private",
-    "judge",
+    "judge_facts",
     "paid_strict_to_be",
     "project",
     "purity_diagnostics",
@@ -26,8 +27,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
-class Projection:
+class Projection(NamedTuple):
     """A fact edge seen from `lca`, the deepest directory containing both ends."""
 
     fact: Fact
@@ -79,10 +79,11 @@ class Projection:
         )
 
 
-def project(fact: Fact) -> Projection | None:
-    """None when the edge stays inside one node (a file, or a directory it loads from)."""
-    src_parts = fact.src.split("/")
-    dst_parts = fact.dst.split("/")
+def _project_pair(src: str, dst: str) -> tuple[str, str, str, tuple[tuple[str, str], ...]] | None:
+    if src == dst:
+        return None
+    src_parts = src.split("/")
+    dst_parts = dst.split("/")
     depth = 0
     while (
         depth < len(src_parts) - 1
@@ -96,7 +97,13 @@ def project(fact: Fact) -> Projection | None:
         ("/".join(dst_parts[:index]), dst_parts[index])
         for index in range(depth + 1, len(dst_parts))
     )
-    return Projection(fact, "/".join(src_parts[:depth]), src_parts[depth], dst_parts[depth], steps)
+    return "/".join(src_parts[:depth]), src_parts[depth], dst_parts[depth], steps
+
+
+def project(fact: Fact) -> Projection | None:
+    """None when the edge stays inside one node (a file, or a directory it loads from)."""
+    geometry = _project_pair(fact.src, fact.dst)
+    return None if geometry is None else Projection(fact, *geometry)
 
 
 def is_private(name: str) -> bool:
@@ -158,8 +165,7 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
                 (hint,),
                 proj.debt_key(),
             )
-        exported = manifests[directory].exports if directory in manifests else ()
-        if child not in exported:
+        if directory not in manifests or child not in manifests[directory].export_set:
             hint = f'add to {manifest_path(directory)}:  exports = [..., "{child}"]; or use the door `{_where(directory)}/__init__.py`'
             return Diagnostic(
                 *_site(fact),
@@ -171,8 +177,26 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
     return None
 
 
-def judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
-    """Every way one fact edge violates the three conditions of the rule."""
+def _private_name_diagnostics(proj: Projection) -> list[Diagnostic]:
+    fact = proj.fact
+    return [
+        Diagnostic(
+            *_site(fact),
+            Code.PRIVATE_NAME,
+            f"{fact.edge()} uses {name!r}, which is private to {fact.dst}",
+            (
+                "underscore names belong to the file that defines them, tests included; use a public name",
+            ),
+            proj.debt_key(name),
+        )
+        for name in fact.names
+        if is_private(name)
+    ]
+
+
+# meiva:note
+# Every way one fact edge violates the three conditions of the rule.
+def _judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
     fact = proj.fact
     found: list[Diagnostic] = []
     if not proj.exempt:
@@ -185,20 +209,80 @@ def judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
     manifest = manifests.get(proj.lca)
     if not proj.exempt and manifest is not None and (proj.cf, proj.ct) in manifest.back:
         found.append(proj.cycle_edge())
-    found.extend(
-        Diagnostic(
-            *_site(fact),
-            Code.PRIVATE_NAME,
-            f"{fact.edge()} uses {name!r}, which is private to {fact.dst}",
-            (
-                "underscore names belong to the file that defines them, tests included; use a public name",
-            ),
-            proj.debt_key(name),
-        )
-        for name in fact.names
-        if is_private(name)
-    )
+    if fact.names:
+        found.extend(_private_name_diagnostics(proj))
     return found
+
+
+@dataclass(frozen=True, slots=True)
+class _CleanEdge:
+    lca: str
+    cf: str
+    ct: str
+    steps: tuple[tuple[str, str], ...]
+    covered: tuple[tuple[str, str], ...]
+
+
+def _steps_clean(steps: tuple[tuple[str, str], ...], manifests: dict[str, Manifest]) -> bool:
+    last = len(steps) - 1
+    for position, (directory, child) in enumerate(steps):
+        if child in Universe.DOOR_FILES and position == last:
+            continue
+        if is_private_module(child):
+            return False
+        if directory not in manifests or child not in manifests[directory].export_set:
+            return False
+    return True
+
+
+type _PairEntry = _CleanEdge | tuple[str, str, str, tuple[tuple[str, str], ...]] | None
+
+
+def _classify_pair(src: str, dst: str, manifests: dict[str, Manifest]) -> _PairEntry:
+    geometry = _project_pair(src, dst)
+    if geometry is None:
+        return None
+    lca, cf, ct, steps = geometry
+    manifest = manifests.get(lca)
+    if dst.endswith("conftest.py") or manifest is None or (cf, ct) in manifest.back:
+        return geometry
+    cut = len(lca) + 1 if lca else 0
+    covered = tuple(manifest.covering(src[cut:], dst[cut:]))
+    if not covered or not _steps_clean(steps, manifests):
+        return geometry
+    return _CleanEdge(lca, cf, ct, steps, covered)
+
+
+def judge_facts(
+    facts: list[Fact], manifests: dict[str, Manifest]
+) -> tuple[list[Projection], list[Diagnostic], dict[tuple[str, str, str], list[Fact]]]:
+    pairs: dict[tuple[str, str], _PairEntry] = {}
+    projections: list[Projection] = []
+    found: list[Diagnostic] = []
+    needed: dict[tuple[str, str, str], list[Fact]] = defaultdict(list)
+    for fact in facts:
+        pair = (fact.src, fact.dst)
+        entry = pairs[pair] if pair in pairs else _classify_pair(fact.src, fact.dst, manifests)
+        if pair not in pairs:
+            pairs[pair] = entry
+        if entry is None:
+            continue
+        if isinstance(entry, _CleanEdge):
+            proj = Projection(fact, entry.lca, entry.cf, entry.ct, entry.steps)
+            projections.append(proj)
+            if fact.names:
+                found.extend(_private_name_diagnostics(proj))
+            for source, target in entry.covered:
+                needed[(entry.lca, source, target)].append(fact)
+            continue
+        proj = Projection(fact, *entry)
+        projections.append(proj)
+        found.extend(_judge(proj, manifests))
+        manifest = manifests.get(proj.lca)
+        if not proj.exempt and manifest is not None:
+            for source, target in manifest.covering(*proj.relative()):
+                needed[(proj.lca, source, target)].append(fact)
+    return projections, found, dict(needed)
 
 
 def _purity_debt(owner: str, path: str, key: str, mode: str) -> DebtKey | None:

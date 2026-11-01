@@ -241,3 +241,33 @@ def test_regions_validate_markers_and_formats_even_without_roles(
 ) -> None:
     root = make_repo({"scan.sh": region})
     assert run(root, "check", "--changed", "scan.sh") == 2
+
+
+def test_changed_production_file_skips_unrelated_conftests(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "",
+            "pkg/a.py": "VALUE = 1\n",
+            "t/conftest.py": "import pytest\n\n@pytest.fixture\ndef thing():\n    return 1\n",
+            "other/conftest.py": "import pytest\n\n@pytest.fixture\ndef extra():\n    return 2\n",
+        }
+    )
+    result = analyze(seat(root), jobs=1, changed={"pkg/a.py"})
+    assert set(result.scans) == {"pkg/a.py"}
+
+
+def test_changed_test_scans_only_ancestor_conftests_and_their_plugins(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "t/__init__.py": "",
+            "t/conftest.py": 'pytest_plugins = ["t.helpers"]\n',
+            "t/helpers.py": "import pytest\n\n@pytest.fixture\ndef thing():\n    return 1\n",
+            "t/sub/test_x.py": "def test_x(thing):\n    assert thing\n",
+            "other/conftest.py": "import pytest\n\n@pytest.fixture\ndef extra():\n    return 2\n",
+        }
+    )
+    result = analyze(seat(root), jobs=1, changed={"t/sub/test_x.py"})
+    assert set(result.scans) == {"t/sub/test_x.py", "t/conftest.py", "t/helpers.py"}
+    assert "other/conftest.py" not in result.scans
