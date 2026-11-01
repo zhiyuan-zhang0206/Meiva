@@ -306,3 +306,42 @@ def test_a_sibling_file_that_is_not_utf8_is_still_a_sibling(scan_tmp) -> None:
     errs = _errors(scan_tmp, "tools/runner.py", _script("import helper"))
     assert len(errs) == 1
     assert "helper" in errs[0]
+
+
+# meiva:note
+# A `helper.py` that does not resolve is not a module a script can import.
+def test_a_broken_symlink_sibling_is_not_a_module(scan_tmp) -> None:
+    (scan_tmp / "tools").mkdir(parents=True)
+    broken = scan_tmp / "tools" / "helper.py"
+    broken.symlink_to(scan_tmp / "tools" / "missing.py")
+    assert _errors(scan_tmp, "tools/runner.py", _script("import helper")) == []
+
+
+# meiva:note
+# A `helper.pyi` types a module; it is not one a script can import.
+def test_a_type_stub_sibling_is_not_a_module(scan_tmp) -> None:
+    _write(scan_tmp, "tools/helper.pyi", "VALUE: int\n")
+    assert _errors(scan_tmp, "tools/runner.py", _script("import helper")) == []
+
+
+# meiva:note
+# The rule decides the precedence between a module file and a package of the same name, not the
+# order the directory listed its entries in.
+def test_a_file_and_a_package_of_the_same_name_resolve_to_the_file(scan_tmp) -> None:
+    _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
+    _write(scan_tmp, "tools/helper/__init__.py", "\n")
+    assert _errors(scan_tmp, "tools/runner.py", _script("from helper.sub import VALUE")) == []
+    assert _errors(scan_tmp, "tools/runner.py", _script("from helper import VALUE")) != []
+
+
+# meiva:note
+# A test file is pytest-managed: the same body that a rule file fails passes through the scan, and
+# the file-level reader still reports it.
+def test_the_scan_skips_the_paths_the_rule_does_not_judge(scan_tmp) -> None:
+    _write(scan_tmp, "pkg/helper.py", "VALUE = 1\n")
+    _write(scan_tmp, "tests/helper.py", "VALUE = 1\n")
+    judged = _write(scan_tmp, "pkg/runner.py", _script("import helper"))
+    skipped = _write(scan_tmp, "tests/runner.py", _script("import helper"))
+    assert _lint.main([str(judged)], repo_root=scan_tmp) == 1
+    assert _lint.main([str(skipped)], repo_root=scan_tmp) == 0
+    assert _lint.scan_file(skipped, root=scan_tmp) != []

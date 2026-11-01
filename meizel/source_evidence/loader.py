@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TypeGuard
 
@@ -20,6 +21,16 @@ _ADAPTER = "meizel/source_evidence/typescript/"
 _COMPILER = "ui/web/node_modules/typescript/lib/"
 _LOCK = "ui/web/package-lock.json"
 _PACKAGE = "ui/web/node_modules/typescript/package.json"
+
+
+# meiva:note
+# Where the evidence is read from, as one value the entry resolves: `root` is the judged checkout
+# (the index names it), and `tool` is the installation whose adapter and locked compiler the index
+# is checked against. Neither is derived here.
+@dataclass(frozen=True, slots=True)
+class Evidence:
+    root: Path
+    tool: Path
 
 
 def ts_paths(files: set[str], node: str) -> tuple[str, ...]:
@@ -36,13 +47,7 @@ def ts_paths(files: set[str], node: str) -> tuple[str, ...]:
 
 def _text(root: Path, relative: str) -> str:
     path = PurePosixPath(relative)
-    if (
-        path.is_absolute()
-        or str(path) != relative
-        or ".." in path.parts
-        or "\\" in relative
-        or not (root / relative).resolve().is_relative_to(root.resolve())
-    ):
+    if path.is_absolute() or str(path) != relative or ".." in path.parts or "\\" in relative:
         raise MeizelError(f"invalid TS index path: {relative!r}")
     text = read_utf8_text(root / relative)
     if text is None:
@@ -54,20 +59,20 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _dependencies(index: Index, tool: Path) -> dict[str, str]:
+def _dependencies(index: Index, evidence: Evidence) -> dict[str, str]:
     expected = {
         _LOCK,
         _PACKAGE,
         "meizel/language/typescript_compiler/compiler.mjs",
         f"{_COMPILER}typescript.js",
-        *(p for p in tracked_files(tool) if p.startswith(_ADAPTER) and p.endswith(".mjs")),
+        *(p for p in tracked_files(evidence.tool) if p.startswith(_ADAPTER) and p.endswith(".mjs")),
     }
     contents: dict[str, str] = {}
     for item in index.dependencies:
         library = item.path.startswith(_COMPILER) and item.path.endswith(".d.ts")
         if item.path in contents or (item.path not in expected and not library):
             raise MeizelError(f"unexpected or duplicate TS dependency: {item.path}")
-        content = _text(tool, item.path)
+        content = _text(evidence.tool, item.path)
         if _digest(content) != item.sha256:
             raise MeizelError(f"stale TS dependency: {item.path}")
         contents[item.path] = content
@@ -131,7 +136,7 @@ def _sources(
         raise MeizelError("TS index omitted selected sources")
 
 
-def load_report(root: Path, files: set[str], node: str, supplied: Path | None) -> TsReport:
+def load_report(evidence: Evidence, files: set[str], node: str, supplied: Path | None) -> TsReport:
     selected = ts_paths(files, node)
     if supplied is None:
         status = "not-requested" if selected else "not-applicable"
@@ -143,11 +148,10 @@ def load_report(root: Path, files: set[str], node: str, supplied: Path | None) -
         index = decode_index(text)
     except (TypeError, ValueError) as error:
         raise MeizelError(f"invalid TS source index: {error}") from error
-    if index.root != str(root.resolve()):
+    if index.root != str(evidence.root):
         raise MeizelError("TS index repository root does not match")
-    tool = Path(__file__).resolve().parents[2]
-    dependencies = _dependencies(index, tool)
-    _sources(index, root, selected, dependencies)
+    dependencies = _dependencies(index, evidence)
+    _sources(index, evidence.root, selected, dependencies)
     status = (
         "not-applicable"
         if not selected

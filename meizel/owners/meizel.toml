@@ -7,13 +7,11 @@ exports = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_j
 
 [purity]
 "." = "strict"
-"clock_lattice.py" = "strict-to-be"
-"clock_lattice_cli.py" = { mode = "none", why = "the command-line entry of the clock-lattice rule: it reads the roles this repository declares and hands the scan directories to the rule, which decides everything else" }
+"clock_lattice.py" = "strict"
+"clock_lattice_cli.py" = { mode = "none", why = "the command-line entry of the clock-lattice rule: it reads the roles this repository declares, the policy, the family modules, the exempted files and the checkout's file set, and hands them to meizel/owners/clock_lattice.py, which decides everything else" }
 "timing_judgement_cli.py" = { mode = "none", why = "the command-line entry of the timing-judgement rule: it finds the test files and reads the baseline, and meizel/owners/timing_judgement.py decides everything else" }
 "decisions.py" = "strict-to-be"
 
 [debt.impure-call]
-"clock_lattice.py#Path.is_file" = 1
-"clock_lattice.py#Path.resolve" = 1
 "decisions.py#Path.is_file" = 1
 "decisions.py#Path.resolve" = 1

@@ -26,7 +26,7 @@ from base.host.proc import run_bounded
 from meizel import lint_common
 from meizel.checkout import roles_at
 from meizel.language import no_script_sibling_imports
-from meizel.owners import clock_lattice
+from meizel.owners import clock_lattice, clock_lattice_cli
 from meizel.roles import select_packages
 from meizel.state import no_os_environ, turn_scoped_config
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet
@@ -165,14 +165,13 @@ CASES = [
         call=partial(turn_scoped_config.main, per_agent_field_names=lambda: {"fixture_field"}),
     ),
     Case(
-        clock_lattice,
+        clock_lattice_cli,
         "ops/x.py",
         "_SOME_REAP_GRACE_S = 100.0\n",
         call=partial(
-            clock_lattice.main,
+            clock_lattice_cli.main,
             scan_dirs=select_packages(roles_at(_REPO_ROOT), "application", "tooling"),
-            family_modules=(),
-            independent={},
+            lattice=clock_lattice.Lattice((), {}, frozenset()),
         ),
     ),
     Case(
