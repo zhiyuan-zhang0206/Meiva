@@ -20,17 +20,18 @@ __all__ = ["main", "scan_file"]
 
 
 # meiva:note
-# The module names this file's directory offers a sibling import, as the directory holds them now:
-# a module file, or a package with an `__init__.py`.
-def _siblings(directory: Path) -> dict[str, script_siblings.SiblingKind]:
-    out: dict[str, script_siblings.SiblingKind] = {}
-    for entry in directory.iterdir():
-        if entry.is_dir():
-            if (entry / "__init__.py").is_file():
-                out.setdefault(entry.name, "pkg")
-        elif entry.suffix == ".py":
-            out.setdefault(entry.stem, "file")
-    return out
+# What one directory holds, as the rule reads it: the stems of its regular `.py` files and the names
+# of its directories that carry an `__init__.py`. The two facts stay apart; which one wins is the
+# rule's decision, not the order this listing came back in.
+def _directory(path: Path) -> script_siblings.Directory:
+    files: set[str] = set()
+    packages: set[str] = set()
+    for entry in path.iterdir():
+        if (entry / "__init__.py").is_file():
+            packages.add(entry.name)
+        elif entry.suffix == ".py" and entry.is_file():
+            files.add(entry.stem)
+    return script_siblings.Directory(frozenset(files), frozenset(packages))
 
 
 def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
@@ -46,7 +47,7 @@ def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
         # Not under the repository: pre-commit passes absolute paths, and an out-of-tree target is
         # judged by the same rule rather than crashing the run.
         rel = path.as_posix()
-    return script_siblings.violations(rel, src, _siblings(path.parent), scope=_PATH_IMPORT_SCOPE)
+    return script_siblings.violations(rel, src, _directory(path.parent), scope=_PATH_IMPORT_SCOPE)
 
 
 # meiva:note

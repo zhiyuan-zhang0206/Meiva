@@ -88,8 +88,14 @@ keep production governance separate from the root distribution environment.
   `check` ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]).
 - `language/` — restrictions on how Python is written:
   `path_imports.py` (code under `meiva_builtins/` reaches other code
-  through packages, never a file path) and `no_script_sibling_imports.py`
-  (a script-mode file restores `sys.path` before importing a sibling).
+  through packages, never a file path) and the sibling-import rule, split the
+  way the config rules are: `no_script_sibling_imports.py` is the effect shell
+  that walks the scan roots, reads each file and prints, and
+  `script_siblings.py` decides script mode, guard order, whether a
+  same-directory name is a module file or a package (a file wins), and what each
+  finding says. The shell states what a directory holds — its regular `.py`
+  stems and its directories with an `__init__.py` — and the rule decides which
+  of the two a name means.
 
 Each rule group keeps its tests in its own `tests/` directory. The gate-level
 tests that drive `scripts/lint/code_structure.py` end to end stay with that

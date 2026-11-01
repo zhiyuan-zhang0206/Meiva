@@ -1,16 +1,42 @@
+# meiva:note
+# The decisions of the PYTHONSAFEPATH sibling-import guard: a script-mode file (a main block or a
+# python/uv shebang) may not import a same-directory sibling unless a `sys.path.insert` /
+# `sys.path.append` call runs before it — at module top, including top-level containers, or earlier
+# in the same function. Every fact arrives as a value: the file's repository-relative name, its
+# text, what its directory holds, and the path-import scope. The entry that enumerates, reads and
+# prints is `meizel/language/no_script_sibling_imports.py`.
+# meiva:link docs/conventions/testing.md
+
 from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Literal
 
-__all__ = ["SiblingKind", "excluded", "judged", "violations"]
+__all__ = ["Directory", "SiblingKind", "excluded", "judged", "violations"]
 
 # meiva:note
-# What a same-directory name can be: a module file (`helper.py`) or a package (`helper/__init__.py`).
-# The caller reads the directory; a decision here never touches the disk.
+# What a same-directory name can resolve to: a module file (`helper.py`) or a package
+# (`helper/__init__.py`).
 SiblingKind = Literal["file", "pkg"]
+
+
+# meiva:note
+# What one directory holds, as the entry read it: the stems of its regular `.py` files and the names
+# of its directories that carry an `__init__.py`. Two facts, kept apart so the precedence between
+# them is decided here: a module file wins over a package of the same name, whatever order the
+# directory listed them in.
+@dataclass(frozen=True, slots=True)
+class Directory:
+    module_files: frozenset[str]
+    packages: frozenset[str]
+
+    def kind(self, first: str, *, dotted: bool) -> SiblingKind | None:
+        if first in self.module_files:
+            return None if dotted else "file"
+        return "pkg" if first in self.packages else None
+
 
 # meiva:note
 # Directories that are never scanned (vendored / generated / scratch). The entry that walks the
@@ -68,16 +94,10 @@ def judged(rel: str) -> bool:
 
 
 # meiva:note
-# One error string per unguarded sibling import. `siblings` is what the file's own directory holds,
-# by module name: the caller reads it, so the same source is judged differently against a directory
-# that holds the module and one that does not.
-def violations(
-    rel: str,
-    source: str,
-    siblings: Mapping[str, SiblingKind],
-    *,
-    scope: tuple[str, ...] = (),
-) -> list[str]:
+# One error string per unguarded sibling import. `directory` is what the file's own directory holds:
+# the caller reads it, so the same source is judged differently against a directory that holds the
+# module and one that does not.
+def violations(rel: str, source: str, directory: Directory, *, scope: tuple[str, ...]) -> list[str]:
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -93,7 +113,7 @@ def violations(
     ) -> None:
         if (isinstance(stmt, ast.ImportFrom) and stmt.level > 0) or id(stmt) in type_checking:
             return
-        for first in _sibling_targets(stmt, siblings):
+        for first in _sibling_targets(stmt, directory):
             if in_fn:
                 guarded = bool(top_guards) or any(g < stmt.lineno for g in fn_guards)
             else:
@@ -183,9 +203,7 @@ def _type_checking_ids(tree: ast.Module) -> set[int]:
 # meiva:note
 # Same-directory modules a statement could resolve to. `from sibling.sub import X` with a sibling
 # FILE is excluded — a file cannot be a package, so the import resolves elsewhere.
-def _sibling_targets(
-    stmt: ast.Import | ast.ImportFrom, siblings: Mapping[str, SiblingKind]
-) -> list[str]:
+def _sibling_targets(stmt: ast.Import | ast.ImportFrom, directory: Directory) -> list[str]:
     out: list[str] = []
     names = (
         [alias.name for alias in stmt.names]
@@ -194,8 +212,7 @@ def _sibling_targets(
     )
     for module_name in names:
         first, _, below = module_name.partition(".")
-        kind = siblings.get(first)
-        if kind is not None and not (kind == "file" and below):
+        if directory.kind(first, dotted=bool(below)) is not None:
             out.append(first)
     return out
 
