@@ -248,6 +248,14 @@ compares: the `sha` equals the PR head; every field of the vocabulary is present
 reports both counts with their unit; a blind selection names the fallback it ran. **The checker does
 not judge whether a reason is good**, which would become subjective and teach people to pad reasons.
 
+**Attaching it** (`scripts/hooks/receipt_attach.py --pr <n> [--merge]`) writes that one line into
+the pull request body and judges it first with the checker **the head commit itself carries** — the
+same pin `audit_merge_receipts.py` applies afterwards, so what is written is what the audit will read.
+The block it owns is marked at both ends and replaced on a re-run, never stacked; a line the checker
+refuses leaves the body untouched; `--merge` re-reads the posted body and verifies it again before
+pressing the button, and is never the default. With no receipt supplied it produces one from the
+worktree checked out at the head, because a shell session's log belongs to whoever ran it.
+
 **What it stops**: a stale receipt (sha mismatch), a missing field, an absence with no reason, a
 skipped run that still claims a count, a layer whose output could not be read, a blind selection
 without its fallback.

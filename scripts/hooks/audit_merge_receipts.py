@@ -157,8 +157,9 @@ def receipt_lines(body: str) -> list[str]:
 
 
 # meiva:note
-# The receipt checker as it stood in that commit, or None when it carried none.
-def _checker_source(root: Path, commit: str) -> str | None:
+# The receipt checker as it stood in that commit, or None when it carried none. Public because the
+# attach tool judges with the same pin: what it writes must be what this will later read.
+def checker_at(root: Path, commit: str) -> str | None:
     result = subprocess.run(  # noqa: S603
         ["git", "show", f"{commit}:{CHECKER_PATH}"],
         cwd=root,
@@ -230,7 +231,7 @@ def judge_commit(root: Path, landed: Landed) -> Judgement:
     lines = receipt_lines(body)
     if not lines:
         return Judgement(landed, "no-receipt", "the body carries no `diff-checks/v1 ` line")
-    checker = _checker_source(root, landed.commit)
+    checker = checker_at(root, landed.commit)
     if checker is None:
         return Judgement(landed, "unverified", f"the commit's tree carries no {CHECKER_PATH}")
     detail = "no receipt line passed"

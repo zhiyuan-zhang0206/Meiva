@@ -1,12 +1,14 @@
-exports = ["diff_checks.py", "diff_checks_pytest.py", "diff_checks_receipt.py", "tests"]
+exports = ["diff_checks.py", "diff_checks_pytest.py", "diff_checks_receipt.py", "receipt_attach.py", "tests"]
 
 [uses]
 "diff_checks.py" = ["diff_closure.py", "diff_checks_pytest.py"]
 "diff_checks_pytest.py" = []
-"tests" = ["audit_merge_receipts.py", "diff_checks.py", "diff_checks_receipt.py"]
+"receipt_attach.py" = ["audit_merge_receipts.py"]
+"tests" = ["audit_merge_receipts.py", "diff_checks.py", "diff_checks_receipt.py", "receipt_attach.py"]
 
 [loads]
 "audit_merge_receipts.py" = ["scripts/hooks"]
 
 [roots]
 "diff_checks.py" = { kinds = ["environ"], why = "receipt entry point composes what each judged child inherits: it reads the launcher's environment once in main() and hands every child the CI contract (that environment minus MEIVA_*), because a child that inherits the operator's shell reports the shell's state as if it were the change's (#5907)" }
+"receipt_attach.py" = { kinds = ["clock"], why = "the attach tool stamps when a receipt was posted; that moment is read once in main() and passed into the note, so the block it writes says a fact rather than guessing one (the pure part, note_for, takes `now` as an argument)" }
