@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path, PurePosixPath
@@ -35,12 +36,42 @@ from meizel.language.scan import scan_tree  # noqa: E402
 from meizel.owners import decisions  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 from meizel.state import ambient_state, machine_role  # noqa: E402
+from scripts.lint.diagnostics import no_ambient_fallback  # noqa: E402
 from scripts.structure import baseline_shards, locality  # noqa: E402
 from scripts.structure.budgets import quality_budget  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
 
-__all__ = ["main"]
+__all__ = ["check_shallow_split", "is_shallow_split_filename", "main"]
+
+_SHALLOW_SPLIT_PATTERN = re.compile(r"_part[0-9]+\.py$")
+_SHALLOW_SPLIT_GUIDANCE = (
+    "mechanical shallow-split filename '{name}' is forbidden — avoid mechanical "
+    "_part[0-9].py or naked *_helpers.py splits. Instead, use one of 3 clean "
+    "refactoring shapes: (1) Extract pure data contracts to contracts.py, "
+    "(2) Extract strict Pure Core module, (3) Create a cohesive subpackage "
+    "with a narrow meizel.toml exports door."
+)
+
+
+# meiva:note
+# Whether filename matches *_part[0-9].py or naked helpers.py / _helpers.py.
+def is_shallow_split_filename(filename: str) -> bool:
+    if filename in {"helpers.py", "_helpers.py"}:
+        return True
+    return bool(_SHALLOW_SPLIT_PATTERN.search(filename))
+
+
+# meiva:note
+# Check whether a non-test file is a mechanical shallow split.
+def check_shallow_split(rel_path: str) -> str | None:
+    if lint_common.is_test_path(rel_path):
+        return None
+    name = PurePosixPath(rel_path).name
+    if is_shallow_split_filename(name):
+        return f"{rel_path}:1: {_SHALLOW_SPLIT_GUIDANCE.format(name=name)}"
+    return None
+
 
 # Baseline sections whose frozen `path::target` site counts must match reality exactly.
 _SITE_SECTIONS = (*locality.EXTERNAL_SECTIONS, ambient_state.SECTION)
@@ -68,7 +99,23 @@ def _scan_file(tree: ast.Module, rel_path: str, table: decisions.Table) -> list[
     out: list[tuple[int, str]] = []
     out.extend(machine_role.violations(tree))
     out.extend(decisions.allowlist_errors(tree, rel_path, _SCAN_DIRS, table))
+    out.extend(no_ambient_fallback.violations(tree, rel_path))
     return out
+
+
+# meiva:note
+# Collect errors for any non-test files using forbidden shallow-split filename conventions.
+def _shallow_split_errors(paths: Iterable[Path], repo_root: Path) -> list[str]:
+    errors: list[str] = []
+    for path in sorted(paths):
+        try:
+            rel = path.relative_to(repo_root).as_posix()
+        except ValueError:
+            continue
+        err = check_shallow_split(rel)
+        if err is not None:
+            errors.append(err)
+    return errors
 
 
 def _in_scan_scope(rel_path: str) -> bool:
@@ -397,6 +444,7 @@ def _check_ast_and_quality(
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
     scanned: set[str] = set()
     errors: list[str] = []
+    errors.extend(_shallow_split_errors(files | ast_files | type_ctx.files, repo_root))
     for path in sorted(files | ast_files | type_ctx.files):
         try:
             rel = path.relative_to(repo_root).as_posix()

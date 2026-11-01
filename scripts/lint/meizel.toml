@@ -1,6 +1,7 @@
 exports = ["async_no_sync_blocking.py", "meiva_root_scope.py", "diagnostics", "fixture_scope.py", "host_platform_marks.py", "no_os_environ.py", "plugins", "pool_keepalives.py"]
 
 [uses]
+"code_structure.py" = ["diagnostics"]
 "docstring_budget_report.py" = ["agent_docstrings.py"]
 "tests" = ["agent_docstrings.py", "agents_md_size.py", "async_no_sync_blocking.py", "meiva_root_scope.py", "code_structure.py", "diagnostics", "fixture_scope.py", "host_platform_marks.py", "no_os_environ.py", "plugins", "policy_removal.py", "pool_keepalives.py", "termination_source.py", "turn_scoped_config.py"]
 
