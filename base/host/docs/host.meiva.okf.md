@@ -25,7 +25,11 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 looks up a program or branches on the platform takes a required `host: Host` with five fields:
 `run` (`proc.run_bounded`, whose timeout bounds the whole process tree), `which`
 (`shutil.which`), `platform` (`base.native_process.os_platform.Platform`: `system` as `linux` or
-`darwin`, `machine`, `executable`; it is defined there once because `native_process` sits below `base.host`), `uid` and `environ` (the process environment, read-only). The composition root builds it with `Host.system(environ=...)`; a test builds the
+`darwin`, `machine`, `executable`; it is defined there once because `native_process` sits below `base.host`), `uid` and `environ` (the process environment, read-only). The composition root builds it with `Host.system(environ=...)`; that door reads the machine
+and the user id of the process it runs in, and `base/host/system/meizel.toml` declares it a root
+for the user id: a `Host` must describe the process that built it, and every component below
+receives the value, so one handed in from outside would let a component claim another process's
+identity. A test builds the
 `Host` it wants with `base.host.system.tests.fake_commands.FakeCommands` as `run`, which records each
 argv, answers from a script routed by argv prefix and refuses an unscripted command. A test that
 needs a real process uses `Host.system(environ={})`. The five fields are the whole port; a new capability

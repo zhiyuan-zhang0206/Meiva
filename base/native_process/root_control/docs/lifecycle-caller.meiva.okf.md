@@ -27,7 +27,10 @@ fail-fast and rejects it on every other verb:
         "operation_id": "stop@1792322999",
         "env_keys": ["DEEPSEEK_API_KEY"]}}
 
-`caller_identity(environ)` in `base/native_process/root_control/client.py` builds it:
+`caller_identity(environ)` in `base/native_process/root_control/client.py` builds it. The `pid`,
+`ppid` and `uid` it carries are read at that boundary on purpose — the file is a declared root for
+them — because the root decides a request's authority on who is actually connected; a value the
+caller supplied would describe the caller by its own account.
 
 - `argv` is truncated (32 items, 200 characters each) and **redacted** — a
   sensitive flag (`--token`, `--password`, `-p`, …) loses its value, whether it
