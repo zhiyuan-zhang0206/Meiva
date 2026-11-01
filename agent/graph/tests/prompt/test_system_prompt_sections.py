@@ -9,6 +9,7 @@ suppressed when it is off, and defaults on through the per-model floor.
 fourth member, 'off', which is a gate like any other and renders nothing.
 """
 
+import os
 import re
 from collections.abc import Callable
 from typing import Any
@@ -40,6 +41,8 @@ from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 from base.paths import meiva_home
+
+ENVIRON = dict(os.environ)
 
 
 def _slices(**changes: Any) -> AgentSlices:
@@ -143,6 +146,7 @@ def test_invest_in_the_future_section_in_full_prompt_when_on():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "# Invest in the future" in prompt
@@ -158,6 +162,7 @@ def test_invest_in_the_future_section_absent_from_full_prompt_when_off():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "# Invest in the future" not in prompt
@@ -220,6 +225,7 @@ def test_codeact_section_defaults_to_on():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
 
@@ -264,6 +270,7 @@ def test_codeact_section_in_full_prompt_when_on():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "CodeAct" in prompt
@@ -279,6 +286,7 @@ def test_codeact_section_absent_from_full_prompt_when_off():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "CodeAct" not in prompt
@@ -411,6 +419,7 @@ def test_off_style_is_absent_from_the_full_system_prompt() -> None:
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "# Keeping the user oriented" not in prompt
@@ -540,6 +549,7 @@ def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert ("# Communicating with the user" in prompt) is expect_section
@@ -557,6 +567,7 @@ def test_knowledge_cutoff_appears_for_known_model():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert "Knowledge cutoff: 2026-01" in prompt
 
@@ -570,6 +581,7 @@ def test_knowledge_cutoff_absent_for_unknown_model():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert "Knowledge cutoff:" not in prompt
 
@@ -663,6 +675,7 @@ def test_cross_machine_delegation_hint_in_full_prompt_when_on():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE in prompt
@@ -679,6 +692,7 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE not in prompt
@@ -731,7 +745,9 @@ def test_plugin_prompt_section_records_an_activation(loguru_records: LogRecords)
         (("myplugin", PluginContributions(system_prompt_sections=(loud_section, silent_section))),)
     )
     slices = _slices()
-    prompt = build_system_prompt(registry, slices, agent_id=1, catalog=catalog, home=meiva_home())
+    prompt = build_system_prompt(
+        registry, slices, agent_id=1, catalog=catalog, home=meiva_home(), environ=ENVIRON
+    )
 
     contribution = f"## Loud\n\nsomething for {first_model}."
     assert contribution in prompt
@@ -753,6 +769,7 @@ def test_long_running_operation_without_fleet():
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert prompt.count("# Efficient long-running operation") == 1
     assert "## Agent-to-agent communication" not in prompt

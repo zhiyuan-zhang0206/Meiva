@@ -4,6 +4,7 @@ Usage: `child_sdk_probes.py <scenario> [arg]`. Imports live inside the scenarios
 order of the environment edits against the first `import meiva` is part of what is tested.
 """
 
+import os
 import sys
 
 
@@ -229,7 +230,11 @@ def external_profile_actor() -> None:
     from meiva.sdk_surface import agent_identity, process_context
 
     process_context.bind_context(
-        MeivaContext(identity=AgentIdentity(405, True), meiva_home=resolve_meiva_home())
+        MeivaContext(
+            identity=AgentIdentity(405, True),
+            meiva_home=resolve_meiva_home(),
+            environ=os.environ,
+        )
     )
     boot.ensure_plugins_loaded()
     print(

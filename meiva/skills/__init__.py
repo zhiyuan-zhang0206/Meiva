@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import types
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -94,23 +95,28 @@ def _provider_roots() -> list[Path]:
 # The full namespace tree of `home`: its `skills/` (install-registry gated) plus the provider
 # roots; the scan itself is `skill_index.scan_tree`, which takes all three as arguments. The agent
 # host, which holds no process context, scans with the home its turn context carries.
-def scan_under(home: Path) -> dict[str, Any]:
+def scan_under(home: Path, *, environ: Mapping[str, str]) -> dict[str, Any]:
     from base.packages.extensions.install_registry import loadable_skill_names
     from meiva.skills.skill_index import scan_tree
 
-    return scan_tree(skills_dir(home), loadable_skill_names(home=home), _provider_roots())
+    return scan_tree(
+        skills_dir(home), loadable_skill_names(home=home, environ=environ), _provider_roots()
+    )
 
 
 # meiva:note
 # Every skill under `home`, flattened (what `names()` returns for the bound context's home).
-def names_under(home: Path) -> list[Skill]:
-    return flatten(scan_under(home))
+# `environ` is what the install registry's host-contract gate runs `git` under: the scan itself
+# reads no process state, so the caller names it (`require_environ()`, `HostPolicy.environ`).
+def names_under(home: Path, *, environ: Mapping[str, str]) -> list[Skill]:
+    return flatten(scan_under(home, environ=environ))
 
 
 # meiva:note
 # The full namespace tree of the bound context's home.
 def _scan_tree() -> dict[str, Any]:
-    return scan_under(process_context.current_context().require_meiva_home())
+    context = process_context.current_context()
+    return scan_under(context.require_meiva_home(), environ=context.require_environ())
 
 
 def skills_in(roots: list[Path]) -> list[Skill]:

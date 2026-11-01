@@ -391,6 +391,7 @@ class MeivaContext:
         *,
         clients: ClientSet,
         machine: MachineIdentityReader,
+        environ: Mapping[str, str],
         original_incarnation: RuntimeIncarnation | None = None,
     ) -> Self:
         """Rebuild identity with clients and original admission supplied by the child's root."""
@@ -399,6 +400,7 @@ class MeivaContext:
             original_incarnation=original_incarnation,
             clients=clients,
             machine=machine,
+            environ=environ,
         )
 
     def plugin_registry(self) -> ExtensionRegistry:

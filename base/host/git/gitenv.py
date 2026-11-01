@@ -22,7 +22,6 @@ is the caller's: `base.host.proc.run_bounded`.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 
 # Bounded, non-interactive ssh. Kept as one string because that is git's
@@ -31,7 +30,11 @@ from collections.abc import Mapping
 _GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=10"
 
 
-def git_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+# meiva:note
+# `environ` is required and this module reads no process state of its own: the caller names the
+# environment (a `Host`, a `ConfigBoot.process_environment()`, a turn context's
+# `require_environ()`), so no caller inherits a live environment by leaving an argument out.
+def git_env(environ: Mapping[str, str]) -> dict[str, str]:
     """The process environment plus the non-interactive git knobs — pass as
     `env=` to any git subprocess Meiva starts (network or local: a local command
     has no business prompting either).
@@ -40,7 +43,7 @@ def git_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     `GIT_SSH_COMMAND` / `GIT_TERMINAL_PROMPT` rather than deferring to it: this
     is the posture Meiva requires of its own git calls, not a default.
     """
-    base = os.environ if environ is None else dict(environ)
+    base = dict(environ)
     return base | {
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_SSH_COMMAND": _GIT_SSH_COMMAND,

@@ -93,7 +93,9 @@ class _NewlyInstalledSkillsHook(Hook):
         drift = index_drift(
             known if known is not None else set(),
             skill_view(
-                runtime.context.require_agent().prompt, home=runtime.context.require_meiva_home()
+                runtime.context.require_agent().prompt,
+                home=runtime.context.require_meiva_home(),
+                environ=runtime.context.require_environ(),
             ),
         )
         if known is None:

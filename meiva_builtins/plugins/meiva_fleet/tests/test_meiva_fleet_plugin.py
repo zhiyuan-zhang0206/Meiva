@@ -1,5 +1,6 @@
 import importlib
 import inspect
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ from meiva_builtins.plugins.meiva_fleet.tests.registry_support import (
     installed_fleet_surface,
     set_fleet_configuration,
 )
+
+ENVIRON = dict(os.environ)
 
 
 def _fleet_slices(**changes: Any) -> AgentSlices:
@@ -63,6 +66,7 @@ def test_plugin_registers_prompt_section(load_activity_plugin: None):
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert "meiva.self.set_label" in prompt
 
@@ -74,6 +78,7 @@ def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert prompt.count("one reporter per milestone") == 1
@@ -90,6 +95,7 @@ def test_prompt_section_states_the_message_threshold(load_activity_plugin: None)
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert prompt.count("Message another agent only when they must reply") == 1
     assert (
@@ -107,6 +113,7 @@ def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert "Workflow selection belongs to `meiva-workflow`" in prompt
     assert "enabling Fleet does not require a registry task or a management tree" in prompt
@@ -138,6 +145,7 @@ def test_fleet_does_not_duplicate_core_lifecycle(load_activity_plugin: None):
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert "# Efficient long-running operation" not in section
     assert prompt.count("# Efficient long-running operation") == 1
@@ -157,6 +165,7 @@ def test_peer_communication_survives_human_guidance_toggle(
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
@@ -243,6 +252,7 @@ def test_reduce_context_switch_reaches_the_prompt(
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     set_fleet_configuration(reduce_context_switch=False)
@@ -252,6 +262,7 @@ def test_reduce_context_switch_reaches_the_prompt(
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
 
@@ -308,6 +319,7 @@ def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "## Fleet task interaction" not in prompt

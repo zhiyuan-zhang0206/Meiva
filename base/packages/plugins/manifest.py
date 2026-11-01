@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -529,7 +530,9 @@ _COMMIT_TIMEOUT_S = 10.0
 
 
 # meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
-def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list[str]:
+def host_contract_errors_dir(
+    pkg_dir: Path, *, environ: Mapping[str, str], repo: Path | None = None
+) -> list[str]:
     try:
         manifest = load_optional_manifest(pkg_dir)
     except ManifestError as exc:
@@ -538,27 +541,29 @@ def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list
         return []
     target = repo or paths.repo_root()
     try:
-        host = host_version_module.host_version(target)
+        host = host_version_module.host_version(target, environ=environ)
     except host_version_module.HostVersionError as exc:
         return [str(exc)]
-    return check_host_engine(manifest, host) + check_host_commit(manifest, target)
+    return check_host_engine(manifest, host) + check_host_commit(manifest, target, environ=environ)
 
 
 # meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
-def check_host_commit(manifest: PluginManifest, repo: Path) -> list[str]:
+def check_host_commit(
+    manifest: PluginManifest, repo: Path, *, environ: Mapping[str, str]
+) -> list[str]:
     sha = manifest.requires_commit
     if sha is None:
         return []
-    head = _git_stdout(repo, "rev-parse", "HEAD")
+    head = _git_stdout(repo, "rev-parse", "HEAD", environ=environ)
     if head is None:
         return [f"requires_commit: cannot resolve HEAD in {repo} to verify {sha}"]
-    present = _git_stdout(repo, "cat-file", "-e", f"{sha}^{{commit}}")
+    present = _git_stdout(repo, "cat-file", "-e", f"{sha}^{{commit}}", environ=environ)
     if present is None:
         return [
             f"requires_commit: {sha} is unresolvable in {repo} — fetch it, then "
             f"retry (the host must contain it to pass the gate)"
         ]
-    rc = _git_rc(repo, "merge-base", "--is-ancestor", sha, "HEAD")
+    rc = _git_rc(repo, "merge-base", "--is-ancestor", sha, "HEAD", environ=environ)
     if rc == 0:
         return []
     if rc == 1:
@@ -569,19 +574,21 @@ def check_host_commit(manifest: PluginManifest, repo: Path) -> list[str]:
     return [f"requires_commit: ancestor check for {sha} failed in {repo} (git error)"]
 
 
-def _git_stdout(repo: Path, *args: str) -> str | None:
-    result = _git_run(repo, *args)
+def _git_stdout(repo: Path, *args: str, environ: Mapping[str, str]) -> str | None:
+    result = _git_run(repo, *args, environ=environ)
     if result is None or result.returncode != 0:
         return None
     return result.stdout.strip()
 
 
-def _git_rc(repo: Path, *args: str) -> int | None:
-    result = _git_run(repo, *args)
+def _git_rc(repo: Path, *args: str, environ: Mapping[str, str]) -> int | None:
+    result = _git_run(repo, *args, environ=environ)
     return None if result is None else result.returncode
 
 
-def _git_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+def _git_run(
+    repo: Path, *args: str, environ: Mapping[str, str]
+) -> subprocess.CompletedProcess[str] | None:
     from base.host.git.gitenv import git_env
     from base.host.proc import run_bounded
 
@@ -591,7 +598,7 @@ def _git_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
             capture_output=True,
             text=True,
             timeout=_COMMIT_TIMEOUT_S,
-            env=git_env(),
+            env=git_env(environ),
         )
     except (OSError, subprocess.SubprocessError):
         return None

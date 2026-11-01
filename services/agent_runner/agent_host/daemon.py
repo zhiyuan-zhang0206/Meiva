@@ -564,6 +564,13 @@ async def run(
             checkpoint_interval=config.view.agent.checkpoint_interval,
         )
         stamping = handoff_source(config)
+        policy = host_policy(
+            config,
+            keys=installation.require_provider_keys(),
+            rng=SecureRandom(secure_rng),
+            pid=os.getpid(),
+            user_home=user_home,
+        )
         host = AgentHost(
             pool=workload_pool,
             control_pool=control_pool,
@@ -575,18 +582,13 @@ async def run(
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
-            policy=host_policy(
-                config,
-                keys=installation.require_provider_keys(),
-                rng=SecureRandom(secure_rng),
-                pid=os.getpid(),
-                user_home=user_home,
-            ),
+            policy=policy,
             handoff_stamping=stamping,
             clients=clients,
             extensions=installation.registry,
             commands=CommandCatalog.system(
-                skills=partial(meiva_skills.names_under, home=home), home=home
+                skills=partial(meiva_skills.names_under, home=home, environ=policy.environ),
+                home=home,
             ),
             plugin_configs=installation.configs,
             home=home,

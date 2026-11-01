@@ -4,6 +4,7 @@ pyproject mirror check (the S1–S2 contract layer, task #1244).
 Spec: `docs/conventions/extensions/plugin-spec-v2.md`.
 """
 
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +14,8 @@ from base.host.git.host_version_plan import parse_version
 from base.packages.plugins import manifest as pm
 from base.packages.plugins import pyproject_mirror as mirror
 from base.packages.plugins.manifest import ManifestError
+
+ENVIRON = dict(os.environ)
 
 
 def _manifest(**overrides: object) -> pm.PluginManifest:
@@ -499,21 +502,21 @@ def test_both_engines_and_requires_commit_are_accepted() -> None:
 
 
 def test_check_host_commit_none_declared_passes(tmp_path: Path) -> None:
-    assert pm.check_host_commit(_manifest(), tmp_path) == []
+    assert pm.check_host_commit(_manifest(), tmp_path, environ=ENVIRON) == []
 
 
 def test_check_host_commit_ancestor_passes(tmp_path: Path) -> None:
     repo, main_sha, _side = _commit_repo(tmp_path)
-    assert pm.check_host_commit(_manifest(requires_commit=main_sha), repo) == []
+    assert pm.check_host_commit(_manifest(requires_commit=main_sha), repo, environ=ENVIRON) == []
 
 
 def test_check_host_commit_non_ancestor_blocks(tmp_path: Path) -> None:
     repo, _main, side_sha = _commit_repo(tmp_path)
-    errors = pm.check_host_commit(_manifest(requires_commit=side_sha), repo)
+    errors = pm.check_host_commit(_manifest(requires_commit=side_sha), repo, environ=ENVIRON)
     assert errors and "not an ancestor" in errors[0]
 
 
 def test_check_host_commit_unresolvable_blocks(tmp_path: Path) -> None:
     repo, _main, _side = _commit_repo(tmp_path)
-    errors = pm.check_host_commit(_manifest(requires_commit="f" * 40), repo)
+    errors = pm.check_host_commit(_manifest(requires_commit="f" * 40), repo, environ=ENVIRON)
     assert errors and "unresolvable" in errors[0]

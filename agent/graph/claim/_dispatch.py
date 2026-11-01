@@ -509,6 +509,7 @@ async def _handle_fork(
             [s for s in tail_skills if isinstance(s, str)],
             slices.prompt.sdk_disable,
             home=ctx.require_meiva_home(),
+            environ=ctx.require_environ(),
             created_at=now,
         )
         if note is not None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -121,7 +122,9 @@ def dispatch_sync(
         case (
             "shell_probe" | "shell_kill" | "shell_capture" | "schedule_capture" | "agent_skill_view"
         ):
-            return OpStatus.COMPLETED, _agent_arm(kind, payload, pool, home=home, now=now)
+            return OpStatus.COMPLETED, _agent_arm(
+                kind, payload, pool, home=home, now=now, environ=host.environ
+            )
         case (
             "workspace_transfer_prepare"
             | "workspace_transfer_import"
@@ -146,6 +149,7 @@ def _agent_arm(
     *,
     home: Path,
     now: datetime,
+    environ: Mapping[str, str],
 ) -> dict[str, object]:
 
     match kind:
@@ -161,9 +165,9 @@ def _agent_arm(
             asv = AgentSkillViewPayload.model_validate(payload)
             if pool is None:
                 raise RuntimeError("agent skill view requires the native DB pool")
-            return cluster.agent_skill_view_op(asv.agent_id, pool, home=home).model_dump(
-                mode="json"
-            )
+            return cluster.agent_skill_view_op(
+                asv.agent_id, pool, home=home, environ=environ
+            ).model_dump(mode="json")
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)
             return cluster.shell_capture_op(

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def cmd_skill_install(
     machine: MachineIdentityReader,
     home: Path,
     now: datetime,
+    environ: Mapping[str, str],
 ) -> int:
     """`meiva skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
     [--accept-risk] [--update-mode auto|notify|off] [--check-every DUR]` —
@@ -97,7 +99,7 @@ def cmd_skill_install(
             return 1
         from cli.commands.extensions._manifest_gate import gate_refuses
 
-        if gate_refuses(root, command="skill install"):
+        if gate_refuses(root, command="skill install", environ=environ):
             return 1
 
         try:

@@ -21,6 +21,8 @@ from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
+ENVIRON = dict(os.environ)
+
 
 class RecordingGateway:
     def put_extension(self, **_: object) -> None:
@@ -376,6 +378,7 @@ def _install_skill(
             machine=command_runtime.machine,
             home=home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )

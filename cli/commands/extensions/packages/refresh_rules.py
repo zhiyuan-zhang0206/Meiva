@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -163,7 +163,7 @@ def git_head_from_ls_remote(
 #
 # Gates in order: it carries a SKILL.md, no critical scan finding, a valid manifest, and (when it
 # has a manifest) a host engine / commit the manifest accepts.
-def staged_gate_error(staged: Path, repo: Path) -> str | None:
+def staged_gate_error(staged: Path, repo: Path, *, environ: Mapping[str, str]) -> str | None:
     if not any(staged.rglob("SKILL.md")):
         return "error: staged tree carries no SKILL.md"
     critical = scan.criticals(scan_package(staged))
@@ -177,12 +177,12 @@ def staged_gate_error(staged: Path, repo: Path) -> str | None:
         return None
     host_errors: list[str] = []
     try:
-        host = host_version.host_version(repo)
+        host = host_version.host_version(repo, environ=environ)
     except host_version.HostVersionError as exc:
         host_errors.append(str(exc))
     else:
         host_errors += manifest_module.check_host_engine(manifest, host)
-    host_errors += manifest_module.check_host_commit(manifest, repo)
+    host_errors += manifest_module.check_host_commit(manifest, repo, environ=environ)
     if host_errors:
         return f"blocked_version: {'; '.join(host_errors)}"
     return None

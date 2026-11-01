@@ -16,6 +16,8 @@ import pytest
 
 from base.host.git import host_version as hv
 
+ENVIRON = dict(os.environ)
+
 _COMMIT_DATE = "2026-03-05T12:00:00+00:00"
 
 
@@ -45,12 +47,12 @@ def git_repo(tmp_path: Path) -> Path:
 
 def test_host_version_derives_from_commit_date(git_repo: Path) -> None:
     # Zero-padded date parts are stripped: 2026-03-05 -> "2026.3.5".
-    assert hv.host_version(git_repo) == "2026.3.5"
+    assert hv.host_version(git_repo, environ=ENVIRON) == "2026.3.5"
 
 
 def test_host_version_display_adds_short_sha(git_repo: Path) -> None:
     sha = _git(git_repo, "rev-parse", "--short", "HEAD").stdout.strip()
-    assert hv.host_version_display(git_repo) == f"2026.3.5+g{sha}"
+    assert hv.host_version_display(git_repo, environ=ENVIRON) == f"2026.3.5+g{sha}"
 
 
 def test_commit_date_moves_with_head(git_repo: Path) -> None:
@@ -78,7 +80,7 @@ def test_commit_date_moves_with_head(git_repo: Path) -> None:
         capture_output=True,
         env=os.environ | env,
     )
-    assert hv.host_version(git_repo) == "2027.11.30"
+    assert hv.host_version(git_repo, environ=ENVIRON) == "2027.11.30"
 
 
 def test_fallback_to_pyproject_without_git(tmp_path: Path) -> None:
@@ -87,15 +89,15 @@ def test_fallback_to_pyproject_without_git(tmp_path: Path) -> None:
     (d / "pyproject.toml").write_text(
         '[project]\nname = "meiva"\nversion = "0.1.5"\n', encoding="utf-8"
     )
-    assert hv.host_version(d) == "0.1.5"
-    assert hv.host_version_display(d) == "0.1.5"
+    assert hv.host_version(d, environ=ENVIRON) == "0.1.5"
+    assert hv.host_version_display(d, environ=ENVIRON) == "0.1.5"
 
 
 def test_neither_source_raises(tmp_path: Path) -> None:
     d = tmp_path / "bare"
     d.mkdir()
     with pytest.raises(hv.HostVersionError) as caught:
-        hv.host_version(d)
+        hv.host_version(d, environ=ENVIRON)
 
     assert str(caught.value) == f"cannot determine host version: no pyproject.toml in {d}"
     assert isinstance(caught.value.__cause__, FileNotFoundError)

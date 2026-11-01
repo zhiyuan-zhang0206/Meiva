@@ -31,7 +31,6 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 [debt.ambient-read]
 "config_view.py#environ base.host.env.registry.process_environment" = 2
 "flags.py#settings base.config.settings" = 1
-"manifest.py#environ base.host.git.gitenv.git_env" = 1
 
 [debt.any-collaborator]
 "extensions.py#any GraphHook.__call__.config" = 1

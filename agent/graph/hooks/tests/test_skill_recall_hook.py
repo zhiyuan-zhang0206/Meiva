@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -135,6 +136,7 @@ def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[
             catalog=catalog,
             provider_keys=inert_keys(catalog),
             clock_factory=Clock.from_settings,
+            environ=os.environ,
         )
     )
 

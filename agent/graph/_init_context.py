@@ -90,6 +90,7 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         agent_id=agent_id,
         catalog=catalog,
         home=ctx.require_meiva_home(),
+        environ=ctx.require_environ(),
     )
     instruction_parts = [p for p in (prompt_body, HANDOFF_INSTRUCTION) if p]
     instruction = "\n\n".join(instruction_parts)
@@ -200,7 +201,9 @@ async def init_context_node(
         # compaction.
         indexed = indexed_skill_identifiers(
             skill_view(
-                runtime.context.require_agent().prompt, home=runtime.context.require_meiva_home()
+                runtime.context.require_agent().prompt,
+                home=runtime.context.require_meiva_home(),
+                environ=runtime.context.require_environ(),
             )
         )
 
@@ -231,6 +234,7 @@ async def init_context_node(
                     if runtime.context.identity is not None
                     else None,
                     home=runtime.context.require_meiva_home(),
+                    environ=runtime.context.require_environ(),
                 )
             ),
             *notes,

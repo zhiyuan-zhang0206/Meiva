@@ -55,6 +55,7 @@ def _bind_schedule_actor(
             bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
             meiva_home=home,
             user_home=user_home,
+            environ=config.process_environment(),
             rng=rng,
         )
     )

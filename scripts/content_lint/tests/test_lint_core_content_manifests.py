@@ -18,6 +18,8 @@ import pytest
 
 from scripts.content_lint import lint_core_content_manifests as lint
 
+ENVIRON = dict(os.environ)
+
 _COMMIT_DATE = "2026-01-02T12:00:00+00:00"
 
 
@@ -75,7 +77,7 @@ def _write(repo: Path, rel: str, payload: dict[str, object]) -> None:
 def test_derived_version_resolves_from_fixture_commit(repo: Path) -> None:
     from base.host.git import host_version
 
-    assert host_version.host_version(repo) == "2026.1.2"
+    assert host_version.host_version(repo, environ=ENVIRON) == "2026.1.2"
 
 
 def test_valid_core_manifest_passes(repo: Path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import replace
 from unittest.mock import MagicMock
@@ -50,6 +51,8 @@ from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
+
+ENVIRON = dict(os.environ)
 
 
 class FakeEngine:
@@ -125,6 +128,7 @@ def runtime(
             agent=AgentSlices.resolve(default_reader=defaults()),
             catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
+            environ=ENVIRON,
         )
     )
 

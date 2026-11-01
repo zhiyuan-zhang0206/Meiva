@@ -228,6 +228,7 @@ def context_from_description(
     machine = ConfiguredMachineIdentity(config)
     return MeivaContext.from_description(
         description,
+        environ=config.process_environment(),
         clients=process_clients(
             config=config,
             machine=machine,

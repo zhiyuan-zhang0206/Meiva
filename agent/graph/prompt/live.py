@@ -11,7 +11,7 @@ import contextlib
 import inspect
 import io
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -56,12 +56,14 @@ def warn_unresolved(config_field: str, names: Sequence[str]) -> None:
         )
 
 
-def read_skills(disabled: Sequence[str], *, home: Path) -> tuple[Skill, ...]:
+def read_skills(
+    disabled: Sequence[str], *, home: Path, environ: Mapping[str, str]
+) -> tuple[Skill, ...]:
     if disabled_by_sdk_config("skills", disabled):
         return ()
     from meiva.skills import names_under
 
-    return tuple(names_under(home))
+    return tuple(names_under(home, environ=environ))
 
 
 def read_view(
@@ -70,19 +72,24 @@ def read_view(
     configured_disable: Sequence[str],
     *,
     home: Path,
+    environ: Mapping[str, str],
 ) -> SkillView:
     disabled = effective_sdk_disable(configured_disable)
     return SkillView(
-        inject, expand, disabled, read_skills(disabled, home=home) if inject or expand else ()
+        inject,
+        expand,
+        disabled,
+        read_skills(disabled, home=home, environ=environ) if inject or expand else (),
     )
 
 
-def skill_view(prompt: Prompt, *, home: Path) -> SkillView:
+def skill_view(prompt: Prompt, *, home: Path, environ: Mapping[str, str]) -> SkillView:
     view = read_view(
         prompt.skills_to_inject_into_system_prompt,
         prompt.skills_to_expand_at_start,
         prompt.sdk_disable,
         home=home,
+        environ=environ,
     )
     warn_unresolved(
         "skills_to_inject_into_system_prompt", resolve_prompt_skills(view.inject, view).unresolved
@@ -117,8 +124,8 @@ def read_plugin_expansions() -> tuple[str, ...]:
     return install.expansions()
 
 
-def read_live_sdk(prompt: Prompt, *, home: Path) -> LiveSdk:
-    view = skill_view(prompt, home=home)
+def read_live_sdk(prompt: Prompt, *, home: Path, environ: Mapping[str, str]) -> LiveSdk:
+    view = skill_view(prompt, home=home, environ=environ)
     return LiveSdk(view, read_mcp_servers(view.disabled, home=home), read_plugin_expansions())
 
 

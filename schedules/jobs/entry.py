@@ -72,6 +72,7 @@ def fresh_schedule_entry(
             clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             meiva_home=home,
             user_home=Path.home(),
+            environ=config.process_environment(),
             rng=rng,
             bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
         )

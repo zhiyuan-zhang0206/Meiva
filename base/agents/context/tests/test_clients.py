@@ -201,7 +201,10 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
 
     machine = MachineFacts.of(name="child", role="agent-runner")
     child = MeivaContext.from_description(
-        description, clients=ClientSet(gateway_url=description["gateway_url"]), machine=machine
+        description,
+        clients=ClientSet(gateway_url=description["gateway_url"]),
+        machine=machine,
+        environ={"MEIVA_TEST": "1"},
     )
     assert child.require_machine() is machine
     assert "machine" not in description

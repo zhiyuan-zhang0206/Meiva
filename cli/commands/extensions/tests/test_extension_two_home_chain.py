@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from functools import partial
@@ -17,6 +18,8 @@ from cli.commands.extensions.skill import cmd_skill_install
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+
+ENVIRON = dict(os.environ)
 
 
 class _DbGateway:
@@ -74,6 +77,7 @@ def test_install_on_home_a_materializes_on_home_b(
                 machine=installing_machine,
                 home=home_a,
                 now=command_runtime.clock.now(),
+                environ=ENVIRON,
             )
             == 0
         )
@@ -120,6 +124,7 @@ def test_home_b_is_idempotent_on_a_second_pass(
                 machine=installing_machine,
                 home=home_a,
                 now=command_runtime.clock.now(),
+                environ=ENVIRON,
             )
             == 0
         )
@@ -162,6 +167,7 @@ def test_the_row_records_the_installing_machine(
                 machine=installing_machine,
                 home=home_a,
                 now=command_runtime.clock.now(),
+                environ=ENVIRON,
             )
             == 0
         )
@@ -195,6 +201,7 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
                 machine=installing_machine,
                 home=home_a,
                 now=command_runtime.clock.now(),
+                environ=ENVIRON,
             )
             == 0
         )
@@ -235,6 +242,7 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
                 machine=installing_machine,
                 home=home_a,
                 now=command_runtime.clock.now(),
+                environ=ENVIRON,
             )
             == 0
         )

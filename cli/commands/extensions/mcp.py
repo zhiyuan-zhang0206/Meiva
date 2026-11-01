@@ -646,7 +646,8 @@ def cmd_mcp_install(
 
         from cli.commands.extensions._manifest_gate import gate_refuses
 
-        if gate_refuses(pkg_dir, command="mcp install", mirror_pyproject=True):
+        gate_env = uv.host.environ
+        if gate_refuses(pkg_dir, command="mcp install", environ=gate_env, mirror_pyproject=True):
             return 1
 
         _land_package(acq.cloned, pkg_dir, dest)
@@ -761,7 +762,8 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime, user_h
 
         from cli.commands.extensions._manifest_gate import gate_refuses
 
-        if gate_refuses(pkg_dir, command="mcp upgrade", mirror_pyproject=True):
+        gate_env = uv.host.environ
+        if gate_refuses(pkg_dir, command="mcp upgrade", environ=gate_env, mirror_pyproject=True):
             return 1
 
         # Carry the installed copy's env across the re-land: it holds the

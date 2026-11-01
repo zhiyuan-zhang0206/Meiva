@@ -2,7 +2,7 @@
 # Framework and plugin notes are stably sorted by cache rank, placing stable settings before changing memory indexes. Agent identity and concrete workspace paths live in `on_fork` notes, not the shared system prompt; a fork keeps the inherited copy byte-identical (the prefix cache it rides) and appends its own after the marker, which says the notes above are the source's. The timezone IANA name remains authoritative when an offset becomes stale across DST. Fork skill additions append at the tail to preserve the inherited prefix.
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -251,7 +251,11 @@ def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
 
     prompt = ctx.require_agent().prompt
     view = read_view(
-        (), prompt.skills_to_expand_at_start, prompt.sdk_disable, home=ctx.require_meiva_home()
+        (),
+        prompt.skills_to_expand_at_start,
+        prompt.sdk_disable,
+        home=ctx.require_meiva_home(),
+        environ=ctx.require_environ(),
     )
     selection = resolve_prompt_skills(view.expand, view)
     warn_unresolved("skills_to_expand_at_start", selection.unresolved)
@@ -267,6 +271,7 @@ def fork_tail_skills_note(
     sdk_disable: Sequence[str],
     *,
     home: Path,
+    environ: Mapping[str, str],
     created_at: datetime,
 ) -> HumanMessage | None:
 
@@ -274,7 +279,7 @@ def fork_tail_skills_note(
         return None
     disabled = effective_sdk_disable(sdk_disable)
     selection = resolve_prompt_skills(
-        names, SkillView((), (), disabled, read_skills(disabled, home=home))
+        names, SkillView((), (), disabled, read_skills(disabled, home=home, environ=environ))
     )
     warn_unresolved("fork_tail_skills", selection.unresolved)
     return _skill_bodies_note(

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -27,6 +28,8 @@ from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.installation import installed
 from meiva.sdk_surface.settings import agent_setting
 from meiva.tests.fixtures.pin_agent import pin_agent
+
+ENVIRON = dict(os.environ)
 
 HANDSHAKE_BOUND_S = 30.0
 
@@ -276,6 +279,7 @@ def test_external_controls_stay_out_of_the_native_prompt() -> None:
         agent_id=None,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert "impersonation" not in meiva.__all_for_meiva__
     assert "meiva.impersonation.attach" not in prompt

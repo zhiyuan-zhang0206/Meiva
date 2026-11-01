@@ -6,6 +6,7 @@ the load dir by converge (see cli/commands/extensions/tests/test_skills_sync.py)
 the scan itself.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,8 @@ from meiva.sdk_surface import skill_sources
 from meiva.skills.skill_proxies import Namespace, SkillProxy, consumed_text
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from meiva.tests.skills._skills_helpers import track, track_present, write_skill
+
+ENVIRON = dict(os.environ)
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
 # default, so the real ~/.agents/skills/ never leaks into a scan; the
@@ -544,5 +547,5 @@ def test_names_under_scans_the_home_it_is_handed(unit_home: Path, tmp_path: Path
         install_registry.InstalledPackage(name="alpha", type="skill"), home=other
     )
 
-    assert [s["name"] for s in skills_mod.names_under(other)] == ["alpha"]
+    assert [s["name"] for s in skills_mod.names_under(other, environ=ENVIRON)] == ["alpha"]
     assert skills_mod.names() == []

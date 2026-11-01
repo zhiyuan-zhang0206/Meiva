@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from base.packages.extensions import install_registry as reg
 from base.paths.home import resolve_meiva_home
+
+ENVIRON = dict(os.environ)
 
 
 def _manifest_for(name: str, **extra: object) -> dict[str, object]:
@@ -29,5 +32,5 @@ def test_scan_drops_host_blocked_packages(unit_home: Path) -> None:
         json.dumps(_manifest_for("blocked", engines={"meiva": ">=2099"})), encoding="utf-8"
     )
 
-    tree = scan_tree(home / "skills", loadable_skill_names(home=home), [])
+    tree = scan_tree(home / "skills", loadable_skill_names(home=home, environ=ENVIRON), [])
     assert "ok" in tree and "blocked" not in tree

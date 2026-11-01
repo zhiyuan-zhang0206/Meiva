@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Protocol, Self, TypedDict
@@ -17,10 +17,18 @@ from base.paths import repo_plugins_dir, repo_root, skills_dir
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
-def load_skill_names(provider_roots: Sequence[Path] = (), *, home: Path) -> list[Skill]:
+def load_skill_names(
+    provider_roots: Sequence[Path] = (), *, home: Path, environ: Mapping[str, str]
+) -> list[Skill]:
     from base.packages.extensions.install_registry import loadable_skill_names
 
-    return flatten(scan_tree(skills_dir(home), loadable_skill_names(home=home), provider_roots))
+    return flatten(
+        scan_tree(
+            skills_dir(home),
+            loadable_skill_names(home=home, environ=environ),
+            provider_roots,
+        )
+    )
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md

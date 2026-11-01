@@ -438,6 +438,7 @@ def _request_context(
             original_incarnation=request.incarnation,
             clients=context.clients,
             machine=context.require_machine(),
+            environ=os.environ,
         ),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         meiva_home=home,
@@ -565,7 +566,7 @@ def main() -> None:
         config.boot()
         machine = ConfiguredMachineIdentity(config)
         clients = derived_clients(config, machine)
-        context = MeivaContext(clients=clients, machine=machine)
+        context = MeivaContext(clients=clients, machine=machine, environ=os.environ)
         run_child(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:
         write_crashed_result(result_path, exc)

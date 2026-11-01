@@ -16,13 +16,19 @@ package's own `pyproject.toml` — the durable #1198 defense (user ruling
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from base import paths
 from base.packages.plugins import manifest as manifest_module
 
 
-def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) -> list[str]:
+# meiva:note
+# `environ` is the environment the host-version gate's `git` subprocesses run under; the install
+# entry names it from the runtime configuration it already holds.
+def manifest_install_errors(
+    pkg_dir: Path, *, environ: Mapping[str, str], mirror_pyproject: bool = False
+) -> list[str]:
     """Manifest checks for a package about to be landed; [] = proceed."""
     try:
         manifest = manifest_module.load_optional_manifest(pkg_dir)
@@ -35,11 +41,11 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
     from base.host.git import host_version as host_version_mod
 
     try:
-        host = host_version_mod.host_version(paths.repo_root())
+        host = host_version_mod.host_version(paths.repo_root(), environ=environ)
     except host_version_mod.HostVersionError as e:
         return [str(e)]
     errors += manifest_module.check_host_engine(manifest, host)
-    errors += manifest_module.check_host_commit(manifest, paths.repo_root())
+    errors += manifest_module.check_host_commit(manifest, paths.repo_root(), environ=environ)
 
     if mirror_pyproject:
         from base.packages.plugins import pyproject_mirror
@@ -60,10 +66,16 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
     return errors
 
 
-def gate_refuses(pkg_dir: Path, *, command: str, mirror_pyproject: bool = False) -> bool:
+def gate_refuses(
+    pkg_dir: Path,
+    *,
+    command: str,
+    environ: Mapping[str, str],
+    mirror_pyproject: bool = False,
+) -> bool:
     """Print the gate's errors under the command's prefix and return True when
     the package must be refused (so a caller can `return 1` on one line)."""
-    errors = manifest_install_errors(pkg_dir, mirror_pyproject=mirror_pyproject)
+    errors = manifest_install_errors(pkg_dir, environ=environ, mirror_pyproject=mirror_pyproject)
     if not errors:
         return False
     for err in errors:
