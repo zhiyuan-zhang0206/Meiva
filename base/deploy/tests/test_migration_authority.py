@@ -117,6 +117,19 @@ def _as_git_worktree(tmp_path: Path) -> None:
 
 
 def _pending_migration(tmp_path: Path) -> Path:
+    # meiva:note
+    # Every caller of this helper migrates from a directory that holds one
+    # synthetic file, so the 2026-11-01 folded names have no file there and the
+    # guard reads them as a generation that can never run again -- while this
+    # fixture has just put the database in the crossed state. Drop them from the
+    # applied set so the shape these tests mean to exercise (a home whose checkout
+    # carries only its own migration) is the shape the guard sees. The fixture
+    # re-inserts the file-backed names before the next test.
+    from base.deploy.schema.migration_history import PRE_RESET_SET
+
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+        for name in PRE_RESET_SET:
+            conn.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_authority_t (id int);")
     _as_git_worktree(tmp_path)
     return tmp_path
