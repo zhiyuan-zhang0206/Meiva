@@ -13,7 +13,12 @@ from cli.fleet_update.plan.helper_gate import (
     refusals,
     unreadable_facts,
 )
-from cli.fleet_update.plan.host_probe import facts_of, host_refusals, was_serving
+from cli.fleet_update.plan.host_probe import (
+    facts_of,
+    host_refusals,
+    supports_stop_message,
+    was_serving,
+)
 from cli.fleet_update.plan.old_target import (
     OldTarget,
     old_commit,
@@ -243,6 +248,15 @@ def test_unknown_host_flags_are_not_negative_answers(field: str, value: str) -> 
 def test_every_valid_host_flag_combination_keeps_its_refusals(hook: str, active: str) -> None:
     reasons = host_refusals("lin", {**_CLEAN, "hook": hook, "active": active})
     assert len(reasons) == (hook == "yes") + (active == "yes")
+
+
+def test_stop_message_probe_word_is_decoded_explicitly() -> None:
+    assert supports_stop_message("lin", {"stop_message": "yes"}) is True
+    assert supports_stop_message("lin", {"stop_message": "no"}) is False
+    with pytest.raises(ValueError, match="lin: the probe did not report stop_message"):
+        supports_stop_message("lin", {})
+    with pytest.raises(ValueError, match=r"lin\.stop_message.*'future'"):
+        supports_stop_message("lin", {"stop_message": "future"})
 
 
 @pytest.mark.parametrize("field", ["helper", "valid", "loaded", "stale"])

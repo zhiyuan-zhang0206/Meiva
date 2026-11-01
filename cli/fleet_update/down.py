@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from .choices import forwarded_flags, message_flag, start_flags
@@ -22,7 +23,7 @@ from .plan.host_commands import (
     stop_command,
     switch_command,
 )
-from .plan.host_probe import host_refusals
+from .plan.host_probe import host_refusals, supports_stop_message
 from .plan.journal import HostEvidence, parse_evidence, stop_completed
 from .plan.old_target import (
     OldTarget,
@@ -83,33 +84,47 @@ def _old_target(s: Session, args: argparse.Namespace, heads: dict[str, str], new
     return OldTarget(reasons, old.resolved)
 
 
+@dataclass(frozen=True)
+class _Preflight:
+    reasons: tuple[str, ...]
+    serving: frozenset[str]
+    rebuilding: frozenset[str] = frozenset()
+    legacy_stop: frozenset[str] = frozenset()
+
+
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
-def _preflight(
-    s: Session, args: argparse.Namespace, new: str
-) -> tuple[list[str], frozenset[str], frozenset[str]]:
+def _preflight(s: Session, args: argparse.Namespace, new: str) -> _Preflight:
     hosts = start_order(args.gateway, tuple(args.runner))
     reasons: list[str] = []
     heads: dict[str, str] = {}
     serving: list[str] = []
+    legacy_stop: list[str] = []
     for alias in hosts:
         facts, was_serving = probe_host(s, alias)
         heads[alias] = facts.get("head", "")
         try:
-            reasons += host_refusals(alias, facts)
+            host_reasons = host_refusals(alias, facts)
+            reasons += host_reasons
+            if not host_reasons and not supports_stop_message(alias, facts):
+                legacy_stop.append(alias)
         except ValueError as exc:
             raise RefusedError(f"invalid host probe: {exc}") from exc
         if was_serving:
             serving.append(alias)
     old = _old_target(s, args, heads, new)
     if reasons or old.reasons:
-        return [*reasons, *old.reasons], frozenset(serving), frozenset()
+        return _Preflight((*reasons, *old.reasons), frozenset(serving))
     # meiva:note
     # The helper gate reads NEW, so every host must hold it first. This fetch is a
     # non-destructive effect the window deliberately accepts before the gate: the gate's own
     # question is about that commit, and the cheap refusals above have already passed.
     if args.dry_run:
         s.say("helper gate: NOT evaluated (dry run: the target commit is not fetched)")
-        return [], frozenset(serving), frozenset()
+        return _Preflight(
+            (),
+            frozenset(serving),
+            legacy_stop=frozenset(legacy_stop),
+        )
     for alias in hosts:
         s.run(alias, fetch_command(new))
     probes = {alias: probe_helper(s, alias, new) for alias in hosts}
@@ -120,7 +135,12 @@ def _preflight(
         rebuilding = rebuilding_hosts(probes, rebuild=rebuild)
     except ValueError as exc:
         raise RefusedError(f"invalid helper probe: {exc}") from exc
-    return list(helper_reasons), frozenset(serving), rebuilding
+    return _Preflight(
+        tuple(helper_reasons),
+        frozenset(serving),
+        rebuilding=rebuilding,
+        legacy_stop=frozenset(legacy_stop),
+    )
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
@@ -198,15 +218,14 @@ def _recover_after_failed_stop(
         s.say(line)
 
 
-def _stop_wave(
-    s: Session, args: argparse.Namespace, serving: frozenset[str], rebuilding: frozenset[str]
-) -> None:
+def _stop_wave(s: Session, args: argparse.Namespace, pre: _Preflight) -> None:
     choices = StopChoices(
         forwarded=(args.shell, args.browser, args.extras, *forwarded_flags(args, args.kept)),
         mode=args.mode,
         timeout=args.stop_timeout,
         infra=args.infra,
         message=message_flag(args),
+        legacy_message_hosts=pre.legacy_stop,
     )
     stopped: list[str] = []
     current = args.gateway
@@ -214,7 +233,7 @@ def _stop_wave(
         for step in stop_steps(
             gateway=args.gateway,
             runners=tuple(args.runner),
-            rebuilding=rebuilding,
+            rebuilding=pre.rebuilding,
             choices=choices,
         ):
             current = step.alias
@@ -228,7 +247,7 @@ def _stop_wave(
             stopped.append(step.alias)
     except FailedError as exc:
         if not s.dry_run:
-            _recover_after_failed_stop(s, args, serving, tuple(stopped), current)
+            _recover_after_failed_stop(s, args, pre.serving, tuple(stopped), current)
         raise FailedError(f"{exc}{_STOP_HINT}") from exc
 
 
@@ -237,9 +256,9 @@ def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}", repo=s.repo).stdout.strip()
     if not new:
         raise RefusedError(f"refused: {args.new} is not a commit in {s.repo}; git fetch origin")
-    reasons, serving, rebuilding = _preflight(s, args, new)
-    if reasons:
-        raise RefusedError("refused: " + "; ".join(reasons))
+    pre = _preflight(s, args, new)
+    if pre.reasons:
+        raise RefusedError("refused: " + "; ".join(pre.reasons))
     announce_leases(s, args.gateway, args.lease_confirm_seconds)
     _stored_schedules(s, args, new)
     silence_note = f" ({args.message_text})" if args.message_text else ""
@@ -252,7 +271,7 @@ def down(s: Session, args: argparse.Namespace) -> None:
             f"fleet update to {new[:12]}: planned outage{silence_note}; `up` expires this silence"
         ),
     )
-    _stop_wave(s, args, serving, rebuilding)
+    _stop_wave(s, args, pre)
     for alias in start_order(args.gateway, tuple(args.runner)):
         s.run(alias, switch_command(new))
     next_step = "continuing with `up`" if args.half == "run" else "run `up` when ready"

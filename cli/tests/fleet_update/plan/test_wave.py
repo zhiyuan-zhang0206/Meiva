@@ -95,6 +95,40 @@ def test_stop_steps_forward_message_to_normal_and_rebuilding_hosts() -> None:
     )
 
 
+def test_stop_steps_omit_message_flags_only_for_legacy_hosts() -> None:
+    choices = StopChoices(
+        forwarded=(
+            "--close-shell-sessions",
+            "--keep-browser",
+            "--keep-extras",
+            "--keep-no-services",
+        ),
+        mode="smooth",
+        timeout=600,
+        message="--message 'Coordinated rollout (#8037)'",
+        infra="--keep-infra",
+        legacy_message_hosts=frozenset({"mac", "gw"}),
+    )
+    steps = stop_steps(
+        gateway="gw", runners=("mac", "lin"), rebuilding=frozenset({"mac"}), choices=choices
+    )
+    assert steps == (
+        StopStep("mac", f"{REBUILD_STOP} --mode smooth --timeout 600", retires_extras=True),
+        StopStep(
+            "lin",
+            "--close-shell-sessions --keep-browser --keep-extras --keep-no-services "
+            "--mode smooth --timeout 600 --message 'Coordinated rollout (#8037)'",
+            retires_extras=False,
+        ),
+        StopStep(
+            "gw",
+            "--close-shell-sessions --keep-browser --keep-extras --keep-no-services "
+            "--mode smooth --timeout 600 --keep-infra",
+            retires_extras=False,
+        ),
+    )
+
+
 def test_a_cluster_with_no_runner_stops_only_the_gateway() -> None:
     steps = stop_steps(gateway="gw", runners=(), rebuilding=frozenset(), choices=_CHOICES)
     assert [step.alias for step in steps] == ["gw"]

@@ -121,8 +121,13 @@ def test_the_probe_carries_backslashes_in_the_journal_unchanged(shell: str, tmp_
 
     assert facts["head"] == git(tmp_path / ".meiva" / "source", "rev-parse", "HEAD")
     assert facts["dirty"] == "0"
+    assert facts["stop_message"] == "no"
     assert facts["op"] == _JOURNAL_WITH_BACKSLASHES
     assert json.loads(facts["op"])["result"]["error"] == _ERROR_WITH_BACKSLASHES
+    host_parser = tmp_path / ".meiva" / "source" / "cli" / "parsers" / "host.py"
+    host_parser.parent.mkdir(parents=True)
+    host_parser.write_text('("--no-message",)\n')
+    assert _probed(shell, tmp_path)["stop_message"] == "yes"
 
 
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])

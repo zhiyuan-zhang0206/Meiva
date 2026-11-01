@@ -37,8 +37,12 @@ class Sim:
 
     # meiva:note
     # One stop: a staged failure keeps its daemon only when the test says so.
-    def _stop(self, alias: str, host: State) -> int:
+    def _stop(self, alias: str, host: State, command: str) -> int:
         assert not (alias == "gw" and self._runners_up()), "gateway stopped before a runner"
+        if host["stop_message"] == "no":
+            assert "--message" not in command and "--no-message" not in command, (
+                "legacy host received --message/--no-message"
+            )
         rc = int(self.s["stop_fails"].get(alias, 0))
         if not rc or alias not in self.s["stop_fails_leaves_up"]:
             host["up"] = False
@@ -81,7 +85,7 @@ class Sim:
         if rc := self._failure(kind, alias):
             return rc
         if kind == "stop":
-            return self._stop(alias, host)
+            return self._stop(alias, host, command)
         if kind == "switch":
             self._switch(host, command)
         elif kind in ("start", "oneshot"):
@@ -93,7 +97,7 @@ class Sim:
         return 0
 
     def _reported(self, alias: str, host: State, emit: list[str]) -> int:
-        for key in ("head", "dirty", "hook", "active"):
+        for key in ("head", "dirty", "hook", "active", "stop_message"):
             emit.append(f"{key}={host[key]}")
         journal = self.s["journal"].get(alias)
         emit.append(f"op={'' if journal is None else json.dumps(journal)}")

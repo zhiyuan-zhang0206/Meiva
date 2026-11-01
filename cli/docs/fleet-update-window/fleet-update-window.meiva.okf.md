@@ -75,8 +75,8 @@ Before any host stops, every host is asked the permissions-helper facts of the c
 Two shapes answer. A host that carries no permissions helper (a Linux machine) owes `helper=absent` and nothing else: there is nothing there to rebuild, so it passes and is never counted among the rebuilding hosts. A host that carries one owes all six facts, and a missing, empty or `-` answer refuses the window before anything stops — reading a probe that could not run as "nothing to do" is how a window walks past the one host it should have stopped for. A host with a helper must also carry the certificate root this fleet records for it in `deploy/fleet/helper-identities.json`, keyed by the SSH alias the window names. Both `mba` and `macbook-air` record the laptop's same verified certificate root; the gate does not infer an alias from the machine name.
 
 The finite probe words are decoded explicitly: helper presence is `present` or
-`absent`, and helper validity/loading/staleness plus host hook/active flags are
-`yes` or `no`. An unknown word is malformed evidence and produces an explicit
+`absent`, and helper validity/loading/staleness plus host
+hook/active/stop_message flags are `yes` or `no`. An unknown word is malformed evidence and produces an explicit
 CLI refusal. Host flags are checked before fetching; helper facts are checked
 after the necessary non-destructive fetch of NEW and before stop, switch or
 rebuild effects. Missing helper facts retain the unreadable-facts refusal above.

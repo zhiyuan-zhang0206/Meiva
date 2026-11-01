@@ -213,7 +213,7 @@ def test_unknown_helper_words_refuse_before_stop_or_switch(
     assert "invalid helper probe: mac:" in out and field in out and "'future'" in out
 
 
-@pytest.mark.parametrize("field", ["hook", "active"])
+@pytest.mark.parametrize("field", ["hook", "active", "stop_message"])
 def test_unknown_host_flags_refuse_before_fetch(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], field: str
 ) -> None:

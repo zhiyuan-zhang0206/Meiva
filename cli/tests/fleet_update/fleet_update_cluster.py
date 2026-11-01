@@ -24,6 +24,7 @@ _IDLE: dict[str, Any] = {
     "dirty": 0,
     "hook": "no",
     "active": "no",
+    "stop_message": "yes",
     "up": True,
 }
 
