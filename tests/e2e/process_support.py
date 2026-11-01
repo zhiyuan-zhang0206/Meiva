@@ -307,7 +307,7 @@ _ENV_TOKEN_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
 _E2E_HOME_RUN_RE = re.compile(r"meiva_e2e_home_(\d+)_(\d+)")
 _E2E_BUILD_RUN_RE = re.compile(r"/ui/web/\.builds/build-(\d+)_(\d+)")
 
-_FRONTEND_HINTS = ("next", "npm")
+_FRONTEND_HINTS = ("next", "pnpm", "npm")
 _REAP_GRACE_SEC = 2.0
 
 

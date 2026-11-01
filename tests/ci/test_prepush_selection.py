@@ -127,11 +127,8 @@ def test_eslint_keeps_commit_hook_and_scopes_push_contribution() -> None:
 
 @pytest.fixture
 def eslint_repo(tmp_path: Path) -> tuple[Path, Path]:
-    """A repo with fake `npx` / `node` / `npm` that log how they were called, so the script's own
-    decisions (which files, whole project or not) can be read back. Returns (repo, call log dir).
-
-    Each tool logs to its own file: the script pipes `npx ... | node ...`, so the two run
-    concurrently and one shared log would record them in whichever order they got scheduled."""
+    """A repo with fake `pnpm` / `node` that log how they were called, so the script's own
+    decisions (which files, whole project or not) can be read back. Returns (repo, call log dir)."""
     repo = tmp_path / "repo"
     (repo / "ui/web/node_modules/.bin").mkdir(parents=True)
     (repo / "ui/web/node_modules/.bin/eslint").write_text("")
@@ -141,7 +138,7 @@ def eslint_repo(tmp_path: Path) -> tuple[Path, Path]:
     calls.mkdir()
     shims = tmp_path / "shims"
     shims.mkdir()
-    for tool in ("npx", "node", "npm"):
+    for tool in ("pnpm", "node"):
         shim = shims / tool
         shim.write_text(f'#!/bin/sh\necho "{tool} $*" >> {calls / tool}\ncat > /dev/null\n')
         shim.chmod(0o755)
@@ -170,11 +167,10 @@ def test_eslint_lints_just_the_changed_files(eslint_repo: tuple[Path, Path]) -> 
     repo, calls = eslint_repo
     result = _run_eslint_script(repo, calls, "ui/web/src/a.tsx", "ui/web/src/lib/b.ts")
     assert result.returncode == 0, result.stderr
-    assert _tool_calls(calls, "npx") == [
-        "npx --no-install eslint --no-warn-ignored --max-warnings 0 src/a.tsx src/lib/b.ts"
+    assert _tool_calls(calls, "pnpm") == [
+        "pnpm exec eslint --no-warn-ignored --max-warnings 0 src/a.tsx src/lib/b.ts"
     ]
     assert _tool_calls(calls, "node") == []
-    assert _tool_calls(calls, "npm") == []
 
 
 @pytest.mark.parametrize(
@@ -183,7 +179,8 @@ def test_eslint_lints_just_the_changed_files(eslint_repo: tuple[Path, Path]) -> 
         "ui/web/eslint.config.mjs",
         "ui/web/eslint-rules/sentence-case.mjs",
         "ui/web/package.json",
-        "ui/web/package-lock.json",
+        "ui/web/pnpm-lock.yaml",
+        "ui/web/pnpm-workspace.yaml",
         "ui/web/tsconfig.json",
     ],
 )
@@ -195,8 +192,8 @@ def test_eslint_setup_change_lints_the_whole_project(
     repo, calls = eslint_repo
     result = _run_eslint_script(repo, calls, "ui/web/src/a.tsx", setup_path)
     assert result.returncode == 0, result.stderr
-    assert _tool_calls(calls, "npm") == ["npm run lint"]
-    assert _tool_calls(calls, "npx") == _tool_calls(calls, "node") == []
+    assert _tool_calls(calls, "pnpm") == ["pnpm run lint"]
+    assert _tool_calls(calls, "node") == []
 
 
 def test_eslint_hook_triggers_on_every_setup_file() -> None:
@@ -447,10 +444,10 @@ def repo(tmp_path: Path) -> Path:
         (bins / name).symlink_to(sys.executable)
     probe = tmp_path / "probe"
     probe.mkdir()
-    for name in ("node", "npm", "npx"):
+    for name in ("node", "pnpm"):
         (probe / name).write_text(
             f"#!{sys.executable}\nimport os,json,sys\n"
-            "if os.path.basename(sys.argv[0]) in {'npx', 'npm'}:\n"
+            "if os.path.basename(sys.argv[0]) == 'pnpm':\n"
             " with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
             " raise SystemExit(int(os.environ.get('TOOL_STATUS', '0')))\n"
             "sys.stdin.read()\n"
@@ -490,9 +487,9 @@ def test_rebased_upstream_ui_does_not_invoke_tool(repo: Path, tool: str) -> None
     # Exercise actual pre-commit old-tip selection, not just the selector function.
     config = repo / ".pre-commit-config.yaml"
     legacy_command = {
-        "tsc": "npx --no-install next typegen && npx --no-install tsc --noEmit",
-        "eslint": "npm run lint",
-        "vitest": "npx --no-install vitest run",
+        "tsc": "pnpm exec next typegen && pnpm exec tsc --noEmit",
+        "eslint": "pnpm run lint",
+        "vitest": "pnpm exec vitest run",
     }[tool]
     config.write_text(
         "repos:\n- repo: local\n  hooks:\n  - id: frontend\n    name: frontend\n"
@@ -554,7 +551,7 @@ def test_new_branch_runs_own_source_and_disk_consumer(repo: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert calls(repo) == [
         [
-            "--no-install",
+            "exec",
             "vitest",
             "run",
             "--config",
@@ -563,7 +560,7 @@ def test_new_branch_runs_own_source_and_disk_consumer(repo: Path) -> None:
             "src/lib/auth/localstorage-policy.test.ts",
         ],
         [
-            "--no-install",
+            "exec",
             "vitest",
             "related",
             "--run",
@@ -585,7 +582,7 @@ def test_schema_type_artifacts_keep_contract_checks_without_related_run(
     commit(repo, generated, "{}" if generated.endswith(".json") else "export interface Example {}")
     result = select(repo, "tsc")
     assert result.returncode == 0, result.stderr
-    assert calls(repo)[-1] == ["--no-install", "tsc", "--noEmit"]
+    assert calls(repo)[-1] == ["exec", "tsc", "--noEmit"]
     (repo / "calls.jsonl").unlink()
     result = select(repo, "vitest")
     assert result.returncode == 0, result.stderr
@@ -602,7 +599,7 @@ def test_type_artifact_does_not_hide_changed_runtime_source(repo: Path) -> None:
     result = select(repo, "vitest")
     assert result.returncode == 0, result.stderr
     assert calls(repo)[-1] == [
-        "--no-install",
+        "exec",
         "vitest",
         "related",
         "--run",
@@ -636,7 +633,7 @@ def test_global_inputs_report_ci_gap_and_keep_known_disk_test(repo: Path) -> Non
     assert "UNVERIFIED" in result.stderr
     assert calls(repo) == [
         [
-            "--no-install",
+            "exec",
             "vitest",
             "run",
             "--config",
@@ -701,13 +698,13 @@ def test_delete_only_input_checks_type_project_and_reports_test_closure(repo: Pa
     git(repo, "commit", "-qm", "delete")
     result = select(repo, "tsc")
     assert result.returncode == 0, result.stderr
-    assert calls(repo) == [["--no-install", "next", "typegen"], ["--no-install", "tsc", "--noEmit"]]
+    assert calls(repo) == [["exec", "next", "typegen"], ["exec", "tsc", "--noEmit"]]
     (repo / "calls.jsonl").unlink()
     result = select(repo, "vitest")
     assert "deleted-input closure requires CI" in result.stderr
     assert calls(repo) == [
         [
-            "--no-install",
+            "exec",
             "vitest",
             "run",
             "--config",

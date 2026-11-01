@@ -110,7 +110,7 @@ def pytest_collection_modifyitems(
     # get a chance to clean it.
     with contextlib.suppress(Exception):  # a cleanup failure must not abort collection
         sweep_stale_e2e_processes(receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl")
-    if shutil.which("npm") and (_REPO_ROOT / "ui" / "web" / "node_modules" / "next").exists():
+    if shutil.which("pnpm") and (_REPO_ROOT / "ui" / "web" / "node_modules" / "next").exists():
         return
     for item in items:
         if isinstance(item, pytest.Function) and {
@@ -118,7 +118,7 @@ def pytest_collection_modifyitems(
             "playwright_runtime",
         }.intersection(item.fixturenames):
             item.add_marker(
-                pytest.mark.skip(reason="e2e prerequisites missing (npm or ui/web/node_modules)")
+                pytest.mark.skip(reason="e2e prerequisites missing (pnpm or ui/web/node_modules)")
             )
 
 
@@ -361,10 +361,12 @@ def frontend_proc() -> Iterator[None]:
     safer than 0.7s incremental build.
     """
     frontend_src = _REPO_ROOT / "ui" / "web"
-    if not shutil.which("npm"):
-        pytest.skip("npm not found — e2e tests require Node.js")
+    if not shutil.which("pnpm"):
+        pytest.skip("pnpm not found — e2e tests require Node.js and pnpm")
     if not (frontend_src / "node_modules" / "next").exists():
-        pytest.skip("ui/web/node_modules not installed — run `npm install` in ui/web/ first")
+        pytest.skip(
+            "ui/web/node_modules not installed — run `pnpm install --frozen-lockfile` in ui/web/ first"
+        )
     build_dir = frontend_src / ".builds" / f"build-{_E2E_SUFFIX}"
     env = {**os.environ, "NEXT_PUBLIC_API_BASE": GATEWAY_URL}
 
@@ -387,7 +389,7 @@ def frontend_proc() -> Iterator[None]:
     build_log = _LOG_DIR / f"frontend-build-{_E2E_SUFFIX}.log"
     with build_log.open("w") as f:
         result = subprocess.run(
-            ["npm", "run", "build"],
+            ["pnpm", "run", "build"],
             cwd=str(build_dir),
             env=env,
             stdout=f,
@@ -395,13 +397,13 @@ def frontend_proc() -> Iterator[None]:
             check=False,
         )
     if result.returncode != 0:
-        raise RuntimeError(f"npm run build failed (exit {result.returncode}); see {build_log}")
+        raise RuntimeError(f"pnpm run build failed (exit {result.returncode}); see {build_log}")
 
     # The port has been held since import, through the build above; hand it to Next now.
     FRONTEND_RESERVATION.release()
     try:
         with managed_proc(
-            ["npm", "run", "start", "--", "-p", str(FRONTEND_PORT)],
+            ["pnpm", "run", "start", "-p", str(FRONTEND_PORT)],
             cwd=str(build_dir),
             env=env,
             label="frontend",

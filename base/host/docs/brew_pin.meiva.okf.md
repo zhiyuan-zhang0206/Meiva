@@ -20,6 +20,8 @@ read a harmless path instead of crashing, and the `brew list` subprocess is boun
 
 UV_VERSION and UV_ASSET_SHA256 are the canonical uv pin: scripts/provision/toolchain.sh and every setup-uv workflow step embed the same version, toolchain.sh embeds the same digests, and drift fails the pin contract tests.
 
+PNPM_VERSION is the canonical pnpm pin: ui/web/package.json (`packageManager`), scripts/provision/node.sh, the macOS host-dependency remediation string and every pnpm/action-setup workflow step embed the same version, and drift fails the pin contract tests. pnpm is installed globally via npm rather than as a Homebrew formula, so it is excluded from PINNED_BREW_FORMULAE.
+
 PGBOUNCER_APT_VERSION and REDIS_APT_VERSION are the canonical apt-series pins; scripts/provision/database.sh and the CI install steps embed the same strings and drift fails the pin tests.
 
 The brew probes are warning-only drift detection: an absent brew or a process error degrades to None or an empty set, and the converge step stays silent when brew is absent or non-macOS while reporting each missing or unpinned formula.

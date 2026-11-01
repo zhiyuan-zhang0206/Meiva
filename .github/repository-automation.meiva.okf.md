@@ -38,9 +38,9 @@ left to manual triage.
 CI runs on pull requests only, and a hosted cache written by a PR run is visible
 to that PR alone; only the default branch's caches are shared. This workflow runs
 on pushes to main that touch a cache-key input (`uv.lock`, `.python-version`,
-`.pre-commit-config.yaml`, `ui/web/package-lock.json`, the Postgres runtime pin,
+`.pre-commit-config.yaml`, `ui/web/pnpm-lock.yaml`, the Postgres runtime pin,
 or `.github/actions/`) and on manual dispatch. It runs the same install steps as
-`ci.yml` with the same keys (uv, pre-commit environments, npm, Postgres/Redis
+`ci.yml` with the same keys (uv, pre-commit environments, pnpm store, Postgres/Redis
 packages, the vendored Postgres runtime, Playwright), so the next PRs restore
 warm caches instead of each building its own. It runs no tests.
 
@@ -76,9 +76,9 @@ executed. Future effective windows are copied into the PR body for review.
 
 A weekly schedule (plus manual dispatch) runs `scripts/ci/dependency_audit.py`:
 `uv audit` over `uv.lock` (severity looked up in OSV, since its JSON carries
-none), `npm audit` over `ui/web` using the canonical npm advisory registry, and
+none), `pnpm audit` over `ui/web` using the canonical npm advisory registry, and
 the version constants Meiva downloads outside the lockfiles (zonky Postgres,
-pgvector, wal-g, otelcol-contrib, uv, Grafana)
+pgvector, wal-g, otelcol-contrib, uv, pnpm, Grafana)
 against each upstream's newest release. One issue, found by its marker, is
 opened or updated while any advisory is high, critical or ungradable or any
 pin is behind, and closed on a clean run. The PR-time `dependency audit` job in
@@ -88,11 +88,12 @@ uses its configured transport; only the audit's advisory request selects
 `https://registry.npmjs.org`. A registry/tool error is an incomplete failed run,
 never a clean report or permission to close the tracked issue.
 
-The canonical uv pin is `base/host/brew_pin.py`; provisioning and every
-`setup-uv` input mirror its version. The weekly report derives its isolated
-`uvx` audit runner from that same pin, including when an operator invokes the
-report with an older installed toolchain. PR-time CI uses the installed pinned
-`uv audit` directly. The audit job does not populate the project wheel cache.
+The canonical uv and pnpm pins live in `base/host/brew_pin.py`; provisioning and
+every `setup-uv` and `pnpm/action-setup` input mirror those versions. The weekly
+report derives its isolated `uvx` audit runner from that same uv pin, including
+when an operator invokes the report with an older installed toolchain. PR-time CI
+uses the installed pinned `uv audit` and `pnpm audit` directly. The audit job
+populates neither the project wheel cache nor the pnpm store cache.
 
 ## `workflows/secret-scan-history.yml`
 

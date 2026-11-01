@@ -97,13 +97,14 @@ def main() -> int:
         )
     status = 0
     for hook in due:
-        # types-codegen-fresh shells out to `npx --no-install openapi-typescript`, which needs
-        # ui/web/node_modules: the same frontend-tooling dependency the frontend pre-push hooks
-        # skip on. Everything else here is pure Python.
+        # meiva:note
+        # types-codegen-fresh invokes `node scripts/codegen/typescript-types.mjs`, which imports
+        # `openapi-typescript` from ui/web/node_modules: the same frontend-tooling dependency the
+        # frontend pre-push hooks skip on. Everything else here is pure Python.
         if hook == "types-codegen-fresh" and not (_ROOT / "ui/web/node_modules").is_dir():
             print(
                 f"WARNING: PRE-PUSH SKIPPED [{hook}]: missing ui/web/node_modules; "
-                "run (cd ui/web && npm ci). CI must pass before merge.",
+                "run (cd ui/web && pnpm install --frozen-lockfile). CI must pass before merge.",
                 file=sys.stderr,
             )
             continue

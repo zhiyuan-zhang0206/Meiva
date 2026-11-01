@@ -37,8 +37,9 @@ tool
 | `redis-cli` | gateway with a local data plane: authenticated admin and ACL commands | `scripts/provision/database.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `pgbouncer` | gateway with a local data plane and pooling enabled: the connection pooler | `scripts/provision/database.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `node` | frontend or browser service selected: builds and runs the Next.js app | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
-| `npm` | frontend or browser service selected: installs and builds the frontend | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
-| `npx` | frontend or browser service selected: runs the frontend tooling and the meiva-browser daemon | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
+| `pnpm` | frontend service selected: installs, builds and runs the frontend | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
+| `npm` | frontend or browser service selected: ships with Node and installs pnpm | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
+| `npx` | frontend or browser service selected: runs the meiva-browser MCP daemon | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `crontab` | Linux, OS jobs enabled, default home: registers the daily backup, log rotation, packages refresh and health probe | `scripts/provision/host_utils.sh` (apt; macOS ships both) | install → re-probe; still missing → refuse |
 | `systemctl` | Linux prod install with OS jobs enabled: installs and enables the boot autostart unit (skipped for a dev worktree) | the host; this repository cannot install it | refuse before converge |
 | `sudo` | Linux prod install with OS jobs enabled, not root: writes the boot unit as root | the host; this repository cannot install it | refuse before converge |

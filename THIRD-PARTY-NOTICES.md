@@ -10,8 +10,8 @@ LGPL/MPL "use without infecting" path), so the obligations attach to those
 libraries' own files, not to Meiva's source.
 
 The authoritative, always-current license set is the metadata of the resolved
-dependencies (`uv.lock`, `ui/web/package-lock.json`); regenerate a full
-report with `uv pip licenses` / `npx license-checker` when shipping a release.
+dependencies (`uv.lock`, `ui/web/pnpm-lock.yaml`); regenerate a full
+report with `uv pip licenses` / `pnpm licenses list` when shipping a release.
 
 ## Runtime dependencies under weak copyleft
 

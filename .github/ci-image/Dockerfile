@@ -13,6 +13,7 @@
 #     `initdb` / `postgres` never run as root (UID 0).
 
 ARG UV_VERSION="0.13.1"
+ARG PNPM_VERSION="11.9.0"
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv_bin
 
@@ -21,6 +22,7 @@ FROM ubuntu:24.04
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG UV_VERSION
+ARG PNPM_VERSION
 ARG PGBOUNCER_APT_VERSION="1.26.0-1.pgdg24.04+1"
 ARG REDIS_APT_VERSION="6:8.2.*"
 
@@ -140,8 +142,8 @@ RUN set -euo pipefail \
     && npm install -g --force corepack@latest \
     && mkdir -p /opt/corepack \
     && corepack enable --install-directory /usr/local/bin \
-    && corepack prepare pnpm@latest --activate \
-    && pnpm --version \
+    && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
+    && test "$(pnpm --version)" = "${PNPM_VERSION}" \
     && npm cache clean --force \
     && rm -rf /root/.npm /root/.cache /var/lib/apt/lists/* /var/cache/apt/archives/*.deb /var/cache/apt/*.bin
 

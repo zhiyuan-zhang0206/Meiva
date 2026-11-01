@@ -39,10 +39,12 @@ WORKDIR /home/verify
 
 # uv, at the pinned release, into ~/.local/bin. One cache directory (mounted as a
 # named volume by the run script) holds the uv package cache, the managed Python
-# interpreters and the npm cache; it carries no cluster state.
+# interpreters, the pnpm content-addressed store and the npm cache; it carries no
+# cluster state.
 ENV PATH=/home/verify/.local/bin:${PATH} \
     UV_CACHE_DIR=/home/verify/.cache/uv \
     UV_PYTHON_INSTALL_DIR=/home/verify/.cache/uv-python \
+    pnpm_config_store_dir=/home/verify/.cache/pnpm-store \
     npm_config_cache=/home/verify/.cache/npm
 RUN bash /opt/meiva-provision/scripts/provision/toolchain.sh \
     && mkdir -p /home/verify/.cache

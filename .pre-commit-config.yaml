@@ -81,10 +81,10 @@ repos:
         pass_filenames: false
 
       - id: lint-package-lock
-        name: lint npm lock (canonical registry sources)
+        name: lint pnpm lock (canonical registry sources)
         entry: .venv/bin/python scripts/lint/locks/package_lock.py
         language: system
-        files: ^(ui/web/package-lock\.json|scripts/lint/locks/package_lock\.py|scripts/lint/tests/test_lint_package_lock\.py)$
+        files: ^(ui/web/(pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|\.npmrc)|scripts/lint/locks/package_lock\.py|scripts/lint/locks/tests/test_lint_package_lock\.py)$
         pass_filenames: false
 
       - id: pyright
@@ -663,7 +663,7 @@ repos:
         name: frontend eslint (changed files)
         entry: bash scripts/hooks/precommit-eslint.sh
         language: system
-        files: ^ui/web/(.*\.(ts|tsx|js|mjs)|package(-lock)?\.json|tsconfig\.json)$
+        files: ^ui/web/(.*\.(ts|tsx|js|mjs)|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json)$
 
       # Push selection ignores old remote tips and lints own surviving paths.
       # Keep this ID for existing CI SKIP-list compatibility.

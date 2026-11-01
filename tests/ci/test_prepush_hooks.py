@@ -533,7 +533,7 @@ def test_missing_frontend_env(checkout: Path, tool: str) -> None:
     result = run_guard(checkout, tool)
     assert result.returncode == 0
     assert f"PRE-PUSH SKIPPED [{tool}]: missing ui/web/node_modules" in result.stderr
-    assert "npm ci" in result.stderr
+    assert "pnpm install --frozen-lockfile" in result.stderr
     assert "executed" not in result.stdout
 
 
@@ -541,7 +541,7 @@ def test_missing_frontend_env(checkout: Path, tool: str) -> None:
 def test_vitest_binary_and_command_status(checkout: Path, status: int) -> None:
     bins = checkout / "ui/web/node_modules/.bin"
     bins.mkdir(parents=True)
-    for name in ("node", "npm"):
+    for name in ("node", "pnpm"):
         (bins / name).symlink_to(sys.executable)
     env_overrides = {"PATH": str(bins) + os.pathsep + os.environ["PATH"]}
     missing = run_guard(checkout, "vitest", env_overrides=env_overrides)

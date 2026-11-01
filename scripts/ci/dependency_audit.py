@@ -20,6 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKER = "<!-- weekly-dependency-audit -->"
 _TITLE = "Weekly dependency audit: findings need attention"
 _UV_PIN = ("uv", "base/host/brew_pin.py", r'^UV_VERSION = "([^"]+)"')
+_PNPM_PIN = ("pnpm", "base/host/brew_pin.py", r'^PNPM_VERSION = "([^"]+)"')
 _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 0}
 _ACTIONABLE_SEVERITIES = frozenset({"critical", "high", "unknown"})
 
@@ -78,6 +79,10 @@ def _is_table(value: object) -> TypeGuard[dict[str, Any]]:
     return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _fetch_json(url: str, *, open_url: UrlOpener) -> object:
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     with open_url(request, 30) as response:
@@ -131,60 +136,147 @@ def python_vulnerabilities(audit_json: dict[str, Any], fetch: Fetch) -> list[Vul
     return found
 
 
-def _dev_only(nodes: list[str], packages: dict[str, Any]) -> bool:
-    if not nodes:
+def _unquote(raw: str) -> str:
+    text = raw.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1]
+    return text
+
+
+def _lock_body_lines(lock_text: str) -> list[str]:
+    lines = [
+        line
+        for line in lock_text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not lines or not lines[0].startswith("lockfileVersion:"):
+        raise ValueError("invalid pnpm-lock.yaml header")
+    if _unquote(lines[0].partition(":")[2]) != "9.0":
+        raise ValueError("invalid pnpm-lock.yaml header")
+    return lines[1:]
+
+
+def _yaml_line_key(line: str) -> tuple[int, str] | None:
+    indent = len(line) - len(line.lstrip(" "))
+    key, sep, _ = line.strip().partition(":")
+    if not sep or indent % 2:
+        return None
+    return indent // 2, _unquote(key)
+
+
+def _record_root_dep(
+    scope: tuple[str, ...], level: int, key: str, runtime_deps: set[str], dev_deps: set[str]
+) -> None:
+    if level != 3 or scope[:2] != ("importers", "."):
+        return
+    if scope[2] == "dependencies":
+        runtime_deps.add(key)
+    elif scope[2] == "devDependencies":
+        dev_deps.add(key)
+
+
+def pnpm_dev_only_roots(lock_text: str) -> frozenset[str]:
+    scope: tuple[str, ...] = ("", "", "", "")
+    saw_root = False
+    runtime_deps: set[str] = set()
+    dev_deps: set[str] = set()
+    for line in _lock_body_lines(lock_text):
+        parsed = _yaml_line_key(line)
+        if parsed is None:
+            continue
+        level, clean_key = parsed
+        if level == 0 and scope[0] == "importers":
+            break
+        if level < 4:
+            scope = (*scope[:level], clean_key, *("",) * (3 - level))
+            saw_root = saw_root or scope[:2] == ("importers", ".")
+            _record_root_dep(scope, level, clean_key, runtime_deps, dev_deps)
+    if not saw_root:
+        raise ValueError("pnpm-lock.yaml missing root importer")
+    return frozenset(dev_deps - runtime_deps)
+
+
+def _finding_paths_dev_only(paths: object, dev_only_roots: frozenset[str] | None) -> bool:
+    if dev_only_roots is None:
+        return True
+    if not _is_object_list(paths) or not paths:
         return False
-    for node in nodes:
-        entry = packages.get(node)
-        if not isinstance(entry, dict) or entry.get("dev") is not True:
+    for path in paths:
+        if not isinstance(path, str) or not path.startswith(".>"):
+            return False
+        direct = path[2:].partition(">")[0]
+        if direct not in dev_only_roots:
             return False
     return True
 
 
-def _no_forward_fix(fix: object, packages: dict[str, Any]) -> bool:
-    if fix is False:
+def _findings_dev_only(findings: object, dev_only_roots: frozenset[str] | None) -> bool:
+    if not _is_object_list(findings) or not findings:
+        return False
+    return all(
+        _is_table(finding)
+        and finding.get("dev") is True
+        and _finding_paths_dev_only(finding.get("paths"), dev_only_roots)
+        for finding in findings
+    )
+
+
+def _no_forward_fix(patched: str, versions: list[str]) -> bool:
+    cleaned = patched.strip()
+    if not cleaned or cleaned == "<0.0.0":
         return True
-    if not _is_table(fix):
-        return False
-    name = fix.get("name")
-    suggested = fix.get("version")
-    installed = packages.get(f"node_modules/{name}")
-    if not isinstance(suggested, str) or not isinstance(installed, dict):
-        return False
-    version = installed.get("version")
-    if not isinstance(version, str):
-        return False
-    return _version_key(suggested) <= _version_key(version)
+    if versions and re.fullmatch(r">=?\s*v?[\d.]+", cleaned):
+        target = _version_key(cleaned)
+        return all(target <= _version_key(version) for version in versions)
+    return False
+
+
+def _advisory_versions(findings: list[object]) -> list[str]:
+    return sorted(
+        {
+            finding["version"]
+            for finding in findings
+            if _is_table(finding) and isinstance(finding.get("version"), str)
+        }
+    )
+
+
+def _advisory_vulnerability(
+    key: str, entry: dict[str, Any], dev_only_roots: frozenset[str] | None
+) -> Vulnerability:
+    raw_findings: object = entry.get("findings")
+    findings: list[object] = raw_findings if _is_object_list(raw_findings) else []
+    versions = _advisory_versions(findings)
+    patched = str(entry.get("patched_versions") or "").strip()
+    raw_severity = str(entry.get("severity") or "").lower()
+    severity = raw_severity if raw_severity in _SEVERITY_RANK else "unknown"
+    advisory = str(entry.get("github_advisory_id") or entry.get("id") or key)
+    exempt = _findings_dev_only(findings, dev_only_roots) and _no_forward_fix(patched, versions)
+    return Vulnerability(
+        ecosystem="pnpm",
+        package=str(entry["module_name"]),
+        version=", ".join(versions) or str(entry.get("vulnerable_versions") or "unknown"),
+        advisory=advisory,
+        severity=severity,
+        fix="none" if (not patched or patched == "<0.0.0") else patched,
+        summary=str(entry.get("title") or entry.get("url") or advisory),
+        dev_only_no_fix=exempt,
+    )
 
 
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def npm_vulnerabilities(
-    audit_json: dict[str, Any], packages: dict[str, Any] | None = None
+def pnpm_vulnerabilities(
+    audit_json: dict[str, Any], dev_only_roots: frozenset[str] | None = None
 ) -> list[Vulnerability]:
-    lock = packages if packages is not None else {}
+    raw_advisories: object = audit_json.get("advisories")
+    if not _is_table(raw_advisories):
+        raise TypeError("pnpm audit JSON missing advisories map")
     found: list[Vulnerability] = []
-    for name, entry in audit_json["vulnerabilities"].items():
-        titles: list[str] = [via["title"] for via in entry["via"] if isinstance(via, dict)]
-        fix = entry["fixAvailable"]
-        if isinstance(fix, dict):
-            fix_text = f"{fix['name']}@{fix['version']}" + (
-                " (major)" if fix["isSemVerMajor"] else ""
-            )
-        else:
-            fix_text = "available" if fix else "none"
-        exempt = _dev_only(entry.get("nodes") or [], lock) and _no_forward_fix(fix, lock)
-        found.append(
-            Vulnerability(
-                ecosystem="npm",
-                package=name,
-                version=entry["range"],
-                advisory="direct" if entry["isDirect"] else "transitive",
-                severity=entry["severity"],
-                fix=fix_text,
-                summary="; ".join(titles) or "via " + ", ".join(map(str, entry["via"])),
-                dev_only_no_fix=exempt,
-            )
-        )
+    for key in sorted(raw_advisories):
+        entry: object = raw_advisories[key]
+        if not _is_table(entry):
+            raise TypeError(f"pnpm advisory {key!r} is not an object")
+        found.append(_advisory_vulnerability(key, entry, dev_only_roots))
     return found
 
 
@@ -217,6 +309,7 @@ PINS: tuple[tuple[str, str, str], ...] = (
         r'^OTELCOL_CONTRIB_VERSION = "([^"]+)"',
     ),
     _UV_PIN,
+    _PNPM_PIN,
     ("Grafana", "deploy/lgtm/native/versions.yml", r"^grafana:\n  version: (\S+)$"),
 )
 
@@ -271,6 +364,7 @@ def latest_binaries(
             "opentelemetry-collector-releases",
         ),
         Binary("uv", pins["uv"], release("astral-sh/uv"), "astral-sh/uv releases"),
+        Binary("pnpm", pins["pnpm"], release("pnpm/pnpm"), "pnpm/pnpm releases"),
         Binary("Grafana", pins["Grafana"], release("grafana/grafana"), "grafana/grafana releases"),
     ]
 
@@ -293,7 +387,7 @@ def render(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> str:
     ]
     for ecosystem, heading in (
         ("python", "Python (uv audit + OSV severity)"),
-        ("npm", "Frontend (npm audit)"),
+        ("pnpm", "Frontend (pnpm audit)"),
     ):
         lines += _ecosystem_section(ecosystem, heading, vulnerabilities)
     lines += [
@@ -442,20 +536,17 @@ def main(argv: list[str], *, run: AuditProcess, open_url: UrlOpener) -> int:
         _REPO_ROOT,
         run=run,
     )
-    npm_json = run_json(
-        ["npm", "audit", "--json", "--registry=https://registry.npmjs.org"],
+    pnpm_json = run_json(
+        ["pnpm", "audit", "--json", "--registry=https://registry.npmjs.org"],
         _REPO_ROOT / "ui/web",
         run=run,
     )
-    raw_lockfile: object = json.loads(
-        (_REPO_ROOT / "ui/web" / "package-lock.json").read_text(encoding="utf-8")
+    dev_roots = pnpm_dev_only_roots(
+        (_REPO_ROOT / "ui/web" / "pnpm-lock.yaml").read_text(encoding="utf-8")
     )
-    lockfile = raw_lockfile if _is_table(raw_lockfile) else {}
-    raw_packages: object = lockfile.get("packages")
-    packages = raw_packages if _is_table(raw_packages) else {}
     vulnerabilities = [
         *python_vulnerabilities(uv_json, partial(_fetch_json, open_url=open_url)),
-        *npm_vulnerabilities(npm_json, packages),
+        *pnpm_vulnerabilities(pnpm_json, dev_roots),
     ]
     binaries = latest_binaries(partial(_gh_api, run=run), partial(_fetch_text, open_url=open_url))
 

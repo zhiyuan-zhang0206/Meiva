@@ -31,7 +31,7 @@
 # (bare tokens only, no leading assignment), an `exec` prefix replaces the
 # shell with the service itself, keeping the unit's pid a direct child of root
 # (chain discipline, I2); a compound command keeps its own shape (the frontend
-# command already ends in `exec npm ...`).
+# command already ends in `exec pnpm ...`).
 #
 # Output is always validated BEFORE anything consumes it — in memory via the
 # same `UnitManifest.from_mapping` validators `load_manifests` uses, and again

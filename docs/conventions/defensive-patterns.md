@@ -422,9 +422,10 @@ Why: the check answered "did the lockfile change", and the question the
 pipeline actually needed was "does node_modules still match the lockfile".
 
 How to apply: when a stamp or hash gates an installation, verify the
-installation state it is meant to represent — here, foreign package-manager
-markers plus installed versions of direct dependencies vs the lockfile,
-falling back to a clean reinstall on any drift. And when prod behavior and
-clean builds disagree, diff the dependency state the build consumed before
-reaching for cache theories: deterministic minifiers produce identical output
-from identical input.
+installation state it is meant to represent — here, `node_modules/.modules.yaml`
+presence, absence of foreign package-manager markers (`.package-lock.json`,
+`.yarn-integrity`), plus installed versions of direct dependencies vs
+`ui/web/pnpm-lock.yaml`, falling back to a clean reinstall on any drift. And
+when prod behavior and clean builds disagree, diff the dependency state the
+build consumed before reaching for cache theories: deterministic minifiers
+produce identical output from identical input.

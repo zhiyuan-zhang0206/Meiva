@@ -19,26 +19,26 @@ from scripts.ci import dependency_audit as audit
 @pytest.mark.parametrize("exit_code", [0, 1])
 def test_audit_accepts_complete_findings(tmp_path: Path, exit_code: int) -> None:
     commands = FakeCommands()
-    commands.on(["npm", "audit"], Reply(returncode=exit_code, stdout='{"vulnerabilities": {}}'))
-    assert audit.run_json(["npm", "audit"], tmp_path, run=commands) == {"vulnerabilities": {}}
+    commands.on(["pnpm", "audit"], Reply(returncode=exit_code, stdout='{"advisories": {}}'))
+    assert audit.run_json(["pnpm", "audit"], tmp_path, run=commands) == {"advisories": {}}
     assert commands.calls[0].timeout == 600
     assert commands.calls[0].kwargs["cwd"] == tmp_path
 
 
 @pytest.mark.parametrize(
     ("exit_code", "stdout"),
-    [(1, '{"error": {"code": "ENOAUDIT"}}'), (2, '{"vulnerabilities": {}}')],
+    [(1, '{"error": {"code": "ENOAUDIT"}}'), (2, '{"advisories": {}}')],
 )
 def test_audit_rejects_registry_and_tool_errors(
     tmp_path: Path, exit_code: int, stdout: str
 ) -> None:
     commands = FakeCommands()
     commands.on(
-        ["npm", "audit"],
+        ["pnpm", "audit"],
         Reply(returncode=exit_code, stdout=stdout, stderr="private registry details"),
     )
-    with pytest.raises(RuntimeError, match="npm reported an audit error") as error:
-        audit.run_json(["npm", "audit"], tmp_path, run=commands)
+    with pytest.raises(RuntimeError, match="pnpm reported an audit error") as error:
+        audit.run_json(["pnpm", "audit"], tmp_path, run=commands)
     assert "private registry details" not in str(error.value)
 
 
@@ -77,59 +77,87 @@ def test_python_findings_carry_osv_severity_and_fix_versions() -> None:
     assert (found.package, found.severity, found.fix) == ("pyjwt", "critical", "2.15.0")
 
 
-def test_npm_findings_flatten_the_package_map() -> None:
-    npm_json = {
-        "vulnerabilities": {
-            "brace-expansion": {
+def test_pnpm_findings_flatten_the_advisories_map() -> None:
+    pnpm_json = {
+        "advisories": {
+            "1001": {
+                "id": 1001,
+                "module_name": "brace-expansion",
                 "severity": "high",
-                "isDirect": False,
-                "range": "<1.1.21",
-                "via": [{"title": "CPU denial of service"}],
-                "fixAvailable": True,
+                "github_advisory_id": "GHSA-brace",
+                "title": "CPU denial of service",
+                "vulnerable_versions": "<1.1.21",
+                "patched_versions": ">=1.1.21",
+                "findings": [
+                    {"version": "1.1.11", "paths": [".>eslint>brace-expansion"], "dev": True}
+                ],
             },
-            "next": {
+            "1002": {
+                "id": 1002,
+                "module_name": "next",
                 "severity": "moderate",
-                "isDirect": True,
-                "range": "<16",
-                "via": ["postcss"],
-                "fixAvailable": {"name": "next", "version": "16.2.0", "isSemVerMajor": True},
+                "github_advisory_id": "GHSA-next",
+                "title": "Middleware bypass",
+                "vulnerable_versions": "<16.4.1",
+                "patched_versions": "<0.0.0",
+                "findings": [{"version": "16.3.8", "paths": [".>next"], "dev": False}],
             },
         }
     }
-    brace, nxt = audit.npm_vulnerabilities(npm_json)
-    assert (brace.severity, brace.advisory, brace.fix) == ("high", "transitive", "available")
-    assert (nxt.fix, nxt.summary) == ("next@16.2.0 (major)", "via postcss")
+    brace, nxt = audit.pnpm_vulnerabilities(pnpm_json)
+    assert (brace.severity, brace.advisory, brace.fix) == ("high", "GHSA-brace", ">=1.1.21")
+    assert (nxt.version, nxt.fix, nxt.summary) == ("16.3.8", "none", "Middleware bypass")
 
 
-def _npm_findings(fix: object, nodes: list[str] | None = None) -> dict[str, object]:
+def _pnpm_findings(
+    patched_versions: str,
+    *,
+    dev: bool = True,
+    paths: list[str] | None = None,
+) -> dict[str, object]:
     return {
-        "vulnerabilities": {
-            "braces": {
+        "advisories": {
+            "2001": {
+                "id": 2001,
+                "module_name": "braces",
                 "severity": "high",
-                "isDirect": False,
-                "range": "<=3.0.3",
-                "nodes": nodes if nodes is not None else ["node_modules/braces"],
-                "via": [{"title": "stack exhaustion"}],
-                "fixAvailable": fix,
+                "github_advisory_id": "GHSA-braces",
+                "title": "stack exhaustion",
+                "vulnerable_versions": "<=3.0.3",
+                "patched_versions": patched_versions,
+                "findings": [
+                    {
+                        "version": "3.0.3",
+                        "paths": paths if paths is not None else [".>shadcn>braces"],
+                        "dev": dev,
+                    }
+                ],
             }
         }
     }
 
 
-def _dev_packages() -> dict[str, object]:
-    return {
-        "node_modules/braces": {"version": "3.0.3", "dev": True},
-        "node_modules/shadcn": {"version": "4.21.1", "dev": True},
-    }
+def _dev_roots() -> frozenset[str]:
+    return audit.pnpm_dev_only_roots(
+        "lockfileVersion: '9.0'\n\n"
+        "importers:\n"
+        "  .:\n"
+        "    dependencies:\n"
+        "      next:\n"
+        "        specifier: 16.3.8\n"
+        "        version: 16.3.8\n"
+        "    devDependencies:\n"
+        "      shadcn:\n"
+        "        specifier: ^4.10.0\n"
+        "        version: 4.21.1\n"
+    )
 
 
-@pytest.mark.parametrize(
-    "fix",
-    [False, {"name": "shadcn", "version": "1.0.0", "isSemVerMajor": True}],
-    ids=["no-fix", "downgrade"],
-)
-def test_a_dev_only_finding_without_a_forward_fix_is_listed_but_not_actionable(fix: object) -> None:
-    (found,) = audit.npm_vulnerabilities(_npm_findings(fix), _dev_packages())
+@pytest.mark.parametrize("patched", ["<0.0.0", ">=1.0.0"], ids=["no-fix", "downgrade"])
+def test_a_dev_only_finding_without_a_forward_fix_is_listed_but_not_actionable(
+    patched: str,
+) -> None:
+    (found,) = audit.pnpm_vulnerabilities(_pnpm_findings(patched), _dev_roots())
     assert found.dev_only_no_fix
     assert not audit.is_actionable([found], [])
     report = audit.render([found], [])
@@ -138,37 +166,37 @@ def test_a_dev_only_finding_without_a_forward_fix_is_listed_but_not_actionable(f
 
 
 def test_a_dev_only_suggestion_at_the_installed_version_is_not_a_forward_fix() -> None:
-    same_version = {"name": "braces", "version": "3.0.3", "isSemVerMajor": False}
-    (found,) = audit.npm_vulnerabilities(_npm_findings(same_version), _dev_packages())
+    (found,) = audit.pnpm_vulnerabilities(_pnpm_findings(">=3.0.3"), _dev_roots())
     assert found.dev_only_no_fix
     assert not audit.is_actionable([found], [])
 
 
 def test_a_dev_only_finding_with_an_upgrade_stays_actionable() -> None:
-    upgrade = {"name": "shadcn", "version": "5.0.0", "isSemVerMajor": True}
-    (found,) = audit.npm_vulnerabilities(_npm_findings(upgrade), _dev_packages())
+    (found,) = audit.pnpm_vulnerabilities(_pnpm_findings(">=3.0.4"), _dev_roots())
     assert not found.dev_only_no_fix
     assert audit.is_actionable([found], [])
 
 
 def test_a_production_finding_without_a_forward_fix_stays_actionable() -> None:
-    packages = {"node_modules/braces": {"version": "3.0.3"}}
-    downgrade = {"name": "shadcn", "version": "1.0.0", "isSemVerMajor": True}
-    (found,) = audit.npm_vulnerabilities(_npm_findings(downgrade), packages)
+    (found,) = audit.pnpm_vulnerabilities(
+        _pnpm_findings("<0.0.0", dev=False, paths=[".>next>braces"]), _dev_roots()
+    )
     assert not found.dev_only_no_fix
     assert audit.is_actionable([found], [])
 
 
 def test_a_mixed_dev_and_production_finding_stays_actionable() -> None:
-    nodes = ["node_modules/braces", "node_modules/next"]
-    packages = {
-        "node_modules/braces": {"version": "3.0.3", "dev": True},
-        "node_modules/next": {"version": "15.4.0", "dev": False},
-        "node_modules/shadcn": {"version": "4.21.1", "dev": True},
-    }
-    (found,) = audit.npm_vulnerabilities(_npm_findings(False, nodes=nodes), packages)
+    paths = [".>shadcn>braces", ".>next>braces"]
+    (found,) = audit.pnpm_vulnerabilities(
+        _pnpm_findings("<0.0.0", dev=True, paths=paths), _dev_roots()
+    )
     assert not found.dev_only_no_fix
     assert audit.is_actionable([found], [])
+
+
+def test_pnpm_audit_rejects_missing_advisories_map() -> None:
+    with pytest.raises(TypeError, match="missing advisories"):
+        audit.pnpm_vulnerabilities({})
 
 
 def test_every_pinned_binary_constant_is_found_in_the_tree() -> None:
@@ -197,7 +225,7 @@ def test_report_runs_the_canonical_uv_pin(tmp_path: Path) -> None:
             )
         ),
     )
-    commands.on("npm", Reply(stdout='{"vulnerabilities": {}}'))
+    commands.on("pnpm", Reply(stdout='{"advisories": {}}'))
     pins = {name: audit.pinned_version(path, pattern) for name, path, pattern in audit.PINS}
     commands.on(
         ["gh", "api", "repos/pgvector/pgvector/tags?per_page=100"],
@@ -207,6 +235,7 @@ def test_report_runs_the_canonical_uv_pin(tmp_path: Path) -> None:
         ("wal-g/wal-g", "wal-g"),
         ("open-telemetry/opentelemetry-collector-releases", "otelcol-contrib"),
         ("astral-sh/uv", "uv"),
+        ("pnpm/pnpm", "pnpm"),
         ("grafana/grafana", "Grafana"),
     ):
         commands.on(
@@ -338,7 +367,7 @@ def test_bare_stdlib_script_help_requires_no_repository_or_site_imports(tmp_path
 def test_github_failure_preserves_command_error_before_report_or_http(tmp_path: Path) -> None:
     commands = FakeCommands()
     commands.on("uvx", Reply(stdout='{"vulnerabilities": []}'))
-    commands.on("npm", Reply(stdout='{"vulnerabilities": {}}'))
+    commands.on("pnpm", Reply(stdout='{"advisories": {}}'))
     commands.on("gh", Reply(returncode=2, stdout="partial response", stderr="gh refused"))
     opener = FakeUrlOpener()
     output = tmp_path / "report.md"

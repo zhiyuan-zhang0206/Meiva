@@ -71,7 +71,8 @@ _GENERATED_EXCLUDE = (
     "ui/web/openapi.json",
     "ui/web/src/lib/*-generated.ts",
     "uv.lock",
-    "package-lock.json",
+    "pnpm-lock.yaml",
+    "*/pnpm-lock.yaml",
     "db/schema.sql",
 )
 # Declared cross-process contract boundaries: a pair of path prefixes whose

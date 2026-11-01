@@ -76,8 +76,10 @@ worktree its own in seconds.
 fetches `origin/main`, adds `.worktrees/<task>` on branch `meiva-<task>` (`--branch`
 and `--base` override), creates the worktree's own real `.venv` and installs the
 locked Python graph in one uncompiled pass (`cli/python_install.py --locked --inexact --no-compile-bytecode`),
-runs `npm ci`, and verifies the shared git hooks and the editable-install
-guard (an inherited `VIRTUAL_ENV` is cleared) — without creating a cluster.
+runs `pnpm install --frozen-lockfile` (cloning hoisted `ui/web/node_modules` from the
+host's content-addressed pnpm store), and verifies the shared git hooks and the
+editable-install guard (an inherited `VIRTUAL_ENV` is cleared) — without creating a
+cluster.
 Re-running it only re-bootstraps; after a failure, run it again with no argument
 inside the worktree. A worktree made by another tool (Claude Code's
 `.claude/worktrees/<name>/`) is completed the same way; the main clone is refused.

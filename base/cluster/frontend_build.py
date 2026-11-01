@@ -40,7 +40,7 @@ def plan_frontend_build(
         )
     return BuildDecision(
         action="build",
-        message=f"frontend build inputs changed for {frontend_dir}; running npm run build",
+        message=f"frontend build inputs changed for {frontend_dir}; running pnpm run build",
     )
 
 
@@ -106,8 +106,8 @@ def record(frontend_dir: Path, key: str) -> None:
     path.write_text(key + "\n")
 
 
-def _npm_build(frontend_dir: Path) -> int:
-    return subprocess.run(["npm", "run", "build"], cwd=str(frontend_dir), check=False).returncode
+def _pnpm_build(frontend_dir: Path) -> int:
+    return subprocess.run(["pnpm", "run", "build"], cwd=str(frontend_dir), check=False).returncode
 
 
 def finalize_frontend_build(
@@ -149,7 +149,7 @@ def ensure_build(
         case "reuse":
             return 0
         case "build":
-            code = _npm_build(frontend_dir)
+            code = _pnpm_build(frontend_dir)
             return finalize_frontend_build(frontend_dir, current_key=current, exit_code=code)
         case _:
             assert_never(decision.action)

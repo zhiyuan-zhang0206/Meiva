@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Weekly dependency audit"
-description: "The weekly report over locked dependencies, npm audit and pinned binaries: its three sections, the single tracked issue, and the dev-only exemption that keeps unfixable tooling findings out of the actionable set."
+description: "The weekly report over locked dependencies, pnpm audit and pinned binaries: its three sections, the single tracked issue, and the dev-only exemption that keeps unfixable tooling findings out of the actionable set."
 tags:
   - ci
   - security
@@ -18,9 +18,9 @@ place, then closed when a run comes back clean:
 - Python: `uv audit` over `uv.lock`; the JSON carries no severity, so each
   advisory id is graded through OSV (GitHub's reviewed severity) and an
   advisory OSV cannot grade is listed as `unknown`.
-- Frontend: `npm audit` over `ui/web/package-lock.json`.
+- Frontend: `pnpm audit` over `ui/web/pnpm-lock.yaml`.
 - Pinned binaries: the version constants Meiva downloads or installs outside the
-  lockfiles (zonky Postgres, pgvector, wal-g, otelcol-contrib, uv, Grafana)
+  lockfiles (zonky Postgres, pgvector, wal-g, otelcol-contrib, uv, pnpm, Grafana)
   against their upstream's newest release. pgvector publishes tags, not GitHub
   releases, so its row reads tags; the zonky row compares only within the
   pinned Postgres major.
@@ -31,19 +31,19 @@ approval. `uvx` runs the audit with the exact `UV_VERSION` pinned in
 
 ## The dev-only exemption
 
-A finding whose lockfile nodes are all dev-only (`"dev": true` in
-`ui/web/package-lock.json`) and whose npm remediation is not a forward fix —
-`fixAvailable` is `false`, or the suggested change is not newer than the
-installed package — has no upgrade that fixes it. It stays listed in the
-report (a run must remain auditable) but does not make the issue actionable.
-Without this exemption the same unfixable dev-tooling tree, for example a
-transitive dependency with no patched release, would keep the issue open
-forever. A dev-only finding with a real upgrade available, and every
-production finding, stay actionable.
+A finding whose advisory findings are all dev-only (`"dev": true` and every
+`.><direct_dep>` path rooted strictly in `importers['.'].devDependencies` of
+`ui/web/pnpm-lock.yaml`) and whose patched range offers no forward fix
+(`patched_versions` is `<0.0.0` or not newer than the installed version) has
+no upgrade that fixes it. It stays listed in the report (a run must remain
+auditable) but does not make the issue actionable. Without this exemption an
+unfixable dev-tooling advisory would keep the issue open forever. A dev-only
+finding with a real upgrade available, and every production finding, stay
+actionable.
 
 ## Contracts
 
-A finding is dev-only when every lockfile node carries dev:true, and has no forward fix when npm reports none or suggests a change that is not newer than the installed package; only both together exempt it.
+A finding is dev-only when every advisory finding carries `dev: true` and reaches only root `devDependencies`, and has no forward fix when `pnpm audit` reports `<0.0.0` or a bound not newer than the installed package; only both together exempt it.
 
 The direct `python3 scripts/ci/dependency_audit.py` entry remains standard-library
 only. It supplies command and HTTP transports to the real audit, binary discovery,

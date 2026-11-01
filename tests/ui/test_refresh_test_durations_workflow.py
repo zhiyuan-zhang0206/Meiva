@@ -191,27 +191,20 @@ def test_ci_shards_never_record_or_upload_durations(suite: str) -> None:
 # them and the durations never refresh (task #5479, regressed by #8047).
 def test_measurement_jobs_frontend_dependencies() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
-    backend_steps = jobs["measure-backend"]["steps"]
-    node = _step(backend_steps, "Install Node")
-    assert node["uses"].startswith("actions/setup-node@")
-    assert node["with"]["node-version"] == 22
-    installs = [
-        step
-        for step in backend_steps
-        if step.get("working-directory") == "ui/web" and step.get("run") == "npm ci"
-    ]
-    assert len(installs) == 1, "measure-backend must install ui/web deps exactly once"
-
-    e2e_steps = jobs["measure-e2e"]["steps"]
-    node = _step(e2e_steps, "Install Node")
-    assert node["uses"].startswith("actions/setup-node@")
-    assert node["with"]["node-version"] == 22
-    installs = [
-        step
-        for step in e2e_steps
-        if step.get("working-directory") == "ui/web" and step.get("run") == "npm ci"
-    ]
-    assert len(installs) == 1, "measure-e2e must install ui/web deps exactly once"
+    for job_name in ("measure-backend", "measure-e2e"):
+        steps = jobs[job_name]["steps"]
+        node = _step(steps, "Install Node")
+        assert node["uses"].startswith("actions/setup-node@")
+        assert node["with"]["node-version"] == 22
+        pnpm = _step(steps, "Install pnpm")
+        assert pnpm["uses"].startswith("pnpm/action-setup@")
+        installs = [
+            step
+            for step in steps
+            if step.get("working-directory") == "ui/web"
+            and step.get("run") == "pnpm install --frozen-lockfile"
+        ]
+        assert len(installs) == 1, f"{job_name} must install ui/web deps exactly once"
 
 
 def test_the_nightly_verdict_is_its_own_leg_reading_junit_only() -> None:

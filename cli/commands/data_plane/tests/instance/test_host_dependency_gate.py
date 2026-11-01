@@ -203,7 +203,7 @@ def test_node_is_read_by_running_it_and_an_install_that_replaces_it_passes(
     bin_dir: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repo.mkdir()
-    for name in ("npm", "npx", "curl"):
+    for name in ("pnpm", "npm", "npx", "curl"):
         _program(bin_dir / name)
     old = _program(bin_dir / "node", 'echo "18.19.1"')
     _provision(
@@ -216,7 +216,7 @@ def test_node_is_read_by_running_it_and_an_install_that_replaces_it_passes(
     assert _gate(repo, scope, _host(bin_dir), bin_dir) == 0
 
     out = capsys.readouterr().out
-    assert "· node: 18.19.1 is older than 20.9" in out
+    assert "· node: 18.19.1 is older than 22.13" in out
     assert "installing Node.js with apt" in out
 
 
@@ -224,7 +224,7 @@ def test_a_node_toolchain_outside_the_inherited_path_is_found_through_the_toolch
     bin_dir: Path, tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     toolchain = tmp_path / "nvm"
-    for name in ("npm", "npx"):
+    for name in ("pnpm", "npm", "npx"):
         _program(toolchain / name)
     _program(toolchain / "node", 'echo "22.14.0"')
     _program(bin_dir / "curl")

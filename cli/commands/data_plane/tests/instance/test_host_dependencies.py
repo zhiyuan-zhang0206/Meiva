@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host import brew_pin
 from cli.commands.data_plane.host_dependencies import table
 from cli.commands.data_plane.host_dependencies.diagnosis import (
     Absent,
@@ -113,6 +114,7 @@ def test_gateway_with_the_frontend_requires_the_full_table() -> None:
         "redis-cli",
         "pgbouncer",
         "node",
+        "pnpm",
         "npm",
         "npx",
         "crontab",
@@ -125,7 +127,7 @@ def test_gateway_with_the_frontend_requires_the_full_table() -> None:
 
 
 def test_headless_gateway_needs_no_frontend_tools() -> None:
-    assert _names(_scope(services=HEADLESS)).isdisjoint({"node", "npm", "npx", "curl"})
+    assert _names(_scope(services=HEADLESS)).isdisjoint({"node", "pnpm", "npm", "npx", "curl"})
 
 
 def test_runner_only_host_skips_the_local_data_plane() -> None:
@@ -263,21 +265,21 @@ def test_a_selection_without_a_data_plane_has_no_redis_to_resolve() -> None:
 
 
 def test_node_at_the_floor_or_above_is_usable() -> None:
-    for version in ("20.9.0", "20.10.1", "22.14.0"):
+    for version in ("22.13.0", "22.14.0", "25.6.1"):
         assert diagnose(_tool("node"), NodeVersion(version)) is None
 
 
 def test_node_older_than_the_floor_names_its_version() -> None:
-    problem = diagnose(_tool("node"), NodeVersion("18.19.1"))
-    assert problem == DependencyProblem("18.19.1 is older than 20.9")
+    problem = diagnose(_tool("node"), NodeVersion("20.9.0"))
+    assert problem == DependencyProblem("20.9.0 is older than 22.13")
 
 
 def test_a_node_version_that_does_not_parse_is_older_than_the_floor() -> None:
     assert diagnose(_tool("node"), NodeVersion("")) == DependencyProblem(
-        "version unknown is older than 20.9"
+        "version unknown is older than 22.13"
     )
     assert diagnose(_tool("node"), NodeVersion("v22")) == DependencyProblem(
-        "v22 is older than 20.9"
+        "v22 is older than 22.13"
     )
 
 
@@ -287,6 +289,7 @@ def test_a_node_whose_version_cannot_be_read_is_a_problem() -> None:
 
 
 def test_a_missing_node_toolchain_binary_names_itself() -> None:
+    assert diagnose(_tool("pnpm"), Absent()) == DependencyProblem("pnpm is not on PATH")
     assert diagnose(_tool("npm"), Absent()) == DependencyProblem("npm is not on PATH")
     assert diagnose(_tool("npx"), Found("/usr/bin/npx", executable=True)) is None
 
@@ -387,7 +390,7 @@ def test_node_older_than_the_floor_refuses() -> None:
     assert isinstance(plan, InstallGroups), "an old Node is fixed by the group's install"
     final = plan_recheck(_missing(scope, node=NodeVersion("18.19.1")), repo=REPO, macos=False)
     assert isinstance(final, Refuse)
-    assert "    ✗ node: 18.19.1 is older than 20.9" in final.refusal
+    assert "    ✗ node: 18.19.1 is older than 22.13" in final.refusal
 
 
 def test_an_unusable_redis_override_refuses_without_installing() -> None:
@@ -417,10 +420,13 @@ def test_a_mac_tool_refuses_with_xcode_select() -> None:
 
 def test_macos_remediation_names_homebrew_instead_of_the_provision_scripts() -> None:
     scope = _scope(macos=True, os_jobs=False)
-    plan = plan_recheck(_missing(scope, pg_isready=Absent(), git=Absent()), repo=REPO, macos=True)
+    plan = plan_recheck(
+        _missing(scope, pg_isready=Absent(), pnpm=Absent(), git=Absent()), repo=REPO, macos=True
+    )
     assert isinstance(plan, Refuse)
     assert "    macOS needs Homebrew first: https://brew.sh" in plan.refusal
     assert "    brew install postgresql@17 redis@8.2 pgbouncer pgvector" in plan.refusal
+    assert f"    brew install node && npm install -g pnpm@{brew_pin.PNPM_VERSION}" in plan.refusal
     assert "    brew install git gh" in plan.refusal
     assert not any("Debian/Ubuntu" in line for line in plan.refusal)
 

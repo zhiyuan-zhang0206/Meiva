@@ -136,8 +136,8 @@ def test_specs_order_and_subset_are_preserved() -> None:
 def test_exec_prefix_only_for_simple_commands() -> None:
     simple = gen.exec_argv(".venv/bin/python -m gateway", _REPO)
     assert simple == ["/bin/sh", "-c", "cd /checkout/repo && exec .venv/bin/python -m gateway"]
-    compound = gen.exec_argv("cd ui/web && npm run start", _REPO)
-    assert compound[2] == "cd /checkout/repo && cd ui/web && npm run start"
+    compound = gen.exec_argv("cd ui/web && pnpm run start", _REPO)
+    assert compound[2] == "cd /checkout/repo && cd ui/web && pnpm run start"
     assignment = gen.exec_argv("FOO=1 .venv/bin/python -m x", _REPO)
     assert assignment[2] == "cd /checkout/repo && FOO=1 .venv/bin/python -m x"
     quoted = gen.exec_argv(".venv/bin/python -c 'print(1)'", _REPO)

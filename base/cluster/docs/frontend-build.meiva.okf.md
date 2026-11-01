@@ -8,13 +8,13 @@ tags: [base, cluster, frontend]
 # Frontend build reuse
 
 The frontend service's launch command starts with
-`base.cluster.frontend_build ensure` and only then `exec npm run start`. `ensure`
+`base.cluster.frontend_build ensure` and only then `exec pnpm run start`. `ensure`
 runs the Next.js production build when the build's inputs changed since the last
 successful build, and reuses the existing `.next` output when they did not.
 
 ## Why
 
-`npm run build` was 13 s on a warm Next.js cache and ~30 s cold (of which ~21 s
+`pnpm run build` was 13 s on a warm Next.js cache and ~30 s cold (of which ~21 s
 is the TypeScript pass), and `meiva start` paid it on every start — including a
 `meiva stop`/`meiva start` cycle that changed nothing. It was the dominant cost
 of a start that had no work to do.
@@ -38,7 +38,7 @@ start builds and then records.
 ## Why the reuse is safe
 
 - **A failed or interrupted build cannot look current.** The key is written only
-  after `npm run build` exits zero. An interrupted rebuild still carries the
+  after `pnpm run build` exits zero. An interrupted rebuild still carries the
   previous key, whose inputs differ from the current ones by construction.
 - **Deleting the build deletes the claim.** The key file lives inside `.next`.
 - **An unprovable key builds.** A checkout git cannot read (`source_digest`

@@ -2,7 +2,7 @@
 
 Package transport is configured independently of cluster initialization.
 `scripts/mirrors/cn.env` contains ordinary package-manager environment settings:
-Tsinghua TUNA for Python and Homebrew, and npmmirror for npm. Review the profile,
+Tsinghua TUNA for Python and Homebrew, and npmmirror for pnpm and npm. Review the profile,
 then export its settings for dependency acquisition and any initial frontend
 build:
 
@@ -27,12 +27,13 @@ rewrite the lock. Existing machine uv/pip single-index settings are recognized;
 explicit environment settings win. See
 `docs/conventions/dev-setup.md#machine-python-indexes` in the Meiva source checkout.
 
-npm follows the same split: `npm ci` downloads each tarball through the
-configured registry, while the committed `ui/web/package-lock.json` keeps
-`registry.npmjs.org` origins. Adding or regenerating dependencies must run
-against the public registry (an entry materialized under a mirror records the
-mirror host), and `scripts/lint/locks/package_lock.py` guards the lock in the commit
-hook and in CI.
+pnpm follows the same split: `pnpm install --frozen-lockfile` downloads each
+tarball through `pnpm_config_registry` (and `npm_config_registry` covers global
+`pnpm` installation during host provisioning), while the committed
+`ui/web/pnpm-lock.yaml` keeps canonical `registry.npmjs.org` resolutions. Adding
+or regenerating dependencies must run against the public registry (a tarball
+resolution materialized under a mirror records the mirror host), and
+`scripts/lint/locks/package_lock.py` guards the lock in the commit hook and in CI.
 
 Toolchain downloads and OS package repositories have separate configuration.
 Acquire the approved uv and Python versions using trusted, verified transport;

@@ -678,9 +678,9 @@ def test_prepush_migration_keeps_direct_ci_owners(tmp_path: Path) -> None:
         check=False,
     )
     assert failed.returncode == 19
-    assert any(step.get("run") == "npx tsc --noEmit" for step in frontend)
-    assert any(step.get("run") == "npm run lint" for step in frontend)
+    assert any(step.get("run") == "pnpm exec tsc --noEmit" for step in frontend)
+    assert any(step.get("run") == "pnpm run lint" for step in frontend)
     assert any(
-        step.get("run") == "npx vitest run --config tests/vitest.config.mts --coverage"
+        step.get("run") == "pnpm exec vitest run --config tests/vitest.config.mts --coverage"
         for step in frontend
     )

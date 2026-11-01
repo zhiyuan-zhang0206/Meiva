@@ -46,7 +46,7 @@ The whitelist is the inventory of non-ignored runtime artifacts legitimately
 produced inside the checkout. As of 2026-08-28:
 
 - `frontend/` — the built UI bundle the gateway serves (the frontend
-  session's `npm run build` output: `.next/`, `tsconfig.tsbuildinfo`,
+  session's `pnpm run build` output: `.next/`, `tsconfig.tsbuildinfo`,
   `next-env.d.ts`; `node_modules` is already gitignored).
 
 Gitignored paths (`.venv/`, `__pycache__/`, `.env`, …) are invisible to the

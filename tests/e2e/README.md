@@ -26,7 +26,7 @@ bypassed.
 ```bash
 # Prerequisites: have Postgres/Redis server binaries locally (each worker runs
 # independent temporary native clusters via base/deploy/tests/containers.py, no Docker needed),
-# npm install (frontend)
+# pnpm install --frozen-lockfile (in ui/web/)
 uv sync
 .venv/bin/playwright install chromium
 
@@ -208,7 +208,7 @@ Pure fake and direct unit tests use the repository's normal test isolation witho
 starting the E2E process environment. Scenario and E2E database fixtures explicitly
 request that environment, whose package teardown restores every assigned key.
 Frontend prerequisites are checked against the collected fixture dependency closure:
-frontend or Playwright consumers skip before fixture setup when npm or Next is
+frontend or Playwright consumers skip before fixture setup when pnpm or Next is
 missing; tests without those dependencies still execute. Browser fixtures that
 select a frontend dynamically retain the Playwright prerequisite check.
 ### Long-history fixture size

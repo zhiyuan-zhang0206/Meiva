@@ -41,7 +41,7 @@ report_scan() {
             else
                 outcome=findings
             fi ;;
-        uv:0|npm:0|npm:1|cochange:0)
+        uv:0|pnpm:0|pnpm:1|cochange:0)
             outcome=$(.venv/bin/python - "$mode" "$SCAN_TMP/stdout" <<'JSON'
 import json
 import sys
@@ -57,7 +57,7 @@ try:
         ):
             raise ValueError("expected an outdated-package list")
         findings = bool(value)
-    elif mode == "npm":
+    elif mode == "pnpm":
         if not isinstance(value, dict) or "error" in value:
             raise ValueError("expected an outdated-package object, not an error")
         for rows in value.values():
@@ -80,8 +80,8 @@ except (ValueError, KeyError, TypeError, OSError) as exc:
     sys.exit(1)
 JSON
             ) || outcome=error
-            if [[ "$mode" == npm && "$code:$outcome" != "0:empty" && "$code:$outcome" != "1:findings" ]]; then
-                echo "npm exit code and report disagree: $code / $outcome"
+            if [[ "$mode" == pnpm && "$code:$outcome" != "0:empty" && "$code:$outcome" != "1:findings" ]]; then
+                echo "pnpm exit code and report disagree: $code / $outcome"
                 outcome=error
             fi ;;
         *) outcome=error ;;
@@ -90,7 +90,7 @@ JSON
     if [[ "$outcome" == error ]]; then SCAN_ERRORS=$((SCAN_ERRORS + 1)); fi
 }
 
-npm_report() { (cd ui/web && npm outdated --json); }
+pnpm_report() { (cd ui/web && pnpm outdated --format json); }
 
 SCAN_ROOTS=(
   # meizel:roles BEGIN dirs application standalone templates
@@ -115,11 +115,11 @@ report_scan uv uv pip list --outdated --format json
 echo ""
 
 if [ -d ui/web/node_modules ]; then
-    echo "--- [1/6] deps: npm outdated (frontend) ---"
-    report_scan npm npm_report
+    echo "--- [1/6] deps: pnpm outdated (frontend) ---"
+    report_scan pnpm pnpm_report
     echo ""
 else
-    echo "--- [1/6] deps: npm outdated SKIPPED (no node_modules) ---"
+    echo "--- [1/6] deps: pnpm outdated SKIPPED (no node_modules) ---"
     echo "[result: skipped; reason: no node_modules]"
     echo ""
 fi

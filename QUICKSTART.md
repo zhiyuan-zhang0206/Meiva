@@ -182,11 +182,11 @@ missing component. The repository's provisioners are the same ones CI uses:
 ```bash
 # Debian/Ubuntu
 sudo bash scripts/provision/database.sh   # PostgreSQL 17 + pgvector, Redis 8.2, PgBouncer
-sudo bash scripts/provision/node.sh       # Node 22 + npm/npx
+sudo bash scripts/provision/node.sh       # Node 22 + pnpm + npm/npx
 sudo bash scripts/provision/host_utils.sh # cron (crontab) + curl
 
 # macOS
-brew install postgresql@17 redis@8.2 pgbouncer pgvector node
+brew install postgresql@17 redis@8.2 pgbouncer pgvector node && npm install -g pnpm@11.9.0
 ```
 
 A headless gateway that does not serve the web UI can skip Node entirely:

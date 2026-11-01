@@ -46,7 +46,7 @@ _WATCHED = (
     "migrations/",
     "services/desktop/permissions_helper/helper",
     "uv.lock",
-    "ui/web/package-lock.json",
+    "ui/web/pnpm-lock.yaml",
     ".python-version",
 )
 

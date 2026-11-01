@@ -16,7 +16,7 @@ on:
       - uv.lock
       - .python-version
       - .pre-commit-config.yaml
-      - ui/web/package-lock.json
+      - ui/web/pnpm-lock.yaml
       - base/cluster/dataplane/runtime_binaries.py
       - .github/actions/**
       - .github/workflows/cache-warm.yml
@@ -69,7 +69,7 @@ jobs:
           key: ${{ steps.precommit-cache.outputs.cache-primary-key }}
 
   node:
-    name: Warm npm cache
+    name: Warm pnpm cache
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     if: github.ref == 'refs/heads/main'
@@ -80,12 +80,17 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: "11.9.0"
+          cache: true
+          cache_dependency_path: ui/web/pnpm-lock.yaml
 
       - name: Install frontend deps
         working-directory: ui/web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
   native:
     name: Warm native runtime caches (Postgres, Redis, Playwright)

@@ -250,16 +250,22 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         probe=Probe.NODE_TOOL,
     ),
     HostTool(
+        name="pnpm",
+        when="frontend service selected: installs, builds and runs the frontend",
+        component=Component.NODE,
+        need=Need.FRONTEND,
+        probe=Probe.NODE_TOOL,
+    ),
+    HostTool(
         name="npm",
-        when="frontend or browser service selected: installs and builds the frontend",
+        when="frontend or browser service selected: ships with Node and installs pnpm",
         component=Component.NODE,
         need=Need.NODE,
         probe=Probe.NODE_TOOL,
     ),
     HostTool(
         name="npx",
-        when="frontend or browser service selected: runs the frontend tooling and the "
-        "meiva-browser daemon",
+        when="frontend or browser service selected: runs the meiva-browser MCP daemon",
         component=Component.NODE,
         need=Need.NODE,
         probe=Probe.NODE_TOOL,

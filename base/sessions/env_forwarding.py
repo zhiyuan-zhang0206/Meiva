@@ -66,15 +66,15 @@ _FRONTEND_TOOLCHAIN_DIRS = (
 )
 
 
+# meiva:note
+# Return a POSIX PATH that can resolve the provisioned Node toolchain.
+#
+# `scripts/provision/node.sh` installs Node through Homebrew on macOS and through apt on Linux,
+# and installs `pnpm` into the global Node prefix. Non-login remote shells do not reliably inherit
+# the Homebrew directories, so the frontend cannot rely on a shell profile to find `pnpm`. Keep
+# the provisioned locations ahead of the inherited path, while preserving every caller-specific
+# directory after them.
 def frontend_toolchain_path(inherited_path: str) -> str:
-    """Return a POSIX PATH that can resolve the provisioned Node toolchain.
-
-    `scripts/provision/node.sh` installs Node through Homebrew on macOS and
-    through apt on Linux. Non-login remote shells do not reliably inherit the
-    Homebrew directories, so the frontend cannot rely on a shell profile to
-    find `npm`. Keep the provisioned locations ahead of the inherited path,
-    while preserving every caller-specific directory after them.
-    """
     seen: set[str] = set()
     dirs = (*_FRONTEND_TOOLCHAIN_DIRS, *inherited_path.split(os.pathsep))
     return os.pathsep.join(
@@ -87,9 +87,9 @@ def frontend_toolchain_path(inherited_path: str) -> str:
 # meiva:note
 # The environment for a direct frontend-toolchain subprocess, built from `environ`.
 #
-# `npm ci` inherited the complete environment of its spawner; copying it
-# preserves npm's user cache and credential behavior while replacing only its
-# PATH with the deterministic Node search path.
+# `pnpm install --frozen-lockfile` inherits the complete environment of its spawner;
+# copying it preserves pnpm's user store and registry configuration while replacing
+# only its PATH with the deterministic Node search path.
 def frontend_toolchain_env(environ: Mapping[str, str]) -> dict[str, str]:
     env = dict(environ)
     env["PATH"] = frontend_toolchain_path(env.get("PATH", ""))
@@ -328,6 +328,6 @@ def exec_into(cmd: str) -> str:
         raise ValueError(
             f"session command is compound but never execs, so the wrapper shell would "
             f"outlive it and swallow the graceful-stop SIGTERM: {cmd!r}. Put `exec` on "
-            f"the stage that should be supervised (e.g. `npm run build && exec npm run start`)."
+            f"the stage that should be supervised (e.g. `pnpm run build && exec pnpm run start`)."
         )
     return f"exec {cmd}"
