@@ -340,21 +340,24 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
             shutil.rmtree(instance, ignore_errors=True)
 
 
+# meiva:note
+# Task #3754: the direct `postgres` spawn receives the same explicit start env as the pg_ctl path
+# (see pg_tools.pg_start_env). The locale is handed in here rather than inherited from the shell:
+# `pg_start_env` passes the caller's names through and fills one only on macOS (`LC_ALL`), so a test
+# that read this shell's `LANG` would be asserting the machine it runs on, not the handoff.
 def test_foreground_start_is_handed_the_built_start_env(
     foreground_root: Path, tmp_path: Path
 ) -> None:
-    """Task #3754: the direct `postgres` spawn receives the same explicit start
-    env as the pg_ctl path (see pg_tools.pg_start_env) — the postmaster is
-    never started without a locale."""
     env_dump = tmp_path / "env.json"
     bin_dir = _write_stub_pg_bindir(tmp_path / "bin", stop_kills_child=True, env_dump=env_dump)
+    handed = {**os.environ, "LC_ALL": "C.UTF-8"}
     config = ThrowawayConfig(
         foreground_root,
         default_root=foreground_root,
         artifact_dir=tmp_path / "artifacts",
         bin_dir=bin_dir,
         home=meiva_home(),
-        environ=os.environ,
+        environ=handed,
     )
 
     with (
@@ -369,7 +372,7 @@ def test_foreground_start_is_handed_the_built_start_env(
         pytest.fail("readiness never succeeds in this test")
 
     spawned_env = json.loads(env_dump.read_text())
-    expected_env = pg_tools.pg_start_env(config.environ)
+    expected_env = pg_tools.pg_start_env(handed)
     for key, value in expected_env.items():
         assert spawned_env.get(key) == value
-    assert bool(spawned_env.get("LC_ALL") or spawned_env.get("LANG"))
+    assert spawned_env.get("LC_ALL") == "C.UTF-8"

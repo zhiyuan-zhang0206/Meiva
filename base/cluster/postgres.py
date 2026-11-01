@@ -168,11 +168,35 @@ def live_processes() -> Iterable[ProcessView]:
     return psutil.process_iter(["pid"])
 
 
+# meiva:note
+# The directory a process works in, when the kernel still reports one. A process that answers with
+# nothing is not a candidate for this home's custody: that is a verdict, not a failed look.
+def _working_directory(process: ProcessView) -> Path | None:
+    cwd = process.cwd()
+    if not cwd:
+        logger.debug(f"[postgres] {process.pid} reports no working directory to compare")
+        return None
+    return Path(cwd)
+
+
+# meiva:note
+# The identity a path names right now, or None when it names nothing. A process outlives the
+# directory it started in — a throwaway home removed under a surviving postmaster — and one whose
+# cwd no longer exists cannot be running this home's data directory: the answer is "not this one",
+# not an exception. Reading a missing path again would only raise the same way.
+def _inode_if_present(path: Path) -> tuple[int, int] | None:
+    try:
+        return _inode(path)
+    except FileNotFoundError:
+        logger.warning(f"[postgres] {path} no longer exists; no process can be working in it")
+        return None
+
+
 def _directory_matches(process: ProcessView, data: Path, receipt: Receipt | None) -> bool:
-    cwd = Path(process.cwd())
-    if cwd.resolve() == data:
+    cwd = _working_directory(process)
+    if cwd is not None and cwd.resolve() == data:
         return True
-    if receipt is not None and _inode(cwd) == receipt.directory:
+    if receipt is not None and cwd is not None and _inode_if_present(cwd) == receipt.directory:
         return True
     argv = process.cmdline()
     return "-D" in argv and Path(argv[argv.index("-D") + 1]).resolve() == data
