@@ -122,23 +122,34 @@ class LaunchOutcome(NamedTuple):
     failed: tuple[str, ...]
 
 
-def service_extra_env(spec: ServiceSpec, *, delivery: LaunchDelivery) -> dict[str, str]:
+# meiva:note
+# The extra environment of one service in a launch: its profile marker, its database login and
+# its machine API token, never its parent's. `roles` is this host's own role set — a service that
+# runs on every host kind takes its token class from the host
+# (`service_spec.api_access_for_host`).
+def service_extra_env(
+    spec: ServiceSpec, *, delivery: LaunchDelivery, roles: MachineRoles
+) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
     from base.telemetry.lgtm_local import BACKENDS, service_environment
-    from cli.commands.data_plane.bringup import api_delivery, db_delivery, runner_db_url
+    from cli.commands.data_plane import bringup
 
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}
     marker = service_spec.profile_marker(spec)
     if marker is not None:
         extra["MEIVA_PROCESS_PROFILE"] = marker
     cls = service_spec.db_access(spec)
-    db_env = db_delivery(cls, delivery=delivery) if cls is not None else {}
+    db_env = bringup.db_delivery(cls, delivery=delivery) if cls is not None else {}
     if db_env:
         extra.update(db_env)
     elif marker == "agent":
-        extra["MEIVA_DB_URL"] = runner_db_url(delivery)
-    if (api := service_spec.api_access(spec)) is not None:
-        extra.update(api_delivery(api, delivery=delivery))
+        extra["MEIVA_DB_URL"] = bringup.runner_db_url(delivery)
+    if (api := service_spec.api_access_for_host(spec, roles)) is not None:
+        # meiva:note
+        # A host-derived class only rides the shells this service starts, so a host with no data
+        # plane of its own launches without it instead of refusing the service (task #5979).
+        deliver = bringup.host_api_delivery if spec.api_access_from_host else bringup.api_delivery
+        extra.update(deliver(api, delivery=delivery))
     if spec.plugin_config is not None:
         from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
         from base.packages.plugins.config_registration import service_config_packet
@@ -246,7 +257,9 @@ def tree_manifest(
         capabilities=sorted(roles),
         repo_root=repo,
         specs=roster,
-        environments={s.session: service_extra_env(s, delivery=delivery) for s in roster},
+        environments={
+            s.session: service_extra_env(s, delivery=delivery, roles=roles) for s in roster
+        },
         home=home,
     )
 

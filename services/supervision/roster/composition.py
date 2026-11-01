@@ -407,6 +407,7 @@ def build_services(
             cmd=".venv/bin/python -m services.agent_runner.pty_sessions.daemon",
             capabilities=BOTH,
             requires_db=False,
+            api_access_from_host=True,
             identity_probe=partial(probe_protocol_service, "pty-sessions"),
             stop_ceiling_s=pty_sessions_budget.SHUTDOWN_CEILING_S,
         ),

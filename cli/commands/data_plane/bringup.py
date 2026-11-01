@@ -401,6 +401,34 @@ def api_delivery(cls: DbAccess, *, delivery: LaunchDelivery) -> dict[str, str]:
 
 
 # meiva:note
+# The machine API token a host can issue to a service that runs on every host kind.
+#
+# `api_delivery` fails the launch when the class it must deliver is not there, which is right
+# for a service whose own work needs it. A machine-agnostic service only CARRIES the token into
+# the shells it starts, and a host with no data plane of its own — a pure agent-runner with no
+# installed capability, a home whose first start never born a write generation — can neither
+# issue one nor run an agent. There the launch proceeds with no token rather than refusing a
+# service the host otherwise runs (task #5979).
+def host_api_delivery(cls: DbAccess, *, delivery: LaunchDelivery) -> dict[str, str]:
+    from base.host.db_authority.ledger import ledger_path, load_ledger
+    from base.host.db_authority.unit import load_unit_capability
+
+    kind = api_delivery_kind(
+        cls,
+        config_source_is_local=_source_is_local(delivery),
+        remote_plane=delivery.remote_data_plane,
+    )
+    home = delivery.home.resolve()
+    if kind is Delivery.UNIT_CAPABILITY and load_unit_capability(home) is None:
+        return {}
+    if kind is Delivery.GENERATION and (
+        not ledger_path(home).exists() or load_ledger(home) is None
+    ):
+        return {}
+    return api_delivery(cls, delivery=delivery)
+
+
+# meiva:note
 # Print this cluster's own pg/redis reachability for `meiva status`.
 #
 # Postgres is probed in two stages: `pg_isready` (the server accepts connections) then an
