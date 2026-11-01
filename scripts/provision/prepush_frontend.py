@@ -41,6 +41,7 @@ _DISK_CONSUMERS = (
         "src/components/plugins/plugin-nav-icon.test.ts",
     ),
 )
+_RSC_MARKERS = ("next/navigation", "next/headers", '"use client"', "'use client'")
 
 
 # meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
@@ -177,9 +178,105 @@ def main(tool: str) -> int:
     return _tests(web, existing, disk)
 
 
+def _run_ci_pnpm(*args: str) -> int:
+    return subprocess.run(["pnpm", *args], cwd="ui/web", check=False).returncode
+
+
+def _touches_rsc_or_build(web: list[str], existing: list[str]) -> bool:
+    if any(p in _GLOBAL or p.startswith("ui/web/src/app/") or not Path(p).is_file() for p in web):
+        return True
+    for rel in existing:
+        if not rel.endswith((".ts", ".tsx")):
+            continue
+        try:
+            text = Path(rel).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if any(marker in text for marker in _RSC_MARKERS):
+            return True
+    return False
+
+
+# meiva:note
+# Incremental pull-request CI passes `--base <sha>` directly so execution never consults the host
+# load guard or local lockfile, and widens to full ESLint, Vitest and Next.js build checks whenever
+# global configuration, local ESLint rules, RSC boundaries or file deletions appear in the diff.
+# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+def run_ci_incremental(base: str) -> int:
+    paths = _query("diff", "--name-only", "--no-renames", "-z", base, "HEAD").split("\0")[:-1]
+    web = [p for p in paths if p.startswith(_WEB)]
+    disk = sorted(
+        {test for prefix, test in _DISK_CONSUMERS if any(p.startswith(prefix) for p in paths)}
+    )
+    existing = [p for p in web if Path(p).is_file()]
+    global_or_deleted = any(p in _GLOBAL or not Path(p).is_file() for p in web)
+
+    if global_or_deleted or any(p.startswith("ui/web/eslint-rules/") for p in web):
+        status = _run_ci_pnpm("run", "lint")
+        if status:
+            return status
+    else:
+        code_files = [p.removeprefix(_WEB) for p in existing if p.endswith(_CODE)]
+        if code_files:
+            status = _run_ci_pnpm(
+                "exec", "eslint", "--no-warn-ignored", "--max-warnings", "0", *code_files
+            )
+            if status:
+                return status
+
+    if _touches_rsc_or_build(web, existing):
+        for script_name in ("build", "check:bundle-integrity"):
+            status = _run_ci_pnpm("run", script_name)
+            if status:
+                return status
+
+    if global_or_deleted:
+        status = _run_ci_pnpm("exec", "vitest", "run", "--config", "tests/vitest.config.mts")
+        if status:
+            return status
+        return _run_ci_pnpm("exec", "vitest", "run", "--config", "tests/vitest.flaky.config.mts")
+
+    direct = [t for t in _direct_tests(existing, disk) if "/flaky/" not in f"/{t}"]
+    sources = _related_sources(existing, direct)
+    if direct:
+        status = _run_ci_pnpm(
+            "exec",
+            "vitest",
+            "run",
+            "--config",
+            "tests/vitest.config.mts",
+            "--passWithNoTests=false",
+            *direct,
+        )
+        if status:
+            return status
+    if sources:
+        status = _run_ci_pnpm(
+            "exec",
+            "vitest",
+            "related",
+            "--run",
+            "--config",
+            "tests/vitest.config.mts",
+            "--passWithNoTests",
+            *sources,
+        )
+        if status:
+            return status
+    if any("/flaky/" in p for p in existing):
+        return _run_ci_pnpm("exec", "vitest", "run", "--config", "tests/vitest.flaky.config.mts")
+    return 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--base" and sys.argv[2]:
+        try:
+            raise SystemExit(run_ci_incremental(sys.argv[2]))
+        except subprocess.CalledProcessError as error:
+            print(error.stderr or str(error), file=sys.stderr)
+            raise SystemExit(error.returncode) from None
     if len(sys.argv) != 2 or sys.argv[1] not in {"tsc", "eslint", "vitest"}:
-        raise SystemExit("usage: prepush_frontend.py tsc|eslint|vitest")
+        raise SystemExit("usage: prepush_frontend.py (tsc|eslint|vitest | --base <sha>)")
     try:
         raise SystemExit(main(sys.argv[1]))
     except subprocess.CalledProcessError as error:

@@ -79,7 +79,8 @@ def test_native_tests_and_evidence_have_no_secret_or_quarantine_bypass(job: str)
         assert len(guards) == 1
         guard = guards[0]
         conditions = {
-            "backend-static-tests": "${{ !cancelled() && needs.classify.outputs.backend == 'true' }}"
+            "backend-static-tests": "${{ !cancelled() && needs.classify.outputs.backend == 'true' }}",
+            "frontend": "${{ !cancelled() && github.event_name != 'pull_request' }}",
         }
         assert guard["if"] == conditions.get(job, "${{ !cancelled() }}")
         assert "continue-on-error" not in guard

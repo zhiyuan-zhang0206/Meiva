@@ -387,17 +387,17 @@ def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
         assert step.get("continue-on-error") is True or step["uses"].startswith("actions/checkout")
 
 
-def test_only_a_queue_run_records_the_baseline() -> None:
+def test_only_a_main_full_dispatch_records_the_baseline() -> None:
     steps = _steps("backend-test-counts")
     record = steps[_index(steps, "Record the total as the next baseline")]
     assert record["if"] == (
-        "${{ !cancelled() && github.event_name == 'pull_request' "
-        "&& startsWith(github.head_ref, 'trunk-merge/') }}"
+        "${{ !cancelled() && github.event_name == 'workflow_dispatch' "
+        "&& github.ref == 'refs/heads/main' }}"
     )
     assert record["with"]["name"] == "test-count-baseline"
-    fetch = steps[_index(steps, "Fetch the previous queue total")]["run"]
+    fetch = steps[_index(steps, "Fetch the previous baseline total")]["run"]
     assert "--name test-count-baseline" in fetch
-    assert 'startswith("trunk-merge/")' in fetch
+    assert "--event workflow_dispatch --branch main" in fetch
 
 
 # ── the leak guard's findings ───────────────────────────────────────────────

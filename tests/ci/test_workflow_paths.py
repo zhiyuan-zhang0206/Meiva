@@ -17,6 +17,10 @@ import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
 EXEMPTIONS = {
+    (
+        "ci.yml",
+        "pull_request",
+    ): "Change-class classification inside ci.yml gates backend, frontend, and e2e lanes per diff.",
     ("release-app.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
 }
 

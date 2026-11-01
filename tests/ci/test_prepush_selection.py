@@ -765,3 +765,56 @@ def test_eslint_pipeline_preserves_native_failure(repo: Path) -> None:
     result = select(repo, "eslint", tool_status="7")
     assert result.returncode == 7
     assert calls(repo)[0][-1] == "src/changed.ts"
+
+
+def test_ci_base_mode_runs_incremental_eslint_conditional_build_and_vitest(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "ui/web/src/components/plain.ts", "export const plain = 1")
+    result = subprocess.run(
+        [sys.executable, str(SELECTOR), "--base", base],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+        env=_repo_env(repo),
+    )
+    assert result.returncode == 0, result.stderr
+    recorded = calls(repo)
+    assert ["run", "build"] not in recorded
+    assert any(
+        cmd[:2] == ["exec", "eslint"] and "src/components/plain.ts" in cmd for cmd in recorded
+    )
+    assert any(
+        cmd[:6]
+        == [
+            "exec",
+            "vitest",
+            "related",
+            "--run",
+            "--config",
+            "tests/vitest.config.mts",
+        ]
+        and "--passWithNoTests" in cmd
+        for cmd in recorded
+    )
+
+    (repo / "calls.jsonl").unlink()
+    commit(
+        repo,
+        "ui/web/src/app/dashboard/page.tsx",
+        '"use client";\nexport default function P() { return null; }',
+    )
+    result_app = subprocess.run(
+        [sys.executable, str(SELECTOR), "--base", base],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+        env=_repo_env(repo),
+    )
+    assert result_app.returncode == 0, result_app.stderr
+    recorded_app = calls(repo)
+    assert ["run", "build"] in recorded_app
+    assert ["run", "check:bundle-integrity"] in recorded_app

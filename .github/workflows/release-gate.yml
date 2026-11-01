@@ -111,60 +111,104 @@ jobs:
             *) echo "nightly full suite for $sha: $conclusion" ;;
           esac
 
-  backend:
+  static-and-structure:
     needs: precheck
     if: needs.precheck.outputs.skip_train != 'true'
-    name: Backend full suite (${{ matrix.group }}/8)
+    name: Static, structure & locality full gate
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2, 3, 4, 5, 6, 7, 8]
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+          fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: '0.13.1'
-          enable-cache: true
-
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install locked Python environment
-        run: uv sync --frozen
+        uses: ./.github/actions/uv-sync
 
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
-      - name: Run the backend suite
-        run: >
-          uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests
-          --ignore=tests/e2e -m "not flaky" -n 4 --dist=loadfile
-          --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration
+      - name: Install frontend deps (TypeScript parser and codegen)
+        working-directory: ui/web
+        run: pnpm install --frozen-lockfile
 
-  e2e:
+      - name: Check repository language, locks, and core-content manifests
+        run: |
+          python3 scripts/content_lint/lint_no_cjk.py
+          python3 scripts/content_lint/lint_no_tailnet.py
+          python3 scripts/lint/meiva_root_scope.py
+          python3 scripts/lint/locks/python_lock.py
+          python3 scripts/lint/locks/package_lock.py
+          uv lock --check
+          uv run python scripts/content_lint/lint_core_content_manifests.py
+
+      - name: Run full ruff, migrations, and clock lattice checks
+        run: |
+          uv run ruff check
+          uv run ruff format --check
+          uv run python scripts/content_lint/lint_migrations.py
+          uv run python -m meizel.owners.clock_lattice_cli
+
+      - name: Apply migrations to fresh DB + trigger smoke
+        run: |
+          mkdir -p "$HOME/.meiva"
+          ln -sfn "$CI_VENDORED_RUNTIME_ROOT" "$HOME/.meiva/runtime"
+          uv run python scripts/ci/migration_smoke.py
+
+      - name: Run full basedpyright
+        run: time uv run basedpyright --threads 2
+
+      - name: Validate source notes, structural hooks, codegen freshness, and locality
+        env:
+          SKIP: check-code-comments,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
+        run: |
+          bash scripts/content_lint/code_comments/check.sh validate
+          env -u VIRTUAL_ENV uv run pre-commit run --all-files
+          env -u VIRTUAL_ENV uv run python -m meizel check
+
+      - name: Run static pytest contracts
+        id: pytest-static
+        run: |
+          mkdir -p tmp
+          uv run pytest --test-environment=static -q -n 4 --dist=loadfile \
+            -W error::pytest.PytestUnhandledThreadExceptionWarning \
+            --junit-xml=tmp/junit-release-static.xml -o junit_family=xunit1
+
+      - name: Validate static test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          test-outcome: ${{ steps.pytest-static.outcome }}
+          junit-patterns: '["tmp/junit-release-static.xml"]'
+
+  frontend:
     needs: precheck
     if: needs.precheck.outputs.skip_train != 'true'
-    name: e2e full matrix (${{ matrix.group }}/4)
+    name: Frontend full suite (typecheck, build, lint, vitest)
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2, 3, 4]
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
-
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: '0.13.1'
-          enable-cache: true
 
       - name: Install Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -178,26 +222,193 @@ jobs:
           cache: true
           cache_dependency_path: ui/web/pnpm-lock.yaml
 
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
+      - name: Install frontend deps
+        working-directory: ui/web
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Next.js route types (typedRoutes)
+        working-directory: ui/web
+        run: pnpm exec next typegen
+
+      - name: TypeScript typecheck (tsc --noEmit)
+        working-directory: ui/web
+        run: pnpm exec tsc --noEmit
+
+      - name: Production build
+        working-directory: ui/web
+        run: pnpm run build
+
+      - name: Production bundle integrity (minifier side-effect tripwires)
+        working-directory: ui/web
+        run: pnpm run check:bundle-integrity
+
+      - name: ESLint
+        working-directory: ui/web
+        run: pnpm run lint
+
+      - name: Unit tests (vitest run)
+        id: vitest
+        working-directory: ui/web
+        run: pnpm exec vitest run --config tests/vitest.config.mts --coverage
+
+      - name: Frontend coverage gate
+        working-directory: ui/web
+        env:
+          FRONTEND_COVERAGE_THRESHOLD: "81"
+        run: |
+          python3 - <<'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(Path("coverage/coverage-summary.json").read_text())
+          coverage = float(summary["total"]["lines"]["pct"])
+          threshold = float(os.environ.get("FRONTEND_COVERAGE_THRESHOLD", "81"))
+          print(f"Frontend line coverage: {coverage}% (threshold: {threshold}%)")
+          if coverage < threshold:
+              raise SystemExit(
+                  f"Frontend coverage {coverage}% is below threshold {threshold}%"
+              )
+          EOF
+
+      - name: Flaky unit tests (vitest run, serial)
+        id: vitest-flaky
+        if: ${{ !cancelled() }}
+        working-directory: ui/web
+        run: pnpm exec vitest run --config tests/vitest.flaky.config.mts
+
+      - name: Validate native test results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          test-outcome: ${{ steps.vitest.outcome }}
+          junit-patterns: '["ui/web/junit.xml"]'
+
+      - name: Validate flaky frontend results
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          test-outcome: ${{ steps.vitest-flaky.outcome }}
+          junit-patterns: '["ui/web/junit-flaky.xml"]'
+          min-tests: '0'
+
+  backend:
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true'
+    name: Backend full suite (${{ matrix.group }}/8)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.precheck.outputs.sha }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install locked Python environment
         run: uv sync --frozen
 
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the backend suite
+        run: >
+          uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests
+          --ignore=tests/e2e -m "not flaky" -n 4 --dist=loadfile
+          --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration
+
+      - name: Run flaky backend bucket serially (shard 1)
+        if: ${{ matrix.group == 1 }}
+        run: |
+          set +e
+          uv run pytest -m flaky --omit-static-tests --ignore=tests/e2e -q
+          status=$?
+          if [ "$status" = 5 ]; then exit 0; fi
+          exit "$status"
+
+  e2e:
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true'
+    name: e2e full matrix (${{ matrix.group }}/4)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.precheck.outputs.sha }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps
         working-directory: ui/web
         run: pnpm install --frozen-lockfile
 
+      - name: Restore Playwright chromium cache
+        id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
       - name: Install Playwright chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
         run: timeout 300 uv run playwright install chromium
 
-      - name: Install Playwright system deps
-        uses: ./.github/actions/install-playwright-deps
-        timeout-minutes: 15
+      - name: Save Playwright chromium cache
+        if: success() && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
 
       - name: Run the e2e suite
         run: >
@@ -209,16 +420,25 @@ jobs:
     if: needs.precheck.outputs.skip_train != 'true'
     name: Platform smoke (vendored runtime)
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: '0.13.1'
-          enable-cache: true
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
 
       - name: Install locked Python environment
         uses: ./.github/actions/uv-sync
@@ -227,7 +447,7 @@ jobs:
         run: uv run python scripts/ci/pgvector_runtime_smoke.py
 
   certify:
-    needs: [precheck, backend, e2e, platform-smoke]
+    needs: [precheck, static-and-structure, frontend, backend, e2e, platform-smoke]
     if: success() && needs.precheck.outputs.skip_train != 'true'
     name: Certify and publish channel/latest
     runs-on: ubuntu-24.04

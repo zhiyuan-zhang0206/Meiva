@@ -128,24 +128,28 @@ def test_a_documentation_change_alone_skips_e2e() -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"decision": "FULL"},
-        {"decision": "SKIP"},
         {"decision": ""},
         {"mode": "shadow"},
         {"mode": ""},
         {"event": "push"},
         {"event": "workflow_dispatch"},
-        {"head_ref": "trunk-merge/pr-1/abc"},
-        {"head_ref": "trunk-temp/batch"},
         {"changed": []},
-        {"changed": [*_UNIT_TESTS, "base/lm/engine.py"]},
-        {"changed": [*_UNIT_TESTS, "tests/components/base/test_poll.py"]},
-        {"changed": [*_UNIT_TESTS, "ui/web/src/app/page.tsx"]},
         {"changed": [*_UNIT_TESTS, "tests/e2e/test_browser.py"]},
+        {"changed": [*_UNIT_TESTS, ".github/ci-image/Dockerfile"]},
+        {"changed": [*_UNIT_TESTS, ".github/workflows/ci.yml"]},
+        {"changed": [*_UNIT_TESTS, "scripts/ci/e2e_scope.py"]},
+        {"changed": [*_UNIT_TESTS, "tests/harness/test_env_guard_canary.py"]},
+        {"changed": [*_UNIT_TESTS, "tests/harness/test_home_isolation.py"]},
     ],
 )
-def test_any_other_case_keeps_e2e(overrides: dict[str, Any]) -> None:
+def test_direct_e2e_inputs_and_full_runs_keep_e2e(overrides: dict[str, Any]) -> None:
     assert not _skip(**overrides)
+
+
+def test_incremental_pull_requests_skip_e2e_when_not_touching_e2e_inputs() -> None:
+    assert _skip(changed=["base/lm/engine.py"])
+    assert _skip(changed=["ui/web/src/app/page.tsx"], decision="FRONTEND_ONLY")
+    assert _skip(changed=["tests/components/base/test_poll.py"], decision="FULL")
 
 
 def test_the_cli_prints_the_step_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -155,7 +159,7 @@ def test_the_cli_prints_the_step_output(tmp_path: Path, capsys: pytest.CaptureFi
 
     assert e2e_scope.main([*arguments, "--mode", "enforce", "--decision", "SELECTED"]) == 0
     assert capsys.readouterr().out == "skip=true\n"
-    assert e2e_scope.main([*arguments, "--mode", "enforce", "--decision", "FULL"]) == 0
+    assert e2e_scope.main([*arguments, "--mode", "shadow", "--decision", "SELECTED"]) == 0
     assert capsys.readouterr().out == "skip=false\n"
 
 
@@ -312,7 +316,8 @@ def test_every_e2e_job_and_the_aggregator_honor_the_flag() -> None:
     assert classify["outputs"]["skip_e2e"] == "${{ steps.e2e.outputs.skip }}"
     step = next(item for item in classify["steps"] if item.get("id") == "e2e")
     assert step["if"] == (
-        "${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}"
+        "${{ github.event_name == 'pull_request' && "
+        "(steps.decide.outputs.frontend == 'true' || steps.decide.outputs.backend == 'true') }}"
     )
     assert "scripts/ci/e2e_scope.py" in step["run"]
     ids = [item.get("id") for item in classify["steps"]]
@@ -345,12 +350,16 @@ def test_no_application_package_uses_a_tooling_package_in_root_manifest() -> Non
         )
 
 
-def test_interface_unchanged_strict_application_module_skips_e2e() -> None:
+def test_application_module_skips_e2e_on_incremental_pr_and_runs_on_dispatch() -> None:
     assert _skip(
         changed=["base/lm/retry.py"],
         interface_unchanged=frozenset({"base/lm/retry.py"}),
     )
-    assert not _skip(
+    assert _skip(
         changed=["base/lm/retry.py"],
         interface_unchanged=frozenset(),
+    )
+    assert not _skip(
+        event="workflow_dispatch",
+        changed=["base/lm/retry.py"],
     )

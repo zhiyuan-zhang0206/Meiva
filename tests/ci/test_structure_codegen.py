@@ -25,6 +25,7 @@ CODEGEN = {hook_id for hook_id in HOOKS if hook_id.endswith("-fresh")}
 JOB = WORKFLOW["jobs"]["backend-structure"]
 STEPS = {step["name"]: step for step in JOB["steps"] if "name" in step}
 LINT = STEPS["Run pre-commit structural gates (--all-files)"]
+INCREMENTAL_LINT = STEPS["Run pre-commit structural gates (incremental PR)"]
 SELECT = STEPS["Select codegen freshness from changed files"]
 FRESHNESS = STEPS["Run codegen freshness hooks (--all-files)"]
 SCRIPT = SELECT["run"].split("<<'PY'\n", 1)[1].removesuffix("PY\n")
@@ -323,10 +324,15 @@ def test_required_job_identity_and_unconditional_lint() -> None:
     assert JOB["timeout-minutes"] == 25
     assert JOB["needs"] == ["classify"]
     assert JOB["if"] == "${{ needs.classify.result == 'success' }}"
-    assert "if" not in LINT
+    assert LINT["if"] == "github.event_name != 'pull_request'"
+    assert INCREMENTAL_LINT["if"] == "github.event_name == 'pull_request'"
     assert "continue-on-error" not in JOB
     assert "continue-on-error" not in LINT
+    assert "continue-on-error" not in INCREMENTAL_LINT
     assert LINT["run"] == "env -u VIRTUAL_ENV uv run pre-commit run --all-files"
+    assert INCREMENTAL_LINT["env"]["SKIP"] == LINT["env"]["SKIP"]
+    assert "pre-commit run --files" in INCREMENTAL_LINT["run"]
+    assert "pre-commit run --all-files" in INCREMENTAL_LINT["run"]
 
 
 def test_codegen_invokes_exactly_the_four_configured_hooks() -> None:
