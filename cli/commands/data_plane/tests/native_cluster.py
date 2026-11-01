@@ -34,6 +34,7 @@ __all__ = [
     "ADMIN_PASSWORD",
     "BEARER",
     "NATIVE_TEST_MACOS",
+    "NATIVE_TEST_SYSTEM",
     "RUNTIME_PASSWORD",
     "NativeCluster",
     "free_port",
@@ -57,6 +58,12 @@ _IDENTITY = "meiva_tinst"
 # loopback-only Redis) is asserted as values in `instance/test_redis_plan.py` and
 # `instance/test_redis_launch_argv.py`.
 NATIVE_TEST_MACOS = False
+
+# meiva:note
+# The operating system a launch receipt is written for: `postgres.start` takes it as a value, and a
+# receipt that names another system is refused when it is read back. This suite drives the real
+# server the way the Linux lane does, which is the same stand-in `NATIVE_TEST_MACOS` above names.
+NATIVE_TEST_SYSTEM = "linux"
 
 
 # meiva:note

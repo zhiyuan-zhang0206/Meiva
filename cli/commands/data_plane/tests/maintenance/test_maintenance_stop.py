@@ -38,6 +38,7 @@ from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.maintenance.plan import RedisShutdownMode, ShutdownRedis, StopPostgres
 from cli.commands.data_plane.maintenance.process_scan import judge, refusal
 from cli.commands.data_plane.stop_waits import StopLegs, deadline_after
+from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM
 from cli.commands.data_plane.tests.native_processes import (
     owned_pooler,
     running_pooler,
@@ -265,6 +266,7 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
                 retained_children=retained,
                 machine=command_machine,
                 timers=SYSTEM_TIMERS,
+                system=NATIVE_TEST_SYSTEM,
             )
             == 0
         )
@@ -325,6 +327,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                     retained_children=retained,
                     machine=command_machine,
                     timers=SYSTEM_TIMERS,
+                    system=NATIVE_TEST_SYSTEM,
                 )
                 == 0
             )

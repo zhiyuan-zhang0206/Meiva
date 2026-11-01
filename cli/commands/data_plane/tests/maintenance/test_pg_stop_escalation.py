@@ -33,6 +33,7 @@ from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.stop_waits import StopLegs, remaining
+from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -101,6 +102,7 @@ def _start_with_hung_archive(
             retained_children=retained,
             machine=machine,
             timers=SYSTEM_TIMERS,
+            system=NATIVE_TEST_SYSTEM,
         )
         == 0
     )

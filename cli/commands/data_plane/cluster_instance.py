@@ -348,6 +348,7 @@ def _launch_postmaster(
     owner: OwnedProcess | None,
     tuning: StartTuning,
     timers: Timers,
+    system: str,
 ) -> None:
     data = pg_data_dir(home)
     pg_isready = str(pg_tool("pg_isready", home=home))
@@ -374,6 +375,7 @@ def _launch_postmaster(
         expected=owner,
         retained_children=retained_children,
         timers=timers,
+        system=system,
     )
 
 
@@ -392,6 +394,7 @@ def start_pg(
     machine: MachineIdentityReader,
     tuning: StartTuning = PRODUCTION_TUNING,
     timers: Timers,
+    system: str,
 ) -> int:
     data = pg_data_dir(home)
     owner = ownership.require_postgres(data, pg_port, required=False)
@@ -422,6 +425,7 @@ def start_pg(
                     owner=owner,
                     tuning=tuning,
                     timers=timers,
+                    system=system,
                 )
             case pg_plan.ProveAuthentication():
                 ownership.require_postgres(data, pg_port)
@@ -734,7 +738,7 @@ def ensure_cluster_storage(
     redis_user: str,
     retained_children: list[subprocess.Popen[bytes]],
     machine: MachineIdentityReader,
-    macos: bool,
+    system: str,
     timers: Timers,
     environ: Mapping[str, str],
 ) -> int:
@@ -747,6 +751,7 @@ def ensure_cluster_storage(
         retained_children=retained_children,
         machine=machine,
         timers=timers,
+        system=system,
     )
     if rc != 0:
         return rc
@@ -757,7 +762,7 @@ def ensure_cluster_storage(
         redis_user,
         home=home,
         machine=machine,
-        macos=macos,
+        macos=system == "darwin",
         timers=timers,
         environ=environ,
     )

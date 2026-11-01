@@ -71,7 +71,7 @@ def test_start_remote_skips_local_instance_and_probes(
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
-        macos=command_runtime.host.platform.system == "darwin",
+        system=command_runtime.host.platform.system,
         timers=command_runtime.timers,
         environ=command_runtime.config.process_environment(),
     )
@@ -101,7 +101,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
-        macos=command_runtime.host.platform.system == "darwin",
+        system=command_runtime.host.platform.system,
         timers=command_runtime.timers,
         environ=command_runtime.config.process_environment(),
     )
@@ -133,7 +133,7 @@ def test_start_remote_redis_unreachable_fails_after_the_database_answers(
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
-        macos=command_runtime.host.platform.system == "darwin",
+        system=command_runtime.host.platform.system,
         timers=command_runtime.timers,
         environ=command_runtime.config.process_environment(),
     )
