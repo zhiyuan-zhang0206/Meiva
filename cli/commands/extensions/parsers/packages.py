@@ -29,6 +29,10 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
 
     return cmd_packages_refresh(
         config=delivered_config(args.runtime.config),
+        # meiva:note
+        # The refresh reads git through the host, and the host it needs is the machine this
+        # invocation runs on with the configuration's own environment.
+        host=args.runtime.host_after_config(),
         repo=args.runtime.checkout,
         home=args.runtime.home,
         user_home=args.runtime.session.user_home,

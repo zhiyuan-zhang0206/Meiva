@@ -39,7 +39,7 @@ from base import paths
 from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
 from base.host.git.gitenv import git_env
-from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
 from base.packages.skills.names import match_key
@@ -107,6 +107,7 @@ class Pass:
         self,
         *,
         config: ConfigBoot,
+        host: Host,
         check_only: bool,
         only: str | None,
         from_job: bool,
@@ -116,6 +117,10 @@ class Pass:
         user_home: Path,
     ) -> None:
         self.config = config
+        # meiva:note
+        # The machine this pass runs on: every git read goes through it, and the environment git
+        # runs in is `host.environ` — the configuration's own snapshot, handed in rather than read.
+        self.host = host
         self.check_only = check_only
         self.only = only
         self.from_job = from_job
@@ -282,11 +287,11 @@ class Pass:
     # -- core channel --------------------------------------------------------
 
     def _checkout_remote(self) -> str | None:
-        result = run_bounded(
+        result = self.host.run(
             ["git", "-C", str(self.repo), "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
-            env=git_env(self.config.process_environment()),
+            env=git_env(self.host.environ),
             timeout=_LOCAL_GIT_TIMEOUT_S,
         )
         if result.returncode != 0:
@@ -300,11 +305,11 @@ class Pass:
             self.repo,
             remote,
             ref,
-            env=git_env(self.config.process_environment()),
+            env=git_env(self.host.environ),
             timeout=self.config.view.packages.refresh_network_timeout_seconds,
         )
         try:
-            result = run_bounded(
+            result = self.host.run(
                 command.argv,
                 cwd=command.cwd,
                 env=command.env,
@@ -327,11 +332,11 @@ class Pass:
             self.repo,
             remote,
             ref,
-            env=git_env(self.config.process_environment()),
+            env=git_env(self.host.environ),
             timeout=self.config.view.packages.refresh_network_timeout_seconds,
         )
         try:
-            result = run_bounded(
+            result = self.host.run(
                 command.argv,
                 cwd=command.cwd,
                 env=command.env,
@@ -497,11 +502,11 @@ class Pass:
         self._record(pkg, result)
 
     def _git_local(self, *args: str) -> tuple[int, str]:
-        result = run_bounded(
+        result = self.host.run(
             ["git", "-C", str(self.repo), *args],
             capture_output=True,
             text=True,
-            env=git_env(self.config.process_environment()),
+            env=git_env(self.host.environ),
             timeout=_LOCAL_GIT_TIMEOUT_S,
         )
         return result.returncode, result.stdout
@@ -522,11 +527,11 @@ class Pass:
         ) as tmp_str:
             tmp = Path(tmp_str)
             tarpath = tmp / "pkg.tar"
-            result = run_bounded(
+            result = self.host.run(
                 ["git", "-C", str(self.repo), "archive", "-o", str(tarpath), head, "--", src_rel],
                 capture_output=True,
                 text=True,
-                env=git_env(self.config.process_environment()),
+                env=git_env(self.host.environ),
                 timeout=_LOCAL_GIT_TIMEOUT_S,
             )
             if result.returncode != 0 or not tarpath.is_file():
@@ -584,11 +589,11 @@ class Pass:
         command = package_listing(
             source,
             ref,
-            env=git_env(self.config.process_environment()),
+            env=git_env(self.host.environ),
             timeout=self.config.view.packages.refresh_network_timeout_seconds,
         )
         try:
-            result = run_bounded(
+            result = self.host.run(
                 command.argv,
                 cwd=command.cwd,
                 env=command.env,
@@ -728,6 +733,7 @@ def _skip(reason: str) -> RefreshReport:
 def run_refresh(
     *,
     config: ConfigBoot,
+    host: Host,
     repo: Path,
     home: Path,
     user_home: Path,
@@ -756,6 +762,7 @@ def run_refresh(
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):
             pass_ = Pass(
                 config=config,
+                host=host,
                 check_only=check_only,
                 only=only,
                 from_job=from_job,
