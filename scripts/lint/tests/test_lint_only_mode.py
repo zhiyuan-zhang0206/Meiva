@@ -39,6 +39,7 @@ from scripts.lint import (
     termination_source,
 )
 from scripts.lint.diagnostics import (
+    hermetic_transactions,
     logger_add_diagnose,
     loguru_format,
     no_emoji,
@@ -209,6 +210,11 @@ CASES = [
         "gateway/x.py",
         "import time\n\n\nasync def f():\n    time.sleep(1)\n",
         call=partial(async_no_sync_blocking.main, repo_blocking_helpers=frozenset()),
+    ),
+    Case(
+        hermetic_transactions,
+        "base/x.py",
+        "from base.db.transaction import write_transaction\nimport time\n\nwith write_transaction(pool):\n    time.sleep(1)\n",
     ),
     Case(
         time_bomb,
