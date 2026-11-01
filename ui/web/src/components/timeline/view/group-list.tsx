@@ -2,40 +2,30 @@ import { useMemo, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import type { DetailsMode } from "@/lib/layout/content-toggle-store";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
-import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 
 import { LiveClockGate } from "../model/reasoning-clock";
-import { classifyItem, inboundKind, type TimelineGroup } from "../model/runs";
-import { groupTimelineSegments } from "../model/segments";
+import { classifyItem, inboundKind } from "../model/runs";
+import { groupTimelineSegments, type RankedTimelineGroup } from "../model/segments";
 import type { CompactPin } from "../model/use-compact-transition-anchor";
 import { useTimelineWindow, useTimelineWindowLimits } from "../model/use-timeline-window";
 import { TimelineRow, cardConfigFor } from "../row";
 import { PendingLiveActivityWindow, TurnBlock } from "../run-block";
 
 export interface GroupEntry {
-  entry: {
-    group: TimelineGroup;
-    indexOffset: number;
-    rank: number;
-    source: "buffer" | "canonical";
-  };
+  group: RankedTimelineGroup;
   groupKey: string;
   virtualKey: string;
   isLiveTurn: boolean;
   runExpanded: boolean;
-  virtualRows: string[] | null;
 }
 
 export function useTimelineGroupWindow({
   canonicalItems,
   compactBuffer,
-  bufferedItems,
   currentItems,
   threadKey,
   turnOverrides,
-  effectiveDetailsMode,
   turnActive,
   viewportRef,
   contentRef,
@@ -47,11 +37,10 @@ export function useTimelineGroupWindow({
 }: {
   canonicalItems: BackendTimelineItem[];
   compactBuffer: CompactTransitionBuffer | null;
-  bufferedItems: BackendTimelineItem[];
+  bufferedItems?: BackendTimelineItem[];
   currentItems: BackendTimelineItem[];
   threadKey: string | undefined;
   turnOverrides: ReadonlyMap<string, boolean>;
-  effectiveDetailsMode: DetailsMode;
   turnActive: boolean;
   viewportRef: RefObject<HTMLElement | null>;
   contentRef: RefObject<HTMLDivElement | null>;
@@ -63,79 +52,69 @@ export function useTimelineGroupWindow({
 }) {
   const { activationRows, turnRows, measureRows } = useTimelineWindowLimits();
 
-  const groups = useMemo(() => {
-    if (!compactBuffer) {
-      return groupTimelineSegments(canonicalItems).map((entry) => ({ ...entry, source: "canonical" as const }));
-    }
-    const buffered = groupTimelineSegments(
-      bufferedItems,
-      (_item, index) => compactBuffer.rows[index].rank,
-    ).map((entry) => ({ ...entry, source: "buffer" as const }));
-    const current = groupTimelineSegments(currentItems)
-      .map((entry) => ({
-        ...entry,
-        indexOffset: entry.indexOffset + bufferedItems.length,
-        source: "canonical" as const,
-      }));
-    return [...buffered, ...current];
-  }, [canonicalItems, compactBuffer, bufferedItems, currentItems]);
+  const groups = useMemo(
+    () => groupTimelineSegments(canonicalItems, compactBuffer, currentItems),
+    [canonicalItems, compactBuffer, currentItems],
+  );
 
-  const groupEntries = useMemo<GroupEntry[]>(() => groups.map((entry) => {
-    const group = entry.group;
-    const groupKey = group.kind === "single" ? group.item.item_id : group.items[0].item_id;
-    const virtualKey = `${threadKey ?? ""}:${entry.source}:${entry.source === "buffer" ? compactBuffer?.epoch : ""}:${entry.rank}:${groupKey}`;
-    const isLastTurn = entry === groups[groups.length - 1];
+  const groupEntries = useMemo<GroupEntry[]>(() => groups.map((group) => {
+    const first = group.kind === "single" ? group.member : group.members[0];
+    const groupKey = first.item.item_id;
+    const virtualKey = `${threadKey ?? ""}:${first.source}:${first.source === "buffer" ? compactBuffer?.epoch : ""}:${first.rank}:${groupKey}`;
+    const isLastTurn = group === groups[groups.length - 1];
     // meiva:note
-    // While turnActive is true, the trailing TurnBlock is the fixed-height Live
-    // Activity Window: it defaults open unless overridden and scrolls inside its
-    // own h-56 frame so outer viewport virtualization must not slice its rows.
+    // While turnActive is true, the trailing TurnBlock defaults open unless manually
+    // overridden; settled TurnBlocks default collapsed. Every expanded TurnBlock
+    // scrolls inside its own max-height ScrollArea.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
     const isLiveTurn = group.kind === "turn" && isLastTurn && turnActive;
     const runExpanded = group.kind === "turn" && (turnOverrides.has(groupKey)
       ? (turnOverrides.get(groupKey) ?? false)
-      : isLiveTurn
-        ? true
-        : effectiveDetailsMode === "all");
-    const virtualRows = group.kind === "turn" && runExpanded && !isLiveTurn
-      ? group.items.map((item) => `${virtualKey}:${item.item_id}`)
-      : null;
-    return { entry, groupKey, virtualKey, isLiveTurn, runExpanded, virtualRows };
-  }), [groups, compactBuffer?.epoch, turnOverrides, effectiveDetailsMode, turnActive, threadKey]);
+      : isLiveTurn);
+    return { group, groupKey, virtualKey, isLiveTurn, runExpanded };
+  }), [groups, compactBuffer?.epoch, turnOverrides, turnActive, threadKey]);
 
-  const renderedRows = groupEntries.reduce((total, entry) => total + (entry.virtualRows?.length ?? 1), 0);
+  const renderedRows = groupEntries.reduce(
+    (total, { group, runExpanded }) =>
+      total + (group.kind === "turn" && runExpanded ? Math.min(group.members.length, turnRows) : 1),
+    0,
+  );
   const virtualEnabled = renderedRows > activationRows;
-  const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, isLiveTurn, runExpanded, virtualRows }) => ({
-    key: virtualKey,
-    rank: entry.rank,
-    itemIds: entry.group.kind === "single"
-      ? [entry.group.item.item_id]
-      : entry.group.items.map((item) => item.item_id),
-    estimatedHeight: (isLiveTurn && runExpanded
-      ? 264
-      : entry.group.kind === "turn" && virtualRows
-        ? 44 + virtualRows.length * 88
-        : entry.group.kind === "turn" ? 32 : 80),
-    expandedRows: virtualRows,
-  })), [groupEntries]);
+  const virtualGroups = useMemo(() => groupEntries.map(({ group, virtualKey, runExpanded }) => {
+    const members = group.kind === "single" ? [group.member] : group.members;
+    return {
+      key: virtualKey,
+      rank: members[0].rank,
+      itemIds: members.map((m) => m.item.item_id),
+      memberRankKeys: members.map((m) => `${m.rank}:${m.item.item_id}`),
+      estimatedHeight: group.kind === "turn" ? (runExpanded ? 264 : 32) : 80,
+      expandedRows: null,
+    };
+  }), [groupEntries]);
 
   const compactPinnedId = compactPin && (() => {
     const bufferedCoordinates = new Map((compactBuffer?.rows ?? []).map((row) => [
       `${row.rank}:${row.item.item_id}`, canonicalBufferCoordinate(row),
     ]));
-    for (const { entry } of groupEntries) {
-      for (const item of entry.group.kind === "single" ? [entry.group.item] : entry.group.items) {
-        const coordinate = entry.source === "buffer"
-          ? bufferedCoordinates.get(`${entry.rank}:${item.item_id}`)
-          : parseItemIdParts(item.item_id);
-        if (entry.rank === compactPin.rank && coordinate?.msg === compactPin.msg && coordinate.block === compactPin.block) {
-          return { id: item.item_id, rank: entry.rank };
+    for (const { group } of groupEntries) {
+      const members = group.kind === "single" ? [group.member] : group.members;
+      for (const member of members) {
+        const coordinate = member.source === "buffer"
+          ? bufferedCoordinates.get(`${member.rank}:${member.item.item_id}`)
+          : parseItemIdParts(member.item.item_id);
+        if (
+          coordinate?.rank === compactPin.rank &&
+          coordinate.msg === compactPin.msg &&
+          coordinate.block === compactPin.block
+        ) {
+          return { id: member.item.item_id, rank: member.rank };
         }
       }
     }
     return null;
   })();
 
-  const { range: virtualRange, rowRange } = useTimelineWindow({
+  const { range: virtualRange } = useTimelineWindow({
     groups: virtualGroups,
     enabled: virtualEnabled,
     turnRows,
@@ -148,7 +127,7 @@ export function useTimelineGroupWindow({
     restoreTop,
   });
 
-  return { groups, groupEntries, virtualEnabled, virtualRange, rowRange };
+  return { groups, groupEntries, virtualEnabled, virtualRange, turnRows };
 }
 
 export function TimelineGroupList({
@@ -156,10 +135,7 @@ export function TimelineGroupList({
   compactBuffer,
   streamingCode,
   turnActive,
-  effectiveDetailsMode,
   overrides,
-  activeStuckHeaderId,
-  activeStuckChildId,
   toggleExpanded,
   toggleTurn,
   onActivityAtBottomChange,
@@ -168,40 +144,34 @@ export function TimelineGroupList({
   groupEntries,
   virtualEnabled,
   virtualRange,
-  rowRange,
+  turnRows,
 }: {
   items: BackendTimelineItem[];
   compactBuffer: CompactTransitionBuffer | null;
   streamingCode: boolean;
   turnActive: boolean;
-  effectiveDetailsMode: DetailsMode;
   overrides: ReadonlySet<string>;
-  activeStuckHeaderId: string | null;
-  activeStuckChildId: string | null;
   toggleExpanded: (id: string, kind: BackendTimelineItem["kind"]) => void;
   toggleTurn: (id: string, currentlyExpanded: boolean) => void;
   onActivityAtBottomChange?: (atBottom: boolean) => void;
   activityScrollSeq?: number;
-  groups: GroupEntry["entry"][];
+  groups: RankedTimelineGroup[];
   groupEntries: GroupEntry[];
   virtualEnabled: boolean;
   virtualRange: { start: number; end: number; before: number; after: number };
-  rowRange: (groupIndex: number) => { start: number; end: number; before: number; after: number };
+  turnRows: number;
 }) {
-  const timelineColors = useTimelineColors();
-
   const renderRow = (
     item: BackendTimelineItem,
     index: number,
     source: "buffer" | "canonical",
     rank: number,
     forceExpand?: boolean,
-    inLiveWindow?: boolean,
   ) => {
     const renderKey = source === "buffer"
       ? `buffer:${compactBuffer?.epoch}:${rank}:${item.item_id}`
       : `canonical:${item.item_id}`;
-    const config = cardConfigFor(item, timelineColors);
+    const config = cardConfigFor(item);
     const streaming =
       streamingCode && index === items.length - 1 && item.kind === "agent_code";
 
@@ -215,18 +185,13 @@ export function TimelineGroupList({
           streaming={streaming}
           expanded={false}
           copyable={false}
-          isStuck={false}
           onToggle={toggleExpanded}
         />
       );
     }
 
     const isPrimary = classifyItem(item) === "primary";
-    const isLastItem = index === items.length - 1;
-    const defaultExpanded = isPrimary || forceExpand ? true
-      : effectiveDetailsMode === "all" ? true
-      : effectiveDetailsMode === "last" ? isLastItem
-      : config.fixedDefault;
+    const defaultExpanded = isPrimary || forceExpand ? true : config.fixedDefault;
     const expanded = overrides.has(item.item_id) ? !defaultExpanded : defaultExpanded;
     const copyable = expanded && !item.partial;
 
@@ -239,8 +204,6 @@ export function TimelineGroupList({
         streaming={streaming}
         expanded={expanded}
         copyable={copyable}
-        stickyHeader={isPrimary || inLiveWindow ? false : "nested"}
-        isStuck={!isPrimary && !inLiveWindow && activeStuckChildId === item.item_id}
         onToggle={toggleExpanded}
       />
     );
@@ -248,16 +211,16 @@ export function TimelineGroupList({
 
   // meiva:note
   // Immediately after a human user submits a message (before the first reasoning
-  // or tool item arrives), render the fixed-height Live Activity Window shell so
-  // the user gets instant visual feedback with zero layout shift.
+  // or tool item arrives), render the inline PendingLiveActivityWindow row so the
+  // user gets instant visual feedback with zero layout shift.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
-  const lastGroup = groups.length > 0 ? groups[groups.length - 1].group : null;
+  const lastGroup = groups.length > 0 ? groups[groups.length - 1] : null;
   const showPendingActivityWindow =
     turnActive &&
     (lastGroup === null ||
       (lastGroup.kind === "single" &&
-        lastGroup.item.kind === "inbound_chat" &&
-        inboundKind(lastGroup.item.source) === "human"));
+        lastGroup.member.item.kind === "inbound_chat" &&
+        inboundKind(lastGroup.member.item.source) === "human"));
 
   return (
     <>
@@ -265,21 +228,24 @@ export function TimelineGroupList({
         <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
       ) : null}
       <LiveClockGate value={turnActive}>
-        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, isLiveTurn, runExpanded, virtualRows }, offset) => {
-          const group = entry.group;
-          const groupIndex = virtualRange.start + offset;
+        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ group, virtualKey, isLiveTurn, runExpanded }) => {
           const renderedGroup = (() => {
             if (group.kind === "single") {
-              return renderRow(group.item, entry.indexOffset + group.index, entry.source, entry.rank);
+              const { item, index, source, rank } = group.member;
+              return renderRow(item, index, source, rank);
             }
 
-            const turnId = group.items[0].item_id;
-            const isLastTurn = entry === groups[groups.length - 1];
-            const childRange = rowRange(groupIndex);
+            const first = group.members[0];
+            const turnId = first.item.item_id;
+            const isLastTurn = group === groups[groups.length - 1];
+            const shouldWindowTurn = runExpanded && group.members.length > turnRows;
+            const forceChildExpand = isLiveTurn;
             return (
               <TurnBlock
                 id={turnId}
-                memberIds={group.items.map((it) => it.item_id)}
+                memberIds={group.members.map((m) => m.item.item_id)}
+                memberRanks={group.members.map((m) => `${m.rank}:${m.item.item_id}`)}
+                memberSources={group.members.map((m) => `${m.source}:${m.rank}:${m.item.item_id}`)}
                 summary={group.summary}
                 expanded={runExpanded}
                 onToggle={toggleTurn}
@@ -287,30 +253,33 @@ export function TimelineGroupList({
                 liveWindow={isLiveTurn}
                 onActivityAtBottomChange={isLiveTurn ? onActivityAtBottomChange : undefined}
                 scrollToBottomSeq={isLiveTurn ? activityScrollSeq : undefined}
-                isStuck={!isLiveTurn && activeStuckHeaderId === turnId}
-                timelineSource={entry.source} displayRank={entry.rank}
-              >
-                {runExpanded ? (
-                  isLiveTurn ? (
-                    group.items.map((it, index) => (
-                      <div key={`${virtualKey}:${it.item_id}`}>
-                        {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, true, true)}
-                      </div>
-                    ))
-                  ) : virtualRows ? (
-                    <>
-                      {virtualEnabled && childRange.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: childRange.before }} aria-hidden="true" /> : null}
-                      {group.items.slice(childRange.start, childRange.end).map((it, childOffset) => {
-                        const index = childRange.start + childOffset;
+                windowedCount={shouldWindowTurn ? group.members.length : undefined}
+                turnRows={shouldWindowTurn ? turnRows : undefined}
+                renderWindowedRow={
+                  shouldWindowTurn
+                    ? (idx: number) => {
+                        const m = group.members[idx];
+                        const rowKey = `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`;
                         return (
-                          <div key={virtualRows[index]} data-virtual-row={virtualRows[index]}>
-                            {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, effectiveDetailsMode !== "none")}
+                          <div key={rowKey} data-virtual-row={rowKey}>
+                            {renderRow(m.item, m.index, m.source, m.rank, forceChildExpand)}
                           </div>
                         );
-                      })}
-                      {virtualEnabled && childRange.after > 0 ? <div data-timeline-spacer="turn-after" style={{ height: childRange.after }} aria-hidden="true" /> : null}
-                    </>
-                  ) : null
+                      }
+                    : undefined
+                }
+                timelineSource={first.source}
+                displayRank={first.rank}
+              >
+                {runExpanded && !shouldWindowTurn ? (
+                  group.members.map((m) => {
+                    const rowKey = `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`;
+                    return (
+                      <div key={rowKey}>
+                        {renderRow(m.item, m.index, m.source, m.rank, forceChildExpand)}
+                      </div>
+                    );
+                  })
                 ) : null}
               </TurnBlock>
             );

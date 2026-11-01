@@ -1,21 +1,11 @@
 "use client";
 
-// Row primitives + the Timeline-colors section for the Display settings page.
+// meiva:note
+// Row primitives for the Display settings page.
 // The page composes sections; this module owns their presentational rows.
 
 import { Switch } from "@/components/ui/switch";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
-import {
-  COLOR_FAMILIES,
-  COLOR_FAMILY_LABELS,
-  COLOR_ITEM_LABELS,
-  COLOR_SLOT_IDS,
-  FAMILY_SWATCH,
-  TIMELINE_COLOR_ITEMS,
-  isColorFamily,
-  type ColorFamily,
-} from "@/lib/timeline/timeline-colors";
-import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
 
 // ── Setting row components ──
@@ -63,7 +53,6 @@ export function RadioRow({
   options,
   value,
   onChange,
-  reapplyOnSelect = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
@@ -71,7 +60,6 @@ export function RadioRow({
   options: { value: string; label: string }[];
   value: string;
   onChange: (v: string) => void;
-  reapplyOnSelect?: boolean;
 }) {
   return (
     <div className={cn("items-start justify-between gap-4 px-3 py-2.5", FLEX)}>
@@ -89,7 +77,6 @@ export function RadioRow({
                   value={opt.value}
                   checked={value === opt.value}
                   onChange={() => onChange(opt.value)}
-                  onClick={() => { if (reapplyOnSelect && value === opt.value) onChange(opt.value); }}
                   className="size-3.5 accent-primary"
                 />
                 <span className="text-xs">{opt.label}</span>
@@ -153,47 +140,6 @@ export function SliderRow({
   );
 }
 
-// A palette picker row — one timeline visual's color family. The swatch
-// mirrors the selected family; the select lists every family. Writes go
-// straight through setSetting (a select commits at most one value per
-// interaction, so no debounce is needed — the timeline recolors while the
-// row updates optimistically).
-function ColorRow({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: ColorFamily;
-  onChange: (v: ColorFamily) => void;
-}) {
-  return (
-    <div className={cn("items-center justify-between gap-4 px-3 py-2.5", FLEX)}>
-      <div className="text-sm font-medium">{label}</div>
-      <div className={cn("items-center gap-2 shrink-0", FLEX)}>
-        <span
-          aria-hidden
-          className={cn("size-3 rounded-full border border-border", FAMILY_SWATCH[value])}
-        />
-        <select
-          aria-label={label}
-          value={value}
-          onChange={(e) => {
-            if (isColorFamily(e.target.value)) onChange(e.target.value);
-          }}
-          className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
-        >
-          {COLOR_FAMILIES.map((f) => (
-            <option key={f} value={f}>
-              {COLOR_FAMILY_LABELS[f]}
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
-  );
-}
-
 // ── Section wrapper ──
 
 // meiva:note
@@ -215,30 +161,5 @@ export function SettingsSection({
         {children}
       </div>
     </div>
-  );
-}
-
-// ── Timeline colors ──
-
-// One color row per configurable slot (tasks #3304 / #3312). Self-contained —
-// it reads and writes the settings store itself, so page.tsx only drops the
-// element into the composition.
-export function TimelineColorsSection() {
-  const { settings, setSetting } = useUserSettings();
-  return (
-    <SettingsSection id="display-colors" title="Timeline colors">
-      {COLOR_SLOT_IDS.map((slot) => {
-        const spec = TIMELINE_COLOR_ITEMS[slot];
-        const value = settings[spec.key];
-        return (
-          <ColorRow
-            key={slot}
-            label={COLOR_ITEM_LABELS[slot]}
-            value={isColorFamily(value) ? value : spec.default}
-            onChange={(v) => setSetting(spec.key, v)}
-          />
-        );
-      })}
-    </SettingsSection>
   );
 }

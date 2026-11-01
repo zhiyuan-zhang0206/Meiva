@@ -48,7 +48,7 @@ function announceCompactDisplayChange(
     state.compactBuffer?.epoch === nextBuffer?.epoch &&
     state.compactBuffer?.rows === nextBuffer?.rows
   ) return;
-  if (!state.compactBuffer && !nextBuffer) return; // retention 0 keeps its immediate swap
+  if (!state.compactBuffer && !nextBuffer) return;
   announceBeforeCompactDisplayChange({
     items: state.items,
     buffer: state.compactBuffer,
@@ -60,7 +60,6 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   items: [],
   compactBuffer: null,
   compactEpoch: 0,
-  compactHistoryPages: 1,
   streamingCode: false,
   turnActive: false,
   connectionState: "open",
@@ -81,11 +80,6 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   scrollToBottomRequest: 0,
 
   requestScrollToBottom: () => set((s) => ({ scrollToBottomRequest: s.scrollToBottomRequest + 1 })),
-  setCompactHistoryPages: (pages) => set((s) => {
-    const compactBuffer = pages === 0 ? null : s.compactBuffer;
-    announceCompactDisplayChange(s, compactBuffer);
-    return { compactHistoryPages: pages, compactBuffer };
-  }),
   invalidateCompactEpoch: () => set((s) => {
     const compactBuffer = s.compactBuffer
       ? { ...s.compactBuffer, epoch: s.compactEpoch + 1 }
@@ -196,7 +190,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         s.streamingIds,
       );
       const epoch = crossedCompact ? s.compactEpoch + 1 : s.compactEpoch;
-      const pendingBuffer = crossedCompact && s.compactHistoryPages !== 0 && s.activeThreadId !== null
+      const pendingBuffer = crossedCompact && s.activeThreadId !== null
         ? captureCompactTransition(s.items, s.compactBuffer, s.activeThreadId, epoch, true)
         : s.compactBuffer && !crossedCompact
           ? { ...s.compactBuffer, tailReady: true }

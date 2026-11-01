@@ -1,4 +1,4 @@
-exports = ["context-breakdown-body.tsx", "context-breakdown.tsx", "context-meter.tsx", "inspector-panel-skeleton.tsx", "inspector-panel.tsx", "inspector-section.tsx"]
+exports = ["context-breakdown-body.tsx", "inspector-panel-skeleton.tsx", "inspector-panel.tsx", "inspector-section.tsx"]
 
 [uses]
 "context-breakdown-body.tsx" = ["context-sections.tsx"]

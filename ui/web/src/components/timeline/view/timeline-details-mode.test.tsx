@@ -1,15 +1,14 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useContentToggleReset } from "@/lib/layout/content-toggle-store";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, setToggleState } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 import { formatItemTime } from "../timestamp";
 afterEach(cleanupTimelineTest);
-describe("Details mode — collapse/expand", () => {
-  it('detailsMode="none" → detail blocks collapsed, primary content visible, turn headers show summaries', () => {
-    setToggleState({ detailsMode: "none" });
+
+describe("Settled vs live expansion behavior", () => {
+  it("settled detail blocks start collapsed while primary content stays visible and turn headers show summaries", () => {
     render(
       <TimelineView
         items={[
@@ -29,80 +28,8 @@ describe("Details mode — collapse/expand", () => {
     expect(screen.getByText(/worked for 8s/i)).toBeTruthy();
     expect(screen.getByText(/1 turn/i)).toBeTruthy();
   });
-  it('settings still loading (isLoading) → detail blocks collapsed even when the in-flight detailsMode reads "all"', () => {
-    setToggleState({ detailsMode: "all", isLoading: true });
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "visible chat" }),
-          makeItem({
-            item_id: "2.0",
-            kind: "agent_reasoning",
-            payload: "hidden thought",
-            reasoning_ms: 8200,
-            reasoning_tokens: 1234,
-          }),
-        ]}
-      />,
-    );
-    expect(screen.queryByText("hidden thought")).toBeNull();
-    expect(screen.getByText("visible chat")).toBeTruthy();
-  });
-  it("settings load completes → the real mode applies without a flash", () => {
-    setToggleState({ detailsMode: "all", isLoading: true });
-    const items = [
-      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "chat" }),
-      makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "thought" }),
-    ];
-    const { rerender } = render(<TimelineView items={items} />);
-    expect(screen.queryByText("thought")).toBeNull();
-    setToggleState({ detailsMode: "all", isLoading: false });
-    rerender(<TimelineView items={items} />);
-    expect(screen.getByText("thought")).toBeTruthy();
-  });
-  it('detailsMode="last" → primary items (agent_chat) always visible', () => {
-    setToggleState({ detailsMode: "last" });
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "first chat" }),
-          makeItem({ item_id: "2.0", kind: "agent_chat", payload: "last chat" }),
-        ]}
-      />,
-    );
-    expect(screen.getByText("first chat")).toBeTruthy();
-    expect(screen.getByText("last chat")).toBeTruthy();
-  });
-  it('detailsMode="last" → last item follows streaming content', () => {
-    setToggleState({ detailsMode: "last" });
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            item_id: "2.0",
-            kind: "agent_chat",
-            payload: "streaming message",
-          }),
-        ]}
-      />,
-    );
-    expect(screen.getByText("streaming message")).toBeTruthy();
-  });
-  it('detailsMode="all" → all blocks expanded', () => {
-    setToggleState({ detailsMode: "all" });
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "first chat" }),
-          makeItem({ item_id: "2.0", kind: "agent_chat", payload: "second chat" }),
-        ]}
-      />,
-    );
-    expect(screen.getByText("first chat")).toBeTruthy();
-    expect(screen.getByText("second chat")).toBeTruthy();
-  });
-  it("primary messages stay visible in flow without a card-toggle header across modes", () => {
-    setToggleState({ detailsMode: "none" });
+
+  it("primary messages stay visible in flow without a card-toggle header", () => {
     render(
       <TimelineView
         items={[
@@ -115,10 +42,11 @@ describe("Details mode — collapse/expand", () => {
     expect(screen.getByText("the visible chat")).toBeTruthy();
     expect(screen.queryByTestId("card-toggle")).toBeNull();
   });
-  it("default expanded secondary item → clicking card header collapses content (override)", () => {
-    setToggleState({ detailsMode: "all" });
+
+  it("live trailing turn expands secondary items by default and clicking card header collapses content", () => {
     render(
       <TimelineView
+        turnActive
         items={[
           makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "the open thought" }),
         ]}
@@ -128,27 +56,11 @@ describe("Details mode — collapse/expand", () => {
     fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.queryByText("the open thought")).toBeNull();
   });
-  it("detailsMode change clears per-item overrides", () => {
-    setToggleState({ detailsMode: "all" });
-    const items = [
-      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "the thought" }),
-    ];
-    const { rerender } = render(<TimelineView items={items} />);
-    fireEvent.click(screen.getByTestId("card-toggle"));
-    expect(screen.queryByText("the thought")).toBeNull();
-    setToggleState({ detailsMode: "none" });
-    rerender(<TimelineView items={items} />);
-    expect(screen.queryByText("the thought")).toBeNull();
-    setToggleState({ detailsMode: "all" });
-    rerender(<TimelineView items={items} />);
-    expect(screen.getByText("the thought")).toBeTruthy();
-  });
 });
 
-describe("Details mode 'none' — turn expansion keeps child blocks collapsed (#4780)", () => {
+describe("Settled turn expansion keeps non-chat child blocks collapsed (#4780)", () => {
   const turnToggle = () => screen.getByTestId("turn-toggle");
   it("reveals the child rows collapsed; each opens on its own click", () => {
-    setToggleState({ detailsMode: "none" });
     render(
       <TimelineView
         items={[
@@ -177,7 +89,6 @@ describe("Details mode 'none' — turn expansion keeps child blocks collapsed (#
     expect(screen.getByTestId("python-code").textContent).toContain("print('hidden code')");
   });
   it("keeps a child's manual expansion across the parent's collapse and re-expand", () => {
-    setToggleState({ detailsMode: "none" });
     render(
       <TimelineView
         items={[
@@ -197,32 +108,11 @@ describe("Details mode 'none' — turn expansion keeps child blocks collapsed (#
   });
 });
 
-describe("Details mode re-pick made while the timeline was unmounted", () => {
-  it("collapses the manual expansions on the next mount", () => {
-    setToggleState({ detailsMode: "none" });
-    const items = [
-      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "hidden thought" }),
-      makeItem({ item_id: "1.1", kind: "agent_code", payload: "print('code')" }),
-    ];
-    const props = { items, threadKey: "reset-gap", scrollMemoryKey: "reset-gap-thread" };
-    const first = render(<TimelineView {...props} />);
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    fireEvent.click(screen.getAllByTestId("card-toggle")[0]);
-    expect(screen.getByText("hidden thought")).toBeTruthy();
-    first.unmount();
-    useContentToggleReset.getState().bumpReset();
-    expect(useContentToggleReset.getState().resetPending).toBe(true);
-    render(<TimelineView {...props} />);
-    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("card-toggle")).toBeNull();
-    expect(useContentToggleReset.getState().resetPending).toBe(false);
-  });
-});
-
 describe("streamingCode last-item only", () => {
   it("last is agent_code + streamingCode=true → last streaming=1, previous agent_code streaming=0", () => {
     render(
       <TimelineView
+        turnActive
         items={[
           makeItem({ item_id: "1", kind: "agent_code", payload: "first" }),
           makeItem({ item_id: "2", kind: "agent_code", payload: "last" }),
@@ -245,6 +135,7 @@ describe("streamingCode last-item only", () => {
         streamingCode
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("0");
   });
 });
@@ -263,6 +154,7 @@ describe("splitEnvelope header length guard", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     const preEl = screen.getByText(/body after long line/);
     expect(preEl.textContent).toContain(longLine);
   });
@@ -271,6 +163,7 @@ describe("splitEnvelope header length guard", () => {
     render(
       <TimelineView items={[makeItem({ kind: "code_output", payload })]} />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/body with leading newlines/)).toBeTruthy();
   });
 });
@@ -350,10 +243,10 @@ describe("ItemTimestamp", () => {
 });
 
 // meiva:note
-// The item stamp and Copy share one footer OUTSIDE the message block; the band is hover-revealed, left-aligned under agent prose and right-aligned under the user bubble.
+// The item stamp and Copy share one right-aligned footer OUTSIDE the message block for both human bubbles and agent prose.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 describe("card hover footer", () => {
-  it("timestamp and Copy share the one band under the block, outside the message box", () => {
+  it("timestamp and Copy share the right-aligned band under the block, outside the message box", () => {
     const humanItem = makeItem({
       item_id: "1.0",
       kind: "inbound_chat",
@@ -375,7 +268,7 @@ describe("card hover footer", () => {
     const band = stamp.parentElement;
     const [, agentCopy] = screen.getAllByLabelText("Copy message");
     expect(band).toBe(agentCopy.parentElement);
-    expect(band?.className).toContain("justify-start");
+    expect(band?.className).toContain("justify-end");
     expect(band?.closest('[data-testid="card-toggle"]')).toBeNull();
     // meiva:note
     // The band is the row's own bottom strip, not the card's: it follows the
@@ -391,18 +284,18 @@ describe("card hover footer", () => {
     expect(band?.parentElement?.className).toContain("timeline-item");
   });
   it("secondary work items inside TurnBlock stamp no time even when expanded", () => {
-    setToggleState({ detailsMode: "all" });
     const item = makeItem({
       kind: "agent_reasoning",
       payload: "deep thought",
       created_at: "2026-10-06T13:39:25+00:00",
     });
     render(<TimelineView items={[item]} />);
+    revealCollapsedCards();
     const stamped = formatItemTime(item.created_at!, { showWeekday: true });
     expect(screen.getByText("deep thought")).toBeTruthy();
     expect(screen.queryByText(stamped)).toBeNull();
   });
-  it("a streaming reply stamps the timestamp but offers no Copy", () => {
+  it("a streaming reply stamps the right-aligned timestamp but offers no Copy", () => {
     const item = makeItem({
       kind: "agent_chat",
       payload: "streaming",
@@ -411,7 +304,7 @@ describe("card hover footer", () => {
     });
     render(<TimelineView items={[item]} />);
     const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
-    expect(stamp.parentElement?.className).toContain("justify-start");
+    expect(stamp.parentElement?.className).toContain("justify-end");
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
   it("standing notes (show_timestamp false) and undated items stamp nothing", () => {

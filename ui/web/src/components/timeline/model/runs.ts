@@ -1,44 +1,25 @@
-// Turn-collapse grouping — the pure layer behind the timeline's aggregate
-// turn blocks. Two independent concerns live here, both DOM-free so vitest
-// drives them directly:
-//
-// 1. classifyItem — splits every timeline item into the human-readable backbone
-//    (primary: kept always visible, breaks a turn) vs the secondary chatter the
-//    agent emits during a turn (thinking / code / output / inter-agent /
-//    system notes: foldable). The `bare` class is the ephemeral system_marker
-//    that has no card (messageCardConfig → null); it never joins a turn and
-//    renders as-is. Classification is derived from the SAME source model the
-//    cards use (inboundKind for inbound_chat, classifyMarker for system_marker),
-//    so a turn's membership and a card's identity can never disagree.
-//
-// 2. groupIntoTurns — folds each maximal stretch of adjacent secondary items
-//    into one turn group (a work block under a single "Details" header); primary
-//    / bare items pass through as single groups. Every secondary run — even a
-//    single item — becomes a turn group so it can be collapsed. Streaming
-//    secondary items are always groupable so the first streaming chunk
-//    immediately lands inside a work block (no bare-then-wrap layout shift).
+// meiva:note
+// Pure turn-collapse classification, summary aggregation, and grouping for the
+// conversation timeline. classifyItem splits primary user-readable messages from
+// secondary work/context items (including pre-token llmWaiting thinking items)
+// and bare ephemeral markers; groupIntoTurns folds maximal runs of adjacent
+// secondary items into collapsible TurnBlocks.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
 
 import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import enMessages from "../../../../messages/en";
 
-import { classifyMarker } from "./marker-classify";
+import { classifyMarker, isSilentEphemeralPayload } from "./marker-classify";
 import { isLiveCode, isLiveExecution, isLiveReasoning } from "./reasoning-clock";
 
-// The turn-label formatters are pure functions (unit-tested directly, no
-// React context), so the translator is an optional parameter: callers with a
-// next-intl translator (Timeline components) pass it for localized output;
-// the standalone tests / en fallback omit it and get the canonical English
-// strings from messages/en — keeping the pure layer dependency-free.
 export type TurnTranslator = (
   key: string,
   values?: Record<string, string | number>,
 ) => string;
 
 const EN_TURN: TurnTranslator = (key, values) => {
-  // The JSON import is typed structurally; `.timeline` is read via an index
-  // cast so a hand-edited catalog degrades to the raw key instead of crashing.
   const dict: Record<string, string> = (
     enMessages as unknown as Record<string, Record<string, string>>
   ).timeline;
@@ -51,14 +32,10 @@ const EN_TURN: TurnTranslator = (key, values) => {
   return s;
 };
 
-// Which side of the "is this an inbound message a human would read" line an
-// inbound_chat source falls on. Mirrors the envelope source model
-// (base/agents/messages/envelope.py): `agent:N` is another agent talking;
-// `external_agent:<subject>[:<instance>]` is an agent outside Meiva that declared
-// itself (distinct from the user); `user` / `ui:page:*` is a person (a page post
-// "reads as User"); everything else — `system`, `system:*`, `watcher:N`,
-// `shell:N`, `schedule:N`, `self:update` — is a framework-generated wake-up /
-// notice. card.tsx branches on the same split.
+// meiva:note
+// Mirrors base/agents/messages/envelope.py sender classes: agent:*, external_agent:*,
+// human (user / ui:page:*), and system wake-ups/notices.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
 export function inboundKind(source: string | null): "human" | "agent" | "external_agent" | "system" {
   const s = source ?? "";
   if (s.startsWith("agent:")) return "agent";
@@ -67,16 +44,47 @@ export function inboundKind(source: string | null): "human" | "agent" | "externa
   return "system";
 }
 
-
-// primary: the human-readable backbone — Meiva's text replies and human inbound
-//   messages. Always rendered; never folded into a turn.
-// secondary: foldable chatter — thinking / code / output, inter-agent messages,
-//   system inbound, compaction, the system prompt, and framework note markers.
-// bare: an ephemeral system_marker (no card); rendered as-is, never in a turn.
 export type ItemClass = "primary" | "secondary" | "bare";
 
+// meiva:note
+// Backend envelopes wrap as "<header>:\n\n<body>" (bounded below 200 chars so a
+// multi-paragraph stdout block is never mistaken for an envelope header).
+// meiva:link agent/messages/docs/message-format.meiva.okf.md
+export function splitEnvelope(payload: string): { header: string; body: string } {
+  const idx = payload.indexOf("\n\n");
+  if (idx > 0 && idx < 200) {
+    return { header: payload.slice(0, idx), body: payload.slice(idx + 2) };
+  }
+  return { header: "", body: payload };
+}
+
+// meiva:note
+// Items that intentionally render no visible DOM (silent ephemeral markers and
+// the companion `[files]` placeholder after `system:upload`). Skipping them during
+// turn grouping prevents invisible items from splitting adjacent TurnBlocks or
+// mounting empty vertical padding gaps.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
+  if (
+    item.kind === "system_marker" &&
+    classifyMarker(item.source).kind === "ephemeral" &&
+    isSilentEphemeralPayload(item.payload)
+  ) {
+    return true;
+  }
+  if (
+    item.kind === "inbound_chat" &&
+    item.source === "user" &&
+    !item.files?.length &&
+    !item.images?.length &&
+    splitEnvelope(item.payload).body === "[files]"
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function classifyItem(item: BackendTimelineItem): ItemClass {
-  if (item.llmWaiting) return "primary";
   switch (item.kind) {
     case "agent_chat":
       return item.user_facing === false ? "secondary" : "primary";
@@ -87,10 +95,6 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
         ? "primary"
         : "secondary";
     case "attach":
-      // Attached media folds into the turn's details block like any other
-      // secondary item (user ruling 2026-08-30 — expand the details block
-      // to see it; the previous "always visible" primary pin is dropped).
-      return "secondary";
     case "agent_reasoning":
     case "agent_code":
     case "code_output":
@@ -99,97 +103,38 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
     case "system_prompt":
       return "secondary";
     case "system_marker":
-      // The card-rendered marker families (lifecycle / memory / note) fold like
-      // any note; the ephemeral markers have no card and stay bare.
       return classifyMarker(item.source).kind === "ephemeral" ? "bare" : "secondary";
   }
-  // Exhaustiveness guard: TS narrows to never; a new kind lands here as bare.
-  /* v8 ignore next 3 */
   const _exhaustive: never = item.kind;
   console.warn("[timeline] classifyItem: unknown item kind", _exhaustive);
   return "bare";
 }
 
 export interface TurnSummary {
-  // Total item count in the turn (all secondary items, including actions).
   readonly total: number;
-  // Action-item counts — thinking / code / output items. These are the
-  // "specific metrics" shown in the turn header line alongside "worked for X".
   readonly thinking: number;
   readonly code: number;
   readonly output: number;
-  // Model work rounds (task #3313): one round emits its reasoning, code, and
-  // output items together, so the three action counters agree on every
-  // complete round — `turns` is their max. The header shows this single count
-  // ("5 turns") in place of the former per-kind labels.
   readonly turns: number;
-  // Non-work item counts. All are still counted; the compact-summary count is
-  // the one that renders in the collapsed line — the system-prompt count is
-  // kept as data but no longer emitted (user ruling 2026-09-15, task #3557).
   readonly systemPrompts: number;
   readonly compactSummaries: number;
   readonly memories: number;
   readonly agentMessages: number;
-  // Catch-all for the remaining secondary chatter: card-family system_marker
-  // notes that are not memories (lifecycle events, guidance notes) and
-  // system-sourced inbound messages (wake-ups / framework notices). Every
-  // secondary kind lands in SOME count, so a turn still reads as a non-empty
-  // line ("1 system note") instead of a blank header — with one deliberate
-  // exception: a turn of only system prompts renders blank, because the
-  // system-prompt fragment is not emitted (task #3557).
   readonly systemNotes: number;
-  // Aggregate wall-clock, both backend-authoritative and both zero-able (a turn
-  // with no reasoning items has thinkingMs 0; no execution has execMs 0):
-  // - thinkingMs: sum of each `agent_reasoning` item's committed `reasoning_ms`,
-  //   falling back to `reasoningElapsedMs` (the frozen frontend clock — set
-  //   when a stream disconnects before the backend commits the block).
-  // - codeMs: sum of each `agent_code` item's committed `code_elapsed_ms`
-  //   (backend wall-clock, persisted with the message), falling back to
-  //   `codeElapsedMs` (the frozen frontend clock — set when code writing
-  //   finishes, before the snapshot commits the backend value).
-  // - execMs: sum of each `code_output` item's committed `exec_ms` — the real
-  //   wall-clock the code ran (agent/graph/exec/node.py).
   readonly thinkingMs: number;
   readonly codeMs: number;
   readonly execMs: number;
-  // SDK calls aggregated across the turn's `agent_code` items, grouped by
-  // namespace alphabetically, then descending by count and method name. Read
-  // directly off each item's backend-populated `sdk_calls` — the call tally
-  // recorded by the run that executed the code
-  // and projected onto the item. This aggregation renders ONLY recorded
-  // calls: `it.sdk_calls` present (even `[]`) is trusted as-is; absent (no
-  // committed field yet, e.g. streaming) contributes nothing. No text
-  // scanning, here or in the per-block chip (`summarizeCode`): scanning the
-  // payload could surface a phantom method from a comment or string like
-  // `# see meiva.files.read(...)` in a header the user may never expand to
-  // check.
-  // How long the agent actually WORKED in this turn: thinkingMs + codeMs +
-  // execMs. Not wall-clock across the turn — a turn is a maximal run of
-  // secondary items, so it can span a restart marker or a wake-up and the idle
-  // gap before the agent picked the work back up; charging that gap to the
-  // agent read as hours of work that never happened. Items with no duration of
-  // their own (notes, markers) contribute 0 via itemOwnMs. Zero when nothing in
-  // the turn is timed. Used for the "Worked for X" header line.
-  // Used for BOTH header timer states — the live "Working for X" adds the
-  // in-flight block's elapsed to it, so the number does not jump when the turn
-  // goes quiet and the label settles to "Worked for X". No wall-clock anchor
-  // for the turn is kept: the turn's start time measures the gap as well as
-  // the work, which is exactly what this field exists to exclude.
+  // meiva:note
+  // Sum of committed/frozen block durations (thinkingMs + codeMs + execMs),
+  // excluding idle wall-clock gaps across restarts or wake-ups; shared by both
+  // "Working for X" (plus live delta) and settled "Worked for X".
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   readonly workedMs: number;
-  // Live-timing info for the collapsed turn header clock. When the last
-  // item in the turn is still streaming (not yet committed), these fields
-  // record its kind and start timestamp so TurnBlock can add the live delta
-  // to the committed aggregate durations — without them the sub-block timing
-  // line ("Thought for Xs · Wrote code for Xs · Ran for Xs") stays frozen
-  // at the committed values while the "Working for Xs" clock ticks.
   readonly lastLiveKind: "reasoning" | "code" | "output" | null;
   readonly lastLiveStartedAt: number;
   readonly sdkCalls: readonly SdkCall[];
 }
 
-// An item's own committed/frozen duration — how long the block itself took,
-// independent of neighbor timestamps. Zero when the item carries no timing
-// (chat, markers, never-committed historical rows).
 function itemOwnMs(it: BackendTimelineItem): number {
   switch (it.kind) {
     case "agent_reasoning":
@@ -237,18 +182,16 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     } else if (it.kind === "inbound_compact_summary" || it.kind === "inbound_compact_request") {
       compactSummaries += 1;
     } else if (it.kind === "inbound_chat") {
-      // Human inbound is primary (never in a turn); agent vs system split here.
       const sender = inboundKind(it.source);
       if (sender === "agent" || sender === "external_agent") agentMessages += 1;
       else systemNotes += 1;
     } else if (it.kind === "system_marker") {
       if (classifyMarker(it.source).kind === "memory") memories += 1;
-      else systemNotes += 1; // lifecycle events + guidance notes
+      else systemNotes += 1;
     } else {
       // meiva:note
-      // `attach` (secondary since 2026-08-30) and non-user-facing `agent_chat` (internal
-      // background-wake notes) land here so the "every member is counted somewhere" invariant
-      // holds regardless.
+      // `attach` and non-user-facing `agent_chat` (internal background-wake notes)
+      // land here so every secondary member contributes to a non-empty summary count.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
       systemNotes += 1;
     }
@@ -256,17 +199,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   const sdkCalls = orderSdkCalls(
     [...sdkCounts.entries()].map(([method, count]) => ({ method, count })),
   );
-  // Agent-work duration: sum of each work block's backend-measured time
-  // (thinkingMs + codeMs + execMs), not wall-clock between items.
-  // This naturally excludes system notes and restart markers — their
-  // itemOwnMs() returns 0 — and correctly measures work even when the
-  // first item lacks created_at (e.g. a streaming block).
   const workedMs = thinkingMs + codeMs + execMs;
-  // Live timing for the collapsed turn header: which kind of block is
-  // currently streaming and when it started. Only the last item can be
-  // live (all prior items are committed). Uses the same live-detection
-  // predicates the individual-card headers use, so the collapsed view
-  // keeps the same clock as the expanded individual block would.
   let lastLiveKind: "reasoning" | "code" | "output" | null = null;
   let lastLiveStartedAt = 0;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -290,8 +223,6 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   return { total: items.length, thinking, code, output, turns: Math.max(thinking, code, output), systemPrompts, compactSummaries, memories, agentMessages, systemNotes, thinkingMs, codeMs, execMs, sdkCalls, workedMs, lastLiveKind, lastLiveStartedAt };
 }
 
-/** Value equality for two summaries — summarizeTurn builds a fresh object on
- *  every regroup, so TurnBlock's memo compares by value to skip unchanged turns. */
 export function turnSummaryEqual(a: TurnSummary, b: TurnSummary): boolean {
   if (a === b) return true;
   for (const key of Object.keys(a) as (keyof TurnSummary)[]) {
@@ -306,13 +237,6 @@ export function turnSummaryEqual(a: TurnSummary, b: TurnSummary): boolean {
 
 export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_TURN): string {
   const parts: string[] = [];
-  // The model's work rounds first ("5 turns") — one round emits its reasoning,
-  // code, and output items together, so the former per-kind action counts
-  // ("2 thinking · 1 code · 1 output") always agreed and collapse into this
-  // single number (task #3313). Then non-work items (context + chatter).
-  // Sentence case throughout — these fragments join into one status line
-  // ("2 turns · 1 memory · 2 system notes · 2 agent messages"), so every label
-  // stays lowercase like the work-item labels below (no mid-line Title Case).
   if (summary.turns > 0) {
     parts.push(
       t("turns", {
@@ -321,12 +245,10 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
       }),
     );
   }
-  // The "system prompt" fragment is deliberately NOT emitted (user ruling
-  // 2026-09-15, task #3557): the prompt is present in every turn, so the
-  // label carries no information in the collapsed line. The count stays in
-  // summarizeTurn — display-layer change only.
-  // Singular compact summaries drop the count prefix ("compact summary …"),
-  // mirroring the original English copy — the singular label stands alone.
+  // meiva:note
+  // Omit the ever-present system prompt from the collapsed turn label while
+  // keeping compact summaries, memories, system notes, and agent messages in sentence case.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   if (summary.compactSummaries > 0) {
     parts.push(
       summary.compactSummaries === 1
@@ -365,11 +287,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
 }
 
 export type TimelineGroup =
-  // A primary item or a bare marker — rendered on its own.
   | { readonly kind: "single"; readonly item: BackendTimelineItem; readonly index: number }
-  // One or more adjacent secondary items folded into one collapsible work block
-  // under a "Details" header. Every non-empty secondary run becomes a turn,
-  // even a single item — always collapsible, never bare.
   | {
       readonly kind: "turn";
       readonly items: readonly BackendTimelineItem[];
@@ -377,19 +295,6 @@ export type TimelineGroup =
       readonly summary: TurnSummary;
     };
 
-/**
- * Fold adjacent secondary items into turn groups. Order-preserving and pure.
- *
- * - `collapseTurns` false → every item is its own single group (grouping off).
- * - All secondary items are always groupable — including streaming / in-progress
- *   items — so the first streaming chunk immediately lands inside a work block
- *   (no bare-then-wrap layout shift). Primary items and bare markers break the
- *   run as before.
- * - Every non-empty secondary run becomes a turn group (even a single item).
- *   Context-only items (system_prompt, compaction events, lifecycle markers)
- *   fold like any other secondary item — including at the very front of the
- *   timeline (the initial context lands inside the first detail block).
- */
 export function groupIntoTurns(
   items: readonly BackendTimelineItem[],
   opts: { readonly collapseTurns: boolean; readonly liveIndex: number | null },
@@ -409,6 +314,7 @@ export function groupIntoTurns(
   };
 
   items.forEach((item, index) => {
+    if (isSilentTimelineItem(item)) return;
     const cls = classifyItem(item);
     const groupable = cls === "secondary";
 

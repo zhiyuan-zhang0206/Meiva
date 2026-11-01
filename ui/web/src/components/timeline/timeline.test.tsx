@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { fakeBrowser } from "@/lib/browser/testing";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, toggleState } from "./view/timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, settingsState } from "./view/timeline-test-mock";
 
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
@@ -44,12 +44,13 @@ describe("timeline document work", () => {
     const items = [makeItem({ kind: "agent_chat", payload: "steady" })];
     const onLoadOlder = vi.fn();
     const { rerender } = render(<TimelineView items={items} threadKey="memo" onLoadOlder={onLoadOlder} />);
-    const reads = toggleState.reads;
-    // e.g. the composer's upload progress or the token meter updated.
+    const reads = settingsState.reads;
+    // meiva:note
+    // Parent-only re-renders (e.g. composer upload progress) must not re-run TimelineView.
     rerender(<TimelineView items={items} threadKey="memo" onLoadOlder={onLoadOlder} />);
-    expect(toggleState.reads).toBe(reads);
+    expect(settingsState.reads).toBe(reads);
     rerender(<TimelineView items={[...items]} threadKey="memo" onLoadOlder={onLoadOlder} />);
-    expect(toggleState.reads).toBeGreaterThan(reads);
+    expect(settingsState.reads).toBeGreaterThan(reads);
   });
 
   it("reuses turn summaries for view changes and refreshes them when items change", () => {
@@ -59,18 +60,25 @@ describe("timeline document work", () => {
       payload: "meiva.files.read('first')",
       sdk_calls: [{ method: "files.read", count: 1 }],
     });
+    // meiva:note
     // Reading committed SDK calls is part of deriving the turn summary.
-    // A collapse and a parent-only update must not re-read historical data.
+    // Expanding/collapsing and parent-only updates must not re-read historical data.
     const calls = vi.fn(() => [{ method: "files.read", count: 1 }]);
     Object.defineProperty(code, "sdk_calls", { get: calls });
     const items = [code];
     const { rerender } = render(<TimelineView items={items} threadKey="first" />);
     expect(calls).toHaveBeenCalled();
-    calls.mockClear();
-
-    fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("python-code")).toBeNull();
+    calls.mockClear();
+    rerender(<TimelineView items={items} threadKey="first" />);
+    expect(calls).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByTestId("card-toggle"));
+    expect(screen.getByTestId("python-code").textContent).toBe("meiva.files.read('first')");
+    calls.mockClear();
     rerender(<TimelineView items={items} threadKey="first" />);
     expect(calls).not.toHaveBeenCalled();
 
@@ -80,7 +88,6 @@ describe("timeline document work", () => {
       sdk_calls: [{ method: "files.read", count: 2 }],
     });
     rerender(<TimelineView items={[next]} threadKey="first" />);
-    fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.getByTestId("turn-toggle").textContent).toContain("files.read × 2");
     expect(screen.getByTestId("python-code").textContent).toBe("meiva.files.read('updated')");
 
@@ -120,11 +127,6 @@ describe("CopyButton click behavior", () => {
     await waitFor(() => expect(screen.getByLabelText("Copied")).toBeTruthy());
   });
 });
-
-// Details mode ("all" / "last" / "none") controls the default expanded
-// state for every block across all message kinds. Secondary items (thinking,
-// code, output, system prompts) are grouped into turn blocks — the turn header
-// shows an aggregate summary; individual cards are only visible when the turn
 
 describe("touch drag vs streaming pin (#1016)", () => {
   // happy-dom's ResizeObserver never fires; drive the component's RO

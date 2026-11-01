@@ -28,7 +28,6 @@ export interface TimelineState {
 
   compactEpoch: number;
 
-  compactHistoryPages: number;
   streamingCode: boolean;
   turnActive: boolean;
   connectionState: ConnectionState;
@@ -60,7 +59,6 @@ export interface TimelineState {
 
   scrollToBottomRequest: number;
   requestScrollToBottom: () => void;
-  setCompactHistoryPages: (pages: number) => void;
   invalidateCompactEpoch: () => void;
   finishCompactTransition: (threadId: number, epoch: number) => void;
 
@@ -204,9 +202,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         return {
           items: snapItems,
           compactEpoch: epoch,
-          compactBuffer: state.compactHistoryPages === 0
-            ? null
-            : captureCompactTransition(state.items, state.compactBuffer, ev.agent_id, epoch, false),
+          compactBuffer: captureCompactTransition(state.items, state.compactBuffer, ev.agent_id, epoch, false),
           streamingIds: new Set(),
           resetPending: false,
           compactReplaceSeq: state.compactReplaceSeq + 1,

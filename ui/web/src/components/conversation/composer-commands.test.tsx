@@ -8,17 +8,6 @@ import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
   transport.getCommands.mockImplementation((_agentId?: number | null) => Promise.resolve(commandList));
-  transport.getContextBreakdown.mockImplementation(() =>
-      Promise.resolve({
-        total_input_tokens: 1000,
-        estimated: false,
-        exact_fraction: 1,
-        max_input_tokens: 1_000_000,
-        soft_compact_tokens: 600_000,
-        hard_compact_tokens: 800_000,
-        sections: [],
-        categories: [{ kind: "system_prompt", tokens: 1000, estimated: false, exact_fraction: 1 }],
-      }));
 });
 
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
@@ -47,7 +36,6 @@ afterEach(() => {
 const diagnostics = { warn: vi.fn<(message: string) => void>(), error: vi.fn<(message: string, cause: unknown) => void>() };
 const baseProps = {
   diagnostics,
-  contextTokens: 0,
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),
 };
@@ -55,8 +43,6 @@ const baseProps = {
 function renderComposerTree(ui: React.ReactElement, wallNow: () => number = () => Date.now()) {
   return renderWithProviders(ui, { wallNow });
 }
-
-const renderComposer = renderComposerTree;
 
 describe("Composer slash commands", () => {
   const recap = { name: "recap", description: "recap it", instruction_hint: "a focus" };
@@ -223,18 +209,14 @@ describe("Composer slash commands", () => {
     await waitFor(() => expect(meta()).toBe("a focus"));
   });
 
-  it("no hint row for an unknown command or a command with an empty hint — falls back to the readout", async () => {
+  it("renders no hint row for an unknown command or a command with an empty hint", async () => {
     commandList = abc;
-    const meta = () => screen.getByTestId("composer-meta");
-    renderComposer(<Composer {...baseProps} mode="idle" contextTokens={500} showContextMeter />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const ta = screen.getByTestId("composer-input");
-    const gauge = () => meta().querySelector('[data-testid="context-meter"]');
     fireEvent.change(ta, { target: { value: "/alpha " } });
-    await waitFor(() => expect(meta().textContent).toBe(""));
-    expect(gauge()).toBeTruthy();
+    await waitFor(() => expect(screen.queryByTestId("composer-meta")).toBeNull());
     fireEvent.change(ta, { target: { value: "/zzz " } });
-    expect(meta().textContent).toBe("");
-    expect(gauge()).toBeTruthy();
+    expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
 
   it("Enter on a partial name fills `/<name> ` and waits — does not send", async () => {

@@ -7,9 +7,10 @@
 // (`/`, `/control/guide`, `/control/schedules`) is a client component for the same reason.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 
+// meiva:note
 // /fleet — full-screen multi-agent supervision view. Renders the live agent
 // relationship graph (spawn/fork/resurrect lineage + decaying message traffic)
-// with each agent's self-reported activity, so a human can judge many agents at
+// with each agent's status and label, so a human can judge many agents at
 // once without opening any single conversation. See components/fleet/fleet-view.tsx.
 //
 // FleetView reads the shared ["agents", "live"] cache (useFleetAgents), kept live by

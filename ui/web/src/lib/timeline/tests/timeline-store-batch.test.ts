@@ -24,7 +24,6 @@ function resetStore(): void {
     items: [],
     compactBuffer: null,
     compactEpoch: 0,
-    compactHistoryPages: 1,
     streamingIds: new Set(),
     streamingCode: false,
     turnActive: false,

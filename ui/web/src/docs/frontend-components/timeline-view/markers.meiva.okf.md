@@ -12,10 +12,10 @@ tags:
 `source` (a backend `NoteTag`) into three card-rendered families — lifecycle
 transitions, memory recall, guidance notes — plus the bare-rendered ephemeral
 catch-all. `components/timeline/markers.tsx` owns rendered marker bodies and
-visuals. Card visuals resolve from the timeline-colors slot chosen in Display
-settings and are composed at call time, so one family swap restyles every
-marker; titles are i18n keys under the `markers` namespace with an English
-fallback.
+icons. All three card-rendered families share the same borderless monochrome
+`CardHeader` chrome inside a `TurnBlock` (no colored accent overrides; user
+ruling 2026-11-01); titles are i18n keys under the `markers` namespace with an
+English fallback.
 
 The three exported dispatch sets are the renderer's exact dispatch table: the backend NoteTag value set is asserted (backend contract test) to be a subset of LIFECYCLE_TAGS ∪ MEMORY_SOURCES ∪ NOTE_SOURCES, and a frontend test iterating the same sets locks every member to its chip and never the red alarm. A backend tag without a branch here falls to the ephemeral path and surfaces as the fail-loud UnknownMarkerChip, not a silent fallback.
 

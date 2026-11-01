@@ -11,7 +11,7 @@ import type { InnerProps } from "./types";
 import { useApi } from "@/lib/transport/transport-context";
 
 /** Only the current archive page is retained. Search restarts at the latest page. */
-export function AgentArchive({ props }: { props: InnerProps & { wide: boolean } }) {
+export function AgentArchive({ props }: { props: InnerProps }) {
   const t = useTranslations("sidebar");
   const [query, setQuery] = useState("");
   return <>
@@ -20,7 +20,7 @@ export function AgentArchive({ props }: { props: InnerProps & { wide: boolean } 
   </>;
 }
 
-function ArchivePage({ query, props }: { query: string; props: InnerProps & { wide: boolean } }) {
+function ArchivePage({ query, props }: { query: string; props: InnerProps }) {
   const client = useApi();
   const t = useTranslations("sidebar");
   const [beforeId, setBeforeId] = useState<number | undefined>();
@@ -38,7 +38,7 @@ function ArchivePage({ query, props }: { query: string; props: InnerProps & { wi
     {page.isSuccess && page.data.agents.length === 0 && <p className="px-3 text-xs">{t("noResults")}</p>}
     <ul>{page.data?.agents.map((agent) => <AgentRowItem key={agent.agent_id} agent={agent}
       label={agent.label ?? undefined} active={props.activeId === agent.agent_id}
-      pending={props.pendingActions[agent.agent_id]} wide={props.wide} depth={0} ancestorsIsLast={[]}
+      pending={props.pendingActions[agent.agent_id]} depth={0} ancestorsIsLast={[]}
       onSelect={() => props.onSelect(agent.agent_id)} onTerminate={() => props.onTerminate(agent.agent_id)}
       onForceExpire={(sessionId) => props.onForceExpire(agent.agent_id, sessionId)}
       onForceKill={() => props.onTerminate(agent.agent_id, true)} onRestart={() => props.onRestart(agent.agent_id)}

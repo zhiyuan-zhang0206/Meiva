@@ -17,7 +17,6 @@ export function registerUseTimelineOwnershipTests(ctx: UseTimelineTestContext): 
     timelineReads,
     snapshotReads,
     resolves,
-    seedSettings,
     setVisibility,
     pushEvent,
     pushConnectionEvent,
@@ -224,13 +223,12 @@ describe("compact retention request ownership", () => {
     expect(timelineReads.filter((read) => read.before)).toHaveLength(1);
   });
 
-  it.each(["switch", "hidden", "unmount", "clear"].flatMap((cause) => [2, -1].map((retention) => ({ cause, retention }))))("$cause cancels retention $retention and rejects its late completion", async ({ cause, retention }) => {
+  it.each(["switch", "hidden", "unmount", "clear"])("%s cancels retention and rejects its late completion", async (cause) => {
     const pages = () => timelineReads.filter((read) => read.before !== undefined);
     const finishes: ((page: TimelineResponse) => void)[] = [];
     const held = Array.from({ length: 3 }, () =>
       new Promise<TimelineResponse>((resolve) => { finishes.push(resolve); }).then(resolves));
     const showError = vi.fn();
-    seedSettings({ "display.compact_history_sessions": retention });
     timeline.always(resolves(tlResp(postWindow(), true)));
     wireReplies.set("/api/agents/1/timeline?before=2.0", [held[0], held[1]]);
     wireReplies.set("/api/agents/1/timeline?before=s1.new.1.0", [held[2]]);

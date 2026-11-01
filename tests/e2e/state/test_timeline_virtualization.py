@@ -12,7 +12,6 @@ import pytest
 from playwright.sync_api import Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e._timeline import move_to_top_and_read_anchor, wait_for_parked_tail
 from tests.e2e.fixture_environment import E2EEnv
 
@@ -73,13 +72,15 @@ def _assert_bounded_sample(sample: _BoundedSample, kind: str) -> None:
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.message_flow:build")
-@pytest.mark.parametrize("kind", ["agent_chat", "agent_reasoning"])
+@pytest.mark.parametrize("kind", ["agent_chat", "mixed_turns"])
 def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str) -> None:
     page = e2e_env.page
     items = [
         {
             "item_id": f"{index}.0",
-            "kind": kind,
+            "kind": "agent_reasoning"
+            if (kind == "mixed_turns" and index % 2 == 1)
+            else "agent_chat",
             "payload": f"Deep history reply {index}",
             "source": None,
             "created_at": "2026-09-25T00:00:00Z",
@@ -96,8 +97,6 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
         re.compile(r"/api/agents/\d+/(timeline|conversation-snapshot)"),
         lambda route: _serve_deep_history(route, tail, older, older_requests),
     )
-    if kind == "agent_reasoning":
-        pin_expand_runs_all(e2e_env.gateway_url)
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=15_000)
     wait_for_parked_tail(

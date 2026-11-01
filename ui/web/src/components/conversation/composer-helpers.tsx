@@ -4,8 +4,6 @@ import { FileText, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { type SlashAutocompleteHandle } from "@/components/conversation/slash-autocomplete";
-import { ContextButton } from "@/components/inspector/context-breakdown";
-import { ContextMeterGhost } from "@/components/inspector/context-meter";
 import type { DeliveredUploadStatus } from "@/lib/contracts/types";
 import { cn, formatFileSize } from "@/lib/format/utils";
 import { isImeComposition, isSendEnter, type KeyStroke } from "@/lib/input/enter-to-send";
@@ -28,50 +26,16 @@ export interface StagedAttachment {
 
 export function ComposerMetaRow({
   commandHint,
-  showContextMeter,
-  contextTokens,
-  contextPending,
-  agentId,
-  breakdownOpen,
-  onBreakdownOpenChange,
-  maxContextTokens,
-  softCompactTokens,
-  hardCompactTokens,
 }: {
   commandHint: string | null;
-  showContextMeter: boolean;
-  contextTokens: number;
-  contextPending: boolean;
-  agentId: number | null;
-  breakdownOpen: boolean;
-  onBreakdownOpenChange: (open: boolean) => void;
-  maxContextTokens: number;
-  softCompactTokens: number;
-  hardCompactTokens: number;
 }) {
-  if (commandHint === null && !(showContextMeter && contextTokens > 0) && !(showContextMeter && contextPending)) {
+  if (commandHint === null) {
     return null;
   }
   return (
     <div className={cn("relative items-center gap-2 px-0.5 text-xs text-muted-foreground h-4 leading-4", FLEX, MIN_W_0)}>
-      <span data-testid="composer-meta" className={cn("truncate", commandHint && "italic", MIN_W_0)}>
-        {commandHint ??
-          (showContextMeter ? (
-            contextTokens > 0 ? (
-              <ContextButton
-                agentId={agentId}
-                open={breakdownOpen}
-                onOpenChange={onBreakdownOpenChange}
-                contextTokens={contextTokens}
-                maxContextTokens={maxContextTokens}
-                softCompactTokens={softCompactTokens}
-                hardCompactTokens={hardCompactTokens}
-                showText={false}
-              />
-            ) : contextPending ? (
-              <ContextMeterGhost />
-            ) : null
-          ) : null)}
+      <span data-testid="composer-meta" className={cn("truncate italic", MIN_W_0)}>
+        {commandHint}
       </span>
     </div>
   );

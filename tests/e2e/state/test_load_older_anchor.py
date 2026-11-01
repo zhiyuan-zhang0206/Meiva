@@ -8,7 +8,6 @@ import httpx
 import pytest
 from playwright.sync_api import Page, Route
 
-from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fixture_environment import E2EEnv
 
 _SAMPLER_JS = """
@@ -241,8 +240,6 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
             route.continue_()
 
     page.route(re.compile(r"/api/agents/\d+/timeline\?.*before="), pause_first_page)
-
-    pin_expand_runs_all(e2e_env.gateway_url)
 
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)

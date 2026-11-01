@@ -22,12 +22,10 @@ const props = {
   onRename: vi.fn(),
   pendingActions: {},
   showStatusDot: false,
-  showActivity: false,
   confirmTerminate: false,
   confirmRestart: false,
   confirmForceKill: false,
-  wide: true,
-} as unknown as InnerProps & { wide: boolean };
+} as unknown as InnerProps;
 const row = (id: number): AgentRow => ({
   agent_id: id,
   spawner: "user",

@@ -1,19 +1,17 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, setToggleState } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards } from "./timeline-test-mock";
 
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 
 afterEach(cleanupTimelineTest);
-describe("turn-collapse (always on — Turns toggle controls expand/collapse)", () => {
-
+describe("turn-collapse (settled turns collapsed by default, live trailing turn expanded)", () => {
   const runToggle = () => screen.getByTestId("turn-toggle");
 
   it("drops a pinned turn expansion when the timeline thread changes", () => {
-    setToggleState({ detailsMode: "none" });
     const threadAItems = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread A thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "thread A code" }),
@@ -54,10 +52,10 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.queryByTestId("python-code")).toBeNull();
   });
 
-  it("drops a pinned inner-card collapse when the timeline thread changes", () => {
-    setToggleState({ detailsMode: "all" });
+  it("drops a pinned inner-card collapse on a live turn when the timeline thread changes", () => {
     const { rerender } = render(
       <TimelineView
+        turnActive
         threadKey="1"
         items={[
           makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread A thinking" }),
@@ -73,6 +71,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
 
     rerender(
       <TimelineView
+        turnActive
         threadKey="2"
         items={[
           makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread B thinking" }),
@@ -84,7 +83,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.getByTestId("python-code").textContent).toBe("thread B code");
   });
 
-  it("folds a run of ≥2 secondary items into an expanded turn block (detailsMode='all')", () => {
+  it("folds a run of ≥2 secondary items into one turn block between primary messages", () => {
     render(
       <TimelineView
         items={[
@@ -98,31 +97,15 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     );
     const runHeader = runToggle();
     expect(runHeader.textContent).toContain("1 turn");
-
-
-    expect(runHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(runHeader.getAttribute("aria-expanded")).toBe("false");
     expect(runHeader.getAttribute("title")).toBeNull();
+    revealCollapsedCards();
+    expect(runHeader.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getAllByTestId("chat-markdown").map((m) => m.textContent)).toEqual([
       "hi",
       "thinking",
       "done",
     ]);
-    expect(screen.getByTestId("python-code").textContent).toBe("x=1");
-  });
-
-  it("clicking the run header toggles inner rows (expanded in 'all' mode, click collapses)", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "think" }),
-          makeItem({ item_id: "1.1", kind: "agent_code", payload: "x=1" }),
-        ]}
-      />,
-    );
-    expect(screen.getByTestId("python-code").textContent).toBe("x=1");
-    fireEvent.click(runToggle());
-    expect(screen.queryByTestId("python-code")).toBeNull();
-    fireEvent.click(runToggle());
     expect(screen.getByTestId("python-code").textContent).toBe("x=1");
   });
 
@@ -138,6 +121,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     );
     const runHeader = runToggle();
     expect(runHeader.textContent).toContain("1 agent message");
+    fireEvent.click(runHeader);
     expect(screen.getByText("Agent 7")).toBeTruthy();
   });
 
@@ -174,8 +158,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.getByText("t2-live")).toBeTruthy();
   });
 
-  it("detailsMode='none' → runs start collapsed (toggle dim, inner rows not mounted)", () => {
-    setToggleState({ detailsMode: 'none' });
+  it("settled runs start collapsed (toggle dim, inner rows not mounted)", () => {
     render(
       <TimelineView
         items={[
@@ -187,6 +170,33 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     const runHeader = runToggle();
     expect(runHeader.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("python-code")).toBeNull();
+  });
+
+  it("turnActive → live trailing turn expands ALL child blocks, while finished turns expand only agent_chat", () => {
+    render(
+      <TimelineView
+        turnActive
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "finished-thought" }),
+          makeItem({ item_id: "1.1", kind: "agent_chat", payload: "finished-internal-note", user_facing: false }),
+          makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "go" }),
+          makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "live-thought" }),
+          makeItem({ item_id: "3.1", kind: "agent_code", payload: "live_code = 1" }),
+          makeItem({ item_id: "3.2", kind: "code_output", payload: "live-output" }),
+        ]}
+      />,
+    );
+    const turns = screen.getAllByTestId("turn-toggle");
+    expect(turns).toHaveLength(2);
+    expect(turns[0].getAttribute("aria-expanded")).toBe("false");
+    expect(turns[1].getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("live-thought")).toBeTruthy();
+    expect(screen.getByTestId("python-code").textContent).toBe("live_code = 1");
+    expect(screen.getByText("live-output")).toBeTruthy();
+
+    fireEvent.click(turns[0]);
+    expect(screen.queryByText("finished-thought")).toBeNull();
+    expect(screen.getByText("finished-internal-note")).toBeTruthy();
   });
 
   it("interrupted items stay in the work block — not peeled out", () => {
@@ -205,6 +215,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
         ]}
       />,
     );
+    revealCollapsedCards();
     const runHeader = runToggle();
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(/t2-cut/)).toBeTruthy();
@@ -223,6 +234,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     const wrapper = container.querySelector('[data-item-id="3.0"]');
     expect(wrapper).toBeTruthy();
     expect(wrapper?.textContent).toContain("1 turn");
+    revealCollapsedCards();
     expect(wrapper?.querySelector('[data-expanded="true"]')).toBeTruthy();
     expect(screen.getByTestId("python-code").textContent).toBe("x=1");
   });
@@ -253,8 +265,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(run?.getAttribute("data-turn-member-ids")).toBe("2.0 3.0 3.1");
   });
 
-  it('detailsMode="last" — clicking the last turn header toggles expansion', () => {
-    setToggleState({ detailsMode: "last" });
+  it("clicking the active turn header toggles expansion", () => {
     render(
       <TimelineView
         turnActive
@@ -277,30 +288,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.getByTestId("python-code").textContent).toBe("x=1");
   });
 
-  it('detailsMode="last" — clicking the last turn header after streaming completes expands it', () => {
-    setToggleState({ detailsMode: "last" });
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "think" }),
-          makeItem({ item_id: "1.1", kind: "agent_code", payload: "x=1" }),
-        ]}
-      />,
-    );
-    const runHeader = runToggle();
-    expect(runHeader.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("python-code")).toBeNull();
-
-    fireEvent.click(runToggle());
-    expect(runHeader.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("python-code").textContent).toBe("x=1");
-
-    fireEvent.click(runToggle());
-    expect(runHeader.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it('detailsMode="last" — collapse pinned mid-stream survives the turn going idle, then a click expands', () => {
-    setToggleState({ detailsMode: "last" });
+  it("collapse pinned mid-stream survives the turn going idle, then a click expands", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "think" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "x=1" }),
@@ -319,8 +307,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
   });
 
-  it('detailsMode="last" — within expanded turn, all sub-items are visible (not just last)', () => {
-    setToggleState({ detailsMode: "last" });
+  it("within an active expanded turn, all sub-items are visible (not just last)", () => {
     render(
       <TimelineView
         turnActive
@@ -336,39 +323,5 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.getByText("think-first")).toBeTruthy();
     expect(screen.getByTestId("python-code").textContent).toBe("code-mid");
     expect(screen.getByText("think-last")).toBeTruthy();
-  });
-
-  it('detailsMode="last" — clicking a middle turn opens it with ALL inner blocks expanded', () => {
-    setToggleState({ detailsMode: "last" });
-    render(
-      <TimelineView
-        turnActive
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "older-think" }),
-          makeItem({ item_id: "1.1", kind: "agent_code", payload: "older-code" }),
-          makeItem({ item_id: "2.0", kind: "agent_chat", payload: "chat" }),
-          makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "newer-think" }),
-          makeItem({ item_id: "3.1", kind: "agent_code", payload: "newer-code" }),
-        ]}
-      />,
-    );
-    const runHeaders = screen.getAllByTestId("turn-toggle");
-    expect(runHeaders).toHaveLength(2);
-
-    expect(runHeaders[0].getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("older-think")).toBeNull();
-    expect(runHeaders[1].getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("newer-think")).toBeTruthy();
-    expect(screen.getByTestId("python-code").textContent).toBe("newer-code");
-
-    fireEvent.click(runHeaders[0]);
-    expect(runHeaders[0].getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("older-think")).toBeTruthy();
-    expect(screen.getAllByTestId("python-code")).toHaveLength(2);
-    expect(runHeaders[1].getAttribute("aria-expanded")).toBe("true");
-
-    fireEvent.click(screen.getAllByTestId("card-toggle")[0]);
-    expect(screen.queryByText("older-think")).toBeNull();
-    expect(screen.getAllByTestId("python-code")).toHaveLength(2);
   });
 });

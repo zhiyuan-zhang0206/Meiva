@@ -1,8 +1,7 @@
-exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline-colors.ts", "use-timeline.ts"]
+exports = ["timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline.ts"]
 
 [uses]
 "tests" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
-"timeline-colors.test.ts" = ["timeline-colors.ts"]
 "timeline-scenarios.test.ts" = ["timeline.ts"]
 "timeline-store.test.ts" = ["timeline-store.ts"]
 "timeline-store.ts" = ["timeline-store-events.ts"]
@@ -10,12 +9,10 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "timeline.test.ts" = ["timeline.ts"]
 "use-compact-history-retention.ts" = ["timeline-plan.ts", "timeline-store.ts"]
 "use-throttled-streaming.test.ts" = ["use-throttled-streaming.ts"]
-"use-timeline-colors.ts" = ["timeline-colors.ts"]
 "use-timeline.test.ts" = ["tests", "timeline-store.ts", "timeline.ts", "use-timeline.ts"]
 "use-timeline.ts" = ["timeline-plan.ts", "timeline-store.ts", "use-compact-history-retention.ts"]
 
 [purity]
-"timeline-colors.ts" = "strict"
 "timeline-plan.ts" = "strict"
 "timeline-store-events.ts" = "strict"
 "timeline-store.ts" = "strict"

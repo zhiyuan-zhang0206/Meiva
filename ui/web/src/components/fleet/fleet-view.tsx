@@ -1,3 +1,4 @@
+// meiva:note
 // Fleet view — full-screen supervision surface. Read-only over the agent and
 // task graphs; the only writes are InboxQueue's notice reply/dismiss.
 //
@@ -5,7 +6,7 @@
 // opening any conversation. The agents surface is the force-directed
 // relationship Graph: spawn/fork/resurrect lineage as the structural skeleton,
 // plus decaying agent-to-agent message traffic. Each node shows its current
-// self-reported activity and links straight to its conversation page for a
+// status and label and links straight to its conversation page for a
 // drill-down.
 //
 // Responsive: on desktop (>= lg / 1024px) the graph and the right-side Inbox sit
@@ -13,6 +14,7 @@
 // (graph), Tasks (task graph), Inbox (the unified notice queue) — become
 // full-screen tabs, each filling the viewport, with a tab bar at the bottom to
 // switch between them.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 
 "use client";
 

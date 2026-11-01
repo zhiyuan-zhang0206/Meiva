@@ -79,8 +79,8 @@ describe("SidebarFooter icon row", () => {
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const footer = screen.getByTestId("sidebar-footer");
     const classes = footer.className.split(" ");
-    for (const cls of ["border-t", "pt-2", "pb-3"]) expect(classes).toContain(cls);
-    for (const cls of ["pt-3", "pb-6"]) expect(classes).not.toContain(cls);
+    for (const cls of ["border-t", "py-1"]) expect(classes).toContain(cls);
+    for (const cls of ["pt-2", "pb-3", "pt-3", "pb-6"]) expect(classes).not.toContain(cls);
     const row = footer.firstElementChild!;
     expect(row.className.split(" ")).not.toContain("min-h-9");
   });

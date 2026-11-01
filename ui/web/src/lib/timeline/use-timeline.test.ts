@@ -34,7 +34,6 @@ import { realNetwork } from "../transport/tests/api/api-provider";
 import { UncancellableFetch } from "../transport/tests/api/api-provider";
 import { systemKeySource } from "../transport/system-transport";
 import { interactionTimingResetForTest } from "../format/interaction-timing";
-import { SETTINGS_QUERY_KEY } from "../state/use-user-settings";
 import type {
   Answer,
   SnapshotRead,
@@ -43,7 +42,6 @@ import type {
 } from "./tests/use-timeline-context";
 import { registerUseTimelinePaginationTests } from "./tests/use-timeline-pagination";
 import {
-  USER_SETTING_DEFAULTS,
   type BackendTimelineItem,
   type ConversationSnapshotResponse,
   type SystemEvent,
@@ -269,7 +267,6 @@ beforeEach(async () => {
   useTimelineStore.getState().switchThread(0, null, false);
   useTimelineStore.setState({ compactReplaceSeq: 0, compactReplaceAgent: null });
   queryClient.setQueryData(["config", null], { fields: [] });
-  seedSettings({});
 });
 
 afterEach(async () => {
@@ -283,10 +280,6 @@ afterEach(async () => {
   currentConnectionHandler = null;
   currentBatchHandler = null;
 });
-
-function seedSettings(overrides: Record<string, unknown>): void {
-  queryClient.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...overrides });
-}
 
 function setVisibility(next: DocumentVisibilityState): void {
   visibility = next;
@@ -484,7 +477,6 @@ describe("timeline ownership when a transport ignores abort", () => {
   it.each(["selection", "hidden", "compact", "unmount"])("%s rejects history decoded after its cancellation", async (cause) => {
     const fault = new UncancellableFetch();
     standingTimelineAnswer = resolves(tlResp([snapshotItem({ item_id: "5.0", payload: "current" })], true));
-    seedSettings({ "display.compact_history_sessions": 0 });
     rig = httpRig({ base: gateway.origin,
       fetch: (url, init) => {
         if (typeof url !== "string") throw new Error("the gateway factory must send a URL string");
@@ -550,7 +542,6 @@ const testContext: UseTimelineTestContext = {
   getQueryClient: () => queryClient,
   wallClock,
   wrapper,
-  seedSettings,
   setVisibility,
   delay: (ms = 0) => new Promise((r) => setTimeout(r, ms)),
 };

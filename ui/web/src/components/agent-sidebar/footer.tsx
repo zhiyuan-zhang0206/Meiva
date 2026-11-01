@@ -358,7 +358,7 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
   return (
     // meiva:note
     // The sidebar's own band, sized for its 28px icon row alone: rule (1) +
-    // pt-2 (8) + row (28) + pb-3 (12) = 49px. Its rule and the composer's are
+    // py-1 (4 + 4) + row (28) = 37px. Its rule and the composer's are
     // independent and never aligned by design (user ruling 2026-11-01), so
     // nothing here is derived from the composer's band — no shared primitive,
     // no minimum row height borrowed from the composer's controls, and no
@@ -366,7 +366,7 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
     <div
       data-testid="sidebar-footer"
-      className="border-t border-border px-2 pt-2 pb-3"
+      className="border-t border-border px-2 py-1"
     >
       <div className={cn("items-center justify-between", FLEX)}>
         <Popover.Root>

@@ -1,6 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setToggleState, setUserSettings } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
@@ -46,14 +46,16 @@ describe("ItemView: agent_chat", () => {
 });
 
 describe("ItemView: agent_code + agent_reasoning", () => {
-  it("agent_code renders PythonCode below an always-visible toggle chip", () => {
+  it("agent_code renders PythonCode below a monochrome 'Code' toggle chip without a line count", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_code", payload: "print(1)" })]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByTestId("python-code").textContent).toBe("print(1)");
-    expect(screen.getByText(/1 line of code/)).toBeTruthy();
+    expect(screen.getByText("Code")).toBeTruthy();
+    expect(screen.queryByText(/line of code/)).toBeNull();
   });
   it("keeps the highlighter pending, so a code block stays plain source", async () => {
     // meiva:note
@@ -62,6 +64,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
     const { container } = render(
       <TimelineView items={[makeItem({ kind: "agent_code", payload: "print(1)\nprint(2)" })]} />,
     );
+    revealCollapsedCards();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(container.querySelector("[data-testid='python-code'] .token")).toBeNull();
     expect(screen.getByTestId("python-code").textContent).toBe("print(1)\nprint(2)");
@@ -70,6 +73,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
   it("agent_code streamingCode=true on last item → PythonCode streaming=1", () => {
     render(
       <TimelineView
+        turnActive
         items={[makeItem({ kind: "agent_code", payload: "x" })]}
         streamingCode
       />,
@@ -82,6 +86,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
         items={[makeItem({ kind: "agent_reasoning", payload: "thinking..." })]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("thinking...");
     expect(screen.getByText("Thinking")).toBeTruthy();
   });
@@ -89,8 +94,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
 
 describe("ItemView: system_prompt", () => {
   const PROMPT = "You are Meiva.\nAct via execute_code.\nThird line.";
-  it("collapsed by default in 'none' mode: turn wraps the prompt unlabeled, body is hidden", () => {
-    setToggleState({ detailsMode: "none" });
+  it("collapsed by default: turn wraps the prompt unlabeled, body is hidden", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "system_prompt", payload: PROMPT, created_at: null })]}
@@ -99,33 +103,25 @@ describe("ItemView: system_prompt", () => {
     expect(screen.queryByText("system prompt")).toBeNull();
     expect(screen.getByTestId("turn-toggle")).toBeTruthy();
     expect(screen.queryByText(/Act via execute_code/)).toBeNull();
-    expect(screen.queryByText("· 3 lines")).toBeNull();
+    expect(screen.queryByText(/lines/)).toBeNull();
   });
-  it("clicking the turn toggle opens the prompt card collapsed; a second click expands it", () => {
-    setToggleState({ detailsMode: "none" });
+  it("clicking the turn toggle opens the prompt card collapsed without a line count; a second click expands it", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "system_prompt", payload: PROMPT, created_at: null })]}
       />,
     );
     fireEvent.click(screen.getByTestId("turn-toggle"));
-    expect(screen.getByText("· 3 lines")).toBeTruthy();
+    expect(screen.getByText("System prompt")).toBeTruthy();
+    expect(screen.queryByText(/lines/)).toBeNull();
     expect(screen.queryByText(/Act via execute_code/)).toBeNull();
     fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.getByText(/Act via execute_code/)).toBeTruthy();
   });
-  it("singular 'line' for a one-line prompt", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "system_prompt", payload: "just one line", created_at: null })]}
-      />,
-    );
-    expect(screen.getByText("· 1 line")).toBeTruthy();
-  });
 });
 
 describe("toggle chip: summary on expanded items", () => {
-  it("committed thinking chip shows 'Thought for' + tokens exactly once", () => {
+  it("committed thinking chip shows 'Thought for' without a token count", () => {
     render(
       <TimelineView
         items={[
@@ -138,13 +134,15 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getAllByText(/Thought for 8s/)).toHaveLength(1);
-    expect(screen.getByText(/1\.2k tokens/)).toBeTruthy();
+    expect(screen.queryByText(/tokens/)).toBeNull();
     expect(screen.getByText("ponder")).toBeTruthy();
   });
   it("streaming thinking chip shows live 'Thinking for'", () => {
     render(
       <TimelineView
+        turnActive
         items={[
           makeItem({
             kind: "agent_reasoning",
@@ -168,6 +166,7 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getAllByText(/Thought for 4s/)).toHaveLength(1);
     expect(screen.queryByText(/Thinking for/)).toBeNull();
   });
@@ -185,12 +184,14 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.queryByText(/Thinking for/)).toBeNull();
   });
   it("thinking with no timing data falls back to a plain 'Thinking' label", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_reasoning", payload: "ponder" })]} />,
     );
+    revealCollapsedCards();
     expect(screen.queryByText(/Thought for|Thinking for|tokens/)).toBeNull();
     expect(screen.getByText("Thinking")).toBeTruthy();
   });
@@ -209,6 +210,7 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getAllByText("files.read")).toHaveLength(2);
     expect(screen.getAllByText("shell.run")).toHaveLength(2);
     expect(screen.getAllByText(/× 2/)).toHaveLength(2);
@@ -217,9 +219,10 @@ describe("toggle chip: summary on expanded items", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_code", payload: "x = 1\nprint(x)" })]} />,
     );
+    revealCollapsedCards();
     expect(screen.queryByText(/×/)).toBeNull();
   });
-  it("code_output chip shows 'ran in Xs' exactly once when exec_ms present", () => {
+  it("code_output chip shows 'ran in Xs' without a line count when exec_ms present", () => {
     render(
       <TimelineView
         items={[
@@ -231,19 +234,24 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/Ran in 1s/)).toBeTruthy();
+    expect(screen.queryByText(/lines?/)).toBeNull();
   });
-  it("code_output without exec_ms shows no 'ran in' meta", () => {
+  it("code_output without exec_ms shows neutral 'Output' label and no 'ran in' meta", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "code_output", payload: "stdout: hi" })]}
       />,
     );
+    revealCollapsedCards();
+    expect(screen.getByText("Output")).toBeTruthy();
     expect(screen.queryByText(/Ran in/)).toBeNull();
   });
   it("streaming code_output chip shows live 'Running for' when execStartedAt is set", () => {
     render(
       <TimelineView
+        turnActive
         items={[
           makeItem({
             kind: "code_output",
@@ -268,6 +276,7 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.queryByText(/Running for/)).toBeNull();
   });
 });
@@ -437,36 +446,52 @@ describe("ItemView: code_output", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/Code execution output/)).toBeTruthy();
     expect(screen.getByText(/stdout: hi/)).toBeTruthy();
   });
 });
 
-describe("ItemView: configurable timeline colors (tasks #3304/#3312)", () => {
-  it("a seeded color override tints the marker header title without vertical accent bars", () => {
-    setUserSettings({ "display.color.note": "fuchsia" });
+describe("ItemView: monochrome secondary headers and turn child defaults", () => {
+  it("renders Memory and Note marker headers in the shared monochrome style without tinted classes", () => {
     const { container } = render(
       <TimelineView
         items={[
           makeItem({
+            item_id: "1.0",
+            kind: "system_marker",
+            source: "memory",
+            payload: "[memory] recalled fact",
+          }),
+          makeItem({
+            item_id: "1.1",
             kind: "system_marker",
             source: "sdk_hint",
-            payload: "[note] palette override",
+            payload: "[note] monochrome note",
           }),
         ]}
       />,
     );
-    const labelWrapper = screen.getByText("Note").parentElement;
-    expect(labelWrapper?.className).toContain("text-fuchsia-700");
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    const memoryWrapper = screen.getByText("Memory").parentElement;
+    const noteWrapper = screen.getByText("Note").parentElement;
+    expect(memoryWrapper?.className).not.toContain("violet");
+    expect(memoryWrapper?.className).not.toContain("uppercase");
+    expect(noteWrapper?.className).not.toContain("fuchsia");
     expect(container.querySelector('[data-testid="card-accent"]')).toBeNull();
   });
 
-  it("renders non-user-facing agent_chat as a collapsible secondary card inside a turn", () => {
-    setToggleState({ detailsMode: "none" });
+  it("renders non-user-facing agent_chat inside a turn expanded by default while keeping other secondary steps collapsed", () => {
     const { container } = render(
       <TimelineView
         items={[
           makeItem({
+            item_id: "1.0",
+            kind: "agent_reasoning",
+            payload: "hidden reasoning",
+          }),
+          makeItem({
+            item_id: "1.1",
             kind: "agent_chat",
             user_facing: false,
             payload: "internal background note",
@@ -476,9 +501,12 @@ describe("ItemView: configurable timeline colors (tasks #3304/#3312)", () => {
     );
     expect(container.querySelector('[data-testid="agent-message-prose"]')).toBeNull();
     fireEvent.click(screen.getByTestId("turn-toggle"));
-    const cardToggle = screen.getByTestId("card-toggle");
-    expect(cardToggle.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(cardToggle);
+    const toggles = screen.getAllByTestId("card-toggle");
+    expect(toggles[0].getAttribute("aria-expanded")).toBe("false");
+    expect(toggles[1].getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByText("hidden reasoning")).toBeNull();
     expect(screen.getByText("internal background note")).toBeTruthy();
+    fireEvent.click(toggles[1]);
+    expect(screen.queryByText("internal background note")).toBeNull();
   });
 });

@@ -13,7 +13,6 @@ from base.config import settings
 from base.db import Database
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
-from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.compact_flow import (
     FIRST_REPLY,
     POST_COMPACT_NARRATION,
@@ -99,8 +98,6 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(
     agent_id = e2e_env.agent_id
     unrecognized_warnings = _collect_unrecognized_console_warnings(page)
 
-    pin_expand_runs_all(e2e_env.gateway_url)
-
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
@@ -119,10 +116,17 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(
 
     _assert_compact_request_finalized(agent_id)
 
+    page.wait_for_selector(f"text={POST_COMPACT_NARRATION}", timeout=15_000)
+    wait_for_status(agent_id, AgentStatus.IDLING.value)
+    page.evaluate(
+        """() => {
+          for (const btn of document.querySelectorAll('[data-testid="turn-toggle"][data-expanded="false"]')) {
+            btn.click();
+          }
+        }"""
+    )
     page.wait_for_selector("text=Compact request", timeout=15_000)
     _assert_no_unrecognized_alarm_after_compact(page, unrecognized_warnings)
-
-    page.wait_for_selector(f"text={POST_COMPACT_NARRATION}", timeout=15_000)
 
     page.fill('[data-testid="composer-input"]', "\u8fd8\u5728\u5417")
     page.click('[data-testid="composer-send"]')

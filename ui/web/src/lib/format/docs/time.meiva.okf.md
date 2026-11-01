@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Timestamp display
-description: The shared timestamp formatters, the clock-format, zone-name and date-format settings, and the day-context rules for an upcoming instant.
+description: The shared timestamp formatters, the clock-format and date-format settings, and the day-context rules for an upcoming instant.
 tags: [frontend, contracts]
 ---
 
@@ -10,19 +10,18 @@ tags: [frontend, contracts]
 `time.ts` is the single owner of turning an ISO instant into text a person
 reads. Views see browser-local time — the viewer's zone, deliberately unlike the
 cluster timezone an agent sees. Four shapes, one job each: `formatAbsolute`
-(full precision, zone name optional), `formatShort` (compact rows),
+(full precision in local time, without appending a timezone name), `formatShort` (compact rows),
 `formatRelative` (one signed wording, `in 4m` / `5m ago`) and `formatUpcoming`
 (an upcoming instant with its day context).
 
-## Clock format, zone name and date format
+## Clock format and date format
 
-Three `display.*` user settings drive every clock render. Their defaults are what
+Two `display.*` user settings drive every clock render. Their defaults are what
 a viewer who never opened Display settings sees.
 
 | Setting               | Values          | Default | Effect                                                              |
 | --------------------- | --------------- | ------- | ------------------------------------------------------------------- |
 | `display.clock_format` | `24h` \| `12h` | `24h`   | `15:45` vs `3:45 PM` on every clock surface                          |
-| `display.show_timezone` | boolean       | `false` | `formatAbsolute` appends `GMT+8` / `PDT` / `UTC`; off shows the clock alone |
 | `display.date_format`  | `absolute` \| `relative` | `absolute` | `formatFuture` on a future instant: `Tomorrow 15:21` vs `in 22h` |
 
 `formatFuture` is the one place that absolute/relative choice is made: it renders
@@ -35,14 +34,11 @@ heartbeat, which then carried a relative span as its sub line).
 `formatClockText` owns the 12/24-hour choice for the viewer's local zone;
 `formatShort` and the run-timeline axis labels compose it. `formatUpcoming`
 renders through `Intl` because it accepts an explicit zone, and takes the same
-`clockFormat`. Components read both keys through `useTimeFormat` — a literal
+`clockFormat`. Components read the clock format through `useTimeFormat` — a literal
 `hour12` at a call site is a bug. A missing key means the default, not an error:
 `user_settings` stores only what the viewer changed, so an old row renders
-24-hour with no zone name.
-
-The zone name is noise in a single-zone deployment (the viewer's own clock is
-implied context), which is why it is opt-in. `GMT+8` appears only when the
-viewer turns it on.
+24-hour. Timezone names (`GMT+8`, `PDT`, `UTC`) are never appended to timestamps
+(user ruling 2026-11-01).
 
 ## Why day context
 

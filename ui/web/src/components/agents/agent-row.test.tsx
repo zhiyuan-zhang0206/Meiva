@@ -104,7 +104,6 @@ const baseProps = {
   label: undefined,
   active: false,
   pending: undefined,
-  wide: false,
   onSelect: noop,
   onTerminate: noop,
   onForceExpire: noop,

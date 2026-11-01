@@ -11,17 +11,6 @@ import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
   transport.getCommands.mockImplementation((_agentId?: number | null) => Promise.resolve(commandList));
-  transport.getContextBreakdown.mockImplementation(() =>
-      Promise.resolve({
-        total_input_tokens: 1000,
-        estimated: false,
-        exact_fraction: 1,
-        max_input_tokens: 1_000_000,
-        soft_compact_tokens: 600_000,
-        hard_compact_tokens: 800_000,
-        sections: [],
-        categories: [{ kind: "system_prompt", tokens: 1000, estimated: false, exact_fraction: 1 }],
-      }));
 });
 
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
@@ -47,7 +36,6 @@ afterEach(() => {
 const diagnostics = { warn: vi.fn<(message: string) => void>(), error: vi.fn<(message: string, cause: unknown) => void>() };
 const baseProps = {
   diagnostics,
-  contextTokens: 0,
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),
 };
@@ -60,8 +48,6 @@ function renderComposerTree(
   if (failStorage !== undefined) browser.failStorage("session", failStorage);
   return renderWithProviders(ui, { browser, wallNow });
 }
-
-const renderComposer = renderComposerTree;
 
 describe("Composer input lifecycle", () => {
   it("send succeeds (returns true) → input cleared", async () => {
@@ -347,105 +333,5 @@ describe("Composer input lifecycle", () => {
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
-  });
-});
-
-describe("Composer context meter (opt-in)", () => {
-  it("renders no context readout by default — those numbers live in the inspector", () => {
-    renderComposerTree(
-      <Composer
-        {...baseProps}
-        mode="idle"
-        contextTokens={26000}
-        maxContextTokens={1000000}
-        softCompactTokens={600000}
-        hardCompactTokens={800000}
-      />,
-    );
-    expect(screen.queryByTestId("context-meter")).toBeNull();
-    expect(screen.queryByTestId("context-meter-button")).toBeNull();
-    expect(screen.queryByTestId("context-meter-ghost")).toBeNull();
-    expect(screen.queryByTestId("composer-meta")).toBeNull();
-  });
-  it("renders no meta line when the agent has no LLM call yet and no hint", () => {
-    renderComposerTree(<Composer {...baseProps} mode="idle" contextTokens={0} showContextMeter />);
-    expect(screen.queryByTestId("composer-meta")).toBeNull();
-  });
-  it("shows the loading ghost while the token snapshot is pending (cold switch)", () => {
-    renderComposer(
-      <Composer {...baseProps} mode="idle" contextTokens={0} contextPending showContextMeter />,
-    );
-    expect(screen.getByTestId("context-meter-ghost")).toBeTruthy();
-    expect(screen.queryByTestId("context-meter-button")).toBeNull();
-    expect(screen.getByTestId("composer-meta").textContent).toBe("");
-  });
-  it("shows the bare gauge — never the numeric readout — when opted in", () => {
-    renderComposer(
-      <Composer
-        {...baseProps}
-        mode="idle"
-        contextTokens={26000}
-        maxContextTokens={1000000}
-        softCompactTokens={600000}
-        hardCompactTokens={800000}
-        showContextMeter
-      />,
-    );
-    const span = screen.getByTestId("composer-meta");
-    expect(span.querySelector('[data-testid="context-meter"]')).toBeTruthy();
-    expect(span.textContent).toBe("");
-  });
-});
-
-describe("Composer context breakdown panel", () => {
-  it("expands anchored above the meta row; the composer input stays interactive", async () => {
-    renderComposer(
-      <Composer
-        {...baseProps}
-        mode="idle"
-        contextTokens={26000}
-        maxContextTokens={1000000}
-        softCompactTokens={600000}
-        hardCompactTokens={800000}
-        showContextMeter
-        agentId={7}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("context-meter-button"));
-    const panel = await screen.findByTestId("context-breakdown-panel");
-    expect(panel.className).toContain("absolute");
-    expect(panel.className).toContain("bottom-full");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
-    expect(ta.disabled).toBe(false);
-    fireEvent.change(ta, { target: { value: "still typing" } });
-    expect(ta.value).toBe("still typing");
-    fireEvent.click(screen.getByTestId("context-breakdown-close"));
-    expect(screen.queryByTestId("context-breakdown-panel")).toBeNull();
-    expect(ta.value).toBe("still typing");
-  });
-  it("is mutually exclusive with the slash dropdown (single popover state)", async () => {
-    commandList = [{ name: "recap", description: "recap the thread", instruction_hint: "" }];
-    renderComposer(
-      <Composer
-        {...baseProps}
-        mode="idle"
-        contextTokens={26000}
-        maxContextTokens={1000000}
-        softCompactTokens={600000}
-        hardCompactTokens={800000}
-        showContextMeter
-        agentId={7}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("context-meter-button"));
-    await screen.findByTestId("context-breakdown-panel");
-    const ta = screen.getByTestId("composer-input");
-    fireEvent.change(ta, { target: { value: "/rec" } });
-    await screen.findByTestId("slash-autocomplete");
-    expect(screen.queryByTestId("context-breakdown-panel")).toBeNull();
-    fireEvent.click(screen.getByTestId("context-meter-button"));
-    await screen.findByTestId("context-breakdown-panel");
-    expect(screen.queryByTestId("slash-autocomplete")).toBeNull();
   });
 });

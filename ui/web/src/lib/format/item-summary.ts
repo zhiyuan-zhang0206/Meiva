@@ -1,10 +1,11 @@
+// meiva:note
 // Pure summarizers for the toggle chips (timeline/toggle-chip).
 //
 // Every Thinking / Code / Output item carries an always-visible chip header
 // with a one-line glanceable summary, so the user keeps a sense of what the
 // agent did even while the content below is collapsed. These functions derive
-// that summary from the item payload; they are pure (no React) so the heavy
-// parsing stays vitest-testable and memoizable.
+// that summary from item metadata; they are pure (no React) so sorting and
+// duration formatting stay vitest-testable and memoizable.
 
 /** One SDK method's call count in a code block, e.g.
  *  `{ method: "files.read", count: 3 }` for `meiva.files.read(...)` ×3. */
@@ -23,14 +24,6 @@ export interface CodeSummary {
   readonly calls: readonly SdkCall[];
   /** Total `meiva.*` call sites (sum of `calls[].count`). */
   readonly totalCalls: number;
-  /** Non-blank line count of the snippet — shown when there are no recorded
-   *  calls. */
-  readonly lines: number;
-}
-
-export interface OutputSummary {
-  readonly lines: number;
-  readonly chars: number;
 }
 
 /** The first dotted segment of a method; an undotted method is its own namespace. */
@@ -51,26 +44,15 @@ export function orderSdkCalls(calls: readonly SdkCall[]): SdkCall[] {
   );
 }
 
-export function summarizeCode(
-  payload: string,
-  sdkCalls?: readonly SdkCall[] | null,
-): CodeSummary {
+export function summarizeCode(sdkCalls?: readonly SdkCall[] | null): CodeSummary {
+  // meiva:note
   // Calls come only from the backend's recorded tally — the SDK-call
   // metadata projected onto the item; the runtime that executed the snippet
-  // counted its real calls. No text scanning, not even as a streaming
-  // fallback: while the field is absent the chip shows the line count alone.
+  // counted its real calls. No text scanning, not even while streaming.
   const calls = orderSdkCalls(sdkCalls ?? []);
   return {
     calls,
     totalCalls: calls.reduce((sum, c) => sum + c.count, 0),
-    lines: nonBlankLineCount(payload),
-  };
-}
-
-export function summarizeOutput(payload: string): OutputSummary {
-  return {
-    lines: lineCount(payload),
-    chars: payload.length,
   };
 }
 
@@ -88,15 +70,4 @@ export function formatDuration(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = Math.round(totalSec % 60);
   return s === 0 ? `${m}m` : `${m}m ${s}s`;
-}
-
-function lineCount(s: string): number {
-  if (s === "") return 0;
-  // Trailing newline is a terminator, not an extra empty line.
-  const body = s.endsWith("\n") ? s.slice(0, -1) : s;
-  return body.split("\n").length;
-}
-
-function nonBlankLineCount(s: string): number {
-  return s.split("\n").filter((l) => l.trim() !== "").length;
 }

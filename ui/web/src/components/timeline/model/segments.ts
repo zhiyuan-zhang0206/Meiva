@@ -1,63 +1,86 @@
+import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
-import { groupIntoTurns, type TimelineGroup } from "./runs";
+import {
+  classifyItem,
+  isSilentTimelineItem,
+  summarizeTurn,
+  type TurnSummary,
+} from "./runs";
 
-export interface RenderGroup {
-  readonly group: TimelineGroup;
-  readonly indexOffset: number;
+export interface RankedTimelineItem {
+  readonly item: BackendTimelineItem;
+  readonly source: "buffer" | "canonical";
   readonly rank: number;
+  readonly index: number;
 }
 
-function segmentKey(item: BackendTimelineItem, rank: number): string {
-  const parts = parseItemIdParts(item.item_id);
-  return rank > 0 ? `${rank}:${parts?.checkpointId ?? ""}` : "current";
-}
+export type RankedTimelineGroup =
+  | {
+      readonly kind: "single";
+      readonly member: RankedTimelineItem;
+    }
+  | {
+      readonly kind: "turn";
+      readonly members: readonly RankedTimelineItem[];
+      readonly summary: TurnSummary;
+    };
 
-/** Keep collapsible runs inside one compact segment without changing items. */
+// meiva:note
+// Group the continuous display stream into maximal secondary TurnBlocks in one
+// single pass across compact boundaries and transition buffers, while retaining
+// each member's own (source, rank, index) for scroll anchors and DOM windowing.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/continuous-segments.meiva.okf.md
 export function groupTimelineSegments(
-  items: readonly BackendTimelineItem[],
-  rankAt: (item: BackendTimelineItem, index: number) => number =
-    (item) => parseItemIdParts(item.item_id)?.rank ?? 0,
-): RenderGroup[] {
-  const result: RenderGroup[] = [];
-  let start = 0;
-  while (start < items.length) {
-    const rank = rankAt(items[start], start);
-    const key = segmentKey(items[start], rank);
-    let end = start + 1;
-    while (end < items.length && segmentKey(items[end], rankAt(items[end], end)) === key) end += 1;
-    const segment = items.slice(start, end);
-    const summaryIndex = rank > 0
-      ? segment.findIndex((item) => item.kind === "inbound_compact_summary")
-      : -1;
-    const prefixGroups = summaryIndex > 0
-      ? groupIntoTurns(segment.slice(0, summaryIndex), {
-          collapseTurns: true,
-          liveIndex: null,
-        })
-      : [];
-    const summaryGroups = summaryIndex >= 0
-      ? groupIntoTurns(segment.slice(summaryIndex, summaryIndex + 1), {
-          collapseTurns: true,
-          liveIndex: null,
-        })
-      : [];
-    const rawStart = summaryIndex >= 0 ? summaryIndex + 1 : 0;
-    const rawGroups = groupIntoTurns(segment.slice(rawStart), {
-      collapseTurns: true,
-      liveIndex: null,
+  canonicalItems: readonly BackendTimelineItem[],
+  compactBuffer: CompactTransitionBuffer | null = null,
+  currentItems: readonly BackendTimelineItem[] = canonicalItems,
+): RankedTimelineGroup[] {
+  const ranked: RankedTimelineItem[] = compactBuffer
+    ? [
+        ...compactBuffer.rows.map((row, index) => ({
+          item: row.item,
+          source: "buffer" as const,
+          rank: row.rank,
+          index,
+        })),
+        ...currentItems.map((item, offset) => ({
+          item,
+          source: "canonical" as const,
+          rank: parseItemIdParts(item.item_id)?.rank ?? 0,
+          index: compactBuffer.rows.length + offset,
+        })),
+      ]
+    : canonicalItems.map((item, index) => ({
+        item,
+        source: "canonical" as const,
+        rank: parseItemIdParts(item.item_id)?.rank ?? 0,
+        index,
+      }));
+
+  const groups: RankedTimelineGroup[] = [];
+  let run: RankedTimelineItem[] = [];
+
+  const flush = () => {
+    if (run.length === 0) return;
+    groups.push({
+      kind: "turn",
+      members: run,
+      summary: summarizeTurn(run.map((m) => m.item)),
     });
-    for (const group of prefixGroups) {
-      result.push({ group, indexOffset: start, rank });
+    run = [];
+  };
+
+  for (const member of ranked) {
+    if (isSilentTimelineItem(member.item)) continue;
+    if (classifyItem(member.item) === "secondary") {
+      run.push(member);
+    } else {
+      flush();
+      groups.push({ kind: "single", member });
     }
-    for (const group of summaryGroups) {
-      result.push({ group, indexOffset: start + summaryIndex, rank });
-    }
-    for (const group of rawGroups) {
-      result.push({ group, indexOffset: start + rawStart, rank });
-    }
-    start = end;
   }
-  return result;
+  flush();
+  return groups;
 }

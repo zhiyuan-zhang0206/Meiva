@@ -225,7 +225,7 @@ function DesktopSidebar(props: DesktopProps) {
           </>
         }
       />
-      <SidebarBody {...props} wide />
+      <SidebarBody {...props} />
       <SidebarFooter activeAgentId={props.activeId} />
     </aside>
   );
@@ -268,7 +268,7 @@ function MobileSidebar(props: MobileProps) {
             </>
           }
         />
-        <SidebarBody {...props} wide />
+        <SidebarBody {...props} />
         <SidebarFooter activeAgentId={props.activeId} />
       </aside>
     </div>

@@ -15,8 +15,8 @@ height on controls.
 
 ## Footer icon row
 
-The row sits in the sidebar's own compact band (rule, `pt-2`, the 28px icon
-row, `pb-3`). Its rule is independent of the composer's and never aligned with
+The row sits in the sidebar's own compact band (rule and `py-1` around the 28px
+icon row — 37px). Its rule is independent of the composer's and never aligned with
 it by design; it neither shares the composer's band nor follows the composer's
 height (user ruling 2026-11-01;
 [[ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md|Bottom rules]]).
@@ -79,9 +79,10 @@ silently disappear on a phone.
 
 Collapsed hides the column entirely; the title bar's PanelLeft button restores
 it. The list is stably sorted by agent ID descending and status or activity
-changes never re-sort it. Status dot, activity line and awaiting badge are
-opt-in (`display.show_agent_status` / `display.show_activity_line` /
-`notification.awaiting_reply`, default off). Status arrives over SSE. Every
-home entry expands the rail once: the one-time reset lives in `HomeShell`
-(which survives layout-frame switches while the sidebar remounts) and waits for
-the persisted settings, so a cold load with `collapsed=true` still expands.
+changes never re-sort it. Status dot and awaiting badge are opt-in
+(`display.show_agent_status` / `notification.awaiting_reply`, default off;
+single-line agent rows carry no secondary activity line, user ruling 2026-11-01).
+Status arrives over SSE. Every home entry expands the rail once: the one-time
+reset lives in `HomeShell` (which survives layout-frame switches while the
+sidebar remounts) and waits for the persisted settings, so a cold load with
+`collapsed=true` still expands.

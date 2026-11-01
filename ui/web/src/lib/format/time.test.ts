@@ -127,7 +127,7 @@ describe("formatUpcoming input handling", () => {
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 const INSTANT = "2026-10-17T08:26:07.250Z";
 
-describe("formatAbsolute clock format and zone name", () => {
+describe("formatAbsolute clock format", () => {
   it("renders 24-hour text without a zone name by default", () => {
     expect(formatAbsolute(INSTANT)).toBe("2026-10-17 08:26:07");
   });
@@ -136,15 +136,8 @@ describe("formatAbsolute clock format and zone name", () => {
     expect(formatAbsolute(INSTANT, { weekday: true })).toBe("2026-10-17 Sat 08:26:07");
   });
 
-  it("appends the zone name only when showTimeZone is on", () => {
-    expect(formatAbsolute(INSTANT, { showTimeZone: true })).toBe("2026-10-17 08:26:07 UTC");
-  });
-
   it("renders a 12-hour clock when the viewer picked it", () => {
     expect(formatAbsolute(INSTANT, { clockFormat: "12h" })).toBe("2026-10-17 8:26:07 AM");
-    expect(formatAbsolute(INSTANT, { clockFormat: "12h", showTimeZone: true })).toBe(
-      "2026-10-17 8:26:07 AM UTC",
-    );
   });
 
   it("returns an empty string for an unparseable iso", () => {

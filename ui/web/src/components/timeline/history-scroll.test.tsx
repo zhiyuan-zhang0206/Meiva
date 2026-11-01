@@ -73,7 +73,7 @@ beforeEach(() => {
   client.setQueryData(["timeline", 42], response);
   client.setQueryData(["timeline", 43], response);
   client.setQueryData(["config", null], { fields: [] });
-  client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.expand_runs_mode": "all" });
+  client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS });
   useTimelineStore.getState().switchThread(null, null, false);
   top = 0;
   height = 5000;

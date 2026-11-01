@@ -45,11 +45,12 @@ export function resolveSavedTimelineAnchor(
 ) {
   const id = CSS.escape(anchor.itemId);
   const rank = anchor.rank;
+  const rankId = CSS.escape(`${rank}:${anchor.itemId}`);
   const exact = viewport.querySelector<HTMLElement>(
     `.timeline-item[data-item-id="${id}"][data-display-rank="${rank}"], [data-turn-expanded="false"][data-item-id="${id}"][data-display-rank="${rank}"]`,
   );
   const collapsed = exact ? null : viewport.querySelector<HTMLElement>(
-    `[data-turn-expanded="false"][data-turn-member-ids~="${id}"][data-display-rank="${rank}"]`,
+    `[data-turn-expanded="false"][data-turn-member-ranks~="${rankId}"], [data-turn-expanded="false"][data-turn-member-ids~="${id}"][data-display-rank="${rank}"]`,
   );
   const buffered = compactBuffer?.rows.some((row) => row.rank === rank && row.item.item_id === anchor.itemId) === true;
   const canonical = canonicalItems.some((item) => item.item_id === anchor.itemId &&
@@ -86,6 +87,7 @@ export interface WindowGroup {
   key: string;
   rank: number;
   itemIds: readonly string[];
+  memberRankKeys?: readonly string[];
   estimatedHeight: number;
   expandedRows: readonly string[] | null;
 }
@@ -290,7 +292,12 @@ export function useTimelineWindow({
   const sizes = groups.map((group) => heights.get(group.key) ?? group.estimatedHeight);
   const pin = pendingAnchor ?? (visiblePin?.identity === identity ? visiblePin : null);
   const pinnedIndex = pin
-    ? groups.findIndex((group) => group.rank === pin.rank && group.itemIds.includes(pin.id)) : -1;
+    ? groups.findIndex((group) =>
+        group.memberRankKeys
+          ? group.memberRankKeys.includes(`${pin.rank}:${pin.id}`)
+          : group.rank === pin.rank && group.itemIds.includes(pin.id),
+      )
+    : -1;
   const range = (() => {
     if (!enabled) return { start: 0, end: groups.length, before: 0, after: 0 };
     if (view.height <= 0) {

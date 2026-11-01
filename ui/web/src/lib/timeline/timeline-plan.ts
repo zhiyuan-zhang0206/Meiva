@@ -73,7 +73,3 @@ export function findOldestTimelineCursor(
 export function computeOlderPageLimit(olderBaseLimit: number, olderFetchCount: number): number {
   return Math.min(olderBaseLimit * Math.pow(2, olderFetchCount), 1000);
 }
-
-export function normalizeCompactHistorySessions(raw: unknown): number {
-  return typeof raw === "number" && Number.isInteger(raw) && raw >= -1 ? raw : 1;
-}

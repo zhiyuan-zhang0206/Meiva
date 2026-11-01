@@ -46,7 +46,6 @@ describe("useTimeFormat", () => {
     const { wrapper } = createSettingsRig();
     const { result } = renderHook(() => useTimeFormat(), { wrapper });
     expect(result.current.clockFormat).toBe("24h");
-    expect(result.current.showTimeZone).toBe(false);
     expect(result.current.formatAbsolute(INSTANT)).toBe("2026-10-17 08:26:07");
     expect(result.current.formatShort(INSTANT)).toBe("10/17 08:26");
   });
@@ -54,11 +53,9 @@ describe("useTimeFormat", () => {
   it("treats missing keys as the defaults (a viewer who never changed them)", () => {
     const { wrapper } = createSettingsRig({
       "display.clock_format": undefined,
-      "display.show_timezone": undefined,
     });
     const { result } = renderHook(() => useTimeFormat(), { wrapper });
     expect(result.current.clockFormat).toBe("24h");
-    expect(result.current.showTimeZone).toBe(false);
     expect(
       result.current.formatUpcoming(
         "2026-10-18T15:21:00Z",
@@ -67,15 +64,13 @@ describe("useTimeFormat", () => {
     ).toBe("Tomorrow 15:21");
   });
 
-  it("follows the stored clock format and zone-name switch", () => {
+  it("follows the stored clock format", () => {
     const { wrapper } = createSettingsRig({
       "display.clock_format": "12h",
-      "display.show_timezone": true,
     });
     const { result } = renderHook(() => useTimeFormat(), { wrapper });
     expect(result.current.clockFormat).toBe("12h");
-    expect(result.current.showTimeZone).toBe(true);
-    expect(result.current.formatAbsolute(INSTANT)).toBe("2026-10-17 8:26:07 AM UTC");
+    expect(result.current.formatAbsolute(INSTANT)).toBe("2026-10-17 8:26:07 AM");
     expect(result.current.formatShort(INSTANT)).toBe("10/17 8:26 AM");
   });
 

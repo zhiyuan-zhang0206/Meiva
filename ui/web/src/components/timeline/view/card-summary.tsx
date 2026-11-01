@@ -6,7 +6,6 @@ import {
   FilePen,
   FileText,
   Search,
-  Settings,
   Sparkles,
   Terminal,
   Wrench,
@@ -16,11 +15,9 @@ import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
-import { formatTokensCompact } from "@/lib/format/format-number";
 import {
   formatDuration,
   summarizeCode,
-  summarizeOutput,
   type SdkCall,
 } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
@@ -113,12 +110,10 @@ function renderToolIcon(source: string | null | undefined, className: string): R
 
 export function Summary({
   item,
-  payload,
   now,
   live,
 }: {
   item: BackendTimelineItem;
-  payload: string;
   now: number;
   live: boolean;
 }) {
@@ -126,31 +121,12 @@ export function Summary({
     case "agent_reasoning":
       return <ThinkingSummary item={item} now={now} live={live} />;
     case "agent_code":
-      return <CodeSummary item={item} payload={payload} now={now} />;
+      return <CodeSummary item={item} now={now} />;
     case "code_output":
-      return <OutputSummary item={item} payload={payload} now={now} />;
-    case "system_prompt":
-      return <SystemPromptSummary payload={payload} />;
+      return <OutputSummary item={item} now={now} />;
     default:
       return null;
   }
-}
-
-function SystemPromptSummary({ payload }: { payload: string }) {
-  const t = useTranslations("timeline");
-  const body = payload.endsWith("\n") ? payload.slice(0, -1) : payload;
-  const lines = body === "" ? 0 : body.split("\n").length;
-  return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Settings className="size-3.5 shrink-0" />
-      <span className="truncate">
-        {t("systemPrompt")}
-        <span className="opacity-60">
-          {` · ${t("lineCount", { count: lines, unit: t(lines === 1 ? "line" : "lines") })}`}
-        </span>
-      </span>
-    </span>
-  );
 }
 
 function ThinkingSummary({
@@ -163,15 +139,9 @@ function ThinkingSummary({
   live: boolean;
 }) {
   const t = useTranslations("timeline");
-  const tokens =
-    item.reasoning_tokens != null
-      ? t("tokens", { count: formatTokensCompact(item.reasoning_tokens) })
-      : null;
 
   let label: string;
-  if (item.llmWaiting && item.reasoningStartedAt != null) {
-    label = t("waitingForModel", { duration: formatDuration(now - item.reasoningStartedAt) });
-  } else if (live && item.reasoningStartedAt != null) {
+  if (live && item.reasoningStartedAt != null) {
     label = t("thinkingFor", { duration: formatDuration(now - item.reasoningStartedAt) });
   } else if (item.reasoning_ms != null) {
     label = t("thoughtFor", { duration: formatDuration(item.reasoning_ms) });
@@ -184,33 +154,29 @@ function ThinkingSummary({
   return (
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
       <Sparkles className={cn("size-3.5 shrink-0", live && "text-sky-500")} />
-      <span className="truncate tabular-nums">
-        {label}
-        {tokens ? <span className="opacity-60"> · {tokens}</span> : null}
-      </span>
+      <span className="truncate tabular-nums">{label}</span>
     </span>
   );
 }
 
 function CodeSummary({
   item,
-  payload,
   now,
 }: {
   item: BackendTimelineItem;
-  payload: string;
   now: number;
 }) {
+  const t = useTranslations("timeline");
   const isExternalTool = Boolean(item.source && item.source !== "execute_code");
-  const { calls, lines } = summarizeCode(payload, isExternalTool ? null : item.sdk_calls);
+  const { calls } = summarizeCode(isExternalTool ? null : item.sdk_calls);
 
   let timing: string | null = null;
   const liveCode = isLiveCode(item);
   const codeElapsed = item.code_elapsed_ms ?? item.codeElapsedMs;
   if (liveCode && item.codeStartedAt != null) {
-    timing = `Writing code for ${formatDuration(now - item.codeStartedAt)}`;
+    timing = t("writingCodeFor", { duration: formatDuration(now - item.codeStartedAt) });
   } else if (codeElapsed != null) {
-    timing = `Wrote code for ${formatDuration(codeElapsed)}`;
+    timing = t("wroteCodeFor", { duration: formatDuration(codeElapsed) });
   }
 
   if (isExternalTool) {
@@ -220,7 +186,6 @@ function CodeSummary({
         <span className="truncate tabular-nums">
           {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
           <span className="text-foreground/80">{item.source}</span>
-          <span className="opacity-60">{` · ${lines} ${lines === 1 ? "line" : "lines"}`}</span>
         </span>
       </span>
     );
@@ -230,16 +195,18 @@ function CodeSummary({
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
       <Code2 className={cn("size-3.5 shrink-0", liveCode && "text-sky-500")} />
       <span className="truncate tabular-nums">
-        {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
         {calls.length > 0 ? (
-          calls.map((c, i) => (
-            <span key={c.method}>
-              {i > 0 ? <span className="opacity-40"> · </span> : null}
-              <CallBadge call={c} />
-            </span>
-          ))
+          <>
+            {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
+            {calls.map((c, i) => (
+              <span key={c.method}>
+                {i > 0 ? <span className="opacity-40"> · </span> : null}
+                <CallBadge call={c} />
+              </span>
+            ))}
+          </>
         ) : (
-          <span className="opacity-80">{`${lines} ${lines === 1 ? "line" : "lines"} of code`}</span>
+          timing ?? t("code")
         )}
       </span>
     </span>
@@ -254,18 +221,6 @@ export const HEADER_CLS =
   "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
   "transition-colors select-none rounded-tr-sm";
 
-// meiva:note
-// Sticky header contract shared by the expandable surfaces: CardHeader
-// (top-level message cards) and the work-block header in run-block.tsx. When
-// expanded, the header pins below the floating HeaderBar — top-11 must match
-// BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout (h-11 = 44px), the same
-// line findClosestStuckHeaderId measures against. A work block's child card
-// pins one level deeper instead (STICKY_CHILD_HEADER_CLS in card.tsx). While
-// `isStuck`, the header switches to the elevated frosted-glass surface over the
-// body scrolling beneath it; the resting header remains transparent.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
-export const STICKY_HEADER_CLS = "sticky top-11 z-10";
-
 export function CallBadge({ call }: { call: SdkCall }) {
   return (
     <span>
@@ -275,9 +230,8 @@ export function CallBadge({ call }: { call: SdkCall }) {
   );
 }
 
-function OutputSummary({ item, payload, now }: { item: BackendTimelineItem; payload: string; now: number }) {
+function OutputSummary({ item, now }: { item: BackendTimelineItem; now: number }) {
   const t = useTranslations("timeline");
-  const { lines } = summarizeOutput(payload);
   const liveExec = isLiveExecution(item);
   const execMs = item.exec_ms ?? item.execElapsedMs;
   let ran: string | null = null;
@@ -289,10 +243,7 @@ function OutputSummary({ item, payload, now }: { item: BackendTimelineItem; payl
   return (
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
       <Terminal className={cn("size-3.5 shrink-0", liveExec && "text-sky-500")} />
-      <span className="truncate tabular-nums">
-        {ran ? <>{ran}<span className="opacity-60">{" · "}</span></> : null}
-        {t("lineCount", { count: lines, unit: t(lines === 1 ? "line" : "lines") })}
-      </span>
+      <span className="truncate tabular-nums">{ran ?? t("output")}</span>
     </span>
   );
 }

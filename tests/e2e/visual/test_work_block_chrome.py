@@ -23,7 +23,6 @@ from tests.e2e.visual.stubbed_home import (
 
 TOLERANCE_PX = 1
 EXPANDED_SETTINGS: list[dict[str, object]] = [
-    {"key": "display.expand_runs_mode", "value": "all"},
     {"key": "display.show_timestamp_weekday", "value": True},
 ]
 
@@ -110,6 +109,22 @@ def _open_work_block(browser: Browser, base_url: str, width: int = 1280):
     )
     page.wait_for_selector("[data-turn-id]", timeout=15_000)
     page.wait_for_timeout(1500)
+    page.evaluate(
+        """() => {
+          for (const btn of document.querySelectorAll('[data-testid="turn-toggle"][data-expanded="false"]')) {
+            btn.click();
+          }
+        }"""
+    )
+    page.wait_for_timeout(200)
+    page.evaluate(
+        """() => {
+          for (const btn of document.querySelectorAll('[data-testid="card-toggle"][data-expanded="false"]')) {
+            btn.click();
+          }
+        }"""
+    )
+    page.wait_for_timeout(300)
     page.evaluate(
         "() => document.querySelector('.timeline-item[data-item-id=\"1.1\"]').scrollIntoView({ block: 'center' })"
     )

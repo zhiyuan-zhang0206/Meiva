@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -400,74 +399,12 @@ def test_keyboard_edges_leave_the_shell_intact(
         ctx.close()
 
 
-_STICKY_SURFACE = """el => {
-  const style = getComputedStyle(el);
-  const top = getComputedStyle(el, '::before');
-  const line = getComputedStyle(el, '::after');
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 1;
-  const ctx = canvas.getContext('2d');
-  const alpha = color => {
-    ctx.clearRect(0, 0, 1, 1);
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, 1, 1);
-    return ctx.getImageData(0, 0, 1, 1).data[3];
-  };
-  return {
-    rect: el.getBoundingClientRect().toJSON(),
-    alpha: alpha(style.backgroundColor),
-    paneAlpha: alpha(top.backgroundColor),
-    paneBlur: top.backdropFilter,
-    paneZ: top.zIndex,
-    paneBottom: parseFloat(top.bottom),
-    topStart: parseFloat(top.top),
-    lineBottom: parseFloat(line.bottom),
-    lineHeight: parseFloat(line.height),
-  };
-}"""
-
-
-_PANE_BEFORE_COLOR = "el => getComputedStyle(el, '::before').backgroundColor"
-_PANE_BEFORE_TRANSITION_MS = (
-    "el => parseFloat(getComputedStyle(el, '::before').transitionDuration) * 1000"
-)
-
-
-def _wait_for_pane_settled(page: Page, header_selector: str, *, poll_ms: int = 20) -> None:
-    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
-    locator = page.locator(header_selector)
-    duration_ms = locator.evaluate(_PANE_BEFORE_TRANSITION_MS)
-    page.wait_for_timeout(duration_ms)
-    deadline = time.monotonic() + (duration_ms * 2 + 500) / 1000
-    previous = locator.evaluate(_PANE_BEFORE_COLOR)
-    while time.monotonic() < deadline:
-        page.wait_for_timeout(poll_ms)
-        current = locator.evaluate(_PANE_BEFORE_COLOR)
-        if current == previous:
-            return
-        previous = current
-
-
-def _assert_sticky_sealed(
-    page: Page, header_selector: str, *, hovered: bool = False
-) -> dict[str, float]:
-    surface = page.locator(header_selector).evaluate(_STICKY_SURFACE)
-    assert surface["alpha"] == 0, "button background flattens the frosted pane"
-    expected_alpha = 77 if hovered else 242
-    assert abs(surface["paneAlpha"] - expected_alpha) <= 1, "glass tint changed"
-    assert surface["paneBlur"] == "blur(12px)", "backdrop blur is missing"
-    assert surface["paneZ"] == "-10", "pane must stay behind the label"
-    assert surface["topStart"] <= -1 and surface["paneBottom"] == 0
-    assert surface["lineBottom"] == 0, "separator is detached from the header edge"
-    assert surface["lineHeight"] == 1
-    return surface["rect"]
-
-
 @pytest.mark.parametrize("width", [390, 1280])
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_pinned_work_detail_seal(
+def test_expanded_work_block_bounded_scroll_and_no_sticky(
     width: int, theme: str, playwright_browser: Browser, frontend_target: str
 ) -> None:
+    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
     context = new_context(playwright_browser, width)
     try:
         page = open_page(
@@ -489,27 +426,27 @@ def test_pinned_work_detail_seal(
             page.wait_for_timeout(250)
         row = page.locator('.timeline-item[data-item-id="0.0"]')
         expect(row).to_be_visible()
-        header_selector = '.timeline-item[data-item-id="0.0"] [data-testid="card-toggle"]'
-        header = page.locator(header_selector)
+        header = page.locator('.timeline-item[data-item-id="0.0"] [data-testid="card-toggle"]')
         if header.get_attribute("aria-expanded") == "false":
             header.click()
             expect(header).to_have_attribute("aria-expanded", "true")
         row.locator("div").first.evaluate("el => { el.style.minHeight = '1200px'; }")
-        row.evaluate("""el => {
-          const viewport = el.closest('[data-radix-scroll-area-viewport]');
-          viewport.scrollTop += el.getBoundingClientRect().top
-            - viewport.getBoundingClientRect().top + 100;
+        assert turn_toggle.evaluate("el => getComputedStyle(el).position") != "sticky"
+        assert header.evaluate("el => getComputedStyle(el).position") != "sticky"
+        inner_vp = turn.locator('[data-testid="turn-scroll-viewport"]')
+        metrics = inner_vp.evaluate("""el => {
+          const outerVp = document.querySelector('[data-testid="timeline-surface"] [data-slot="scroll-area-viewport"]');
+          el.scrollTop = 120;
+          return {
+            clientHeight: el.clientHeight,
+            scrollHeight: el.scrollHeight,
+            scrollTop: el.scrollTop,
+            outerHeight: outerVp ? outerVp.clientHeight : 0,
+          };
         }""")
-        expect(header).to_have_attribute("data-stuck", "true")
-        page.mouse.move(1, 1)
-        _wait_for_pane_settled(page, header_selector)
-        resting = _assert_sticky_sealed(page, header_selector)
-        bar = page.locator('[data-testid="timeline-surface"] header').bounding_box()
-        assert bar is not None
-        turn_box = turn_toggle.bounding_box()
-        assert turn_box is not None
-        assert abs(turn_box["y"] - (bar["y"] + bar["height"])) < 0.5
-        assert abs(resting["top"] - (turn_box["y"] + turn_box["height"])) < 0.5
+        assert metrics["scrollHeight"] > metrics["clientHeight"], metrics
+        assert metrics["clientHeight"] <= metrics["outerHeight"] * 0.5 + 2, metrics
+        assert metrics["scrollTop"] > 0, metrics
         for item_id in ("1.1", "1.2"):
             primary_row = page.locator(f'.timeline-item[data-item-id="{item_id}"]')
             assert primary_row.locator('[data-testid="card-toggle"]').count() == 0
@@ -517,11 +454,6 @@ def test_pinned_work_detail_seal(
                 "sticky",
                 "fixed",
             )
-        header.hover()
-        _wait_for_pane_settled(page, header_selector)
-        assert _assert_sticky_sealed(page, header_selector, hovered=True) == resting, (
-            "hover changed pin geometry"
-        )
     finally:
         context.close()
 

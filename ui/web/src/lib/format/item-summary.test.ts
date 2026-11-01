@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDuration, orderSdkCalls, sdkNamespace, summarizeCode, summarizeOutput } from "./item-summary";
+import { formatDuration, orderSdkCalls, sdkNamespace, summarizeCode } from "./item-summary";
 
 describe("summarizeCode", () => {
   it("renders recorded calls by namespace, then count and method name", () => {
-    const s = summarizeCode("", [
+    const s = summarizeCode([
       { method: "shell.run", count: 5 },
       { method: "files.read", count: 2 },
       { method: "files.write", count: 1 },
@@ -17,38 +17,19 @@ describe("summarizeCode", () => {
     expect(s.totalCalls).toBe(8);
   });
 
-  it("recorded calls win — the payload text never adds or removes entries", () => {
-    const code = "meiva.shell.run('ls')\nmeiva.files.read('a')";
-    const s = summarizeCode(code, [{ method: "files.read", count: 1 }]);
-    expect(s.calls).toEqual([{ method: "files.read", count: 1 }]);
-    expect(s.totalCalls).toBe(1);
-  });
-
-  it("plain python: no calls, non-blank line count", () => {
-    const code = "x = 1\n\ny = 2\nprint(x + y)\n";
-    const s = summarizeCode(code);
-    expect(s.calls).toEqual([]);
-    expect(s.lines).toBe(3);
-  });
-
-  it("trusts an authoritative empty array — comment/string mentions never count", () => {
-    const code = "# meiva.files.read('comment-only')\nvalue = \"meiva.shell.run('string-only')\"";
-
-    expect(summarizeCode(code, [])).toEqual({
+  it("trusts an authoritative empty array", () => {
+    expect(summarizeCode([])).toEqual({
       calls: [],
       totalCalls: 0,
-      lines: 2,
     });
   });
 
   it.each([undefined, null])(
-    "absent sdk_calls (%s) shows no calls and never scans the payload",
+    "absent sdk_calls (%s) shows no calls",
     (sdkCalls) => {
-      const code = "meiva.files.read('a')\nmeiva.shell.run('ls')";
-      expect(summarizeCode(code, sdkCalls)).toEqual({
+      expect(summarizeCode(sdkCalls)).toEqual({
         calls: [],
         totalCalls: 0,
-        lines: 2,
       });
     },
   );
@@ -101,18 +82,6 @@ describe("orderSdkCalls", () => {
       { method: "agents.spawn", count: 1 },
       { method: "shell.run", count: 100 },
     ]);
-  });
-});
-
-describe("summarizeOutput", () => {
-  it("counts lines and chars, no trailing-newline phantom line", () => {
-    const s = summarizeOutput("a\nb\nc\n");
-    expect(s.lines).toBe(3);
-    expect(s.chars).toBe(6);
-  });
-
-  it("empty output is zero lines", () => {
-    expect(summarizeOutput("").lines).toBe(0);
   });
 });
 

@@ -18,15 +18,10 @@ import {
   CircleDot,
   Clock,
   EyeOff,
-  Gauge,
-  Globe,
-  History,
   Languages,
   MessageSquareText,
   MoveHorizontal,
   Palette,
-  Rows3,
-  Ruler,
 } from "lucide-react";
 import { cn } from "@/lib/format/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -44,30 +39,11 @@ import {
 } from "@/lib/timeline/timeline-width";
 import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
 import { readStoredSetting, useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
-import { type DetailsMode, useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { FLEX } from "@/lib/layout/layout";
 import { ModelPickerSection } from "./_model_picker";
 import { NotificationCategoryRows } from "./_notification-categories";
-import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
+import { RadioRow, SettingsSection, SliderRow, ToggleRow } from "./_rows";
 import { useApi } from "@/lib/transport/transport-context";
-
-// meiva:note
-// The expansion modes the timeline knows, as the rows the control renders: one list, so a
-// selected value can be checked against what the control offers instead of being asserted.
-const DETAILS_MODE_OPTIONS: { value: DetailsMode; label: string }[] = [
-  { value: "all", label: "Expand all blocks" },
-  { value: "last", label: "Last block only" },
-  { value: "none", label: "Collapse all blocks" },
-];
-
-function isDetailsMode(value: string): value is DetailsMode {
-  return DETAILS_MODE_OPTIONS.some((option) => option.value === value);
-}
-
-// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
-function resetManualExpansions(): void {
-  useContentToggleReset.getState().bumpReset();
-}
 
 // ── Page ──
 
@@ -75,9 +51,6 @@ export default function DisplaySettingsPage() {
   const client = useApi();
   const t = useTranslations("displaySettings");
   const { settings, setSetting, isLoading } = useUserSettings();
-  const { detailsMode, setDetailsMode } = useContentToggle();
-  const setComposerContextMeter = (value: boolean) =>
-    setSetting("display.composer_context_meter", value);
   const [widthPx, setWidthPx] = useDebouncedSetting<number>(
     "display.timeline_width_px",
     TIMELINE_WIDTH_PX_DEFAULT,
@@ -107,16 +80,6 @@ export default function DisplaySettingsPage() {
       </div>
     );
   }
-
-  // Compact-history retention (task #3698): number of older pages fetched
-  // after a compact rewrites the history. -1 means All;
-  // missing/invalid values read as the default 1.
-  const compactHistorySetting = settings["display.compact_history_sessions"];
-  const compactHistorySessions =
-    typeof compactHistorySetting === "number" &&
-    Number.isInteger(compactHistorySetting) && compactHistorySetting >= -1
-      ? compactHistorySetting
-      : 1;
 
   const hiddenModels: string[] = readStoredSetting<string[]>(settings["models.hidden"], []);
   // meiva:note
@@ -181,13 +144,6 @@ export default function DisplaySettingsPage() {
           onChange={(v) => setSetting("display.show_agent_status", v)}
         />
         <ToggleRow
-          icon={Activity}
-          label="Show activity line"
-          description="In wide-sidebar mode, show a second line of the agent's activity; off by default"
-          value={settings["display.show_activity_line"] === true}
-          onChange={(v) => setSetting("display.show_activity_line", v)}
-        />
-        <ToggleRow
           icon={EyeOff}
           label="Show terminated agents"
           description="Show terminated agents (red status dot) in the sidebar; off shows only live agents"
@@ -211,13 +167,6 @@ export default function DisplaySettingsPage() {
           ]}
           value={settings["display.clock_format"] === "12h" ? "12h" : "24h"}
           onChange={(v) => setSetting("display.clock_format", v)}
-        />
-        <ToggleRow
-          icon={Globe}
-          label="Show timezone"
-          description="Append the timezone name to full timestamps (e.g. 2026-05-06 16:56:29 UTC). Off by default: the times you see are already in your own clock"
-          value={settings["display.show_timezone"] === true}
-          onChange={(v) => setSetting("display.show_timezone", v)}
         />
         <RadioRow
           icon={Clock}
@@ -256,56 +205,6 @@ export default function DisplaySettingsPage() {
           onChange={setWidthPx}
           format={(v) => `${v}px`}
           disabled={isNarrow}
-        />
-        <RadioRow
-          icon={Rows3}
-          label="Timeline details"
-          description="How much of each work block the timeline expands on its own: every block, only the most recent one (following the stream), or none. Picking a mode again re-applies it, collapsing any blocks you expanded by hand."
-          options={DETAILS_MODE_OPTIONS}
-          value={detailsMode}
-          onChange={(v) => {
-            if (isDetailsMode(v)) setDetailsMode(v);
-            resetManualExpansions();
-          }}
-          reapplyOnSelect
-        />
-        <RadioRow
-          icon={History}
-          label="Compact history"
-          description="How much previous compact history to restore automatically after a compact. 0 clears the view; 1–3 fetch that many older pages. All fetches every available page in sequence, which can take time and use substantial memory on long histories."
-          options={[
-            { value: "0", label: "Off" },
-            { value: "1", label: "1" },
-            { value: "2", label: "2" },
-            { value: "3", label: "3" },
-            { value: "-1", label: "All" },
-          ]}
-          value={String(compactHistorySessions)}
-          onChange={(v) => setSetting("display.compact_history_sessions", Number(v))}
-        />
-      </SettingsSection>
-
-      <TimelineColorsSection />
-
-      <SettingsSection id="display-context-bar" title="Context usage bar">
-        <ToggleRow
-          icon={Gauge}
-          label={t("composerContextMeter")}
-          description={t("composerContextMeterDesc")}
-          value={settings["display.composer_context_meter"] === true}
-          onChange={setComposerContextMeter}
-        />
-        <RadioRow
-          icon={Ruler}
-          label="Usage bar width"
-          description="Width of the opt-in context-usage bar beside the composer; the inspector's Context section is unaffected"
-          options={[
-            { value: "compact", label: "Compact" },
-            { value: "comfortable", label: "Comfortable (default)" },
-            { value: "wide", label: "Wide" },
-          ]}
-          value={readStoredSetting(settings["display.context_meter_width"], "comfortable")}
-          onChange={(v) => setSetting("display.context_meter_width", v)}
         />
       </SettingsSection>
 

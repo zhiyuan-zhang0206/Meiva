@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, pullOlderAtTop, render, setToggleState } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, pullOlderAtTop, render } from "./timeline-test-mock";
 
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
@@ -126,6 +126,7 @@ describe("deep history DOM window", () => {
       item_id: `${index + 1}.0`, kind: "agent_reasoning", payload: `Thought ${index + 1}`,
     }));
     render(<TimelineView items={reasoning} threadKey="configured-turn" />);
+    fireEvent.click(screen.getByTestId("turn-toggle"));
     viewport = screen.getByTestId("scroll-viewport");
     expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
     expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
@@ -410,14 +411,16 @@ describe("deep history DOM window", () => {
       payload: `Thought ${index + 1}`,
     }));
     render(<TimelineView items={items} threadKey="deep-run" />);
+    fireEvent.click(screen.getByTestId("turn-toggle"));
     const viewport = screen.getByTestId("scroll-viewport");
+    const turnViewport = screen.getByTestId("turn-scroll-viewport");
     expect(viewport.querySelectorAll('[data-turn-expanded="true"]').length).toBe(1);
     expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
     expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
-    Object.defineProperty(viewport, "clientHeight", { value: 720, configurable: true });
+    Object.defineProperty(turnViewport, "clientHeight", { value: 360, configurable: true });
     act(() => {
-      viewport.scrollTop = 20_000;
-      fireEvent.scroll(viewport);
+      turnViewport.scrollTop = 10_000;
+      fireEvent.scroll(turnViewport);
     });
     await waitFor(() => {
       expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
@@ -447,7 +450,6 @@ it("renders image-only human messages during impersonation as thumbnails", () =>
 
 
 it("restores expanded work and detail blocks when returning to an agent", () => {
-  setToggleState({ detailsMode: "none" });
   const work = [makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "Read this detail" })];
   const { rerender } = render(<TimelineView key="read-A" threadKey="A" scrollMemoryKey="expansion:A" items={work} />);
   fireEvent.click(screen.getByTestId("turn-toggle"));

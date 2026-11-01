@@ -8,7 +8,6 @@ import httpx
 import pytest
 from playwright.sync_api import Page
 
-from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fixture_environment import E2EEnv
 
 
@@ -144,7 +143,6 @@ def _settle(page: Page, read_js: str, timeout_s: float = 20.0) -> None:
 
 
 def _pin_page_settings(gateway_url: str) -> None:
-    pin_expand_runs_all(gateway_url)
     resp = httpx.put(
         f"{gateway_url}/api/settings/display.inspector_open",
         json={"value": True},

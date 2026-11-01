@@ -37,7 +37,6 @@ function resetStore(): void {
     items: [],
     compactBuffer: null,
     compactEpoch: 0,
-    compactHistoryPages: 1,
     streamingIds: new Set(),
     streamingCode: false,
     turnActive: false,
@@ -101,7 +100,7 @@ describe("compact transition buffer", () => {
     expect(useTimelineStore.getState().compactBuffer).toBeNull();
   });
 
-  it("buffers the crossed-compact REST swap and skips the buffer at retention zero", () => {
+  it("buffers the crossed-compact REST swap", () => {
     useTimelineStore.getState().switchThread(42, [oldReply()], true);
     useTimelineStore.getState().reloadSnapshot([
       item({ item_id: "0.0", kind: "system_prompt" }),
@@ -109,10 +108,6 @@ describe("compact transition buffer", () => {
       current(),
     ], 3, true);
     expect(useTimelineStore.getState().compactBuffer?.rows[0].item.payload).toBe("old reply");
-    useTimelineStore.getState().setCompactHistoryPages(0);
-    expect(useTimelineStore.getState().compactBuffer).toBeNull();
-    startCompact();
-    expect(useTimelineStore.getState().compactBuffer).toBeNull();
   });
 
   it("releases uncovered rows when the existing finite page budget settles", () => {

@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
@@ -373,6 +373,7 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const { rerender } = render(
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
+    fireEvent.click(screen.getByTestId("turn-toggle"));
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);

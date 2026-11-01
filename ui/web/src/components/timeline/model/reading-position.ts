@@ -1,6 +1,5 @@
 import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 import { saveScrollMemory } from "@/lib/layout/scroll-memory";
-import type { DetailsMode } from "@/lib/layout/content-toggle-store";
 import type { StickyController } from "@/lib/layout/sticky";
 
 // meiva:note
@@ -35,15 +34,13 @@ export function rememberTimelinePosition(
 }
 
 interface ReadingExpansion {
-  mode: DetailsMode;
   items: ReadonlySet<string>;
   turns: ReadonlyMap<string, boolean>;
 }
 // Only ephemeral view choices live here. Server rows stay in the QueryClient.
 const expansions = new Map<string, ReadingExpansion>();
-export function readTimelineExpansion(key: string | undefined, mode: DetailsMode) {
-  const saved = key ? expansions.get(key) : undefined;
-  return saved?.mode === mode ? saved : undefined;
+export function readTimelineExpansion(key: string | undefined) {
+  return key ? expansions.get(key) : undefined;
 }
 export function rememberTimelineExpansion(key: string | undefined, value: ReadingExpansion) {
   if (key) expansions.set(key, value);

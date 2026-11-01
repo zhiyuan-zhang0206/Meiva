@@ -52,7 +52,6 @@ export interface UseTimelineTestContext {
   getQueryClient: () => QueryClient;
   wallClock: { now: () => number; advance: (ms: number) => void };
   wrapper: ({ children }: { children: React.ReactNode }) => React.ReactElement;
-  seedSettings: (overrides: Record<string, unknown>) => void;
   setVisibility: (visibility: DocumentVisibilityState) => void;
   delay: (ms?: number) => Promise<void>;
 }

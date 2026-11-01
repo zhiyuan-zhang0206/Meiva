@@ -26,8 +26,8 @@ rises with them. The gap above this rule is described in
 
 ## The sidebar footer's band
 
-Sized for its own 28px icon row: a 1px rule, 8px (`pt-2`), the row, 12px
-(`pb-3`) — 49px, owned by `components/agent-sidebar/footer.tsx`. It follows no
+Sized for its own 28px icon row: a 1px rule and 4px (`py-1`) above and below
+the row — 37px, owned by `components/agent-sidebar/footer.tsx`. It follows no
 other column's geometry: it neither takes the composer's control-row minimum
 nor tracks the composer's measured height (user report 2026-10-29 removed the
 day the footer took the composer's published height as its minimum).
