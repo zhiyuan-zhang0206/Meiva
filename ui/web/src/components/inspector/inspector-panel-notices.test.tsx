@@ -1,9 +1,10 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import { foldNotices } from "@/lib/fold/notices";
+import { inspectLiveQueryKey } from "@/lib/inspector/inspector-queries";
 import type { PageRow, SystemEvent } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
@@ -98,13 +99,13 @@ describe("InspectorPanel", () => {
 
   it("updates the notice without rereading statistics when notice SSE arrives", async () => {
     const queryClient = createInspectorQueryClient();
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     renderWithBrowser(
       <QueryClientProvider client={queryClient}>
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,
     );
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    const liveReads = getAgentInspectLive.mock.calls.length;
 
     act(() => {
       const event = { agent_id: 1, role: "notice_posted", notice_id: 1, priority: "P2", title: "t", task_id: null } as SystemEvent;
@@ -114,8 +115,18 @@ describe("InspectorPanel", () => {
       streamHandlers.system?.(event);
     });
 
-    expect(invalidate.mock.calls.filter(([options]) => options?.queryKey?.[0] === "agent-inspect-live")).toHaveLength(1);
-    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["agent-inspect", 1] });
+    // meiva:note
+    // Two observables, both read from the cache the panel writes to: the notice's own query is
+    // invalidated, and the windowed statistics query is not — an invalidation is an action on the
+    // cache, and a refetch follows from it, so the flag is what a wrong call would leave behind.
+    // Reading it beats replacing `invalidateQueries` with a spy.
+    const live = queryClient.getQueryCache().find({ queryKey: inspectLiveQueryKey(1) });
+    expect(live?.state.isInvalidated).toBe(true);
+    const windowed = queryClient.getQueryCache().findAll({ queryKey: ["agent-inspect"] });
+    expect(windowed.length).toBeGreaterThan(0);
+    expect(windowed.some((query) => query.state.isInvalidated)).toBe(false);
+
+    await waitFor(() => expect(getAgentInspectLive.mock.calls.length).toBeGreaterThan(liveReads));
     expect(getAgentInspectStatistics).toHaveBeenCalledTimes(1);
   });
 
