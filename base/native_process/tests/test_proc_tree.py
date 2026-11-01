@@ -9,16 +9,16 @@ import psutil
 import pytest
 
 from base.native_process import ownership as proc_tree
-from base.native_process.os_platform import is_linux, is_macos
+from base.native_process.os_platform import is_linux
 from base.native_process.ownership import OwnedProcess, stable_create_time
 
 
+# meiva:note
+# The drift is taken from the production door, which resolves the platform once for its own host;
+# a test that read `is_macos()` here would assert a property of the machine running it.
 def _identity_with_drift(offset: float) -> OwnedProcess:
-    return OwnedProcess(
-        os.getpid(),
-        stable_create_time(psutil.Process(), macos=is_macos()) + offset,
-        None,
-    )
+    captured = OwnedProcess.capture(psutil.Process())
+    return OwnedProcess(os.getpid(), captured.birth + offset, None)
 
 
 @pytest.mark.parametrize("offset", [-1.0, 1.0, -0.0001, 0.0001])
