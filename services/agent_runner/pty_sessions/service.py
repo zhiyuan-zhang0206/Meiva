@@ -37,6 +37,7 @@ from base.clock import Timers
 from base.host.env.registry import session_credential_keys
 from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
+from base.native_process.os_platform import is_macos
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import ProcessControl
 from base.paths import logs_dir, run_dir
@@ -317,7 +318,7 @@ class PtyService:
         try:
             session.set_winsz(master, cols, rows)
             try:
-                create_time = stable_create_time(psutil.Process(pid))
+                create_time = stable_create_time(psutil.Process(pid), macos=is_macos())
             except psutil.NoSuchProcess:
                 create_time = session.DEAD_CHILD_SENTINEL
             starttime = (

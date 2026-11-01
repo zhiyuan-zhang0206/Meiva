@@ -44,6 +44,7 @@ import psutil
 from base.clock import Timers
 from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
+from base.native_process.os_platform import is_macos
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.paths import logs_path, run_dir
@@ -127,6 +128,7 @@ def process_for_record(
 ) -> psutil.Process | None:
     """Return the live psutil.Process named by `rec`, or None if it is gone or a
     different (recycled) process now holds the pid."""
+    macos = is_macos()
     try:
         proc = psutil.Process(rec.pid)
         if not process_is_live(proc):
@@ -144,7 +146,7 @@ def process_for_record(
             )
         # Platforms without Linux's clock-stable `/proc/<pid>/stat` field 22
         # identify the process by its creation time within a tolerance.
-        if abs(stable_create_time(proc) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
+        if abs(stable_create_time(proc, macos=macos) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
             return None
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
@@ -167,9 +169,10 @@ def build_session_record(
     started_at: float | None = None,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
 ) -> SessionRecord:
+    macos = is_macos()
     try:
         proc = psutil.Process(child_pid)
-        create_time = stable_create_time(proc)
+        create_time = stable_create_time(proc, macos=macos)
         observed_started_at = proc.create_time()
     except psutil.NoSuchProcess:
         # meiva:note
@@ -273,6 +276,7 @@ def admit_expected_signal(
     first_tick: int | None,
     has_first_tick: bool,
 ) -> bool:
+    macos = is_macos()
     if latest != expected:
         return False
     if expected.starttime is not None:
@@ -288,7 +292,10 @@ def admit_expected_signal(
             )
             is True
         )
-    return abs(stable_create_time(proc) - expected.create_time) <= _CREATE_TIME_TOLERANCE_S
+    return (
+        abs(stable_create_time(proc, macos=macos) - expected.create_time)
+        <= _CREATE_TIME_TOLERANCE_S
+    )
 
 
 def graceful_signal(

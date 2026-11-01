@@ -9,12 +9,16 @@ import psutil
 import pytest
 
 from base.native_process import ownership as proc_tree
-from base.native_process.os_platform import is_linux
+from base.native_process.os_platform import is_linux, is_macos
 from base.native_process.ownership import OwnedProcess, stable_create_time
 
 
 def _identity_with_drift(offset: float) -> OwnedProcess:
-    return OwnedProcess(os.getpid(), stable_create_time(psutil.Process()) + offset, None)
+    return OwnedProcess(
+        os.getpid(),
+        stable_create_time(psutil.Process(), macos=is_macos()) + offset,
+        None,
+    )
 
 
 @pytest.mark.parametrize("offset", [-1.0, 1.0, -0.0001, 0.0001])
@@ -115,6 +119,40 @@ def test_reading_a_pid_nobody_holds_finds_nothing() -> None:
     assert identity.read_live() is None
 
 
+# meiva:note
+# psutil's private per-platform handle, standing in for macOS's monotonic reading.
+class _FakeMonotonicProc:
+    def __init__(self, value: float) -> None:
+        self._value = value
+
+    def create_time(self, *, monotonic: bool = False) -> float:
+        if not monotonic:
+            raise AssertionError("the public reading is create_time(), not _proc")
+        return self._value
+
+
+# meiva:note
+# A process whose two create-time readings differ, so the chosen branch is visible.
+class _FakeCreateTimeProcess:
+    def __init__(self, *, public: float, monotonic: float) -> None:
+        self.pid = os.getpid()
+        self._public = public
+        self._proc = _FakeMonotonicProc(monotonic)
+
+    def create_time(self) -> float:
+        return self._public
+
+
+def test_the_create_time_branch_follows_the_platform_it_is_given() -> None:
+    # meiva:note
+    # The system is an argument, not a reading: a record written on macOS is compared through the
+    # monotonic value even when this host is Linux (2026-11-01: this function used to re-read the
+    # host and ignore the system its own caller had already resolved).
+    process = _FakeCreateTimeProcess(public=99.0, monotonic=42.0)
+    assert stable_create_time(process, macos=True) == 42.0
+    assert stable_create_time(process, macos=False) == 99.0
+
+
 @pytest.mark.requires_host("darwin")
 @pytest.mark.parametrize("seconds", (60.0, 3600.0))
 def test_stable_create_time_ignores_a_simulated_clock_step(seconds: float) -> None:
@@ -122,7 +160,7 @@ def test_stable_create_time_ignores_a_simulated_clock_step(seconds: float) -> No
     # psutil's Darwin backend exposes monotonic create_time on the private _proc handle.
     del seconds
     proc = psutil.Process()
-    assert stable_create_time(proc) == float(
+    assert stable_create_time(proc, macos=True) == float(
         proc._proc.create_time(monotonic=True)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
     )
 

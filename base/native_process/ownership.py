@@ -55,13 +55,31 @@ def _has_platform_proc(process: object) -> TypeGuard[_ProcessWithPlatformProc]:
     return hasattr(process, "_proc")
 
 
+# meiva:note
+# The system a reading is for: the one handed in, else this host's. The fallback is the one
+# `capture(platform=...)` keeps for callers that name no system; the acquisition itself is recorded
+# once, in `os_platform` (`is_macos` asks `Platform.current`).
 def _sys_platform(platform: str | None = None) -> str:
     if platform is not None:
         return platform
     return "darwin" if is_macos() else "linux"
 
 
-def stable_create_time(process: psutil.Process) -> float:
+# meiva:note
+# What the create-time reading needs of a process: the pid it names, the wall-clock value every
+# platform has, and (on macOS) the private monotonic one. Narrow enough that a test hands the two
+# readings and no live handle.
+class CreateTimeProcess(Protocol):
+    pid: int
+
+    def create_time(self) -> float: ...
+
+
+# meiva:note
+# The system is a parameter here, not a reading: a caller comparing against a record written on the
+# other system must take the branch that record was written under, which a second read of this host
+# silently overrides (2026-11-01: `capture(platform=...)` accepted a system and ignored it here).
+def stable_create_time(process: CreateTimeProcess, *, macos: bool) -> float:
     """Native start timestamp; Linux uses start ticks for identity instead.
 
     psutil's public `create_time()` is not bit-stable across readers on macOS:
@@ -74,7 +92,7 @@ def stable_create_time(process: psutil.Process) -> float:
     written and compared through that same value. Linux's public value includes
     a reconstructed boot wall time and is diagnostic, never its identity key.
     """
-    if _sys_platform() == "darwin":
+    if macos:
         # psutil's per-platform object is untyped in the public stubs; its
         # monotonic create_time is the pid-reuse key used above.
         if not _has_platform_proc(process):
@@ -127,7 +145,9 @@ class OwnedProcess:
             ticks = _validate_start_ticks(process.pid, first_raw)
         else:
             ticks = _start_ticks(process.pid)
-        identity = cls(process.pid, stable_create_time(process), ticks)
+        identity = cls(
+            process.pid, stable_create_time(process, macos=sys_platform == "darwin"), ticks
+        )
         if sys_platform == "linux" and identity.starttime is None:
             if not psutil.pid_exists(process.pid):
                 raise psutil.NoSuchProcess(process.pid)

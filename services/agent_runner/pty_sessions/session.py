@@ -27,6 +27,7 @@ import psutil
 
 from base.clock import Timers
 from base.log import logger
+from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.native_process.process_control import ProcessControl
 from base.sessions import log_writer
@@ -316,7 +317,8 @@ class PtySession:
             if self.record.starttime is not None:
                 return self.record.identifies(self.pid) is True
             return (
-                abs(stable_create_time(proc) - self.record.create_time) <= _CREATE_TIME_TOLERANCE_S
+                abs(stable_create_time(proc, macos=is_macos()) - self.record.create_time)
+                <= _CREATE_TIME_TOLERANCE_S
             )
         except psutil.Error:
             return False
