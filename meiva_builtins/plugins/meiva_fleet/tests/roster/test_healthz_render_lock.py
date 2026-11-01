@@ -44,6 +44,7 @@ from services.supervision.roster.service_spec import (
 
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 _RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})
+_BOTH: frozenset[MachineRole] = frozenset({"gateway", "agent-runner"})
 _REPO = Path("/checkout/repo")
 
 
@@ -82,8 +83,8 @@ class _Legacy:
 # meiva:note
 # The agent-host and ops rows also declare the stop ceiling their SIGTERM exits added after
 # the migration (the host settles running turns to their restart, ops drains the requests it
-# admitted): the TERM window each derives is a deliberate change, every other launch fact of
-# the rows stays locked.
+# admitted), and schedule-manager declares its move to both_services with runner DB access:
+# those deliberate changes are updated in place while every other launch fact stays locked.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 _LEGACY = (
     _Legacy("im-bridge", "services.entrypoints.im_bridge.daemon", _GATEWAY, True),
@@ -109,7 +110,13 @@ _LEGACY = (
     ),
     _Legacy("pg-backup", "services.backup.scheduler.daemon", _GATEWAY, True),
     _Legacy("ttl-reaper", "services.upkeep.ttl_reaper.daemon", _GATEWAY, True),
-    _Legacy("schedule-manager", "services.wake.schedule_manager.daemon", _GATEWAY, True),
+    _Legacy(
+        "schedule-manager",
+        "services.wake.schedule_manager.daemon",
+        _BOTH,
+        True,
+        db_access="runner",
+    ),
     _Legacy("page-server", "services.agent_runner.page_server.daemon", _RUNNER, True),
     _Legacy(
         "agent-host",

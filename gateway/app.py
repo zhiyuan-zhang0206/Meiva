@@ -267,7 +267,7 @@ async def lifespan(
             await sync_startup_schedules(
                 db_pool,
                 home=process.home,
-                machine=process.machine.name(),
+                resolve_machine=process.machine.name,
                 provision_builtins=config.view.gateway.provision_builtin_schedules,
             )
 

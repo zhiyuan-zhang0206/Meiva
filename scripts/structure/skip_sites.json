@@ -85,8 +85,8 @@
     "skip('swiftc is unavailable')"
   ],
   "services/desktop/permissions_helper/tests/test_helper_retirement.py": [
-    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)",
-    "skipif(sys.platform != 'darwin' or shutil.which('swiftc') is None)"
+    "skipif(shutil.which('swift') is None)",
+    "skipif(shutil.which('swiftc') is None)"
   ],
   "services/desktop/permissions_helper/tests/test_native_ax_actions.py": [
     "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"

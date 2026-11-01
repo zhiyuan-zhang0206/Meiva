@@ -87,7 +87,9 @@ def load_installed_runtime(home: Path, source: Path) -> None:
 #
 # The caller holds the home's lifecycle mutex and has proved no agent host serves
 # the home. Per-row commits are deliberate: after an interruption, the prepared
-# text is a no-op and any third text is refused.
+# text is a no-op and any third text is refused. In _FULL_QUERY, identity/config/
+# status/history facts ([:8]) and placement/owner ([9:11]) precede script ([11]);
+# updated_at ([8]) advances on edit.
 def replace_script(
     pool: ConnectionPool[Connection], schedule_id: int, script: str, expected_sha256: str
 ) -> str:
@@ -97,7 +99,7 @@ def replace_script(
     from gateway.schedules.router import fetch_full_blocking, update_blocking
 
     previous = fetch_full_blocking(pool, schedule_id)
-    actual = script_sha256(previous[9])
+    actual = script_sha256(previous[11])
     prepared = script_sha256(script)
     if actual == prepared:
         return "unchanged"
@@ -106,8 +108,7 @@ def replace_script(
             f"schedule {schedule_id}: expected old script {expected_sha256}, found {actual}"
         )
     row, _needs_sync = update_blocking(pool, schedule_id, {"script": script})
-    # _FULL_COLS: identity/config/status/history facts precede updated_at/script.
-    if row[:8] != previous[:8] or row[9] != script:
+    if row[:8] != previous[:8] or row[9:11] != previous[9:11] or row[11] != script:
         raise RuntimeError(f"schedule {schedule_id}: installed writer changed protected fields")
     return "updated"
 
