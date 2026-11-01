@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts.analysis import Analysis, exempt_test_modules
+from meizel.contracts.analysis import Analysis, analyze, exempt_test_modules, load_policy
 from meizel.graph.model import Fact, FactKind
-from meizel.tests.synthetic import analysis_of
+from meizel.language.scan import typescript_files
+from meizel.tests.synthetic import seat
 
 pytestmark = pytest.mark.registry
 
@@ -35,11 +36,22 @@ PRODUCTION = {
 
 # meiva:note
 # One analysis for the file: the rule reads the run's import graph, so every case below works on the
-# facts this tree produced. Injecting a production import is a fact appended to that list - no file is
-# written and no checkout is made, which is how the manual reverse control becomes a CI test.
+# facts this tree produced. Python AST scans never emit import or patch facts targeting TypeScript
+# paths (and manifest `[loads]` are still loaded in full), so when every documented double is
+# TypeScript, scoping `changed` to `typescript_files` yields the exact same exemption set, patch
+# sites, and diagnostics without scanning Python files. Injecting a production import is a fact
+# appended to that list - no file is written and no checkout is made, which is how the manual reverse
+# control becomes a CI test.
 @pytest.fixture(scope="module")
 def analysis() -> Analysis:
-    return analysis_of(ROOT)
+    universe = seat(ROOT)
+    policy, _ = load_policy(universe)
+    scope = (
+        None
+        if any(module.endswith(".py") for module in DOCUMENTED)
+        else typescript_files(universe, policy)
+    )
+    return analyze(universe, changed=scope)
 
 
 def _sites(analysis: Analysis) -> dict[str, int]:
