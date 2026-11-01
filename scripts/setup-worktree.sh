@@ -115,13 +115,15 @@ bootstrap() {
   echo "→ editable venv guard …"
   python3 "$SCRIPT_DIR/host_ops/guard_editable_venv.py" "$REPO_ROOT"
 
-  if [ ! -x .venv/bin/python ]; then
-    echo "→ creating this worktree's own .venv …"
-    uv sync --frozen
-  fi
-
   echo "→ locked Python install …"
-  .venv/bin/python "$REPO_ROOT/cli/python_install.py" --locked --inexact
+  # System `python3` on macOS is 3.9 (no `tomllib`), so before `.venv` exists run the
+  # stdlib installer under uv's checkout-pinned Python in a single uncompiled pass.
+  if [ -x .venv/bin/python ]; then
+    .venv/bin/python "$REPO_ROOT/cli/python_install.py" --locked --inexact --no-compile-bytecode
+  else
+    uv run --no-project --python "$(tr -d '[:space:]' < "$REPO_ROOT/.python-version")" \
+      python "$REPO_ROOT/cli/python_install.py" --locked --inexact --no-compile-bytecode
+  fi
 
   # `npm ci`, as CI does: it installs exactly what package-lock.json pins and never
   # rewrites it (`npm install` strips optional-dependency entries on a newer npm).

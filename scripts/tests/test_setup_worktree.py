@@ -19,6 +19,7 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 _SEEDED = (
+    ".python-version",
     "base/deploy/git/check_git_hooks.py",
     "scripts/setup-worktree.sh",
     "scripts/provision/check_git_hooks.py",
@@ -28,7 +29,7 @@ _UV = """\
 #!/bin/sh
 echo "uv $* @ $PWD" >> "$SETUP_CALLS"
 [ -z "${FAIL_UV:-}" ] || { echo "uv: simulated failure" >&2; exit 1; }
-if [ "$1" = sync ]; then
+if [ "$1" = run ]; then
   mkdir -p .venv/bin
   printf '#!/bin/sh\\necho "python $* @ $PWD" >> "$SETUP_CALLS"\\n' > .venv/bin/python
   chmod +x .venv/bin/python
@@ -204,9 +205,13 @@ def test_creates_the_worktree_off_fresh_origin_main_and_bootstraps_in_order(
         check=False,
     )
     assert tracking.returncode == 1
+    pin = (_REPO / ".python-version").read_text().strip()
     assert world.calls() == [
-        ("uv sync --frozen", path),
-        (f"python {path}/cli/python_install.py --locked --inexact", path),
+        (
+            f"uv run --no-project --python {pin} python {path}/cli/python_install.py"
+            " --locked --inexact --no-compile-bytecode",
+            path,
+        ),
         ("npm ci --no-audit --no-fund", path / "ui/web"),
     ]
     assert (path / ".venv").is_dir() and not (path / ".venv").is_symlink()
@@ -238,7 +243,11 @@ def test_rerunning_only_rebootstraps_the_existing_worktree(world: _World) -> Non
     assert world.git(path, "rev-parse", "HEAD") == head
     assert world.git(world.main, "worktree", "list").count("\n") == 1  # main + t1 only
     commands = [command.split()[0] for command, _ in world.calls()]
-    assert commands == ["uv", "python", "npm", "python", "npm"]  # the venv is built once
+    assert commands == ["uv", "npm", "python", "npm"]
+    assert world.calls()[2] == (
+        f"python {path}/cli/python_install.py --locked --inexact --no-compile-bytecode",
+        path,
+    )
 
 
 def test_an_existing_worktree_on_another_branch_is_refused_when_one_is_named(
@@ -314,7 +323,7 @@ def test_without_a_task_a_foreign_worktree_is_completed_in_place(world: _World) 
     path = native.resolve()
     assert done.returncode == 0, done.stderr
     assert done.stdout.splitlines()[-1] == _ready_line(path, "native")
-    assert [cwd for _, cwd in world.calls()] == [path, path, path / "ui/web"]
+    assert [cwd for _, cwd in world.calls()] == [path, path / "ui/web"]
 
 
 def test_a_failed_bootstrap_keeps_the_worktree_and_resumes_on_rerun(world: _World) -> None:

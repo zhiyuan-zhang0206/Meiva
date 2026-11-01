@@ -10,9 +10,11 @@ tags:
 # Locked Python Installation
 
 `cli/python_install.py` is a stdlib-only module runnable before project packages
-exist. Invoke it with Python 3.12 and an explicit checkout; worktree setup uses
-its already-created venv. It neither creates cluster identity nor starts or
-provisions services. The script explicitly locates
+exist. Invoke it with Python 3.12 and an explicit checkout; worktree setup runs
+it under `uv run --no-project --python <pin>` when `.venv` does not yet exist
+(creating `.venv` and installing in one pass) and under `.venv/bin/python` when
+re-bootstrapping. It neither creates cluster identity nor starts or provisions
+services. The script explicitly locates
 its checkout, including when `PYTHONSAFEPATH` disables implicit cwd imports.
 That import-path bootstrap runs only at the standalone `__main__` entry;
 loading the installer as a library leaves the caller's import path intact.
@@ -43,13 +45,17 @@ steps; neither branch mutates `uv.lock` or commits a derived requirements file.
 This preflight preserves the environment on a stale lock; it is not an atomic
 rollback of later network, build, or installation failures.
 
-Every installing step (native sync, both mirror `uv pip install` steps) also passes
-`--compile-bytecode`: `--no-config` hides `[tool.uv] compile-bytecode`, so the flag
-is explicit, and the `.pyc` files of the packages it installs exist before the first
-service imports them. uv compiles only what it installs into site-packages: the
-checkout's editable source gets its `.pyc` from the first import, and a package
-already installed uncompiled is not recompiled. `cli/fleet_update.py` passes the
-same flag to its `uv sync`; a developer's plain `uv sync` stays uncompiled.
+Every installing step (native sync, both mirror `uv pip install` steps) passes an
+explicit bytecode flag (`--compile-bytecode` by default, `--no-compile-bytecode`
+when `--no-compile-bytecode` is given): `--no-config` hides `[tool.uv]
+compile-bytecode` and `UV_COMPILE_BYTECODE` may be set in the caller's shell, so
+the chosen mode is explicit. By default, the `.pyc` files of installed packages
+exist before the first service imports them. uv compiles only what it installs
+into site-packages: the checkout's editable source gets its `.pyc` from the first
+import, and a package already installed uncompiled is not recompiled.
+`cli/fleet_update.py` passes `--compile-bytecode` to its `uv sync`; ephemeral
+development worktrees (`scripts/setup-worktree.sh`) pass `--no-compile-bytecode`
+so site-packages remain CoW-cloned from the uv cache with zero `.pyc` writes.
 
 Every uv step runs with `--no-config`, which also makes uv ignore
 `.python-version` and accept any interpreter meeting `requires-python`. The steps
