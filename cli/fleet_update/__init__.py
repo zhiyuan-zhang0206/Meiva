@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import choices
 from .down import down
+from .fleet_gate import resolve_target
 from .plan.host_failures import PARTIAL_FAILURE_EXIT, incomplete_summary
 from .session import FailedError, Pacing, RefusedError, Session, Timers
 from .up import up
@@ -54,6 +55,10 @@ def main(
     )
     phase = "down" if args.half == "run" else args.half
     try:
+        if args.half != "up":
+            resolved = resolve_target(repo, args.target_request)
+            args.resolved_new = resolved.sha
+            s.say(resolved.notice)
         hosts = [args.gateway, *args.runner]
         unames = s.run_all(hosts, lambda host: s.run(host, "uname -s", effect=False).split()[-1])
         s.os = dict(zip(hosts, unames, strict=True))

@@ -16,7 +16,11 @@ import pytest
 from base.host.env.agent_env import AGENT_ID_ENV
 from cli.fleet_update.plan.host_commands import CLEAN
 from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
-from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
+from cli.fleet_update.plan.release_target import (
+    ReleaseCertificate,
+    format_tag_message,
+)
+from cli.tests.fleet_update.fleet_update_cluster import Cluster, certify_commit, git
 
 
 def test_drift_checks_run_after_the_smoke_and_the_refresh(
@@ -203,6 +207,7 @@ def test_a_python_change_needs_the_flag(env: tuple[Cluster, Callable[..., int]])
     (repo / ".python-version").write_text("3.12.13\n")
     git(repo, "commit", "-qam", "python")
     cluster.new = git(repo, "rev-parse", "HEAD")
+    certify_commit(repo, cluster.new, version="v2026.10.24.120001")
     assert run("down") == 2 and cluster.effects == []
     assert run("down", "--allow-python-change") == 0
 
@@ -251,3 +256,120 @@ def test_up_judges_a_start_by_its_exit_code(
 
     assert "PARTIAL: lin failed" in capsys.readouterr().out
     assert all(cluster.hosts[alias]["up"] for alias in ("gw", "mac"))
+
+
+@pytest.mark.parametrize("channel", ["stable", "latest"])
+def test_channel_mode_switches_hosts_to_the_certified_channel_commit(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    channel: str,
+) -> None:
+    cluster, run = env
+    assert run("down", "--channel", channel) == 0
+    out = capsys.readouterr().out
+    assert f"target: channel {channel} -> v2026.10.24.120000 @ {cluster.new[:12]}" in out
+    assert all(h["head"] == cluster.new for h in cluster.hosts.values())
+
+
+def test_release_mode_supports_exact_certified_rollback_and_hotfix_tags(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    repo = cluster.repo
+    (repo / "uv.lock").write_text("hotfix-1\n")
+    git(repo, "commit", "-qam", "hotfix-1")
+    hotfix_sha = git(repo, "rev-parse", "HEAD")
+    cluster.new = hotfix_sha
+    certify_commit(
+        repo,
+        hotfix_sha,
+        version="v2026.10.24.120000-hf1",
+        channels=("stable",),
+        hotfix_of="v2026.10.24.120000",
+    )
+
+    assert run("down", "--release", "v2026.10.24.120000-hf1") == 0
+    out = capsys.readouterr().out
+    assert f"target: release v2026.10.24.120000-hf1 @ {hotfix_sha[:12]}" in out
+    assert all(h["head"] == hotfix_sha for h in cluster.hosts.values())
+
+
+def test_uncertified_or_tampered_targets_refuse_exit_2_before_any_ssh_command(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    repo = cluster.repo
+    unreleased_head = git(repo, "rev-parse", "HEAD")
+
+    assert run("down", "--new", unreleased_head) == 2
+    assert "carries no meiva-release/v1 release tag" in capsys.readouterr().out
+    assert cluster.commands == [] and cluster.effects == []
+
+    git(repo, "tag", "v2026.10.24.130000", unreleased_head)
+    git(repo, "tag", "-a", "v2026.10.24.130001", "-m", "manual tag", unreleased_head)
+    forged_cert = ReleaseCertificate(
+        version="v2026.10.24.130002",
+        sha=cluster.new,
+        source_ref="refs/heads/main",
+        gate_run_id="99",
+        gate_run_url="https://github.com/example/Meiva/actions/runs/99",
+        certified_at="2026-10-24T13:00:02Z",
+    )
+    git(
+        repo,
+        "tag",
+        "-a",
+        "v2026.10.24.130002",
+        "-m",
+        format_tag_message(forged_cert),
+        unreleased_head,
+    )
+
+    for extra, expected in (
+        (["--new", unreleased_head], "not peeled commit"),
+        (["--release", "v2026.10.24.130000"], "not an annotated tag carrying a meiva-release/v1"),
+        (["--release", "v2026.10.24.130001"], "lacks a valid meiva-release/v1 JSON certificate"),
+        (["--release", "v2026.10.24.130002"], "not peeled commit"),
+        (["--release", "v2026.10.24.195959"], "is not present in"),
+    ):
+        assert run("down", *extra) == 2
+        out = capsys.readouterr().out
+        assert expected in out, out
+        assert cluster.commands == [] and cluster.effects == []
+
+
+def test_track_branch_rolls_out_unreleased_origin_branch_with_explicit_notice(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    repo = cluster.repo
+    (repo / "uv.lock").write_text("preview-1\n")
+    git(repo, "commit", "-qam", "preview-1")
+    first_preview = git(repo, "rev-parse", "HEAD")
+    (repo / "uv.lock").write_text("preview-2\n")
+    git(repo, "commit", "-qam", "preview-2")
+    tip_preview = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", "refs/remotes/origin/feat/preview", tip_preview)
+
+    assert run("down", "--track-branch", "feat/missing") == 2
+    assert "origin/feat/missing is not present" in capsys.readouterr().out
+    assert cluster.commands == []
+
+    git(repo, "checkout", "-q", "-b", "unrelated", cluster.old)
+    (repo / "uv.lock").write_text("side\n")
+    git(repo, "commit", "-qam", "side")
+    unrelated_sha = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "main")
+
+    assert run("down", "--track-branch", "feat/preview", "--new", unrelated_sha) == 2
+    assert "is not an ancestor of origin/feat/preview" in capsys.readouterr().out
+    assert cluster.commands == []
+
+    cluster.new = first_preview
+    assert run("down", "--track-branch", "feat/preview", "--new", first_preview) == 0
+    out = capsys.readouterr().out
+    assert (
+        f"target: UNRELEASED branch feat/preview @ {first_preview} (preview / rapid-iteration mode)"
+        in out
+    )
+    assert all(h["head"] == first_preview for h in cluster.hosts.values())

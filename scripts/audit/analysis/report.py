@@ -55,7 +55,6 @@ _STRUCTURE_PREFIXES = (
     "scripts/lint/",
     "scripts/content_lint/",
     ".github/",
-    ".trunk/",
 )
 _IMPORT_KINDS = frozenset(
     {"import", "import in function", "wildcard import", "re-export", "attribute"}

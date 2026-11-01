@@ -8,12 +8,10 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 from dataclasses import dataclass
-from pathlib import Path
 
 from .choices import forwarded_flags, message_flag, start_flags
-from .fleet_gate import baselines, probe_helper, probe_host
+from .fleet_gate import baselines, git_in_repo, probe_helper, probe_host, resolve_target
 from .oneshot import start_script
 from .plan.gateway_commands import pre_verify_script
 from .plan.helper_gate import rebuilding_hosts, refusals
@@ -59,11 +57,6 @@ _STOP_HINT = (
 )
 
 
-def _git(*args: str, repo: Path) -> subprocess.CompletedProcess[str]:
-    command = ["git", "-C", str(repo), *args]
-    return subprocess.run(command, capture_output=True, text=True, check=False)
-
-
 def host_evidence(s: Session, alias: str) -> HostEvidence:
     return parse_evidence(s.run(alias, OP_EVIDENCE, effect=False))
 
@@ -74,11 +67,13 @@ def _old_target(s: Session, args: argparse.Namespace, heads: dict[str, str], new
     old = old_commit(heads, new)
     if old.reasons or old.resolved is None:
         return old
-    if _git("cat-file", "-e", f"{old.resolved}^{{commit}}", repo=s.repo).returncode:
+    if git_in_repo("cat-file", "-e", f"{old.resolved}^{{commit}}", repo=s.repo).returncode:
         return OldTarget((unfetched_old_reason(old.resolved, str(s.repo)),), None)
-    stat = _git("diff", "--stat", old.resolved, new, "--", *_WATCHED, repo=s.repo).stdout.rstrip()
+    stat = git_in_repo(
+        "diff", "--stat", old.resolved, new, "--", *_WATCHED, repo=s.repo
+    ).stdout.rstrip()
     s.say(stat or "no change under " + " ".join(_WATCHED))
-    python = _git("diff", "--quiet", old.resolved, new, "--", ".python-version", repo=s.repo)
+    python = git_in_repo("diff", "--quiet", old.resolved, new, "--", ".python-version", repo=s.repo)
     allowed = args.python == "--allow-python-change"
     reasons = python_change_reason(changed=bool(python.returncode), allowed=allowed)
     return OldTarget(reasons, old.resolved)
@@ -292,9 +287,12 @@ def _stop_wave(s: Session, args: argparse.Namespace, pre: _Preflight) -> None:
 
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def down(s: Session, args: argparse.Namespace) -> None:
-    new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}", repo=s.repo).stdout.strip()
-    if not new:
-        raise RefusedError(f"refused: {args.new} is not a commit in {s.repo}; git fetch origin")
+    pre_resolved: str | None = getattr(args, "resolved_new", None)
+    new = (
+        pre_resolved
+        if pre_resolved is not None
+        else resolve_target(s.repo, args.target_request).sha
+    )
     pre = _preflight(s, args, new)
     if pre.reasons:
         raise RefusedError("refused: " + "; ".join(pre.reasons))

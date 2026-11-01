@@ -32,9 +32,7 @@ import pytest
 from meiva_builtins.skills.skill_tools import GROUP, MissingSkillToolError, missing
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SKIP_DIRS = frozenset(
-    {".git", ".venv", ".worktrees", "node_modules", "__pycache__", ".cache", ".trunk"}
-)
+_SKIP_DIRS = frozenset({".git", ".venv", ".worktrees", "node_modules", "__pycache__", ".cache"})
 
 # meiva:note
 # Distribution -> the module the member is imported as. A member a script runs as a program

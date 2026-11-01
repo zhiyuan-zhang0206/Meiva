@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
+from cli.tests.fleet_update.fleet_update_cluster import Cluster, certify_commit, git
 
 Group = tuple[frozenset[str], tuple[str, ...]]
 
@@ -65,6 +65,7 @@ def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
     cluster = Cluster(
         git(repo, "rev-parse", "HEAD~1"), git(repo, "rev-parse", "HEAD"), repo=repo, workdir=workdir
     )
+    certify_commit(repo, cluster.new)
     # meiva:note
     # The shipped table names real machines; a test cluster has its own aliases, so the table
     # in this repository is written the way an operator's pull request would write it.
@@ -74,6 +75,7 @@ def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "baselines")
     logs = str(tmp_path / "logs")
+    target_flags = {"--channel", "--release", "--track-branch", "--new"}
 
     def run(half: str, *extra: str) -> int:
         # meiva:note
@@ -81,7 +83,9 @@ def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
         given = set(extra)
         groups = (*_BOTH, *(_STOP if half != "up" else ()), *(_START if half != "down" else ()))
         chosen = [token for flags, tokens in groups if not given & flags for token in tokens]
-        new = ["--new", cluster.new] if half in ("run", "down") else []
+        new = (
+            ["--new", cluster.new] if half in ("run", "down") and not (given & target_flags) else []
+        )
         argv = [half, "--gateway", "gw", "--log-dir", logs, *new, *chosen, *extra]
         return cluster.invoke(argv)
 

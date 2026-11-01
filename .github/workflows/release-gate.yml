@@ -1,43 +1,43 @@
-# The release gate (task #5762): the one place a tree is certified for a release wave.
+# Post-merge Release Train and on-demand release certification gate.
 #
-# A release wave may only deploy a commit that descends from (or is) a tree this gate passed.
-# The gate runs when the wave is launched, not when a tag is made and not on every version
-# bump: the wave is the human-controlled event, and a tag is only its record.
+# Scheduled runs certify `main` HEAD when new commits have landed since `channel/latest`, skipping
+# runner-hours when `channel/latest` already points at `main` HEAD. Manual `workflow_dispatch` runs
+# certify `main`, a release candidate ref, or a hotfix branch (`hotfix_of` -> `-hf<N>`).
 #
-# Two products on success:
-#   - the annotated tag `vX.Y.Z`, pointing at the certified commit (the human marker);
-#   - `release/<version>.json`, the machine-readable proof this gate reads on every later run
-#     (`scripts/host_ops/release/base.py`), opened as a pull request because every change to
-#     main goes through one. The deployment precheck does not read it yet: nothing in
-#     cli/fleet_update consults the verdict, so a wave is not refused for a missing base.
-# A tag alone can never create release eligibility: the reader ignores tags entirely.
-#
-# A red nightly verdict (`.github/workflows/refresh-test-durations.yml`) does not fail main's
-# merge ability, but it does block this gate: when a nightly run exists for the certified commit
-# and failed, the wave refuses to certify it. A commit the nightly never ran (the usual case, as
-# it runs once a night on main) is not refused for that reason alone - the gate's own matrix is
-# then the only full-suite evidence, and it is fresher.
+# Products on success (all Git-native, zero reverse pull requests to `main`):
+#   - immutable annotated tag `vYYYY.MM.DD.HHMMSS` (or `vYYYY.MM.DD.HHMMSS-hf<N>`) carrying a
+#     `meiva-release/v1` JSON certificate bound to the peeled commit SHA;
+#   - moving annotated tag `channel/latest` carrying a `meiva-channel/v1` JSON pointer when
+#     certifying `refs/heads/main` (non-hotfix);
+#   - a corresponding GitHub Release (`--latest=false`; `promote-release.yml` promotes to
+#     `channel/stable` and `--latest`).
 
 name: Release gate
 
 on:
+  schedule:
+    - cron: '17 */6 * * *'
   workflow_dispatch:
     inputs:
-      target_sha:
-        description: Commit the release wave would deploy (default main HEAD)
+      target_ref:
+        description: Branch, tag, or commit to certify (default main)
+        required: false
+        default: 'main'
+      version:
+        description: Explicit CalVer tag vYYYY.MM.DD.HHMMSS[-hfN] (leave empty to mint UTC timestamp)
         required: false
         default: ''
-      version:
-        description: Version this gate certifies, three parts (e.g. 1.4.0)
-        required: true
+      hotfix_of:
+        description: Certified base tag vYYYY.MM.DD.HHMMSS when certifying a post-release hotfix (-hfN)
+        required: false
+        default: ''
       reason:
-        description: Why this release is being cut (recorded in the tag and the record)
+        description: Operator note recorded in the release certificate
         required: false
         default: ''
 
 permissions:
   contents: write
-  pull-requests: write
   actions: read
 
 env:
@@ -51,58 +51,54 @@ concurrency:
 
 jobs:
   precheck:
-    # Refuses before spending a runner-hour on a tree that may not be released at all: the
-    # target must exist and descend from a commit an earlier gate certified.
-    name: Precheck (release base)
+    name: Precheck (release train & base)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       sha: ${{ steps.target.outputs.sha }}
+      source_ref: ${{ steps.target.outputs.source_ref }}
+      skip_train: ${{ steps.target.outputs.skip_train }}
+      version: ${{ steps.target.outputs.version }}
+      hotfix_of: ${{ steps.target.outputs.hotfix_of }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Fetch release and channel tags
+        run: git fetch --tags --force origin
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.1'
           enable-cache: true
 
-      - name: Resolve the target commit
+      - name: Resolve target and check idle train
         id: target
-        run: |
-          target="${{ inputs.target_sha }}"
-          if [ -z "$target" ]; then target="$GITHUB_SHA"; fi
-          sha="$(git rev-parse --verify --quiet "${target}^{commit}")" || {
-            echo "::error::target '$target' does not resolve to a commit in this checkout"
-            exit 1
-          }
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "certifying $sha as v${{ inputs.version }}"
-
-      # Before any leg spends a runner-hour and before the certify job can write a tag: the
-      # certificate must name a version the target tree actually carries. It reads the TARGET
-      # commit, not this checkout — the input may name another commit.
-      - name: Refuse a certificate label the tree does not carry
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_REF: ${{ inputs.target_ref || 'main' }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+          HOTFIX_OF: ${{ inputs.hotfix_of }}
         run: >
-          python3 scripts/host_ops/release/label.py
+          python3 scripts/host_ops/release/certify.py precheck
           --repo .
-          --target "${{ steps.target.outputs.sha }}"
-          --version "${{ inputs.version }}"
+          --event-name "$EVENT_NAME"
+          --target-ref "$TARGET_REF"
+          --version "$EXPLICIT_VERSION"
+          --hotfix-of "$HOTFIX_OF"
+          --github-output "$GITHUB_OUTPUT"
 
-      # Stdlib only, so the refusal costs seconds and cannot fail on an environment problem.
-      # The bootstrap flag is what makes the first release possible at all: the record can only
-      # come from the run that certifies it. base.py refuses it the moment release/ has ever been
-      # committed, so the flag cannot reopen a door a deleted record closed.
       - name: Refuse a tree without a certified base
+        if: steps.target.outputs.skip_train != 'true'
         run: >
           python3 scripts/host_ops/release/base.py
           --repo .
-          --target ${{ steps.target.outputs.sha }}
-          --provenance-dir release
+          --target "${{ steps.target.outputs.sha }}"
           --bootstrap-when-empty
 
       - name: Refuse a commit whose nightly full suite was red
+        if: steps.target.outputs.skip_train != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -117,6 +113,7 @@ jobs:
 
   backend:
     needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true'
     name: Backend full suite (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -143,8 +140,6 @@ jobs:
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime
 
-      # The whole backend population, sharded exactly as CI shards it, with no selection:
-      # the gate certifies the tree, not a computed subset of it.
       - name: Run the backend suite
         run: >
           uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests
@@ -153,6 +148,7 @@ jobs:
 
   e2e:
     needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true'
     name: e2e full matrix (${{ matrix.group }}/4)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -204,9 +200,8 @@ jobs:
           --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration
 
   platform-smoke:
-    # The platform half of the gate: the vendored Postgres runtime must actually serve a
-    # pgvector query, which unit tests cannot prove because they provision their own server.
     needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true'
     name: Platform smoke (vendored runtime)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -227,10 +222,9 @@ jobs:
         run: uv run python scripts/ci/pgvector_runtime_smoke.py
 
   certify:
-    # Only a tree that passed every leg above gets a version. Both products are written here
-    # and nowhere else, so "who decided this tree is releasable" has one answer.
     needs: [precheck, backend, e2e, platform-smoke]
-    name: Certify and record
+    if: success() && needs.precheck.outputs.skip_train != 'true'
+    name: Certify and publish channel/latest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -239,81 +233,51 @@ jobs:
           ref: ${{ needs.precheck.outputs.sha }}
           fetch-depth: 0
 
-      - name: Refuse a version that is not three parts
-        run: |
-          case "${{ inputs.version }}" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::version must be three numeric parts, got '${{ inputs.version }}'"; exit 1 ;;
-          esac
+      - name: Fetch release and channel tags
+        run: git fetch --tags --force origin
 
-      - name: Write the release record
-        run: |
-          mkdir -p release
-          python3 - <<'PY'
-          import json, os, pathlib
-          version = os.environ["VERSION"]
-          record = {
-              "version": version,
-              "sha": os.environ["SHA"],
-              "gate_run": f"{os.environ['SERVER']}/{os.environ['REPO']}/actions/runs/{os.environ['RUN_ID']}",
-              "passed": True,
-              "reason": os.environ.get("REASON", ""),
-          }
-          path = pathlib.Path("release") / f"{version}.json"
-          path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-          print(path.read_text())
-          PY
+      - name: Mint annotated release certificate
+        id: mint
         env:
-          VERSION: ${{ inputs.version }}
           SHA: ${{ needs.precheck.outputs.sha }}
-          SERVER: ${{ github.server_url }}
-          REPO: ${{ github.repository }}
+          SOURCE_REF: ${{ needs.precheck.outputs.source_ref }}
+          EXPLICIT_VERSION: ${{ needs.precheck.outputs.version }}
+          HOTFIX_OF: ${{ needs.precheck.outputs.hotfix_of }}
           RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REASON: ${{ inputs.reason }}
+        run: >
+          python3 scripts/host_ops/release/certify.py mint
+          --repo .
+          --sha "$SHA"
+          --source-ref "$SOURCE_REF"
+          --certified-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          --gate-run-id "$RUN_ID"
+          --gate-run-url "$RUN_URL"
+          --version "$EXPLICIT_VERSION"
+          --hotfix-of "$HOTFIX_OF"
+          --reason "$REASON"
+          --github-output "$GITHUB_OUTPUT"
 
-      - name: Publish the tag the humans read
-        run: |
-          git config user.name "meiva release gate"
-          git config user.email "release-gate@meiva.invalid"
-          # A failed certify step leaves its tag behind, and a re-dispatch would then die on
-          # "tag already exists" instead of completing the record. Re-publishing the same tag on
-          # the same commit is a no-op; a tag pointing somewhere else is a real refusal. Which of
-          # the three this is belongs to scripts/host_ops/release/tag.py, where both real-tag
-          # cases run against a repository: an annotated tag (the only kind created here) makes
-          # `rev-parse refs/tags/vX` answer with the TAG OBJECT's sha, so peeling to ^{commit} is
-          # what makes the comparison mean anything.
-          action="$(python3 scripts/host_ops/release/tag.py --repo . --version "${{ inputs.version }}" --target "${{ needs.precheck.outputs.sha }}")"
-          if [ "$action" = "create" ]; then
-            git tag -a "v${{ inputs.version }}" "${{ needs.precheck.outputs.sha }}" -m "v${{ inputs.version }} certified by the release gate
-
-          run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          reason: ${{ inputs.reason }}"
-            git push origin "v${{ inputs.version }}"
-          else
-            echo "tag v${{ inputs.version }} already marks the certified commit; nothing to publish"
-          fi
-
-      - name: Open the pull request that lands the record
+      - name: Publish release tag, channel/latest, and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.mint.outputs.version }}
+          SHA: ${{ steps.mint.outputs.sha }}
+          TAG_ACTION: ${{ steps.mint.outputs.tag_action }}
+          ADVANCE_LATEST: ${{ steps.mint.outputs.advance_latest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          branch="release/v${{ inputs.version }}"
-          git checkout -b "$branch"
-          git add release
-          git commit -m "release: v${{ inputs.version }} certified by the release gate
-
-          Gate run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          Certified commit: ${{ needs.precheck.outputs.sha }}"
-          git push origin "$branch"
-          gh pr create --base main --head "$branch" \
-            --title "release: v${{ inputs.version }}" \
-            --body "Certified by the release gate: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-          - certified commit: \`${{ needs.precheck.outputs.sha }}\`
-          - version: \`v${{ inputs.version }}\`
-          - reason: ${{ inputs.reason }}
-
-          Merging this pull request makes the certification the base every later gate run must
-          descend from (\`scripts/host_ops/release/base.py\` reads \`release/<version>.json\`).
-          The deployment precheck does not consult it yet, so a wave is not refused for a missing
-          base today. The tag already exists and carries the same run link."
+          if [ "$TAG_ACTION" = "create" ]; then
+            git push origin "refs/tags/$VERSION"
+          fi
+          if [ "$ADVANCE_LATEST" = "true" ]; then
+            git push --force origin refs/tags/channel/latest:refs/tags/channel/latest
+          fi
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release create "$VERSION" \
+              --verify-tag \
+              --latest=false \
+              --title "$VERSION" \
+              --notes "Certified commit \`$SHA\` via Release gate ($RUN_URL)."
+          fi

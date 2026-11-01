@@ -52,7 +52,7 @@ def _repo(tmp_path: Path) -> Path:
         "base/empty/tests/helper.py": "",
         "ops/worker.py": "",
         "scripts/tests/test_reads_github.py": 'WORKFLOW = ".github/workflows/ci.yml"\n',
-        "scripts/tests/test_reads_trunk.py": "ROOT = '.trunk'\n",
+        "scripts/tests/test_reads_meiva.py": "ROOT = '.meiva'\n",
         "scripts/tests/test_reads_agents.py": 'SKILLS = root / ".agents" / "skills"\n',
         "scripts/tests/test_imports_agents_module.py": "from base.agents import runner\n",
         "ui/web/src/App.tsx": "",
@@ -196,7 +196,7 @@ def test_repository_level_inputs_run_only_the_tree_scan_tests(tmp_path: Path, pa
     ("path", "reader"),
     [
         (".github/workflows/ci.yml", "scripts/tests/test_reads_github.py"),
-        (".trunk/trunk.yaml", "scripts/tests/test_reads_trunk.py"),
+        (".meiva/settings.toml", "scripts/tests/test_reads_meiva.py"),
         (".agents/skills/demo/SKILL.md", "scripts/tests/test_reads_agents.py"),
     ],
 )
@@ -204,7 +204,7 @@ def test_a_hidden_tool_directory_also_runs_the_tests_that_name_it(
     tmp_path: Path, path: str, reader: str
 ) -> None:
     repo_root = _repo(tmp_path)
-    _write(repo_root, ".trunk/trunk.yaml")
+    _write(repo_root, ".meiva/settings.toml")
 
     result = _select(repo_root, path)
 
@@ -222,10 +222,10 @@ def test_a_module_named_base_agents_does_not_reference_the_agents_directory(
 def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> None:
     expectations = {
         ".github/workflows/ci.yml": (
+            "tests/scripts/test_audit_branch_protection_contract.py",
             "tests/scripts/test_ci_test_selection.py",
             "tests/ci/test_workflow_paths.py",
         ),
-        ".trunk/trunk.yaml": ("tests/scripts/test_audit_branch_protection_contract.py",),
         ".agents/skills/inspect-a-trace/SKILL.md": ("tests/skills/test_inspect_a_trace_fetch.py",),
     }
     checkout = test_selector.load_checkout(_REPO_ROOT)

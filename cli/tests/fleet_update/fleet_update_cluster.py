@@ -10,6 +10,12 @@ from typing import Any
 
 from cli import fleet_update
 from cli.fleet_update.plan.host_commands import CLEAN
+from cli.fleet_update.plan.release_target import (
+    Channel,
+    ChannelPointer,
+    ReleaseCertificate,
+    format_tag_message,
+)
 from cli.fleet_update.programs import ALERT_SILENCE_SCRIPT, VERIFY_SCRIPTS, program_text
 from cli.fleet_update.session import Pacing
 from cli.fleet_update.timers import ProcessTimers
@@ -18,6 +24,45 @@ from cli.fleet_update.timers import ProcessTimers
 def git(repo: Path, *args: str) -> str:
     command = ["git", "-c", "user.name=t", "-c", "user.email=t@x.invalid", "-C", str(repo), *args]
     return subprocess.run(command, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def certify_commit(
+    repo: Path,
+    sha: str,
+    *,
+    version: str = "v2026.10.24.120000",
+    channels: tuple[Channel, ...] = ("stable", "latest"),
+    hotfix_of: str | None = None,
+    source_ref: str = "refs/heads/main",
+) -> ReleaseCertificate:
+    cert = ReleaseCertificate(
+        version=version,
+        sha=sha,
+        source_ref=source_ref,
+        gate_run_id="9001",
+        gate_run_url="https://github.com/example/Meiva/actions/runs/9001",
+        certified_at="2026-10-24T12:00:00Z",
+        hotfix_of=hotfix_of,
+    )
+    git(repo, "tag", "-f", "-a", version, "-m", format_tag_message(cert), sha)
+    for channel in channels:
+        pointer = ChannelPointer(
+            channel=channel,
+            version=version,
+            sha=sha,
+            updated_at="2026-10-24T12:00:00Z",
+        )
+        git(
+            repo,
+            "tag",
+            "-f",
+            "-a",
+            f"channel/{channel}",
+            "-m",
+            format_tag_message(pointer),
+            sha,
+        )
+    return cert
 
 
 _IDLE: dict[str, Any] = {

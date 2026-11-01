@@ -108,9 +108,11 @@ issue.
 
 A weekly schedule (plus manual dispatch) runs
 `scripts/audit/branch_protection.py` with read access to GitHub's live branch
-protection and workflow registry. The script derives the expected checks from
-`.trunk/trunk.yaml`, then verifies exact required contexts, non-strict update
-policy, admin enforcement, and active `ci.yml` / `ci-rerun.yml` workflows.
+protection and workflow registry. The script compares live GitHub protection
+against the canonical required-check contract in
+`scripts/audit/analysis/protection.py`, verifying exact required contexts,
+non-strict update policy, admin enforcement, and active `ci.yml` / `ci-rerun.yml`
+workflows.
 
 Verified drift keeps the run red and creates or updates one marker issue. A
 could-not-verify result stays red without opening an issue, avoiding transient API

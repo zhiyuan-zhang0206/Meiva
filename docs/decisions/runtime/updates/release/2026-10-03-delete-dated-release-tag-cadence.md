@@ -1,5 +1,7 @@
 # The dated release-tag cadence is deleted
 
+Superseded by [2026-11-01-release-train-and-channels.md](../../../engineering/tooling/2026-11-01-release-train-and-channels.md).
+
 ## Context
 
 The [release-path removal](2026-09-30-remove-release-image-path.md) deleted the retained-image

@@ -1,4 +1,4 @@
-exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_failures.py", "host_probe.py", "journal.py", "lease_announcement.py", "old_target.py", "recovery.py", "redaction.py", "roster.py", "silence_replies.py", "stop_wave.py", "stored_schedules.py", "verify_steps.py", "wave_order.py"]
+exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_failures.py", "host_probe.py", "journal.py", "lease_announcement.py", "old_target.py", "recovery.py", "redaction.py", "release_target.py", "roster.py", "silence_replies.py", "stop_wave.py", "stored_schedules.py", "verify_steps.py", "wave_order.py"]
 
 [uses]
 "gateway_commands.py" = ["host_commands.py"]
@@ -22,6 +22,7 @@ exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_fa
 "probe_values.py" = "strict"
 "recovery.py" = "strict"
 "redaction.py" = "strict"
+"release_target.py" = "strict"
 "roster.py" = "strict"
 "silence_replies.py" = "strict"
 "stop_wave.py" = "strict"

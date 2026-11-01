@@ -1,4 +1,9 @@
-exports = ["base.py", "label.py", "nightly.py", "tag.py"]
+exports = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
 
 [uses]
-"tests" = ["base.py", "label.py", "nightly.py", "tag.py"]
+"base.py" = ["git_tags.py"]
+"bisect_train.py" = ["git_tags.py"]
+"certify.py" = ["git_tags.py", "tag.py"]
+"promote.py" = ["git_tags.py"]
+"tag.py" = ["git_tags.py"]
+"tests" = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]

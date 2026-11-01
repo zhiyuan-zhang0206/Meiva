@@ -213,7 +213,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/scripts/test_audit_branch_protection_contract.py": (
         "contract",
-        "the branch-protection audit accepts the real .trunk/trunk.yaml declaration of the full gate",
+        "the branch-protection audit's required status checks match job names in .github/workflows/ci.yml",
     ),
     "tests/scripts/test_ci_artifact_policy.py": (
         "contract",
