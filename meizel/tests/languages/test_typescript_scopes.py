@@ -3,8 +3,8 @@
 #
 # These contracts need the real Node producer: a repository that contains `.ts` files makes `check`
 # run the locked TypeScript package, and without it the run refuses with a compiler error instead of
-# reaching the warning. They therefore live in the native lane (`NATIVE_TEST_PATHS`), like the other
-# compiler contracts, and the static lane excludes this file.
+# reaching the warning. Because backend-static-tests now installs Node and the locked TypeScript
+# package, all compiler contracts live in the static lane and the native shards omit them.
 from __future__ import annotations
 
 from pathlib import Path

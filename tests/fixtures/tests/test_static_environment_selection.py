@@ -197,3 +197,9 @@ def test_compiler_file_routes_to_native_without_losing_static_python(owned_tree:
     )
     assert refused.returncode == pytest.ExitCode.USAGE_ERROR
     assert "Static processes accept only owned static test paths" in refused.stderr
+
+
+def test_production_static_environment_has_empty_native_test_paths() -> None:
+    from tests.fixtures import static_environment as environment
+
+    assert environment.NATIVE_TEST_PATHS == ()

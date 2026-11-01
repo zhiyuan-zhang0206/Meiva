@@ -183,6 +183,7 @@ def _measure_shard(
             "not flaky",
             "-n",
             str(_BACKEND_WORKERS),
+            "--dist=loadfile",
             "--splits",
             str(groups),
             "--group",

@@ -185,21 +185,24 @@ def test_ci_shards_never_record_or_upload_durations(suite: str) -> None:
 
 
 # meiva:note
-# The measured population shells out to node; a shard that draws those tests needs
-# ui/web/node_modules/typescript or the whole refresh fails (task #5479).
-def test_both_measurement_jobs_install_the_typescript_parser_dependencies() -> None:
+# All TypeScript compiler/accounting contracts run in the static lane (backend-static-tests).
+# The measured backend population has no Node/npm dependency; measure-e2e retains its browser setup.
+def test_measurement_jobs_frontend_dependencies() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
-    for name in ("measure-backend", "measure-e2e"):
-        steps = jobs[name]["steps"]
-        node = _step(steps, "Install Node")
-        assert node["uses"].startswith("actions/setup-node@")
-        assert node["with"]["node-version"] == 22
-        installs = [
-            step
-            for step in steps
-            if step.get("working-directory") == "ui/web" and step.get("run") == "npm ci"
-        ]
-        assert len(installs) == 1, f"{name} must install ui/web deps exactly once"
+    backend_steps = jobs["measure-backend"]["steps"]
+    assert not [step for step in backend_steps if "Install Node" in str(step.get("name"))]
+    assert not [step for step in backend_steps if step.get("run") == "npm ci"]
+
+    e2e_steps = jobs["measure-e2e"]["steps"]
+    node = _step(e2e_steps, "Install Node")
+    assert node["uses"].startswith("actions/setup-node@")
+    assert node["with"]["node-version"] == 22
+    installs = [
+        step
+        for step in e2e_steps
+        if step.get("working-directory") == "ui/web" and step.get("run") == "npm ci"
+    ]
+    assert len(installs) == 1, "measure-e2e must install ui/web deps exactly once"
 
 
 def test_the_nightly_verdict_is_its_own_leg_reading_junit_only() -> None:
