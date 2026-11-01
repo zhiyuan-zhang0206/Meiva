@@ -35,6 +35,12 @@ on:
 permissions:
   contents: read
 
+# GitHub Actions defaults `run:` steps to `sh -e {0}` (`/bin/sh` = dash on Ubuntu)
+# inside `container:` jobs rather than `bash`; set `bash` explicitly to match host jobs.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('ci-runner-image-{0}', github.ref) || format('ci-runner-image-{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
