@@ -23,6 +23,7 @@ __all__ = [
     "PGVECTOR_VERSION",
     "PG_ARTIFACTS",
     "PG_VERSION",
+    "artifact_system",
     "download",
     "download_ghcr_blob",
     "download_ghcr_blob_with_opener",
@@ -32,7 +33,6 @@ __all__ = [
     "pgvector_extension_files",
     "pgvector_platform_key",
     "platform_key",
-    "resolve_host_platform",
     "runtime_root",
     "vendored_pg_bin_dir",
     "vendored_pg_dir",
@@ -72,21 +72,16 @@ PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
 }
 
 
-def resolve_host_platform(
-    *, system: str | None = None, machine: str | None = None
-) -> tuple[str, str]:
-    if system is not None and machine is not None:
-        return system, machine
-    current = Platform.current()
-    default_system = "Darwin" if current.system == "darwin" else "Linux"
-    return (
-        system if system is not None else default_system,
-        machine if machine is not None else current.machine,
-    )
+# meiva:note
+# The vocabulary the artifact tables are keyed by, spelled once: `Platform.system` carries what
+# `sys.platform` reduces to ("linux"/"darwin"), while the pinned assets name "Linux"/"Darwin".
+# Nothing is read here — the platform it translates was handed in by the caller that holds it.
+def artifact_system(platform: Platform) -> tuple[str, str]:
+    return ("Darwin" if platform.system == "darwin" else "Linux", platform.machine)
 
 
-def platform_key(*, system: str | None = None, machine: str | None = None) -> str:
-    sys_name, arch = resolve_host_platform(system=system, machine=machine)
+def platform_key(*, system: str, machine: str) -> str:
+    sys_name, arch = system, machine
     if sys_name == "Darwin":
         return "darwin"
     if sys_name == "Linux":
@@ -96,7 +91,7 @@ def platform_key(*, system: str | None = None, machine: str | None = None) -> st
     raise RuntimeError(f"no vendored Postgres available for {sys_name}")
 
 
-def vendored_pg_supported(*, system: str | None = None, machine: str | None = None) -> bool:
+def vendored_pg_supported(*, system: str, machine: str) -> bool:
     try:
         return platform_key(system=system, machine=machine) in PG_ARTIFACTS
     except RuntimeError:
@@ -119,8 +114,8 @@ def vendored_pg_bin_dir(home: Path, *, pg_version: str = PG_VERSION) -> Path | N
 def ensure_pg_binaries(
     *,
     home: Path,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
     pg_version: str = PG_VERSION,
     open_url: UrlOpener | None = None,
@@ -241,8 +236,8 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
     staging.rename(target)
 
 
-def pgvector_platform_key(*, system: str | None = None, machine: str | None = None) -> str:
-    sys_name, arch = resolve_host_platform(system=system, machine=machine)
+def pgvector_platform_key(*, system: str, machine: str) -> str:
+    sys_name, arch = system, machine
     if sys_name == "Darwin":
         if arch == "arm64":
             return "darwin-arm64"
@@ -257,8 +252,8 @@ def pgvector_platform_key(*, system: str | None = None, machine: str | None = No
 def ensure_pgvector(
     *,
     home: Path,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
     pg_version: str = PG_VERSION,
     pgvector_version: str = PGVECTOR_VERSION,

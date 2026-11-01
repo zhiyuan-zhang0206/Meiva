@@ -49,6 +49,7 @@ def test_only_linux_x86_64_is_pinned() -> None:
 def test_other_platforms_fail_fast(pinned: PinnedWalgEnv, system: str, machine: str) -> None:
     with pytest.raises(RuntimeError, match="no pinned wal-g artifact for"):
         walg_binary.ensure_walg_binary(
+            environ=os.environ,
             home=pinned.home,
             system=system,
             machine=machine,
@@ -70,6 +71,7 @@ def test_other_platforms_fail_fast(pinned: PinnedWalgEnv, system: str, machine: 
 
 def test_install_downloads_verifies_and_publishes_an_executable(pinned: PinnedWalgEnv) -> None:
     path = walg_binary.ensure_walg_binary(
+        environ=os.environ,
         home=pinned.home,
         system="Linux",
         machine="x86_64",
@@ -98,6 +100,7 @@ def test_install_downloads_verifies_and_publishes_an_executable(pinned: PinnedWa
 
 def test_install_is_idempotent(pinned: PinnedWalgEnv) -> None:
     walg_binary.ensure_walg_binary(
+        environ=os.environ,
         home=pinned.home,
         system="Linux",
         machine="x86_64",
@@ -105,6 +108,7 @@ def test_install_is_idempotent(pinned: PinnedWalgEnv) -> None:
         open_url=pinned.opener,
     )
     walg_binary.ensure_walg_binary(
+        environ=os.environ,
         home=pinned.home,
         system="Linux",
         machine="x86_64",
@@ -123,6 +127,7 @@ def test_checksum_mismatch_installs_nothing(
 
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
         walg_binary.ensure_walg_binary(
+            environ=os.environ,
             home=pinned.home,
             system="Linux",
             machine="x86_64",
@@ -137,6 +142,7 @@ def test_wrong_version_never_displaces_the_installed_binary(
     pinned: PinnedWalgEnv,
 ) -> None:
     walg_binary.ensure_walg_binary(
+        environ=os.environ,
         home=pinned.home,
         system="Linux",
         machine="x86_64",
@@ -152,6 +158,7 @@ def test_wrong_version_never_displaces_the_installed_binary(
 
     with pytest.raises(RuntimeError, match=r"does not report v3\.0\.9"):
         walg_binary.ensure_walg_binary(
+            environ=os.environ,
             home=pinned.home,
             system="Linux",
             machine="x86_64",
@@ -175,6 +182,7 @@ def test_installed_problem_names_each_defect(pinned: PinnedWalgEnv) -> None:
     )
 
     path = walg_binary.ensure_walg_binary(
+        environ=os.environ,
         home=pinned.home,
         system="Linux",
         machine="x86_64",
@@ -215,3 +223,35 @@ def test_installed_problem_names_each_defect(pinned: PinnedWalgEnv) -> None:
         is None
     )
     assert os.access(path, os.X_OK)
+
+
+# meiva:note
+# The probe is the one place this module starts a process, so it is where an ambient environment
+# would leak back in. The fake binary refuses to report its version unless it was started with the
+# environment the caller stated: restoring `daemon_process_env()` inside `_require_version` fails
+# this case, which is the mutation check for the read this change removed.
+_CALLER_MARKED_WALG = (
+    b"#!/bin/sh\n"
+    b'[ "$LC_ALL" = "from-the-caller" ] || '
+    b'{ echo "the probe ran without the caller environment" >&2; exit 3; }\n'
+    b'echo "wal-g version v3.0.9 deadbeef 2026.08.20 PostgreSQL"\n'
+)
+
+
+def test_the_version_probe_runs_with_the_environment_its_caller_states(tmp_path: Path) -> None:
+    opener = FakeUrlOpener()
+    opener.on("https://github.com/wal-g/", Answer(body=_CALLER_MARKED_WALG), repeat=True)
+    artifacts = {
+        "linux-x86_64": ("wal-g-fake", hashlib.sha256(_CALLER_MARKED_WALG).hexdigest()),
+    }
+
+    path = walg_binary.ensure_walg_binary(
+        home=tmp_path / "home",
+        system="Linux",
+        machine="x86_64",
+        environ={"LC_ALL": "from-the-caller"},
+        artifacts=artifacts,
+        open_url=opener,
+    )
+
+    assert path.exists()

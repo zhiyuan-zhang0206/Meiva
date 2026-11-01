@@ -25,6 +25,12 @@ from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane import runtime_binaries as rb
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.log.tests.log_records import LogRecords
+from base.native_process.os_platform import Platform
+
+# meiva:note
+# These tests name the platform the artifact tables are keyed by instead of reading the host's, so
+# the pinned asset and the key that finds it stay the same pair on every runner.
+_SYSTEM, _MACHINE = "Linux", "x86_64"
 
 
 @pytest.fixture()
@@ -179,7 +185,7 @@ def test_ensure_pg_binaries_hermetic_fixture(
 ) -> None:
     artifact_name = "synthetic-postgres"
     synthetic_jar = _synthetic_pg_jar(artifact_name)
-    key = rb.platform_key()
+    key = rb.platform_key(system=_SYSTEM, machine=_MACHINE)
     artifacts = {
         key: (artifact_name, hashlib.sha256(synthetic_jar).hexdigest()),
     }
@@ -188,6 +194,8 @@ def test_ensure_pg_binaries_hermetic_fixture(
 
     bin_dir = rb.ensure_pg_binaries(
         home=isolated_runtime,
+        system=_SYSTEM,
+        machine=_MACHINE,
         artifacts=artifacts,
         open_url=opener,
     )
@@ -204,6 +212,8 @@ def test_ensure_pg_binaries_hermetic_fixture(
     assert (
         rb.ensure_pg_binaries(
             home=isolated_runtime,
+            system=_SYSTEM,
+            machine=_MACHINE,
             artifacts=artifacts,
             open_url=opener,
         )
@@ -361,9 +371,32 @@ def test_ensure_pgvector_fails_on_checksum_mismatch(
         )
 
 
+# meiva:note
+# The tables are fed, never consulted from whichever host runs the test: a caller that names no
+# platform is refused instead of being answered with the one reading it, which is the read this
+# change removed. Re-adding a `None` default plus `Platform.current()` fails both calls.
+def test_the_platform_is_named_by_the_caller_not_read_from_the_host() -> None:
+    with pytest.raises(TypeError):
+        rb.platform_key()  # pyright: ignore[reportCallIssue]
+    with pytest.raises(TypeError):
+        rb.vendored_pg_supported()  # pyright: ignore[reportCallIssue]
+
+
+# meiva:note
+# The two vocabularies meet in one place: `Platform.system` is what `sys.platform` reduces to,
+# the tables name "Linux"/"Darwin". Handing in the other host changes the answer, so a reader
+# that ignored its argument and read the process would be caught here.
+def test_artifact_system_translates_the_platform_it_is_given() -> None:
+    linux = Platform("linux", "x86_64", "/usr/bin/python3")
+    mac = Platform("darwin", "arm64", "/usr/bin/python3")
+
+    assert rb.artifact_system(linux) == ("Linux", "x86_64")
+    assert rb.artifact_system(mac) == ("Darwin", "arm64")
+
+
 def test_ensure_pgvector_requires_pg_tree(isolated_runtime: Path) -> None:
     with pytest.raises(RuntimeError, match="ensure_pg_binaries"):
-        rb.ensure_pgvector(home=isolated_runtime)
+        rb.ensure_pgvector(home=isolated_runtime, system=_SYSTEM, machine=_MACHINE)
 
 
 def test_download_ghcr_blob_fetches_token_then_blob() -> None:

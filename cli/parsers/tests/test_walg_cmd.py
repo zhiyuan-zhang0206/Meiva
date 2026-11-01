@@ -34,6 +34,11 @@ from services.backup.walg.tests.support import (
     take_basebackup,
 )
 
+# meiva:note
+# These tests name the platform the artifact tables are keyed by instead of reading the host's, so
+# the pinned asset and the key that finds it stay the same pair on every runner.
+_SYSTEM, _MACHINE = "Linux", "x86_64"
+
 
 @pytest.fixture
 def plane_off(data_plane_config: DataPlaneConfig) -> DataPlaneConfig:
@@ -136,7 +141,7 @@ def test_run_prints_timestamped_lines_and_returns_the_ticks_exit_code(
 def test_status_says_when_the_tick_never_ran(
     plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], sandbox: Sandbox
 ) -> None:
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     assert "daily tick: never ran" in capsys.readouterr().out
 
@@ -160,7 +165,7 @@ def test_status_shows_the_last_run_and_its_failed_step(
         ),
     )
 
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     out = capsys.readouterr().out
     assert "daily tick: last started 2026-10-02T06:25:00+00:00" in out
@@ -174,7 +179,7 @@ def test_status_reports_an_unreadable_state_file(
     state.state_path(sandbox.home).parent.mkdir(parents=True)
     state.state_path(sandbox.home).write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     assert "daily tick: state UNREADABLE" in capsys.readouterr().out
 
@@ -189,6 +194,8 @@ def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
             home=sandbox.home,
             environ=sandbox.environ,
             installed=always_pinned,
+            system=_SYSTEM,
+            machine=_MACHINE,
         )
         == 0
     )
@@ -216,6 +223,8 @@ def test_check_exits_non_zero_and_names_the_failing_step(
             home=sandbox.home,
             environ=sandbox.environ,
             installed=always_pinned,
+            system=_SYSTEM,
+            machine=_MACHINE,
         )
         == 1
     )
@@ -246,7 +255,10 @@ def test_check_at_the_door_names_each_run_by_a_token_it_draws(
 def test_status_when_off_says_so(
     plane_off: DataPlaneConfig, capsys: pytest.CaptureFixture[str], sandbox: Sandbox
 ) -> None:
-    assert walg_cmd.cmd_walg_status(plane_off, home=sandbox.home) == 0
+    assert (
+        walg_cmd.cmd_walg_status(plane_off, home=sandbox.home, system=_SYSTEM, machine=_MACHINE)
+        == 0
+    )
 
     assert capsys.readouterr().out == "WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)\n"
 
@@ -296,7 +308,7 @@ def test_status_shows_the_fingerprint_not_the_key(
 ) -> None:
     fingerprint = walg_config.read_config(sandbox.config_file).key_fingerprint
 
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     out = capsys.readouterr().out
     assert f"key fingerprint: {fingerprint} (pinned: not yet)" in out
@@ -311,7 +323,7 @@ def test_status_reports_an_unusable_configuration_instead_of_raising(
 ) -> None:
     sandbox.config_file.write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     out = capsys.readouterr().out
     assert "configuration: UNUSABLE" in out
@@ -414,6 +426,8 @@ def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
             home=sandbox.home,
             environ=sandbox.environ,
             installed=always_pinned,
+            system=_SYSTEM,
+            machine=_MACHINE,
         )
 
     assert code == 0
@@ -451,6 +465,8 @@ def test_restore_rejects_a_bad_target_before_fetching(
         environ=sandbox.environ,
         **kwargs,
         installed=always_pinned,
+        system=_SYSTEM,
+        machine=_MACHINE,
     )
 
     assert code == 1
@@ -473,6 +489,8 @@ def test_restore_reports_a_failed_fetch_and_exits_non_zero(
         home=sandbox.home,
         environ=sandbox.environ,
         installed=always_pinned,
+        system=_SYSTEM,
+        machine=_MACHINE,
     )
 
     assert code == 1
@@ -498,6 +516,8 @@ def test_restore_refuses_a_directory_that_holds_something(
         home=sandbox.home,
         environ=sandbox.environ,
         installed=always_pinned,
+        system=_SYSTEM,
+        machine=_MACHINE,
     )
 
     assert code == 1
@@ -519,6 +539,8 @@ def test_restore_while_wal_g_is_off_says_so(
         home=sandbox.home,
         environ=sandbox.environ,
         installed=always_pinned,
+        system=_SYSTEM,
+        machine=_MACHINE,
     )
 
     assert code == 1
@@ -567,7 +589,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
         ),
     )
 
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     out = capsys.readouterr().out
     assert (
@@ -584,7 +606,7 @@ def test_status_shows_the_key_the_handed_home_pinned(
     pinned = walg_config.pinned_key_id(sandbox.home)
     assert pinned is not None
 
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     assert f"(pinned: {pinned})" in capsys.readouterr().out
 
@@ -595,7 +617,7 @@ def test_status_flags_a_key_other_than_the_one_the_handed_home_pinned(
     walg_config.load_walg_config(path=sandbox.config_file, home=sandbox.home)
     sandbox.key_file.write_text("ef" * 32 + "\n")
 
-    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home, system=_SYSTEM, machine=_MACHINE) == 0
 
     assert "KEY MISMATCH" in capsys.readouterr().out
 
@@ -616,6 +638,8 @@ def test_restore_refuses_a_key_other_than_the_one_the_handed_home_pinned(
         home=sandbox.home,
         environ=sandbox.environ,
         installed=always_pinned,
+        system=_SYSTEM,
+        machine=_MACHINE,
     )
 
     assert code == 1

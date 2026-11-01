@@ -11,12 +11,11 @@ from pathlib import Path
 from base.cluster.dataplane.runtime_binaries import (
     download,
     download_with_opener,
-    resolve_host_platform,
     runtime_root,
 )
 from base.host.net.ports import UrlOpener
 from base.log import logger
-from base.native_process.child_env import daemon_process_env
+from base.native_process.child_env import filter_daemon_env
 
 __all__ = [
     "WALG_ARTIFACTS",
@@ -42,11 +41,11 @@ _VERSION_PROBE_TIMEOUT_S = 30
 
 def _artifact(
     *,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
 ) -> tuple[str, str]:
-    sys_name, arch = resolve_host_platform(system=system, machine=machine)
+    sys_name, arch = system, machine
     table = artifacts if artifacts is not None else WALG_ARTIFACTS
     if sys_name == "Linux" and arch in ("x86_64", "amd64"):
         return table["linux-x86_64"]
@@ -73,8 +72,8 @@ def _sha256_of(path: Path) -> str | None:
 def installed_problem(
     *,
     home: Path,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
 ) -> str | None:
     try:
@@ -92,7 +91,11 @@ def installed_problem(
     return None
 
 
-def _require_version(binary: Path) -> None:
+# meiva:note
+# The probe runs the candidate with the environment its caller states, filtered to the daemon set:
+# this module holds no opinion about the process it happens to run in, and a probe must not hand
+# the boot pass's gateway credentials to a downloaded binary.
+def _require_version(binary: Path, *, environ: Mapping[str, str]) -> None:
     """The candidate binary must run and report the pinned version."""
     result = subprocess.run(  # noqa: S603 — the candidate is the checksum-verified pinned artifact
         [str(binary), "--version"],
@@ -100,7 +103,7 @@ def _require_version(binary: Path) -> None:
         text=True,
         check=False,
         timeout=_VERSION_PROBE_TIMEOUT_S,
-        env=daemon_process_env(),
+        env=filter_daemon_env(environ),
     )
     if result.returncode != 0 or WALG_VERSION not in result.stdout:
         raise RuntimeError(
@@ -112,8 +115,9 @@ def _require_version(binary: Path) -> None:
 def ensure_walg_binary(
     *,
     home: Path,
-    system: str | None = None,
-    machine: str | None = None,
+    system: str,
+    machine: str,
+    environ: Mapping[str, str],
     artifacts: Mapping[str, tuple[str, str]] | None = None,
     open_url: UrlOpener | None = None,
 ) -> Path:
@@ -145,7 +149,7 @@ def ensure_walg_binary(
             file.flush()
             os.fsync(file.fileno())
         candidate.chmod(0o755)
-        _require_version(candidate)
+        _require_version(candidate, environ=environ)
         candidate.replace(target)
     finally:
         with suppress(FileNotFoundError):

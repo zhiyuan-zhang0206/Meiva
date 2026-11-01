@@ -125,9 +125,17 @@ class Platform:
 # the caller names another -- so a caller handed a stand-in for the pinned build stays honest about
 # everything else it resolves.
 def ambient_platform(
-    *, home: Path, installed: Callable[..., str | None] = walg_binary.installed_problem
+    *,
+    home: Path,
+    system: str,
+    machine: str,
+    installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> Platform:
-    binary_problem = installed(home=home)
+    # meiva:note
+    # The two values are the caller's: `walg_binary` is handed the platform its artifact table is
+    # keyed by instead of reaching for whichever host runs the process, and this function only
+    # assembles the facts one run is decided on.
+    binary_problem = installed(home=home, system=system, machine=machine)
     try:
         target = pg_target(home=home)
         accepting = postgres_accepts_connections(target)
@@ -440,6 +448,8 @@ def run_tick(
     path: Path | None,
     home: Path,
     environ: Mapping[str, str],
+    system: str,
+    machine: str,
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     if path is None:
@@ -447,7 +457,7 @@ def run_tick(
         return 0
     return run_tick_on(
         report,
-        platform=ambient_platform(home=home, installed=installed),
+        platform=ambient_platform(home=home, system=system, machine=machine, installed=installed),
         throwaway=throwaway,
         database_for_url=database_for_url,
         path=path,
@@ -546,6 +556,8 @@ def run_drill_now(
     path: Path | None,
     home: Path,
     environ: Mapping[str, str],
+    system: str,
+    machine: str,
     installed: Callable[..., str | None] = walg_binary.installed_problem,
 ) -> int:
     if path is None:
@@ -553,7 +565,7 @@ def run_drill_now(
         return 1
     return run_drill_now_on(
         report,
-        platform=ambient_platform(home=home, installed=installed),
+        platform=ambient_platform(home=home, system=system, machine=machine, installed=installed),
         throwaway=throwaway,
         database_for_url=database_for_url,
         path=path,
