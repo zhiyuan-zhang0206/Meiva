@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from meizel import allowances
 from meizel.contracts.cli import GitRepo
 from meizel.graph.model import MeizelError, Sources
 from meizel.graph.universe import Universe
@@ -13,7 +14,13 @@ def main() -> int:
     path = sys.argv[1]
     source = b"answer = 1" if path.endswith(".py") else b"const answer = 1;"
     try:
-        scan_source(Universe(GitRepo(Path(sys.argv[2])), [path]), path, source, Sources())
+        scan_source(
+            Universe(GitRepo(Path(sys.argv[2])), [path]),
+            path,
+            source,
+            Sources(),
+            policy=allowances.Policy(),
+        )
     except MeizelError as error:
         print(error)
         return 2

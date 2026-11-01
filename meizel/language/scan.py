@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, TypeGuard
 
 from meizel import allowances
@@ -63,18 +62,12 @@ __all__ = [
 
 # The calls that start a process, with where the argument list is: the index of the list argument,
 # or the index where an unpacked list starts. A bare `python` counts as a command in these only.
-_ARGV_LIST_AT = {
+_STATIC_ARGV_LIST_AT = {
     "subprocess.run": 0,
     "subprocess.call": 0,
     "subprocess.check_call": 0,
     "subprocess.check_output": 0,
     "subprocess.Popen": 0,
-    **dict.fromkeys(
-        allowances.load(Path(__file__).resolve().parents[2]).names(
-            "python-commands", "argv-wrappers"
-        ),
-        0,
-    ),
     "os.execv": 1,
     "os.execve": 1,
     "os.execvp": 1,
@@ -95,6 +88,16 @@ _ARGV_UNPACKED_FROM = {
     "os.spawnlp": 2,
     "os.spawnlpe": 2,
 }
+
+
+# meiva:note
+# The wrappers a policy adds to that table: a call that takes an argv list and starts a process. The
+# list is a fact of the policy the run parsed, so a run that judges another repository is handed
+# that repository's policy instead of reading this one's.
+def _argv_wrappers(policy: allowances.Policy) -> frozenset[str]:
+    return frozenset(policy.names("python-commands", "argv-wrappers"))
+
+
 _LEAVES = frozenset(
     {
         ast.Constant,
@@ -181,9 +184,17 @@ class FileScan:
 
 class Scanner(AmbientAccess):
     def __init__(
-        self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool, sources: Sources
+        self,
+        universe: Universe,
+        path: str,
+        tree: ast.Module,
+        *,
+        walrus: bool,
+        sources: Sources,
+        policy: allowances.Policy,
     ) -> None:
         super().__init__(universe, path, tree, walrus=walrus, sources=sources)
+        self.argv_wrappers = _argv_wrappers(policy)
         self.fixture_state = fixtures.FixtureState()
         self.fn_depth = 0
         self.qualnames: list[str] = []
@@ -597,7 +608,9 @@ class Scanner(AmbientAccess):
 
     def spawn_call(self, callee: str | None, node: ast.Call) -> None:
         """A call that starts a process: judge its argument list when that starts a Python interpreter."""
-        at = _ARGV_LIST_AT.get(callee or "")
+        at = _STATIC_ARGV_LIST_AT.get(callee or "")
+        if at is None and (callee or "") in self.argv_wrappers:
+            at = 0
         if at is not None and len(node.args) > at:
             argv = node.args[at]
             if isinstance(argv, ast.List | ast.Tuple):
@@ -618,7 +631,9 @@ class Scanner(AmbientAccess):
         self.children(node)
 
 
-def scan_source(universe: Universe, path: str, source: bytes, sources: Sources) -> FileScan:
+def scan_source(
+    universe: Universe, path: str, source: bytes, sources: Sources, *, policy: allowances.Policy
+) -> FileScan:
     """Scan `source` as if it were the file at `path` (a version that is not in the working tree)."""
     if path.endswith((".ts", ".tsx", ".mts", ".cts")):
         try:
@@ -627,9 +642,7 @@ def scan_source(universe: Universe, path: str, source: bytes, sources: Sources) 
             raise MeizelError(
                 f"{path}: cannot decode TypeScript source as UTF-8: {error}"
             ) from error
-        ts = typescript.scan_batch(universe, {path: text}, allowances.load(universe.root), sources)[
-            path
-        ]
+        ts = typescript.scan_batch(universe, {path: text}, policy, sources)[path]
         return _typescript_scan(ts)
     try:
         tree = ast.parse(source, filename=path)
@@ -637,7 +650,7 @@ def scan_source(universe: Universe, path: str, source: bytes, sources: Sources) 
         raise MeizelError(f"{path}:{error.lineno}: cannot parse: {error.msg}") from error
     except ValueError as error:
         raise MeizelError(f"{path}: cannot read: {error}") from error
-    return scan_tree(universe, path, tree, sources, walrus=b":=" in source)
+    return scan_tree(universe, path, tree, sources, walrus=b":=" in source, policy=policy)
 
 
 def _typescript_scan(ts: typescript.TsScan) -> FileScan:
@@ -658,9 +671,15 @@ def _typescript_scan(ts: typescript.TsScan) -> FileScan:
 
 
 def scan_tree(
-    universe: Universe, path: str, tree: ast.Module, sources: Sources, *, walrus: bool
+    universe: Universe,
+    path: str,
+    tree: ast.Module,
+    sources: Sources,
+    *,
+    walrus: bool,
+    policy: allowances.Policy,
 ) -> FileScan:
-    return Scanner(universe, path, tree, walrus=walrus, sources=sources).run()
+    return Scanner(universe, path, tree, walrus=walrus, sources=sources, policy=policy).run()
 
 
 def _read_source(universe: Universe, path: str) -> bytes:
@@ -670,8 +689,10 @@ def _read_source(universe: Universe, path: str) -> bytes:
         raise MeizelError(f"{path}: cannot read: {error}") from error
 
 
-def scan_file(universe: Universe, path: str, sources: Sources) -> FileScan:
-    return scan_source(universe, path, _read_source(universe, path), sources)
+def scan_file(
+    universe: Universe, path: str, sources: Sources, *, policy: allowances.Policy
+) -> FileScan:
+    return scan_source(universe, path, _read_source(universe, path), sources, policy=policy)
 
 
 def scan_typescript_files(

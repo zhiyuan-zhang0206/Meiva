@@ -52,7 +52,7 @@ _COMMON_SCAN_KEYS = frozenset({"path", "facts", "imported", "symbols", "type_che
 _FACT_KINDS: dict[str, FactKind] = {k.value: k for k in FactKind}
 _CODES: dict[str, Code] = {c.value: c for c in Code}
 _AMBIENT_KINDS: dict[str, AmbientKind] = {k.value: k for k in AmbientKind}
-_WORKER: dict[str, tuple[Universe, Sources]] = {}
+_WORKER: dict[str, tuple[Universe, Sources, Policy]] = {}
 type _FixtureForm = Literal["parameter", "usefixtures", "call", "lookup"]
 
 
@@ -567,26 +567,27 @@ def _encode_py_entry(
     return json.dumps(payload, separators=(",", ":"))
 
 
-def _init_worker(universe: Universe, sources: Sources) -> None:
-    _WORKER["scan"] = (universe, sources)
+def _init_worker(universe: Universe, sources: Sources, policy: Policy) -> None:
+    _WORKER["scan"] = (universe, sources, policy)
 
 
 def _scan_in_worker(path: str) -> tuple[FileScan, str]:
-    universe, sources = _WORKER["scan"]
-    scan = scan_file(universe, path, sources)
+    universe, sources, policy = _WORKER["scan"]
+    scan = scan_file(universe, path, sources, policy=policy)
     return scan, encode_file_scan(scan)
 
 
 def _scan_python_misses(
-    universe: Universe, sources: Sources, paths: list[str], jobs: int | None
+    universe: Universe, sources: Sources, paths: list[str], jobs: int | None, policy: Policy
 ) -> list[tuple[FileScan, dict[str, object]]]:
     workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
     if workers <= 1 or len(paths) < _PARALLEL_FROM:
         return [
-            (scan, _scan_to_raw(scan)) for scan in (scan_file(universe, p, sources) for p in paths)
+            (scan, _scan_to_raw(scan))
+            for scan in (scan_file(universe, p, sources, policy=policy) for p in paths)
         ]
     with ProcessPoolExecutor(
-        workers, initializer=_init_worker, initargs=(universe, sources)
+        workers, initializer=_init_worker, initargs=(universe, sources, policy)
     ) as pool:
         chunk = max(1, len(paths) // (workers * 8))
         pairs = list(pool.map(_scan_in_worker, paths, chunksize=chunk))
@@ -662,12 +663,15 @@ def _scan_python_cached(
         return {}
     digests = universe.file_digests()
     if not digests:
-        return {scan.path: scan for scan, _ in _scan_python_misses(universe, sources, paths, jobs)}
+        return {
+            scan.path: scan
+            for scan, _ in _scan_python_misses(universe, sources, paths, jobs, policy)
+        }
     ctx = _py_context_digest(universe, sources, policy, digests)
     keys, scans, misses = _partition_py_cache(universe, paths, ctx, digests)
     if not misses:
         return scans
-    fresh = _scan_python_misses(universe, sources, misses, jobs)
+    fresh = _scan_python_misses(universe, sources, misses, jobs, policy)
     for scan, _ in fresh:
         scans[scan.path] = scan
     _store_py_scans(universe, fresh, keys, digests)

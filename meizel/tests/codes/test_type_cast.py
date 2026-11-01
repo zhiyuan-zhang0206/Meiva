@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from meizel import allowances
 from meizel.contracts.analysis import analyze, diagnose, load_policy
 from meizel.contracts.cli import GitRepo
 from meizel.graph.model import Code, Sources
@@ -22,7 +23,13 @@ from meizel.tests.synthetic import (
 
 
 def scan(tmp_path: Path, source: str, path: str = "app.py") -> FileScan:
-    return scan_source(Universe(GitRepo(tmp_path), [path]), path, source.encode(), Sources())
+    return scan_source(
+        Universe(GitRepo(tmp_path), [path]),
+        path,
+        source.encode(),
+        Sources(),
+        policy=allowances.Policy(),
+    )
 
 
 @pytest.mark.parametrize(

@@ -12,6 +12,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from meizel import allowances
 from meizel.contracts.ambient_read import sources_from
 from meizel.contracts.analysis import diagnose
 from meizel.contracts.manifest import Manifest
@@ -145,7 +146,7 @@ def _source_span(scan: FileScan, source: bytes, name: str) -> tuple[int, int] | 
 
 
 def defines(universe: Universe, path: str, source: bytes, name: str) -> bool:
-    scan = scan_source(universe, path, source, Sources())
+    scan = scan_source(universe, path, source, Sources(), policy=allowances.Policy())
     return _source_span(scan, source, name) is not None
 
 
@@ -158,7 +159,9 @@ def symbol_debt(
 ) -> Found:
     """The violations inside `name` in this version of `path`, counted per `(code, owner, key)`."""
     policy, _ = load_policy(universe)
-    scan = scan_source(universe, path, source, sources_from(manifests, policy, universe))
+    scan = scan_source(
+        universe, path, source, sources_from(manifests, policy, universe), policy=policy
+    )
     span = _source_span(scan, source, name)
     if span is None:
         raise MeizelError(f"{path} defines no top-level function or class {name}")
