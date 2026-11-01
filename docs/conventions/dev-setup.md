@@ -184,28 +184,14 @@ it is not a production update mechanism.
 
 See [AGENTS.md](../../AGENTS.md) for the worktree and PR workflow.
 
-## The `user-code` dependency group
+## Environment isolation for agent tasks
 
-`[dependency-groups].user-code` in `pyproject.toml` holds the libraries agent code may
-import from `execute_code` (pandas, scipy, matplotlib, openpyxl ...). No module of this
-repository imports one — `tests/contracts/test_user_code_group.py` re-derives that on every
-run, so code that starts importing a member fails the suite instead of quietly widening
-the group — and `[tool.uv] default-groups` installs the group on every `uv sync`. A
-worktree, CI and a fleet update therefore keep exactly the environment they had before
-the group existed; nothing is lost by the declaration moving.
-
-A build that runs no agent code drops the group, and with it 25 distributions (about
-290 MB installed). Exporting without it also drops the packages only it pulled in —
-matplotlib's fonttools and kiwisolver, pandas' narwhals, scipy's threadpoolctl:
-
-```bash
-uv sync --no-group user-code     # a service-only environment, for a build job
-uv export --no-group user-code   # the requirement set to install into an image
-```
-
-`lxml`, `aiohttp`, `python-dateutil` and `rich` stay installed in that mode anyway,
-because `trafilatura` (from `skill-tools`), `traceloop-sdk`, `croniter` and `textual` require
-them.
+The host `.venv` installs only first-party runtime, development, and built-in skill
+dependencies. It no longer pre-installs generic agent execution libraries such as
+`pandas`, `scipy`, `matplotlib`, or `scikit-learn`. Agent tasks that require extra
+third-party libraries must run in isolated task environments (for example via
+`uv run --with <package>` or a dedicated business repository environment) rather than
+polluting the host `.venv`.
 
 ## The `skill-tools` dependency group
 
@@ -216,12 +202,13 @@ rss) and the `yt-dlp` program (audio-transcribe, web-sources youtube).
 `meiva_builtins/skills/` imports one" half on every run, so a shipped module that starts
 importing a member fails the suite instead of quietly widening the group.
 
-It is a default group for the same reason `user-code` is, and for one more: the update wave
-that would move it out of the default set builds its command *before* the checkout moves
-(`switch_command` in `cli/fleet_update/plan/host_commands.py`), so that wave cannot add
-`--group skill-tools` and every host would lose the group until the next update. Default
-membership costs a service face nothing, because `uv export --only-group svc-X` emits that
-group's closure alone, never another default group's.
+It is a default group so every `uv sync` (developer worktree, CI, fleet update) installs it,
+and for one more: the update wave that would move it out of the default set builds its
+command *before* the checkout moves (`switch_command` in
+`cli/fleet_update/plan/host_commands.py`), so that wave cannot add `--group skill-tools`
+and every host would lose the group until the next update. Default membership costs a
+service face nothing, because `uv export --only-group svc-X` emits that group's closure
+alone, never another default group's.
 
 A face that runs no skill leaves the group out:
 

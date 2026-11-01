@@ -132,13 +132,13 @@ def _tool(name: str) -> str:
 
 
 def _python_runs(change: ChangeSet) -> tuple[Run, ...]:
+    targets = tuple(
+        f for f in change.python_files() if not change.root.exists() or (change.root / f).exists()
+    )
+    pyright_judge = f"whole-tree errors must stay at the base's {PYRIGHT_ERROR_BASELINE}"
     return (
-        Run(
-            "pyright",
-            (_tool("basedpyright"), "--threads", "2"),
-            f"whole-tree errors must stay at the base's {PYRIGHT_ERROR_BASELINE}",
-        ),
-        Run("ruff", (_tool("ruff"), "check", *change.python_files()), "exit code"),
+        Run("pyright", (_tool("basedpyright"), "--threads", "2"), pyright_judge),
+        Run("ruff", (_tool("ruff"), "check", *targets), "exit code"),
     )
 
 

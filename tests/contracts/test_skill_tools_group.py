@@ -99,9 +99,7 @@ def test_default_groups_install_the_group_beside_the_others() -> None:
         "a `uv sync` installs the default groups only: without `skill-tools` here, the next "
         "sync removes the skill scripts' libraries from every existing environment"
     )
-    assert "dev" in defaults and "user-code" in defaults, (
-        "the default set is 'dev' plus the two toolbox groups, never this group alone"
-    )
+    assert "dev" in defaults, "the default set is 'dev' plus this group, never this group alone"
 
 
 def test_every_group_member_declares_its_import_name() -> None:

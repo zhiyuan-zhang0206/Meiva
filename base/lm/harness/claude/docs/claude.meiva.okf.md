@@ -31,8 +31,9 @@ Antigravity should not pay for it.
 `session.py` imports the SDK inside `_load_sdk()`, at session construction, so
 `import base.lm.harness` and `import base.lm.harness.claude` both work on a
 machine without the extra; only building a session fails, and the error names the
-command above (`MissingClaudeSdkError`). The development environment carries the
-package through the dependency group, so pyright still resolves the import.
+command above (`MissingClaudeSdkError`). The development environment resolves
+the SDK through type stubs (`typings/claude_agent_sdk/`), so pyright still
+resolves the import without bundling the ~240MB CLI in the default checkout.
 
 ## Modules
 

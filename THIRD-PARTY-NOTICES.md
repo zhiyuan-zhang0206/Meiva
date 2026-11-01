@@ -20,7 +20,6 @@ report with `uv pip licenses` / `npx license-checker` when shipping a release.
 | `psycopg`, `psycopg-binary`, `psycopg-pool` | LGPL-3.0-only | PostgreSQL driver |
 | `pyte` | LGPL-3.0 | terminal screen model for PTY sessions (`base/sessions/pty/screen.py`) |
 | `certifi` | MPL-2.0 | CA certificate bundle |
-| `tqdm` | MPL-2.0 AND MIT | progress bars |
 | `tld` (via `trafilatura`) | MPL-1.1 (elected; tri-licensed MPL-1.1 / GPL-2.0 / LGPL-2.1+) | TLD parsing for web fetch |
 
 LGPL/MPL obligations are satisfied by using these as unmodified, separately
