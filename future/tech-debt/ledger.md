@@ -105,6 +105,18 @@ fixture/incident scope.
 - **last-verified**: 2026-10-19
 
 
+### boundary:system-clock-world-point
+- **class**: boundary
+- **status**: open
+- **evidence**: `base/clock/__init__.py` is the tree's one place that takes the world's time, and it is also where the pure clock lives, so `meizel` records four debts against the same file and no split removes all four without moving the module's public names: `[debt.impure-call] "__init__.py#datetime.now" = 1` (the `_utc_now` default behind `Clock(..., now=...)`, `base/clock/__init__.py:54`), `"__init__.py#time.monotonic" = 1` and `"__init__.py#time.sleep" = 1` (`_SystemTimers`, `:38`), and `[debt.impure-edge] "__init__.py#base/config/__init__.py" = 1` (`clock_config_from_settings`, `:20`). Marking the module `none` is refused: `Clock` itself is imported by ten `strict` modules (`agent/takeover/relay.py:10` among them), and a `none` shell would push an `impure-edge` onto every one of them. Two remedies were measured and both rejected in task #5925, because PR-side CI was off and neither can be verified locally: (i) move the system realization to a `none` shell and require `now` — **57 production `Clock(...)` constructions and 87 test ones (116 files)** change the time source of paths that today fall back to the wall clock; (ii) keep the default and move only `_SystemTimers` / `SYSTEM_TIMERS` / `from_settings` — **349 files** must rewrite an import (`from base.clock import … SYSTEM_TIMERS …` in 309 files, 264 of them tests; `Clock.from_settings()` in 83), because `SYSTEM_TIMERS` is the tree's default timers value. Each debt below carries the condition that revives it and the check a reader runs to see whether it has:
+  - `__init__.py#datetime.now` — **now**: the `now` parameter defaults to `_utc_now`, which is the module's only wall-clock read. **Revive when** either a real defect shows the default is harmful (a path that must observe a fixed instant receives the system's instead), or the tree adopts "every clock is handed down" — no default, the 116 construction sites updated — once PR-side CI is back. **Check**: `grep -n 'now: Callable[[], datetime] = _utc_now' base/clock/__init__.py` is empty, or the defect's reproduction names this default as its cause.
+  - `__init__.py#time.monotonic` and `__init__.py#time.sleep` — **now**: `_SystemTimers` is the process's interval clock, next to the pure `Clock` that consumes it. **Revive when** the realization moves into its own `none` module, which can only land with the 349-file `SYSTEM_TIMERS` move above and an all-green CI to verify it. **Check**: `grep -n 'class _SystemTimers' base/clock/__init__.py` is empty and `python -m meizel debt` lists neither key.
+  - `__init__.py#base/config/__init__.py` — **now**: `clock_config_from_settings()` reads the settings singleton for the process timezone and stamp policy. **Revive when** the clock configuration is built by the root and handed in — `from_settings()` leaves the module, the same 83-file move — or `base.config` gains an accessor the clock may import without an edge. **Check**: `grep -n 'from base.config import' base/clock/__init__.py` is empty.
+  **Trigger for the family**: PR-side CI restored and a merge path that can carry a ~350-file mechanical change in one reviewed batch. Until then this entry is the record; the four stay in the ledger and the count does not move.
+- **first-seen**: 2026-11-01 (task #5925)
+- **last-verified**: 2026-11-01
+
+
 ### deps:playwright-1.62to1.64
 - **class**: deps
 - **status**: open
