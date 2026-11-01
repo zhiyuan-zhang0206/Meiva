@@ -1,8 +1,9 @@
-exports = ["converge_host.py", "lgtm_toggle.py", "root_driver.py", "start", "status", "stop", "tests"]
+exports = ["converge_host.py", "lgtm_toggle.py", "root_driver.py", "root_units.py", "start", "status", "stop", "tests"]
 
 [uses]
 "lgtm_toggle.py" = ["start"]
-"root_driver.py" = ["root_control"]
+"root_driver.py" = ["root_control", "root_units.py"]
+"root_units.py" = []
 "root_readiness.py" = ["root_control", "root_driver.py"]
 "start" = ["converge_host.py", "root_driver.py", "root_control", "root_readiness.py", "stand_down.py", "status"]
 "status" = ["root_control", "root_driver.py"]

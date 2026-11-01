@@ -240,6 +240,7 @@ def cmd_restart(
         database_factory=database_factory,
         environ=command.config.process_environment(),
         home=command.home,
+        pid=command.pid,
     ) as audit:
         code = _cmd_restart_body(
             request,
@@ -269,7 +270,10 @@ def _require_ok(response: ResponsePayload, what: str) -> None:
 # does not own (`require_root_owner` raises), or a root that runs no agent-host unit.
 def admit_agent_host_restart(command: CommandRuntime, *, timeout: float) -> RootClient | None:
     client = root_driver.root_client(
-        command.home, environ=command.config.process_environment(), timeout=timeout
+        command.home,
+        environ=command.config.process_environment(),
+        pid=command.pid,
+        timeout=timeout,
     )
     status = root_driver.root_status(client)
     if status is None:
@@ -321,7 +325,10 @@ def restart_agent_host(
     print(f"  ✓ {AGENT_HOST} stopped")
     record_lifecycle_request("up", [AGENT_HOST])
     fresh = root_driver.root_client(
-        command.home, environ=command.config.process_environment(), timeout=timeout
+        command.home,
+        environ=command.config.process_environment(),
+        pid=command.pid,
+        timeout=timeout,
     )
     _require_ok(fresh.up(AGENT_HOST), f"up {AGENT_HOST}")
     waited = root_readiness.wait_for_service_tree(
@@ -330,6 +337,7 @@ def restart_agent_host(
         home=command.home,
         timers=command.timers,
         environ=command.config.process_environment(),
+        pid=command.pid,
     )
     if waited.unready:
         print(f"  ✗ {AGENT_HOST} did not become ready after restart", file=sys.stderr)
@@ -354,6 +362,7 @@ def cmd_restart_agent_host(
         database_factory=database_factory,
         environ=command.config.process_environment(),
         home=command.home,
+        pid=command.pid,
     ) as audit:
         try:
             refuse_hosted_stop(command.home)

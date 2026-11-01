@@ -140,6 +140,7 @@ def _admitted(plan: StopPlan, request: StopRequest, env: StopEnvironment) -> boo
                 tree,
                 home=env.command.home,
                 environ=env.command.config.process_environment(),
+                pid=env.command.pid,
             )
         )
     )
@@ -205,6 +206,7 @@ def cmd_stop(
         database_factory=env.database_factory,
         environ=env.command.config.process_environment(),
         home=env.command.home,
+        pid=env.command.pid,
     ) as audit:
         code = do_stop(request, env, retained_children)
         audit.exited(code)

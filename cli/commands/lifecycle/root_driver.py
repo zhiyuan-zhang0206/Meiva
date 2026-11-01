@@ -18,7 +18,7 @@ import subprocess
 import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import NamedTuple, TypeGuard, assert_never
+from typing import NamedTuple, assert_never
 
 import psutil
 
@@ -74,6 +74,7 @@ from cli.commands.lifecycle.root_control.snapshot import (
     parse_snapshot,
     root_units,
 )
+from cli.commands.lifecycle.root_units import unit_digests
 from cli.database.lifecycle_audit import record_lifecycle_request
 from cli.start_runtime import StartRuntime
 from services.desktop.permissions_helper.launchd_job import BoundedRunner, LaunchdFacts
@@ -106,7 +107,7 @@ def complete_boot_start(
 
     if not in_boot_unit(host=host, pid=control_pid, proc_root=proc_root):
         return
-    snapshot = root_status(root_client(home, environ=host.environ))
+    snapshot = root_status(root_client(home, environ=host.environ, pid=control_pid))
     if snapshot is None:
         raise RootDriverError("cannot hand systemd an unobservable root")
     require_root_owner(snapshot, helper=helper, home=home)
@@ -163,10 +164,12 @@ def start_roster(
 # The client carries the caller block of this process, which the root records beside every
 # state verb it serves (`base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md`):
 # pid, working directory and argv are facts of the process; `environ` is the mapping handed in.
-def root_client(home: Path, *, environ: Mapping[str, str], timeout: float = 5.0) -> RootClient:
+def root_client(
+    home: Path, *, environ: Mapping[str, str], pid: int, timeout: float = 5.0
+) -> RootClient:
     return RootClient(
         root_run_dir(home) / _ROOT_SOCKET_NAME,
-        caller=caller_identity(environ),
+        caller=caller_identity(environ, pid=pid),
         timeout=timeout,
     )
 
@@ -502,30 +505,6 @@ def _launch_outcome(roster: tuple[ServiceSpec, ...], snapshot: RootSnapshot) -> 
     return LaunchOutcome(roster, tuple(session_name(problem.unit_id) for problem in problems))
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
-# meiva:note
-# The requested manifest digest of every unit, by unit id.
-def unit_digests(manifest: Mapping[str, object]) -> dict[str, str]:
-    from services.supervision.meiva_root.manifest import UnitManifest
-
-    rows = manifest["units"]
-    if not _is_object_list(rows):
-        raise TypeError("the launch manifest carries no unit list")
-    desired = (
-        UnitManifest.from_mapping(row, origin="requested tree")
-        for row in rows
-        if _is_object_dict(row)
-    )
-    return {unit.id: unit.digest() for unit in desired}
-
-
 # meiva:note
 # Refuse a running root whose generation differs from the requested launch.
 def require_same_generation(
@@ -547,9 +526,10 @@ def admit_live_start(
     reconcile: bool,
     helper: HelperFactory | None,
     inputs: RootLaunchInputs,
+    pid: int,
 ) -> bool:
     """Observe before any converge/schema write; reuse only identical inputs."""
-    snapshot = root_status(root_client(inputs.home, environ=inputs.environment))
+    snapshot = root_status(root_client(inputs.home, environ=inputs.environment, pid=pid))
     if snapshot is None:
         require_root_absent(inputs.home)
         return False
@@ -601,6 +581,7 @@ def launch_service_tree(
     honor_restart_budget: bool,
     inputs: RootLaunchInputs,
     timers: Timers,
+    pid: int,
 ) -> LaunchOutcome:
     home = inputs.home
     env = managed_service_env(inputs.service_path, environ=inputs.environment)
@@ -612,7 +593,7 @@ def launch_service_tree(
         run_dir=root_run_dir(home),
         manifests=root_manifests_path(home),
     )
-    client = root_client(home, environ=inputs.environment)
+    client = root_client(home, environ=inputs.environment, pid=pid)
     try:
         snapshot = root_status(client)
         if snapshot is not None:
@@ -673,16 +654,16 @@ def require_root_absent(home: Path) -> None:
 
 
 def root_tree_plan(
-    preserve: frozenset[str], *, home: Path, environ: Mapping[str, str]
+    preserve: frozenset[str], *, home: Path, environ: Mapping[str, str], pid: int
 ) -> list[str]:
     """Display names for the selected exact root units."""
-    selection = root_tree_selection(home, environ=environ)
+    selection = root_tree_selection(home, environ=environ, pid=pid)
     return sorted(name for name, unit in selection.items() if unit not in preserve)
 
 
-def root_tree_selection(home: Path, *, environ: Mapping[str, str]) -> dict[str, str]:
+def root_tree_selection(home: Path, *, environ: Mapping[str, str], pid: int) -> dict[str, str]:
     """Map the home's qualified display names to the root's exact unit IDs."""
-    snapshot = root_status(root_client(home, environ=environ))
+    snapshot = root_status(root_client(home, environ=environ, pid=pid))
     if snapshot is None:
         require_root_absent(home)
         return {}
@@ -735,12 +716,13 @@ def down_units(
     force: bool,
     home: Path,
     environ: Mapping[str, str],
+    pid: int,
 ) -> None:
     for unit_id in unit_ids:
         remaining_s = deadline.left()
         if remaining_s is None:
             raise RootDriverError("service stop deadline expired; custody retained")
-        client = root_client(home, environ=environ, timeout=remaining_s)
+        client = root_client(home, environ=environ, pid=pid, timeout=remaining_s)
         response = client.force_down(unit_id) if force else client.down(unit_id)
         _call_ok(response, f"down {unit_id}")
         print(f"  ✓ meiva-root unit {session_name(unit_id)} stopped")
@@ -757,6 +739,7 @@ def stop_root_service_tree(
     run: BoundedRunner,
     timers: Timers,
     environ: Mapping[str, str],
+    pid: int,
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
 
@@ -766,7 +749,7 @@ def stop_root_service_tree(
     tree cannot be brought down; the caller's phase accounting reports it.
     """
     deadline = Deadline.after(timers, timeout_s)
-    client = root_client(home, environ=environ, timeout=timeout_s)
+    client = root_client(home, environ=environ, pid=pid, timeout=timeout_s)
     snapshot = root_status(client)
     if snapshot is None:
         require_root_absent(home)
@@ -782,7 +765,9 @@ def stop_root_service_tree(
             print("  meiva-root: every unit is preserved — tree left running")
         case StopUnits(unit_ids, stop_root):
             record_lifecycle_request("force-down" if force else "down", unit_ids)
-            down_units(unit_ids, deadline=deadline, force=force, home=home, environ=environ)
+            down_units(
+                unit_ids, deadline=deadline, force=force, home=home, environ=environ, pid=pid
+            )
             if stop_root:
                 print(
                     f"  meiva-root: stopping the whole tree ({len(unit_ids)} unit(s)) and the root"

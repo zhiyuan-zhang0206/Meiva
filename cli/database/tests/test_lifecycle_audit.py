@@ -187,6 +187,7 @@ def test_a_sink_that_cannot_be_dialled_never_fails_an_attributable_command(
             database_factory=refuse_database,
             environ=command_runtime.config.process_environment(),
             home=command_runtime.home,
+            pid=os.getpid(),
         ) as command:
             record_lifecycle_request("down", ["gateway"])
             command.exited(0)
@@ -206,6 +207,7 @@ def test_a_boot_start_is_not_attributed_to_an_operator(command_runtime: CommandR
             environ=command_runtime.config.process_environment(),
             home=command_runtime.home,
             enabled=False,
+            pid=os.getpid(),
         ) as command:
             record_lifecycle_request("up", ["gateway"])
             command.exited(0)
@@ -226,6 +228,7 @@ def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
         database_factory=operator_database,
         environ=command_runtime.config.process_environment(),
         home=command_runtime.home,
+        pid=os.getpid(),
     ) as command:
         record_lifecycle_request("down", ["gateway"])
         command.exited(0)

@@ -184,6 +184,7 @@ def _stop_services_step(step: StopServices, env: StopEnvironment, run: StopRun) 
         run=command.host.run,
         timers=command.timers,
         environ=command.config.process_environment(),
+        pid=command.pid,
     )
     if step.phase == "services" and not step.force:
         leftover = consume_host_exit_message(command.home)

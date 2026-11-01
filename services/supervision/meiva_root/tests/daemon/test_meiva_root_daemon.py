@@ -107,7 +107,7 @@ def _read_log(path: Path) -> str:
 
 def _wait_ready(run_dir: Path, proc: subprocess.Popen[bytes], log_path: Path) -> RootClient:
     socket_path = run_dir / _SOCKET_NAME
-    client = RootClient(socket_path, caller=caller_identity({}), timeout=5.0)
+    client = RootClient(socket_path, caller=caller_identity({}, pid=os.getpid()), timeout=5.0)
     deadline = time.monotonic() + 15.0
     while time.monotonic() < deadline:
         if proc.poll() is not None:

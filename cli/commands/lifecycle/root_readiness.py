@@ -72,9 +72,10 @@ def wait_for_service_tree(
     home: Path,
     timers: Timers,
     environ: Mapping[str, str],
+    pid: int,
     poll_interval_s: float = root_driver.READY_POLL_INTERVAL_S,
 ) -> ReadinessWait:
-    client = root_driver.root_client(home, environ=environ)
+    client = root_driver.root_client(home, environ=environ, pid=pid)
     by_session = {spec.session: spec for spec in roster}
     started_at = timers.monotonic()
     recorded: set[str] = set()

@@ -80,13 +80,24 @@ def test_identity_records_names_not_values() -> None:
             "SOME_TOKEN": "value-that-must-not-leak",
             "MEIVA_AGENT_ID": "7",
             "MEIVA_OPERATION_ID": "op-1",
-        }
+        },
+        pid=os.getpid(),
     )
     assert "value-that-must-not-leak" not in json.dumps(identity)
     assert identity["pid"] == os.getpid()
     assert identity["agent_id"] == "7"
     assert identity["operation_id"] == "op-1"
     assert identity["env_keys"] == ["SOME_TOKEN"]
+
+
+# meiva:note
+# The caller block names the process the caller IS, so the id it carries is the one the caller
+# handed in. Reading `os.getpid()` here instead would answer "who am I?" for a caller that had
+# already answered it, which is the bug this pins: revert the reader and the two ids differ.
+def test_identity_reports_the_pid_it_is_given() -> None:
+    identity = client.caller_identity({}, pid=424242)
+
+    assert identity["pid"] == 424242
 
 
 def test_redaction_covers_attached_and_underscored_forms() -> None:

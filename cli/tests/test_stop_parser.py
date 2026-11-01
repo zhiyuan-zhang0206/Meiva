@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import pytest
@@ -251,6 +252,10 @@ class _Runtime:
         self.helper = None
         self.config = _Config()
         self.home = home
+        # meiva:note
+        # The caller block the stop hands the root names the invocation's own pid; the stand-in
+        # states one so the handler never reaches for the process it happens to run in.
+        self.pid = os.getpid()
 
 
 @pytest.mark.parametrize(
