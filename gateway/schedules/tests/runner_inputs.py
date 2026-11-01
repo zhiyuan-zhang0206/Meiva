@@ -35,13 +35,14 @@ def run_schedule(
 ) -> int:
     image = process_context.loaded_code_image()
     version = CodeVersion(image)
+    config = snapshot_process_config()
     gate = ProcessDbGate(process=process_name(), version=version.get)
     database = partial(
         Database.from_settings,
         gate=gate,
         direct_url=ClusterDirectUrl(machine.host, home=meiva_home()),
     )
-    with closing(clients_over(snapshot_process_config(), machine, database)) as clients:
+    with closing(clients_over(config, machine, database)) as clients:
         process_context.bind_context(
             MeivaContext(
                 identity=AgentIdentity(
@@ -51,6 +52,7 @@ def run_schedule(
                 machine=machine,
                 clock_factory=Clock.from_settings,
                 meiva_home=meiva_home(),
+                environ=config.process_environment(),
             )
         )
         return engine.run(
@@ -61,9 +63,7 @@ def run_schedule(
                 inputs=ScheduleInputs(
                     database, clients.event_pipeline, image, machine=machine, home=meiva_home()
                 ),
-                plugins=engine.PluginInputs(
-                    config=snapshot_process_config(), machine=machine, clients=clients
-                ),
+                plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
                 policy=policy,
                 home=meiva_home(),
                 main_thread_id=threading.get_ident(),

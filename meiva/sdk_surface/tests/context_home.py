@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -22,7 +23,8 @@ __all__ = ["context_over_unit_home"]
 def context_over_unit_home(unit_home: Path) -> Iterator[Path]:
     previous = process_context.bound_context()
     context = MeivaContext() if previous is None else previous
-    process_context.bind_context(replace(context, meiva_home=unit_home))
+    environ = context.environ if context.environ is not None else dict(os.environ)
+    process_context.bind_context(replace(context, meiva_home=unit_home, environ=environ))
     try:
         yield unit_home
     finally:

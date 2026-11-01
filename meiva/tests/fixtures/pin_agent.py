@@ -84,7 +84,7 @@ def pin_agent(
             ),
             bus=bus if bus is not None else (None if bound is None else bound.bus),
             user_home=Path.home(),
-            environ=os.environ if bound is None else bound.environ,
+            environ=os.environ if bound is None or bound.environ is None else bound.environ,
         )
     )
 
