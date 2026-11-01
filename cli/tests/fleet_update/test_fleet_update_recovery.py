@@ -25,12 +25,44 @@ def test_a_failed_stop_brings_back_the_hosts_this_run_stopped(
     cluster.stop_fails["lin"] = 1
     assert run("down") == 1
     out = capsys.readouterr().out
-    assert _started(cluster) == ["mac", "lin"], "mac stopped cleanly, lin's stop failed; no gw"
+    started = _started(cluster)
+    assert len(started) == 2 and set(started) == {"mac", "lin"}, (
+        "mac stopped cleanly, lin's stop failed; no gw"
+    )
     assert cluster.hosts["mac"]["up"] and cluster.hosts["lin"]["up"]
     assert cluster.hosts["gw"]["up"], "the gateway was never stopped"
     assert "recovered: mac, lin" in out
     assert "needs manual: none" in out
     assert "Failed phase: down" in out
+
+
+def test_multiple_parallel_runner_stop_failures_recover_all_failed_runners(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.stop_fails["mac"] = 1
+    cluster.stop_fails["lin"] = 1
+    assert run("down") == 1
+    out = capsys.readouterr().out
+    started = _started(cluster)
+    assert len(started) == 2 and set(started) == {"mac", "lin"}
+    assert ("stop", "gw") not in cluster.effects
+    assert all(cluster.hosts[alias]["up"] for alias in ("gw", "mac", "lin"))
+    assert "recovered: mac, lin" in out
+    assert "mac: exit 1:" in out and "lin: exit 1:" in out
+
+
+def test_a_failed_gateway_stop_restarts_the_gateway_before_the_runners(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.stop_fails["gw"] = 1
+    cluster.barriers["start"] = ["mac", "lin"]
+    assert run("down") == 1
+    out = capsys.readouterr().out
+    started = _started(cluster)
+    assert started[0] == "gw" and set(started[1:]) == {"mac", "lin"}
+    assert "recovered: gw, mac, lin" in out
 
 
 def test_switch_never_runs_after_a_failed_stop(
@@ -76,7 +108,8 @@ def test_a_recovery_that_cannot_start_names_the_host(
     cluster.recover_fails.add("lin")
     assert run("down") == 1
     out = capsys.readouterr().out
-    assert _started(cluster) == ["mac", "lin"]
+    started = _started(cluster)
+    assert len(started) == 2 and set(started) == {"mac", "lin"}
     assert "recovered: mac" in out
     assert "needs manual: lin" in out
     assert not cluster.hosts["lin"]["up"]
@@ -115,7 +148,8 @@ def test_an_unreadable_host_does_not_abort_recovery_or_replace_the_stop_failure(
     cluster.fail["evidence", "gw"] = 255
     assert run("down") == 1
     out = capsys.readouterr().out
-    assert _started(cluster) == ["mac", "lin"]
+    started = _started(cluster)
+    assert len(started) == 2 and set(started) == {"mac", "lin"}
     assert "recovery: could not read gw's evidence:" in out
     assert "recovered: mac, lin" in out and "needs manual: gw" in out
     assert "FAILED: lin: exit 1:" in out and "On that host retry `meiva stop`" in out

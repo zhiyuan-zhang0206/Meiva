@@ -23,14 +23,14 @@ class Recovery(Enum):
 
 # meiva:note
 # A host that is up needs nothing. A host that is down and this run took down (its stop completed
-# here, or it is the host whose stop failed and its journal records a failed or unfinished stop)
+# here, or it is a host whose stop failed and its journal records a failed or unfinished stop)
 # restarts; any other down host is left for the operator.
 def recovery_action(
-    *, alias: str, stopped: frozenset[str], failed: str, evidence: HostEvidence
+    *, alias: str, stopped: frozenset[str], failed: frozenset[str], evidence: HostEvidence
 ) -> Recovery:
     if evidence.daemon_up:
         return Recovery.RUNNING
-    if alias in stopped or (alias == failed and stop_failed(evidence.journal)):
+    if alias in stopped or (alias in failed and stop_failed(evidence.journal)):
         return Recovery.RESTART
     return Recovery.LEFT_DOWN
 

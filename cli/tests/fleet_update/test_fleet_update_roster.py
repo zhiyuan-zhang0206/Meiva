@@ -65,8 +65,9 @@ def test_an_unlisted_offline_machine_is_reported_not_required(
     assert run("up") == 0
     out = capsys.readouterr().out
     assert "roster: laptop is not listed, not checked: online=False head=None running=None" in out
-    assert cluster.smoked == ["gw", "mac", "lin"]
-    assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
+    assert len(cluster.smoked) == 3 and set(cluster.smoked) == {"gw", "mac", "lin"}
+    refreshes = [a for k, a in cluster.effects if k == "refresh"]
+    assert len(refreshes) == 3 and set(refreshes) == {"gw", "mac", "lin"}
     assert "up complete: every listed machine runs" in out
 
 
@@ -101,7 +102,7 @@ def test_the_roster_name_comes_from_the_host_not_its_ssh_alias(
     assert run("down") == 0
     cluster.names["mac"] = "mac-mini"
     assert run("up") == 0
-    assert cluster.smoked == ["gw", "mac-mini", "lin"]
+    assert len(cluster.smoked) == 3 and set(cluster.smoked) == {"gw", "mac-mini", "lin"}
 
 
 @pytest.mark.parametrize("reply", ["Traceback (most recent call last):", "", '{"name": "gw"}'])

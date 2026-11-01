@@ -15,10 +15,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shlex
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -275,21 +277,67 @@ class Sim:
         return rc
 
 
+def _barrier_participant(alias: str, command: str) -> tuple[str, str] | None:
+    if 'meiva" stop' in command:
+        return "stop", alias
+    if "--detach" in command:
+        return "switch", alias
+    if "launchctl bootstrap" in command or 'meiva" start' in command:
+        return "start", alias
+    if " - smoke " in command:
+        return "smoke", command.partition(" - smoke ")[2].split()[0].strip("'")
+    if "packages refresh" in command:
+        return "refresh", alias
+    return None
+
+
+def _wait_barrier(path: Path, alias: str, command: str) -> str | None:
+    matched = _barrier_participant(alias, command)
+    if matched is None:
+        return None
+    wave, participant = matched
+    with path.with_suffix(".lock").open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        with path.open(encoding="utf-8") as handle:
+            barriers: dict[str, list[str]] = json.load(handle).get("barriers", {})
+    expected = barriers.get(wave)
+    if not expected or participant not in expected:
+        return None
+    barrier_dir = path.parent / f"barrier-{wave}"
+    barrier_dir.mkdir(exist_ok=True)
+    (barrier_dir / participant).write_text("arrived", encoding="utf-8")
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if all((barrier_dir / member).exists() for member in expected):
+            return None
+        time.sleep(0.005)
+    missing = [member for member in expected if not (barrier_dir / member).exists()]
+    return f"{wave} wave did not run concurrently; {participant} waited on {missing}"
+
+
 def main(argv: list[str]) -> int:
     alias, command = argv[-2], argv[-1]
     path = Path(os.environ["FLEET_CLUSTER_STATE"])
-    with path.open(encoding="utf-8") as handle:
-        state: State = json.load(handle)
+    stdin = sys.stdin.buffer.read().decode("utf-8")
+    barrier_violation = _wait_barrier(path, alias, command)
     emitted: list[str] = []
-    try:
-        stdin = sys.stdin.buffer.read().decode("utf-8")
-        rc = Sim(state).handle(alias, command, stdin, emitted)
-    except AssertionError as violation:
-        state["violations"].append(f"{alias}: {violation}")
-        emitted.append(f"VIOLATION {violation}")
-        rc = 99
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(state, handle)
+    with path.with_suffix(".lock").open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        with path.open(encoding="utf-8") as handle:
+            state: State = json.load(handle)
+        if barrier_violation is not None:
+            state["violations"].append(f"{alias}: {barrier_violation}")
+            emitted.append(f"VIOLATION {barrier_violation}")
+            rc = 99
+        else:
+            try:
+                rc = Sim(state).handle(alias, command, stdin, emitted)
+            except AssertionError as violation:
+                state["violations"].append(f"{alias}: {violation}")
+                emitted.append(f"VIOLATION {violation}")
+                rc = 99
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(state, handle)
     sys.stdout.buffer.write("".join(f"{line}\n" for line in emitted).encode("utf-8"))
     return rc
 

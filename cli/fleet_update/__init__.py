@@ -55,7 +55,8 @@ def main(
     phase = "down" if args.half == "run" else args.half
     try:
         hosts = [args.gateway, *args.runner]
-        s.os = {host: s.run(host, "uname -s", effect=False).split()[-1] for host in hosts}
+        unames = s.run_all(hosts, lambda host: s.run(host, "uname -s", effect=False).split()[-1])
+        s.os = dict(zip(hosts, unames, strict=True))
         for phase in ("down", "up") if args.half == "run" else (args.half,):
             s.say(f"phase: {phase}")
             if phase == "down":

@@ -26,7 +26,8 @@ def test_drift_checks_run_after_the_smoke_and_the_refresh(
     assert run("down") == 0
     assert run("up") == 0
     assert [a for k, a in cluster.effects if k == "schedules-verify"] == ["gw"]
-    assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
+    plugins = [a for k, a in cluster.effects if k == "plugins-verify"]
+    assert len(plugins) == 3 and set(plugins) == {"gw", "mac", "lin"}
     kinds = [kind for kind, _ in cluster.effects]
     first_verify = min(
         i for i, k in enumerate(kinds) if k in ("schedules-verify", "plugins-verify")
@@ -54,7 +55,8 @@ def test_a_red_drift_check_fails_up_with_its_detail(
     out = capsys.readouterr().out
     assert detail in out and f"matrix: {failing[1]} failed at" in out
     assert {"smoke", "refresh"} <= {k for k, _ in cluster.effects}
-    assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
+    plugins = [a for k, a in cluster.effects if k == "plugins-verify"]
+    assert len(plugins) == 3 and set(plugins) == {"gw", "mac", "lin"}
 
 
 def test_every_red_drift_check_is_reported_not_only_the_first(
@@ -107,7 +109,8 @@ def test_allow_red_schedules_proceeds_and_still_lists_the_rows(
     assert run("down", "--allow-red-schedules") == 0
     out = capsys.readouterr().out
     assert "WARNING: stored schedule scripts red" in out and _RED_ROW in out
-    assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
+    stops = [a for k, a in cluster.effects if k == "stop"]
+    assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
 def test_a_check_that_could_not_run_refuses_like_a_red(

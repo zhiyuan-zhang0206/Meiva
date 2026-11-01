@@ -32,7 +32,7 @@ from .plan.old_target import (
     unfetched_old_reason,
 )
 from .plan.recovery import Recovery, recovery_action, recovery_report
-from .plan.stop_wave import StopChoices, stop_steps
+from .plan.stop_wave import StopChoices, StopStep, stop_steps
 from .plan.stored_schedules import schedule_check
 from .plan.wave_order import start_order
 from .programs import (
@@ -92,15 +92,20 @@ class _Preflight:
     legacy_stop: frozenset[str] = frozenset()
 
 
+def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
+    s.run(alias, fetch_command(new))
+    return probe_helper(s, alias, new)
+
+
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _preflight(s: Session, args: argparse.Namespace, new: str) -> _Preflight:
     hosts = start_order(args.gateway, tuple(args.runner))
+    probed = s.run_all(hosts, lambda alias: probe_host(s, alias))
     reasons: list[str] = []
     heads: dict[str, str] = {}
     serving: list[str] = []
     legacy_stop: list[str] = []
-    for alias in hosts:
-        facts, was_serving = probe_host(s, alias)
+    for alias, (facts, was_serving) in zip(hosts, probed, strict=True):
         heads[alias] = facts.get("head", "")
         try:
             host_reasons = host_refusals(alias, facts)
@@ -125,9 +130,8 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> _Preflight:
             frozenset(serving),
             legacy_stop=frozenset(legacy_stop),
         )
-    for alias in hosts:
-        s.run(alias, fetch_command(new))
-    probes = {alias: probe_helper(s, alias, new) for alias in hosts}
+    helper_facts = s.run_all(hosts, lambda alias: _fetch_and_probe(s, alias, new))
+    probes = dict(zip(hosts, helper_facts, strict=True))
     rebuild = bool(getattr(args, "rebuild_extras", False))
     table = baselines(s.repo)
     try:
@@ -173,6 +177,27 @@ def _restart(s: Session, args: argparse.Namespace, alias: str) -> None:
     s.run(alias, script)
 
 
+def _restart_wave(
+    s: Session, args: argparse.Namespace, to_restart: tuple[str, ...]
+) -> frozenset[str]:
+    recovered: set[str] = set()
+    if args.gateway in to_restart:
+        try:
+            _restart(s, args, args.gateway)
+            recovered.add(args.gateway)
+        except FailedError as exc:
+            s.say(f"recovery: {exc}")
+    runners = [alias for alias in to_restart if alias != args.gateway]
+    for alias, outcome in zip(
+        runners, s.gather(runners, lambda alias: _restart(s, args, alias)), strict=True
+    ):
+        if isinstance(outcome, FailedError):
+            s.say(f"recovery: {outcome}")
+        else:
+            recovered.add(alias)
+    return frozenset(recovered)
+
+
 # meiva:note
 # A failed stop must not leave the cluster half stopped. `plan.recovery` decides which hosts
 # come back; the start is `meiva start` with the operator's explicit selection, never `--boot`:
@@ -184,38 +209,43 @@ def _recover_after_failed_stop(
     s: Session,
     args: argparse.Namespace,
     serving: frozenset[str],
-    stopped: tuple[str, ...],
-    failed: str,
+    stopped: frozenset[str],
+    failed: frozenset[str],
 ) -> None:
-    recovered: list[str] = []
+    serving_hosts = tuple(
+        alias for alias in start_order(args.gateway, tuple(args.runner)) if alias in serving
+    )
+    evidences = s.gather(serving_hosts, lambda alias: host_evidence(s, alias))
     down: list[str] = []
-    for alias in start_order(args.gateway, tuple(args.runner)):
-        if alias not in serving:
-            continue
-        try:
-            evidence = host_evidence(s, alias)
-        except FailedError as exc:
+    to_restart: list[str] = []
+    for alias, evidence in zip(serving_hosts, evidences, strict=True):
+        if isinstance(evidence, FailedError):
             down.append(alias)
-            s.say(f"recovery: could not read {alias}'s evidence: {exc}")
+            s.say(f"recovery: could not read {alias}'s evidence: {evidence}")
             continue
         action = recovery_action(
             alias=alias,
-            stopped=frozenset(stopped),
+            stopped=stopped,
             failed=failed,
             evidence=evidence,
         )
         if action is Recovery.RUNNING:
             continue
         down.append(alias)
-        if action is Recovery.LEFT_DOWN:
-            continue
-        try:
-            _restart(s, args, alias)
-            recovered.append(alias)
-        except FailedError as exc:
-            s.say(f"recovery: {exc}")
-    for line in recovery_report(tuple(down), tuple(recovered)):
+        if action is Recovery.RESTART:
+            to_restart.append(alias)
+    recovered_set = _restart_wave(s, args, tuple(to_restart))
+    recovered = tuple(alias for alias in down if alias in recovered_set)
+    for line in recovery_report(tuple(down), recovered):
         s.say(line)
+
+
+def _stop_one(s: Session, step: StopStep) -> None:
+    if step.retires_extras:
+        s.say(f"{step.alias}: retiring extras so its next start can rebuild the helper")
+    s.run(step.alias, stop_command(step.flags))
+    if not s.dry_run and not stop_completed(host_evidence(s, step.alias).journal):
+        raise FailedError(f"{step.alias}: stop exited 0 but its journal records no completed stop")
 
 
 def _stop_wave(s: Session, args: argparse.Namespace, pre: _Preflight) -> None:
@@ -227,27 +257,36 @@ def _stop_wave(s: Session, args: argparse.Namespace, pre: _Preflight) -> None:
         message=message_flag(args),
         legacy_message_hosts=pre.legacy_stop,
     )
+    steps = stop_steps(
+        gateway=args.gateway,
+        runners=tuple(args.runner),
+        rebuilding=pre.rebuilding,
+        choices=choices,
+    )
+    runner_steps, gateway_step = steps[:-1], steps[-1]
     stopped: list[str] = []
-    current = args.gateway
-    try:
-        for step in stop_steps(
-            gateway=args.gateway,
-            runners=tuple(args.runner),
-            rebuilding=pre.rebuilding,
-            choices=choices,
-        ):
-            current = step.alias
-            if step.retires_extras:
-                s.say(f"{step.alias}: retiring extras so its next start can rebuild the helper")
-            s.run(step.alias, stop_command(step.flags))
-            if not s.dry_run and not stop_completed(host_evidence(s, step.alias).journal):
-                raise FailedError(
-                    f"{step.alias}: stop exited 0 but its journal records no completed stop"
-                )
+    failed: list[str] = []
+    errors: list[FailedError] = []
+    for step, outcome in zip(
+        runner_steps, s.gather(runner_steps, lambda step: _stop_one(s, step)), strict=True
+    ):
+        if isinstance(outcome, FailedError):
+            failed.append(step.alias)
+            errors.append(outcome)
+        else:
             stopped.append(step.alias)
+    if errors:
+        if not s.dry_run:
+            _recover_after_failed_stop(s, args, pre.serving, frozenset(stopped), frozenset(failed))
+        summary = "; ".join(str(err) for err in errors)
+        raise FailedError(f"{summary}{_STOP_HINT}") from errors[0]
+    try:
+        _stop_one(s, gateway_step)
     except FailedError as exc:
         if not s.dry_run:
-            _recover_after_failed_stop(s, args, pre.serving, tuple(stopped), current)
+            _recover_after_failed_stop(
+                s, args, pre.serving, frozenset(stopped), frozenset({gateway_step.alias})
+            )
         raise FailedError(f"{exc}{_STOP_HINT}") from exc
 
 
@@ -272,7 +311,9 @@ def down(s: Session, args: argparse.Namespace) -> None:
         ),
     )
     _stop_wave(s, args, pre)
-    for alias in start_order(args.gateway, tuple(args.runner)):
-        s.run(alias, switch_command(new))
+    s.run_all(
+        start_order(args.gateway, tuple(args.runner)),
+        lambda alias: s.run(alias, switch_command(new)),
+    )
     next_step = "continuing with `up`" if args.half == "run" else "run `up` when ready"
     s.say(f"down complete: every host is stopped on {new[:12]}; {next_step}")

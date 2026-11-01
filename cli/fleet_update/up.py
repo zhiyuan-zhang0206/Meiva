@@ -37,27 +37,46 @@ def _host_failure(
     return start_failure(alias, recorded, str(exc), window=window)
 
 
+def _start_one(
+    s: Session,
+    args: argparse.Namespace,
+    alias: str,
+    window: tuple[datetime, datetime],
+) -> HostFailure | None:
+    script = start_script(
+        macos=s.os[alias] == "Darwin",
+        alias=alias,
+        stamp=s.stamp,
+        timeout_s=args.start_timeout,
+        flags=start_flags(args),
+    )
+    try:
+        s.run(alias, script)
+    except FailedError as exc:
+        return _host_failure(s, alias, exc, window)
+    return None
+
+
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
     # meiva:note
-    # Start every host, then verify every host: one failure never erases what the window learned
-    # about the others, and each listed host ends with its own line.
+    # Start the gateway first and then all runners in parallel, then verify every host: one
+    # failure never erases what the window learned about the others, and each listed host ends
+    # with its own line.
     failures: list[HostFailure] = []
     window = (s.now, s.now + timedelta(seconds=args.start_timeout))
     hosts = start_order(args.gateway, tuple(args.runner))
     started: set[str] = set()
-    for alias in hosts:
-        script = start_script(
-            macos=s.os[alias] == "Darwin",
-            alias=alias,
-            stamp=s.stamp,
-            timeout_s=args.start_timeout,
-            flags=start_flags(args),
-        )
-        try:
-            s.run(alias, script)
-        except FailedError as exc:
-            failure = _host_failure(s, alias, exc, window)
+    gateway_failure = _start_one(s, args, args.gateway, window)
+    if gateway_failure is not None:
+        failures.append(gateway_failure)
+        s.say(f"PARTIAL: {gateway_failure.line()}")
+    else:
+        started.add(args.gateway)
+    runners = tuple(args.runner)
+    runner_outcomes = s.run_all(runners, lambda alias: _start_one(s, args, alias, window))
+    for alias, failure in zip(runners, runner_outcomes, strict=True):
+        if failure is not None:
             failures.append(failure)
             s.say(f"PARTIAL: {failure.line()}")
         else:

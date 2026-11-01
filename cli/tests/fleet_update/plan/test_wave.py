@@ -203,12 +203,16 @@ _FAILED = HostEvidence(False, Journal("stop", complete=True, rc=1))
 def test_a_down_host_comes_back_only_when_this_run_took_it_down(
     alias: str, evidence: HostEvidence, expected: Recovery
 ) -> None:
-    got = recovery_action(alias=alias, stopped=frozenset({"mac"}), failed="lin", evidence=evidence)
+    got = recovery_action(
+        alias=alias, stopped=frozenset({"mac"}), failed=frozenset({"lin"}), evidence=evidence
+    )
     assert got is expected
 
 
 def _failed_host_action(evidence: HostEvidence) -> Recovery:
-    return recovery_action(alias="lin", stopped=frozenset({"mac"}), failed="lin", evidence=evidence)
+    return recovery_action(
+        alias="lin", stopped=frozenset({"mac"}), failed=frozenset({"lin"}), evidence=evidence
+    )
 
 
 def test_the_failed_host_is_restarted_only_if_its_own_journal_records_a_failed_stop() -> None:
@@ -218,6 +222,15 @@ def test_the_failed_host_is_restarted_only_if_its_own_journal_records_a_failed_s
     )
     assert (
         _failed_host_action(HostEvidence(False, Journal("stop", False, None))) is Recovery.RESTART
+    )
+    both_failed = frozenset({"mac", "lin"})
+    assert (
+        recovery_action(alias="mac", stopped=frozenset(), failed=both_failed, evidence=_FAILED)
+        is Recovery.RESTART
+    )
+    assert (
+        recovery_action(alias="lin", stopped=frozenset(), failed=both_failed, evidence=_FAILED)
+        is Recovery.RESTART
     )
 
 

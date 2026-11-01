@@ -107,6 +107,7 @@ class Cluster:
         # certificate) and the rest stay as a healthy fleet would report them.
         self.helper_hash = "a" * 64
         self.helper_cert_root = "f" * 40
+        self.barriers: dict[str, list[str]] = {}
         self.violations: list[str] = []
 
     def process_env(self) -> dict[str, str]:
@@ -159,6 +160,7 @@ class Cluster:
             "lease_reads": self.lease_reads,
             "helper_hash": self.helper_hash,
             "helper_cert_root": self.helper_cert_root,
+            "barriers": self.barriers,
             "violations": self.violations,
         }
 
