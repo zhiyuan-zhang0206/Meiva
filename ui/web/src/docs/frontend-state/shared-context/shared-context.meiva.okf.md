@@ -25,8 +25,10 @@ body has no nested scrollbar. The question is the column's own bottom region,
 pinned under that area instead of travelling inside it (user report 2026-10-30,
 replacing the 2026-10-29 order in which it was the reading area's first block).
 The column therefore reads title bar, reading area, question: the question keeps
-its place while the document scrolls, and one taller than the region's cap
-scrolls inside its own card rather than starving the reading area.
+its place while the document scrolls, and one taller than the region's `70dvh`
+cap (applied to the inner `ScrollArea` viewport so overflow scrolls rather than
+clipping against an `auto`-height root) scrolls inside its own card rather than
+starving the reading area.
 Question controls use the timeline's 13px body size and compact row spacing.
 Touch inputs retain their 16px baseline; a narrow desktop column still uses 13px.
 The document bar is the right column's title bar, outside the reading viewport
@@ -39,8 +41,8 @@ dark `#dfdcd6`, `15px / 14px / 13px / 12.5px` headings, `12px` code blocks and
 tables, and `11.5px` inline code) so the right-hand workspace document stays
 visually subordinate to the `15px` main conversation column. Plain numbered choice rows avoid a card around every option.
 A persistent comment input and the shared send button match the chat composer;
-the selection and comment form one explicit submission. Dismiss is a small outlined
-header button. This keeps the user's task in one reading flow rather than
+the selection and comment form one explicit submission, with Dismiss as a
+secondary ghost action below the reply input. This keeps the user's task in one reading flow rather than
 splitting it into stacked control panels.
 Switching agents or navigating to another referenced document resets this shared
 reading position to the top.
