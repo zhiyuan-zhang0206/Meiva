@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -22,6 +23,8 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.host.net.tests.local_http import closed_port_url
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from base.paths import root_manifests_path
 from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -114,12 +117,15 @@ def launch_record(home: Path, *sessions: str) -> None:
 
 
 # meiva:note
-# A gateway host whose home is `home`, with an inert program finder: a probe round reaches
-# only the real resources of the test.
+# A gateway host whose home is `tmp_path`, with an inert program finder: a probe round reaches
+# only the real resources of the test. The source-tree guard is one of those: it runs git against
+# the checkout the test names, so this host carries the production runner and the empty
+# environment the fixture declares, and no test has to script a `git status` reply.
 @pytest.fixture
 def probe_command(command_runtime: CommandRuntime, tmp_path: Path) -> CommandRuntime:
     command_runtime.machine.set(role="gateway")
-    return dataclasses.replace(command_runtime, home=tmp_path)
+    host = fake_host(commands=run_bounded, uid=os.geteuid(), environ={})
+    return dataclasses.replace(command_runtime, host=host, home=tmp_path)
 
 
 # meiva:note

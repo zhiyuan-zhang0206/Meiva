@@ -12,7 +12,7 @@ from __future__ import annotations
 import random
 import shutil
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +34,7 @@ from base.deploy.schema.migrations import (
 )
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.net.http_dial import get as dial_get
+from base.host.system.hostport import Host
 from base.paths import root_manifests_path
 from cli.commands._repo import roles_or_none
 from cli.commands.cluster._provider_guard import ProviderGuardConfig, provider_guard_checks
@@ -290,10 +291,10 @@ def read_editable_violations(
 # Source tamper or unavailable inspection of a home that executes its source checkout, without
 # repairing files. The guard marks "I could not look" with a prefix on its findings; this
 # reading carries that as a flag so the wording is decided from values.
-def read_source_tree(source_root: Path | None, *, environ: Mapping[str, str]) -> SourceTreeReading:
+def read_source_tree(source_root: Path | None, *, host: Host) -> SourceTreeReading:
     if source_root is None:
         return SourceTreeReading(guard_skipped=False, findings=())
-    violations = source_tree_guard.source_tree_violations(source_root, environ=environ)
+    violations = source_tree_guard.source_tree_violations(source_root, host=host)
     prefix = source_tree_guard.GUARD_SKIPPED_PREFIX
     if any(v.startswith(prefix) for v in violations):
         return SourceTreeReading(
@@ -322,6 +323,6 @@ def read_health(
         editable_violations=read_editable_violations(
             options.source_root, options.editable_allowed_roots
         ),
-        source_tree=read_source_tree(options.source_root, environ=command.host.environ),
+        source_tree=read_source_tree(options.source_root, host=command.host),
         provider=provider_guard_checks(options.provider, database_factory=database_factory),
     )

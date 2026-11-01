@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import fnmatch
 import subprocess
-from collections.abc import Mapping
 from pathlib import Path
 
 from base.host.git.gitenv import git_env
-from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 
 # Bounded git: a guard must never hang a probe (mirrors
 # ``cluster_drift._GIT_TIMEOUT_S``).
@@ -45,22 +44,22 @@ GUARD_SKIPPED_PREFIX = "guard skipped: "
 
 
 # meiva:note
-# `environ` is the process environment the caller was handed (`Host.environ` where it holds a
-# host): git's posture keys are derived from it, so a guard that reports on a tree the caller
-# named should read the environment that caller runs with, not whatever this process inherited.
+# The command runs through the caller's `Host`: its `run` bounds the whole tree, and its
+# `environ` is the environment that caller was handed, so a guard reporting on a tree the caller
+# named reads the environment that caller runs with, not whatever this process inherited.
 def git(
-    source: Path, *args: str, environ: Mapping[str, str], timeout: float = _READ_TIMEOUT_S
+    source: Path, *args: str, host: Host, timeout: float = _READ_TIMEOUT_S
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a bounded git command in ``source``; None only when the checkout is
     absent or not a git repo (the caller decides how to treat that)."""
     if not (source / ".git").exists():
         return None
     try:
-        return run_bounded(
+        return host.run(
             ["git", "-C", str(source), *args],
             capture_output=True,
             text=True,
-            env=git_env(environ),
+            env=git_env(host.environ),
             timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
@@ -111,7 +110,7 @@ def validate_whitelist(patterns: tuple[str, ...]) -> None:
                 )
 
 
-def source_tree_violations(repo: Path, *, environ: Mapping[str, str]) -> tuple[str, ...]:
+def source_tree_violations(repo: Path, *, host: Host) -> tuple[str, ...]:
     """Human-readable tamper findings for the prod source checkout.
 
     Returns ``()`` only when the guard SAW the tree and found nothing wrong.
@@ -130,7 +129,7 @@ def source_tree_violations(repo: Path, *, environ: Mapping[str, str]) -> tuple[s
     source = Path(repo)
     if not (source / ".git").exists():
         return (f"{GUARD_SKIPPED_PREFIX}not a git checkout",)
-    status = git(source, "status", "--porcelain", environ=environ)
+    status = git(source, "status", "--porcelain", host=host)
     if status is None or status.returncode != 0:
         return (f"{GUARD_SKIPPED_PREFIX}git unavailable",)
     violations: list[str] = []
