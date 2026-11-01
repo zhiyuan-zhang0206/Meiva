@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
 
 from meizel.allowances import parse
+from meizel.contracts.analysis import render_policy
 from meizel.contracts.sync import with_table
+from meizel.language import ALLOWED_STDLIB_MODULES, IMPURE_STDLIB_MODULES
 from meizel.tests.synthetic import (
     RepoFactory,
     analysis_of,
@@ -396,3 +399,33 @@ def test_policy_surface_reports_an_added_unless_clause_as_narrower(
     out = capsys.readouterr().out
     assert "1 narrower" in out
     assert "**added** `meizel.policy.toml [ambient-readers.pid unless]` `app.reader()`" in out
+
+
+def test_stdlib_module_classification_is_complete_and_disjoint() -> None:
+    all_known = frozenset(sys.stdlib_module_names | {"__future__", "builtins"})
+    assert all_known == ALLOWED_STDLIB_MODULES | IMPURE_STDLIB_MODULES
+    assert frozenset() == ALLOWED_STDLIB_MODULES & IMPURE_STDLIB_MODULES
+    assert "subprocess" in IMPURE_STDLIB_MODULES
+    assert "socket" in IMPURE_STDLIB_MODULES
+    assert "asyncio" in ALLOWED_STDLIB_MODULES
+    assert "threading" in ALLOWED_STDLIB_MODULES
+    assert "json" in ALLOWED_STDLIB_MODULES
+
+
+def test_third_party_imports_fail_closed_unless_in_pure_third_party(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {})
+            + '\n[purity]\npure-third-party = ["pydantic"]\n',
+            "pkg/__init__.py": "",
+            "pkg/allowed.py": "import pydantic\n",
+            "pkg/blocked.py": "import some_unknown_third_party\n",
+            "pkg/meizel.toml": 'purity = "strict"\n',
+        }
+    )
+    diags = diagnostics(root, "impure-call")
+    assert len(diags) == 1
+    assert "impure import `some_unknown_third_party` in strict module" in diags[0].message
+    assert diags[0].path == "pkg/blocked.py"

@@ -60,9 +60,9 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 | `path-imports` | runtime `sys.path` mutation | `scope`, `skills-scope` (lists) |
 | `python-commands` | bare Python subprocess invocations | `argv-wrappers` (list) |
 | `approved-patches` | test-support files that patch on purpose (`meizel/contracts/analysis.py`, [[meizel/docs/checker/patching/patching.meiva.okf.md|patching]]) | `files`; `max-files` (the list's budget: past it a run fails as `approved-budget`) |
-| `purity` | mechanical purity rules (`strict` / `strict-to-be`) | `impure-imports`, `impure-calls`, `impure-fixtures`, `max-uses`, `max-exports`, `max-public-symbols`, `max-params`, `max-attr-hops` (lists) |
+| `purity` | mechanical purity rules (`strict` / `strict-to-be`) | `pure-third-party`, `impure-imports`, `impure-calls`, `impure-fixtures`, `max-uses`, `max-exports`, `max-public-symbols`, `max-params`, `max-attr-hops` (lists) |
 | `type-checking` | `if TYPE_CHECKING:` | `files` |
-| `typescript` | TypeScript/TSX scanning (`meizel/language/typescript.py`) | `scopes`, `import-sources`, `aliases`, `extensions`, `impure-calls`, `impure-hooks` (lists) |
+| `typescript` | TypeScript/TSX scanning (`meizel/language/typescript.py`) | `scopes`, `import-sources`, `aliases`, `extensions`, `impure-calls`, `impure-hooks`, `inlined-env-roots`, `package-dir` (lists) |
 
 An entry that names a file or a site still goes stale when the file is gone or the site is no
 longer reported; the lint fails and says which table to remove it from. A lint reads the file

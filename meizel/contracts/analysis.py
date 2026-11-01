@@ -51,6 +51,8 @@ from meizel.language.scan import (
 from meizel.lint_common import is_test_path
 from meizel.roles import select_packages
 
+_EMPTY_POLICY = Policy()
+
 __all__ = [
     "POLICY",
     "Analysis",
@@ -632,17 +634,26 @@ def _type_checking_diagnostics(
 
 # meiva:note
 # The diagnostics a single file produces on its own, without whole-repository facts.
-def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) -> list[Diagnostic]:
+def diagnose(
+    scan: FileScan,
+    manifests: dict[str, Manifest],
+    *,
+    policy: Policy | None = None,
+    universe: Universe | None = None,
+) -> list[Diagnostic]:
+    pol = _EMPTY_POLICY if policy is None else policy
     _, found, _ = judge_facts(scan.facts, manifests)
     loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     found.extend(_source_diagnostics([scan], loaders, externals))
-    found.extend(_patch_diagnostics([scan], _approved(policy), scan.facts))
-    found.extend(ambient_diagnostics([scan], manifests))
-    found.extend(_entropy_diagnostics([scan], manifests))
-    found.extend(_type_cast_diagnostics([scan]))
-    found.extend(_any_collaborator_diagnostics([scan]))
-    found.extend(_type_checking_diagnostics([scan], manifests, policy))
-    found.extend(purity_diagnostics([scan], [scan], manifests, Policy(), include_manifests=False))
+    found.extend(_patch_diagnostics([scan], _approved(pol), scan.facts))
+    found.extend(ambient_diagnostics([scan], manifests) + _entropy_diagnostics([scan], manifests))
+    found.extend(_type_cast_diagnostics([scan]) + _any_collaborator_diagnostics([scan]))
+    found.extend(_type_checking_diagnostics([scan], manifests, pol))
+    found.extend(
+        purity_diagnostics(
+            [scan], [scan], manifests, pol, include_manifests=False, universe=universe
+        )
+    )
     return _distinct(found)
 
 
@@ -709,8 +720,7 @@ def _load_declarations(
 
 
 def manifest_diagnostics(universe: Universe) -> list[Diagnostic]:
-    _, _, diagnostics = _load_declarations(universe, None)
-    return _distinct(diagnostics)
+    return _distinct(_load_declarations(universe, None)[2])
 
 
 def analyze(
@@ -726,11 +736,9 @@ def analyze(
     )
     judged = sorted(scans if scope is None else scope & scans.keys())
     judged_scans = [scans[p] for p in judged]
-    loaders = _declared_loads(manifests)
-    externals = _declared_externals(manifests)
+    loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     facts = [f for scan in judged_scans for f in scan.facts]
-    facts.extend(_fixture_facts(universe, scans, judged))
-    facts.extend(_load_facts(manifests))
+    facts.extend([*_fixture_facts(universe, scans, judged), *_load_facts(manifests)])
     mounts, unmounted = mount_facts(universe, scope)
     facts.extend(mounts)
     diagnostics.extend(unmounted)
@@ -739,11 +747,14 @@ def analyze(
     diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals))
     diagnostics.extend(_patch_diagnostics(judged_scans, _approved(policy), facts))
     diagnostics.extend(ambient_diagnostics(judged_scans, manifests))
-    diagnostics.extend(_entropy_diagnostics(judged_scans, manifests))
-    diagnostics.extend(_type_cast_diagnostics(judged_scans))
+    diagnostics.extend(
+        _entropy_diagnostics(judged_scans, manifests) + _type_cast_diagnostics(judged_scans)
+    )
     diagnostics.extend(_any_collaborator_diagnostics(judged_scans))
     diagnostics.extend(_type_checking_diagnostics(judged_scans, manifests, policy))
-    purity_diags = purity_diagnostics(scans.values(), judged_scans, manifests, policy)
+    purity_diags = purity_diagnostics(
+        scans.values(), judged_scans, manifests, policy, universe=universe
+    )
     stale = StaleDeclarations()
     inert: list[tuple[str, str]] = []
     if scope is None:

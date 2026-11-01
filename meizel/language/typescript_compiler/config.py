@@ -92,7 +92,7 @@ DEFAULT_TS_IMPURE_HOOKS: frozenset[str] = frozenset(
 # build, not a read of the environment. A file outside these roots (a config, a script, a test) is not
 # bundled and reads it.
 INLINED_ENV_PREFIX = "NEXT_PUBLIC_"
-INLINED_ENV_ROOTS: tuple[str, ...] = ("ui/web/src/",)
+INLINED_ENV_ROOTS: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,5 +145,5 @@ def load_ts_config(policy: Policy) -> TsConfig:
         max_params=_policy_int(policy, "max-params", 6),
         max_attr_hops=_policy_int(policy, "max-attr-hops", 3),
         inlined_env_prefix=INLINED_ENV_PREFIX,
-        inlined_env_roots=INLINED_ENV_ROOTS,
+        inlined_env_roots=policy.names("typescript", "inlined-env-roots") or INLINED_ENV_ROOTS,
     )

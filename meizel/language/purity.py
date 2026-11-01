@@ -9,6 +9,10 @@ from meizel import allowances
 from meizel.graph.model import Code, EnumSubsetUse, PurityItem
 from meizel.graph.universe import Universe
 from meizel.language.purity_structure import (
+    ALLOWED_STDLIB_MODULES,
+    DEFAULT_IMPURE_IMPORTS,
+    IMPURE_DOTTED_STDLIB_MODULES,
+    IMPURE_STDLIB_MODULES,
     record_attr_write,
     record_enum_subsets,
     record_module_structure,
@@ -18,8 +22,11 @@ from meizel.language.purity_structure import (
 )
 
 __all__ = [
+    "ALLOWED_STDLIB_MODULES",
     "DEFAULT_IMPURE_CALLS",
     "DEFAULT_IMPURE_IMPORTS",
+    "IMPURE_DOTTED_STDLIB_MODULES",
+    "IMPURE_STDLIB_MODULES",
     "PurityState",
     "make_state",
     "record_assign",
@@ -33,32 +40,66 @@ __all__ = [
 
 _Dotted = Callable[[ast.expr], str | None]
 
-DEFAULT_IMPURE_IMPORTS = frozenset(
-    {
-        "subprocess",
-        "socket",
-        "shutil",
-        "tempfile",
-        "signal",
-        "multiprocessing",
-        "ctypes",
-        "fcntl",
-        "pty",
-        "termios",
-        "psycopg",
-        "psycopg_pool",
-        "redis",
-        "httpx",
-        "requests",
-        "urllib",
-        "fastapi",
-        "starlette",
-        "uvicorn",
-        "watchfiles",
-        "watchdog",
-        "playwright",
-    }
-)
+
+def _is_impure_stdlib(module_name: str) -> bool:
+    parts = module_name.split(".")
+    top = parts[0]
+    if top in IMPURE_STDLIB_MODULES:
+        return True
+    for i in range(1, len(parts) + 1):
+        if ".".join(parts[:i]) in IMPURE_DOTTED_STDLIB_MODULES:
+            return True
+    return top not in ALLOWED_STDLIB_MODULES
+
+
+def _is_first_party_module(universe: Universe | None, name: str, current_path: str = "") -> bool:
+    if universe is None:
+        return False
+    top = name.split(".", 1)[0]
+    if universe.is_first_party_name(top) or universe.resolve_module(top) is not None:
+        return True
+    if not current_path:
+        return False
+    dir_path = current_path.rpartition("/")[0]
+    if dir_path:
+        if (
+            f"{dir_path}/{top}.py" in universe.files
+            or f"{dir_path}/{top}/__init__.py" in universe.files
+        ):
+            return True
+        parts = dir_path.split("/")
+        for i in range(len(parts)):
+            candidate = "/".join(parts[: i + 1]) + f"/scripts/{top}.py"
+            if candidate in universe.files:
+                return True
+    return False
+
+
+def _is_impure_import(
+    name: str,
+    pure_third_party: frozenset[str],
+    universe: Universe | None = None,
+    current_path: str = "",
+) -> tuple[bool, str]:
+    top = name.split(".", 1)[0]
+    if _is_first_party_module(universe, top, current_path):
+        return False, top
+
+    parts = name.split(".")
+    for i in range(len(parts), 0, -1):
+        prefix = ".".join(parts[:i])
+        if prefix in IMPURE_DOTTED_STDLIB_MODULES:
+            return True, prefix
+
+    if top in IMPURE_STDLIB_MODULES:
+        return True, top
+    if top in ALLOWED_STDLIB_MODULES:
+        return False, top
+
+    if top in pure_third_party:
+        return False, top
+    return True, top
+
 
 _OS_ENVIRON = ".".join(("os", "environ"))
 _OS_GETENV = ".".join(("os", "getenv"))
@@ -226,6 +267,9 @@ class PurityState:
     call_funcs: set[int] = field(default_factory=set[int])
     enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
     defined_classes: set[str] = field(default_factory=set[str])
+    pure_third_party: frozenset[str] = field(default_factory=frozenset[str])
+    universe: Universe | None = None
+    current_path: str = ""
 
     def finalize_subsets(self) -> list[EnumSubsetUse]:
         return [u for u in self.enum_subsets if u.cls_name not in self.defined_classes]
@@ -235,13 +279,17 @@ class PurityState:
 
     def record_import(self, node: ast.Import) -> None:
         for alias in node.names:
-            top = alias.name.split(".", 1)[0]
-            if top in self.impure_imports:
+            impure, reported = _is_impure_import(
+                alias.name, self.pure_third_party, self.universe, self.current_path
+            )
+            if not impure and alias.name.split(".", 1)[0] in self.impure_imports:
+                impure, reported = True, alias.name.split(".", 1)[0]
+            if impure:
                 self.items.append(
                     PurityItem(
                         node.lineno,
                         Code.IMPURE_CALL,
-                        f"import {top}",
+                        f"import {reported}",
                         f"impure import `{alias.name}` in strict module",
                         _IMPURE_IMPORT_HINT,
                     )
@@ -249,17 +297,32 @@ class PurityState:
 
     def record_import_from(self, node: ast.ImportFrom) -> None:
         if node.level == 0 and node.module:
-            top = node.module.split(".", 1)[0]
-            if top in self.impure_imports:
-                self.items.append(
-                    PurityItem(
-                        node.lineno,
-                        Code.IMPURE_CALL,
-                        f"import {top}",
-                        f"impure import `{node.module}` in strict module",
-                        _IMPURE_IMPORT_HINT,
-                    )
+            seen_reported: set[str] = set()
+            for alias in node.names:
+                full_name = f"{node.module}.{alias.name}"
+                impure, reported = _is_impure_import(
+                    full_name, self.pure_third_party, self.universe, self.current_path
                 )
+                if not impure and node.module != full_name:
+                    impure, reported = _is_impure_import(
+                        node.module, self.pure_third_party, self.universe, self.current_path
+                    )
+                if not impure and (
+                    full_name in self.impure_imports
+                    or node.module.split(".", 1)[0] in self.impure_imports
+                ):
+                    impure, reported = True, node.module.split(".", 1)[0]
+                if impure and reported not in seen_reported:
+                    seen_reported.add(reported)
+                    self.items.append(
+                        PurityItem(
+                            node.lineno,
+                            Code.IMPURE_CALL,
+                            f"import {reported}",
+                            f"impure import `{node.module}` in strict module",
+                            _IMPURE_IMPORT_HINT,
+                        )
+                    )
 
     # meiva:note
     # The nodes that name a type and not a value: an annotation (parameter, return, variable), the second
@@ -334,15 +397,19 @@ def _policy_int(policy: allowances.Policy, section: str, default: int) -> int:
 # other snapshot's policy asks a different question and gets its own answer, so no cache of the
 # old rules survives a swap.
 @cache
-def _rules_for(text: str) -> tuple[frozenset[str], frozenset[str], int, int, int]:
+def _rules_for(
+    text: str,
+) -> tuple[frozenset[str], frozenset[str], frozenset[str], int, int, int]:
     if not text:
-        return DEFAULT_IMPURE_IMPORTS, DEFAULT_IMPURE_CALLS, 6, 6, 3
+        return frozenset(), DEFAULT_IMPURE_CALLS, DEFAULT_IMPURE_IMPORTS, 6, 6, 3
     policy, _ = allowances.parse(text)
-    imports = DEFAULT_IMPURE_IMPORTS | frozenset(policy.names("purity", "impure-imports"))
+    pure_third_party = frozenset(policy.names("purity", "pure-third-party"))
     calls = DEFAULT_IMPURE_CALLS | frozenset(policy.names("purity", "impure-calls"))
+    impure_imports = DEFAULT_IMPURE_IMPORTS | frozenset(policy.names("purity", "impure-imports"))
     return (
-        imports,
+        pure_third_party,
         calls,
+        impure_imports,
         _policy_int(policy, "max-public-symbols", 6),
         _policy_int(policy, "max-params", 6),
         _policy_int(policy, "max-attr-hops", 3),
@@ -352,10 +419,19 @@ def _rules_for(text: str) -> tuple[frozenset[str], frozenset[str], int, int, int
 # meiva:note
 # The policy the run admitted: read through the universe that holds the tree, never from a path
 # this module computes itself.
-def make_state(universe: Universe) -> PurityState:
+def make_state(universe: Universe, path: str = "") -> PurityState:
     text = universe.repo.load_text(allowances.POLICY) if allowances.POLICY in universe.files else ""
-    imports, calls, max_pub, max_params, max_hops = _rules_for(text)
-    return PurityState(imports, calls, max_pub, max_params, max_hops)
+    pure_third_party, calls, impure_imports, max_pub, max_params, max_hops = _rules_for(text)
+    return PurityState(
+        impure_imports=impure_imports,
+        impure_calls=calls,
+        max_public_symbols=max_pub,
+        max_params=max_params,
+        max_attr_hops=max_hops,
+        pure_third_party=pure_third_party,
+        universe=universe,
+        current_path=path,
+    )
 
 
 def _annotation_ast(ann: ast.expr) -> ast.AST:

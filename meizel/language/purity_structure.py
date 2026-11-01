@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import ast
+import sys
 
 from meizel.graph.model import Code, EnumSubsetUse, PurityItem
 
 __all__ = [
+    "ALLOWED_STDLIB_MODULES",
+    "ALL_KNOWN_STDLIB",
+    "DEFAULT_IMPURE_IMPORTS",
+    "IMPURE_DOTTED_STDLIB_MODULES",
+    "IMPURE_STDLIB_MODULES",
     "record_attr_write",
     "record_enum_subsets",
     "record_module_structure",
@@ -12,6 +18,116 @@ __all__ = [
     "record_params",
     "record_pass_through",
 ]
+
+IMPURE_STDLIB_MODULES: frozenset[str] = frozenset(
+    {
+        "_curses",
+        "_curses_panel",
+        "_ctypes",
+        "_dbm",
+        "_gdbm",
+        "_lsprof",
+        "_multiprocessing",
+        "_posixsubprocess",
+        "_signal",
+        "_socket",
+        "_sqlite3",
+        "_ssl",
+        "_tkinter",
+        "_tracemalloc",
+        "_winapi",
+        "_wmi",
+        "aifc",
+        "antigravity",
+        "audioop",
+        "bdb",
+        "cProfile",
+        "compileall",
+        "curses",
+        "ctypes",
+        "dbm",
+        "ensurepip",
+        "faulthandler",
+        "fcntl",
+        "ftplib",
+        "grp",
+        "idlelib",
+        "imaplib",
+        "lib2to3",
+        "mmap",
+        "msilib",
+        "msvcrt",
+        "multiprocessing",
+        "netrc",
+        "nis",
+        "nntplib",
+        "nt",
+        "ossaudiodev",
+        "pdb",
+        "pipes",
+        "poplib",
+        "posix",
+        "profile",
+        "pstats",
+        "pty",
+        "pwd",
+        "py_compile",
+        "readline",
+        "resource",
+        "rlcompleter",
+        "runpy",
+        "select",
+        "selectors",
+        "shelve",
+        "shutil",
+        "signal",
+        "smtplib",
+        "sndhdr",
+        "socket",
+        "socketserver",
+        "spwd",
+        "sqlite3",
+        "ssl",
+        "subprocess",
+        "sunau",
+        "syslog",
+        "telnetlib",
+        "tempfile",
+        "termios",
+        "this",
+        "tkinter",
+        "trace",
+        "tracemalloc",
+        "tty",
+        "turtle",
+        "turtledemo",
+        "venv",
+        "wave",
+        "webbrowser",
+        "winreg",
+        "winsound",
+        "wsgiref",
+        "xmlrpc",
+        "zipapp",
+    }
+)
+
+IMPURE_DOTTED_STDLIB_MODULES: frozenset[str] = frozenset(
+    {
+        "urllib.request",
+        "urllib.robotparser",
+        "urllib.response",
+        "urllib.error",
+        "http.client",
+        "http.server",
+        "http.cookiejar",
+    }
+)
+
+ALL_KNOWN_STDLIB: frozenset[str] = frozenset(sys.stdlib_module_names | {"__future__", "builtins"})
+ALLOWED_STDLIB_MODULES: frozenset[str] = frozenset(ALL_KNOWN_STDLIB - IMPURE_STDLIB_MODULES)
+
+DEFAULT_IMPURE_IMPORTS: frozenset[str] = IMPURE_STDLIB_MODULES
 
 _PASSTHROUGH_HINT = (
     "have callers invoke the target directly, or give this function a real boundary responsibility"

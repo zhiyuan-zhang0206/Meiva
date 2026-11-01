@@ -242,3 +242,22 @@ def test_an_analyzer_failure_keeps_its_own_message(tmp_path: Path) -> None:
 
     assert "scripts/setup-worktree.sh" not in str(caught.value)
     assert "boom" in str(caught.value)
+
+
+def test_meizel_source_code_contains_no_meiva_specific_hardcoded_literals() -> None:
+    meizel_dir = Path(__file__).resolve().parents[1]
+    forbidden = ["db_conn", "aops_pool", "meiva_builtins", "ui/web"]
+    violations: list[str] = []
+    for path in meizel_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if "tests" in path.parts or "test_graph" in path.parts or "__pycache__" in path.parts:
+            continue
+        if path.suffix not in {".py", ".mjs", ".js"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(meizel_dir)
+        for term in forbidden:
+            if term in text:
+                violations.append(f"{rel}: contains forbidden literal {term!r}")
+    assert violations == []

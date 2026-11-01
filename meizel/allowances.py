@@ -84,6 +84,7 @@ RULES: dict[str, dict[str, str]] = {
     "single-owner": {"postgres-dial-owners": NAMES},
     "purity": {
         "impure-imports": NAMES,
+        "pure-third-party": NAMES,
         "impure-calls": NAMES,
         "impure-fixtures": NAMES,
         "max-uses": NAMES,
@@ -99,6 +100,8 @@ RULES: dict[str, dict[str, str]] = {
         "extensions": NAMES,
         "impure-calls": NAMES,
         "impure-hooks": NAMES,
+        "inlined-env-roots": NAMES,
+        "package-dir": NAMES,
     },
 }
 PER_NAME = frozenset({"single-owner"})

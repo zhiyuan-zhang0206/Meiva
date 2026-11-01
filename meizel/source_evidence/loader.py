@@ -18,9 +18,13 @@ from meizel.source_evidence.decode import decode_index
 from meizel.source_evidence.model import Index, TsReport
 
 _ADAPTER = "meizel/source_evidence/typescript/"
-_COMPILER = "ui/web/node_modules/typescript/lib/"
-_LOCK = "ui/web/pnpm-lock.yaml"
-_PACKAGE = "ui/web/node_modules/typescript/package.json"
+
+
+def _find_package_dir(index: Index) -> str:
+    for dep in index.dependencies:
+        if dep.path.endswith("pnpm-lock.yaml"):
+            return dep.path.removesuffix("/pnpm-lock.yaml").removesuffix("pnpm-lock.yaml")
+    return ""
 
 
 # meiva:note
@@ -59,17 +63,22 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _dependencies(index: Index, evidence: Evidence) -> dict[str, str]:
+def _dependencies(index: Index, evidence: Evidence) -> tuple[dict[str, str], str]:
+    pkg_dir = _find_package_dir(index)
+    prefix = f"{pkg_dir}/" if pkg_dir else ""
+    lock = f"{prefix}pnpm-lock.yaml"
+    package = f"{prefix}node_modules/typescript/package.json"
+    compiler = f"{prefix}node_modules/typescript/lib/"
     expected = {
-        _LOCK,
-        _PACKAGE,
+        lock,
+        package,
         "meizel/language/typescript_compiler/compiler.mjs",
-        f"{_COMPILER}typescript.js",
+        f"{compiler}typescript.js",
         *(p for p in tracked_files(evidence.tool) if p.startswith(_ADAPTER) and p.endswith(".mjs")),
     }
     contents: dict[str, str] = {}
     for item in index.dependencies:
-        library = item.path.startswith(_COMPILER) and item.path.endswith(".d.ts")
+        library = item.path.startswith(compiler) and item.path.endswith(".d.ts")
         if item.path in contents or (item.path not in expected and not library):
             raise MeizelError(f"unexpected or duplicate TS dependency: {item.path}")
         content = _text(evidence.tool, item.path)
@@ -78,12 +87,12 @@ def _dependencies(index: Index, evidence: Evidence) -> dict[str, str]:
         contents[item.path] = content
     if not expected <= contents.keys():
         raise MeizelError("TS index omitted required tool dependencies")
-    locked = _locked_typescript_version(contents[_LOCK])
+    locked = _locked_typescript_version(contents[lock])
     if index.compiler_version != locked or index.compiler_version != _package_version(
-        contents[_PACKAGE]
+        contents[package]
     ):
         raise MeizelError("TS compiler version does not match the locked installation")
-    return contents
+    return contents, compiler
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -161,7 +170,11 @@ def _locked_typescript_version(text: str) -> str:
 
 
 def _sources(
-    index: Index, root: Path, selected: tuple[str, ...], dependencies: Mapping[str, str]
+    index: Index,
+    root: Path,
+    selected: tuple[str, ...],
+    dependencies: Mapping[str, str],
+    compiler: str,
 ) -> None:
     seen: set[str] = set()
     for source in index.sources:
@@ -177,7 +190,7 @@ def _sources(
             for declaration in (*item.declarations, *item.freeze_receiver, *item.freeze_callee):
                 if (
                     declaration.dependency not in dependencies
-                    or not declaration.dependency.startswith(_COMPILER)
+                    or not declaration.dependency.startswith(compiler)
                     or not declaration.dependency.endswith(".d.ts")
                 ):
                     raise MeizelError("TS allocation lacks locked library provenance")
@@ -202,8 +215,8 @@ def load_report(evidence: Evidence, files: set[str], node: str, supplied: Path |
         raise MeizelError(f"invalid TS source index: {error}") from error
     if index.root != str(evidence.root):
         raise MeizelError("TS index repository root does not match")
-    dependencies = _dependencies(index, evidence)
-    _sources(index, evidence.root, selected, dependencies)
+    dependencies, compiler = _dependencies(index, evidence)
+    _sources(index, evidence.root, selected, dependencies, compiler)
     status = (
         "not-applicable"
         if not selected
