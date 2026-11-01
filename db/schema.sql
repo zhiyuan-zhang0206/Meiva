@@ -156,6 +156,11 @@ CREATE TABLE agents_meta (
     -- fork fields exist in pairs or not at all (constraint explicitly named to align with the ALTER in 0002 migration)
     CONSTRAINT agents_meta_fork_pair_check
         CHECK ((fork_source_agent_id IS NULL) = (fork_source_checkpoint_id IS NULL))
+) WITH (
+    fillfactor = 85,
+    autovacuum_vacuum_scale_factor = 0.05,
+    autovacuum_vacuum_cost_limit = 1000,
+    autovacuum_vacuum_cost_delay = 2
 );
 
 -- Live roster scans exclude the retained terminated-agent history.
@@ -375,6 +380,11 @@ CREATE TABLE inbound_messages (
     -- e.g. for the delivery watchdog / degraded-wake alerts.
     claimed_at TIMESTAMPTZ,
     CONSTRAINT inbound_agent_command_unique UNIQUE(agent_id,id)
+) WITH (
+    fillfactor = 85,
+    autovacuum_vacuum_scale_factor = 0.05,
+    autovacuum_vacuum_cost_limit = 1000,
+    autovacuum_vacuum_cost_delay = 2
 );
 
 COMMENT ON COLUMN inbound_messages.claimed_at IS
@@ -401,6 +411,10 @@ CREATE INDEX inbound_messages_agent_id_created_at_idx
 -- In the new design all kinds are claimed by claim without filtering by kind; one partial
 -- index covers all hot path queries.
 CREATE INDEX idx_inbound_per_agent_pending ON inbound_messages (agent_id, created_at)
+    WHERE status = 'pending';
+
+-- Watchdog scan: order pending inbounds across all agents by created_at.
+CREATE INDEX idx_inbound_pending_created_at ON inbound_messages (created_at)
     WHERE status = 'pending';
 
 CREATE UNIQUE INDEX idx_inbound_messages_client_message_id
@@ -1003,14 +1017,7 @@ CREATE TABLE agent_tasks (
     last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
     reminder_count      INTEGER NOT NULL DEFAULT 0,  -- reminders sent for the current overdue window
     escalated_at        TIMESTAMPTZ,  -- delegator escalation marker: set by the daemon with the delivered digest; cleared with the counters by any write the reminder-window policy counts, so by default a note clears it too (task #5314; the user leg marks itself via its notice)
-    reminders_paused_until TIMESTAMPTZ,  -- deadline until which the reminder and escalation passes skip this task; set through update() under Fleet task_reminder_pause_max_seconds (unset = this home cannot pause). A deadline at or before now() means "not paused": no separate flag (task #5311).
-    -- Retired task-cost columns: inactive; retained for expand-contract upgrades.
-    token_budget        BIGINT CHECK (token_budget IS NULL OR token_budget > 0),
-    usd_budget          DOUBLE PRECISION CHECK (usd_budget IS NULL OR (usd_budget > 0 AND usd_budget < 'Infinity'::double precision)),
-    token_used          BIGINT NOT NULL DEFAULT 0 CHECK (token_used >= 0),
-    usd_used            DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (usd_used >= 0 AND usd_used < 'Infinity'::double precision),
-    token_budget_notified_at TIMESTAMPTZ,  -- first token-ceiling breach notification
-    usd_budget_notified_at   TIMESTAMPTZ   -- first USD-ceiling breach notification
+    reminders_paused_until TIMESTAMPTZ  -- deadline until which the reminder and escalation passes skip this task; set through update() under Fleet task_reminder_pause_max_seconds (unset = this home cannot pause). A deadline at or before now() means "not paused": no separate flag (task #5311).
 );
 
 -- The system root task is permanently 'in_progress': it is the tree anchor and
@@ -2569,10 +2576,8 @@ CREATE TABLE schema_migrations (
 -- post-baseline files in migrations/ that are not folded below.
 INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');
 
--- Current reset anchor: the previous 93 migration names are folded into this schema.
-INSERT INTO schema_migrations (name) VALUES ('20261026T091500_schema-baseline');
-INSERT INTO schema_migrations (name) VALUES ('20261031T172218_machine-placed-schedules');
-INSERT INTO schema_migrations (name) VALUES ('20261101T081023_harness-switch-and-external-messages');
+-- Current reset anchor: the previous 8 migration names are folded into this schema.
+INSERT INTO schema_migrations (name) VALUES ('20261101T170000_schema-baseline');
 
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN
