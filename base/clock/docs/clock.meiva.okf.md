@@ -117,4 +117,15 @@ its process root built. It reads no entropy of its own, so the root chooses the 
 `SystemRandom` where the id must be unguessable) and a test that hands in a seeded generator gets
 the same identifiers on every run. A component does not take an id callable; it takes the generator.
 
+## Debt boundary
+
+`meizel` records four debts against `base/clock/__init__.py`: the wall-clock read behind
+`Clock`'s `now` default, the two `_SystemTimers` reads, and the settings import that builds the
+clock configuration. They are the same fact from four sides — this module is where the tree
+takes the world's time, and it is also where the pure `Clock` lives, so no split removes the
+effect without moving a name that hundreds of importers use. Crossing that boundary is
+recorded, with the measured cost and the condition that revives each debt, as
+`boundary:system-clock-world-point` in
+the [tech-debt ledger](../../../future/tech-debt/ledger.md).
+
 Parent: [[base/docs/base.meiva.okf.md|base library]].
