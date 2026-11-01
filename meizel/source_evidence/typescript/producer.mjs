@@ -7,7 +7,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {sourceEvidence} from './extract.mjs';
-import {ts, compiler, tool} from '../../language/typescript_compiler/compiler.mjs';
+import {ts, compiler, tool, packageDir} from '../../language/typescript_compiler/compiler.mjs';
 
 const entry = fileURLToPath(import.meta.url);
 const libraryRoot = path.dirname(compiler);
@@ -36,7 +36,8 @@ function main(args) {
     return content;
   };
   for (const name of fs.readdirSync(path.dirname(entry)).filter(n=>n.endsWith('.mjs')).sort()) record(path.join(path.dirname(entry),name));
-  for (const relative of ['meizel/language/typescript_compiler/compiler.mjs','ui/web/pnpm-lock.yaml','ui/web/node_modules/typescript/package.json','ui/web/node_modules/typescript/lib/typescript.js']) record(path.join(tool,relative));
+  const pkgPrefix = packageDir ? `${packageDir}/` : '';
+  for (const relative of ['meizel/language/typescript_compiler/compiler.mjs', `${pkgPrefix}pnpm-lock.yaml`, `${pkgPrefix}node_modules/typescript/package.json`, `${pkgPrefix}node_modules/typescript/lib/typescript.js`]) record(path.join(tool,relative));
   host.getSourceFile = (file,version) => {
     const normalized = path.resolve(file);
     const supplied = files.get(normalized);

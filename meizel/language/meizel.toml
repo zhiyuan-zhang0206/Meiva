@@ -1,7 +1,7 @@
 exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py"]
 
 [uses]
-"__init__.py" = ["scan_cache.py"]
+"__init__.py" = ["purity.py", "scan_cache.py"]
 "ambient.py" = ["fake_entropy.py", "patching.py"]
 "no_script_sibling_imports.py" = ["script_siblings.py"]
 "patching.py" = ["bindings.py", "fixtures.py", "purity.py", "python_commands.py", "restricted.py"]

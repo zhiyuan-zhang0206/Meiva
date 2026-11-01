@@ -468,29 +468,22 @@ argv-wrappers = [
 ]
 
 [purity]
-impure-imports = [
-    "ctypes",
-    "fastapi",
-    "fcntl",
-    "httpx",
-    "multiprocessing",
-    "playwright",
-    "psycopg",
-    "psycopg_pool",
-    "pty",
-    "redis",
-    "requests",
-    "shutil",
-    "signal",
-    "socket",
-    "starlette",
-    "subprocess",
-    "tempfile",
-    "termios",
-    "urllib",
-    "uvicorn",
-    "watchdog",
-    "watchfiles",
+pure-third-party = [
+    "dotenv",
+    "feedparser",
+    "langchain_anthropic",
+    "langchain_core",
+    "langchain_openai",
+    "langgraph",
+    "loguru",
+    "mcp",
+    "opentelemetry",
+    "ormsgpack",
+    "pydantic",
+    "pydantic_core",
+    "pydantic_settings",
+    "trafilatura",
+    "yaml",
 ]
 impure-calls = [
     "datetime.datetime.now",
@@ -512,17 +505,7 @@ impure-calls = [
     "uuid.uuid1",
     "uuid.uuid4",
 ]
-impure-fixtures = [
-    "aops_pool",
-    "database",
-    "database_gate",
-    "db_conn",
-    "event_bus",
-    "monkeypatch",
-    "operator_database",
-    "pool",
-    "redis_url",
-]
+impure-fixtures = []
 max-uses = ["8"]
 max-exports = ["4"]
 max-public-symbols = ["6"]
@@ -530,6 +513,12 @@ max-params = ["6"]
 max-attr-hops = ["3"]
 
 [typescript]
+inlined-env-roots = [
+    "ui/web/src/",
+]
+package-dir = [
+    "ui/web",
+]
 # `ui/web/src/components` is enumerated child by child: every subdirectory is judged except
 # `timeline`, whose view tests import the package door and close a local cycle the checker cannot
 # record on first adoption (see the debt-gate note in docs/checker/typescript.meiva.okf.md). Add

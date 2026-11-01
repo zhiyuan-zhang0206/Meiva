@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from meizel.contracts.analysis import render_policy
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, edges, verdict
 
 
@@ -212,3 +213,77 @@ def test_an_underscore_fixture_works_through_autouse_and_in_its_own_file(
         }
     )
     assert verdict(root) == set()
+
+
+def test_pure_helper_fixture_in_mixed_conftest_allowed_in_strict_tests(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {}) + "\n[purity]\nimpure-fixtures = []\n",
+            "infra/__init__.py": "",
+            "infra/db.py": "import socket\nclass DBConn:\n    pass\n",
+            "infra/meizel.toml": 'purity = "none"\nexports = ["db.py"]\n',
+            "conftest.py": (
+                "import pytest\n"
+                "from infra.db import DBConn\n\n"
+                "@pytest.fixture\n"
+                "def db_conn():\n"
+                "    return DBConn()\n\n"
+                "@pytest.fixture\n"
+                "def pure_payload():\n"
+                "    return {'x': 1, 'y': 2}\n"
+            ),
+            "core/__init__.py": "",
+            "core/model.py": "def calc(p: dict) -> int:\n    return p['x'] + p['y']\n",
+            "core/meizel.toml": 'purity = "strict"\n',
+            "core/tests/__init__.py": "",
+            "core/tests/test_model.py": (
+                "from core.model import calc\n\n"
+                "def test_calc(pure_payload):\n"
+                "    assert calc(pure_payload) == 3\n"
+            ),
+            "meizel.toml": '[uses]\n"core" = ["infra"]\n"core/tests" = ["core"]\n',
+        }
+    )
+    assert diagnostics(root, "impure-test-fixture") == []
+
+
+def test_fixture_taint_graph_catches_transitive_impure_fixtures_without_string_config(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {}) + "\n[purity]\nimpure-fixtures = []\n",
+            "infra/__init__.py": "",
+            "infra/db.py": "import socket\nclass Transport:\n    pass\n",
+            "infra/meizel.toml": 'purity = "none"\nexports = ["db.py"]\n',
+            "conftest.py": (
+                "import pytest\n"
+                "from infra.db import Transport\n\n"
+                "@pytest.fixture\n"
+                "def raw_transport():\n"
+                "    return Transport()\n\n"
+                "@pytest.fixture\n"
+                "def database_session(raw_transport):\n"
+                "    return raw_transport\n\n"
+                "@pytest.fixture\n"
+                "def api_client(database_session):\n"
+                "    return database_session\n"
+            ),
+            "core/__init__.py": "",
+            "core/domain.py": "def logic() -> int:\n    return 42\n",
+            "core/meizel.toml": 'purity = "strict"\n',
+            "core/tests/__init__.py": "",
+            "core/tests/test_domain.py": (
+                "from core.domain import logic\n\n"
+                "def test_via_client(api_client):\n"
+                "    assert logic() == 42\n"
+            ),
+            "meizel.toml": '[uses]\n"core" = ["infra"]\n"core/tests" = ["core"]\n',
+        }
+    )
+    found = diagnostics(root, "impure-test-fixture")
+    assert len(found) == 1
+    assert "test of strict modules requests impure fixture `api_client`" in found[0].message
+    assert found[0].path == "core/tests/test_domain.py"

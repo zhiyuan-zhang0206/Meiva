@@ -63,7 +63,7 @@ class PatchForms(PythonCommands):
     def __init__(self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool) -> None:
         super().__init__(universe, path, tree, walrus=walrus)
         self.test_file = fixtures.is_test_file(path)
-        self.purity_state = purity.make_state(universe)
+        self.purity_state = purity.make_state(universe, path=path)
         self.patches: list[Patch] = []
         self.binding_files: set[str] = set()
 
