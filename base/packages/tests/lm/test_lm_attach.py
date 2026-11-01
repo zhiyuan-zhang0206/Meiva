@@ -257,7 +257,9 @@ def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
 
     assert pack is not None
     assert str(image_14.resolve()) in pack.delivered
-    assert pack.skipped == [(str(image_15.resolve()), "image exceeds 4096 px dimension limit")]
+    assert pack.skipped == [
+        (str(image_15.resolve()), "image (4097x1 px) exceeds 4096 px dimension limit")
+    ]
 
 
 def test_builtin_provider_bindings_own_attach_policy(*, model_catalog: ModelCatalog) -> None:
@@ -322,8 +324,8 @@ def test_image_dimensions_and_model_capabilities_are_enforced(
     assert claude_pack is not None
     assert text_only_pack is not None
     assert claude_video_pack is not None
-    assert deepseek_pack.skipped[0][1] == "image exceeds 8192 px dimension limit"
-    assert claude_pack.skipped[0][1] == "image exceeds 8000 px dimension limit"
+    assert deepseek_pack.skipped[0][1] == "image (9000x9000 px) exceeds 8192 px dimension limit"
+    assert claude_pack.skipped[0][1] == "image (9000x9000 px) exceeds 8000 px dimension limit"
     assert text_only_pack.skipped[0][1] == "your model cannot receive image"
     assert claude_video_pack.skipped[0][1] == "your model cannot receive video"
 

@@ -17,6 +17,8 @@ from typing import Any
 from base.clock import Clock
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import factory
+from base.lm.attach.constants import media_type_for_mime
+from base.lm.attach.files import image_dimensions
 from base.lm.call import invoke_text
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -183,14 +185,18 @@ def _read_text_file(p: Path) -> str:
 
 # meiva:note
 # Read the file `path` names as one part: a media file (image, video, audio, PDF by suffix) as its
-# bytes and MIME type, any other file as UTF-8 text, which is also scanned.
+# bytes, MIME type and (for images) pixel dimensions, any other file as UTF-8 text, which is also
+# scanned.
 def _read_part(deps: UnderstandDeps, path: str | Path) -> Scanned[Part]:
     p = resolve_in(deps.base_dir, Path(path).expanduser())
     if not p.is_file():
         raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({p})")
     mime = calls.media_mime(p.suffix)
     if mime is not None:
-        return Scanned(MediaPart(path=str(path), mime=mime, data=p.read_bytes()))
+        dimensions = image_dimensions(p) if media_type_for_mime(mime) == "image" else None
+        return Scanned(
+            MediaPart(path=str(path), mime=mime, data=p.read_bytes(), dimensions=dimensions)
+        )
     content = _read_text_file(p)
     return Scanned(TextPart(content), findings_of(content, "understand.input"))
 
@@ -198,9 +204,9 @@ def _read_part(deps: UnderstandDeps, path: str | Path) -> Scanned[Part]:
 # meiva:note
 # Answer `prompt` over several files in ONE model call. The content types present pick the one
 # model (`routing.route`), whose provider receives the media blocks built for it; text files become
-# text parts. Part order follows `paths`, prompt last. Routing, effort and size refusals happen
-# before any model is built. The findings of the files read so far ride with the answer, and with
-# the failure when reading or answering fails.
+# text parts. Part order follows `paths`, prompt last. Routing, effort, size and image-dimension
+# refusals happen before any model is built. The findings of the files read so far ride with the
+# answer, and with the failure when reading or answering fails.
 def _understand_paths(
     deps: UnderstandDeps,
     paths: tuple[str | Path, ...],

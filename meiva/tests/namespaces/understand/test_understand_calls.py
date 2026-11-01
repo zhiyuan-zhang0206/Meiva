@@ -294,7 +294,7 @@ def test_a_misconfigured_type_that_is_absent_does_not_matter(model_catalog: Mode
 
 
 def test_content_is_the_parts_in_order_with_the_prompt_last(model_catalog: ModelCatalog) -> None:
-    parts = [TextPart("notes"), MediaPart("a.png", "image/png", _PNG)]
+    parts = [TextPart("notes"), MediaPart("a.png", "image/png", _PNG, dimensions=(2, 2))]
 
     content = content_for(model_catalog, "deepseek-flash", parts, "what is this")
 
@@ -321,10 +321,58 @@ def test_a_gemini_pdf_and_a_claude_pdf_are_built_for_their_provider(
 def test_a_media_file_over_the_shared_ceiling_is_refused_naming_the_path(
     model_catalog: ModelCatalog,
 ) -> None:
-    big = MediaPart("shots/huge.png", "image/png", b"\x00" * (20 * 1024 * 1024 + 1))
+    big = MediaPart("shots/huge.png", "image/png", b"\x00" * (20 * 1024 * 1024 + 1), (2, 2))
 
     with pytest.raises(UnderstandError, match=r"'shots/huge\.png' cannot be sent to .*20 MiB"):
         content_for(model_catalog, "deepseek-flash", [big], "p")
+
+
+def test_an_image_over_the_model_dimension_limit_is_refused_naming_path_dimensions_model_and_limit(
+    model_catalog: ModelCatalog,
+) -> None:
+    wide = MediaPart("shots/wide.png", "image/png", _PNG, dimensions=(9000, 120))
+
+    with pytest.raises(
+        UnderstandError,
+        match=(
+            r"'shots/wide\.png' cannot be sent to deepseek-flash: "
+            r"image \(9000x120 px\) exceeds 8192 px dimension limit"
+        ),
+    ):
+        content_for(model_catalog, "deepseek-flash", [wide], "p")
+
+
+def test_the_15th_image_uses_the_multi_image_dimension_tier_of_the_model(
+    model_catalog: ModelCatalog,
+) -> None:
+    parts = [
+        *(
+            MediaPart(f"shots/{index}.png", "image/png", _PNG, dimensions=(8000, 2))
+            for index in range(1, 15)
+        ),
+        MediaPart("shots/15.png", "image/png", _PNG, dimensions=(4097, 2)),
+    ]
+
+    with pytest.raises(
+        UnderstandError,
+        match=(
+            r"'shots/15\.png' cannot be sent to deepseek-flash: "
+            r"image \(4097x2 px\) exceeds 4096 px dimension limit"
+        ),
+    ):
+        content_for(model_catalog, "deepseek-flash", parts, "p")
+
+
+def test_an_image_whose_dimensions_cannot_be_read_is_refused_naming_path_and_model(
+    model_catalog: ModelCatalog,
+) -> None:
+    broken = MediaPart("shots/broken.png", "image/png", _PNG, dimensions=None)
+
+    with pytest.raises(
+        UnderstandError,
+        match=r"'shots/broken\.png' cannot be sent to deepseek-flash: cannot read image dimensions",
+    ):
+        content_for(model_catalog, "deepseek-flash", [broken], "p")
 
 
 _NOW = datetime(2026, 10, 24, 5, 6, 7, 123456, tzinfo=UTC)

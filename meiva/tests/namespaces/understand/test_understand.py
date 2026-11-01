@@ -14,6 +14,7 @@ from typing import Any, cast
 import pytest
 from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage
+from PIL import Image
 
 from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.namespaces.understand.provider_support import UnderstandHarness, image_block
@@ -176,7 +177,7 @@ def test_each_media_type_goes_to_its_own_configured_model(
     understand_harness.configure_models(
         image="claude-sonnet-5", pdf="gemini-3.1-pro-preview", audio="gemini-3.8-flash"
     )
-    (tmp_path / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    Image.new("RGB", (2, 2), "white").save(tmp_path / "a.png")
     (tmp_path / "a.pdf").write_bytes(b"%PDF-1.7\n")
     (tmp_path / "a.mp3").write_bytes(b"\x00" * 8)
 
@@ -242,6 +243,24 @@ def test_oversized_media_is_refused_before_any_model_is_asked(
     assert understand_harness.video.requests == []
 
 
+def test_an_image_over_the_model_dimension_limit_is_refused_before_any_model_is_asked(
+    understand_harness: UnderstandHarness, tmp_path: Path
+) -> None:
+    huge = tmp_path / "huge.png"
+    Image.new("1", (9000, 100)).save(huge)
+
+    with pytest.raises(
+        UnderstandError,
+        match=(
+            r"huge\.png' cannot be sent to deepseek-flash: "
+            r"image \(9000x100 px\) exceeds 8192 px dimension limit"
+        ),
+    ):
+        understand_harness.understand([{"prompt": "x", "paths": [str(huge)]}])
+
+    assert understand_harness.image.requests == []
+
+
 def test_an_undecodable_unknown_file_is_refused_with_the_suffix_hint(
     understand_harness: UnderstandHarness, tmp_path: Path
 ) -> None:
@@ -301,7 +320,7 @@ def test_paths_two_images_make_a_single_media_call(
     understand_harness: UnderstandHarness, fake_image: Path, tmp_path: Path
 ) -> None:
     img2 = tmp_path / "img2.png"
-    img2.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x11" * 32)
+    Image.new("RGB", (3, 3), "black").save(img2)
 
     [out] = understand_harness.understand(
         [{"prompt": "compare these", "paths": [str(fake_image), str(img2)]}]
@@ -393,7 +412,7 @@ def test_paths_validation() -> None:
 
 def test_paths_missing_file_raises(understand_harness: UnderstandHarness, tmp_path: Path) -> None:
     good = tmp_path / "good.png"
-    good.write_bytes(b"\x89PNG\r\n\x1a\n")
+    Image.new("RGB", (2, 2), "white").save(good)
 
     with pytest.raises(FileNotFoundError, match="does not name an existing file"):
         understand_harness.understand(
@@ -407,7 +426,7 @@ def test_paths_auto_save_source_labels_list(
     saved_in = tmp_path / "paths_ws" / ".exec_output"
     understand_harness.save_to(saved_in)
     shot = tmp_path / "shot.png"
-    shot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    Image.new("RGB", (2, 2), "white").save(shot)
 
     understand_harness.understand([{"prompt": "compare", "paths": [str(fake_image), str(shot)]}])
 

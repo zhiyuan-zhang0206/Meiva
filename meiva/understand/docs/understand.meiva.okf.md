@@ -17,7 +17,7 @@ tags:
 ## Core API
 
 - `understand(targets: list[dict], max_concurrent=12) → list[str]` — Batch-only. Each target is a dict with `prompt` plus exactly one of `text` / `paths`. Answers come back in input order.
-  - `paths`: non-empty list of file paths (relative path resolution same as other file operations) — a single file is a one-element list. Text files are read as UTF-8; images/video/audio/PDF are classified by suffix (the shared `ATTACH_MEDIA_MIME` table, one owner for suffix → type) and sent as the provider-native blocks of the shared attach packing; the per-file size limits (shared 20 MiB ceiling, then the provider's own) apply. Every file is sent in ONE model call as separate parts, so the model can compare them (e.g. a design frame plus a page screenshot); the content types present pick that one model ([Routing](#routing)).
+  - `paths`: non-empty list of file paths (relative path resolution same as other file operations) — a single file is a one-element list. Text files are read as UTF-8; images/video/audio/PDF are classified by suffix (the shared `ATTACH_MEDIA_MIME` table, one owner for suffix → type) and sent as the provider-native blocks of the shared attach packing; the per-file size limits (shared 20 MiB ceiling, then the provider's own) and `AttachPolicy.image_dimension_tiers` pixel-dimension limits apply. Every file is sent in ONE model call as separate parts, so the model can compare them (e.g. a design frame plus a page screenshot); the content types present pick that one model ([Routing](#routing)).
   - `text`: material itself (literal string).
 
 There is no single-call form — one question is a one-element list:
@@ -33,7 +33,7 @@ Targets run with a default ceiling of 12; pass a positive `max_concurrent=N` to 
 - `ValueError` — a target is missing `prompt`, does not carry exactly one of `text` / `paths`, or `paths` is an empty list.
 - `TypeError` — `targets[i]['paths']` is not a list, or an element is not a path string.
 - `FileNotFoundError` — a target's `paths` entry does not point to an existing file.
-- `UnderstandError` — a typed provider call failed permanently or exhausted its retries, a file in `paths` is binary, cannot be read as UTF-8, and its extension is not in supported media suffixes, a media file is over a size limit of the chosen model, a configured model does not accept its own type (named by its `MEIVA_UNDERSTAND_<TYPE>_MODEL`), or no configured model accepts every type present.
+- `UnderstandError` — a typed provider call failed permanently or exhausted its retries, a file in `paths` is binary, cannot be read as UTF-8, and its extension is not in supported media suffixes, a media file is over a size or image-dimension limit of the chosen model (or an image's dimensions cannot be read), a configured model does not accept its own type (named by its `MEIVA_UNDERSTAND_<TYPE>_MODEL`), or no configured model accepts every type present.
 
 Validation runs over every target before any model call, so a malformed batch fails before spending tokens. The first error from a running batch propagates.
 Unknown model-invocation errors retain their original exception and traceback
@@ -69,7 +69,7 @@ The usage source of the call is `understand` for text and `understand.<type>` (`
 
 Images go as standard `image_url` data-URI blocks, which every provider client decodes (DeepSeek, Gemini, Claude, OpenAI …). PDF, audio and video go as the block the shared packing builds for the model's provider: a `document` block for a Claude model, an inline `media` part for Gemini. Audio and video exist in the catalog only on Gemini models, so only a Gemini model can answer them.
 
-The Gemini-only knobs `MEIVA_UNDERSTAND_MEDIA_RESOLUTION`, `MEIVA_UNDERSTAND_MEDIA_THINKING_LEVEL` and `MEIVA_UNDERSTAND_MEDIA_BASE_URL` apply only when the chosen model is a Gemini model. For any other model `effort` goes through that model's own effort levels (DeepSeek: `high` / `max`) like a text call. Media goes inline; a file over a size limit raises `UnderstandError` naming the path.
+The Gemini-only knobs `MEIVA_UNDERSTAND_MEDIA_RESOLUTION`, `MEIVA_UNDERSTAND_MEDIA_THINKING_LEVEL` and `MEIVA_UNDERSTAND_MEDIA_BASE_URL` apply only when the chosen model is a Gemini model. For any other model `effort` goes through that model's own effort levels (DeepSeek: `high` / `max`) like a text call. Media goes inline; a file over a size or image-dimension limit raises `UnderstandError` naming the path, the model and the limit.
 
 `meiva.understand` and `meiva.self.attach` ([[meiva/self/docs/self.meiva.okf.md]]) are the agent's two ways to use a media file: attach puts the pixels in the agent's own context (it sees them itself, and they stay in the conversation); `understand` has a separate model answer in text and keeps the context small.
 

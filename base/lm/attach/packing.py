@@ -241,10 +241,10 @@ def plan_attachments(
             continue
         if attachment.media_type == "image":
             dimensions_answer = yield DimensionsRequest(attachment.path_text)
-            reason = _image_dimension_error(
+            reason = image_dimension_error(
                 model,
-                state.delivered_images,
-                _expect_dimensions(dimensions_answer),
+                state.delivered_images + 1,
+                _expect_dimensions(dimensions_answer).dimensions,
                 catalog=catalog,
             )
             if reason:
@@ -381,14 +381,19 @@ def file_size_error(model: str, media_type: str, size: int, *, catalog: ModelCat
     return None
 
 
-def _image_dimension_error(
-    model: str, delivered_images: int, observed: DimensionsObserved, *, catalog: ModelCatalog
+# meiva:note
+# Why the `image_count`-th image of one call, with `dimensions` `(width, height)`, cannot reach
+# `model` inline, or None when it can: unreadable metadata, or a side over the provider's
+# `AttachPolicy.image_dimension_tiers` limit for that image count. Attach packing and
+# `meiva.understand` both judge an image by it.
+def image_dimension_error(
+    model: str, image_count: int, dimensions: tuple[int, int] | None, *, catalog: ModelCatalog
 ) -> str | None:
-    if observed.dimensions is None:
+    if dimensions is None:
         return "cannot read image dimensions"
-    dimension_limit = _image_dimension_limit(model, delivered_images + 1, catalog=catalog)
-    if max(observed.dimensions) > dimension_limit:
-        return f"image exceeds {dimension_limit} px dimension limit"
+    dimension_limit = _image_dimension_limit(model, image_count, catalog=catalog)
+    if max(dimensions) > dimension_limit:
+        return f"image ({dimensions[0]}x{dimensions[1]} px) exceeds {dimension_limit} px dimension limit"
     return None
 
 
