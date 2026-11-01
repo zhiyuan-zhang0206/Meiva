@@ -2,24 +2,23 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 
 [uses]
 "ambient.py" = ["fake_entropy.py", "patching.py"]
+"no_script_sibling_imports.py" = ["script_siblings.py"]
 "patching.py" = ["bindings.py", "fixtures.py", "purity.py", "python_commands.py", "restricted.py"]
 "purity.py" = ["purity_structure.py"]
 "python_commands.py" = ["restricted.py"]
 "scan.py" = ["ambient.py", "bindings.py", "fixtures.py", "input_mutations.py", "mounts.py", "purity.py", "restricted.py", "typescript.py"]
-"tests" = ["no_script_sibling_imports.py", "path_imports.py", "typescript.py"]
+"tests" = ["no_script_sibling_imports.py", "path_imports.py", "script_siblings.py", "typescript.py"]
 "typescript.py" = ["typescript_compiler"]
 "typescript_compiler" = ["fixtures.py"]
 
 [purity]
 "." = "strict"
 "bindings.py" = "strict"
-"no_script_sibling_imports.py" = "strict-to-be"
+"no_script_sibling_imports.py" = { mode = "none", why = "the command-line entry of the PYTHONSAFEPATH sibling-import guard: it enumerates the files a run judges, reads them, states which modules sit beside each one, and prints what the rule found; meizel/language/script_siblings.py decides script mode, guard order, sibling resolution and the repair" }
 "path_imports.py" = "strict"
 "purity.py" = "strict"
 "scan.py" = "strict-to-be"
+"script_siblings.py" = "strict"
 
 [debt.impure-call]
-"no_script_sibling_imports.py#Path.is_file" = 2
-"no_script_sibling_imports.py#Path.resolve" = 2
-"no_script_sibling_imports.py#Path.rglob" = 1
 "scan.py#Path.resolve" = 1
