@@ -696,6 +696,14 @@ jobs:
             echo "No changed Python files; skipping clock lattice check."
           fi
 
+      - name: ensure-plugins-loaded context census (UNBOUND=0)
+        # #8062 made the host-version gate take the environment its `git` runs under from the
+        # caller. A load site that names no context (or one built without `environ=`) then raises
+        # on the first name listing, and `install.mark_load_failed()` keeps the whole process
+        # failing. The census counts those sites across the repository and fails while any is
+        # unbound; a new inheriting site has to be listed with its reason in the script.
+        run: uv run python scripts/audit/ensure_plugins_loaded_context_census.py
+
       - name: Apply migrations to fresh DB + trigger smoke
         if: ${{ github.event_name != 'pull_request' || env.RUN_MIGRATION_SMOKE == 'true' }}
         run: |

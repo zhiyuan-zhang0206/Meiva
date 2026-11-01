@@ -1,4 +1,4 @@
-exports = ["analysis", "branch_protection.py", "refusal_loss.py"]
+exports = ["analysis", "branch_protection.py", "ensure_plugins_loaded_context_census.py", "refusal_loss.py"]
 
 [uses]
 "branch_protection.py" = ["analysis"]
@@ -9,6 +9,7 @@ exports = ["analysis", "branch_protection.py", "refusal_loss.py"]
 "sdk_usage.py" = ["sdk_usage_report.py"]
 "refusal_loss.py" = ["analysis"]
 "tests" = ["analysis", "branch_protection.py", "call_sites.py", "impact_census.py", "module_moves.py", "sdk_usage.py", "sdk_usage_report.py", "where_used.py"]
+"tests/census" = ["ensure_plugins_loaded_context_census.py"]
 "tests/refusal" = ["analysis", "refusal_loss.py"]
 "where_used.py" = ["analysis"]
 
@@ -21,6 +22,7 @@ exports = ["analysis", "branch_protection.py", "refusal_loss.py"]
 [purity]
 "." = "strict"
 "branch_protection.py" = { mode = "none", why = "the command line shell: it runs the read-only gh API calls the audit needs (naming the branch as a URL segment), then prints the verdict; which checks the gate must carry and how a GitHub payload differs from it are in analysis/protection.py" }
+"ensure_plugins_loaded_context_census.py" = { mode = "none", why = "the command line shell: it walks and parses the Python sources of the checkout the operator names and prints how each `ensure_plugins_loaded` call site gets its context; which sites are unbound is the whole of its decision, and its `BOUND_REASONS` table is data the reviewer reads" }
 "call_sites.py" = { mode = "none", why = "the command line shell: it walks and reads the Python sources of the checkout the operator names and prints the findings; what a spec means, which argument supplies a parameter and how a report reads are in analysis/calls.py" }
 "impact_census.py" = { mode = "none", why = "the command line shell: it builds the impact graph and the timing model of the checkout the operator names through the CI test-selection loaders, and prints the numbers; which source files every test reaches, which inputs nothing bounds and which tests pull them in are in analysis/reach.py" }
 "module_moves.py" = { mode = "none", why = "the command line shell: it reads the tracked text of the checkout the operator names (skipping frozen history, itself, symlinked contents and binaries), imports the new module to see which names it carries, and prints the findings; which lines still name the old path and which names a caller uses are in analysis/moves.py" }
