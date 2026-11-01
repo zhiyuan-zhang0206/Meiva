@@ -21,8 +21,6 @@ import pytest
 from loguru import logger
 
 from base.config import ConfigBoot
-from base.host.proc import run_bounded
-from base.host.system.tests.fake_commands import fake_host
 from base.packages.extensions import install_registry as reg
 from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
@@ -38,6 +36,7 @@ from cli.commands.extensions.packages.refresh_rules import (
     effective_interval_seconds,
     is_due,
 )
+from cli.commands.extensions.tests.support.packages_host import packages_host
 
 
 @pytest.fixture
@@ -63,10 +62,7 @@ def _refresh(
 ) -> RefreshReport:
     return run_refresh(
         config=config,
-        # meiva:note
-        # The refresh reads git through the host: the production runner against the checkout this
-        # case wrote, with the environment the configuration carries.
-        host=fake_host(commands=run_bounded, environ=config.process_environment()),
+        host=packages_host(config),
         repo=repo,
         now=datetime.now(UTC),
         check_only=check_only,
@@ -381,7 +377,7 @@ def test_git_channel_copy_edit_converges_to_incoming(
     sink = logger.add(lambda m: notes.append(str(m)), level="INFO", format="{message}")
     try:
         gate = Pass(
-            host=fake_host(commands=run_bounded, environ=refresh_config.process_environment()),
+            host=packages_host(refresh_config),
             config=refresh_config,
             check_only=False,
             only=None,
@@ -666,7 +662,7 @@ def test_refresh_cmd_json_shape(
     assert (
         cmd_packages_refresh(
             config=refresh_config,
-            host=fake_host(commands=run_bounded, environ=refresh_config.process_environment()),
+            host=packages_host(refresh_config),
             repo=core_repo,
             now=datetime.now(UTC),
             json_output=True,
