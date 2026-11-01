@@ -181,7 +181,6 @@ async def test_claim_drops_compact_and_user_restart_for_external_harness(
     ext_ctx = replace(runtime.context, harness=Harness.CLAUDE_CODE)
     initial_state = AgentState(
         messages=[SystemMessage(content="handoff"), HumanMessage(content="hi")],
-        harness_cursor=2,
     )
 
     compact_batch = [

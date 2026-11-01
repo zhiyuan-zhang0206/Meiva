@@ -56,3 +56,35 @@ async def cancel_hosted_turn_best_effort(agent_id: int, *, host: LocalAgentHost)
             agent_id,
             exc_info=True,
         )
+
+
+async def prepare_harness_switch(
+    agent_id: int,
+    *,
+    old_harness: str,
+    new_harness: str,
+    source: str,
+    message: str,
+    host: LocalAgentHost,
+) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{host.health_port}/prepare-harness-switch",
+                json={
+                    "agent_id": agent_id,
+                    "old_harness": old_harness,
+                    "new_harness": new_harness,
+                    "source": source,
+                    "message": message,
+                },
+            )
+            resp.raise_for_status()
+            return True
+    except httpx.HTTPError:
+        _log.warning(
+            "prepare_harness_switch call for agent %s failed (non-fatal)",
+            agent_id,
+            exc_info=True,
+        )
+        return False

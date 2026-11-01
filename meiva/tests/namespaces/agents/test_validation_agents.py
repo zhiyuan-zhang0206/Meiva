@@ -131,7 +131,11 @@ class TestAgentsEntries:
         ("call", "match"),
         [
             pytest.param(lambda: agents.terminate(("7",)), "agent_id must be int", id="terminate"),  # pyright: ignore[reportArgumentType]
-            pytest.param(lambda: agents.restart(("7",)), "agent_id must be int", id="restart"),  # pyright: ignore[reportArgumentType]
+            pytest.param(
+                lambda: agents.restart(("7",), "msg"),  # pyright: ignore[reportArgumentType]
+                "agent_id must be int",
+                id="restart",
+            ),
             pytest.param(
                 lambda: agents.cancel(cast(Any, ("7",))), "agent_id must be int", id="cancel"
             ),

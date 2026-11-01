@@ -8,7 +8,7 @@ from langchain_core.messages import AnyMessage
 from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
 from base.agents.context.external_attachment.state_channels import (
@@ -48,6 +48,8 @@ def _new_security_findings() -> list[SecurityFindingEntry]:
 
 # meiva:link agent/docs/state.meiva.okf.md
 class BaseAgentState(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     messages: Annotated[list[AnyMessage], MESSAGES_DELTA_CHANNEL] = Field(
         default_factory=_new_any_messages
     )
@@ -58,7 +60,7 @@ class BaseAgentState(BaseModel):
     skill_reads: Annotated[list[str], operator.add] = Field(default_factory=list)
     halted: bool = False
     interrupted_by_restart: bool = False
-    harness_cursor: int = 0
+    harness_pending_input: dict[str, Any] | None = None
     turn_active: bool = False
     non_human_wake: bool = False
     exit_requested: bool = False

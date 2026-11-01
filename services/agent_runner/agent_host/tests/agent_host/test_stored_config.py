@@ -36,6 +36,15 @@ def test_non_json_decoded_scalars_keep_string_coercion() -> None:
     )
 
 
+def test_harness_change_changes_the_fingerprint() -> None:
+    native = StoredConfig("runner", "idling", "meiva", None, None)
+    external = StoredConfig("runner", "idling", "codex", None, None)
+    assert native.fingerprint != external.fingerprint
+    assert config_fingerprint(None, None, harness="meiva") != config_fingerprint(
+        None, None, harness="codex"
+    )
+
+
 def test_the_row_retains_its_maps_and_observes_nested_edits() -> None:
     nested = {"enabled": True}
     overlay: dict[str, object] = {"feature": nested}

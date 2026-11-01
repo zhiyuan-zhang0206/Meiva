@@ -21,7 +21,7 @@ _UPDATE_OVERLAY = (
 )
 _INSERT_RESTART = (
     "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-    "VALUES (%s, '', 'restart', 'self', %s::jsonb)"
+    "VALUES (%s, %s, 'restart', 'self', %s::jsonb)"
 )
 _INSERT_TERMINATE = (
     "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -54,16 +54,16 @@ class SqlStatement:
 # shell, which checks the final stored pair under the row lock before running these.
 # meiva:link meiva/self/docs/self.meiva.okf.md
 def restart_statements(
-    agent_id: int, config_overlay: Mapping[str, object] | None
+    agent_id: int, message: str, config_overlay: Mapping[str, object] | None
 ) -> tuple[SqlStatement, ...]:
     if not config_overlay:
-        return (SqlStatement(_INSERT_RESTART, (agent_id, None)),)
+        return (SqlStatement(_INSERT_RESTART, (agent_id, message, None)),)
     overlay = dict(config_overlay)
     return (
         SqlStatement(_UPDATE_OVERLAY, (json.dumps(overlay), agent_id)),
         SqlStatement(
             _INSERT_RESTART,
-            (agent_id, json.dumps({"config_overlay": overlay}, sort_keys=True)),
+            (agent_id, message, json.dumps({"config_overlay": overlay}, sort_keys=True)),
         ),
     )
 

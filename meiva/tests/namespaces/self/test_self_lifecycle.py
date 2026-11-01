@@ -99,9 +99,9 @@ def test_restart_without_an_overlay_queues_a_bare_restart_row(
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
 
     with pytest.raises(AgentRestart):
-        meiva.self.restart()
+        meiva.self.restart("self test restart")
 
-    assert _inbound(db_conn, agent_id, "restart") == [("self", "", None)]
+    assert _inbound(db_conn, agent_id, "restart") == [("self", "self test restart", None)]
     overlay = db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()
@@ -170,7 +170,7 @@ def test_restart_is_refused_for_the_harness_stored_for_the_agent(
     )
 
     with pytest.raises(RuntimeError, match="codex"):
-        meiva.self.restart()
+        meiva.self.restart("attempt restart on codex")
 
     assert _inbound(db_conn, agent_id, "restart") == []
 
@@ -250,7 +250,7 @@ def test_restart_checks_the_overlay_against_the_plugin_configs_of_the_contexts_h
     assert overlay_home != Path.home()
 
     with pytest.raises(AgentRestart):
-        meiva.self.restart({"restart_probe": "x"})
+        meiva.self.restart("probe update", config_overlay={"restart_probe": "x"})
 
     stored = db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
@@ -270,7 +270,7 @@ def test_restart_persists_and_overwrites_exec_timeout_seconds_overlay(
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
 
     with pytest.raises(AgentRestart):
-        meiva.self.restart({"exec_timeout_seconds": 25.0})
+        meiva.self.restart("timeout 25", config_overlay={"exec_timeout_seconds": 25.0})
 
     stored = db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
@@ -278,7 +278,7 @@ def test_restart_persists_and_overwrites_exec_timeout_seconds_overlay(
     assert stored is not None and stored[0] == {"exec_timeout_seconds": 25.0}
 
     with pytest.raises(AgentRestart):
-        meiva.self.restart({"exec_timeout_seconds": 300.0})
+        meiva.self.restart("timeout 300", config_overlay={"exec_timeout_seconds": 300.0})
 
     restored = db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)

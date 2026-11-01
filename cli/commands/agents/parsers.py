@@ -409,6 +409,15 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         type=_validated_config_json,
         help='config overlay as JSON (e.g. {"llm_model":"gpt-5.6-sol"})',
     )
+    agents_restart_p.add_argument(
+        "-m",
+        "--message",
+        dest="message",
+        type=_nonblank_message,
+        required=True,
+        metavar="TEXT",
+        help="natural-language explanation delivered to the agent (required on restart)",
+    )
     agents_restart_p.set_defaults(func=_h_agents_restart)
 
     agents_resurrect_p = agents_sub.add_parser(
@@ -460,7 +469,6 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         agents_transfer_p,
     )
     _add_message_choice(
-        agents_restart_p,
         agents_resurrect_p,
         agents_terminate_p,
         agents_kill_p,

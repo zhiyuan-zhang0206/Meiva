@@ -93,6 +93,43 @@ if set(HARNESS_BILLING) != set(Harness):
 
 
 # meiva:note
+# A harness enters this set when a launcher that can start a session on it
+# exists. Until then the runner refuses to wake a row born on it: recording an
+# intent the platform cannot honour would make the stored value a claim about a
+# runtime loop that is not actually running. Every external harness is here
+# because the graph routes its turns to `harness_turn`, whose bridge opens an
+# adapter session; removing a value retires its launcher and leaves rows born on
+# it inert, which is the rollback.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset(
+    (
+        Harness.MEIVA,
+        Harness.CLAUDE_CODE,
+        Harness.CODEX,
+        Harness.ANTIGRAVITY,
+        Harness.KIMI_CODE,
+    )
+)
+
+DEFAULT_HARNESS = Harness.MEIVA
+
+
+def coerce_harness(value: object) -> Harness:
+    if value is None:
+        return DEFAULT_HARNESS
+    if isinstance(value, Harness):
+        return value
+    if isinstance(value, str):
+        try:
+            return Harness(value)
+        except ValueError:
+            legal = ", ".join(harness.value for harness in Harness)
+            raise ValueError(f"unknown harness {value!r}; legal values: {legal}") from None
+    legal = ", ".join(harness.value for harness in Harness)
+    raise ValueError(f"unknown harness {value!r}; legal values: {legal}")
+
+
+# meiva:note
 # What a local probe can prove about one harness on one machine: `available` is
 # installed and signed in, `unavailable` is missing or not signed in, and
 # `unknown` is installed with a sign-in state this process cannot read — reported

@@ -194,7 +194,11 @@ def _assert_recovery(owner: int, root: Path, count: tuple[Any, ...] | None) -> N
     chat_and_wait(owner, "Late checkpoint: a partial result landed; inspect the handoff.")
     assert (root / f"{owner}.recovered").exists()
     assert (root / f"{owner}.json").read_text() == handoff
-    httpx.post(f"{GATEWAY_URL}/api/agents/{owner}/restart", timeout=30).raise_for_status()
+    httpx.post(
+        f"{GATEWAY_URL}/api/agents/{owner}/restart",
+        json={"message": "restart budget handoff"},
+        timeout=30,
+    ).raise_for_status()
     poll_until(
         lambda: _restart_applied(owner),
         timeout=60,

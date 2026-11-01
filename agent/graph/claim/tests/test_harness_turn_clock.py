@@ -140,12 +140,8 @@ async def test_interrupt_keeps_tool_messages_without_a_finish_instant() -> None:
         Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=moments.__next__)
     )
     projector.on_event(_tool())
-    halted = projector.settle_interrupt(InterruptReason.SYSTEM, effective_len=2, pre_messages=())
+    items = projector.settle_interrupt(InterruptReason.SYSTEM)
 
-    assert halted["harness_cursor"] == 4
-    messages = halted["messages"]
-    assert isinstance(messages, list)
-    items: list[object] = messages
     assert len(items) == 2
     assert isinstance(items[1], ToolMessage)
     assert items[1].tool_call_id == "call"

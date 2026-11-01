@@ -238,8 +238,9 @@ describe("write endpoints", () => {
   });
 
   it("restartAgent POSTs /api/agents/{id}/restart", async () => {
-    await api().restartAgent(99);
+    await api().restartAgent(99, { message: "restarting agent" });
     expect([requests()[0].method, requests()[0].path]).toEqual(["POST", "/api/agents/99/restart"]);
+    expect(json(requests()[0])).toEqual({ message: "restarting agent" });
   });
 
   it("resurrectAgent POSTs JSON {prompt} to /api/agents/{id}/resurrect", async () => {

@@ -231,7 +231,7 @@ class ResurrectAgentRequest(BaseModel):
 # merged into the persistent agent overlay, and carried in the restart inbound payload.
 class RestartAgentRequest(BaseModel):
     source: str = Field(default="user", min_length=1, max_length=64)
-    message: UserContent | None = None
+    message: UserContent
     config_overlay: dict[str, object] | None = None
 
     @field_validator("source")

@@ -15,7 +15,11 @@ def test_restart_config_overlay_persists_and_rejects_invalid_values(spawned_agen
 
     response = httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
-        json={"source": "agent:405", "config_overlay": overlay},
+        json={
+            "message": "restart config overlay",
+            "source": "agent:405",
+            "config_overlay": overlay,
+        },
         timeout=30.0,
     )
 
@@ -30,7 +34,10 @@ def test_restart_config_overlay_persists_and_rejects_invalid_values(spawned_agen
 
     invalid = httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
-        json={"config_overlay": {"completion_notice_policy": "bogus"}},
+        json={
+            "message": "restart config overlay",
+            "config_overlay": {"completion_notice_policy": "bogus"},
+        },
         timeout=30.0,
     )
 

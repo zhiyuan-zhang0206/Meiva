@@ -80,28 +80,34 @@ async def node_lifecycle(
     timeline_inputs: TimestampPolicy,
     timeline_limit: int,
     full_window: bool = False,
+    publish_timeline: bool = True,
 ) -> AsyncGenerator[None]:
     turn_progress.mark(agent_id)
     with stall_guard(node_name, stall):
-        cursor = SNAPSHOT_CURSOR.get(agent_id, 0)
-        mode = window_mode(message_count=len(messages), cursor=cursor, full_window=full_window)
-        if mode is WindowMode.FULL:
-            items, msg_count = build_timeline_items(messages, inputs=timeline_inputs)
-            window, _ = tail_window(items, timeline_limit)
+        if publish_timeline:
+            cursor = SNAPSHOT_CURSOR.get(agent_id, 0)
+            mode = window_mode(message_count=len(messages), cursor=cursor, full_window=full_window)
+            if mode is WindowMode.FULL:
+                items, msg_count = build_timeline_items(messages, inputs=timeline_inputs)
+                window, _ = tail_window(items, timeline_limit)
+            else:
+                window, msg_count = build_timeline_items(
+                    messages, start=cursor, inputs=timeline_inputs
+                )
+            # meiva:note
+            # An empty window publishes nothing and leaves the cursor, so a render that produced
+            # nothing is retried by the next enter instead of being counted as covered.
+            if window:
+                event_publisher.emit(
+                    TimelineSnapshot(
+                        agent_id=agent_id,
+                        items=[it.model_dump() for it in window],
+                        msg_count=msg_count,
+                    ).model_dump_json()
+                )
+                SNAPSHOT_CURSOR[agent_id] = len(messages)
         else:
-            window, msg_count = build_timeline_items(messages, start=cursor, inputs=timeline_inputs)
-        # meiva:note
-        # An empty window publishes nothing and leaves the cursor, so a render that produced
-        # nothing is retried by the next enter instead of being counted as covered.
-        if window:
-            event_publisher.emit(
-                TimelineSnapshot(
-                    agent_id=agent_id,
-                    items=[it.model_dump() for it in window],
-                    msg_count=msg_count,
-                ).model_dump_json()
-            )
-            SNAPSHOT_CURSOR[agent_id] = len(messages)
+            msg_count = len(messages)
         t0 = time.monotonic()
         logger.info(
             "[node enter {node}] msgs={msg_count}",

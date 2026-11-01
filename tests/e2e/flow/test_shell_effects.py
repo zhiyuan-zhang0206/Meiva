@@ -117,7 +117,10 @@ def test_background_completion_respects_the_hourly_policy(
     agent = spawned_agent
     response = httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent}/restart",
-        json={"config_overlay": {"completion_notice_policy": "hourly"}},
+        json={
+            "message": "apply hourly policy",
+            "config_overlay": {"completion_notice_policy": "hourly"},
+        },
         timeout=30.0,
     )
     response.raise_for_status()
@@ -186,7 +189,11 @@ def test_session_survives_agent_host_and_gateway_restarts(
         )
 
     usable("initial")
-    restart = httpx.post(f"{GATEWAY_URL}/api/agents/{agent}/restart", timeout=30.0)
+    restart = httpx.post(
+        f"{GATEWAY_URL}/api/agents/{agent}/restart",
+        json={"message": "restart shell effects"},
+        timeout=30.0,
+    )
     restart.raise_for_status()
 
     def applied() -> tuple[bool, object]:

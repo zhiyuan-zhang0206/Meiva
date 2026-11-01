@@ -454,32 +454,30 @@ BEGIN
 END $$;
 SQL
 
-echo "-> harness immutability smoke: fixed at birth, every other write stays free"
+echo "-> harness switch & external messages smoke: mutable harness + agent_harness_messages insert/select"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
--- `harness` is the runtime loop an agent is born on (task #5407). The trigger
--- rejects a change, and the WHEN guard leaves ordinary lifecycle writes alone —
--- a body that fired on every UPDATE would break status transitions instead.
+-- `harness` can now be switched on restart. Verify mutable harness and agent_harness_messages round-trip.
 INSERT INTO agents (id, label) VALUES (993001, 'harness-smoke');
 INSERT INTO agents_meta (id, status, harness) VALUES (993001, 'idling', 'codex');
 DO $$
 DECLARE stored TEXT;
+        msg_count INT;
 BEGIN
     IF (SELECT harness FROM agents_meta WHERE id = 993001) <> 'codex' THEN
         RAISE EXCEPTION 'the explicit harness was not stored';
     END IF;
-    BEGIN
-        UPDATE agents_meta SET harness = 'meiva' WHERE id = 993001;
-        RAISE EXCEPTION 'changing harness was NOT rejected';
-    EXCEPTION
-        WHEN raise_exception THEN
-            IF SQLERRM NOT LIKE '%immutable%' THEN
-                RAISE;
-            END IF;
-    END;
-    UPDATE agents_meta SET status = 'running' WHERE id = 993001;
+    UPDATE agents_meta SET harness = 'meiva' WHERE id = 993001;
     SELECT harness INTO stored FROM agents_meta WHERE id = 993001;
-    IF stored <> 'codex' THEN
-        RAISE EXCEPTION 'a status transition rewrote harness — stored=%', stored;
+    IF stored <> 'meiva' THEN
+        RAISE EXCEPTION 'harness update did not succeed — stored=%', stored;
+    END IF;
+
+    INSERT INTO agent_harness_messages (agent_id, seq, harness, item)
+    VALUES (993001, 0, 'codex', '{"kind": "human", "text": "hello"}'::jsonb);
+
+    SELECT count(*) INTO msg_count FROM agent_harness_messages WHERE agent_id = 993001;
+    IF msg_count <> 1 THEN
+        RAISE EXCEPTION 'agent_harness_messages insert failed — msg_count=%', msg_count;
     END IF;
 END $$;
 SQL

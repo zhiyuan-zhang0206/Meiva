@@ -159,7 +159,7 @@ def test_lifecycle_default_source_requires_identity_before_http(action: str) -> 
         if action == "terminate":
             meiva.agents.terminate(7)
         elif action == "restart":
-            meiva.agents.restart(7)
+            meiva.agents.restart(7, "restart reason")
         else:
             meiva.agents.resurrect(7, "continue")
 

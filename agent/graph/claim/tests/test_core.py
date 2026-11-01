@@ -155,8 +155,10 @@ class TestRestart:
             )
         )  # self identity
         with pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart()
-        assert _inbound_rows(db_conn, meiva.self.AGENT_ID) == [("", "restart", "self")]
+            meiva.self.restart("restarting self")
+        assert _inbound_rows(db_conn, meiva.self.AGENT_ID) == [
+            ("restarting self", "restart", "self")
+        ]
 
     def test_restart_with_config_inserts_payload(
         self,
@@ -182,7 +184,9 @@ class TestRestart:
             )
         )
         with pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart(config_overlay={"auto_compact_fraction": 0.7})
+            meiva.self.restart(
+                "compact fraction change", config_overlay={"auto_compact_fraction": 0.7}
+            )
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT kind, source, payload FROM inbound_messages "
@@ -227,7 +231,7 @@ class TestRestart:
         db_conn.commit()
 
         with pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart(config_overlay={"llm_model": "gpt-5.6-sol"})
+            meiva.self.restart("model change", config_overlay={"llm_model": "gpt-5.6-sol"})
 
         # Column should have MERGED result (pre-existing key preserved).
         with db_conn.cursor() as cur:
@@ -270,7 +274,7 @@ class TestRestart:
             )
         )
         with pytest.raises(meiva.self.InvalidConfigOverlay, match=r"typo|per_agent"):  # type: ignore[attr-defined]
-            meiva.self.restart(config_overlay={"definitely_not_a_field": 1})
+            meiva.self.restart("bad config", config_overlay={"definitely_not_a_field": 1})
         # No inbound delivered (process will not exit)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -310,7 +314,9 @@ class TestRestart:
         assert before_row[0] in (None, {})
 
         with pytest.raises(meiva.self.InvalidConfigOverlay, match="not a registered model"):  # type: ignore[attr-defined]
-            meiva.self.restart(config_overlay={"llm_model": "deepseek-v4-flash-vision"})
+            meiva.self.restart(
+                "bad model", config_overlay={"llm_model": "deepseek-v4-flash-vision"}
+            )
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -365,7 +371,7 @@ class TestRestart:
             )
         )
         with held_installation(model_installation), pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart(config_overlay={"llm_model": model})
+            meiva.self.restart("retired model", config_overlay={"llm_model": model})
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",

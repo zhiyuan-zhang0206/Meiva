@@ -859,7 +859,7 @@
     "/api/agents/{agent_id}/restart": {
       "post": {
         "summary": "Post Agent Restart",
-        "description": "Enqueue native restart on the agent's home runner.\n\nThe current turn reaches claim, returns normally and flushes its checkpoint.\nThe host then applies the exact command and releases the incarnation for\nnew admission, retaining agent ID and context. Terminated agents require\nresurrection; restart returns already_terminated for them.",
+        "description": "Enqueue restart or harness switch on the agent's home runner.\n\nRestart requires a non-empty message. For native meiva agents while alive,\nthe current turn reaches claim, returns normally and flushes its checkpoint.\nFor harness switching, external harnesses, or terminated agents, an exact\n4-step transition sequence settles, drops, updates harness, and resurrects.",
         "operationId": "post_agent_restart_api_agents__agent_id__restart_post",
         "parameters": [
           {
@@ -873,6 +873,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -16011,16 +16012,9 @@
             "default": "user"
           },
           "message": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 1000000,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 1000000,
+            "minLength": 1,
             "title": "Message"
           },
           "config_overlay": {
@@ -16037,6 +16031,9 @@
           }
         },
         "type": "object",
+        "required": [
+          "message"
+        ],
         "title": "RestartAgentRequest"
       },
       "RestartAgentResponse": {

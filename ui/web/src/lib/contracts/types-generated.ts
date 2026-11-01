@@ -3581,7 +3581,7 @@ export interface components {
         };
         RestartAgentRequest: {
             source: string;
-            message?: string | null;
+            message: string;
             config_overlay?: {
                 [key: string]: unknown;
             } | null;
@@ -4814,7 +4814,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": components["schemas"]["RestartAgentRequest"];
             };

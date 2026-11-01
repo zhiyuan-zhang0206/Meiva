@@ -30,16 +30,16 @@ harness. `harness_availability()` answers a different question — whether *this
 machine* is set up to run a harness — and a harness can be launchable by the
 release while unavailable here.
 
-## What cannot change it
+## Switching on restart and fork rules
 
-Nothing. Restart and resurrect run the same harness, and any attempt to rewrite
-the stored value is rejected rather than applied. Correcting a wrong value means
-spawning a new agent.
+An agent's harness can be switched bidirectionally (`meiva` <-> external, or between external harnesses) on restart:
+`meiva.agents.restart(agent_id, message="...", config_overlay={"harness": "..."})`.
+The agent must be in `idling` or `terminated` status, and a mandatory `message` explaining the switch is required.
 
 A fork continues its source's identity, so it inherits the source's harness.
 Naming the source's own value is accepted; naming a different one fails with
 `fork_harness_mismatch` and creates nothing. To move onto another harness, spawn
-a new agent instead of forking.
+a new agent or switch harness via restart after creation.
 
 ## Checking what this machine can run
 

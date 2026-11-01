@@ -399,16 +399,22 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
     description="The agent's most recent LLM call token usage. `input_tokens` is\ncontext-window occupancy; `max_input_tokens` is the model's context\nwindow ceiling so the frontend can render \"context: 26k/1M tokens\".\nWhen the frontend switches to an existing agent, it uses this endpoint\nto fetch the historical latest value to initialize the token counter\nUI — the SSE `token_usage` event is fire-and-forget without persistence,\nand the previous value is not available without switching to.\n\nReturns (0, 0, 0) on a checkpoint read failure — the intentional\nfail-fast boundary: the read failure is caught here (the SSE\ntoken_usage push refreshes the UI later), but the reverse scan over\nthe loaded messages runs unguarded so a bug surfaces normally rather\nthan being masked as 0/0.",
 )
 def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
-
-    try:
-        messages = load_checkpoint_messages(request.app.state.db, agent_id)
-    except CheckpointReadError as exc:
-        _log.warning(
-            "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
-            agent_id,
-            exc,
-        )
-        messages = []
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    harness = str(row[0]) if row and row[0] is not None else "meiva"
+    if harness != "meiva":
+        messages: list[BaseMessage] = []
+    else:
+        try:
+            messages = load_checkpoint_messages(request.app.state.db, agent_id)
+        except CheckpointReadError as exc:
+            _log.warning(
+                "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
+                agent_id,
+                exc,
+            )
+            messages = []
     return token_usage_response(agent_id, request, messages)
 
 
@@ -472,16 +478,22 @@ def token_usage_response(
     description="How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure view logic\n(`base/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
 )
 def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownResponse:
-
-    try:
-        messages = load_checkpoint_messages(request.app.state.db, agent_id)
-    except CheckpointReadError as exc:
-        _log.warning(
-            "context-breakdown: checkpoint read failed for agent %s, returning empty: %r",
-            agent_id,
-            exc,
-        )
-        messages = []
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    harness = str(row[0]) if row and row[0] is not None else "meiva"
+    if harness != "meiva":
+        messages: list[BaseMessage] = []
+    else:
+        try:
+            messages = load_checkpoint_messages(request.app.state.db, agent_id)
+        except CheckpointReadError as exc:
+            _log.warning(
+                "context-breakdown: checkpoint read failed for agent %s, returning empty: %r",
+                agent_id,
+                exc,
+            )
+            messages = []
     return context_breakdown_response(
         request.app.state.db_pool,
         agent_id,

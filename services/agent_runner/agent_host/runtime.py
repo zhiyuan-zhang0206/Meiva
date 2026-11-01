@@ -290,6 +290,8 @@ async def cached_runtime(
     slices: AgentSlices,
     build: Callable[[int, str, AgentSlices], Awaitable[AgentRuntime]],
     evict: Callable[[], None],
+    *,
+    retire: Callable[[int, AgentRuntime], None],
 ) -> AgentRuntime:
     """Build and retain the existing cache entry; the host owns its lifetime."""
     cached = runtimes.get(agent_id)
@@ -300,6 +302,8 @@ async def cached_runtime(
         return cached
 
     reason = "cold" if cached is None else "config_changed"
+    if cached is not None:
+        retire(agent_id, cached)
     stats.cache_misses += 1
     started = time.monotonic()
     runtime = await build(agent_id, fingerprint, slices)

@@ -637,15 +637,22 @@ def terminate(
     )
 
 
-def restart(agent_id: int, *, message: str | None = None) -> RestartResult:
+def restart(
+    agent_id: int, message: str, *, config_overlay: dict[str, object] | None = None
+) -> RestartResult:
     """Restart an agent under the same id and continue any turn in progress.
 
-    `message` is shown to the agent with the restart notice. A running step
-    gets 10 seconds to finish; after that a model call is dropped and running
-    code is terminated, and the agent is told so when it continues."""
+    `message` is a mandatory, non-blank explanation shown to the agent.
+    `config_overlay` is an optional flat {field_name: value} mapping merged
+    into the agent's persistent configuration (such as harness or llm_model)."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    message = coerce_str(message, "message", allow_none=True)
-    return RestartResult(gateway_client.restart(agent_id, message=message))
+    message = coerce_str(message, "message")
+    if not message.strip():
+        raise ValueError("message must not be blank")
+    config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
+    return RestartResult(
+        gateway_client.restart(agent_id, message=message, config_overlay=config_overlay)
+    )
 
 
 def cancel(agent_id: int) -> CancelResult:

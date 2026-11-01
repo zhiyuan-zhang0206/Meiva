@@ -139,10 +139,9 @@ def test_agents_cancel_posts_to_cancel_route(
 
 def test_agents_restart_posts(wire: PublicGateway, capsys: pytest.CaptureFixture[str]) -> None:
     seen = wire.respond("post", {"status": "enqueued"})
-    assert wire.run("agents", "restart", str(9), "--no-message") == 0
+    assert wire.run("agents", "restart", str(9), "-m", "restarting") == 0
     assert seen["url"] == f"{wire.url}/api/agents/9/restart"
-    assert seen["json"] is None
-    assert wire.requests[-1]["body"] == b""
+    assert seen["json"] == {"message": "restarting"}
     assert "enqueued" in capsys.readouterr().out
 
 
@@ -152,12 +151,18 @@ def test_agents_restart_posts_config_overlay(
     seen = wire.respond("post", {"status": "enqueued"})
     assert (
         wire.run(
-            "agents", "restart", str(9), "--config", '{"llm_model":"gpt-5.6-sol"}', "--no-message"
+            "agents",
+            "restart",
+            str(9),
+            "--config",
+            '{"llm_model":"gpt-5.6-sol"}',
+            "-m",
+            "restarting",
         )
         == 0
     )
     assert seen["url"] == f"{wire.url}/api/agents/9/restart"
-    assert seen["json"] == {"config_overlay": {"llm_model": "gpt-5.6-sol"}}
+    assert seen["json"] == {"config_overlay": {"llm_model": "gpt-5.6-sol"}, "message": "restarting"}
     assert "enqueued" in capsys.readouterr().out
 
 
@@ -246,7 +251,7 @@ def test_agents_lifecycle_verbs_forward_message(wire: PublicGateway) -> None:
     assert wire.requests[-1]["json"] == {"prompt": "Resume audit"}
 
 
-@pytest.mark.parametrize("verb", ["restart", "resurrect", "terminate", "kill"])
+@pytest.mark.parametrize("verb", ["resurrect", "terminate", "kill"])
 def test_agents_lifecycle_verbs_require_nonblank_message_choice(
     verb: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -265,6 +270,23 @@ def test_agents_lifecycle_verbs_require_nonblank_message_choice(
     assert "one of the arguments --message --no-message is required" in err
     assert "--message cannot be empty" in err
     assert "not allowed with argument" in err
+
+
+def test_agents_restart_requires_nonblank_message(capsys: pytest.CaptureFixture[str]) -> None:
+    from cli.parsers import build_parser
+
+    for bad in (
+        ["agents", "restart", "9"],
+        ["agents", "restart", "9", "-m", ""],
+        ["agents", "restart", "9", "-m", "   "],
+        ["agents", "restart", "9", "--message", ""],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            build_parser().parse_args(bad)
+        assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "the following arguments are required: -m/--message" in err
+    assert "--message cannot be empty" in err
 
 
 def test_agents_send_posts_content_and_source(

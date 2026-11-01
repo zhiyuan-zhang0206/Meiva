@@ -42,5 +42,8 @@ def serve_agent_host(
             on_cancel(int(str(body["agent_id"])))
         return Reply({"cancelled": cancelled})
 
-    with serve_post({"/cancel-turn": cancel}) as served:
+    def prepare_switch(body: dict[str, object]) -> Reply:
+        return Reply({"ok": True})
+
+    with serve_post({"/cancel-turn": cancel, "/prepare-harness-switch": prepare_switch}) as served:
         yield ServedAgentHost(LocalAgentHost(home=home, health_port=served.port), served)

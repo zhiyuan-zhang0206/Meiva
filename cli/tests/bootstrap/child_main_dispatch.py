@@ -56,7 +56,7 @@ def _parse_real_subcommands() -> None:
         ]
     )
     assert args.machine == "unit"
-    args = parser.parse_args(["agents", "restart", "7", "--config", "{}", "--no-message"])
+    args = parser.parse_args(["agents", "restart", "7", "--config", "{}", "-m", "restarting"])
     assert args.agent_id == 7
     assert args.config == "{}"
     args = parser.parse_args(["notices", "list", "--agent", "7"])

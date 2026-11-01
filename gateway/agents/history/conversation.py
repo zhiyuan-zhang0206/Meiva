@@ -50,7 +50,11 @@ def get_conversation_snapshot(agent_id: int, request: Request) -> ConversationSn
     through the timeline read, matching `GET .../timeline` (token usage and
     pending tolerate absence, but are not reached then).
     """
-    messages = load_current_messages(request.app.state.db, agent_id)
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    harness = str(row[0]) if row and row[0] is not None else "meiva"
+    messages = [] if harness != "meiva" else load_current_messages(request.app.state.db, agent_id)
     return ConversationSnapshotResponse(
         timeline=head_timeline(agent_id, request, messages),
         token_usage=token_usage_response(agent_id, request, messages),

@@ -11,10 +11,12 @@ from typing import assert_never
 
 from psycopg_pool import ConnectionPool
 
+from base import paths
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.api_contracts.agent_contract import (
+    AgentNotFound,
     AgentStatus,
     CancelResult,
     InvalidModelConfig,
@@ -28,17 +30,18 @@ from base.api_contracts.agent_contract import (
 )
 from base.config import settings
 from base.db import Database
+from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.registry import FileSessionRegistry
 from base.lm.registry import normalize_overlay_llm_model
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
-    resurrect_agent,
 )
 from ops.agents.resurrection_retry import report_auto_resurrect_failure
-from ops.agents.wake import ResurrectTriggerStaleError
+from ops.agents.wake import ResurrectTriggerStaleError, resurrect_agent
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import kill_agent_shells
 from ops.lifecycle import resurrect_plan, termination
@@ -66,6 +69,7 @@ from ops.lifecycle.hosted_turn import (
     LocalAgentHost,
     cancel_hosted_turn,
     cancel_hosted_turn_best_effort,
+    prepare_harness_switch,
 )
 
 # Re-exported (explicit-alias form) from `launch` so the gateway routers and
@@ -446,14 +450,18 @@ def restart_blocking(
     default_model: str,
     home: Path,
 ) -> int | None:
-    from base.db.transaction import write_transaction
     from base.packages.plugins.config_registration import validate_config_overlay
     from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
-    if body.config_overlay:
+    clean_overlay = (
+        {k: v for k, v in body.config_overlay.items() if k != "harness"}
+        if body.config_overlay
+        else {}
+    )
+    if clean_overlay:
         try:
             validate_config_overlay(
-                body.config_overlay,
+                clean_overlay,
                 models=catalog.models,
                 decision_models=catalog.decision_models,
                 prices=catalog.prices,
@@ -476,18 +484,17 @@ def restart_blocking(
         if row[0] == "terminated":
             return None
         payload: dict[str, object] | None = None
-        if body.config_overlay:
+        if clean_overlay:
             from base.agents.model.model_config import validate_restart_model_config
 
             # Settle a withdrawn llm_model before the overlay is stored — the
             # provider-outage model-switch channel must not persist a stale id (#4306).
-            overlay = dict(body.config_overlay)
-            model_receipt = normalize_overlay_llm_model(overlay, models=catalog.models)
+            model_receipt = normalize_overlay_llm_model(clean_overlay, models=catalog.models)
             with conn.cursor() as cur:
                 validate_restart_model_config(
                     cur,
                     agent_id,
-                    overlay,
+                    clean_overlay,
                     catalog=catalog,
                     default_model=default_model,
                 )
@@ -508,9 +515,9 @@ def restart_blocking(
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
                 "WHERE id = %s",
-                (json.dumps(overlay), agent_id),
+                (json.dumps(clean_overlay), agent_id),
             )
-            payload = {"config_overlay": overlay}
+            payload = {"config_overlay": clean_overlay}
         # insert_inbound_message commits this connection, so its INSERT commits
         # the preceding overlay UPDATE in the same transaction.
         return insert_inbound_message(
@@ -525,6 +532,112 @@ def restart_blocking(
         )
 
 
+def _update_harness_transition_meta_blocking(
+    db_pool: ConnectionPool,
+    agent_id: int,
+    target_harness: str,
+    config_overlay: dict[str, object] | None,
+    catalog: ModelCatalog,
+) -> None:
+    overlay_without_harness = (
+        {k: v for k, v in config_overlay.items() if k != "harness"} if config_overlay else {}
+    )
+    with write_transaction(db_pool) as conn:
+        if overlay_without_harness:
+            normalize_overlay_llm_model(overlay_without_harness, models=catalog.models)
+            conn.execute(
+                "UPDATE agents_meta SET harness = %s, config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb WHERE id = %s",
+                (target_harness, json.dumps(overlay_without_harness), agent_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE agents_meta SET harness = %s WHERE id = %s",
+                (target_harness, agent_id),
+            )
+        if target_harness != "meiva":
+            conn.execute(
+                "UPDATE agents_meta SET birth_config = COALESCE(birth_config, '{}'::jsonb) || '{\"harness_model_selection\": 1}'::jsonb WHERE id = %s",
+                (agent_id,),
+            )
+
+
+def _read_restart_status_and_harness_blocking(
+    db_pool: ConnectionPool, agent_id: int
+) -> tuple[str, str]:
+    with db_pool.connection() as conn:
+        row = conn.execute(
+            "SELECT status, harness FROM agents_meta WHERE id = %s", (agent_id,)
+        ).fetchone()
+    if row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    return str(row[0]), str(row[1])
+
+
+async def _execute_harness_transition(
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    body: RestartAgentRequest,
+    db_pool: ConnectionPool,
+    *,
+    status: str,
+    old_harness: str,
+    target_harness: str,
+    is_switch: bool,
+    host: LocalAgentHost,
+    catalog: ModelCatalog,
+    home: Path,
+) -> RestartAgentResponse:
+    if status not in ("idling", "terminated"):
+        raise ValueError(f"Cannot restart agent in status {status!r}; must be idling or terminated")
+
+    await prepare_harness_switch(
+        agent_id,
+        old_harness=old_harness,
+        new_harness=target_harness,
+        source=body.source,
+        message=body.message,
+        host=host,
+    )
+    await asyncio.to_thread(
+        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete, agent_id
+    )
+
+    if status != "terminated":
+        _old_status, killed_page_names, _cmd_id, cutoff = await asyncio.to_thread(
+            force_terminate_transaction,
+            agent_id,
+            db_pool,
+            source=body.source,
+            kill_all_shell_sessions=True,
+        )
+        await _kill_shell_sessions_now(agent_id, cutoff=cutoff, home=home)
+        for page_name in killed_page_names:
+            await publish_page_closed(bus, agent_id, page_name)
+        await release_browser_pages(agent_id, home=host.home)
+
+    await asyncio.to_thread(
+        _update_harness_transition_meta_blocking,
+        db_pool,
+        agent_id,
+        target_harness,
+        body.config_overlay,
+        catalog,
+    )
+
+    wake_prompt = (
+        f"[Harness switched from '{old_harness}' to '{target_harness}']\n{body.message}"
+        if is_switch
+        else body.message
+    )
+    await asyncio.to_thread(
+        resurrect_agent, db, bus, agent_id, resurrected_by=body.source, prompt=wake_prompt
+    )
+    return RestartAgentResponse(status=RestartResult.ENQUEUED)
+
+
+# meiva:note
+# Local-target restart or harness switch.
 async def restart_agent_op(
     db: Database,
     bus: EventBus,
@@ -532,26 +645,57 @@ async def restart_agent_op(
     body: RestartAgentRequest,
     db_pool: ConnectionPool,
     *,
+    host: LocalAgentHost,
     catalog: ModelCatalog,
     default_model: str,
     home: Path,
 ) -> RestartAgentResponse:
-    """Local-target restart — INSERT one kind='restart' inbound."""
-    iid = await asyncio.to_thread(
-        restart_blocking,
+    status, old_harness = await asyncio.to_thread(
+        _read_restart_status_and_harness_blocking, db_pool, agent_id
+    )
+    target_harness = (
+        str(body.config_overlay["harness"])
+        if body.config_overlay and "harness" in body.config_overlay
+        else old_harness
+    )
+
+    is_switch = target_harness != old_harness
+    if not is_switch and status == "terminated":
+        return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
+
+    if not is_switch and old_harness == "meiva":
+        iid = await asyncio.to_thread(
+            restart_blocking,
+            db,
+            bus,
+            agent_id,
+            body,
+            db_pool,
+            catalog=catalog,
+            default_model=default_model,
+            home=home,
+        )
+        if iid is None:
+            return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
+        await publish_inbound_arrived(
+            bus, agent_id, iid, "restart", body.source, body.message or ""
+        )
+        return RestartAgentResponse(status=RestartResult.ENQUEUED)
+
+    return await _execute_harness_transition(
         db,
         bus,
         agent_id,
         body,
         db_pool,
+        status=status,
+        old_harness=old_harness,
+        target_harness=target_harness,
+        is_switch=is_switch,
+        host=host,
         catalog=catalog,
-        default_model=default_model,
         home=home,
     )
-    if iid is None:
-        return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
-    await publish_inbound_arrived(bus, agent_id, iid, "restart", body.source, body.message or "")
-    return RestartAgentResponse(status=RestartResult.ENQUEUED)
 
 
 _LIFECYCLE_PATH = re.compile(
@@ -566,7 +710,7 @@ _LIFECYCLE_PATH = re.compile(
 #
 # The op entry reads the port from the endpoint table it built and hands the value down; this
 # module names neither a setting nor a home of its own.
-def _local_agent_host(home: Path, *, health_port: int) -> LocalAgentHost:
+def local_agent_host(home: Path, *, health_port: int) -> LocalAgentHost:
     return LocalAgentHost(home=home, health_port=health_port)
 
 
@@ -601,7 +745,7 @@ async def lifecycle_op(
         )
     if action == "cancel":
         return await cancel_agent_op(
-            db, agent_id, host=_local_agent_host(home, health_port=agent_host_port)
+            db, agent_id, host=local_agent_host(home, health_port=agent_host_port)
         )
     if action == "terminate":
         return await terminate_agent_op(
@@ -610,7 +754,7 @@ async def lifecycle_op(
             agent_id,
             TerminateAgentRequest.model_validate(body),
             db_pool,
-            host=_local_agent_host(home, health_port=agent_host_port),
+            host=local_agent_host(home, health_port=agent_host_port),
         )
     if action == "resurrect-explicit":
         return await resurrect_agent_op(
@@ -636,6 +780,7 @@ async def lifecycle_op(
             agent_id,
             RestartAgentRequest.model_validate(body),
             db_pool,
+            host=local_agent_host(home, health_port=agent_host_port),
             catalog=catalog,
             default_model=settings.lm.llm_model,
             home=home,

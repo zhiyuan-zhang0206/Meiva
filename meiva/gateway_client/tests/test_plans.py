@@ -150,11 +150,19 @@ def test_terminate_sends_each_flag_only_when_set() -> None:
 
 
 def test_restart_and_resurrect_carry_their_provenance() -> None:
-    assert restart_request(7, "agent:1") == Request(
-        "POST", "/api/agents/7/restart", body={"source": "agent:1"}
-    )
     assert restart_request(7, "agent:1", message="reload skill") == Request(
         "POST", "/api/agents/7/restart", body={"source": "agent:1", "message": "reload skill"}
+    )
+    assert restart_request(
+        7, "agent:1", message="switch harness", config_overlay={"harness": "codex"}
+    ) == Request(
+        "POST",
+        "/api/agents/7/restart",
+        body={
+            "source": "agent:1",
+            "message": "switch harness",
+            "config_overlay": {"harness": "codex"},
+        },
     )
     assert resurrect_request(7, "wake", "agent:1") == Request(
         "POST",

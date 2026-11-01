@@ -510,7 +510,7 @@ async def test_subprocess_self_restart_lifecycle_and_inbound(
 
     result = await _run(
         tmp_path,
-        _self_lifecycle_code("meiva.self.restart()"),
+        _self_lifecycle_code('meiva.self.restart("restarting")'),
         parent=real_parent(environ={**os.environ, "MEIVA_DB_URL": runner_db_url}),
     )
 

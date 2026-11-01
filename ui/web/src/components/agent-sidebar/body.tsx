@@ -132,7 +132,7 @@ export function SidebarBody(props: InnerProps) {
                 onTerminate={() => treeProps.onTerminate(agent.agent_id)}
                 onForceExpire={(sessionId) => treeProps.onForceExpire(agent.agent_id, sessionId)}
                 onForceKill={() => treeProps.onTerminate(agent.agent_id, true)}
-                onRestart={() => treeProps.onRestart(agent.agent_id)}
+                onRestart={(msg) => treeProps.onRestart(agent.agent_id, msg)}
                 onResurrect={(prompt) => treeProps.onResurrect(agent.agent_id, prompt)}
                 onFork={(prompt) => treeProps.onFork(agent.agent_id, prompt)}
                 onCompact={() => treeProps.onCompact(agent.agent_id)}
@@ -219,7 +219,7 @@ function TreeNode({ node, depth, ancestorsIsLast, ...rest }: TreeNodeProps) {
         onTerminate={() => rest.onTerminate(node.agent.agent_id)}
         onForceExpire={(sessionId) => rest.onForceExpire(node.agent.agent_id, sessionId)}
         onForceKill={() => rest.onTerminate(node.agent.agent_id, true)}
-        onRestart={() => rest.onRestart(node.agent.agent_id)}
+        onRestart={(msg) => rest.onRestart(node.agent.agent_id, msg)}
         onResurrect={(prompt) => rest.onResurrect(node.agent.agent_id, prompt)}
         onFork={(prompt) => rest.onFork(node.agent.agent_id, prompt)}
         onCompact={() => rest.onCompact(node.agent.agent_id)}

@@ -17,7 +17,6 @@ from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.framework import harness_pre_turn_hooks
 from agent.graph.interrupt import (
     ModelInterruptedError,
-    interrupt_halt,
     interruptible_model,
     subscribe_interrupt,
 )
@@ -26,6 +25,11 @@ from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.messages import exec_output_message
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.agents.history.harness_messages import (
+    aappend_harness_timeline_items,
+    aget_next_harness_message_seq,
+)
+from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InterruptReason
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
@@ -33,6 +37,7 @@ from base.agents.messages.reply_intent import resolve_agent_reply
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.telemetry import SdkCall
 from base.clock import Clock
+from base.db.transaction import async_write_transaction
 from base.events.live.coalescer import DeltaCoalescer
 from base.events.live.projection import (
     Cancelled,
@@ -80,19 +85,17 @@ PROGRESS_TICK_SECONDS = 60.0
 
 
 # meiva:note
-# The messages the harness has not been given yet: everything after the cursor, minus
-# the agent's own replies. A reply lands in the same state write as the cursor that
-# covers it, so one after the cursor means a native node wrote it (it must not have) —
-# either way, feeding the agent's own words back as a user turn is wrong, and the
-# cursor skips them.
+# Filter out agent replies from a sequence of messages.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-def pending_messages(state: _state.AgentState) -> list[BaseMessage]:
-    cursor = min(max(state.harness_cursor, 0), len(state.messages))
-    return [
-        message
-        for message in state.messages[cursor:]
-        if not isinstance(message, (AIMessage, ToolMessage))
-    ]
+def pending_messages(
+    messages_or_state: _state.AgentState | Sequence[BaseMessage],
+) -> list[BaseMessage]:
+    messages = (
+        messages_or_state.messages
+        if isinstance(messages_or_state, _state.AgentState)
+        else messages_or_state
+    )
+    return [message for message in messages if not isinstance(message, (AIMessage, ToolMessage))]
 
 
 def render_messages(messages: Sequence[BaseMessage]) -> str:
@@ -472,28 +475,13 @@ class HarnessTurnProjector:
     def settle_interrupt(
         self,
         reason: InterruptReason,
-        *,
-        effective_len: int,
-        pre_messages: Sequence[BaseMessage],
-    ) -> dict[str, object]:
-        halt: dict[str, object] = dict(interrupt_halt(reason))
-        partial: list[BaseMessage] = []
+    ) -> list[BaseMessage]:
+        self._reasoning_coalescer.flush()
+        self._coalescer.flush()
         if reason is InterruptReason.SYSTEM and self._messages:
-            self._reasoning_coalescer.flush()
-            self._coalescer.flush()
             self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
-            partial = list(self._messages)
-        if pre_messages or partial:
-            raw_halt = halt.get("messages")
-            halt_msgs = (
-                [m for m in raw_halt if isinstance(m, BaseMessage)]
-                if _is_object_sequence(raw_halt)
-                else []
-            )
-            halt["messages"] = [*pre_messages, *partial, *halt_msgs]
-        if partial:
-            halt["harness_cursor"] = effective_len + len(partial)
-        return halt
+            return list(self._messages)
+        return []
 
     def finish(self, turns: Sequence[HarnessTurn]) -> list[BaseMessage]:
         self._reasoning_coalescer.flush()
@@ -554,16 +542,16 @@ async def harness_turn_node(
     assert event_publisher is not None, "harness_turn requires ctx.event_publisher"  # noqa: S101
     agent_id = agent_id_from_config(config)
     pre_messages, hook_updates = await _run_pre_turn_hooks(state, runtime, config)
-    effective_messages = [*state.messages, *pre_messages] if pre_messages else state.messages
     async with node_lifecycle(
         HARNESS_TURN,
-        messages=effective_messages,
+        messages=state.messages,
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=ctx.turn_progress,
         stall=StallConfig(ctx.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=ctx.timestamp_policy(),
         timeline_limit=ctx.require_agent().read("display", "timeline_default_limit"),
+        publish_timeline=False,
     ):
         return await _run_harness_turn(
             state,
@@ -573,6 +561,43 @@ async def harness_turn_node(
             pre_messages=pre_messages,
             hook_updates=hook_updates,
         )
+
+
+def _resolve_turn_prompt_and_key(
+    state: _state.AgentState,
+    pre_messages: Sequence[BaseMessage],
+    agent_id: int,
+) -> tuple[str, str]:
+    pending_input = state.harness_pending_input or {}
+    text = str(pending_input.get("prompt") or "")
+    if pre_messages:
+        pre_text = render_messages(pre_messages)
+        text = f"{pre_text}\n\n{text}".strip() if text else pre_text
+    key = str(pending_input.get("key") or "") or f"inbound-turn-{agent_id}"
+    return text, key
+
+
+async def _append_turn_timeline(
+    ctx: MeivaContext, agent_id: int, messages: Sequence[BaseMessage]
+) -> None:
+    if not messages or ctx.ops_pool is None:
+        return
+    items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
+    async with async_write_transaction(ctx.ops_pool) as pool_conn:
+        await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
+
+
+async def _handle_turn_interrupted(
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    projector: HarnessTurnProjector,
+    reason: InterruptReason,
+) -> None:
+    partial = projector.settle_interrupt(reason)
+    await _append_turn_timeline(ctx, agent_id, partial)
+    _announce_cancel(ctx, agent_id)
+    await interrupt_engine(agent_id, bridge)
 
 
 async def _run_harness_turn(
@@ -586,57 +611,38 @@ async def _run_harness_turn(
 ) -> Command[HarnessGoto]:
     bridge = ctx.require_harness_bridge()
     ctx.turn_progress.mark(agent_id)
-    effective_messages = [*state.messages, *pre_messages] if pre_messages else state.messages
-    cursor = min(max(state.harness_cursor, 0), len(effective_messages))
-    pending = [
-        m for m in effective_messages[cursor:] if not isinstance(m, (AIMessage, ToolMessage))
-    ]
-    text = render_messages(pending)
     extra_updates = dict(hook_updates) if hook_updates else {}
+    text, key = _resolve_turn_prompt_and_key(state, pre_messages, agent_id)
     if not text:
-        if pre_messages:
-            extra_updates["messages"] = list(pre_messages)
         return Command[HarnessGoto](
-            update={**extra_updates, "halted": True, "harness_cursor": len(effective_messages)},
-            goto=CLAIM,
+            update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
         )
 
+    base_idx = 0
+    if ctx.ops_pool is not None:
+        async with ctx.ops_pool.connection() as pool_conn:
+            base_idx = await aget_next_harness_message_seq(pool_conn, agent_id)
     projector = HarnessTurnProjector(
         event_publisher=event_publisher,
         agent_id=agent_id,
-        base_idx=len(effective_messages),
+        base_idx=base_idx,
         turn_progress=ctx.turn_progress,
         clock=ctx.require_clock(),
         non_human_wake=state.non_human_wake,
     )
     try:
         async with subscribe_interrupt(
-            ctx.ops_pool,
-            agent_id,
-            resources=ctx.hosted_resources,
+            ctx.ops_pool, agent_id, resources=ctx.hosted_resources
         ) as cancel_event:
+            action = bridge.run_turn(text, key=key, on_event=projector.on_event)
             turn = await interruptible_model(
-                _ticking(
-                    ctx.turn_progress.mark,
-                    agent_id,
-                    bridge.run_turn(
-                        text,
-                        key=turn_key(pending, cursor=cursor),
-                        on_event=projector.on_event,
-                    ),
-                ),
-                cancel_event,
+                _ticking(ctx.turn_progress.mark, agent_id, action), cancel_event
             )
     except ModelInterruptedError as interrupted:
-        halt = projector.settle_interrupt(
-            interrupted.reason,
-            effective_len=len(effective_messages),
-            pre_messages=pre_messages,
+        await _handle_turn_interrupted(ctx, agent_id, bridge, projector, interrupted.reason)
+        return Command[HarnessGoto](
+            update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
         )
-        if "harness_cursor" not in halt:
-            _announce_cancel(ctx, agent_id)
-        await interrupt_engine(agent_id, bridge)
-        return Command[HarnessGoto](update={**extra_updates, **halt}, goto=CLAIM)
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 
@@ -644,23 +650,10 @@ async def _run_harness_turn(
     for completed in turns:
         log_turn_usage(ctx, agent_id, bridge.model, completed)
     committed = projector.finish(turns)
-    # meiva:note
-    # The turn's last completion is the agent's last AI message, and it is stamped where
-    # the native node stamps it: before this call a harness agent's `last_message_text`
-    # stayed NULL for its whole life, so `meiva.agents.get_last_message()` answered
-    # `None` for every codex / claude / antigravity agent while its transcript held the
-    # text (#5511). The same UPDATE also clears the crash marker and the permanent-reject
-    # streak, which a completed harness turn earns exactly as a native one does.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    await _append_turn_timeline(ctx, agent_id, committed)
     await persist_last_active(ctx, agent_id, turns[-1].text)
     return Command[HarnessGoto](
-        update={
-            **extra_updates,
-            "messages": [*pre_messages, *committed],
-            "harness_cursor": len(effective_messages) + len(committed),
-            "halted": True,
-        },
-        goto=CLAIM,
+        update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
     )
 
 

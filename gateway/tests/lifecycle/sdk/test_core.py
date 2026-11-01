@@ -43,7 +43,7 @@ class TestSelfRestart:
         )
         pin_agent(aid)
         with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
-            meiva.self.restart(config_overlay={"reasoning_effort": "low"})
+            meiva.self.restart("effort test", config_overlay={"reasoning_effort": "low"})
         assert db_conn.execute(
             "SELECT config_overlay FROM agents_meta WHERE id=%s", (aid,)
         ).fetchone() == ({"llm_model": "deepseek-flash"},)
@@ -59,15 +59,15 @@ class TestSelfRestart:
         pin_agent(aid)
         overlay: dict[str, object] = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
         with pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart(config_overlay=overlay)
+            meiva.self.restart("model change", config_overlay=overlay)
         assert db_conn.execute(
             "SELECT config_overlay FROM agents_meta WHERE id=%s", (aid,)
         ).fetchone() == (overlay,)
-        assert _inbound_rows(db_conn, aid) == [("", "restart", "self")]
+        assert _inbound_rows(db_conn, aid) == [("model change", "restart", "self")]
 
     def test_restart_inserts_inbound(self, db_conn: psycopg.Connection, gateway_client):
         aid = _spawn_self()
         with pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart()
+            meiva.self.restart("restart self")
         rows = _inbound_rows(db_conn, aid)
         assert any(r[1] == "restart" and r[2] == "self" for r in rows)

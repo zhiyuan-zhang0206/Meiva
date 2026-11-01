@@ -1,4 +1,4 @@
-exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py", "checkpoint_segment.py", "checkpoint_serde.py", "checkpoint_serializer.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "hierarchy", "message_tokens.py", "timeline.py", "timeline_item.py"]
+exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py", "checkpoint_segment.py", "checkpoint_serde.py", "checkpoint_serializer.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "harness_messages.py", "hierarchy", "message_tokens.py", "timeline.py", "timeline_item.py"]
 
 [uses]
 "checkpoint.py" = ["checkpoint_postgres_walks.py", "checkpoint_serde.py", "checkpoint_serializer.py", "closing_request.py", "delta_read_compat.py"]
@@ -6,9 +6,10 @@ exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py"
 "compact_boundary.py" = ["closing_request.py"]
 "context_breakdown.py" = ["message_tokens.py"]
 "context_response.py" = ["context_breakdown.py"]
+"harness_messages.py" = ["timeline_item.py"]
 "hierarchy" = ["checkpoint.py", "timeline.py"]
 "message_tokens.py" = ["closing_request.py"]
-"tests" = ["checkpoint.py", "checkpoint_postgres_walks.py", "checkpoint_serde.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "hierarchy", "message_tokens.py", "timeline.py"]
+"tests" = ["checkpoint.py", "checkpoint_postgres_walks.py", "checkpoint_serde.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "harness_messages.py", "hierarchy", "message_tokens.py", "timeline.py", "timeline_item.py"]
 "timeline.py" = ["timeline_item.py"]
 
 [purity]
