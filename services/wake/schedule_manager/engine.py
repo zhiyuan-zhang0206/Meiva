@@ -51,12 +51,15 @@ from types import FrameType
 from loguru import logger
 
 import base.host.proc
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
+from base.agents.context.identity import AgentIdentity
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from meiva import boot
+from meiva.sdk_surface import process_context
 from services.wake.schedule_manager.guard_admission import (
     Admission,
     Frame,
@@ -408,6 +411,26 @@ class StallGuard:
             raise RuntimeError(f"Schedule {self.schedule_id} stall guard did not stop")
 
 
+# meiva:note
+# The context the in-process script runs under: the one the runner bound before it called the
+# engine (`services/wake/schedule_manager/runner.py`, which owns the `schedule:<id>` actor and
+# names the environment the SDK's `git` runs under), or — for a process that drives the engine
+# directly and bound none — a context of the same shape built here from the root's own facts.
+# The script is never left running under no context: that silently drops every skill name
+# (the surface lists nothing without a home) and leaves `meiva.agents.*` with no provenance.
+def script_context(schedule_id: int, root: RunnerRoot) -> MeivaContext:
+    bound = process_context.bound_context()
+    if bound is not None:
+        return bound
+    return MeivaContext(
+        identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
+        clients=root.plugins.clients,
+        machine=root.plugins.machine,
+        meiva_home=root.home,
+        environ=root.plugins.config.process_environment(),
+    )
+
+
 def run_python_script(
     schedule_id: int, run_id: int | None, script_path: Path, root: RunnerRoot
 ) -> None:
@@ -445,6 +468,7 @@ def run_python_script(
             config=root.plugins.config,
             machine=root.plugins.machine,
             clients=root.plugins.clients,
+            context=script_context(schedule_id, root),
         )
         runpy.run_path(
             str(script_path),

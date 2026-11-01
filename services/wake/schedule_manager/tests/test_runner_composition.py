@@ -10,7 +10,20 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from services.wake.schedule_manager import runner
+from base.agents.context.clients import ClientSet
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot
+from base.daemon.schedules.inputs import ScheduleInputs
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process.code_version import CodeVersion
+from base.paths import meiva_home
+from base.telemetry import process_name
+from meiva.boot import clients_over
+from meiva.sdk_surface import process_context
+from services.wake.schedule_manager import engine, runner
+from services.wake.schedule_manager.stall_policy import StallPolicy
 
 
 def _schedule(conn: psycopg.Connection, script: str = "pass") -> int:
@@ -101,3 +114,69 @@ def test_runpy_script_receives_the_same_entry_builders(
 
     assert runner.run(sid) == 0
     assert marker.read_text() == "borrowed"
+
+
+# meiva:note
+# The engine names the context its in-process script runs under. `runner.run` binds the schedule's
+# actor before it calls the engine, but a process that drives the engine directly binds none; the
+# script must still run as `schedule:<id>`, under an environment the SDK's `git` can be handed —
+# before this, such a script listed no skill names at all and failed in `require_actor`.
+def _engine_root() -> tuple[engine.RunnerRoot, ClientSet]:
+    config = ConfigBoot()
+    config.read_process_environment()
+    machine = ConfiguredMachineIdentity(config)
+    image = process_context.loaded_code_image()
+    gate = ProcessDbGate(process=process_name(), version=CodeVersion(image).get)
+    home = meiva_home()
+
+    def database() -> Database:
+        return Database.from_settings(
+            gate=gate, direct_url=ClusterDirectUrl(machine.host, home=home)
+        )
+
+    clients = clients_over(config, machine, database)
+    root = engine.RunnerRoot(
+        database=database(),
+        inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine, home=home),
+        plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
+        policy=StallPolicy(timeout_s=60.0),
+        home=home,
+        main_thread_id=threading.get_ident(),
+    )
+    return root, clients
+
+
+def test_the_engine_names_the_script_context_when_no_caller_bound_one(
+    db_conn: psycopg.Connection, unit_home: Path
+) -> None:
+    marker = unit_home / "unnamed.txt"
+    script = (
+        "from pathlib import Path\n"
+        "from meiva.sdk_surface import process_context\n"
+        "from meiva.sdk_surface.agent_identity import require_actor\n"
+        "context = process_context.current_context()\n"
+        f"Path({str(marker)!r}).write_text(\n"
+        "    repr((require_actor(), context.require_environ().get('MEIVA_HOME'),\n"
+        "          str(context.require_meiva_home())))\n"
+        ")\n"
+    )
+    sid = _schedule(db_conn, script)
+    root, clients = _engine_root()
+    previous = process_context.unbind_context()
+    try:
+        assert engine.run(sid, None, root) == 0
+    finally:
+        clients.close(pipeline_timeout=2)
+        # meiva:note
+        # The engine binds the context it hands the load, so this test puts the process back where
+        # it found it rather than leaving a schedule actor bound for the next test.
+        process_context.unbind_context()
+        if previous is not None:
+            process_context.bind_context(previous)
+
+    # meiva:note
+    # the test's own repr.
+    actor, environ_home, home = eval(marker.read_text())  # noqa: S307
+    assert actor == f"schedule:{sid}"
+    assert environ_home == str(unit_home)
+    assert home == str(unit_home)
