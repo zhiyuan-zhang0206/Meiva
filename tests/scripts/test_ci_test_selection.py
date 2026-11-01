@@ -513,7 +513,7 @@ def test_static_contracts_job_has_no_native_toolchain() -> None:
     assert static_job["if"] == "${{ needs.classify.outputs.backend == 'true' }}"
     assert static_job["container"]["options"] == "--init --shm-size=2g"
     assert static_job["strategy"]["matrix"]["group"] == (
-        "${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4]') }}"
+        "${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4, 5, 6, 7, 8]') }}"
     )
     assert "continue-on-error" not in static_job
     assert not any(

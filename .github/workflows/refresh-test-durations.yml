@@ -42,6 +42,75 @@ jobs:
         id: durations
         uses: ./.github/actions/resolve-test-durations
 
+  measure-static:
+    needs: plan
+    name: Measure static durations (${{ matrix.group }}/8)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.plan.outputs.key }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install locked Python environment
+        uses: ./.github/actions/uv-sync
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript comment parser)
+        working-directory: ui/web
+        run: pnpm install --frozen-lockfile
+
+      - name: Measure static shard
+        run: >
+          uv run python scripts/ci/refresh_test_durations.py measure static
+          --group ${{ matrix.group }}
+          --output tmp/durations/static-${{ matrix.group }}.json
+          --junit-xml tmp/verdict/static-${{ matrix.group }}.xml
+
+      - name: Upload static duration measurement
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-durations-static-${{ matrix.group }}
+          path: tmp/durations/static-${{ matrix.group }}.json
+          if-no-files-found: error
+
+      - name: Upload static test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verdict-junit-static-${{ matrix.group }}
+          path: tmp/verdict/static-${{ matrix.group }}.xml
+          if-no-files-found: warn
+
   measure-backend:
     needs: plan
     name: Measure backend durations (${{ matrix.group }}/8)
@@ -224,7 +293,7 @@ jobs:
     # step cannot turn the nightly red, and a retried shard cannot turn it green.
     # A red verdict is an alert: it fails this job and records the shard that failed, and it
     # blocks the release gate. It does not touch main's merge ability.
-    needs: [measure-backend, measure-e2e]
+    needs: [measure-static, measure-backend, measure-e2e]
     if: always() && !cancelled()
     name: Nightly verdict (regression)
     runs-on: ubuntu-24.04
@@ -279,9 +348,10 @@ jobs:
           fi
 
   publish:
-    needs: [plan, measure-backend, measure-e2e]
+    needs: [plan, measure-static, measure-backend, measure-e2e]
     if: >-
-      !cancelled() && needs.measure-backend.result == 'success' &&
+      !cancelled() && needs.measure-static.result == 'success' &&
+      needs.measure-backend.result == 'success' &&
       needs.measure-e2e.result == 'success'
     name: Merge and save the test durations
     runs-on: ubuntu-24.04
@@ -306,7 +376,7 @@ jobs:
           path: ${{ runner.temp }}/durations
           merge-multiple: true
 
-      # Fails unless all 12 shard artifacts arrived and none is empty or overlaps another,
+      # Fails unless all 20 shard artifacts arrived and none is empty or overlaps another,
       # so a partial timing model is never saved.
       - name: Merge complete shard measurements
         run: >

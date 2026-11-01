@@ -17,17 +17,30 @@ def _workflow_matrix_groups(workflow_name: str, job_name: str) -> list[int]:
 
 
 def test_shard_counts_track_both_workflow_matrices() -> None:
+    ci_document = yaml.safe_load(
+        (_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    static_expr = ci_document["jobs"]["backend-static-tests"]["strategy"]["matrix"]["group"]
+    assert (
+        static_expr
+        == "${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4, 5, 6, 7, 8]') }}"
+    )
+    nightly_static = _workflow_matrix_groups("refresh-test-durations.yml", "measure-static")
+    release_static = _workflow_matrix_groups("release-gate.yml", "backend-static")
     ci_backend = _workflow_matrix_groups("ci.yml", "backend-shard")
     nightly_backend = _workflow_matrix_groups("refresh-test-durations.yml", "measure-backend")
     ci_e2e = _workflow_matrix_groups("ci.yml", "e2e-shard")
     nightly_e2e = _workflow_matrix_groups("refresh-test-durations.yml", "measure-e2e")
 
+    assert refresh.STATIC_SHARDS == 8 == len(nightly_static) == len(release_static)
     assert refresh.BACKEND_SHARDS == len(ci_backend) == len(nightly_backend)
     assert refresh.E2E_SHARDS == len(ci_e2e) == len(nightly_e2e)
 
 
 def test_coverage_args_track_the_ci_backend_shard() -> None:
     document = yaml.safe_load((_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    expected = sorted(arg.removeprefix("--cov=") for arg in refresh.BACKEND_COVERAGE_ARGS)
+
     steps = document["jobs"]["backend-shard"]["steps"]
     (command,) = (step["run"] for step in steps if step.get("name") == "Run pytest shard")
     attempts = [
@@ -35,7 +48,14 @@ def test_coverage_args_track_the_ci_backend_shard() -> None:
         for attempt in command.split("uv run pytest")[1:]
     ]
     assert len(attempts) == 2
-    assert attempts[0] == attempts[1]
-    assert (
-        sorted(arg.removeprefix("--cov=") for arg in refresh.BACKEND_COVERAGE_ARGS) == attempts[0]
+    assert attempts[0] == attempts[1] == expected
+
+
+def test_coverage_args_track_the_ci_static_shard() -> None:
+    document = yaml.safe_load((_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    expected = sorted(arg.removeprefix("--cov=") for arg in refresh.BACKEND_COVERAGE_ARGS)
+    static_steps = document["jobs"]["backend-static-tests"]["steps"]
+    (static_cmd,) = (
+        step["run"] for step in static_steps if step.get("name") == "Run static pytest contracts"
     )
+    assert sorted(re.findall(r"--cov=(\w+)", static_cmd)) == expected

@@ -101,6 +101,8 @@ def test_the_cli_writes_the_record_and_exits_nonzero_when_red(tmp_path: Path) ->
             str(junit),
             "--sha",
             "deadbeef",
+            "--static-shards",
+            "0",
             "--backend-shards",
             "2",
             "--e2e-shards",
@@ -126,6 +128,8 @@ def test_the_cli_exits_zero_when_every_shard_is_green(tmp_path: Path) -> None:
             str(junit),
             "--sha",
             "deadbeef",
+            "--static-shards",
+            "0",
             "--backend-shards",
             "1",
             "--e2e-shards",
@@ -137,3 +141,44 @@ def test_the_cli_exits_zero_when_every_shard_is_green(tmp_path: Path) -> None:
 
     assert code == 0
     assert '"ok": true' in output.read_text(encoding="utf-8")
+
+
+def test_the_cli_requires_static_shards_by_default(tmp_path: Path) -> None:
+    junit = tmp_path / "junit"
+    junit.mkdir()
+    for group in range(1, 9):
+        _write(junit, f"backend-{group}", CLEAN)
+    for group in range(1, 5):
+        _write(junit, f"e2e-{group}", CLEAN)
+    output = tmp_path / "nightly" / "sha.json"
+
+    assert (
+        nightly.main(
+            [
+                "--junit-dir",
+                str(junit),
+                "--sha",
+                "deadbeef",
+                "--output",
+                str(output),
+            ]
+        )
+        == 1
+    )
+    assert "static: expected 8 shards, got 0" in output.read_text(encoding="utf-8")
+
+    for group in range(1, 9):
+        _write(junit, f"static-{group}", CLEAN)
+    assert (
+        nightly.main(
+            [
+                "--junit-dir",
+                str(junit),
+                "--sha",
+                "deadbeef",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )

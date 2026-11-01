@@ -84,6 +84,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--junit-dir", type=Path, required=True, help="directory holding the junit files"
     )
     parser.add_argument("--sha", required=True, help="the commit the nightly run tested")
+    parser.add_argument("--static-shards", type=int, default=8)
     parser.add_argument("--backend-shards", type=int, default=8)
     parser.add_argument("--e2e-shards", type=int, default=4)
     parser.add_argument(
@@ -94,7 +95,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     paths = sorted(arguments.junit_dir.rglob("*.xml"))
     results = [read_shard(path) for path in paths]
-    verdict = judge(results, {"backend": arguments.backend_shards, "e2e": arguments.e2e_shards})
+    verdict = judge(
+        results,
+        {
+            "static": arguments.static_shards,
+            "backend": arguments.backend_shards,
+            "e2e": arguments.e2e_shards,
+        },
+    )
     record = {
         "sha": arguments.sha,
         "ok": verdict.ok,

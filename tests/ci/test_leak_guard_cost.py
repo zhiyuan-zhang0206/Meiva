@@ -206,6 +206,17 @@ def test_a_test_enters_a_handful_of_python_frames(run: leak_guard.Run) -> None:
     assert _python_calls(lambda: run.compare(before)) <= _FRAMES_PER_PHASE
 
 
+def test_a_clean_file_boundary_enters_no_python_frame_per_module(
+    request: pytest.FixtureRequest,
+) -> None:
+    guard = leak_guard.Run()
+    guard.configure(str(request.config.rootpath))
+    assert guard.boundary("pkg/tests/test_a.py") == []
+    assert guard.watch.tracked > 100
+    assert _python_calls(lambda: guard.boundary("pkg/tests/test_a.py")) <= 3
+    assert _python_calls(lambda: guard.boundary("pkg/tests/test_b.py")) <= _FRAMES_PER_PHASE
+
+
 def test_the_signals_are_read_without_the_python_wrapper(run: leak_guard.Run) -> None:
     """`signal.getsignal` is three frames and an enum construction per signal: the raw answer is enough."""
     wrapper_code = signal.getsignal.__code__

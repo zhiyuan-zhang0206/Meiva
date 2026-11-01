@@ -71,7 +71,19 @@ def test_every_leg_runs_on_the_commit_the_precheck_resolved_and_skips_idle_train
         assert container["image"].startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:")
         assert container["options"] == "--init --shm-size=2g"
         assert jobs[container_leg]["defaults"]["run"]["shell"] == "bash"
-    assert jobs["backend-static"]["strategy"]["matrix"]["group"] == [1, 2, 3, 4]
+    assert jobs["backend-static"]["strategy"]["matrix"]["group"] == [1, 2, 3, 4, 5, 6, 7, 8]
+
+
+def test_release_gate_splits_restore_durations_resolved_by_precheck() -> None:
+    jobs = _yaml(_RELEASE_GATE)["jobs"]
+    assert jobs["precheck"]["outputs"]["durations_key"] == "${{ steps.durations.outputs.key }}"
+    resolve_durations = _step(jobs["precheck"]["steps"], "Resolve the test durations")
+    assert resolve_durations["uses"] == "./.github/actions/resolve-test-durations"
+    assert resolve_durations["if"] == "steps.target.outputs.skip_train != 'true'"
+    for split_leg in ("backend-static", "backend", "e2e"):
+        restore = _step(jobs[split_leg]["steps"], "Restore the test durations")
+        assert restore["uses"] == "./.github/actions/restore-test-durations"
+        assert restore["with"]["key"] == "${{ needs.precheck.outputs.durations_key }}"
 
 
 def test_precheck_validates_target_base_and_nightly_verdict() -> None:
