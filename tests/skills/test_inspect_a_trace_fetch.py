@@ -382,14 +382,22 @@ def test_gateway_get_sends_the_explicit_secret() -> None:
     assert seen_auth == ["Bearer explicit-secret"]
 
 
-def test_gateway_get_uses_the_homes_env_file_secret() -> None:
-    env_file = rt.resolve_meiva_home() / ".env"
-    env_file.write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
-    try:
-        with _serve_gateway() as (base_url, seen_auth):
-            out = _run_rt_subcommand(["gateway-get", base_url, "/api/events"], {})
-    finally:
-        env_file.unlink(missing_ok=True)
+# meiva:note
+# This test gets its own home rather than writing the suite's. pytest gives the run one home for
+# its whole life (`tests/fixtures/env_bootstrap`), and every fixture that touches the database or
+# Redis reads `<home>/.env` before it does anything else, so a test that rewrites or removes that
+# file breaks every later test in the same worker -- `--dist=loadfile` schedules this file in the
+# middle of a worker's queue, and shard 1/8 of run 41288203853 lost its `.env` there and reported
+# 265 setup errors (task #5933/E).
+def test_gateway_get_uses_the_homes_env_file_secret(tmp_path: Path) -> None:
+    home = tmp_path / "gateway-home"
+    home.mkdir()
+    (home / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
+
+    with _serve_gateway() as (base_url, seen_auth):
+        out = _run_rt_subcommand(
+            ["gateway-get", base_url, "/api/events"], {"MEIVA_HOME": str(home)}
+        )
 
     assert json.loads(out) == {"ok": True}
     assert seen_auth == ["Bearer dev-cluster-secret"]
