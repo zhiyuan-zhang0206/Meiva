@@ -76,8 +76,7 @@ def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str) -> Non
     if row is None:
         raise ValueError(f"task #{task_id} no longer exists")
     current: str = row[0] or ""
-    if current and not current.endswith("\n"):
-        current += "\n"
+    prefix = (current.rstrip("\n") + "\n\n") if current else ""
     # meiva:note
     # The line lands in `results`; the row's clock is not touched here. `updated_at` moves in the
     # one branch that also clears the reminder ladder (`write_task_update` below), so a note moves
@@ -85,7 +84,7 @@ def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str) -> Non
     # disagree with the counter the daemon escalates on.
     cur.execute(
         "UPDATE agent_tasks SET results = %s WHERE id = %s",
-        (current + line, task_id),
+        (prefix + line, task_id),
     )
 
 
