@@ -21,7 +21,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.cluster_instance import StartTuning
 from cli.commands.data_plane.instance.pg_plan import PgIdentity, pg_hba_body, pg_ident_body
-from cli.commands.data_plane.tests.native_cluster import NativeCluster
+from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM, NativeCluster
 from cli.commands.data_plane.tests.native_cluster import native_cluster as native_cluster
 from cli.commands.data_plane.tests.native_cluster import retained_children as retained_children
 from cli.database.tests.command_inputs import command_machine as command_machine
@@ -41,6 +41,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> int:
         machine=machine,
         tuning=StartTuning(bind_wait_s=0.0),
         timers=SYSTEM_TIMERS,
+        system=NATIVE_TEST_SYSTEM,
     )
 
 

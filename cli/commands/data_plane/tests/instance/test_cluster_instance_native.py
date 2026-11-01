@@ -38,7 +38,7 @@ from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.tests.native_cluster import (
     ADMIN_PASSWORD,
     BEARER,
-    NATIVE_TEST_MACOS,
+    NATIVE_TEST_SYSTEM,
     RUNTIME_PASSWORD,
     NativeCluster,
     redis_command,
@@ -68,7 +68,7 @@ def _storage(cluster_: NativeCluster, machine: MachineIdentityReader) -> int:
         redis_user=cluster_.identity,
         retained_children=cluster_.retained_children,
         machine=machine,
-        macos=NATIVE_TEST_MACOS,
+        system=NATIVE_TEST_SYSTEM,
         timers=SYSTEM_TIMERS,
         environ=os.environ,
     )
@@ -179,7 +179,7 @@ def test_the_entry_brings_up_the_instance_on_the_recorded_ports_with_the_url_ide
             retained_children=native_cluster.retained_children,
             database_factory=operator_database,
             machine=command_machine,
-            macos=NATIVE_TEST_MACOS,
+            system=NATIVE_TEST_SYSTEM,
             timers=SYSTEM_TIMERS,
             environ=os.environ,
         )
@@ -223,7 +223,7 @@ def test_a_fresh_single_box_redis_refuses_unauthenticated_connections(
             retained_children=native_cluster.retained_children,
             database_factory=operator_database,
             machine=command_machine,
-            macos=NATIVE_TEST_MACOS,
+            system=NATIVE_TEST_SYSTEM,
             timers=SYSTEM_TIMERS,
             environ=os.environ,
         )
@@ -259,6 +259,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             retained_children=native_cluster.retained_children,
             machine=command_machine,
             timers=SYSTEM_TIMERS,
+            system=NATIVE_TEST_SYSTEM,
         )
         == 0
     )

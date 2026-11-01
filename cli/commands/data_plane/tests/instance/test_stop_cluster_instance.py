@@ -33,6 +33,7 @@ from cli.commands.data_plane.tests.data_plane_records import with_redis_admin
 from cli.commands.data_plane.tests.native_cluster import (
     ADMIN_PASSWORD,
     NATIVE_TEST_MACOS,
+    NATIVE_TEST_SYSTEM,
     RUNTIME_PASSWORD,
     NativeCluster,
 )
@@ -58,7 +59,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> None:
         redis_user=cluster.identity,
         retained_children=cluster.retained_children,
         machine=machine,
-        macos=NATIVE_TEST_MACOS,
+        system=NATIVE_TEST_SYSTEM,
         timers=SYSTEM_TIMERS,
         environ=os.environ,
     )
