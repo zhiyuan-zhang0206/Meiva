@@ -12,9 +12,13 @@ from tests.e2e.process_support import proc_log_tail
 
 # meiva:note
 # Both commands run inside a per-session copy of `ui/web` whose `node_modules` is a symlink back
-# to the workspace tree (`ui/web/node_modules`): the dependencies are the workspace's, and this
-# module is the one place that names how pnpm is invoked against them.
-PNPM = ("pnpm",)
+# to the workspace tree (`ui/web/node_modules`): the dependencies are the workspace's, so pnpm
+# must not manage them from here. Its pre-run dependency verification reads the symlinked tree as
+# a stale `node_modules` and rebuilds it: with no TTY that aborts the script
+# (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`) before `next build` runs, and with a TTY it
+# deletes and reinstalls the shared tree under every other worker's build — one worker then fails
+# on a half-rebuilt `node_modules` (`Cannot find module .../next/dist/compiled/...`).
+PNPM = ("pnpm", "--config.verify-deps-before-run=false")
 
 
 def pnpm_run(script: str, *arguments: str) -> list[str]:
