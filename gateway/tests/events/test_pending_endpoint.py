@@ -210,6 +210,57 @@ def test_pending_tolerates_malformed_content_blocks(
     assert resp.json()[0]["images"] is None
 
 
+def test_pending_upload_note_carries_upload_files_and_deterministic_id_order(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    tid = _seed_agent(db_conn)
+    batch_id = "c" * 32
+    insert_inbound_message(
+        db_conn,
+        tid,
+        "Files uploaded with the next message",
+        source="system:upload",
+        payload={
+            "upload_files": [
+                {
+                    "name": "shot.png",
+                    "size": 512,
+                    "content_type": "image/png",
+                    "path": "/var/meiva/workspaces/1/uploads/shot.png",
+                    "batch_id": batch_id,
+                    "ordinal": 0,
+                }
+            ]
+        },
+        bus=event_bus,
+        database=database,
+    )
+    insert_inbound_message(
+        db_conn,
+        tid,
+        "here is the file",
+        source="user",
+        bus=event_bus,
+        database=database,
+    )
+
+    with gateway_test_client() as client:
+        resp = client.get(f"/api/agents/{tid}/pending")
+
+    assert resp.status_code == 200
+    items = resp.json()
+    assert [it["sender"] for it in items] == ["system", "user"]
+    assert items[0]["files"] == [
+        {
+            "name": "shot.png",
+            "size": 512,
+            "content_type": "image/png",
+            "url": f"/api/agents/{tid}/uploads/{batch_id}/0",
+        }
+    ]
+    assert items[1]["files"] is None
+
+
 def _active_lease(db_conn: psycopg.Connection, agent_id: int) -> str:
     lease_id = str(uuid4())
     with db_conn.cursor() as cur:

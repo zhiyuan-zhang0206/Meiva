@@ -374,19 +374,25 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/ui/contributions"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/uploads/{filename}"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/uploads/{batch_id}/{ordinal}"): RouteContract(
+        note="read-only: serves one accepted delivered file from the agent's workspace if its size and SHA-256 match the frozen manifest"
+    ),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/uploads/staged"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="stage one picked file on the gateway under a required principal-v1 key and replay its StagedFile receipt",
+    ),
+    ("DELETE", "/api/keyed/v1/agents/{agent_id}/uploads/staged/{file_id}"): RouteContract(
+        note="discard a staged file not yet taken by a live batch; repeats are harmless"
+    ),
     ("POST", "/api/keyed/v1/agents/{agent_id}/uploads"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="immutable source acceptance and delivery intent; native receiver and one retained inbound recover together; no client activation",
+        note="immutable source acceptance and delivery intent; native receiver and retained inbounds recover together; no client activation",
     ),
     ("GET", "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}"): RouteContract(),
     (
         "GET",
         "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}/objects/{ordinal}",
     ): RouteContract(),
-    ("POST", "/api/agents/{agent_id}/uploads"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="silent save only: the claimed manifest is published as immutable objects and the original receipt replays under the same key; no inbound is queued",
-    ),
     ("GET", "/api/internal/agent-transfers/{transfer_id}/bundle"): RouteContract(
         note="read-only: the bytes staged for one in-flight transfer — a repeat re-reads the same "
         "bundle, and 404 once the import scope that staged it ends",

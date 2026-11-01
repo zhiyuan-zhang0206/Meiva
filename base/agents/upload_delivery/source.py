@@ -1,5 +1,6 @@
-"""Durable source acceptance and retained single-inbound delivery outcome."""
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
 
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -8,31 +9,29 @@ from psycopg.types.json import Jsonb
 
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.agents.upload_delivery import storage
 from base.agents.upload_delivery.models import (
-    NAMESPACE,
+    PROTOCOL,
     Acceptance,
     CopyProof,
     DeliveryStatus,
+    FrozenMessage,
     Manifest,
     Object,
     ReceiveRequest,
+    StagedFile,
     UploadDeliveryConflictError,
     current_unit,
-    make_manifest,
     request_hash,
 )
-from base.agents.upload_delivery.paths import (
-    MAX_AGENT_UPLOAD_BYTES,
-    MAX_AGENT_UPLOAD_FILES,
-    agent_upload_dir,
-)
+from base.agents.upload_delivery.naming import delivered_names, send_directory, upload_note
+from base.agents.upload_delivery.paths import agent_upload_dir
+from base.agents.upload_delivery.staging import claim_for_batch, staged_object
+from base.agents.upload_delivery.storage import lock_agent
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
 from base.paths import WORKSPACES_DIR_NAME
 
-# Copy attempts a batch gets before it is held for a person to re-upload.
 MAX_COPY_ATTEMPTS = 3
 
 
@@ -58,55 +57,89 @@ def target_unit(conn: Connection[Any], agent_id: int) -> UnitIdentity:
     return UnitIdentity(machine=rows[0][0], home=rows[0][1])
 
 
-def _lookup(conn: Connection[Any], key: str, fingerprint: str) -> tuple[Any, ...] | None:
+def _lookup(conn: Connection[Any], key: str, fingerprint: str) -> Acceptance | None:
     row = conn.execute(
-        "SELECT request_hash, manifest, source_unit, target_unit, acceptance, storage_directory "
-        "FROM upload_delivery_batches WHERE operation_key=%s",
+        "SELECT request_hash, protocol, acceptance FROM upload_delivery_batches "
+        "WHERE operation_key=%s",
         (key,),
     ).fetchone()
-    if row is not None and row[0] != fingerprint:
+    if row is None:
+        return None
+    if row[0] != fingerprint or row[1] != PROTOCOL or row[2] is None:
         raise UploadDeliveryConflictError(
             "idempotency key already identifies another upload manifest"
         )
-    return row
+    return Acceptance.model_validate(row[2])
 
 
-def _claim(
+def _taken_directories(conn: Connection[Any], agent_id: int, prefix: str) -> set[str]:
+    rows = conn.execute(
+        "SELECT send_directory FROM upload_delivery_batches "
+        "WHERE agent_id=%s AND send_directory LIKE %s",
+        (agent_id, f"{prefix}%"),
+    ).fetchall()
+    return {str(row[0]) for row in rows if row[0] is not None}
+
+
+def send(
     pool: ConnectionSource,
     key: str,
     agent_id: int,
-    names: list[str],
-    batch: list[tuple[str, bytes, str]],
-    provenance: InboundProvenance,
     *,
+    file_ids: list[str],
+    text: str,
+    provenance: InboundProvenance,
+    sent_at: datetime,
+    batch_id: str,
     local_machine: str,
     home: Path,
     upload_root: Path,
-) -> tuple[Any, ...]:
-    fingerprint = request_hash(names, batch)
+) -> Acceptance:
+    frozen_message = FrozenMessage(text=text, source="user")
+    fingerprint = request_hash(agent_id, file_ids, frozen_message.text)
     source = current_unit(local_machine=local_machine, home=home)
     directory = agent_upload_dir(agent_id, create=False, root=upload_root).resolve()
     with write_transaction(pool) as conn:
-        storage.lock_agent(conn, agent_id)
+        lock_agent(conn, agent_id)
         found = _lookup(conn, key, fingerprint)
         if found is not None:
             return found
-        manifest = make_manifest(agent_id, names, batch, key=key)
         target = target_unit(conn, agent_id)
-        storage.check_quota(
-            conn,
-            agent_id,
-            directory,
-            source.machine,
-            sum(item.size for item in manifest.objects),
-            len(manifest.objects),
-            MAX_AGENT_UPLOAD_BYTES,
-            MAX_AGENT_UPLOAD_FILES,
+        staged = claim_for_batch(conn, agent_id, file_ids, unit=source, directory=directory)
+        base_dir = sent_at.strftime("%Y%m%d-%H%M%S")
+        send_dir = send_directory(sent_at, _taken_directories(conn, agent_id, base_dir))
+        names = delivered_names(item.name for item in staged)
+        objects = [
+            Object(
+                ordinal=ordinal,
+                name=name,
+                staged_id=item.file_id,
+                size=item.size,
+                sha256=item.sha256,
+                content_type=item.content_type,
+            )
+            for ordinal, (item, name) in enumerate(zip(staged, names, strict=True))
+        ]
+        manifest = Manifest(
+            batch_id=batch_id,
+            agent_id=agent_id,
+            sent_at=sent_at.isoformat(),
+            directory=send_dir,
+            objects=objects,
+        )
+        acceptance = Acceptance(
+            batch_id=manifest.batch_id,
+            agent_id=agent_id,
+            directory=manifest.directory,
+            files=manifest.objects,
+            status_url=f"/api/keyed/v1/agents/{agent_id}/uploads/{manifest.batch_id}",
         )
         conn.execute(
             "INSERT INTO upload_delivery_batches "
             "(batch_id, operation_key, agent_id, request_hash, manifest, source_unit, target_unit, "
-            "storage_machine, storage_directory, provenance) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "storage_machine, storage_directory, provenance, acceptance, ready_at, state, "
+            "protocol, send_directory, message) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),'pending',%s,%s,%s)",
             (
                 manifest.batch_id,
                 key,
@@ -123,93 +156,43 @@ def _claim(
                         "source_transport": provenance.source_transport,
                     }
                 ),
+                Jsonb(acceptance.model_dump()),
+                PROTOCOL,
+                manifest.directory,
+                Jsonb(frozen_message.model_dump()),
             ),
         )
-        return (
-            fingerprint,
-            manifest.model_dump(),
-            source.model_dump(),
-            target.model_dump(),
-            None,
-            str(directory),
-        )
-
-
-def accept(
-    pool: ConnectionSource,
-    key: str,
-    agent_id: int,
-    names: list[str],
-    batch: list[tuple[str, bytes, str]],
-    provenance: InboundProvenance,
-    *,
-    local_machine: str,
-    home: Path,
-    upload_root: Path,
-) -> Acceptance:
-    claimed = _claim(
-        pool,
-        key,
-        agent_id,
-        names,
-        batch,
-        provenance,
-        local_machine=local_machine,
-        home=home,
-        upload_root=upload_root,
-    )
-    if claimed[4] is not None:
-        return Acceptance.model_validate(claimed[4])
-    if UnitIdentity.model_validate(claimed[2]) != current_unit(
-        local_machine=local_machine, home=home
-    ):
-        raise UploadDeliveryConflictError("receiving source belongs to another native unit")
-    manifest = Manifest.model_validate(claimed[1])
-    directory = agent_upload_dir(agent_id, create=False, root=upload_root).resolve()
-    if str(directory) != claimed[5]:
-        raise UploadDeliveryConflictError("receiving source binds another native physical root")
-    # No DB connection is held across filesystem publication. Fixed namespace and
-    # create-only primitive permit overlapping live writers after DB disconnection.
-    storage.publish(directory, manifest, [item[1] for item in batch])
-    acceptance = Acceptance(
-        batch_id=manifest.batch_id,
-        agent_id=agent_id,
-        files=manifest.objects,
-        status_url=f"/api/keyed/v1/agents/{agent_id}/uploads/{manifest.batch_id}",
-    )
-    with write_transaction(pool) as conn:
-        storage.lock_agent(conn, agent_id)
-        found = _lookup(conn, key, claimed[0])
-        assert found is not None  # noqa: S101 -- retained receiving identity
-        if found[4] is not None:
-            return Acceptance.model_validate(found[4])
-        storage.verify_all(directory, manifest)
         conn.execute(
-            "UPDATE upload_delivery_batches SET acceptance=%s, ready_at=now(), state='pending' "
-            "WHERE operation_key=%s",
-            (Jsonb(acceptance.model_dump()), key),
+            "UPDATE upload_staged_files SET batch_id=%s WHERE file_id = ANY(%s)",
+            (manifest.batch_id, file_ids),
         )
-    return acceptance
+        return acceptance
 
 
 def status(pool: ConnectionSource, agent_id: int, batch_id: str) -> DeliveryStatus:
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT acceptance, state, reason, inbound_id, source_unit, target_unit, attempts, next_attempt_at FROM upload_delivery_batches "
-            "WHERE agent_id=%s AND batch_id=%s",
+            "SELECT batch_id, state, reason, send_directory, message, manifest, inbound_id, "
+            "source_unit, target_unit, attempts, next_attempt_at, protocol "
+            "FROM upload_delivery_batches WHERE agent_id=%s AND batch_id=%s",
             (agent_id, batch_id),
         ).fetchone()
-    if row is None:
+    if row is None or row[11] != PROTOCOL:
         raise AgentNotFound(agent_id)
+    manifest = Manifest.model_validate(row[5])
+    frozen = FrozenMessage.model_validate(row[4])
     return DeliveryStatus(
-        acceptance=None if row[0] is None else Acceptance.model_validate(row[0]),
+        batch_id=row[0],
         state=row[1],
         reason=row[2],
-        inbound_id=row[3],
-        source=UnitIdentity.model_validate(row[4]),
-        target=UnitIdentity.model_validate(row[5]),
-        attempts=row[6],
-        next_attempt_at=row[7] if row[1] == "pending" else None,
+        directory=row[3],
+        message_text=frozen.text,
+        files=manifest.objects,
+        inbound_id=row[6],
+        source=UnitIdentity.model_validate(row[7]),
+        target=UnitIdentity.model_validate(row[8]),
+        attempts=row[9],
+        next_attempt_at=row[10] if row[1] == "pending" else None,
     )
 
 
@@ -221,24 +204,27 @@ def served_object(
     *,
     local_machine: str,
     home: Path,
-) -> tuple[Path, Object]:
+) -> tuple[Path, StagedFile]:
+    unit = current_unit(local_machine=local_machine, home=home)
+    with pool.connection() as conn:
+        return staged_object(conn, agent_id, batch_id, ordinal, unit=unit)
+
+
+def accepted_object(
+    pool: ConnectionSource, agent_id: int, batch_id: str, ordinal: int
+) -> tuple[UnitIdentity, str, Object]:
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT manifest, source_unit, storage_directory FROM upload_delivery_batches "
-            "WHERE agent_id=%s AND batch_id=%s AND ready_at IS NOT NULL",
-            (agent_id, batch_id),
+            "SELECT target_unit, manifest FROM upload_delivery_batches "
+            "WHERE agent_id=%s AND batch_id=%s AND protocol=%s AND state='accepted'",
+            (agent_id, batch_id, PROTOCOL),
         ).fetchone()
-    if row is None or UnitIdentity.model_validate(row[1]) != current_unit(
-        local_machine=local_machine, home=home
-    ):
-        raise UploadDeliveryConflictError("source object is not ready on this native unit")
-    manifest = Manifest.model_validate(row[0])
+    if row is None:
+        raise AgentNotFound(agent_id)
+    manifest = Manifest.model_validate(row[1])
     if not 0 <= ordinal < len(manifest.objects):
         raise UploadDeliveryConflictError("object ordinal is absent from the fixed manifest")
-    item = manifest.objects[ordinal]
-    path = storage.object_path(Path(row[2]), manifest, item)
-    storage.verify(path, item)
-    return path, item
+    return UnitIdentity.model_validate(row[0]), manifest.directory, manifest.objects[ordinal]
 
 
 # meiva:note
@@ -262,18 +248,19 @@ def due(
             "UPDATE upload_delivery_batches SET next_attempt_at=now()+make_interval(secs => %s) "
             "WHERE batch_id IN ("
             "SELECT batch_id FROM upload_delivery_batches "
-            "WHERE state='pending' AND next_attempt_at<=now() AND source_unit=%s "
+            "WHERE state='pending' AND protocol=%s AND next_attempt_at<=now() AND source_unit=%s "
             "ORDER BY next_attempt_at, batch_id LIMIT %s FOR UPDATE SKIP LOCKED"
             ") RETURNING manifest, source_unit, target_unit",
             (
                 claim_seconds,
+                PROTOCOL,
                 Jsonb(current_unit(local_machine=local_machine, home=home).model_dump()),
                 limit,
             ),
         ).fetchall()
     return [
         ReceiveRequest(
-            version=1,
+            version=PROTOCOL,
             manifest=Manifest.model_validate(row[0]),
             source=UnitIdentity.model_validate(row[1]),
             target=UnitIdentity.model_validate(row[2]),
@@ -286,8 +273,8 @@ def validate_pending(pool: ConnectionSource, request: ReceiveRequest) -> bool:
     """Fence known placement changes before copy; final acceptance rechecks under lock."""
     with write_transaction(pool) as conn:
         row = conn.execute(
-            "SELECT state FROM upload_delivery_batches WHERE batch_id=%s FOR UPDATE",
-            (request.manifest.batch_id,),
+            "SELECT state FROM upload_delivery_batches WHERE batch_id=%s AND protocol=%s FOR UPDATE",
+            (request.manifest.batch_id, PROTOCOL),
         ).fetchone()
         if row is None or row[0] != "pending":
             return False
@@ -297,26 +284,21 @@ def validate_pending(pool: ConnectionSource, request: ReceiveRequest) -> bool:
 
 
 def record_failure(pool: ConnectionSource, batch_id: str, reason: str, *, hold: bool) -> str | None:
-    """Record one failed copy attempt; the batch's state afterwards, None when not pending.
-
-    A permanent failure (`hold`) or the `MAX_COPY_ATTEMPTS`th attempt holds the batch, which
-    nothing retries or unseals; otherwise it stays pending behind a linear backoff.
-    """
     with write_transaction(pool) as conn:
         row = conn.execute(
             "UPDATE upload_delivery_batches SET reason=%s, attempts=attempts+1, "
             "state=CASE WHEN %s OR attempts+1 >= %s THEN 'hold' ELSE 'pending' END, "
             "next_attempt_at=now()+interval '30 seconds' * (attempts+1) "
-            "WHERE batch_id=%s AND state='pending' RETURNING state",
-            (reason, hold, MAX_COPY_ATTEMPTS, batch_id),
+            "WHERE batch_id=%s AND protocol=%s AND state='pending' RETURNING state",
+            (reason, hold, MAX_COPY_ATTEMPTS, batch_id, PROTOCOL),
         ).fetchone()
     return None if row is None else row[0]
 
 
 # meiva:note
 # The received files' own namespace inside the agent's workspace:
-# `<target home>/workspaces/<agent id>/<configured name>/.delivered-v1/<batch>/<object>`. The home,
-# the workspaces root, the agent's own directory, the batch and the namespace are all pinned to
+# `<target home>/workspaces/<agent id>/<configured name>/<send directory>/<object>`. The home,
+# the workspaces root, the agent's own directory and the send directory are all pinned to
 # what the batch froze, so a proof can only name a file in the workspace of the machine the batch
 # targets. The one free segment is the delivered-directory name (`MEIVA_UPLOAD_DIR_NAME`): a
 # receiver whose config lags the gateway still delivered a real, readable file, and refusing that
@@ -327,9 +309,8 @@ def _proof_paths(proof: CopyProof, manifest: Manifest, *, home: str) -> list[str
     workspace = PurePosixPath(home) / WORKSPACES_DIR_NAME / str(manifest.agent_id)
     if (
         ".." in native_directory.parts
-        or native_directory.name != manifest.batch_id
-        or native_directory.parent.name != NAMESPACE
-        or native_directory.parent.parent.parent != workspace
+        or native_directory.name != manifest.directory
+        or native_directory.parent.parent != workspace
     ):
         raise UploadDeliveryConflictError(
             "copy proof directory differs from its fixed agent batch namespace"
@@ -339,7 +320,7 @@ def _proof_paths(proof: CopyProof, manifest: Manifest, *, home: str) -> list[str
 
 def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) -> int:
     if (
-        proof.version != 1
+        proof.version != PROTOCOL
         or proof.target != request.target
         or proof.manifest_hash != request.manifest.fingerprint()
     ):
@@ -347,10 +328,10 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
     manifest = request.manifest
     with write_transaction(pool) as conn:
         row = conn.execute(
-            "SELECT inbound_id, target_unit, manifest, provenance, state, source_unit "
+            "SELECT inbound_id, target_unit, manifest, provenance, state, source_unit, message "
             "FROM upload_delivery_batches "
-            "WHERE batch_id=%s AND ready_at IS NOT NULL FOR UPDATE",
-            (manifest.batch_id,),
+            "WHERE batch_id=%s AND protocol=%s AND ready_at IS NOT NULL FOR UPDATE",
+            (manifest.batch_id, PROTOCOL),
         ).fetchone()
         if row is None:
             raise UploadDeliveryConflictError("source acceptance is absent")
@@ -367,37 +348,60 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
         if target_unit(conn, manifest.agent_id) != request.target:
             raise UploadDeliveryConflictError("agent placement changed after upload acceptance")
         paths = _proof_paths(proof, manifest, home=request.target.home)
-        content = (
-            "Uploaded files on "
-            + request.target.machine
-            + ":\n"
-            + "\n".join(
-                f"- {item.filename}: {path}"
+        frozen = FrozenMessage.model_validate(row[6])
+        provenance = InboundProvenance(**row[3])
+        note_content = upload_note(
+            request.target.machine,
+            [
+                (item.name, item.content_type, item.size, path)
                 for item, path in zip(manifest.objects, paths, strict=True)
-            )
+            ],
         )
-        receipt, _ = insert_chat_inbound_in_transaction(
+        upload_files = [
+            {
+                "name": item.name,
+                "size": item.size,
+                "content_type": item.content_type,
+                "path": path,
+                "batch_id": manifest.batch_id,
+                "ordinal": item.ordinal,
+            }
+            for item, path in zip(manifest.objects, paths, strict=True)
+        ]
+        note_receipt, _ = insert_chat_inbound_in_transaction(
             conn,
             agent_id=manifest.agent_id,
-            content=content,
-            # meiva:note
-            # The delivery is framework machinery, not the human speaking: the agent reads it
-            # as a system note. The wake does not depend on the source, so the upload still
-            # reaches the agent.
-            # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+            content=note_content,
             source="system:upload",
+            payload={"upload_files": upload_files},
+            client_message_id=f"upload-delivery-v2:{manifest.batch_id}:note",
+            provenance=provenance,
+        )
+        user_content = frozen.text if frozen.text.strip() else "[files]"
+        user_receipt, _ = insert_chat_inbound_in_transaction(
+            conn,
+            agent_id=manifest.agent_id,
+            content=user_content,
+            source=frozen.source,
             payload=None,
-            client_message_id=f"upload-delivery-v1:{manifest.batch_id}",
-            provenance=InboundProvenance(**row[3]),
+            client_message_id=f"upload-delivery-v2:{manifest.batch_id}:message",
+            provenance=provenance,
         )
         conn.execute(
             "UPDATE upload_delivery_batches SET state='accepted', reason=NULL, inbound_id=%s, "
             "copy_proof=%s, outcome=%s WHERE batch_id=%s",
             (
-                receipt.inbound_id,
+                user_receipt.inbound_id,
                 Jsonb(proof.model_dump()),
-                Jsonb({"inbound_id": receipt.inbound_id, "content": content}),
+                Jsonb(
+                    {
+                        "note_inbound_id": note_receipt.inbound_id,
+                        "message_inbound_id": user_receipt.inbound_id,
+                        "content": note_content,
+                        "message_text": user_content,
+                    }
+                ),
                 manifest.batch_id,
             ),
         )
-        return receipt.inbound_id
+        return user_receipt.inbound_id

@@ -14,6 +14,7 @@ from langchain_core.messages import (
 
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.impersonation.status import ImpersonationMetadata
+from base.agents.messages.inbound_images import kwargs_upload_files
 from base.agents.messages.kwargs import (
     MeivaMessageKwargs,
     MeivaMsgType,
@@ -218,6 +219,7 @@ def _inbound_item(
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
         images=images if images else None,
+        files=kwargs_upload_files(kwargs.get("meiva_upload_files")),
     )
 
 

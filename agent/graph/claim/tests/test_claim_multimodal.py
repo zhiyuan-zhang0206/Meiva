@@ -23,6 +23,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.graph.claim._chat_inbound import build_chat_inbound
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
@@ -338,3 +339,44 @@ def test_inbound_metadata_keeps_arrival_and_adds_pickup_time(
     kw = msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
     assert kw["meiva_created_at"] == arrival.isoformat()
     assert kw["meiva_picked_up_at"] == _PICKED_UP_AT.isoformat()
+
+
+def test_upload_note_inbound_carries_meiva_upload_files() -> None:
+    batch_id = "a" * 32
+    row = ClaimedInbound(
+        id=9,
+        agent_id=7,
+        content="- shot.png (image/png, 812 B): /home/workspaces/7/uploads/20260419-142305/shot.png",
+        kind="chat",
+        source="system:upload",
+        payload={
+            "upload_files": [
+                {
+                    "name": "shot.png",
+                    "size": 812,
+                    "content_type": "image/png",
+                    "path": "/home/workspaces/7/uploads/20260419-142305/shot.png",
+                    "batch_id": batch_id,
+                    "ordinal": 0,
+                }
+            ]
+        },
+        created_at=datetime(2026, 6, 30, 12, 0, 0, tzinfo=UTC),
+    )
+    msg, _ = build_chat_inbound(
+        row,
+        read_security_enabled=lambda: settings.agent.security_scan_enabled,
+        envelope_inputs=_ENVELOPE_INPUTS,
+        expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
+        gateway=_forbidden_gateway,
+        picked_up_at=_PICKED_UP_AT,
+    )
+    kw = read_meiva_kwargs(msg)
+    assert kw.get("meiva_upload_files") == [
+        {
+            "name": "shot.png",
+            "size": 812,
+            "content_type": "image/png",
+            "url": f"/api/agents/7/uploads/{batch_id}/0",
+        }
+    ]

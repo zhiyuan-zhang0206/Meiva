@@ -1,29 +1,27 @@
 """Real native transactions, filesystem faults and guarded delivered-upload consumers."""
 
-import base64
+import hashlib
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from base.agents.messages.inbound_provenance import InboundProvenance
-from base.agents.upload_delivery import source
+from base.agents.upload_delivery import source, staging
 from base.agents.upload_delivery.models import (
-    NAMESPACE,
+    PROTOCOL,
     CopyProof,
     ReceiveRequest,
     UnitIdentity,
     UploadDeliveryConflictError,
     current_unit,
 )
-from base.agents.upload_delivery.paths import delivered_upload_dir, fetch_upload_b64
+from base.agents.upload_delivery.paths import delivered_upload_dir, staged_path
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import WORKSPACES_DIR_NAME, resolve_meiva_home
@@ -58,6 +56,7 @@ def uploaded_agent(
     *,
     machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
+    del default_home
     unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     agent = seed_agent(db_conn)
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
@@ -77,7 +76,7 @@ def uploaded_agent(
             client.app.state.gateway_access, gateway_url=source_url
         )
         receive = receiver_op(client, receiver_for(client, unit))
-        with runner_ops(db_conn, unit.machine, {"upload-receive-v1": receive}) as runner:
+        with runner_ops(db_conn, unit.machine, {"upload-receive-v2": receive}) as runner:
             db_conn.execute(
                 "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
                 "VALUES (%s,%s,true,%s)",
@@ -127,6 +126,22 @@ def recovery_for(client: GatewayTestClient, machine: MachineIdentityReader) -> U
     )
 
 
+def stage(
+    client: TestClient,
+    agent: int,
+    *,
+    key: str = "stage-intent",
+    data: bytes = b"bytes",
+    name: str = "photo.png",
+    content_type: str = "image/png",
+):
+    return client.post(
+        f"/api/keyed/v1/agents/{agent}/uploads/staged",
+        headers={**HEADERS, "Idempotency-Key": key},
+        files={"file": (name, data, content_type)},
+    )
+
+
 def post(
     client: TestClient,
     agent: int,
@@ -134,11 +149,29 @@ def post(
     key: str = "intent",
     data: bytes = b"bytes",
     name: str = "photo.png",
+    content_type: str = "image/png",
+    text: str = "here are the files",
+    file_ids: list[str] | None = None,
 ):
+    if file_ids is None:
+        digest = hashlib.sha256(name.encode("utf-8", errors="replace") + b":" + data).hexdigest()[
+            :12
+        ]
+        staged_resp = stage(
+            client,
+            agent,
+            key=f"stage-{key}-{digest}",
+            data=data,
+            name=name,
+            content_type=content_type,
+        )
+        if staged_resp.status_code != 201:
+            return staged_resp
+        file_ids = [staged_resp.json()["file_id"]]
     return client.post(
         f"/api/keyed/v1/agents/{agent}/uploads",
         headers={**HEADERS, "Idempotency-Key": key},
-        files=[("files", (name, data, "image/png"))],
+        json={"file_ids": file_ids, "text": text},
     )
 
 
@@ -163,8 +196,8 @@ def request_for(pool: ConnectionPool, batch_id: str, *, local_machine: str) -> R
 
 
 # meiva:note
-# The proof a receiver on `request.target` returns: the batch's namespace inside that agent's own
-# workspace on the target machine, named by the cluster's configured directory name.
+# The proof a receiver on `request.target` returns: the batch's send directory inside that agent's
+# own workspace on the target machine, named by the cluster's configured directory name.
 def proof_for(client: GatewayTestClient, request: ReceiveRequest) -> CopyProof:
     path = delivered_upload_dir(
         request.manifest.agent_id,
@@ -173,10 +206,10 @@ def proof_for(client: GatewayTestClient, request: ReceiveRequest) -> CopyProof:
         create=False,
     ).resolve()
     return CopyProof(
-        version=1,
+        version=PROTOCOL,
         target=request.target,
         manifest_hash=request.manifest.fingerprint(),
-        directory=str(path / ".delivered-v1" / request.manifest.batch_id),
+        directory=str(path / request.manifest.directory),
     )
 
 
@@ -194,7 +227,7 @@ def test_lost_response_replay_retains_original_notification_after_deletion(
     proof = proof_for(client, request)
     iid = source.complete(client.app.state.db_pool, request, proof)
     assert source.complete(client.app.state.db_pool, request, proof) == iid
-    db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (iid,))
+    db_conn.execute("DELETE FROM inbound_messages WHERE agent_id=%s", (agent,))
     db_conn.execute("DELETE FROM agents_meta WHERE id=%s", (agent,))
     db_conn.execute("DELETE FROM agent_lifecycle_intervals WHERE agent_id=%s", (agent,))
     db_conn.execute("DELETE FROM agents WHERE id=%s", (agent,))
@@ -215,7 +248,14 @@ def test_changed_manifest_and_invalid_guard_have_no_effect(
     client, agent = uploaded_agent
     assert post(client, agent).status_code == 202
     assert post(client, agent, data=b"changed").status_code == 409
-    assert post(client, agent, key="invalid", name="bad.unsafe%url").status_code == 422
+    assert (
+        client.post(
+            f"/api/keyed/v1/agents/{agent}/uploads",
+            headers={**HEADERS, "Idempotency-Key": "invalid"},
+            json={"file_ids": [], "text": ""},
+        ).status_code
+        == 422
+    )
     for headers in (
         {},
         {"Idempotency-Key": "x"},
@@ -226,7 +266,7 @@ def test_changed_manifest_and_invalid_guard_have_no_effect(
             client.post(
                 f"/api/keyed/v1/agents/{agent}/uploads",
                 headers=headers,
-                files=[("files", ("f", b"x"))],
+                json={"file_ids": ["0" * 32], "text": ""},
             ).status_code
             == 422
         )
@@ -244,31 +284,32 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
 ):
     client, agent = uploaded_agent
     # meiva:note
-    # The files are durable and fsynced, then the batch's ready write fails: the response is lost.
-    with failing_update(db_conn, "upload_delivery_batches", message="fault after source fsync"):
-        assert post(client, agent).status_code == 500
-        assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == (
-            "receiving",
-        )
+    # The file is durable and fsynced in staging, then the staged row's ready write fails.
+    with failing_update(db_conn, "upload_staged_files", message="fault after staged fsync"):
+        assert stage(client, agent, key="stage-fault").status_code == 500
+        assert db_conn.execute("SELECT state FROM upload_staged_files").fetchone() == ("receiving",)
 
     def recover(_index: int):
-        return source.accept(
+        return staging.stage(
             client.app.state.db_pool,
             "direct",
             agent,
-            ["f.png"],
-            [("f.png", b"native", "image/png")],
-            InboundProvenance("cluster_bearer", "http"),
+            raw_name="f.png",
+            data=b"native",
+            content_type="image/png",
+            file_id="0" * 32,
             local_machine=machine_identity.name(),
             home=resolve_meiva_home(),
             upload_root=client.app.state.gateway_config.upload_staging_root,
+            max_bytes=client.app.state.gateway_config.max_agent_upload_bytes,
+            max_files=client.app.state.gateway_config.max_agent_upload_files,
         )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         values = list(executor.map(recover, range(2)))
     assert values[0] == values[1]
-    assert post(client, agent).status_code == 202
-    assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (2,)
+    assert stage(client, agent, key="stage-fault").status_code == 201
+    assert db_conn.execute("SELECT count(*) FROM upload_staged_files").fetchone() == (2,)
 
 
 def test_placement_or_bad_proof_rejected_before_inbound(
@@ -364,32 +405,26 @@ def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
     assert path.read_bytes() == b"bytes"
 
 
-def test_silent_admission_counts_hidden_files_and_receiving_reservation(
+def test_staged_admission_enforces_agent_quota(
     uploaded_agent: tuple[GatewayTestClient, int],
 ):
     client, agent = uploaded_agent
-    assert post(client, agent).status_code == 202
+    assert stage(client, agent, key="first-stage", data=b"bytes").status_code == 201
     small = replace(client.app.state.gateway_config, max_agent_upload_bytes=5)
     with gateway_test_client(
         process=client.app.state.gateway_process, config=small, raise_server_exceptions=False
     ) as limited:
-        response = limited.post(
-            f"/api/agents/{agent}/uploads",
-            headers={**HEADERS, "Idempotency-Key": "silent"},
-            files=[("files", ("flat", b"x"))],
-        )
+        response = stage(limited, agent, key="second-stage", data=b"x")
     assert response.status_code == 413
 
 
 def test_name_byte_budget_includes_atomic_primitive_temporary_name(
-    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
+    uploaded_agent: tuple[GatewayTestClient, int],
 ):
     client, agent = uploaded_agent
-    rejected = post(client, agent, name="x." + "a" * 184)
-    assert rejected.status_code == 422
-    assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (0,)
-    accepted = post(client, agent, name="x." + "a" * 182)
+    accepted = post(client, agent, key="max-len", name="a" * 300 + ".png")
     assert accepted.status_code == 202, accepted.text
+    assert accepted.json()["files"][0]["name"].endswith(".png")
     assert len(accepted.json()["files"][0]["name"].encode()) == 217
     assert client.get(accepted.json()["status_url"] + "/objects/0").content == b"bytes"
 
@@ -407,7 +442,7 @@ def test_completed_receipt_rejects_different_immutable_intent(
     iid = source.complete(client.app.state.db_pool, request, proof_for(client, request))
     raw = request.model_dump()
     if changed == "manifest":
-        raw["manifest"]["objects"][0]["filename"] = "different-display.png"
+        raw["manifest"]["objects"][0]["name"] = "different-display.png"
     else:
         raw[changed]["home"] += "-different"
     changed_request = ReceiveRequest.model_validate(raw)
@@ -425,13 +460,16 @@ def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers
 
     client, agent = uploaded_agent
     name = "original display café.html"
-    response = client.post(
-        f"/api/keyed/v1/agents/{agent}/uploads",
-        headers=HEADERS,
-        files=[("files", (name, b"<script>bad()</script>", "text/html"))],
+    response = post(
+        client,
+        agent,
+        key="html-upload",
+        name=name,
+        data=b"<script>bad()</script>",
+        content_type="text/html",
     )
     assert response.status_code == 202, response.text
-    assert response.json()["files"][0]["filename"] == name
+    assert response.json()["files"][0]["name"] == name
     served = client.get(response.json()["status_url"] + "/objects/0")
     assert served.status_code == 200
     assert served.headers["content-type"] == "text/html; charset=utf-8"
@@ -496,8 +534,7 @@ def delivered_copy(
 
 # meiva:note
 # Acceptance: a delivered attachment lands inside the agent's own workspace and the notice the
-# agent reads names that path. The bytes the gateway received stay in staging, which is not a
-# user-visible folder and is never what the agent is pointed at.
+# agent reads names that path. The bytes the gateway received stay in staging until released.
 def test_a_delivered_upload_lands_in_the_agents_own_workspace(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
@@ -521,16 +558,19 @@ def test_a_delivered_upload_lands_in_the_agents_own_workspace(
     )
 
     iid = source.complete(client.app.state.db_pool, request, proof)
-    row = db_conn.execute("SELECT content FROM inbound_messages WHERE id=%s", (iid,)).fetchone()
-    assert row is not None
-    assert str(copy) in row[0]
+    rows = db_conn.execute(
+        "SELECT id, source, content FROM inbound_messages WHERE agent_id=%s ORDER BY id",
+        (agent,),
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0][1] == "system:upload"
+    assert str(copy) in rows[0][2]
+    assert rows[1] == (iid, "user", "here are the files")
 
     staged = source.agent_upload_dir(
         agent, create=False, root=client.app.state.gateway_config.upload_staging_root
     )
-    assert (
-        staged / NAMESPACE / request.manifest.batch_id / request.manifest.objects[0].name
-    ).read_bytes() == b"bytes"
+    assert staged_path(staged, request.manifest.objects[0].staged_id).read_bytes() == b"bytes"
 
 
 # meiva:note
@@ -559,7 +599,7 @@ def test_a_proof_outside_the_workspace_root_is_refused(
     elsewhere = (
         Path(*(p if p != WORKSPACES_DIR_NAME else "not-workspaces" for p in parts))
         if shape == "not-the-workspace-root"
-        else Path(*parts[:-3], "..", *parts[-2:])
+        else Path(*parts[:-2], "..", parts[-1])
     )
     with pytest.raises(UploadDeliveryConflictError, match="fixed agent batch namespace"):
         source.complete(
@@ -572,7 +612,7 @@ def test_a_proof_outside_the_workspace_root_is_refused(
 
 # meiva:note
 # Acceptance: uploading the same file name twice keeps both copies. Each batch is published
-# create-only into its own namespace directory, so the newer upload never replaces the older one.
+# create-only into its own timestamped send directory, so the newer upload never replaces the older one.
 def test_the_same_file_name_uploaded_twice_keeps_both_copies(
     uploaded_agent: tuple[GatewayTestClient, int],
     *,
@@ -594,33 +634,33 @@ def test_the_same_file_name_uploaded_twice_keeps_both_copies(
     assert [path.read_bytes() for path in copies] == [b"first", b"second"]
 
 
-# meiva:note
-# The silent image lane still works after the move: the bytes are served back at the url the
-# upload returned, and nothing is written into the agent's workspace — the claim node fetches
-# them over HTTP and never reads the gateway's disk.
-def test_a_silent_image_upload_is_served_from_its_url_and_not_delivered(
+def test_staged_file_discard_and_conflict_when_batch_pending(
     uploaded_agent: tuple[GatewayTestClient, int],
-    *,
-    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    image = b"\x89PNG\r\n\x1a\n" + b"pixels"
-    saved = client.post(
-        f"/api/agents/{agent}/uploads",
-        headers=HEADERS,
-        files=[("files", ("shot.png", image, "image/png"))],
+    draft = stage(client, agent, key="draft-discard", data=b"draft").json()
+    delete_resp = client.delete(f"/api/keyed/v1/agents/{agent}/uploads/staged/{draft['file_id']}")
+    assert delete_resp.status_code == 204
+    assert (
+        client.delete(f"/api/keyed/v1/agents/{agent}/uploads/staged/{draft['file_id']}").status_code
+        == 204
     )
-    assert saved.status_code == 200, saved.text
-    stored = saved.json()["files"][0]
-    name = Path(stored["url"]).name
 
-    with (
-        serving_gateway(client, client.app.state.db_pool) as source_url,
-        httpx.Client(base_url=source_url) as http,
-    ):
-        mime, b64 = fetch_upload_b64(agent, name, client=lambda: http)
-
-    assert mime == "image/png"
-    assert base64.standard_b64decode(b64) == image
-    unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
-    assert not delivered_copy(client, unit, agent).exists()
+    claimed = stage(client, agent, key="draft-claimed", data=b"claimed").json()
+    sent = post(client, agent, key="send-claimed", file_ids=[claimed["file_id"]])
+    assert sent.status_code == 202
+    assert (
+        client.delete(
+            f"/api/keyed/v1/agents/{agent}/uploads/staged/{claimed['file_id']}"
+        ).status_code
+        == 409
+    )
+    source.record_failure(
+        client.app.state.db_pool, sent.json()["batch_id"], "receiver-gone", hold=True
+    )
+    assert (
+        client.delete(
+            f"/api/keyed/v1/agents/{agent}/uploads/staged/{claimed['file_id']}"
+        ).status_code
+        == 204
+    )

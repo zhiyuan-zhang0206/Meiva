@@ -7,12 +7,13 @@ tags: [gateway, uploads]
 
 # Delivered upload acceptance and recovery
 
-`POST /api/keyed/v1/agents/{id}/uploads` requires a verified credential, explicit
-`principal-v1` and caller `Idempotency-Key`. It promises at most one user chat, only
-**after** confirmed copy, and only within a bounded number of copy attempts: a batch
-that cannot be copied is held and the person uploads again. Browser file delivery uses this route with one key per
-submission; silent native-image attachments use the separate keyed
-`POST /api/agents/{id}/uploads`, which never notifies the agent.
+`POST /api/keyed/v1/agents/{id}/uploads` accepts `{"file_ids": [...], "text": "..."}`
+(or multipart files) with a verified credential, explicit `principal-v1` and caller
+`Idempotency-Key`. It promises at most one `system:upload` delivery inbound (plus
+one companion `user` inbound when `text` is non-empty), only **after** confirmed
+copy, and only within a bounded number of copy attempts: a batch that cannot be
+copied is held. Per-file staging (`/uploads/staged`) is owned by
+[source publication](source-publication.meiva.okf.md).
 SDK/MCP callers are not activated. Agent IDs must be
 positive signed BIGINT values, validated before native storage or database work.
 
@@ -93,15 +94,14 @@ is not automatically unsealed by another overlapping worker.
 
 For pending delivery, the transaction locks current agent/placement and matching
 registered unit, then calls `insert_chat_inbound_in_transaction` with fixed
-batch-derived ID, source `system:upload` (the delivery is framework machinery,
-so the agent reads the file list as a system note, not as the human speaking)
-and frozen verified provenance. Original
+batch-derived ID, source `system:upload` (`meiva_uploaded_files` metadata) and,
+when `message_text` is non-empty, `{batch_id}:text` with source `user`. Original
 IID, copy proof and delivery outcome commit in the same transaction. Rollback
 creates neither acceptance nor chat; lost commit response recovers the original
 outcome. No mutable-target FK or TTL deletes this evidence.
 
 Authenticated `.../uploads/{batch}` projects receiving/pending/accepted/HOLD,
-frozen source/target, attempts, next retry, safe failure reason and retained IID.
+`directory`, `message_text`, `files`, frozen source/target, attempts, next retry, safe failure reason and retained IID.
 Accepted means chat acceptance, not execution. A receiver outage is retried until the
 third failed copy, which HOLDs the batch; unsupported protocol, native conflict/quota,
 missing source or changed/deleted placement HOLD at once. Every HOLD is visible in the

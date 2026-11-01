@@ -7,7 +7,7 @@ from gateway.upload_delivery.failure_plan import CopyFailure, receiver_failure, 
 
 
 def test_a_runner_without_the_receive_op_holds_the_batch() -> None:
-    result = {"error": "unknown kind: 'upload-receive-v1'"}
+    result = {"error": "unknown kind: 'upload-receive-v2'"}
     assert receiver_failure(result) == CopyFailure("unsupported-receiver", hold=True)
 
 

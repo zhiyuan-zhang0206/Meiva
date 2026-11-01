@@ -30,10 +30,6 @@ from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
 from ops.rpc_schemas.content import UserContent
 from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
-from ops.rpc_schemas.messages import ContentBlock as ContentBlock
-from ops.rpc_schemas.messages import ImageUrlContentBlock as ImageUrlContentBlock
-from ops.rpc_schemas.messages import ImageUrlRef as ImageUrlRef
-from ops.rpc_schemas.messages import TextContentBlock as TextContentBlock
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
 from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
@@ -371,7 +367,7 @@ OpKind = Literal[
     "shell_capture",
     "schedule_capture",
     "harness_probe",
-    "upload-receive-v1",
+    "upload-receive-v2",
     "to_user_read",
     "workspace_transfer_prepare",
     "workspace_transfer_import",

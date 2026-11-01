@@ -8,7 +8,7 @@ import type { ComponentProps, ComponentType } from "react";
 import type { AgentSidebar as AgentSidebarComponent } from "@/components/agent-sidebar";
 import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
-import type { Composer as ComposerComponent } from "@/components/conversation/composer";
+import type { Composer as ComposerComponent, StageQueueBatch } from "@/components/conversation/composer";
 import { PendingStrip } from "@/components/conversation/pending-strip";
 import type { UploadButton as UploadButtonComponent } from "@/components/conversation/upload-button";
 import type { SharedContextPanel as ContextPanelComponent } from "@/components/context/shared-context-panel";
@@ -22,7 +22,7 @@ import type { useAgents } from "@/lib/agents/use-agents";
 import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
 import { useReplySuggestion } from "@/lib/composer/use-reply-suggestion";
 import { useToUser } from "@/lib/context/use-to-user";
-import type { AgentRow, ContentBlock } from "@/lib/contracts/types";
+import type { AgentRow, DeliveredUploadStatus } from "@/lib/contracts/types";
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
 import type { Harness } from "@/lib/harness/harness";
@@ -357,32 +357,20 @@ function HomeContent({
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_px"]);
 
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadCount, setUploadCount] = useState(0);
+  const stageSeqRef = useRef(0);
+  const [stageQueue, setStageQueue] = useState<StageQueueBatch | null>(null);
+  const [deliveringBatch, setDeliveringBatch] = useState<DeliveredUploadStatus | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const uploadHandler = useCallback(
-    async (files: File[]) => {
-      if (activeId == null || files.length === 0) return;
-      setUploading(true);
-      setUploadProgress(0);
-      setUploadCount(files.length);
+    (files: File[]): Promise<void> => {
+      if (activeId == null || files.length === 0) return Promise.resolve();
       setUploadError(null);
-      try {
-        // meiva:note
-        // The upload's idempotency key comes from the transport this page was handed: which origin
-        // can mint one (crypto.randomUUID, or random bytes on plain HTTP) is the transport's
-        // business, and a test that needs the fallback answers `newOperationKey` itself instead of
-        // replacing the page's `crypto`.
-        await client.submitUploadedFiles(activeId, files, client.newOperationKey(), setUploadProgress);
-      } catch (e: unknown) {
-        setUploadError(errMsg(e));
-      } finally {
-        setUploading(false);
-      }
+      stageSeqRef.current += 1;
+      setStageQueue({ seq: stageSeqRef.current, files });
+      return Promise.resolve();
     },
-    [activeId, client],
+    [activeId],
   );
 
   const {
@@ -410,19 +398,12 @@ function HomeContent({
   const handleSend = useCallback(
     async (
       content: string,
-      imageUrls: string[],
+      _fileIds: string[],
       clientMessageId: string,
     ): Promise<boolean> => {
       if (activeId == null) return false;
       try {
-        if (imageUrls.length === 0) {
-          await client.sendMessage(activeId, content, clientMessageId);
-        } else {
-          const blocks: ContentBlock[] = [];
-          if (content) blocks.push({ type: "text", text: content });
-          for (const u of imageUrls) blocks.push({ type: "image_url", image_url: { url: u } });
-          await client.sendMessage(activeId, blocks, clientMessageId);
-        }
+        await client.sendMessage(activeId, content, clientMessageId);
         timelineStore.requestScrollToBottom();
         return true;
       } catch (e: unknown) {
@@ -437,13 +418,12 @@ function HomeContent({
     [activeId, client, showError, timelineStore, t],
   );
 
-  const attachImage = useCallback(
-    async (file: File): Promise<string> => {
-      if (activeId == null) throw new Error("no active agent");
-      const batch = await client.uploadFiles(activeId, [file]);
-      return batch.files[0].url;
+  const handleUploadError = useCallback(
+    (msg: string) => {
+      setUploadError(msg);
+      showError(`Upload failed: ${msg}`);
     },
-    [activeId, client],
+    [showError],
   );
 
   const handleStop = useCallback(async () => {
@@ -523,7 +503,11 @@ function HomeContent({
             {contextAvailable && <ContextPanelToggle open={false} onToggle={openContext} />}
           </HeaderBar>
           <div className="relative z-20 bg-background">
-            <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
+            <PendingStrip
+              items={visiblePendingMessages}
+              deliveringBatch={deliveringBatch}
+              maxWidthCss={composerMaxWidth}
+            />
             {activeAgent?.harness === "meiva" && activeAgent.supports_vision === null && (
               <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
                 {t("modelCapabilitiesUnavailable")}
@@ -535,9 +519,10 @@ function HomeContent({
               mode={composerMode}
               onSend={handleSend}
               onStop={handleStop}
-              onUploadFiles={uploadHandler}
-              onAttachImage={activeAgent?.harness === "meiva" && activeAgent.supports_vision === true ? attachImage : undefined}
-              filesUploading={uploading}
+              stageQueue={stageQueue}
+              onDeliveringBatchChange={setDeliveringBatch}
+              onUploadSent={() => timelineStore.requestScrollToBottom()}
+              onUploadError={handleUploadError}
               focusToken={store.composerFocusToken}
               contextTokens={contextTokens}
               maxContextTokens={maxContextTokens}
@@ -552,9 +537,9 @@ function HomeContent({
               <UploadButton
                 agentId={activeId}
                 onUpload={uploadHandler}
-                uploading={uploading}
-                progress={uploadProgress}
-                count={uploadCount}
+                uploading={false}
+                progress={0}
+                count={0}
                 error={uploadError}
               />
             </Composer>

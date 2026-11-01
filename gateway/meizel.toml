@@ -14,7 +14,7 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 "routers" = ["agents", "extensions", "http", "lgtm", "schemas"]
 "schedules" = ["agents", "http", "routers"]
 "tests" = ["agents", "app.py", "cluster", "events", "extensions", "http", "lgtm", "routers", "schedules", "schemas", "upload_delivery"]
-"upload_delivery" = ["agents", "http", "routers"]
+"upload_delivery" = ["agents", "http"]
 
 [purity]
 "__init__.py" = "strict"

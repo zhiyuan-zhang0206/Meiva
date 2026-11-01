@@ -239,6 +239,7 @@ export function makeItem(
     exec_ms: overrides.exec_ms,
     impersonation: overrides.impersonation,
     images: overrides.images ?? null,
+    files: overrides.files ?? null,
     image_captions: overrides.image_captions ?? null,
     sdk_calls: overrides.sdk_calls,
   };

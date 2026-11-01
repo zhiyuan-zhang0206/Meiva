@@ -8,7 +8,16 @@ export interface KeySource {
 
 export type UploadRequest = Pick<
   XMLHttpRequest,
-  "open" | "setRequestHeader" | "send" | "status" | "responseText" | "withCredentials" | "onload" | "onerror"
+  | "open"
+  | "setRequestHeader"
+  | "send"
+  | "abort"
+  | "status"
+  | "responseText"
+  | "withCredentials"
+  | "onload"
+  | "onerror"
+  | "onabort"
 > & { upload: Pick<XMLHttpRequestUpload, "addEventListener"> };
 
 // meiva:note

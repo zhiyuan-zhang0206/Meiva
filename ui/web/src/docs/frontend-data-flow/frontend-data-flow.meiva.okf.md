@@ -15,14 +15,13 @@ Draft entry acceptance: [[draft-agents.meiva.okf.md]].
 
 ## Submitted uploads
 
-Ordinary file delivery submits one batch/key to
-`POST /api/keyed/v1/agents/{id}/uploads` with `principal-v1`. The upload ends after
-the matching 202 source receipt, before remote copy or agent execution; the
-Gateway recovery owner continues delivery. Byte progress is transport progress.
-`transport/gateway/upload-delivery.ts` rejects old/malformed receipts without resending
-or falling back. No client Outbox or retry UI is added. Silent native-image
-attachments use `api.uploadFiles`, which sends a fresh `Idempotency-Key` with
-`principal-v1` per call to the keyed silent-save route and returns the saved URLs.
+Selected, pasted or dropped files (including images) stage immediately via
+`POST /api/keyed/v1/agents/{id}/uploads/staged` (`principal-v1`, per-file key;
+removable via `DELETE .../uploads/staged/{file_id}`). Submitting sends
+`POST /api/keyed/v1/agents/{id}/uploads` (`{"file_ids": [...], "text": "..."}`),
+validates the 202 receipt in `transport/gateway/upload-delivery.ts`, and polls
+`GET .../uploads/{batch_id}` (persisted per agent in `sessionStorage`) until
+`accepted` or `hold` (which offers Restore or Retry).
 
 ## Stream ownership (`lib/transport/stream/sse-share.ts`)
 

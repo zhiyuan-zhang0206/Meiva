@@ -19,8 +19,10 @@ re-read the checkpoint before an async commit landed and missed the
 just-claimed inbound. `TimelineItem` lives in `timeline_item.py` (file line
 budget); this module re-exports it.
 
-Inbound and attach messages render text only: a multimodal inbound's base64
-image blocks are dropped (thumbnails ride on `meiva_image_urls`); an attach's
+Inbound and attach messages render text only: a historical multimodal inbound's
+base64 image blocks are dropped (thumbnails ride on `meiva_image_urls`), while
+delivered upload batches (`system:upload`) carry structured file metadata on
+`meiva_uploaded_files` (projected as `TimelineItem.files`); an attach's
 data-URI images ride on `images` with per-image captions. The system prompt is
 item 0, `created_at=None`. A compact item prefixes the payload with the
 wall-clock ts when the timestamp policy is on and carries the producing run as

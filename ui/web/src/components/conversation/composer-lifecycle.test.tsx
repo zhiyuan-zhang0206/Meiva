@@ -211,7 +211,7 @@ describe("Composer input lifecycle", () => {
         clientMessageId: "stale-client-id",
         agentId,
         content: "stale body",
-        imageUrls: [],
+        fileIds: [],
       }),
     );
     expect(persistentStorage.getItem(attemptKey)).toContain("stale-client-id");
@@ -296,14 +296,12 @@ describe("Composer input lifecycle", () => {
     const onSend = vi.fn(
       () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
     );
-    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/new.png"));
     renderComposerTree(
       <Composer
         {...baseProps}
         mode="idle"
         agentId={7}
         onSend={onSend}
-        onAttachImage={onAttachImage}
       />,
     );
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
@@ -321,7 +319,7 @@ describe("Composer input lifecycle", () => {
     fireEvent.drop(screen.getByTestId("composer"), {
       dataTransfer: { files: [image], types: ["Files"] },
     });
-    expect(onAttachImage).not.toHaveBeenCalled();
+    expect(transport.stageUploadFile).not.toHaveBeenCalled();
     resolveSend(true);
     await waitFor(() => expect(ta.value).toBe("later edit"));
     expect(screen.queryByRole("button", { name: "Sending" })).toBeNull();

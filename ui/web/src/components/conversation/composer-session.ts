@@ -1,20 +1,22 @@
 // meiva:note
-// One session owner retains the composer's drafts and submit identity: the page's
-// session storage when it has it, and this page view's memory when it does not, so
-// a refused storage costs the draft at the next visit rather than the draft now.
+// One session owner retains the composer's drafts, submit identity, and active upload
+// batch: the page's session storage when it has it, and this page view's memory when
+// it does not, so a refused storage costs the draft at the next visit rather than the
+// draft now.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import type { BrowserStorage } from "@/lib/browser/browser";
 
 export const draftKey = (id: number) => `composer-draft-${id}`;
 export const sendAttemptKey = (id: number) => `composer-send-attempt-${id}`;
+export const activeUploadBatchKey = (id: number) => `composer-upload-batch-${id}`;
 
 export interface SendAttempt {
   signature: string;
   clientMessageId: string;
   agentId: number | null;
   content: string;
-  imageUrls: string[];
+  fileIds: string[];
 }
 
 export function isAttempt(attempt: SendAttempt | null, clientMessageId: string): boolean {
@@ -54,6 +56,23 @@ export function removeSession(session: BrowserStorage, key: string): void {
   memorySession.set(key, null);
 }
 
+export function readActiveUploadBatch(session: BrowserStorage, agentId: number): string | null {
+  const raw = readSession(session, activeUploadBatchKey(agentId));
+  return raw !== null && /^[0-9a-f]{32}$/.test(raw) ? raw : null;
+}
+
+export function writeActiveUploadBatch(
+  session: BrowserStorage,
+  agentId: number,
+  batchId: string,
+): void {
+  writeSession(session, activeUploadBatchKey(agentId), batchId);
+}
+
+export function clearActiveUploadBatch(session: BrowserStorage, agentId: number): void {
+  removeSession(session, activeUploadBatchKey(agentId));
+}
+
 // meiva:note
 // A stored attempt is a plain JSON value until this proves its shape — every field `SendAttempt`
 // declares, `agentId` included — so the reader returns a value it has checked rather than a cast of
@@ -70,9 +89,9 @@ function isSendAttempt(value: unknown): value is SendAttempt {
     (typeof value.agentId === "number" || value.agentId === null) &&
     "content" in value &&
     typeof value.content === "string" &&
-    "imageUrls" in value &&
-    Array.isArray(value.imageUrls) &&
-    value.imageUrls.every((url) => typeof url === "string")
+    "fileIds" in value &&
+    Array.isArray(value.fileIds) &&
+    value.fileIds.every((id) => typeof id === "string")
   );
 }
 
@@ -94,10 +113,10 @@ export function resolveSendAttempt(
   current: SendAttempt | null,
   sendingAgentId: number | null,
   content: string,
-  imageUrls: string[],
+  fileIds: string[],
   mintClientMessageId: () => string,
 ): SendAttempt {
-  const signature = JSON.stringify([sendingAgentId, content, imageUrls]);
+  const signature = JSON.stringify([sendingAgentId, content, fileIds]);
   let candidate = current;
   if (candidate?.signature !== signature && sendingAgentId != null) {
     const persisted = readSendAttempt(session, sendingAgentId);
@@ -110,6 +129,6 @@ export function resolveSendAttempt(
         clientMessageId: mintClientMessageId(),
         agentId: sendingAgentId,
         content,
-        imageUrls: [...imageUrls],
+        fileIds: [...fileIds],
       };
 }

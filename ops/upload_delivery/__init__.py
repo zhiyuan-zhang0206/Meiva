@@ -16,11 +16,12 @@ from typing import assert_never
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
-from base.agents.upload_delivery import storage
+from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import (
-    NAMESPACE,
+    PROTOCOL,
     CopyProof,
     Manifest,
+    ObjectReadRequest,
     ReceiveRequest,
     UploadDeliveryConflictError,
 )
@@ -39,7 +40,7 @@ from ops.upload_delivery.copy_plan import (
     plan_objects,
 )
 
-__all__ = ["ReceiverConfig", "copy_batch"]
+__all__ = ["ReceiverConfig", "copy_batch", "read_delivered_object"]
 
 
 # meiva:note
@@ -92,11 +93,32 @@ def copy_batch(
             (manifest.batch_id, config.unit.machine, config.unit.home),
         )
     return CopyProof(
-        version=1,
+        version=PROTOCOL,
         target=config.unit,
         manifest_hash=manifest.fingerprint(),
-        directory=str(directory / NAMESPACE / manifest.batch_id),
+        directory=str(directory / manifest.directory),
     )
+
+
+def read_delivered_object(
+    pool: ConnectionSource, request: ObjectReadRequest, config: ReceiverConfig
+) -> tuple[bytes, str]:
+    target, send_directory, item = source.accepted_object(
+        pool, request.agent_id, request.batch_id, request.ordinal
+    )
+    if target != config.unit:
+        raise UploadDeliveryConflictError("delivered upload belongs to another native unit")
+    directory = delivered_upload_dir(
+        request.agent_id,
+        home=Path(config.unit.home),
+        name=config.upload_dir_name,
+        create=False,
+    ).resolve()
+    path = directory / send_directory / item.name
+    if path.resolve().parent != (directory / send_directory):
+        raise UploadDeliveryConflictError("delivered upload escapes its native root")
+    storage.verify(path, item)
+    return path.read_bytes(), item.content_type
 
 
 def _reserve(

@@ -50,6 +50,7 @@ from gateway.tests.support.runner_ops.ops_stub import OpsCall, RunnerOps, regist
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, in_flight
 from services.agent_runner.agent_ops.daemon import ops_route
+from services.agent_runner.agent_ops.upload_object import upload_object_route
 from services.agent_runner.agent_ops.workspace_export import workspace_export_route
 
 __all__ = ["ExecutedOp", "executed_ops", "local_runner"]
@@ -150,6 +151,7 @@ async def _serve(
     executor = boot.op_thread_pool(authority=authority)
     home = resolve_meiva_home() if unit_home is None else unit_home.resolve()
     sem = asyncio.Semaphore(authority.service_field_value("ops_concurrency"))
+    receiver = _receiver_of(machine.name(), home, gateway_access)
     route = functools.partial(
         ops_route,
         active_ops={},
@@ -166,7 +168,7 @@ async def _serve(
         host=host,
         rng=seeded_rng(),
         home=home,
-        receiver=_receiver_of(machine.name(), home, gateway_access),
+        receiver=receiver,
         agent_host=ServiceEndpoints.from_fields(get_field, runtime=run_dir(home)).of("agent_host"),
     )
     export_route = functools.partial(
@@ -174,6 +176,15 @@ async def _serve(
         pool=pool,
         machine=machine.name(),
         home=home,
+        executor=executor,
+        dispatch_sem=sem,
+        requests=requests,
+        workers=workers,
+    )
+    object_route = functools.partial(
+        upload_object_route,
+        pool=pool,
+        receiver=receiver,
         executor=executor,
         dispatch_sem=sem,
         requests=requests,
@@ -202,6 +213,7 @@ async def _serve(
         extra_routes={
             ("POST", "/ops"): recorded,
             ("POST", "/workspace/export"): export_route,
+            ("POST", "/upload-delivery/object"): object_route,
         },
         image=image,
     )

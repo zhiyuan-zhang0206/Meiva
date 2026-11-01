@@ -1,26 +1,34 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MessageDeliveryUnknownError } from "@/lib/transport/api";
+import type { DeliveredUploadStatus, StagedFile } from "@/lib/contracts/types";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
 import { Composer } from "./composer";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
+
+const stagedId1 = "a".repeat(32);
+const stagedId2 = "b".repeat(32);
+const batchId1 = "c".repeat(32);
+const sha = "d".repeat(64);
+
 beforeEach(() => {
   resetTransport();
   transport.getCommands.mockImplementation((_agentId?: number | null) => Promise.resolve(commandList));
+  transport.deleteStagedUploadFile.mockResolvedValue(undefined);
   transport.getContextBreakdown.mockImplementation(() =>
-      Promise.resolve({
-        total_input_tokens: 1000,
-        estimated: false,
-        exact_fraction: 1,
-        max_input_tokens: 1_000_000,
-        soft_compact_tokens: 600_000,
-        hard_compact_tokens: 800_000,
-        sections: [],
-        categories: [{ kind: "system_prompt", tokens: 1000, estimated: false, exact_fraction: 1 }],
-      }));
+    Promise.resolve({
+      total_input_tokens: 1000,
+      estimated: false,
+      exact_fraction: 1,
+      max_input_tokens: 1_000_000,
+      soft_compact_tokens: 600_000,
+      hard_compact_tokens: 800_000,
+      sections: [],
+      categories: [{ kind: "system_prompt", tokens: 1000, estimated: false, exact_fraction: 1 }],
+    }),
+  );
 });
 
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
@@ -29,9 +37,7 @@ const getCommandsMock = transport.getCommands;
 beforeEach(() => {
   interactionTimingResetForTest();
   telemetryTestControl.reset();
-  getCommandsMock.mockImplementation((_agentId?: number | null) =>
-    Promise.resolve(commandList),
-  );
+  getCommandsMock.mockImplementation((_agentId?: number | null) => Promise.resolve(commandList));
 });
 afterEach(() => {
   cleanup();
@@ -40,10 +46,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-// meiva:note
-// The composer reports a failed command fetch to the sink the shell hands in, so every render in
-// this file states one; a test that cares reads what it collected.
-const diagnostics = { warn: vi.fn<(message: string) => void>(), error: vi.fn<(message: string, cause: unknown) => void>() };
+
+const diagnostics = {
+  warn: vi.fn<(message: string) => void>(),
+  error: vi.fn<(message: string, cause: unknown) => void>(),
+};
 const baseProps = {
   diagnostics,
   contextTokens: 0,
@@ -77,27 +84,7 @@ describe("Composer file upload (drag + paste)", () => {
     renderComposerTree(<Composer {...baseProps} mode="idle" filesUploading={false} />);
     expect(screen.queryByTestId("composer-upload-hint")).toBeNull();
   });
-  it("shows the file-upload hint without blocking Enter-to-send", async () => {
-    const onSend = vi.fn(() => Promise.resolve(true));
-    renderComposerTree(
-      <Composer
-        {...baseProps}
-        mode="idle"
-        filesUploading
-        onSend={onSend}
-      />,
-    );
-    expect(screen.getByTestId("composer-upload-hint").textContent).toBe(
-      "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
-    );
-    const textarea = screen.getByTestId("composer-input");
-    fireEvent.change(textarea, { target: { value: "send this now" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("send this now", [], expect.any(String)),
-    );
-  });
-  it("dropping files calls onUploadFiles", () => {
+  it("dropping files calls onUploadFiles when provided", () => {
     const onUploadFiles = vi.fn();
     renderComposerTree(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
     const f1 = new File(["a"], "a.png", { type: "image/png" });
@@ -115,7 +102,7 @@ describe("Composer file upload (drag + paste)", () => {
     });
     expect(onUploadFiles).not.toHaveBeenCalled();
   });
-  it("pasting files calls onUploadFiles", () => {
+  it("pasting files calls onUploadFiles when provided", () => {
     const onUploadFiles = vi.fn();
     renderComposerTree(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
     const img = new File(["x"], "img.png", { type: "image/png" });
@@ -124,39 +111,7 @@ describe("Composer file upload (drag + paste)", () => {
     });
     expect(onUploadFiles).toHaveBeenCalledWith([img]);
   });
-  it("pasted images use file delivery and Enter sends text while that upload is in flight", async () => {
-    let finishUpload: (() => void) | undefined;
-    const onUploadFiles = vi.fn(
-      () => new Promise<void>((resolve) => { finishUpload = resolve; }),
-    );
-    const onSend = vi.fn(() => Promise.resolve(true));
-    renderComposerTree(
-      <Composer
-        {...baseProps}
-        mode="idle"
-        onSend={onSend}
-        onUploadFiles={onUploadFiles}
-      />,
-    );
-    const textarea = screen.getByTestId("composer-input");
-    const image = new File(["img"], "paste.png", { type: "image/png" });
-    fireEvent.paste(textarea, {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    expect(onUploadFiles).toHaveBeenCalledWith([image]);
-    expect(screen.queryByTestId("composer-attachments")).toBeNull();
-    fireEvent.change(textarea, { target: { value: "describe the uploaded file" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith(
-        "describe the uploaded file",
-        [],
-        expect.any(String),
-      ),
-    );
-    finishUpload?.();
-  });
-  it("pasting plain text (no files) does not call onUploadFiles", () => {
+  it("pasting plain text (no files) does not stage or upload files", () => {
     const onUploadFiles = vi.fn();
     renderComposerTree(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);
     fireEvent.paste(screen.getByTestId("composer-input"), {
@@ -166,23 +121,50 @@ describe("Composer file upload (drag + paste)", () => {
   });
 });
 
-describe("Composer image attachments", () => {
-  // meiva:note
-  // The previews are object URLs the browser port hands out (`fakeBrowser().objectUrls`), so a case
-  // reads `browser.actions.createdUrls` / `revokedUrls` instead of replacing the URL API; a preview
-  // that is never released shows up as a created URL with no matching revoke.
+describe("Composer unified staged attachments & batch delivery", () => {
   const imageFile = () => new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
-  it("pasting an image attaches a thumbnail and uploads it", async () => {
-    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+  const textFile = () => new File(["hello"], "notes.txt", { type: "text/plain" });
+
+  it("stages pasted images and non-image files into the attachment strip", async () => {
+    transport.stageUploadFile
+      .mockResolvedValueOnce({
+        file_id: stagedId1,
+        name: "shot.png",
+        size: 3,
+        content_type: "image/png",
+        sha256: sha,
+      })
+      .mockResolvedValueOnce({
+        file_id: stagedId2,
+        name: "notes.txt",
+        size: 5,
+        content_type: "text/plain",
+        sha256: sha,
+      });
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
     const ta = screen.getByTestId("composer-input");
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    await waitFor(() => expect(onAttachImage).toHaveBeenCalledTimes(1));
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile(), textFile()], types: ["Files"] } });
+    await waitFor(() => expect(transport.stageUploadFile).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId("composer-attachments")).toBeTruthy();
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(
+        false,
+      ),
+    );
   });
-  it("revokes the preview object URL when the composer unmounts", async () => {
-    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    const { browser, unmount } = renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+
+  it("revokes image preview object URLs when the composer unmounts", async () => {
+    transport.stageUploadFile.mockResolvedValue({
+      file_id: stagedId1,
+      name: "shot.png",
+      size: 3,
+      content_type: "image/png",
+      sha256: sha,
+    });
+    const { browser, unmount } = renderComposerTree(
+      <Composer {...baseProps} mode="idle" agentId={7} />,
+    );
     const ta = screen.getByTestId("composer-input");
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(screen.getByTestId("composer-attachments")).toBeTruthy());
@@ -190,176 +172,169 @@ describe("Composer image attachments", () => {
     expect(browser.actions.createdUrls).toHaveLength(1);
     expect(browser.actions.revokedUrls).toEqual(browser.actions.createdUrls);
   });
-  it("sends text + the resolved image url as onSend's second arg", async () => {
-    const onSend = vi.fn(() => Promise.resolve(true));
-    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} onAttachImage={onAttachImage} />);
-    const ta = screen.getByTestId("composer-input");
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    await waitFor(() => expect(onAttachImage).toHaveBeenCalled());
-    fireEvent.change(ta, { target: { value: "what is this" } });
-    fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith(
-        "what is this",
-        ["/api/agents/7/uploads/shot.png"],
-        expect.any(String),
-      ),
-    );
-  });
-  it("drops native images when switching agents while keeping text drafts and ordinary file delivery", async () => {
-    const onSend = vi.fn(() => Promise.resolve(true));
-    const onUploadFiles = vi.fn();
-    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/807/uploads/shot.png"));
-    const { browser, rerender } = renderComposerTree(
-      <Composer {...baseProps} mode="idle" agentId={807} onSend={onSend} onAttachImage={onAttachImage} />,
-    );
-    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
-    fireEvent.change(ta, { target: { value: "native draft" } });
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(false));
-    sessionStorage.setItem("composer-draft-809", "external draft");
-    rerender(<Composer {...baseProps} mode="idle" agentId={809} onSend={onSend} onUploadFiles={onUploadFiles} />);
-    expect(screen.queryByTestId("composer-attachments")).toBeNull();
-    expect(browser.actions.revokedUrls).toEqual(browser.actions.createdUrls);
-    expect(ta.value).toBe("external draft");
-    expect(sessionStorage.getItem("composer-draft-807")).toBe("native draft");
-    const ordinaryFile = new File(["notes"], "notes.txt", { type: "text/plain" });
-    const pastedImage = imageFile();
-    fireEvent.paste(ta, { clipboardData: { files: [pastedImage, ordinaryFile], types: ["Files"] } });
-    expect(onUploadFiles).toHaveBeenCalledWith([pastedImage]);
-    expect(onUploadFiles).toHaveBeenCalledWith([ordinaryFile]);
-    expect(onAttachImage).toHaveBeenCalledTimes(1);
-    fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("external draft", [], expect.any(String)));
-  });
-  it("releases an image preview when selection changes before the attachment commits", () => {
-    const onAttachImage = vi.fn(() => new Promise<string>(() => undefined));
-    const { browser, rerender } = renderComposerTree(
-      <Composer {...baseProps} mode="idle" agentId={837} onAttachImage={onAttachImage} />,
-    );
-    act(() => {
-      fireEvent.paste(screen.getByTestId("composer-input"), {
-        clipboardData: { files: [imageFile()], types: ["Files"] },
+
+  it("aborts an in-flight stage on remove and deletes a ready staged file on remove", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let callCount = 0;
+    transport.stageUploadFile.mockImplementation((_agentId, _file, _key, _onProgress, signal) => {
+      callCount += 1;
+      if (callCount === 1) {
+        capturedSignal = signal;
+        return new Promise<StagedFile>(() => undefined);
+      }
+      return Promise.resolve({
+        file_id: stagedId2,
+        name: "notes.txt",
+        size: 5,
+        content_type: "text/plain",
+        sha256: sha,
       });
-      rerender(<Composer {...baseProps} mode="idle" agentId={839} />);
     });
-    expect(screen.queryByTestId("composer-attachments")).toBeNull();
-    expect(browser.actions.revokedUrls).toEqual(browser.actions.createdUrls);
-  });
-  it("ignores an old agent's pending upload after switching away and returning", async () => {
-    let resolveUpload!: (url: string) => void;
-    const onAttachImage = vi.fn(() => new Promise<string>((resolve) => { resolveUpload = resolve; }));
-    const onSend = vi.fn(() => Promise.resolve(true));
-    const { rerender } = renderComposerTree(
-      <Composer {...baseProps} mode="idle" agentId={817} onSend={onSend} onAttachImage={onAttachImage} />,
-    );
-    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
-    fireEvent.change(ta, { target: { value: "saved native text" } });
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(true);
-    rerender(<Composer {...baseProps} mode="idle" agentId={819} onSend={onSend} />);
-    fireEvent.change(ta, { target: { value: "send while old upload is pending" } });
-    fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("send while old upload is pending", [], expect.any(String)));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
-    rerender(<Composer {...baseProps} mode="idle" agentId={817} onSend={onSend} onAttachImage={onAttachImage} />);
-    expect(ta.value).toBe("saved native text");
-    await act(() => {
-      resolveUpload("/api/agents/817/uploads/shot.png");
-      return Promise.resolve();
-    });
-    expect(screen.queryByTestId("composer-attachments")).toBeNull();
-    fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("saved native text", [], expect.any(String)));
-  });
-  it("invalidates pending images on capability loss without resetting them for callback replacement", async () => {
-    let resolveOldUpload!: (url: string) => void;
-    let resolveNewUpload!: (url: string) => void;
-    const oldAttach = vi.fn(() => new Promise<string>((resolve) => { resolveOldUpload = resolve; }));
-    const newAttach = vi.fn((_file: File) => new Promise<string>((resolve) => { resolveNewUpload = resolve; }));
-    const onSend = vi.fn(() => Promise.resolve(true));
-    const { rerender } = renderComposerTree(
-      <Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} onAttachImage={oldAttach} />,
-    );
-    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
-    fireEvent.change(ta, { target: { value: "keep this draft" } });
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    rerender(<Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} />);
-    expect(screen.queryByTestId("composer-attachments")).toBeNull();
-    expect(ta.value).toBe("keep this draft");
-    rerender(<Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} onAttachImage={newAttach} />);
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    await act(() => {
-      resolveOldUpload("/api/agents/827/uploads/old.png");
-      return Promise.resolve();
-    });
-    expect(screen.getAllByRole("button", { name: "Remove shot.png" })).toHaveLength(1);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(true);
-    rerender(<Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} onAttachImage={(file) => newAttach(file)} />);
-    await act(() => {
-      resolveNewUpload("/api/agents/827/uploads/new.png");
-      return Promise.resolve();
-    });
-    fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("keep this draft", ["/api/agents/827/uploads/new.png"], expect.any(String)));
-  });
-  it("normal Send preserves an unchanged image snapshot identity after ambiguity", async () => {
-    const onSend = vi
-      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
-      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
-        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
-      )
-      .mockResolvedValueOnce(true);
-    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
-    renderComposerTree(
-      <Composer
-        {...baseProps}
-        mode="idle"
-        agentId={7}
-        onSend={onSend}
-        onAttachImage={onAttachImage}
-      />,
-    );
-    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    await waitFor(() => expect(onAttachImage).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Remove shot.png" }).disabled).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-    expect(onSend.mock.calls[1][1]).toEqual(["/api/agents/7/uploads/shot.png"]);
-    expect(onSend.mock.calls[1][2]).toBe(onSend.mock.calls[0][2]);
-  });
-  it("send stays disabled while an image is still uploading", async () => {
-    let resolve!: (u: string) => void;
-    const onAttachImage = vi.fn(() => new Promise<string>((r) => { resolve = r; }));
-    renderComposerTree(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
     const ta = screen.getByTestId("composer-input");
-    fireEvent.change(ta, { target: { value: "hi" } });
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    await waitFor(() => expect(onAttachImage).toHaveBeenCalled());
-    const btn = screen.getByRole<HTMLButtonElement>("button", { name: "Send message" });
-    expect(btn.disabled).toBe(true);
-    resolve("/api/agents/7/uploads/shot.png");
-    await waitFor(() => expect(btn.disabled).toBe(false));
-  });
-  it("image-only (no text) is sendable once uploaded", async () => {
-    const onSend = vi.fn(() => Promise.resolve(true));
-    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/a.png"));
-    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} onAttachImage={onAttachImage} />);
-    const ta = screen.getByTestId("composer-input");
-    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
-    await waitFor(() => expect(onAttachImage).toHaveBeenCalled());
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile(), textFile()], types: ["Files"] } });
+    await waitFor(() => expect(transport.stageUploadFile).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Remove shot.png" }));
+    expect(capturedSignal?.aborted).toBe(true);
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith(
-        "",
-        ["/api/agents/7/uploads/a.png"],
+      expect(screen.getByTestId("composer-attachment-card").getAttribute("data-status")).toBe(
+        "ready",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove notes.txt" }));
+    expect(transport.deleteStagedUploadFile).toHaveBeenCalledWith(7, stagedId2);
+  });
+
+  it("disables Send while a stage is uploading or failed, and retries a failed stage with the same key", async () => {
+    transport.stageUploadFile
+      .mockRejectedValueOnce(new Error("network glitch"))
+      .mockResolvedValueOnce({
+        file_id: stagedId1,
+        name: "notes.txt",
+        size: 5,
+        content_type: "text/plain",
+        sha256: sha,
+      });
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
+    const ta = screen.getByTestId("composer-input");
+    fireEvent.change(ta, { target: { value: "please check" } });
+    fireEvent.paste(ta, { clipboardData: { files: [textFile()], types: ["Files"] } });
+    const retryBtn = await screen.findByRole("button", { name: "Retry notes.txt" });
+    const sendBtn = screen.getByRole<HTMLButtonElement>("button", { name: "Send message" });
+    expect(sendBtn.disabled).toBe(true);
+    const firstKey = transport.stageUploadFile.mock.calls[0][2];
+    fireEvent.click(retryBtn);
+    await waitFor(() => expect(transport.stageUploadFile).toHaveBeenCalledTimes(2));
+    expect(transport.stageUploadFile.mock.calls[1][2]).toBe(firstKey);
+    await waitFor(() => expect(sendBtn.disabled).toBe(false));
+  });
+
+  it("submits staged file IDs and text on Send, polls until accepted, and keeps Stop usable when busy", async () => {
+    const onStop = vi.fn();
+    transport.stageUploadFile.mockResolvedValueOnce({
+      file_id: stagedId1,
+      name: "notes.txt",
+      size: 5,
+      content_type: "text/plain",
+      sha256: sha,
+    });
+    transport.submitUploadedFiles.mockResolvedValueOnce({
+      batch_id: batchId1,
+      agent_id: 7,
+      directory: `/tmp/uploads/${batchId1}`,
+      status_url: `/api/keyed/v1/agents/7/uploads/${batchId1}`,
+      files: [
+        {
+          ordinal: 0,
+          name: "notes.txt",
+          staged_id: stagedId1,
+          size: 5,
+          sha256: sha,
+          content_type: "text/plain",
+        },
+      ],
+    });
+    let resolveStatus!: (status: DeliveredUploadStatus) => void;
+    transport.getUploadDeliveryStatus.mockImplementation(
+      () => new Promise<DeliveredUploadStatus>((r) => { resolveStatus = r; }),
+    );
+    renderComposerTree(
+      <Composer {...baseProps} mode="busy" agentId={7} onStop={onStop} />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "review notes" } });
+    fireEvent.paste(ta, { clipboardData: { files: [textFile()], types: ["Files"] } });
+    await waitFor(() =>
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expect(transport.submitUploadedFiles).toHaveBeenCalledWith(
+        7,
+        [stagedId1],
+        "review notes",
         expect.any(String),
       ),
     );
+    await waitFor(() => expect(ta.value).toBe(""));
+    expect(screen.getByTestId("composer-upload-hint").textContent).toContain("Delivering");
+    const stopBtn = screen.getByRole<HTMLButtonElement>("button", { name: "Stop current turn" });
+    expect(stopBtn.disabled).toBe(false);
+    fireEvent.click(stopBtn);
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveStatus({
+        batch_id: batchId1,
+        state: "accepted",
+        reason: null,
+        directory: `/tmp/uploads/${batchId1}`,
+        message_text: "review notes",
+        files: [],
+        inbound_id: 42,
+        source: { machine: "m1", home: "/tmp" },
+        target: { machine: "m1", home: "/tmp" },
+        attempts: 1,
+        next_attempt_at: null,
+      });
+    });
+    await waitFor(() => expect(screen.queryByTestId("composer-upload-hint")).toBeNull());
+  });
+
+  it("surfaces a held batch with Restore to draft and Retry delivery actions", async () => {
+    sessionStorage.setItem("composer-upload-batch-7", batchId1);
+    transport.getUploadDeliveryStatus.mockResolvedValueOnce({
+      batch_id: batchId1,
+      state: "hold",
+      reason: "disk full",
+      directory: `/tmp/uploads/${batchId1}`,
+      message_text: "held text",
+      files: [
+        {
+          ordinal: 0,
+          name: "notes.txt",
+          staged_id: stagedId1,
+          size: 5,
+          sha256: sha,
+          content_type: "text/plain",
+        },
+      ],
+      inbound_id: null,
+      source: { machine: "m1", home: "/tmp" },
+      target: { machine: "m1", home: "/tmp" },
+      attempts: 3,
+      next_attempt_at: null,
+    });
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
+    const banner = await screen.findByTestId("composer-held-batch");
+    expect(banner.textContent).toContain("disk full");
+    fireEvent.click(screen.getByTestId("composer-held-restore"));
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    expect(ta.value).toBe("held text");
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+    expect(screen.queryByTestId("composer-held-batch")).toBeNull();
   });
 });
 

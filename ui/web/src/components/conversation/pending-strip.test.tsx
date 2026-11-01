@@ -26,12 +26,18 @@ function mixedQueue(): PendingInbound[] {
 }
 
 describe("userPending", () => {
-  it("keeps the rows the user caused, including a page callback", () => {
+  it("keeps the rows the user caused, including a page callback and upload batches", () => {
     const queued = userPending([
       item({ id: 1 }),
       item({ id: 2, source: "ui:page:compare", sender: "user" }),
+      item({
+        id: 3,
+        source: "system:upload",
+        sender: "system",
+        files: [{ name: "report.pdf", size: 1024, content_type: "application/pdf", url: "/api/keyed/v1/agents/7/uploads/b/objects/0" }],
+      }),
     ]);
-    expect(queued.map((p) => p.id)).toEqual([1, 2]);
+    expect(queued.map((p) => p.id)).toEqual([1, 2, 3]);
   });
 
   it("drops agent, automation and system rows", () => {
@@ -120,5 +126,65 @@ describe("PendingStrip", () => {
     // Without an image the same literal is the message's real text — keep it.
     rerender(<PendingStrip items={[item({ id: 1, content: "[image]" })]} />);
     expect(screen.getByText("[image]")).toBeTruthy();
+  });
+
+  it("renders file chips for system:upload and suppresses the [files] placeholder on the companion user row", () => {
+    render(
+      <PendingStrip
+        items={[
+          item({
+            id: 10,
+            source: "system:upload",
+            sender: "system",
+            content: "Files uploaded with the next message (saved to /tmp/b):",
+            files: [
+              {
+                name: "report.pdf",
+                size: 2048,
+                content_type: "application/pdf",
+                url: "/api/keyed/v1/agents/7/uploads/b/objects/0",
+              },
+            ],
+          }),
+          item({ id: 11, source: "user", sender: "user", content: "[files]" }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("report.pdf")).toBeTruthy();
+    expect(screen.queryByText("[files]")).toBeNull();
+    expect(screen.queryByText(/Files uploaded with the next message/)).toBeNull();
+  });
+
+  it("renders an in-flight delivering upload batch", () => {
+    render(
+      <PendingStrip
+        items={[]}
+        deliveringBatch={{
+          batch_id: "a".repeat(32),
+          state: "pending",
+          reason: null,
+          directory: "/tmp/a",
+          message_text: "analyze this",
+          files: [
+            {
+              ordinal: 0,
+              name: "data.csv",
+              staged_id: "b".repeat(32),
+              size: 128,
+              sha256: "c".repeat(64),
+              content_type: "text/csv",
+            },
+          ],
+          inbound_id: null,
+          source: { machine: "m1", home: "/tmp" },
+          target: { machine: "m1", home: "/tmp" },
+          attempts: 0,
+          next_attempt_at: null,
+        }}
+      />,
+    );
+    expect(screen.getByTestId("pending-delivering-batch")).toBeTruthy();
+    expect(screen.getByText("analyze this")).toBeTruthy();
+    expect(screen.getByText("data.csv")).toBeTruthy();
   });
 });

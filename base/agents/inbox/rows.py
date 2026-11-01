@@ -79,7 +79,7 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
             "        AND transcribed.event_key = 'inbound:' || ib.id::text"
             "    ))"
             ") "
-            "ORDER BY ib.created_at ASC",
+            "ORDER BY ib.created_at ASC, ib.id ASC",
             (agent_id,),
         )
         return [InboundRow(*row) for row in cur.fetchall()]

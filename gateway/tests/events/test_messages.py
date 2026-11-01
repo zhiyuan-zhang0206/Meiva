@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import psycopg
 
 from base.api_contracts.idempotency import keyed_headers
@@ -10,12 +8,7 @@ from base.daemon.schedules.completion_notices import (
     current_default_completion_notice_policy,
     policy_for_agent,
 )
-from base.lm.catalog import ModelCatalog
-from base.packages.tests.model_catalog import AddModels
-from base.paths import meiva_home
-from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_config
-
-UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "principal-v1"}
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _seed_agent(
@@ -170,20 +163,6 @@ def test_post_message_content_over_one_mib_is_413(
     assert _pending_rows(db_conn, tid) == []
 
 
-def test_post_message_block_list_over_one_mib_is_413(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
-) -> None:
-    tid = _seed_agent(db_conn, local_machine=machine_identity)
-    blocks = [{"type": "text", "text": "a" * 1_100_000}]
-    with gateway_test_client(machine=machine_identity) as client:
-        resp = client.post(
-            f"/api/agents/{tid}/messages", json={"content": blocks, "source": "user"}
-        )
-    assert resp.status_code == 413
-    assert "1 MiB" in resp.json()["detail"]
-    assert _pending_rows(db_conn, tid) == []
-
-
 def test_reconcile_rejects_over_limit_after_timeout(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
@@ -262,22 +241,6 @@ def test_post_message_invalid_source_422(
     assert _pending_rows(db_conn, tid) == []
 
 
-def _seed_vision_agent(
-    db_conn: psycopg.Connection,
-    model: str = "claude-opus-4-8",
-    *,
-    local_machine: MachineIdentityReader,
-) -> int:
-    tid = _seed_agent(db_conn, local_machine=local_machine)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
-            (f'{{"llm_model": "{model}"}}', tid),
-        )
-    db_conn.commit()
-    return tid
-
-
 def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | None]:
     with conn.cursor() as cur:
         cur.execute(
@@ -289,11 +252,11 @@ def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | N
         return row[0], row[1]
 
 
-class TestMultimodalMessage:
-    def test_image_to_non_vision_model_422(
+class TestMessageContentContract:
+    def test_content_block_list_rejected_422(
         self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
     ) -> None:
-        tid = _seed_vision_agent(db_conn, model="glm-5.3", local_machine=machine_identity)
+        tid = _seed_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -309,157 +272,6 @@ class TestMultimodalMessage:
                 },
             )
         assert resp.status_code == 422
-        assert "cannot see images" in resp.text
-        assert _pending_rows(db_conn, tid) == []
-
-    def test_image_to_vision_model_stores_blocks(
-        self,
-        db_conn: psycopg.Connection,
-        tmp_path: Path,
-        *,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
-        with gateway_test_client(
-            machine=machine_identity,
-            config=gateway_test_config(upload_staging_root=tmp_path),
-        ) as client:
-            up = client.post(
-                f"/api/agents/{tid}/uploads",
-                headers=UPLOAD_HEADERS,
-                files=[("files", ("shot.png", b"\x89PNG\r\n\x1a\npix", "image/png"))],
-            )
-            assert up.status_code == 200
-            url = up.json()["files"][0]["url"]
-            assert url.startswith(f"/api/agents/{tid}/uploads/meiva-upload-")
-            assert _pending_rows(db_conn, tid) == []
-
-            resp = client.post(
-                f"/api/agents/{tid}/messages",
-                json={
-                    "content": [
-                        {"type": "text", "text": "describe this"},
-                        {"type": "image_url", "image_url": {"url": url}},
-                    ],
-                    "source": "user",
-                },
-            )
-        assert resp.status_code == 201
-        content, payload = _payload_row(db_conn, tid)
-        assert content == "describe this"
-        assert payload is not None
-        blocks = payload["content_blocks"]
-        assert blocks[0] == {"type": "text", "text": "describe this"}
-        assert blocks[1]["type"] == "image_url"
-        assert blocks[1]["image_url"]["url"] == url
-
-    def test_image_to_withdrawn_vision_model_resolves_text_only_422(
-        self,
-        db_conn: psycopg.Connection,
-        tmp_path: Path,
-        add_models: AddModels,
-        model_catalog: ModelCatalog,
-        *,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        from dataclasses import replace
-
-        from base.packages.plugin_providers import build_model_catalog
-
-        model = "glm-vision-fixture"
-        base = build_model_catalog(home=meiva_home()).models["glm-5.3"]
-        catalog = add_models(
-            model_catalog,
-            {
-                model: replace(
-                    base,
-                    spawnable=False,
-                    unavailable_fallback="glm-5.3",
-                    media_types=frozenset({"image"}),
-                )
-            },
-        )
-        tid = _seed_vision_agent(db_conn, model=model, local_machine=machine_identity)
-        with gateway_test_client(
-            machine=machine_identity,
-            config=gateway_test_config(upload_staging_root=tmp_path),
-            catalog=catalog,
-        ) as client:
-            up = client.post(
-                f"/api/agents/{tid}/uploads",
-                headers=UPLOAD_HEADERS,
-                files=[("files", ("shot.png", b"\x89PNG\r\n\x1a\npix", "image/png"))],
-            )
-            assert up.status_code == 200
-            url = up.json()["files"][0]["url"]
-
-            resp = client.post(
-                f"/api/agents/{tid}/messages",
-                json={
-                    "content": [
-                        {"type": "text", "text": "describe this"},
-                        {"type": "image_url", "image_url": {"url": url}},
-                    ],
-                    "source": "user",
-                },
-            )
-        assert resp.status_code == 422
-        assert "cannot see images" in resp.text
-        assert _pending_rows(db_conn, tid) == []
-
-    def test_image_ref_wrong_agent_422(
-        self,
-        db_conn: psycopg.Connection,
-        tmp_path: Path,
-        *,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
-        with gateway_test_client(
-            machine=machine_identity,
-            config=gateway_test_config(upload_staging_root=tmp_path),
-        ) as client:
-            resp = client.post(
-                f"/api/agents/{tid}/messages",
-                json={
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": "/api/agents/999/uploads/x.png"},
-                        },
-                    ],
-                    "source": "user",
-                },
-            )
-        assert resp.status_code == 422
-        assert "different agent" in resp.text
-        assert _pending_rows(db_conn, tid) == []
-
-    def test_image_ref_missing_file_404(
-        self,
-        db_conn: psycopg.Connection,
-        tmp_path: Path,
-        *,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
-        with gateway_test_client(
-            machine=machine_identity,
-            config=gateway_test_config(upload_staging_root=tmp_path),
-        ) as client:
-            resp = client.post(
-                f"/api/agents/{tid}/messages",
-                json={
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"/api/agents/{tid}/uploads/nope.png"},
-                        },
-                    ],
-                    "source": "user",
-                },
-            )
-        assert resp.status_code == 404
         assert _pending_rows(db_conn, tid) == []
 
     def test_plain_string_still_works(

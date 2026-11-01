@@ -14,13 +14,12 @@ from starlette.datastructures import State
 
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import (
-    NAMESPACE,
     CopyProof,
     ReceiveRequest,
     UploadDeliveryConflictError,
     current_unit,
 )
-from base.agents.upload_delivery.paths import delivered_upload_dir
+from base.agents.upload_delivery.paths import delivered_upload_dir, staged_path
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import get_field
@@ -76,18 +75,16 @@ def test_source_ready_commit_failure_recovers(
     uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
     client, agent = uploaded_agent
-    with failing_update(db_conn, "upload_delivery_batches", message="source ready commit failure"):
+    with failing_update(db_conn, "upload_staged_files", message="source ready commit failure"):
         assert post(client, agent).status_code == 500
-        assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == (
-            "receiving",
-        )
+        assert db_conn.execute("SELECT state FROM upload_staged_files").fetchone() == ("receiving",)
     _recovered_source_ready(client, db_conn, agent)
 
 
 # meiva:note
-# The ready write commits, then the caller sees a failure: the pool lends the batch claim first
-# and the ready write second, and loses the acknowledgement of the second. The route answers 500,
-# and the next upload of the same batch finds the committed work again.
+# The ready write commits, then the caller sees a failure: the pool lends the staged-file claim
+# first and the ready write second, and loses the acknowledgement of the second. The route answers
+# 500, and the next upload of the same batch finds the committed work again.
 def test_source_ready_lost_commit_ack_recovers(
     uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
@@ -101,6 +98,7 @@ def test_source_ready_lost_commit_ack_recovers(
             "db_pool": LostAckPool(
                 client.app.state.db_pool, lose_on=2, message="source ready response lost"
             ),
+            "clock": client.app.state.clock,
             "gateway_config": client.app.state.gateway_config,
             "gateway_process": client.app.state.gateway_process,
             "machine_token_acceptance": client.app.state.machine_token_acceptance,
@@ -112,7 +110,7 @@ def test_source_ready_lost_commit_ack_recovers(
     app.include_router(delivery_router)
     with GatewayTestClient(app, raise_server_exceptions=False) as faulted:
         assert post(faulted, agent).status_code == 500
-    assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == ("pending",)
+    assert db_conn.execute("SELECT state FROM upload_staged_files").fetchone() == ("ready",)
     _recovered_source_ready(client, db_conn, agent)
 
 
@@ -127,18 +125,15 @@ def _request_and_proof(
     return request, proof_for(client, request)
 
 
-def _assert_one_system_notice(db_conn: psycopg.Connection[Any], agent: int, iid: int) -> None:
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-    ).fetchone() == (1,)
-    # meiva:note
-    # The delivery is framework machinery: the agent reads it as a system note, not as the
-    # human speaking.
-    # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
-    assert db_conn.execute(
-        "SELECT source, source_verified_by, source_transport FROM inbound_messages WHERE id=%s",
-        (iid,),
-    ).fetchone() == ("system:upload", "cluster_bearer", "http")
+def _assert_accepted_inbounds(db_conn: psycopg.Connection[Any], agent: int, iid: int) -> None:
+    rows = db_conn.execute(
+        "SELECT id, source, source_verified_by, source_transport "
+        "FROM inbound_messages WHERE agent_id=%s ORDER BY id",
+        (agent,),
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0][1:] == ("system:upload", "cluster_bearer", "http")
+    assert rows[1] == (iid, "user", "cluster_bearer", "http")
 
 
 def test_inbound_transaction_rollback_recovers(
@@ -157,7 +152,7 @@ def test_inbound_transaction_rollback_recovers(
         ).fetchone() == (0,)
     iid = source.complete(client.app.state.db_pool, request, proof)
     assert source.complete(client.app.state.db_pool, request, proof) == iid
-    _assert_one_system_notice(db_conn, agent, iid)
+    _assert_accepted_inbounds(db_conn, agent, iid)
 
 
 # meiva:note
@@ -175,13 +170,13 @@ def test_inbound_lost_commit_ack_recovers(
         source.complete(lossy, request, proof)
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-    ).fetchone() == (1,)
+    ).fetchone() == (2,)
     iid = source.complete(client.app.state.db_pool, request, proof)
     assert source.complete(client.app.state.db_pool, request, proof) == iid
-    _assert_one_system_notice(db_conn, agent, iid)
+    _assert_accepted_inbounds(db_conn, agent, iid)
 
 
-@pytest.mark.parametrize("version", [None, True, 1.0, 2, "1"])
+@pytest.mark.parametrize("version", [None, True, 1, 2.0, "2"])
 def test_explicit_native_request_and_proof_versions_fail_fast(
     uploaded_agent: tuple[GatewayTestClient, int],
     version: object,
@@ -212,7 +207,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
         payload["version"] = version
     with pytest.raises(ValidationError):
         dispatch_sync(
-            "upload-receive-v1",
+            "upload-receive-v2",
             payload,
             pool=client.app.state.db_pool,
             db=client.app.state.db,
@@ -253,7 +248,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
             access=replace(client.app.state.gateway_access, gateway_url=source_url),
         )
         receive = receiver_op(client, config, lose_first_response=True)
-        with runner_ops(db_conn, "remote", {"upload-receive-v1": receive}) as runner:
+        with runner_ops(db_conn, "remote", {"upload-receive-v2": receive}) as runner:
             db_conn.execute(
                 "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
                 "VALUES ('remote',%s,true,%s)",
@@ -283,12 +278,12 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
             await recovery.close()
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-    ).fetchone() == (1,)
+    ).fetchone() == (2,)
     remote_dir = delivered_upload_dir(
         agent, home=Path(target.home), name=config.upload_dir_name, create=False
     ).resolve()
     assert (
-        remote_dir / ".delivered-v1" / request.manifest.batch_id / request.manifest.objects[0].name
+        remote_dir / request.manifest.directory / request.manifest.objects[0].name
     ).read_bytes() == b"bytes"
 
 
@@ -303,8 +298,8 @@ async def test_unknown_remote_kind_holds(
     unit = current_unit(local_machine=machine_identity.name(), home=resolve_meiva_home())
     # meiva:note
     # A runner of the previous version answers the way its dispatcher does for a kind it lacks.
-    old_runner = failed({"error": "unknown kind: 'upload-receive-v1'"})
-    with runner_ops(db_conn, unit.machine, {"upload-receive-v1": old_runner}) as runner:
+    old_runner = failed({"error": "unknown kind: 'upload-receive-v2'"})
+    with runner_ops(db_conn, unit.machine, {"upload-receive-v2": old_runner}) as runner:
         register_second_home(db_conn, unit, url=runner.url)
         request = request_for(
             client.app.state.db_pool,
@@ -405,7 +400,7 @@ def test_concurrent_receivers_and_inbound_acceptance_one_identity(
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_copies").fetchone() == (1,)
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-    ).fetchone() == (1,)
+    ).fetchone() == (2,)
 
 
 def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_ready(
@@ -440,13 +435,11 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
     # meiva:note
     # The gateway loses its staged object and the agent's workspace has no copy: a re-receive
     # has to pull, and must not mark ready anything it could not fetch.
-    staged = (
+    staged = staged_path(
         source.agent_upload_dir(
             agent, create=False, root=client.app.state.gateway_config.upload_staging_root
-        )
-        / NAMESPACE
-        / request.manifest.batch_id
-        / item.name
+        ),
+        item.staged_id,
     )
     staged.unlink()
     delivered = Path(proof.directory) / item.name
@@ -454,7 +447,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
 
     with serving_gateway(client, client.app.state.db_pool, timeout=5.0) as source_url:
         status, result = dispatch_sync(
-            "upload-receive-v1",
+            "upload-receive-v2",
             request.model_dump(),
             pool=client.app.state.db_pool,
             db=client.app.state.db,
@@ -545,7 +538,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     target = unit.model_copy(update={"home": unit.home + "-second"})
     config = replace(receiver_for(client, target), quota_bytes=5)
     receive = receiver_op(client, config)
-    with runner_ops(db_conn, unit.machine, {"upload-receive-v1": receive}) as runner:
+    with runner_ops(db_conn, unit.machine, {"upload-receive-v2": receive}) as runner:
         assert register_second_home(db_conn, unit, url=runner.url) == target
         response = post(client, agent)
         assert response.status_code == 202
@@ -558,7 +551,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
         recovery = recovery_for(client, machine_identity)
         await recovery.copy(request)
         await recovery.close()
-    assert len(runner.calls_of("upload-receive-v1")) == 1
+    assert len(runner.calls_of("upload-receive-v2")) == 1
     assert (
         source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state
         == "accepted"

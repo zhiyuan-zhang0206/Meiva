@@ -1179,7 +1179,7 @@
     "/api/agents/{agent_id}/messages": {
       "post": {
         "summary": "Post Agent Message",
-        "description": "Deliver a chat inbound to the specified agent.\n\n`content` is either a plain string or a list of OpenAI-shaped content blocks\n(multimodal: text + `image_url` referencing an upload of this agent). A\nstring is a pure INSERT + return; a block list is capability-gated (422 if\nthe agent's model cannot see images) and stored with the blocks in the\ninbound's JSONB payload for the claim node to inline natively.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` (always sent with `Idempotency-Scope: principal-v1`) is\nstored transactionally with the inbound; same-key retries return the same\n`inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n413: message content exceeds the 1 MiB transport limit.\n422: a block list gated out (non-vision model) or referencing a bad upload,\nor a key without the principal-v1 scope header.",
+        "description": "Deliver a plain-text chat inbound to the specified agent.\n\n`content` is a non-empty plain string. File and image attachments are sent via\n`POST /api/keyed/v1/agents/{agent_id}/uploads`.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` (always sent with `Idempotency-Scope: principal-v1`) is\nstored transactionally with the inbound; same-key retries return the same\n`inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n413: message content exceeds the 1 MiB transport limit.\n422: invalid content or a key without the principal-v1 scope header.",
         "operationId": "post_agent_message_api_agents__agent_id__messages_post",
         "parameters": [
           {
@@ -7755,11 +7755,10 @@
         }
       }
     },
-    "/api/agents/{agent_id}/uploads": {
-      "post": {
-        "summary": "Upload Files",
-        "description": "Save one or more files silently and return each file's reference url.\n\nNo inbound is queued: the caller carries the returned urls into a later\nmultimodal message. `deliver=true` is refused; delivering a batch to the\nagent is `POST /api/keyed/v1/agents/{id}/uploads`.\n\nresponse_model makes FastAPI validate the return + emit the schema into\nOpenAPI components; the frontend codegen auto-syncs to types-generated.ts.",
-        "operationId": "upload_files_api_agents__agent_id__uploads_post",
+    "/api/agents/{agent_id}/uploads/{batch_id}/{ordinal}": {
+      "get": {
+        "summary": "Serve Delivered Upload",
+        "operationId": "serve_delivered_upload_api_agents__agent_id__uploads__batch_id___ordinal__get",
         "parameters": [
           {
             "name": "agent_id",
@@ -7767,58 +7766,39 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
               "title": "Agent Id"
             }
           },
           {
-            "name": "deliver",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Deliver"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
+            "name": "batch_id",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "title": "Idempotency-Key"
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Batch Id"
             }
           },
           {
-            "name": "Idempotency-Scope",
-            "in": "header",
+            "name": "ordinal",
+            "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "title": "Idempotency-Scope"
+              "type": "integer",
+              "minimum": 0,
+              "exclusiveMaximum": 1000,
+              "title": "Ordinal"
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_files_api_agents__agent_id__uploads_post"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadedBatch"
-                }
+                "schema": {}
               }
             }
           },
@@ -7838,7 +7818,6 @@
     "/api/agents/{agent_id}/uploads/{filename}": {
       "get": {
         "summary": "Serve Upload",
-        "description": "Serve one saved upload back (image thumbnails in the timeline).\n\nTraversal-safe: `resolve_upload_path` refuses any name escaping the agent's\nupload dir. 404 when the agent or the file does not exist.",
         "operationId": "serve_upload_api_agents__agent_id__uploads__filename__get",
         "parameters": [
           {
@@ -7868,6 +7847,121 @@
                 "schema": {}
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/uploads/staged": {
+      "post": {
+        "summary": "Stage Upload",
+        "operationId": "stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedFile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/uploads/staged/{file_id}": {
+      "delete": {
+        "summary": "Discard Staged Upload",
+        "operationId": "discard_staged_upload_api_keyed_v1_agents__agent_id__uploads_staged__file_id__delete",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMaximum": 9223372036854775808,
+              "exclusiveMinimum": 0,
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -7922,9 +8016,9 @@
         "requestBody": {
           "required": true,
           "content": {
-            "multipart/form-data": {
+            "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Body_upload_api_keyed_v1_agents__agent_id__uploads_post"
+                "$ref": "#/components/schemas/UploadSendRequest"
               }
             }
           }
@@ -8076,6 +8170,10 @@
             "type": "integer",
             "title": "Agent Id"
           },
+          "directory": {
+            "type": "string",
+            "title": "Directory"
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/Object"
@@ -8093,6 +8191,7 @@
         "required": [
           "batch_id",
           "agent_id",
+          "directory",
           "files",
           "status_url"
         ],
@@ -8802,33 +8901,8 @@
       "AgentMessageIn": {
         "properties": {
           "content": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "items": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/TextContentBlock"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ImageUrlContentBlock"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "type",
-                    "mapping": {
-                      "image_url": "#/components/schemas/ImageUrlContentBlock",
-                      "text": "#/components/schemas/TextContentBlock"
-                    }
-                  }
-                },
-                "type": "array",
-                "minItems": 1
-              }
-            ],
+            "type": "string",
+            "minLength": 1,
             "title": "Content"
           },
           "source": {
@@ -10152,39 +10226,19 @@
         ],
         "title": "AvailabilityReason"
       },
-      "Body_upload_api_keyed_v1_agents__agent_id__uploads_post": {
+      "Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post": {
         "properties": {
-          "files": {
-            "items": {
-              "type": "string",
-              "contentMediaType": "application/octet-stream"
-            },
-            "type": "array",
-            "title": "Files"
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
           }
         },
         "type": "object",
         "required": [
-          "files"
+          "file"
         ],
-        "title": "Body_upload_api_keyed_v1_agents__agent_id__uploads_post"
-      },
-      "Body_upload_files_api_agents__agent_id__uploads_post": {
-        "properties": {
-          "files": {
-            "items": {
-              "type": "string",
-              "contentMediaType": "application/octet-stream"
-            },
-            "type": "array",
-            "title": "Files"
-          }
-        },
-        "type": "object",
-        "required": [
-          "files"
-        ],
-        "title": "Body_upload_files_api_agents__agent_id__uploads_post"
+        "title": "Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post"
       },
       "BornChainResponse": {
         "properties": {
@@ -11349,20 +11403,13 @@
       },
       "DeliveryStatus": {
         "properties": {
-          "acceptance": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Acceptance"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id"
           },
           "state": {
             "type": "string",
             "enum": [
-              "receiving",
               "pending",
               "accepted",
               "hold"
@@ -11379,6 +11426,21 @@
               }
             ],
             "title": "Reason"
+          },
+          "directory": {
+            "type": "string",
+            "title": "Directory"
+          },
+          "message_text": {
+            "type": "string",
+            "title": "Message Text"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/Object"
+            },
+            "type": "array",
+            "title": "Files"
           },
           "inbound_id": {
             "anyOf": [
@@ -11418,9 +11480,12 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "acceptance",
+          "batch_id",
           "state",
           "reason",
+          "directory",
+          "message_text",
+          "files",
           "inbound_id",
           "source",
           "target",
@@ -12381,43 +12446,6 @@
           "items"
         ],
         "title": "HostPermissionsPayload"
-      },
-      "ImageUrlContentBlock": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "image_url",
-            "title": "Type"
-          },
-          "image_url": {
-            "$ref": "#/components/schemas/ImageUrlRef"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "image_url"
-        ],
-        "title": "ImageUrlContentBlock",
-        "description": "Image part of a multimodal chat message (OpenAI content-block shape).\n\n`image_url.url` must reference an upload of the target agent\n(`/api/agents/{id}/uploads/<name>`); the message endpoint validates the\nownership + that the file still exists on disk and 422s otherwise. Only a\nreference is carried on the wire, never base64 — the claim node inlines the\nbytes as native model content at delivery time."
-      },
-      "ImageUrlRef": {
-        "properties": {
-          "url": {
-            "type": "string",
-            "maxLength": 2048,
-            "minLength": 1,
-            "title": "Url"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "url"
-        ],
-        "title": "ImageUrlRef",
-        "description": "The `image_url` object of an image content block."
       },
       "ImpersonationMetadata": {
         "properties": {
@@ -14787,17 +14815,16 @@
             "minimum": 0.0,
             "title": "Ordinal"
           },
-          "filename": {
-            "type": "string",
-            "maxLength": 4096,
-            "minLength": 1,
-            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
-            "title": "Filename"
-          },
           "name": {
             "type": "string",
-            "pattern": "^[0-9a-f]{32}-[0-9]+(?:\\.[^/\\\\\\x00-\\x1f\\x7f?#%]+)?$",
+            "minLength": 1,
+            "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
             "title": "Name"
+          },
+          "staged_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Staged Id"
           },
           "size": {
             "type": "integer",
@@ -14822,8 +14849,8 @@
         "type": "object",
         "required": [
           "ordinal",
-          "filename",
           "name",
+          "staged_id",
           "size",
           "sha256",
           "content_type"
@@ -15303,6 +15330,20 @@
               }
             ],
             "title": "Images"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TimelineUploadFile"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
           },
           "created_at": {
             "type": "string",
@@ -18222,6 +18263,49 @@
         ],
         "title": "SseTotals"
       },
+      "StagedFile": {
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "File Id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "maximum": 52428800.0,
+            "minimum": 0.0,
+            "title": "Size"
+          },
+          "content_type": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "title": "Content Type"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "file_id",
+          "name",
+          "size",
+          "content_type",
+          "sha256"
+        ],
+        "title": "StagedFile"
+      },
       "StatsDashboard": {
         "properties": {
           "live_count": {
@@ -19225,27 +19309,6 @@
         ],
         "title": "TerminateResult"
       },
-      "TextContentBlock": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "text",
-            "title": "Type"
-          },
-          "text": {
-            "type": "string",
-            "title": "Text"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "text"
-        ],
-        "title": "TextContentBlock",
-        "description": "Text part of a multimodal chat message (OpenAI content-block shape)."
-      },
       "TextQuestion": {
         "properties": {
           "type": {
@@ -19431,6 +19494,20 @@
             ],
             "title": "Images"
           },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TimelineUploadFile"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
           "image_captions": {
             "anyOf": [
               {
@@ -19506,6 +19583,39 @@
         ],
         "title": "TimelineResponse",
         "description": "Cold-load timeline payload: one window of rendered items + the\nauthoritative `msg_count` (len(state.messages)) + `has_more`.\n\n`msg_count` is surfaced (not inferred frontend-side from max rendered\nmsg_idx) so the merge that preserves the single streaming \"future\npartial\" uses the exact boundary — a trailing message that renders to\nnothing would otherwise make an inferred count too low.\n\nThe endpoint returns only a tail window (newest `limit` items); `before`\npages further back for scroll-up history. `has_more` reports whether\nolder items exist before the returned window."
+      },
+      "TimelineUploadFile": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Size"
+          },
+          "content_type": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content Type"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "content_type",
+          "url"
+        ],
+        "title": "TimelineUploadFile"
       },
       "ToUserDocument": {
         "properties": {
@@ -19942,56 +20052,31 @@
         "title": "UnitIdentity",
         "description": "One unit: its machine name and its home path on that machine (data)."
       },
-      "UploadedBatch": {
+      "UploadSendRequest": {
         "properties": {
-          "files": {
+          "file_ids": {
             "items": {
-              "$ref": "#/components/schemas/UploadedFile"
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
             },
             "type": "array",
-            "title": "Files"
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "File Ids"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 1048576,
+            "title": "Text",
+            "default": ""
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "files"
+          "file_ids"
         ],
-        "title": "UploadedBatch",
-        "description": "Result of one upload request — the files saved in a single batch."
-      },
-      "UploadedFile": {
-        "properties": {
-          "filename": {
-            "type": "string",
-            "title": "Filename"
-          },
-          "path": {
-            "type": "string",
-            "title": "Path"
-          },
-          "url": {
-            "type": "string",
-            "title": "Url"
-          },
-          "size": {
-            "type": "integer",
-            "title": "Size"
-          },
-          "content_type": {
-            "type": "string",
-            "title": "Content Type"
-          }
-        },
-        "type": "object",
-        "required": [
-          "filename",
-          "path",
-          "url",
-          "size",
-          "content_type"
-        ],
-        "title": "UploadedFile",
-        "description": "Single file upload result.\n\n`filename` is display metadata; keyed silent uploads use a separate immutable\nstored object name in `path` and `url`.\n\n`url` is the HTTP path the saved file is served back at\n(`/api/agents/{id}/uploads/<name>`) — the frontend uses it as an image\nthumbnail src and, for a native image attachment, as the `image_url.url`\nreference it sends in the next multimodal message."
+        "title": "UploadSendRequest"
       },
       "UserSettingListResponse": {
         "properties": {

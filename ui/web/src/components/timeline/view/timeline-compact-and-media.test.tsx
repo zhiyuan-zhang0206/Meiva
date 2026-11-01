@@ -257,6 +257,50 @@ describe("ItemView: inbound_chat images", () => {
     expect(screen.getByAltText("attached image")).toBeTruthy();
     expect(screen.queryByText("[image]")).toBeNull();
   });
+
+  it("renders uploaded file cards + raster image thumbnails on system:upload, hides [files] companion, and falls back on image 404", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            item_id: "10.0",
+            kind: "inbound_chat",
+            source: "system:upload",
+            payload: "system:upload:\n\nFiles uploaded with the next message (saved to /tmp/b):",
+            files: [
+              {
+                name: "diagram.png",
+                size: 4096,
+                content_type: "image/png",
+                url: "/api/keyed/v1/agents/7/uploads/b/objects/0",
+              },
+              {
+                name: "spec.pdf",
+                size: 8192,
+                content_type: "application/pdf",
+                url: "/api/keyed/v1/agents/7/uploads/b/objects/1",
+              },
+            ],
+          }),
+          makeItem({
+            item_id: "11.0",
+            kind: "inbound_chat",
+            source: "user",
+            payload: "user [2026-11-01]:\n\n[files]",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("diagram.png")).toBeTruthy();
+    expect(screen.getByText("spec.pdf")).toBeTruthy();
+    expect(screen.queryByText("[files]")).toBeNull();
+    expect(screen.queryByText(/Files uploaded with the next message/)).toBeNull();
+    const img = screen.getByAltText("diagram.png");
+    expect(img.getAttribute("src")).toContain("/api/keyed/v1/agents/7/uploads/b/objects/0");
+    fireEvent.error(img);
+    expect(screen.queryByAltText("diagram.png")).toBeNull();
+    expect(screen.getByText("diagram.png")).toBeTruthy();
+  });
 });
 
 describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {

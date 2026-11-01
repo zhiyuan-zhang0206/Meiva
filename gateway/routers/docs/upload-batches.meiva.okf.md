@@ -7,15 +7,19 @@ tags: []
 
 # Silent upload acceptance and immutable objects
 
-`POST /api/agents/{id}/uploads` is the only silent save route and requires
-`Idempotency-Key` plus `Idempotency-Scope: principal-v1` (`operation_key`; a missing
-key or scope is 422 before any effect). The stored key includes the verified
-principal, HTTP method and actual agent path. The ordered manifest fingerprints
-original filenames, bytes, sizes, content types and order. Same-key changes
-return 409; different keys create new objects. `deliver=true` is refused with
-422 before admission: delivery is `POST /api/keyed/v1/agents/{id}/uploads`.
+`GET /api/agents/{id}/uploads/{filename}` serves an uploaded file by its sanitized
+or disambiguated filename (`gateway/routers/upload/router.py`). It resolves the
+agent's workspace delivered upload directory (`delivered_upload_dir`) first and falls
+back to the gateway staging directory (`agent_upload_dir`), refusing path traversal
+and serving with `X-Content-Type-Options: nosniff`.
+Staged file upload (`POST /api/keyed/v1/agents/{id}/uploads/staged`), staged file
+deletion (`DELETE /api/keyed/v1/agents/{id}/uploads/staged/{file_id}`) and batch
+delivery (`POST /api/keyed/v1/agents/{id}/uploads`) live in
+`gateway/upload_delivery/router.py`. See the
+[delivered upload owner](../../upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md).
 
-`gateway.routers.upload.batches` owns `agent_upload_batches`. A first writable
+`gateway.routers.upload.batches` retains the lower-level `agent_upload_batches`
+helpers for legacy batch records. A first writable
 transaction takes a per-agent PostgreSQL xact lock, checks existing identity before
 mutable agent existence, and commits the receiving manifest/reservation. A second
 writable transaction takes the same lock, publishes files and commits the original

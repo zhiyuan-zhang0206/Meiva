@@ -1,49 +1,27 @@
 from __future__ import annotations
 
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from pathlib import Path
 
-import httpx2 as httpx
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
+from base.agents.upload_delivery import source
+from base.agents.upload_delivery.models import PROTOCOL, CopyProof, current_unit
+from base.agents.upload_delivery.paths import agent_upload_dir, delivered_upload_dir
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.paths import resolve_meiva_home
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
     gateway_test_config,
     spawn_via_http,
 )
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 
 pytestmark = pytest.mark.usefixtures("gateway_local_runner")
-
-
-def _upload(
-    client: TestClient,
-    agent_id: int,
-    files: list[tuple[str, tuple[str, bytes, str]]],
-    *,
-    query: str = "",
-    headers: dict[str, str] | None = None,
-) -> httpx.Response:
-    return client.post(
-        f"/api/agents/{agent_id}/uploads{query}",
-        headers=headers
-        if headers is not None
-        else {"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
-        files=files,
-    )
-
-
-def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
-    row = db.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
-    ).fetchone()
-    assert row is not None
-    return row[0]
 
 
 def _spawn_agent() -> int:
@@ -59,279 +37,106 @@ def _upload_client(home: Path, **limits: int) -> AbstractContextManager[GatewayT
     return gateway_test_client(config=gateway_test_config(upload_staging_root=home, **limits))
 
 
-def _agent_dir(home: Path, agent_id: int) -> Path:
-    return home / str(agent_id)
+def _write_historical_flat_upload(home: Path, agent_id: int, name: str, data: bytes) -> str:
+    directory = agent_upload_dir(agent_id, root=home)
+    (directory / name).write_bytes(data)
+    return f"/api/agents/{agent_id}/uploads/{name}"
 
 
-def _stored_files(directory: Path) -> list[Path]:
-    return sorted(path for path in directory.iterdir() if path.is_file())
-
-
-class TestUploadFile:
-    def test_upload_single_file_saves_privately_and_queues_no_inbound(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-
-        with _upload_client(tmp_path) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [("files", ("hello.txt", b"Hello, world!", "text/plain"))],
-            )
-
-        assert resp.status_code == 200, resp.text
-        files = resp.json()["files"]
-        assert len(files) == 1
-        assert files[0]["filename"] == "hello.txt"
-        assert files[0]["size"] == 13
-        assert files[0]["content_type"] == "text/plain"
-        dest = Path(files[0]["path"])
-        assert dest.parent == _agent_dir(tmp_path, agent_id)
-        assert dest.read_bytes() == b"Hello, world!"
-        assert dest.parent.stat().st_mode & 0o777 == 0o700
-        assert dest.stat().st_mode & 0o777 == 0o600
-        assert _inbound_count(db_conn, agent_id) == 0
-
-    def test_upload_multiple_files_one_batch(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-
-        with _upload_client(tmp_path) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [
-                    ("files", ("a.txt", b"aaa", "text/plain")),
-                    ("files", ("b.txt", b"bb", "text/plain")),
-                    ("files", ("c.txt", b"c", "text/plain")),
-                ],
-            )
-
-        assert resp.status_code == 200, resp.text
-        files = resp.json()["files"]
-        assert [f["filename"] for f in files] == ["a.txt", "b.txt", "c.txt"]
-        assert [f["size"] for f in files] == [3, 2, 1]
-        assert [Path(f["path"]).read_bytes() for f in files] == [b"aaa", b"bb", b"c"]
-
-    def test_slashes_in_a_display_name_never_reach_the_stored_path(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-
-        with _upload_client(tmp_path) as client:
-            resp = _upload(client, agent_id, [("files", ("etc/passwd.txt", b"data", "text/plain"))])
-
-        assert resp.status_code == 200, resp.text
-        file = resp.json()["files"][0]
-        assert file["filename"] == "etc/passwd.txt"
-        assert Path(file["path"]).parent == _agent_dir(tmp_path, agent_id)
-        assert Path(file["path"]).suffix == ".txt"
-
-    def test_control_characters_in_a_display_name_are_refused(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-
-        with _upload_client(tmp_path) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [("files", ("evil\x1b[31m.txt", b"data", "text/plain"))],
-            )
-
-        assert resp.status_code == 422, resp.text
-        assert not _agent_dir(tmp_path, agent_id).exists()
-
-    def test_upload_agent_not_found_returns_404(self, tmp_path: Path) -> None:
-        with _upload_client(tmp_path) as client:
-            resp = _upload(client, 99999, [("files", ("x.txt", b"x", "text/plain"))])
-        assert resp.status_code == 404
-
-    def test_upload_empty_file(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
-        agent_id = _spawn_agent()
-
-        with _upload_client(tmp_path) as client:
-            resp = _upload(client, agent_id, [("files", ("empty.txt", b"", "text/plain"))])
-
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["files"][0]["size"] == 0
-
-
-class TestUploadContract:
-    @pytest.mark.parametrize(
-        "headers",
-        [
-            {},
-            {"Idempotency-Key": "k"},
-            {"Idempotency-Scope": "principal-v1"},
-            {"Idempotency-Key": "k", "Idempotency-Scope": "unsupported"},
-        ],
+def _stage_and_accept_batch(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    files: list[tuple[str, bytes, str]],
+    *,
+    machine: str,
+    runner_url: str,
+) -> tuple[str, Path]:
+    unit = current_unit(local_machine=machine, home=resolve_meiva_home())
+    db_conn.execute(
+        "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
+        "VALUES (%s,%s,true,%s) ON CONFLICT (machine_name, home) DO UPDATE SET url=EXCLUDED.url",
+        (unit.machine, unit.home, runner_url),
     )
-    def test_missing_or_unsupported_identity_is_refused_before_any_effect(
-        self,
-        db_conn: psycopg.Connection,
-        tmp_path: Path,
-        headers: dict[str, str],
-    ) -> None:
-        agent_id = _spawn_agent()
+    db_conn.commit()
+    file_ids: list[str] = []
+    for name, data, content_type in files:
+        staged = client.post(
+            f"/api/keyed/v1/agents/{agent_id}/uploads/staged",
+            headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
+            files={"file": (name, data, content_type)},
+        )
+        assert staged.status_code == 201, staged.text
+        file_ids.append(staged.json()["file_id"])
 
+    sent = client.post(
+        f"/api/keyed/v1/agents/{agent_id}/uploads",
+        headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
+        json={"file_ids": file_ids, "text": "attached"},
+    )
+    assert sent.status_code == 202, sent.text
+    batch_id = sent.json()["batch_id"]
+    pool = client.app.state.db_pool
+    request = next(
+        item
+        for item in source.due(
+            pool, local_machine=machine, home=resolve_meiva_home(), claim_seconds=0.0
+        )
+        if item.manifest.batch_id == batch_id
+    )
+    upload_dir = delivered_upload_dir(
+        agent_id,
+        home=resolve_meiva_home(),
+        name=client.app.state.gateway_config.upload_dir_name,
+        create=True,
+    ).resolve()
+    batch_dir = upload_dir / request.manifest.directory
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    for item, (_name, data, _content_type) in zip(request.manifest.objects, files, strict=True):
+        (batch_dir / item.name).write_bytes(data)
+    proof = CopyProof(
+        version=PROTOCOL,
+        target=unit,
+        manifest_hash=request.manifest.fingerprint(),
+        directory=str(batch_dir),
+    )
+    source.complete(pool, request, proof)
+    return batch_id, batch_dir
+
+
+class TestLegacyUploadRouteRemoved:
+    def test_post_legacy_upload_route_is_removed(self, tmp_path: Path) -> None:
+        agent_id = _spawn_agent()
         with _upload_client(tmp_path) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [("files", ("a.txt", b"x", "text/plain"))],
-                headers=headers,
+            resp = client.post(
+                f"/api/agents/{agent_id}/uploads",
+                headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
+                files=[("files", ("hello.txt", b"Hello", "text/plain"))],
             )
-
-        assert resp.status_code == 422
-        assert not _agent_dir(tmp_path, agent_id).exists()
-        row = db_conn.execute("SELECT count(*) FROM agent_upload_batches").fetchone()
-        assert row is not None and row[0] == 0
-
-    def test_deliver_true_is_refused_and_saves_nothing(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-
-        with _upload_client(tmp_path) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [("files", ("a.txt", b"x", "text/plain"))],
-                query="?deliver=true",
-            )
-
-        assert resp.status_code == 422
-        assert "/api/keyed/v1/agents/{id}/uploads" in resp.json()["detail"]
-        assert not _agent_dir(tmp_path, agent_id).exists()
-        assert _inbound_count(db_conn, agent_id) == 0
-
-    def test_response_url_serves_the_saved_object(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-
-        with _upload_client(tmp_path) as client:
-            resp = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
-            url = resp.json()["files"][0]["url"]
-            served = client.get(url)
-
-        assert url == f"/api/agents/{agent_id}/uploads/{Path(resp.json()['files'][0]['path']).name}"
-        assert served.status_code == 200
-        assert served.content == b"\x89PNG"
-        assert _inbound_count(db_conn, agent_id) == 0
-
-
-class TestUploadLimits:
-    def test_per_file_limit_rejected_413(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
-        agent_id = _spawn_agent()
-        with _upload_client(tmp_path, max_upload_bytes=10) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [("files", ("big.bin", b"x" * 11, "application/octet-stream"))],
-            )
-        assert resp.status_code == 413
-        assert not _agent_dir(tmp_path, agent_id).exists()
-
-    def test_agent_quota_rejected_413(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
-        agent_id = _spawn_agent()
-        with _upload_client(tmp_path, max_agent_upload_bytes=30) as client:
-            ok = _upload(client, agent_id, [("files", ("a.txt", b"a" * 20, "text/plain"))])
-            over = _upload(client, agent_id, [("files", ("b.txt", b"b" * 20, "text/plain"))])
-        assert ok.status_code == 200
-        assert over.status_code == 413
-        assert len(_stored_files(_agent_dir(tmp_path, agent_id))) == 1
-
-    def test_agent_quota_rejects_entire_oversized_batch(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-        with _upload_client(tmp_path, max_agent_upload_bytes=5) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [
-                    ("files", ("a.txt", b"aaa", "text/plain")),
-                    ("files", ("b.txt", b"bbb", "text/plain")),
-                ],
-            )
-
-        assert resp.status_code == 413
-        directory = _agent_dir(tmp_path, agent_id)
-        assert not directory.exists() or _stored_files(directory) == []
-
-    def test_file_count_cap_rejected_413(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
-        agent_id = _spawn_agent()
-        with _upload_client(tmp_path, max_agent_upload_files=1) as client:
-            ok = _upload(client, agent_id, [("files", ("a.txt", b"a", "text/plain"))])
-            over = _upload(client, agent_id, [("files", ("b.txt", b"b", "text/plain"))])
-        assert ok.status_code == 200
-        assert over.status_code == 413
-
-    def test_file_count_cap_rejects_entire_batch(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-        with _upload_client(tmp_path, max_agent_upload_files=1) as client:
-            resp = _upload(
-                client,
-                agent_id,
-                [
-                    ("files", ("a.txt", b"a", "text/plain")),
-                    ("files", ("b.txt", b"b", "text/plain")),
-                ],
-            )
-
-        assert resp.status_code == 413
-        directory = _agent_dir(tmp_path, agent_id)
-        assert not directory.exists() or _stored_files(directory) == []
-
-    def test_concurrent_batches_share_agent_quota(
-        self, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:
-        agent_id = _spawn_agent()
-        with (
-            _upload_client(tmp_path, max_agent_upload_bytes=10) as client,
-            ThreadPoolExecutor(max_workers=2) as executor,
-        ):
-            responses = [
-                executor.submit(
-                    _upload, client, agent_id, [("files", (name, b"x" * 6, "text/plain"))]
-                )
-                for name in ("a.txt", "b.txt")
-            ]
-            statuses = [response.result().status_code for response in responses]
-
-        assert sorted(statuses) == [200, 413]
-        stored = _stored_files(_agent_dir(tmp_path, agent_id))
-        assert len(stored) == 1
-        assert stored[0].read_bytes() == b"x" * 6
+        assert resp.status_code in (404, 405)
 
 
 class TestServeUpload:
     def test_serves_saved_file(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
+        del db_conn
         agent_id = _spawn_agent()
         raw = b"\x89PNG\r\n\x1a\npixels"
+        url = _write_historical_flat_upload(tmp_path, agent_id, "shot.png", raw)
         with _upload_client(tmp_path) as client:
-            saved = _upload(client, agent_id, [("files", ("shot.png", raw, "image/png"))])
-            resp = client.get(saved.json()["files"][0]["url"])
+            resp = client.get(url)
         assert resp.status_code == 200
         assert resp.content == raw
 
     def test_renderable_upload_served_as_attachment(
         self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
+        del db_conn
         agent_id = _spawn_agent()
+        url = _write_historical_flat_upload(
+            tmp_path, agent_id, "page.html", b"<script>alert(1)</script>"
+        )
         with _upload_client(tmp_path) as client:
-            saved = _upload(
-                client,
-                agent_id,
-                [("files", ("page.html", b"<script>alert(1)</script>", "text/html"))],
-            )
-            resp = client.get(saved.json()["files"][0]["url"])
+            resp = client.get(url)
         assert resp.status_code == 200
         assert resp.headers["x-content-type-options"] == "nosniff"
         assert resp.headers["content-disposition"].startswith("attachment")
@@ -339,21 +144,24 @@ class TestServeUpload:
     def test_plain_upload_served_with_nosniff_only(
         self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
+        del db_conn
         agent_id = _spawn_agent()
+        url = _write_historical_flat_upload(tmp_path, agent_id, "shot.png", b"\x89PNG")
         with _upload_client(tmp_path) as client:
-            saved = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
-            resp = client.get(saved.json()["files"][0]["url"])
+            resp = client.get(url)
         assert resp.status_code == 200
         assert resp.headers["x-content-type-options"] == "nosniff"
         assert "content-disposition" not in resp.headers
 
     def test_missing_file_404(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
+        del db_conn
         agent_id = _spawn_agent()
         with _upload_client(tmp_path) as client:
             resp = client.get(f"/api/agents/{agent_id}/uploads/nope.png")
         assert resp.status_code == 404
 
     def test_traversal_rejected(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
+        del db_conn
         agent_id = _spawn_agent()
         with _upload_client(tmp_path) as client:
             resp = client.get(f"/api/agents/{agent_id}/uploads/..%2f..%2fsecret")
@@ -363,3 +171,68 @@ class TestServeUpload:
         with _upload_client(tmp_path) as client:
             resp = client.get("/api/agents/99999/uploads/x.png")
         assert resp.status_code == 404
+
+
+class TestServeDeliveredUpload:
+    def test_serves_raster_image_inline_and_svg_or_html_as_attachment(
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        machine_identity: MachineIdentityReader,
+        gateway_local_runner: RunnerOps,
+    ) -> None:
+        agent_id = _spawn_agent()
+        png_bytes = b"\x89PNG\r\n\x1a\npixels"
+        svg_bytes = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
+        with _upload_client(tmp_path, upload_recovery_enabled=False) as client:
+            batch_id, _directory = _stage_and_accept_batch(
+                client,
+                db_conn,
+                agent_id,
+                [
+                    ("shot.png", png_bytes, "image/png"),
+                    ("icon.svg", svg_bytes, "image/svg+xml"),
+                ],
+                machine=machine_identity.name(),
+                runner_url=gateway_local_runner.url,
+            )
+            png_resp = client.get(f"/api/agents/{agent_id}/uploads/{batch_id}/0")
+            svg_resp = client.get(f"/api/agents/{agent_id}/uploads/{batch_id}/1")
+
+        assert png_resp.status_code == 200
+        assert png_resp.content == png_bytes
+        assert png_resp.headers["content-disposition"].startswith("inline;")
+        assert png_resp.headers["x-content-type-options"] == "nosniff"
+        assert png_resp.headers["content-security-policy"] == "sandbox; default-src 'none'"
+        assert png_resp.headers["cache-control"] == "private, max-age=31536000, immutable"
+
+        assert svg_resp.status_code == 200
+        assert svg_resp.content == svg_bytes
+        assert svg_resp.headers["content-disposition"].startswith("attachment;")
+        assert svg_resp.headers["x-content-type-options"] == "nosniff"
+
+    def test_modified_or_deleted_workspace_file_returns_404(
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        machine_identity: MachineIdentityReader,
+        gateway_local_runner: RunnerOps,
+    ) -> None:
+        agent_id = _spawn_agent()
+        with _upload_client(tmp_path, upload_recovery_enabled=False) as client:
+            batch_id, directory = _stage_and_accept_batch(
+                client,
+                db_conn,
+                agent_id,
+                [("report.txt", b"original", "text/plain")],
+                machine=machine_identity.name(),
+                runner_url=gateway_local_runner.url,
+            )
+            target_file = directory / "report.txt"
+            target_file.write_bytes(b"modified")
+            modified_resp = client.get(f"/api/agents/{agent_id}/uploads/{batch_id}/0")
+            target_file.unlink()
+            deleted_resp = client.get(f"/api/agents/{agent_id}/uploads/{batch_id}/0")
+
+        assert modified_resp.status_code == 404
+        assert deleted_resp.status_code == 404

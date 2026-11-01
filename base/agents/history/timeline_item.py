@@ -13,7 +13,11 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from base.agents.impersonation.status import ImpersonationMetadata
-from base.agents.messages.inbound_images import inbound_image_urls
+from base.agents.messages.inbound_images import (
+    TimelineUploadFile,
+    inbound_image_urls,
+    inbound_upload_files,
+)
 from base.agents.sdk.tally import SdkCall
 from base.db.protocols import DatabaseLike
 
@@ -102,6 +106,7 @@ class TimelineItem(BaseModel):
     # elsewhere): inbound_chat = gateway-relative urls from meiva_image_urls
     # (via assetUrl); attach = data URIs from content blocks (rendered raw).
     images: list[str] | None = None
+    files: list[TimelineUploadFile] | None = None
     # Per-image caption lines on an `attach` item, aligned 1:1 with `images`:
     # the backend-generated "- [N] name (mime, size) — \"label\"" line that
     # precedes each image block in the message content, so the frontend can
@@ -185,6 +190,7 @@ def _message(anchor: TimelineItem, row: tuple[Any, ...]) -> TimelineItem:
         source=payload["source"],
         payload=payload["content"],
         images=None if outgoing else inbound_image_urls(info.agent_id, payload["payload"]),
+        files=None if outgoing else inbound_upload_files(info.agent_id, payload["payload"]),
         created_at=created_at.isoformat(),
         inbound_id=None if outgoing else payload["inbound_id"],
         impersonation=ImpersonationMetadata.model_validate(

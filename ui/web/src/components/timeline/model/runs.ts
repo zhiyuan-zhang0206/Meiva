@@ -81,7 +81,11 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
     case "agent_chat":
       return item.user_facing === false ? "secondary" : "primary";
     case "inbound_chat":
-      return inboundKind(item.source) === "human" ? "primary" : "secondary";
+      return inboundKind(item.source) === "human" ||
+        item.source === "system:upload" ||
+        Boolean(item.files?.length)
+        ? "primary"
+        : "secondary";
     case "attach":
       // Attached media folds into the turn's details block like any other
       // secondary item (user ruling 2026-08-30 — expand the details block

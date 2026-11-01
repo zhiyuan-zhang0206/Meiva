@@ -1,10 +1,11 @@
-exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests", "workspace_export.py"]
+exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests", "upload_object.py", "workspace_export.py"]
 
 [uses]
-"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py", "workspace_export.py"]
+"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py", "upload_object.py", "workspace_export.py"]
 "dispatch_sync.py" = ["ops_plan.py"]
 "tests" = ["boot.py", "daemon.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py"]
 "to_user_resource.py" = ["in_flight.py"]
+"upload_object.py" = ["in_flight.py"]
 "workspace_export.py" = ["in_flight.py"]
 
 [purity]

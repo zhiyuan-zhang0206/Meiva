@@ -17,12 +17,13 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.upload_delivery.models import (
-    NAMESPACE,
+    PROTOCOL,
     CopyProof,
+    Manifest,
+    Object,
     ReceiveRequest,
     UploadDeliveryConflictError,
     UploadQuotaExceededError,
-    make_manifest,
 )
 from base.agents.upload_delivery.paths import delivered_upload_dir
 from base.cluster.machine import GatewayAccess
@@ -58,16 +59,31 @@ class Batch:
             _AGENT, home=Path(config.unit.home), name=config.upload_dir_name, create=False
         ).resolve()
         item = self.request.manifest.objects[ordinal]
-        return directory / NAMESPACE / self.request.manifest.batch_id / item.name
+        return directory / self.request.manifest.directory / item.name
 
 
 def _batch(home: Path, *contents: bytes) -> Batch:
-    manifest = make_manifest(
-        _AGENT,
-        [f"file-{n}.png" for n in range(len(contents))],
-        [("", data, "image/png") for data in contents],
+    objects = [
+        Object(
+            ordinal=n,
+            name=f"file-{n}.png",
+            staged_id=f"{n:032x}",
+            size=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+            content_type="image/png",
+        )
+        for n, data in enumerate(contents)
+    ]
+    manifest = Manifest(
+        batch_id="a" * 32,
+        agent_id=_AGENT,
+        sent_at="2026-04-19T14:23:05+00:00",
+        directory="20260419-142305",
+        objects=objects,
     )
-    request = ReceiveRequest(version=1, target=_target(home), source=_SOURCE, manifest=manifest)
+    request = ReceiveRequest(
+        version=PROTOCOL, target=_target(home), source=_SOURCE, manifest=manifest
+    )
     return Batch(request, dict(enumerate(contents)))
 
 
