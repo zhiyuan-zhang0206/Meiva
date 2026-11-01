@@ -34,3 +34,14 @@ def test_ci_installs_the_canonical_redis_from_the_redis_io_repo() -> None:
     assert '"redis-server=${redis_version}" "redis-tools=${redis_version}"' in text
     major_minor = brew_pin.REDIS_APT_VERSION.removesuffix(".*")
     assert re.search(rf"^\s*{re.escape(major_minor)}\.\*\) ;;$", text, re.MULTILINE)
+
+
+def test_ci_runner_image_installs_and_holds_the_canonical_redis() -> None:
+    text = (_REPO_ROOT / ".github/ci-image/Dockerfile").read_text(encoding="utf-8")
+    assert re.findall(r'^ARG REDIS_APT_VERSION="([^"]+)"$', text, re.MULTILINE) == [
+        brew_pin.REDIS_APT_VERSION
+    ]
+    assert "https://packages.redis.io/deb" in text
+    assert '"redis-server=${REDIS_APT_VERSION}"' in text
+    assert '"redis-tools=${REDIS_APT_VERSION}"' in text
+    assert "apt-mark hold pgbouncer redis-server redis-tools" in text
