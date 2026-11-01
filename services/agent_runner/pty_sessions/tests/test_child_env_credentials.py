@@ -46,3 +46,18 @@ def test_child_env_drops_a_credential_the_overlay_names() -> None:
 def test_child_env_applies_an_ordinary_overlay_entry() -> None:
     env = child_env({"MEIVA_SCHEDULE_ID": "49"}, base_environ={"MEIVA_SCHEDULE_ID": "1"})
     assert env["MEIVA_SCHEDULE_ID"] == "49"
+
+
+# meiva:note
+# The machine token is the one credential that must stay: a watcher's overlay carries the
+# launcher's runner projection only when the launcher has one, and a seat rebuilt from the launchd
+# side has none (`project_watcher_runner_env` returns `{}`). The carrier is this service's own
+# environment, so an empty projection must leave the token in place (task #5979).
+def test_an_empty_watcher_projection_leaves_the_machine_token_in_place() -> None:
+    base = {"MEIVA_API_TOKEN": "t" * 40, "MEIVA_HOME": "/home/u/.meiva"}
+    env = child_env({}, base_environ=base)
+    assert env["MEIVA_API_TOKEN"] == "t" * 40
+    # meiva:note
+    # The regression this guards: naming the key in the drop set takes the bearer away from every
+    # session with no error at all, which is how the alarm channel went silent on 2026-11-01.
+    assert "MEIVA_API_TOKEN" not in session_credential_keys()

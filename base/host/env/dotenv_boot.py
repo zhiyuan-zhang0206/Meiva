@@ -240,12 +240,15 @@ def _is_launcher_redis_url(env: Mapping[str, str], value: str | None) -> bool:
 # meiva:note
 # Return the launcher's validated data-plane URLs for a watcher session.
 #
-# A shell's base env is the pty-sessions service's own env, not the
-# launcher's, and a watcher must not rely on any ambient inheritance for its
-# runner credentials. Only an agent launch
-# tree may explicitly forward them. A profile-less process on
-# the secured default-home gateway can carry the owner URL after config
-# import; refuse that launch before it creates a doomed watcher session.
+# This is an OVERRIDE, not the machine token's carrier. A shell's base env is the
+# pty-sessions service's own env, and since the daemon is started with the token its host
+# issues (task #5979) every session inherits `MEIVA_API_TOKEN` from there — including a
+# watcher whose launcher has no projection at all, which is the normal case for a seat
+# rebuilt from the launchd side. What this function adds is the launcher's own runner
+# data-plane URLs, which the base env does not carry. Only an agent launch tree may
+# forward them. A profile-less process on the secured default-home gateway can carry the
+# owner URL after config import; refuse that launch before it creates a doomed watcher
+# session.
 # Redis always authenticates, so only a named, password-carrying runtime ACL
 # URL is forwarded, never the `default` admin user, whatever the bearer.
 #
