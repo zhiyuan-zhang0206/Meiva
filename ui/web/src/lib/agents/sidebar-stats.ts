@@ -6,7 +6,7 @@ import { useUserSettings } from "../state/use-user-settings";
 import type { Api } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 
-export const STATS_WINDOWS = [0, 1, 6, 24, 72, 168] as const;
+export const STATS_WINDOWS = [0, 1, 6, 24, 72, 168, 720] as const;
 export type StatsWindowHours = (typeof STATS_WINDOWS)[number];
 export const STATS_WINDOW_LABELS: Record<StatsWindowHours, string> = {
   0: "5m",
@@ -15,6 +15,7 @@ export const STATS_WINDOW_LABELS: Record<StatsWindowHours, string> = {
   24: "24h",
   72: "3d",
   168: "7d",
+  720: "30d",
 };
 export const STATS_WINDOW_DEFAULT: StatsWindowHours = 24;
 

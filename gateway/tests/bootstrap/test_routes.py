@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -98,9 +99,6 @@ def _insert_agent(db: psycopg.Connection, *, status: str = "running", spawner: s
 
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
-    """Empty events / empty agents_meta table → all counts 0, avg_turn_seconds None,
-    cache_hit_pct 0, cost_usd 0 (no input → division-by-zero fallback). Without ?hours=
-    window_hours echoes default 24."""
     db_conn.commit()  # let truncate take effect before starting client
     with gateway_test_client() as client:
         resp = client.get("/api/stats/dashboard")
@@ -110,7 +108,9 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     assert body["window_hours"] == 24
     assert body["tokens"] == {"input": 0, "output": 0, "cache_read": 0, "cache_hit_pct": 0}
     assert body["cost_usd"] == 0
-    assert body["avg_turn_seconds"] is None
+    assert body["openai_cost_usd"] == 0
+    assert body["anthropic_cost_usd"] == 0
+    assert "avg_turn_seconds" not in body
     assert body["warnings"] == 0
     assert body["errors"] == 0
 
@@ -314,23 +314,80 @@ def test_dashboard_cost_uses_usage_time_snapshots(
     # The matching log event is excluded: llm_usage is telemetry-only in both
     # the status card and Grafana panels.
     assert body["cost_usd"] == pytest.approx(37.25)  # pyright: ignore[reportUnknownMemberType]
+    assert math.isclose(body["openai_cost_usd"], 0.0)
+    assert math.isclose(body["anthropic_cost_usd"], 30.0)
 
 
-def test_dashboard_aggregates_turn_end_filters_ok(
+def test_dashboard_provider_api_costs_exclude_subscription_harnesses(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """`event='turn_end'` AVG only includes ok=true (exclude cancelled / abnormal turns).
-    Locks the ok field contract from _llm.py:llm_node finally."""
-    aid = _insert_agent(db_conn, status="running")
-    event_rows.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
-    event_rows.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
-    # ok=False abnormal turn of 100s must not enter AVG
-    event_rows.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 100.0, "ok": False})
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "gpt-6.1-sol",
+            "in_total": 1000,
+            "out_total": 500,
+            "cache_read": 200,
+            "cost_usd": 12.5,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "gpt-6-luna-decisions",
+            "source": "memory_rerank",
+            "in_total": 400,
+            "out_total": 0,
+            "cost_usd": 0.25,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "gpt-6-astra",
+            "source": "codex",
+            "in_total": 2000,
+            "out_total": 800,
+            "cost_usd": 9.0,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "claude-sonnet-5-5",
+            "in_total": 1500,
+            "out_total": 600,
+            "cache_read": 500,
+            "cost_usd": 6.75,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "claude-sonnet-5-5",
+            "source": "claude_code",
+            "in_total": 3000,
+            "out_total": 900,
+            "cost_usd": 14.0,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "deepseek-flash",
+            "in_total": 500,
+            "out_total": 200,
+            "cost_usd": 1.5,
+        },
+    )
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    # AVG(2, 4) = 3.0
-    assert body["avg_turn_seconds"] == 3.0
+    assert body["tokens"]["input"] == 8400
+    assert body["tokens"]["output"] == 3000
+    assert math.isclose(body["cost_usd"], 21.0)
+    assert math.isclose(body["openai_cost_usd"], 12.75)
+    assert math.isclose(body["anthropic_cost_usd"], 6.75)
 
 
 def test_dashboard_default_24h_window_filters_old_rows(
@@ -396,31 +453,30 @@ def test_dashboard_audit_warning_not_counted(
 def test_dashboard_hours_param_selects_window(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """?hours= applies the same Loki window to every event aggregate."""
     aid = _insert_agent(db_conn, status="running")
     event_rows.add(event="some_warning", level="warning", agent_id=aid, ts_offset_hours=3)
     event_rows.add(
-        event="turn_end",
-        agent_id=aid,
-        payload={"duration_seconds": 10.0, "ok": True},
-        ts_offset_hours=3,
-    )
-    event_rows.add(
-        event="turn_end",
-        agent_id=aid,
-        payload={"duration_seconds": 2.0, "ok": True},
-        ts_offset_hours=0.5,
-    )
-    event_rows.add(
         event="llm_usage",
         agent_id=aid,
-        payload={"in_total": 100, "out_total": 50, "cache_read": 0, "cost_usd": 1.0},
+        payload={
+            "model": "gpt-6.1-sol",
+            "in_total": 100,
+            "out_total": 50,
+            "cache_read": 0,
+            "cost_usd": 1.0,
+        },
         ts_offset_hours=3,
     )
     event_rows.add(
         event="llm_usage",
         agent_id=aid,
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 0.1},
+        payload={
+            "model": "claude-sonnet-5-5",
+            "in_total": 10,
+            "out_total": 5,
+            "cache_read": 0,
+            "cost_usd": 0.1,
+        },
         ts_offset_hours=0.5,
     )
     db_conn.commit()
@@ -431,13 +487,14 @@ def test_dashboard_hours_param_selects_window(
     assert narrow["tokens"]["input"] == 10
     assert narrow["tokens"]["output"] == 5
     assert narrow["warnings"] == 0
-    assert narrow["avg_turn_seconds"] == 2.0
+    assert math.isclose(narrow["openai_cost_usd"], 0.0)
+    assert math.isclose(narrow["anthropic_cost_usd"], 0.1)
     assert wide["window_hours"] == 6
     assert wide["tokens"]["input"] == 110
     assert wide["tokens"]["output"] == 55
     assert wide["warnings"] == 1
-    # AVG(10, 2) = 6.0
-    assert wide["avg_turn_seconds"] == 6.0
+    assert math.isclose(wide["openai_cost_usd"], 1.0)
+    assert math.isclose(wide["anthropic_cost_usd"], 0.1)
 
 
 def test_five_minute_window_delta() -> None:
@@ -445,18 +502,16 @@ def test_five_minute_window_delta() -> None:
 
 
 def test_dashboard_all_whitelisted_hours_accepted(db_conn: psycopg.Connection) -> None:
-    """All 6 whitelist values (0/1/6/24/72/168) return 200, window_hours echoed as-is."""
     db_conn.commit()
     with gateway_test_client() as client:
-        for hours in (0, 1, 6, 24, 72, 168):
+        for hours in (0, 1, 6, 24, 72, 168, 720):
             resp = client.get("/api/stats/dashboard", params={"hours": hours})
             assert resp.status_code == 200
             assert resp.json()["window_hours"] == hours
 
 
-@pytest.mark.parametrize("bad", ["5", "-1", "25", "169", "abc", "24.5"])
+@pytest.mark.parametrize("bad", ["5", "-1", "25", "169", "721", "abc", "24.5"])
 def test_dashboard_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> None:
-    """hours outside {0,1,6,24,72,168} → 422 (fail-fast), not silently fallback to 24."""
     db_conn.commit()
     with gateway_test_client() as client:
         resp = client.get("/api/stats/dashboard", params={"hours": bad})

@@ -250,19 +250,22 @@ class StatsDashboard(BaseModel):
         json_schema_extra={
             "description": (
                 "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\n"
-                "All windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n"
-                "`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n"
+                "All windowed fields (`tokens` / `cost_usd` / `openai_cost_usd` /\n"
+                "`anthropic_cost_usd` / `warnings` / `errors`) aggregate over the\n"
+                "`applied_window_hours` horizon.\n"
                 "`window_hours` echoes the selected value — `0` means five minutes; all\n"
                 "other values are hours.\n"
                 "`applied_window_hours` is the served window in hours: the requested one.\n\n"
                 "- `live_count`: current non-terminated count (from agents_meta, not\n"
                 "  events; not windowed)\n"
                 "- `tokens`: windowed telemetry LLM token usage\n"
-                "- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n"
-                "  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n"
-                "  events that pre-date the snapshot field contribute 0\n"
-                "- `avg_turn_seconds`: windowed avg LLM call wall time\n"
-                "  (event=turn_end + ok=true)\n"
+                "- `cost_usd`: windowed metered API spend in USD, summed from the usage-time\n"
+                "  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`\n"
+                "  excluding subscription harnesses; events that pre-date the snapshot field\n"
+                "  contribute 0\n"
+                "- `openai_cost_usd` / `anthropic_cost_usd`: the OpenAI and Anthropic slices\n"
+                "  of `cost_usd`, resolved via the gateway model catalog (`None` only when\n"
+                "  the model catalog failed to load)\n"
                 "- `warnings` / `errors`: raw event totals over the window (critical\n"
                 "  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n"
                 "  and is deliberately NOT counted — these numbers are operator-facing\n"
@@ -273,8 +276,6 @@ class StatsDashboard(BaseModel):
                 "  cancels the class — exact, or a wildcard row with an empty `process`.\n"
                 "  The sidebar card shows `alert_classes_active`; the classes themselves\n"
                 "  are `GET /api/stats/alert-classes`, which reads the same rows.\n\n"
-                "`avg_turn_seconds` None = zero turns in the window (new DB / no\n"
-                'activity); frontend renders "—".\n\n'
                 "`plugin_stats` is not windowed (see `PluginStat`): the runtime values\n"
                 "behind cards that plugins declare under `contributions.ui.stats`, joined\n"
                 "by the console on `(plugin, id)`.\n\n"
@@ -288,7 +289,8 @@ class StatsDashboard(BaseModel):
     applied_window_hours: int | None = None
     tokens: StatsTokens
     cost_usd: float = Field(ge=0)
-    avg_turn_seconds: float | None
+    openai_cost_usd: float | None = Field(default=None, ge=0)
+    anthropic_cost_usd: float | None = Field(default=None, ge=0)
     warnings: NonNegativeInt
     errors: NonNegativeInt
     alert_classes_active: NonNegativeInt

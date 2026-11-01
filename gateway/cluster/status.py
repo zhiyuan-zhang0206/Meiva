@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -37,6 +38,8 @@ from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.resource.reading import ResourceSample
+from base.lm.catalog import ModelCatalog
+from base.lm.usage import vendor_of_model
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.surface import stats
 from gateway.cluster._health import get_health
@@ -69,6 +72,7 @@ from gateway.http.config import (
     gateway_config,
     gateway_rpc,
 )
+from gateway.http.model_catalog import catalog_for_observation
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import RpcClient
@@ -112,7 +116,7 @@ router.add_api_route("/api/health", get_health, methods=["GET"], response_model=
 
 @router.get(
     "/api/stats/dashboard",
-    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `openai_cost_usd` / `anthropic_cost_usd`: the window's\n  `llm_usage` rows in `telemetry_events` (cost is each row's usage-time snapshot\n  excluding subscription harnesses; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / openai_cost_usd / anthropic_cost_usd 0.0. The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
 )
 def get_stats_dashboard(
     request: Request,
@@ -125,9 +129,29 @@ def get_stats_dashboard(
             request.app.state.gateway_config,
             gateway_clock(request),
             cluster=gateway_cluster(request),
+            catalog=catalog_for_observation(request.app.state.catalog),
         )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
+
+
+def _provider_api_costs(
+    api_cost_by_model: Sequence[tuple[str, Decimal]],
+    catalog: ModelCatalog | None,
+) -> tuple[float | None, float | None]:
+    if catalog is None:
+        return None, None
+    openai = Decimal(0)
+    anthropic = Decimal(0)
+    for model, cost in api_cost_by_model:
+        vendor = (
+            vendor_of_model(model, catalog=catalog) or catalog.prices.vendor(model) or ""
+        ).lower()
+        if vendor == "openai":
+            openai += cost
+        elif vendor == "anthropic":
+            anthropic += cost
+    return float(openai), float(anthropic)
 
 
 def _compute_stats_dashboard(
@@ -137,6 +161,7 @@ def _compute_stats_dashboard(
     clock: Clock,
     *,
     cluster: str,
+    catalog: ModelCatalog | None,
 ) -> StatsDashboard:
     """Assemble the payload from one pooled connection."""
 
@@ -158,6 +183,7 @@ def _compute_stats_dashboard(
         if totals.cache_input
         else (None if totals.in_total else 0.0)
     )
+    openai_cost_usd, anthropic_cost_usd = _provider_api_costs(totals.api_cost_by_model, catalog)
     return StatsDashboard(
         live_count=live_count,
         window_hours=hours,
@@ -169,7 +195,8 @@ def _compute_stats_dashboard(
             cache_hit_pct=cache_hit_pct,
         ),
         cost_usd=totals.cost_usd,
-        avg_turn_seconds=totals.turn_seconds / totals.turn_count if totals.turn_count else None,
+        openai_cost_usd=openai_cost_usd,
+        anthropic_cost_usd=anthropic_cost_usd,
         warnings=sum(row.count for row in alert_classes if row.level == "warning"),
         errors=sum(row.count for row in alert_classes if row.level != "warning"),
         alert_classes_active=sum(row.dismissal_id is None for row in alert_classes),

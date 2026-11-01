@@ -50,6 +50,12 @@ import { SidebarIconButton } from "./icon-button";
 export const STATUS_POPOVER_CLASS =
   "z-50 max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none";
 
+// meiva:note
+// Point-in-time cluster state (`live_count` and plugin-declared balances / subscription
+// quotas) sits in its own unwindowed section above the `Usage` block, matching the
+// Inspector panel's separation between live state and windowed metrics so the window
+// selector only governs the time-aggregated grid below.
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
 export function StatusCards({
   stats,
   error,
@@ -82,18 +88,12 @@ export function StatusCards({
       : null;
   const windowedPlaceholder = windowMismatch ? "…" : placeholder;
   const windowedTitle = windowMismatch ? t("statusPanelUpdatingFor", { win }) : null;
-  const cards: (
-    | { kind?: undefined; label: string; value: string; title?: string; windowed?: boolean }
-    | { kind: "warnings"; title?: string; windowed?: boolean }
+  const windowedCards: (
+    | { kind?: undefined; label: string; value: string; title?: string }
+    | { kind: "warnings"; title?: string }
   )[] = [
     {
-      label: t("liveAgents"),
-      value: stats ? String(stats.live_count) : placeholder,
-      title: errMsg ?? t("liveAgentsTitle"),
-    },
-    {
       label: t("tokens"),
-      windowed: true,
       value: windowMismatch
         ? windowedPlaceholder
         : stats
@@ -108,7 +108,6 @@ export function StatusCards({
     },
     {
       label: t("cacheHit"),
-      windowed: true,
       value: windowMismatch
         ? windowedPlaceholder
         : stats
@@ -118,7 +117,6 @@ export function StatusCards({
     },
     {
       label: t("cost"),
-      windowed: true,
       value: windowMismatch
         ? windowedPlaceholder
         : stats
@@ -128,24 +126,40 @@ export function StatusCards({
         windowedTitle ??
         errMsg ??
         (stats
-          ? t("costTitleDetail", { win, amount: stats.cost_usd })
+          ? t("costTitleDetail", { win, amount: stats.cost_usd.toFixed(2) })
           : t("costTitle", { win })),
     },
     {
-      label: t("avgTurnTime"),
-      windowed: true,
-      value:
-        windowMismatch
-          ? windowedPlaceholder
-          : stats?.avg_turn_seconds != null
-          ? `${Math.round(stats.avg_turn_seconds)}s`
-          : placeholder,
-      title: windowedTitle ?? errMsg ?? t("avgTurnTitle", { win }),
+      kind: "warnings",
+      title: windowedTitle ?? errMsg ?? t("warningsTitle", { win }),
     },
     {
-      kind: "warnings",
-      windowed: true,
-      title: windowedTitle ?? errMsg ?? t("warningsTitle", { win }),
+      label: t("openaiCost"),
+      value: windowMismatch
+        ? windowedPlaceholder
+        : stats?.openai_cost_usd != null
+          ? `$${stats.openai_cost_usd.toFixed(2)}`
+          : placeholder,
+      title:
+        windowedTitle ??
+        errMsg ??
+        (stats?.openai_cost_usd != null
+          ? t("openaiCostTitleDetail", { win, amount: stats.openai_cost_usd.toFixed(2) })
+          : t("openaiCostTitle", { win })),
+    },
+    {
+      label: t("anthropicCost"),
+      value: windowMismatch
+        ? windowedPlaceholder
+        : stats?.anthropic_cost_usd != null
+          ? `$${stats.anthropic_cost_usd.toFixed(2)}`
+          : placeholder,
+      title:
+        windowedTitle ??
+        errMsg ??
+        (stats?.anthropic_cost_usd != null
+          ? t("anthropicCostTitleDetail", { win, amount: stats.anthropic_cost_usd.toFixed(2) })
+          : t("anthropicCostTitle", { win })),
     },
   ];
   const valueClass = failedWithoutData
@@ -186,73 +200,93 @@ export function StatusCards({
             </span>
           ) : null}
         </div>
-        <WindowSelect
-          value={String(windowHours)}
-          options={STATS_WINDOWS.map((h) => ({
-            value: String(h),
-            label:
-              h === windowHours && appliedWindowHours != null
-                ? `${STATS_WINDOW_LABELS[h]} · ${appliedWindowHours}h`
-                : STATS_WINDOW_LABELS[h],
-          }))}
-          // meiva:note
-          // The select offers exactly the known windows, so the pick is looked up in that list: a
-          // value the list does not hold changes nothing rather than being asserted into the type.
-          // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
-          onChange={(v) => {
-            const picked = STATS_WINDOWS.find((h) => String(h) === v);
-            if (picked !== undefined) onWindowChange(picked);
-          }}
-          ariaLabel={t("statusPanelWindow")}
-          className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
-        />
       </div>
-      <div className="grid grid-cols-2 gap-1 px-3 py-2">
-        {cards.map((card) =>
-          card.kind === "warnings" ? (
-            <WarningErrorCard
-              key="warnings"
-              stats={windowMismatch ? undefined : stats}
-              placeholder={windowedPlaceholder}
-              placeholderClass={placeholderClass}
-              valueClass={valueClass}
-              firstLoad={firstLoad}
-              title={card.title}
+      <div className="px-3 py-2">
+        <div
+          title={errMsg ?? t("liveAgentsTitle")}
+          className={cn("items-center justify-between rounded bg-sidebar-accent/40 px-2.5 py-1.5", FLEX)}
+        >
+          <span className="text-[10px] tracking-wide text-muted-foreground">
+            {t("liveAgents")}
+          </span>
+          {firstLoad ? (
+            <span
+              className="h-4 w-8 animate-pulse rounded bg-muted-foreground/20"
+              aria-hidden
             />
           ) : (
-            <div
-              key={card.label}
-              title={windowMismatch && card.windowed ? card.title : undefined}
-              className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
-            >
-              <span className="text-[10px] tracking-wide text-muted-foreground">
-                {card.label}
-              </span>
-              {firstLoad ? (
-                <span
-                  className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
-                  aria-hidden
-                />
-              ) : (
-                <span className={valueClass}>{card.value}</span>
-              )}
-            </div>
-          ),
-        )}
-      </div>
-      {pluginCards.length > 0 ? (
-        // meiva:note
-        // Plugin-declared cards (`contributions.ui.stats` + the values the
-        // dashboard carried). Not windowed: a plugin value is a point in
-        // time, so the window selector deliberately does not apply — the
-        // section sits below the windowed grid precisely to say so.
-        // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
-        <div className="divide-y divide-border/60 border-t border-border px-3">
-          {pluginCards.map((card) => (
-            <PluginStatCard key={card.key} card={card} />
-          ))}
+            <span className={valueClass}>{stats ? String(stats.live_count) : placeholder}</span>
+          )}
         </div>
-      ) : null}
+        {pluginCards.length > 0 ? (
+          <div className="mt-2 divide-y divide-border/60 border-t border-border/60">
+            {pluginCards.map((card) => (
+              <PluginStatCard key={card.key} card={card} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="border-t border-border">
+        <div className={cn("items-center justify-between px-3 pt-2 pb-1.5", FLEX)}>
+          <div className={cn("items-center gap-1.5 text-[10px] font-medium tracking-wide text-muted-foreground", FLEX)}>
+            <Activity className="size-3" aria-hidden />
+            <span>{t("statusUsageSection")}</span>
+          </div>
+          <WindowSelect
+            value={String(windowHours)}
+            options={STATS_WINDOWS.map((h) => ({
+              value: String(h),
+              label:
+                h === windowHours && appliedWindowHours != null
+                  ? `${STATS_WINDOW_LABELS[h]} · ${appliedWindowHours}h`
+                  : STATS_WINDOW_LABELS[h],
+            }))}
+            // meiva:note
+            // The select offers exactly the known windows, so the pick is looked up in that list: a
+            // value the list does not hold changes nothing rather than being asserted into the type.
+            // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+            onChange={(v) => {
+              const picked = STATS_WINDOWS.find((h) => String(h) === v);
+              if (picked !== undefined) onWindowChange(picked);
+            }}
+            ariaLabel={t("statusPanelWindow")}
+            className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-1 px-3 pb-2.5">
+          {windowedCards.map((card) =>
+            card.kind === "warnings" ? (
+              <WarningErrorCard
+                key="warnings"
+                stats={windowMismatch ? undefined : stats}
+                placeholder={windowedPlaceholder}
+                placeholderClass={placeholderClass}
+                valueClass={valueClass}
+                firstLoad={firstLoad}
+                title={card.title}
+              />
+            ) : (
+              <div
+                key={card.label}
+                title={card.title}
+                className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
+              >
+                <span className="text-[10px] tracking-wide text-muted-foreground">
+                  {card.label}
+                </span>
+                {firstLoad ? (
+                  <span
+                    className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
+                    aria-hidden
+                  />
+                ) : (
+                  <span className={valueClass}>{card.value}</span>
+                )}
+              </div>
+            ),
+          )}
+        </div>
+      </div>
     </div>
   );
 }

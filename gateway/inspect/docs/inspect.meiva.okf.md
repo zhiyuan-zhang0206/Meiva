@@ -33,7 +33,7 @@ instead, with unexpected gaps emitted as the `inspect_metrics_coverage_gap` even
 Missing evidence is null/partial with window and observation timestamps, not a
 zero or a claim of complete collection. No synchronous log scan or completed
 result TTL is part of the statistics path. The statistics path serves only the
-explicit hour windows whitelisted by `StatsWindowHours` (0/1/6/24/72/168); it
+explicit hour windows whitelisted by `StatsWindowHours` (0/1/6/24/72/168/720); it
 has no since-compact window (a window over compact boundaries would first need
 an authoritative completed-compact stamp — a separate execution-contract
 decision). The `/inspect/live` half remains

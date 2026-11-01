@@ -56,25 +56,28 @@ launch deployments; a fleet update is the operator script `python -m cli.fleet_u
 Backs the status cards of the frontend sidebar's Status popover in **one** round trip,
 polled on one page-wide 30s cadence regardless of how many sidebar consumers
 are mounted. `hours` is the aggregation window, whitelisted to
-1 / 6 / 24 / 72 / 168 (default 24).
+0 (5m) / 1 / 6 / 24 / 72 / 168 / 720 (default 24).
 
 | Card data | Source |
 |---|---|
-| `live_count`, lifetime event estimate | Postgres metadata |
-| windowed tokens, cost, turn duration, warning/error counts | `telemetry_events` (Postgres) |
+| `live_count` | Postgres `agents_meta` (not windowed) |
+| windowed `tokens`, `cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, warning/error counts | `telemetry_events` (Postgres) |
 | warning/error event totals and `alert_classes_active` / `alert_classes_dismissed` | the window's classes (below) and the active `event_dismissals` rows (Postgres) that cancel them |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/surface/stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
 Every request computes its window in one pooled connection with an 8-second
-statement timeout (a timeout is a retriable 503): one scan of the window's
-`llm_usage` and `turn_end` rows (`gateway/cluster/monitor/stats_events.py`) gives the
-token, cost and turn sums, and one grouped count of the warning, error and
+statement timeout (a timeout is a retriable 503): one grouped scan of the window's
+`llm_usage` rows (`gateway/cluster/monitor/stats_events.py`) gives the
+token sums, total metered API cost and per-model metered API cost slices (excluding
+`SUBSCRIPTION_SOURCES`), and one grouped count of the warning, error and
 critical rows (served by the partial index `telemetry_events_anomaly_ts`) gives
-the alert classes. The window is the requested one (7 days included), so
-`applied_window_hours` equals `window_hours`. The `llm_usage.cost_usd` sum is the
-usage-time quote snapshot, not historical tokens repriced against today's registry.
-Every read is scoped to the current home-derived cluster label (rows with no label
-included).
+the alert classes. `openai_cost_usd` and `anthropic_cost_usd` resolve each model's
+vendor through the gateway `ModelCatalog` (`None` only when catalog startup failed,
+preserving `200` for the rest of the dashboard). The window is the requested one
+(up to 30 days), so `applied_window_hours` equals `window_hours`. The `llm_usage.cost_usd`
+sum is the usage-time quote snapshot, not historical tokens repriced against today's
+registry. Every read is scoped to the current home-derived cluster label (rows with no
+label included).
 
 ### Alert classes — `GET /api/stats/alert-classes?hours=` and `.../samples`
 

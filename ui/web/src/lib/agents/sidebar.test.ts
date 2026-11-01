@@ -129,10 +129,11 @@ describe("useSidebarCollapsed", () => {
 });
 
 describe("useStatsWindow (DB-backed, validated)", () => {
-  it("keeps the valid five-minute window", () => {
-    const { wrapper } = createSettingsRig({ "display.stats_window_hours": 0 });
-    const { result } = renderHook(() => useStatsWindow(), { wrapper });
-    expect(result.current.windowHours).toBe(0);
+  it("keeps the valid five-minute and thirty-day windows", () => {
+    const fiveMin = createSettingsRig({ "display.stats_window_hours": 0 });
+    expect(renderHook(() => useStatsWindow(), { wrapper: fiveMin.wrapper }).result.current.windowHours).toBe(0);
+    const thirtyDay = createSettingsRig({ "display.stats_window_hours": 720 });
+    expect(renderHook(() => useStatsWindow(), { wrapper: thirtyDay.wrapper }).result.current.windowHours).toBe(720);
   });
 
   it("rejects an out-of-whitelist window → default", () => {
@@ -150,7 +151,8 @@ describe("useStatsDashboard shared polling", () => {
       window_hours: 24,
       tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
-      avg_turn_seconds: null,
+      openai_cost_usd: 0,
+      anthropic_cost_usd: 0,
       warnings: 0,
       errors: 0,
       alert_classes_active: 0,
@@ -231,7 +233,8 @@ describe("useStatsDashboard shared polling", () => {
       window_hours: 24,
       tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
-      avg_turn_seconds: null,
+      openai_cost_usd: 0,
+      anthropic_cost_usd: 0,
       warnings: 0,
       errors: 0,
       alert_classes_active: 0,

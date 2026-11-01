@@ -12,23 +12,24 @@ function openStatus() {
 }
 
 describe("StatusCards tri-state (loading / data / error)", () => {
-  it("fetching without data shows an updating spinner and six skeleton values", async () => {
+  it("fetching without data shows an updating spinner and seven skeleton values", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsFetching = true;
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     expect(await screen.findByRole("status", { name: "Status is updating" })).toBeTruthy();
-    expect(document.querySelectorAll(".animate-pulse")).toHaveLength(6);
+    expect(document.querySelectorAll(".animate-pulse")).toHaveLength(7);
     expect(screen.queryByText("—")).toBeNull();
   });
-  it("stats has data → 6 cards show real numbers", async () => {
+  it("stats has data → live count and 6 windowed cards show real numbers", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
-      cost_usd: 1.2345,
-      avg_turn_seconds: 3.14,
+      cost_usd: 25.4,
+      openai_cost_usd: 12.34,
+      anthropic_cost_usd: 5.67,
       warnings: 19_588,
       errors: 41,
       alert_classes_active: 7,
@@ -40,9 +41,11 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     expect(await screen.findByText("5")).toBeTruthy();
     expect(await screen.findByText("19.1k")).toBeTruthy();
     expect(await screen.findByText("80.00%")).toBeTruthy();
-    expect(await screen.findByText("$1.23")).toBeTruthy();
-    expect(await screen.findByText("3s")).toBeTruthy();
+    expect(await screen.findByText("$25.40")).toBeTruthy();
+    expect(await screen.findByText("$12.34")).toBeTruthy();
+    expect(await screen.findByText("$5.67")).toBeTruthy();
     expect(await screen.findByText("19588 / 41")).toBeTruthy();
+    expect(screen.queryByText("Average turn time")).toBeNull();
     expect(screen.queryByText("19,629 events")).toBeNull();
     expect(screen.queryByText("7")).toBeNull();
   });
@@ -53,7 +56,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 6000, output: 0, cache_read: 0, cache_hit_pct: null },
       cost_usd: 3,
-      avg_turn_seconds: null,
+      openai_cost_usd: 1.5,
+      anthropic_cost_usd: 0.5,
       warnings: 0,
       errors: 0,
       alert_classes_active: 0,
@@ -74,7 +78,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1.2345,
-      avg_turn_seconds: 3.14,
+      openai_cost_usd: 0.5,
+      anthropic_cost_usd: 0.25,
       warnings: 3,
       errors: 2,
       alert_classes_active: 0,
@@ -94,7 +99,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 1, output: 1, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
-      avg_turn_seconds: null,
+      openai_cost_usd: 0,
+      anthropic_cost_usd: 0,
       warnings: 10_000,
       errors: 0,
       alert_classes_active: 1,
@@ -112,7 +118,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     state.statsError = new Error("stats endpoint 500");
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
-    expect((await screen.findAllByText("!")).length).toBeGreaterThanOrEqual(6);
+    expect((await screen.findAllByText("!")).length).toBeGreaterThanOrEqual(7);
     expect(document.querySelectorAll(".text-destructive").length).toBeGreaterThan(0);
     const retry = await screen.findByRole("button", { name: "Retry" });
     expect(retry.getAttribute("title")).toBe("stats endpoint 500");
@@ -127,7 +133,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1,
-      avg_turn_seconds: 3,
+      openai_cost_usd: 0.5,
+      anthropic_cost_usd: 0.25,
       warnings: 2,
       errors: 1,
       alert_classes_active: 1,
@@ -164,7 +171,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 1_500_000, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
-      avg_turn_seconds: null,
+      openai_cost_usd: 0,
+      anthropic_cost_usd: 0,
       warnings: 0,
       errors: 0,
       alert_classes_active: 0,
@@ -175,14 +183,15 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     openStatus();
     expect(await screen.findByText("1.5M")).toBeTruthy();
   });
-  it("avg_turn_seconds=null → shows placeholder, not 'NaNs'", () => {
+  it("null provider cost slices (unavailable model catalog) show placeholder instead of $0.00", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
-      live_count: 0,
+      live_count: 2,
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
-      cost_usd: 0,
-      avg_turn_seconds: null,
+      cost_usd: 1.5,
+      openai_cost_usd: null,
+      anthropic_cost_usd: null,
       warnings: 0,
       errors: 0,
       alert_classes_active: 0,
@@ -191,6 +200,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     };
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
+    expect(await screen.findByText("$1.50")).toBeTruthy();
+    expect(await screen.findAllByText("—")).toHaveLength(2);
     expect(screen.queryByText(/NaN/)).toBeNull();
   });
 });
@@ -202,7 +213,8 @@ describe("plugin status cards", () => {
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
-      avg_turn_seconds: null,
+      openai_cost_usd: 0,
+      anthropic_cost_usd: 0,
       warnings: 0,
       errors: 0,
       alert_classes_active: 0,
@@ -210,7 +222,7 @@ describe("plugin status cards", () => {
       plugin_stats: pluginStats,
     };
   }
-  it("a declared card renders the plugin's value and detail below the built-in grid", async () => {
+  it("a declared card renders the plugin's value and detail in the unwindowed section above Usage", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [{ plugin: "codex_usage", id: "codex-a", label: "Codex A" }];
     state.stats = statsWith([
@@ -226,7 +238,9 @@ describe("plugin status cards", () => {
     ]);
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
-    expect(await screen.findByText("Codex A")).toBeTruthy();
+    const codex = await screen.findByText("Codex A");
+    const usageHeading = await screen.findByText("Usage");
+    expect(codex.compareDocumentPosition(usageHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(await screen.findByText("Weekly reset 10-04 17:14 UTC+08:00")).toBeTruthy();
     expect(await screen.findByText("52% remaining · 0 resets available")).toBeTruthy();
   });
@@ -332,41 +346,54 @@ describe("plugin status cards", () => {
 });
 
 describe("StatusCards window selector", () => {
-  it("hides stale windowed values while retaining the live-agent count", async () => {
+  it("hides stale windowed values while retaining the live-agent count and plugin cards", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
+    state.pluginStatDeclarations = [{ plugin: "deepseek_balance", id: "bal", label: "DeepSeek" }];
     state.stats = {
       live_count: 5,
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
-      cost_usd: 1.2345,
-      avg_turn_seconds: 3.14,
+      cost_usd: 10.5,
+      openai_cost_usd: 4.2,
+      anthropic_cost_usd: 3.1,
       warnings: 2,
       errors: 1,
       alert_classes_active: 1,
       alert_classes_dismissed: 2,
-      plugin_stats: [],
+      plugin_stats: [
+        {
+          plugin: "deepseek_balance",
+          id: "bal",
+          value: "$42.80",
+          detail: null,
+          status: "ok",
+          updated_at: new Date().toISOString(),
+          updated_by: null,
+        },
+      ],
     };
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     expect(await screen.findByText("5")).toBeTruthy();
-    expect(await screen.findAllByText("…")).toHaveLength(5);
+    expect(await screen.findByText("$42.80")).toBeTruthy();
+    expect(await screen.findAllByText("…")).toHaveLength(6);
     expect(screen.queryByText("19.1k")).toBeNull();
     expect(screen.queryByText("80.00%")).toBeNull();
-    expect(screen.queryByText("$1.23")).toBeNull();
-    expect(screen.queryByText("3s")).toBeNull();
-    expect(screen.queryByText("Total 2")).toBeNull();
-    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(5);
+    expect(screen.queryByText("$10.50")).toBeNull();
+    expect(screen.queryByText("$4.20")).toBeNull();
+    expect(screen.queryByText("$3.10")).toBeNull();
+    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(6);
   });
-  it("renders all six window options with the persisted value selected", async () => {
+  it("renders all seven window options including 30d with the persisted value selected", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
-    state.statsWindowHours = 72;
+    state.statsWindowHours = 720;
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     const select = await screen.findByLabelText<HTMLSelectElement>("Status time window");
-    expect(select.value).toBe("72");
+    expect(select.value).toBe("720");
     const labels = Array.from(select.options).map((o) => o.text);
-    expect(labels).toEqual(["5m", "1h", "6h", "24h", "3d", "7d"]);
+    expect(labels).toEqual(["5m", "1h", "6h", "24h", "3d", "7d", "30d"]);
   });
   it("labels a retention-clamped selected window with the applied hours", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -377,7 +404,8 @@ describe("StatusCards window selector", () => {
       applied_window_hours: 84,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 1,
-      avg_turn_seconds: 3,
+      openai_cost_usd: 0.5,
+      anthropic_cost_usd: 0.2,
       warnings: 0,
       errors: 0,
       alert_classes_active: 0,
@@ -395,21 +423,25 @@ describe("StatusCards window selector", () => {
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     const select = await screen.findByLabelText("Status time window");
-    fireEvent.change(select, { target: { value: "6" } });
+    fireEvent.change(select, { target: { value: "720" } });
     await waitFor(() =>
-      expect(transport.putSetting).toHaveBeenCalledWith("display.stats_window_hours", 6),
+      expect(transport.putSetting).toHaveBeenCalledWith("display.stats_window_hours", 720),
     );
   });
-  it("card labels render for each stat", async () => {
+  it("separates Live agents above the Usage section and renders each stat label", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
+    const live = await screen.findByText("Live agents");
+    const usage = await screen.findByText("Usage");
+    expect(live.compareDocumentPosition(usage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(await screen.findByText("Warnings / errors")).toBeTruthy();
-    expect(await screen.findByText("Live agents")).toBeTruthy();
     expect(await screen.findByText("Tokens")).toBeTruthy();
     expect(await screen.findByText("Cache hit")).toBeTruthy();
-    expect(await screen.findByText("Average turn time")).toBeTruthy();
     expect(await screen.findByText("Cost")).toBeTruthy();
+    expect(await screen.findByText("OpenAI API")).toBeTruthy();
+    expect(await screen.findByText("Anthropic API")).toBeTruthy();
+    expect(screen.queryByText("Average turn time")).toBeNull();
   });
 });
