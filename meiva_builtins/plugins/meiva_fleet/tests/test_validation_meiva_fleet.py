@@ -79,7 +79,7 @@ class TestTasksEntries:
         message: Any = ("note",)
         task_registry.log(task.id, message, operation_key=str(uuid4()))
 
-        assert (task_registry.get(task.id).results or "").endswith(" note\n")
+        assert (task_registry.get(task.id).results or "").endswith(" note\n\n")
 
     def test_log_multi_element_type_errors(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import task_registry
