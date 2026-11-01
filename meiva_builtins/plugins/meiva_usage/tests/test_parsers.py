@@ -14,13 +14,17 @@ from meiva_builtins.plugins.meiva_usage.credentials import (
 )
 from meiva_builtins.plugins.meiva_usage.parsers import (
     parse_anthropic_cost_report_page,
-    parse_antigravity_windows,
+    parse_antigravity_quota_groups,
     parse_claude_windows,
     parse_codex_primary_window,
     parse_openai_costs_page,
     sanitize_codex_rpc_error,
 )
-from meiva_builtins.plugins.meiva_usage.types import UsageProbeError, email_from_jwt
+from meiva_builtins.plugins.meiva_usage.types import (
+    UsageProbeError,
+    WindowPair,
+    email_from_jwt,
+)
 
 
 def test_parse_claude_oauth_blob_valid() -> None:
@@ -203,7 +207,67 @@ def test_parse_antigravity_credentials_empty_access_token_with_refresh() -> None
         parse_antigravity_credentials_blob({"token": {"access_token": "", "refresh_token": ""}})
 
 
-def test_parse_antigravity_windows_wire_shape_wrapped_and_disabled() -> None:
+def _assert_real_gemini_groups(gemini: WindowPair | None) -> None:
+    assert gemini is not None
+    assert gemini.weekly is not None
+    assert gemini.session is not None
+    assert pytest.approx(gemini.weekly.used_percent, rel=1e-4) == 18.4308
+    assert pytest.approx(gemini.session.used_percent, rel=1e-4) == 23.6813
+    assert gemini.weekly.window_minutes == 10080
+    assert gemini.session.window_minutes == 300
+
+
+def _assert_real_claude_gpt_groups(claude_gpt: WindowPair | None) -> None:
+    assert claude_gpt is not None
+    assert claude_gpt.weekly is not None
+    assert claude_gpt.session is not None
+    assert pytest.approx(claude_gpt.weekly.used_percent, rel=1e-4) == 99.097
+    assert pytest.approx(claude_gpt.session.used_percent, rel=1e-4) == 94.3613
+    assert claude_gpt.weekly.window_minutes == 10080
+    assert claude_gpt.session.window_minutes == 300
+
+
+def test_parse_antigravity_quota_groups_real_wire_payload() -> None:
+    payload = {
+        "groups": [
+            {
+                "displayName": "Gemini Models",
+                "buckets": [
+                    {
+                        "bucketId": "gemini-weekly",
+                        "remainingFraction": 0.8156919,
+                        "resetTime": "2026-11-07T00:00:00Z",
+                    },
+                    {
+                        "bucketId": "gemini-5h",
+                        "remainingFraction": 0.7631871,
+                        "resetTime": "2026-11-01T18:00:00Z",
+                    },
+                ],
+            },
+            {
+                "displayName": "Claude and GPT models",
+                "buckets": [
+                    {
+                        "bucketId": "3p-weekly",
+                        "remainingFraction": 0.00902968,
+                        "resetTime": "2026-11-08T00:00:00Z",
+                    },
+                    {
+                        "bucketId": "3p-5h",
+                        "remainingFraction": 0.0563868,
+                        "resetTime": "2026-11-01T17:00:00Z",
+                    },
+                ],
+            },
+        ]
+    }
+    groups = parse_antigravity_quota_groups(payload)
+    _assert_real_gemini_groups(groups.gemini)
+    _assert_real_claude_gpt_groups(groups.claude_gpt)
+
+
+def test_parse_antigravity_quota_groups_wrapped_response_and_disabled() -> None:
     payload = {
         "response": {
             "groups": [
@@ -225,17 +289,16 @@ def test_parse_antigravity_windows_wire_shape_wrapped_and_disabled() -> None:
             ]
         }
     }
-    session, weekly = parse_antigravity_windows(payload)
-    assert session is not None
-    assert session.used_percent == 25.0
-    assert session.window_minutes == 300
+    groups = parse_antigravity_quota_groups(payload)
+    assert groups.gemini is not None
+    assert groups.gemini.session is not None
+    assert groups.gemini.session.used_percent == 25.0
+    assert groups.gemini.weekly is not None
+    assert groups.gemini.weekly.used_percent == 100.0
+    assert groups.claude_gpt is None
 
-    assert weekly is not None
-    assert weekly.used_percent == 100.0
-    assert weekly.window_minutes == 10080
 
-
-def test_parse_antigravity_windows_protobuf_omitted_zero() -> None:
+def test_parse_antigravity_quota_groups_protobuf_omitted_zero() -> None:
     payload = {
         "groups": [
             {
@@ -259,10 +322,49 @@ def test_parse_antigravity_windows_protobuf_omitted_zero() -> None:
             }
         ]
     }
-    session, _ = parse_antigravity_windows(payload)
-    assert session is not None
-    assert session.used_percent == 100.0
-    assert session.window_minutes == 300
+    groups = parse_antigravity_quota_groups(payload)
+    assert groups.gemini is not None
+    assert groups.gemini.session is not None
+    assert groups.gemini.session.used_percent == 100.0
+    assert groups.gemini.weekly is not None
+    assert groups.gemini.weekly.used_percent == 20.0
+
+
+def test_parse_antigravity_quota_groups_flat_buckets_fallback() -> None:
+    payload = {
+        "buckets": [
+            {
+                "bucketId": "gemini-5h",
+                "remainingFraction": 0.9,
+            },
+            {
+                "bucketId": "3p-weekly",
+                "remainingFraction": 0.4,
+            },
+        ]
+    }
+    groups = parse_antigravity_quota_groups(payload)
+    assert groups.gemini is not None
+    assert groups.gemini.session is not None
+    assert groups.gemini.session.used_percent == 10.0
+    assert groups.gemini.weekly is None
+
+    assert groups.claude_gpt is not None
+    assert groups.claude_gpt.weekly is not None
+    assert groups.claude_gpt.weekly.used_percent == 60.0
+    assert groups.claude_gpt.session is None
+
+
+def test_parse_antigravity_quota_groups_empty_raises() -> None:
+    with pytest.raises(UsageProbeError, match="missing rate-limit windows"):
+        parse_antigravity_quota_groups({})
+
+    with pytest.raises(UsageProbeError, match="missing rate-limit windows"):
+        parse_antigravity_quota_groups({"groups": []})
+
+    empty_buckets: list[object] = []
+    with pytest.raises(UsageProbeError, match="missing rate-limit windows"):
+        parse_antigravity_quota_groups({"groups": [{"name": "unknown", "buckets": empty_buckets}]})
 
 
 def test_parse_openai_costs_page_basic() -> None:

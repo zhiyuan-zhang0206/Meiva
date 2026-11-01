@@ -62,31 +62,8 @@ def probe_collector(
     codex_rpc_runner: CodexRpcRunner | None = None,
     display_tz: tzinfo = UTC,
     timeout_s: float = 10.0,
-) -> CardReading:
+) -> dict[str, CardReading]:
     fetcher = http_fetch if http_fetch is not None else urllib_json_fetcher
-
-    if collector.provider == "claude":
-        return probe_claude(
-            collector,
-            user_home=user_home,
-            environ=environ,
-            now=now,
-            platform=platform,
-            http_fetch=fetcher,
-            keychain_reader=keychain_reader,
-            display_tz=display_tz,
-        )
-
-    if collector.provider == "deepseek":
-        return probe_deepseek(
-            collector,
-            user_home=user_home,
-            environ=environ,
-            now=now,
-            platform=platform,
-            http_fetch=fetcher,
-            display_tz=display_tz,
-        )
 
     if collector.provider == "antigravity":
         return probe_antigravity(
@@ -99,8 +76,30 @@ def probe_collector(
             display_tz=display_tz,
         )
 
-    if collector.provider == "codex":
-        return probe_codex(
+    reading: CardReading
+    if collector.provider == "claude":
+        reading = probe_claude(
+            collector,
+            user_home=user_home,
+            environ=environ,
+            now=now,
+            platform=platform,
+            http_fetch=fetcher,
+            keychain_reader=keychain_reader,
+            display_tz=display_tz,
+        )
+    elif collector.provider == "deepseek":
+        reading = probe_deepseek(
+            collector,
+            user_home=user_home,
+            environ=environ,
+            now=now,
+            platform=platform,
+            http_fetch=fetcher,
+            display_tz=display_tz,
+        )
+    elif collector.provider == "codex":
+        reading = probe_codex(
             collector,
             user_home=user_home,
             environ=environ,
@@ -110,9 +109,8 @@ def probe_collector(
             display_tz=display_tz,
             timeout_s=timeout_s,
         )
-
-    if collector.provider == "openai":
-        return probe_openai(
+    elif collector.provider == "openai":
+        reading = probe_openai(
             collector,
             user_home=user_home,
             environ=environ,
@@ -121,9 +119,8 @@ def probe_collector(
             http_fetch=fetcher,
             display_tz=display_tz,
         )
-
-    if collector.provider == "anthropic":
-        return probe_anthropic(
+    elif collector.provider == "anthropic":
+        reading = probe_anthropic(
             collector,
             user_home=user_home,
             environ=environ,
@@ -132,5 +129,7 @@ def probe_collector(
             http_fetch=fetcher,
             display_tz=display_tz,
         )
+    else:
+        raise UsageProbeError(f"Unsupported provider: {collector.provider}")
 
-    raise UsageProbeError(f"Unsupported provider: {collector.provider}")
+    return {collector.id: reading}

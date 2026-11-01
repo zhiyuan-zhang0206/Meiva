@@ -7,6 +7,9 @@ import pytest
 
 from meiva_builtins.plugins.meiva_usage.types import (
     ERROR_STALE_AFTER_S,
+    AntigravityQuotaGroups,
+    RateWindow,
+    WindowPair,
     resolve_user_path,
     should_write_failure,
 )
@@ -46,3 +49,26 @@ def test_resolve_user_path(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must not be empty"):
         resolve_user_path("   ", user_home=home)
+
+
+def test_window_pair_and_quota_groups() -> None:
+    empty = WindowPair()
+    assert empty.has_any() is False
+    assert empty.session is None
+    assert empty.weekly is None
+
+    session_only = WindowPair(session=RateWindow(used_percent=10.0))
+    assert session_only.has_any() is True
+
+    weekly_only = WindowPair(weekly=RateWindow(used_percent=20.0))
+    assert weekly_only.has_any() is True
+
+    both = WindowPair(
+        session=RateWindow(used_percent=10.0),
+        weekly=RateWindow(used_percent=20.0),
+    )
+    assert both.has_any() is True
+
+    groups = AntigravityQuotaGroups(gemini=both, claude_gpt=session_only)
+    assert groups.gemini == both
+    assert groups.claude_gpt == session_only

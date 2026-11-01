@@ -30,6 +30,63 @@ from meiva_builtins.plugins.meiva_usage.types import CardReading, should_write_f
 _log = logger
 
 
+def _resolve_error_hysteresis(
+    db: Database,
+    card_id: str,
+    reading: CardReading,
+    now: datetime,
+) -> tuple[CardReading, bool]:
+    with db.write_transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, updated_at, value FROM plugin_stats WHERE plugin = %s AND id = %s",
+            ("meiva_usage", card_id),
+        )
+        row = cur.fetchone()
+        existing_status = str(row[0]) if row and row[0] is not None else None
+        existing_updated_at = row[1] if row else None
+        existing_value = str(row[2]) if row and row[2] is not None else None
+
+    if not should_write_failure(existing_status, existing_updated_at, now):
+        status = existing_status if existing_status in ("ok", "warn", "error") else "ok"
+        return (
+            CardReading(
+                value=existing_value or "—",
+                detail="probe error suppressed (cached reading fresh)",
+                status=status,
+            ),
+            False,
+        )
+    if existing_value:
+        return CardReading(value=existing_value, detail=reading.detail, status="error"), True
+    return reading, True
+
+
+def _upsert_card_reading(
+    db: Database,
+    *,
+    card_id: str,
+    reading: CardReading,
+    now: datetime,
+    machine_name: str,
+) -> CardReading:
+    if reading.status == "error":
+        reading, should_upsert = _resolve_error_hysteresis(db, card_id, reading, now)
+        if not should_upsert:
+            return reading
+
+    stats.upsert(
+        db,
+        plugin="meiva_usage",
+        id=card_id,
+        value=reading.value,
+        detail=reading.detail,
+        status=reading.status,
+        updated_by=machine_name,
+        detail_cap=500,
+    )
+    return reading
+
+
 def refresh_collector_once(
     collector: CollectorConfig,
     *,
@@ -43,11 +100,10 @@ def refresh_collector_once(
     http_fetch: HttpJsonFetcher | None = None,
     keychain_reader: Callable[[str], str | None] | None = None,
     codex_rpc_runner: CodexRpcRunner | None = None,
-) -> CardReading:
-    error_detail: str | None = None
-    reading: CardReading
+) -> dict[str, CardReading]:
+    readings: dict[str, CardReading]
     try:
-        reading = probe_collector(
+        readings = probe_collector(
             collector,
             user_home=user_home,
             environ=environ,
@@ -62,39 +118,29 @@ def refresh_collector_once(
         err_msg = str(exc).strip() or type(exc).__name__
         if len(err_msg) > 200:
             err_msg = err_msg[:197] + "..."
-        error_detail = err_msg
-        reading = CardReading(value="—", detail=err_msg, status="error")
+        readings = {
+            card.id: CardReading(value="—", detail=err_msg, status="error")
+            for card in collector.stat_cards()
+        }
 
-    if error_detail is not None:
-        with db.write_transaction() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT status, updated_at, value FROM plugin_stats WHERE plugin = %s AND id = %s",
-                ("meiva_usage", collector.id),
+    results: dict[str, CardReading] = {}
+    for card in collector.stat_cards():
+        reading = readings.get(card.id)
+        if reading is None:
+            reading = CardReading(
+                value="—",
+                detail=f"Card '{card.id}' missing from probe results",
+                status="error",
             )
-            row = cur.fetchone()
-            existing_status = str(row[0]) if row and row[0] is not None else None
-            existing_updated_at = row[1] if row else None
-            existing_value = str(row[2]) if row and row[2] is not None else None
-            if not should_write_failure(existing_status, existing_updated_at, now):
-                return CardReading(
-                    value=existing_value or "—",
-                    detail="probe error suppressed (cached reading fresh)",
-                    status=existing_status if existing_status in ("ok", "warn", "error") else "ok",
-                )
-            if existing_value:
-                reading = CardReading(value=existing_value, detail=error_detail, status="error")
-
-    stats.upsert(
-        db,
-        plugin="meiva_usage",
-        id=collector.id,
-        value=reading.value,
-        detail=reading.detail,
-        status=reading.status,
-        updated_by=machine_name,
-        detail_cap=500,
-    )
-    return reading
+        persisted = _upsert_card_reading(
+            db,
+            card_id=card.id,
+            reading=reading,
+            now=now,
+            machine_name=machine_name,
+        )
+        results[card.id] = persisted
+    return results
 
 
 def _resolve_display_tz(display_tz: tzinfo | None, environ: Mapping[str, str]) -> tzinfo:

@@ -43,7 +43,10 @@ via `CollectorConfig`. Through declarative contribution faces, the plugin provis
 - **UI stats face (`ui_stats.py`)**:
   Contributes `tuple[StatCardSpec, ...]` for all collectors with `enabled=True`. Evaluated
   dynamically against the current `UsageConfig`, generating status cards rendered by the gateway
-  in `/api/ui/contributions`.
+  in `/api/ui/contributions`. For `antigravity` collectors, each enabled collector contributes two
+  distinct cards (`<id>-gemini` labeled `<label> · Gemini` and `<id>-claude-gpt` labeled
+  `<label> · Claude & GPT`), populated from a single `retrieveUserQuotaSummary` poll per cycle.
+  Other providers contribute a single card (`<id>`).
 
 - **Schedules face (`schedules.py`)**:
   Contributes `tuple[ScheduleSpec, ...]` for active collectors (`enabled=True`). Each schedule
@@ -83,3 +86,19 @@ For providers without a direct balance endpoint, `meiva_usage` polls their offic
 Card formatting operates in two modes:
 1. **30-day trailing spend (default)**: When `known_balance_usd` is not configured, the card displays 30-day cumulative spend (e.g. `$42.50 (30d)`) and today's spend in the detail line.
 2. **Prepaid baseline subtraction**: When `known_balance_usd` and `balance_as_of` (`YYYY-MM-DD`) are both configured, the probe computes remaining prepaid credit by subtracting spend since `balance_as_of` from `known_balance_usd` (e.g. `$85.20 left`), entering `"warn"` status when remaining balance drops to $\le 10\%$ of baseline or $\le \$5.00$.
+
+### 6. Antigravity dual-pool quota architecture
+
+Antigravity operates two distinct rate-limit quota pools:
+1. **Gemini Models** (`gemini-weekly`, `gemini-5h` windows).
+2. **Claude and GPT models** (`3p-weekly`, `3p-5h` windows).
+
+The upstream `POST https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary`
+endpoint requires a modern client `User-Agent` (`antigravity/2.30.0 <os>/<arch>`) to include Gemini Models
+alongside 3P models in the response.
+
+Each scheduled `antigravity` collector executes one poll per cycle and populates two declared status cards:
+- `<id>-gemini` (`<label> · Gemini`): displays remaining weekly and session percentages for Gemini models.
+- `<id>-claude-gpt` (`<label> · Claude & GPT`): displays remaining weekly and session percentages for Claude & GPT models.
+
+Readings are written to `plugin_stats` independently, ensuring individual pool warnings (`"warn"`) or missing pool errors (`"error"`) do not degrade the other pool's healthy status. Error hysteresis (`should_write_failure`) applies independently per card ID.

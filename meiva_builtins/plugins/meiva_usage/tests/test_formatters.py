@@ -8,11 +8,16 @@ import pytest
 
 from meiva_builtins.plugins.meiva_usage.formatters import (
     format_admin_cost_card,
+    format_antigravity_group_card,
     format_codex_window_card,
     format_deepseek_balance_card,
     format_dual_window_card,
 )
-from meiva_builtins.plugins.meiva_usage.types import RateWindow, UsageProbeError
+from meiva_builtins.plugins.meiva_usage.types import (
+    RateWindow,
+    UsageProbeError,
+    WindowPair,
+)
 
 
 def test_format_dual_window_card_both_windows() -> None:
@@ -56,6 +61,113 @@ def test_format_dual_window_card_timezone_conversion() -> None:
 def test_format_dual_window_card_both_none_raises() -> None:
     with pytest.raises(UsageProbeError, match="missing rate-limit windows"):
         format_dual_window_card(None, None)
+
+
+def test_format_antigravity_group_card_both_windows_healthy() -> None:
+    session = RateWindow(
+        used_percent=23.6813,
+        resets_at=datetime(2026, 11, 1, 18, 0, tzinfo=UTC),
+        window_minutes=300,
+    )
+    weekly = RateWindow(
+        used_percent=18.4308,
+        resets_at=datetime(2026, 11, 7, 0, 0, tzinfo=UTC),
+        window_minutes=10080,
+    )
+    reading = format_antigravity_group_card(WindowPair(session=session, weekly=weekly))
+    assert reading.value == "7d 82% · 5h 76% left"
+    assert reading.detail == "resets 7d 11-07 00:00 · 5h 11-01 18:00"
+    assert reading.status == "ok"
+
+
+def test_format_antigravity_group_card_warn_threshold() -> None:
+    session = RateWindow(
+        used_percent=94.3613,
+        resets_at=datetime(2026, 11, 1, 17, 0, tzinfo=UTC),
+    )
+    weekly = RateWindow(
+        used_percent=99.097,
+        resets_at=datetime(2026, 11, 8, 0, 0, tzinfo=UTC),
+    )
+    reading = format_antigravity_group_card(WindowPair(session=session, weekly=weekly))
+    assert reading.value == "7d 1% · 5h 6% left"
+    assert reading.detail == "resets 7d 11-08 00:00 · 5h 11-01 17:00"
+    assert reading.status == "warn"
+
+    r_weekly_low = format_antigravity_group_card(
+        WindowPair(
+            session=RateWindow(used_percent=20.0),
+            weekly=RateWindow(used_percent=92.0),
+        )
+    )
+    assert r_weekly_low.status == "warn"
+
+    r_session_low = format_antigravity_group_card(
+        WindowPair(
+            session=RateWindow(used_percent=95.0),
+            weekly=RateWindow(used_percent=20.0),
+        )
+    )
+    assert r_session_low.status == "warn"
+
+
+def test_format_antigravity_group_card_no_resets_fallback_detail() -> None:
+    reading = format_antigravity_group_card(
+        WindowPair(
+            session=RateWindow(used_percent=30.0),
+            weekly=RateWindow(used_percent=40.0),
+        )
+    )
+    assert reading.value == "7d 60% · 5h 70% left"
+    assert reading.detail == "7d & 5h windows"
+    assert reading.status == "ok"
+
+
+def test_format_antigravity_group_card_single_window_fallback() -> None:
+    weekly_only = format_antigravity_group_card(
+        WindowPair(
+            weekly=RateWindow(
+                used_percent=25.0,
+                resets_at=datetime(2026, 11, 7, 0, 0, tzinfo=UTC),
+            )
+        )
+    )
+    assert weekly_only.value == "75% left"
+    assert weekly_only.detail == "7d window · resets 11-07 00:00"
+    assert weekly_only.status == "ok"
+
+    session_only = format_antigravity_group_card(
+        WindowPair(
+            session=RateWindow(
+                used_percent=95.0,
+            )
+        )
+    )
+    assert session_only.value == "5% left"
+    assert session_only.detail == "5h window"
+    assert session_only.status == "warn"
+
+
+def test_format_antigravity_group_card_timezone_conversion() -> None:
+    pair = WindowPair(
+        session=RateWindow(
+            used_percent=20.0,
+            resets_at=datetime(2026, 11, 1, 6, 0, tzinfo=UTC),
+        ),
+        weekly=RateWindow(
+            used_percent=20.0,
+            resets_at=datetime(2026, 11, 1, 12, 0, tzinfo=UTC),
+        ),
+    )
+    tz_shanghai = ZoneInfo("Asia/Shanghai")
+    reading = format_antigravity_group_card(pair, display_tz=tz_shanghai)
+    assert reading.value == "7d 80% · 5h 80% left"
+    assert reading.detail == "resets 7d 11-01 20:00 · 5h 11-01 14:00"
+
+
+def test_format_antigravity_group_card_empty_raises() -> None:
+    with pytest.raises(UsageProbeError, match="missing rate-limit windows"):
+        format_antigravity_group_card(WindowPair())
 
 
 def test_format_codex_window_card_labels() -> None:

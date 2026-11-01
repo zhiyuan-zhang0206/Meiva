@@ -18,7 +18,7 @@ exports = ["runner.py"]
 "probes" = ["credentials.py", "default_config.py", "formatters.py", "parsers.py", "types.py"]
 "runner.py" = ["default_config.py", "probes", "types.py"]
 "schedules.py" = ["default_config.py"]
-"tests" = ["credentials.py", "default_config.py", "formatters.py", "parsers.py", "plugin.py", "probes", "runner.py", "schedules.py", "types.py"]
+"tests" = ["credentials.py", "default_config.py", "formatters.py", "parsers.py", "plugin.py", "probes", "runner.py", "schedules.py", "types.py", "ui_stats.py"]
 "ui_stats.py" = ["default_config.py"]
 
 [roots]

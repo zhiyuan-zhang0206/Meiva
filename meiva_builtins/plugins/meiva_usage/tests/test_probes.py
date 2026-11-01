@@ -269,7 +269,7 @@ def test_probe_antigravity_token_refresh(tmp_path: Path) -> None:
             }
         return {}
 
-    reading = probe_antigravity(
+    readings = probe_antigravity(
         collector,
         user_home=tmp_path,
         environ=environ,
@@ -277,8 +277,9 @@ def test_probe_antigravity_token_refresh(tmp_path: Path) -> None:
         platform="darwin",
         http_fetch=fake_http_fetch,
     )
-    assert reading.value == "50% left"
-    assert reading.status == "ok"
+    assert readings["ag-refresh-gemini"].value == "7d 90% · 5h 50% left"
+    assert readings["ag-refresh-gemini"].status == "ok"
+    assert readings["ag-refresh-claude-gpt"].status == "error"
     assert any("oauth2.googleapis.com" in r.url for r in requests_made)
 
 
@@ -317,7 +318,7 @@ def test_probe_antigravity_email_filtering(tmp_path: Path) -> None:
         )
 
 
-def test_probe_antigravity_no_expiry_does_not_refresh_upfront(tmp_path: Path) -> None:
+def test_probe_antigravity_dual_group_success_and_user_agent(tmp_path: Path) -> None:
     now = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
     cli_dir = tmp_path / ".gemini" / "antigravity-cli"
     cli_dir.mkdir(parents=True)
@@ -336,33 +337,42 @@ def test_probe_antigravity_no_expiry_does_not_refresh_upfront(tmp_path: Path) ->
     )
 
     collector = CollectorConfig(
-        id="ag-direct",
-        label="AG Direct",
+        id="ag-main",
+        label="AG Main",
         provider="antigravity",
         machine="test-box",
     )
 
+    captured_uas: list[str] = []
     requests_made: list[HttpJsonRequest] = []
 
     def fake_http_fetch(req: HttpJsonRequest) -> dict[str, Any]:
         requests_made.append(req)
+        captured_uas.append(req.headers.get("User-Agent", ""))
         assert "retrieveUserQuotaSummary" in req.url
         assert req.headers.get("Authorization") == "Bearer valid-direct-token"
         return {
             "response": {
                 "groups": [
                     {
-                        "displayName": "Gemini",
+                        "displayName": "Gemini Models",
                         "buckets": [
-                            {"bucketId": "gemini-2.5-pro-5h", "remainingFraction": 0.8},
-                            {"bucketId": "gemini-2.5-pro-weekly", "remainingFraction": 0.6},
+                            {"bucketId": "gemini-weekly", "remainingFraction": 0.8156919},
+                            {"bucketId": "gemini-5h", "remainingFraction": 0.7631871},
                         ],
-                    }
+                    },
+                    {
+                        "displayName": "Claude and GPT models",
+                        "buckets": [
+                            {"bucketId": "3p-weekly", "remainingFraction": 0.00902968},
+                            {"bucketId": "3p-5h", "remainingFraction": 0.0563868},
+                        ],
+                    },
                 ]
             }
         }
 
-    reading = probe_antigravity(
+    readings = probe_antigravity(
         collector,
         user_home=tmp_path,
         environ={},
@@ -370,8 +380,124 @@ def test_probe_antigravity_no_expiry_does_not_refresh_upfront(tmp_path: Path) ->
         platform="darwin",
         http_fetch=fake_http_fetch,
     )
-    assert reading.value == "60% left"
+    assert captured_uas[-1] == "antigravity/2.30.0 darwin/arm64"
     assert not any("oauth2.googleapis.com" in r.url for r in requests_made)
+    assert "ag-main-gemini" in readings
+    assert "ag-main-claude-gpt" in readings
+    assert readings["ag-main-gemini"].status == "ok"
+    assert readings["ag-main-gemini"].value == "7d 82% · 5h 76% left"
+    assert readings["ag-main-claude-gpt"].status == "warn"
+    assert readings["ag-main-claude-gpt"].value == "7d 1% · 5h 6% left"
+
+    probe_antigravity(
+        collector,
+        user_home=tmp_path,
+        environ={},
+        now=now,
+        platform="linux",
+        http_fetch=fake_http_fetch,
+    )
+    assert captured_uas[-1] == "antigravity/2.30.0 linux/amd64"
+
+
+def test_probe_antigravity_partial_gemini_only(tmp_path: Path) -> None:
+    now = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+    cli_dir = tmp_path / ".gemini" / "antigravity-cli"
+    cli_dir.mkdir(parents=True)
+    (cli_dir / "antigravity-oauth-token").write_text(
+        json.dumps(
+            {
+                "token": {
+                    "access_token": "valid-token",
+                    "refresh_token": "valid-refresh",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    collector = CollectorConfig(
+        id="ag-partial",
+        label="AG Partial",
+        provider="antigravity",
+        machine="test-box",
+    )
+
+    def fake_gemini_only(_req: HttpJsonRequest) -> dict[str, Any]:
+        return {
+            "groups": [
+                {
+                    "displayName": "Gemini Models",
+                    "buckets": [
+                        {"bucketId": "gemini-5h", "remainingFraction": 0.9},
+                    ],
+                }
+            ]
+        }
+
+    r1 = probe_antigravity(
+        collector,
+        user_home=tmp_path,
+        environ={},
+        now=now,
+        platform="darwin",
+        http_fetch=fake_gemini_only,
+    )
+    assert r1["ag-partial-gemini"].status == "ok"
+    assert r1["ag-partial-gemini"].value == "90% left"
+    assert r1["ag-partial-claude-gpt"].status == "error"
+    assert r1["ag-partial-claude-gpt"].value == "—"
+    assert "Claude and GPT models quota group missing" in r1["ag-partial-claude-gpt"].detail
+
+
+def test_probe_antigravity_partial_claude_only(tmp_path: Path) -> None:
+    now = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+    cli_dir = tmp_path / ".gemini" / "antigravity-cli"
+    cli_dir.mkdir(parents=True)
+    (cli_dir / "antigravity-oauth-token").write_text(
+        json.dumps(
+            {
+                "token": {
+                    "access_token": "valid-token",
+                    "refresh_token": "valid-refresh",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    collector = CollectorConfig(
+        id="ag-partial",
+        label="AG Partial",
+        provider="antigravity",
+        machine="test-box",
+    )
+
+    def fake_claude_only(_req: HttpJsonRequest) -> dict[str, Any]:
+        return {
+            "groups": [
+                {
+                    "displayName": "Claude and GPT models",
+                    "buckets": [
+                        {"bucketId": "3p-5h", "remainingFraction": 0.8},
+                    ],
+                }
+            ]
+        }
+
+    r2 = probe_antigravity(
+        collector,
+        user_home=tmp_path,
+        environ={},
+        now=now,
+        platform="darwin",
+        http_fetch=fake_claude_only,
+    )
+    assert r2["ag-partial-gemini"].status == "error"
+    assert r2["ag-partial-gemini"].value == "—"
+    assert "Gemini Models quota group missing" in r2["ag-partial-gemini"].detail
+    assert r2["ag-partial-claude-gpt"].status == "ok"
+    assert r2["ag-partial-claude-gpt"].value == "80% left"
 
 
 def test_probe_antigravity_401_triggers_refresh_retry(tmp_path: Path) -> None:
@@ -425,7 +551,7 @@ def test_probe_antigravity_401_triggers_refresh_retry(tmp_path: Path) -> None:
             }
         return {}
 
-    reading = probe_antigravity(
+    readings = probe_antigravity(
         collector,
         user_home=tmp_path,
         environ=environ,
@@ -433,7 +559,9 @@ def test_probe_antigravity_401_triggers_refresh_retry(tmp_path: Path) -> None:
         platform="darwin",
         http_fetch=fake_http_fetch,
     )
-    assert reading.value == "90% left"
+    assert readings["ag-retry-gemini"].value == "90% left"
+    assert readings["ag-retry-gemini"].status == "ok"
+    assert readings["ag-retry-claude-gpt"].status == "error"
     assert attempts["quota_calls"] == 2
     assert attempts["refreshed"] is True
 
@@ -621,4 +749,4 @@ def test_probe_collector_dispatcher() -> None:
         platform="darwin",
         http_fetch=fake_fetch,
     )
-    assert reading.value == "CNY 50.00"
+    assert reading["ds-card"].value == "CNY 50.00"

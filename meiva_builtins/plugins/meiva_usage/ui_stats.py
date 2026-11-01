@@ -9,4 +9,4 @@ from meiva_builtins.plugins.meiva_usage.default_config import UsageConfig
 
 
 def contribute(config: UsageConfig) -> tuple[StatCardSpec, ...]:
-    return tuple(StatCardSpec(id=c.id, label=c.label) for c in config.collectors if c.enabled)
+    return tuple(card for c in config.collectors if c.enabled for card in c.stat_cards())

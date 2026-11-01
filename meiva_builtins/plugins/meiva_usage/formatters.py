@@ -9,7 +9,12 @@ from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Literal, TypeGuard
 
-from meiva_builtins.plugins.meiva_usage.types import CardReading, RateWindow, UsageProbeError
+from meiva_builtins.plugins.meiva_usage.types import (
+    CardReading,
+    RateWindow,
+    UsageProbeError,
+    WindowPair,
+)
 
 
 def _is_obj_list(value: object) -> TypeGuard[list[object]]:
@@ -24,6 +29,16 @@ def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt
+
+
+def _find_dual_window_reset(windows: list[tuple[str, RateWindow, float]]) -> datetime | None:
+    tightest_window = min(windows, key=lambda item: item[2])[1]
+    if tightest_window.resets_at is not None:
+        return tightest_window.resets_at
+    for _, window, _ in windows:
+        if window.resets_at is not None:
+            return window.resets_at
+    return None
 
 
 def format_dual_window_card(
@@ -48,14 +63,7 @@ def format_dual_window_card(
 
     parts: list[str] = [f"{label} {rem:.0f}% left" for label, _, rem in windows]
 
-    tightest_window = min(windows, key=lambda item: item[2])[1]
-    reset_dt = tightest_window.resets_at
-    if reset_dt is None:
-        for _, window, _ in windows:
-            if window.resets_at is not None:
-                reset_dt = window.resets_at
-                break
-
+    reset_dt = _find_dual_window_reset(windows)
     if reset_dt is not None:
         aware_dt = _ensure_utc(reset_dt).astimezone(display_tz)
         parts.append(f"resets {aware_dt:%m-%d %H:%M}")
@@ -63,6 +71,71 @@ def format_dual_window_card(
     detail = " · ".join(parts)
     status = "warn" if tightest_rem <= 10.0 else "ok"
     return CardReading(value=value, detail=detail, status=status)
+
+
+def _format_antigravity_dual_window(
+    session: RateWindow,
+    weekly: RateWindow,
+    *,
+    display_tz: tzinfo,
+) -> CardReading:
+    weekly_rem = max(0.0, min(100.0, 100.0 - weekly.used_percent))
+    session_rem = max(0.0, min(100.0, 100.0 - session.used_percent))
+    value = f"7d {weekly_rem:.0f}% · 5h {session_rem:.0f}% left"
+    reset_parts: list[str] = []
+    if weekly.resets_at is not None:
+        reset_parts.append(f"7d {_ensure_utc(weekly.resets_at).astimezone(display_tz):%m-%d %H:%M}")
+    if session.resets_at is not None:
+        reset_parts.append(
+            f"5h {_ensure_utc(session.resets_at).astimezone(display_tz):%m-%d %H:%M}"
+        )
+    detail = f"resets {' · '.join(reset_parts)}" if reset_parts else "7d & 5h windows"
+    status: Literal["ok", "warn"] = "warn" if min(weekly_rem, session_rem) <= 10.0 else "ok"
+    return CardReading(value=value, detail=detail, status=status)
+
+
+def _format_antigravity_single_window(
+    window: RateWindow,
+    *,
+    is_weekly: bool,
+    display_tz: tzinfo,
+) -> CardReading:
+    rem = max(0.0, min(100.0, 100.0 - window.used_percent))
+    value = f"{rem:.0f}% left"
+    parts = ["7d window" if is_weekly else "5h window"]
+    if window.resets_at is not None:
+        parts.append(f"resets {_ensure_utc(window.resets_at).astimezone(display_tz):%m-%d %H:%M}")
+    detail = " · ".join(parts)
+    status: Literal["ok", "warn"] = "warn" if rem <= 10.0 else "ok"
+    return CardReading(value=value, detail=detail, status=status)
+
+
+def format_antigravity_group_card(
+    windows: WindowPair,
+    *,
+    display_tz: tzinfo = UTC,
+) -> CardReading:
+    if windows.session is None and windows.weekly is None:
+        raise UsageProbeError("Antigravity quota group is missing rate-limit windows")
+    if windows.weekly is not None and windows.session is not None:
+        return _format_antigravity_dual_window(
+            windows.session,
+            windows.weekly,
+            display_tz=display_tz,
+        )
+    if windows.weekly is not None:
+        return _format_antigravity_single_window(
+            windows.weekly,
+            is_weekly=True,
+            display_tz=display_tz,
+        )
+    if windows.session is not None:
+        return _format_antigravity_single_window(
+            windows.session,
+            is_weekly=False,
+            display_tz=display_tz,
+        )
+    raise UsageProbeError("Antigravity quota group is missing rate-limit windows")
 
 
 def format_codex_window_card(
