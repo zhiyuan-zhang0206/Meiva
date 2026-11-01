@@ -19,19 +19,30 @@ _SAMPLER_JS = """
   const sample = (why) => {
     const items = [...vp.querySelectorAll('[data-item-id]')];
     const vpRect = vp.getBoundingClientRect();
-    // The reading position = the TOPMOST VISIBLE node's viewport top (the
-    // 0.0 prompt card included — when it fills the viewport the user reads
-    // inside it and the invariant holds there, not on the first real item).
+    // The reading position = the topmost visible real node's viewport top (falling
+    // back to the 0.0 prompt card when only it fills the viewport).
     let anchorId = null, anchorTop = null;
+    let fallbackId = null, fallbackTop = null;
+    const tops = {};
     for (const n of items) {
+      const id = n.dataset.itemId;
+      if (!id || id.startsWith('_')) continue;
       const r = n.getBoundingClientRect();
-      if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) { anchorId = n.dataset.itemId; anchorTop = r.top; break; }
+      if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) {
+        tops[id] = r.top;
+        if (id === '0.0') {
+          if (fallbackId === null) { fallbackId = id; fallbackTop = r.top; }
+          continue;
+        }
+        if (anchorId === null) { anchorId = id; anchorTop = r.top; }
+      }
     }
+    if (anchorId === null) { anchorId = fallbackId; anchorTop = fallbackTop; }
     if (window.__tl.samples.length > 20000) return;
     const reserve = vp.querySelector('[data-history-pull-space]');
     const reserveBox = reserve?.getBoundingClientRect();
     const exposedPullSpace = reserveBox ? Math.max(0, Math.min(reserveBox.height, reserveBox.bottom - vpRect.top)) : 0;
-    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop, exposedPullSpace });
+    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop, exposedPullSpace, tops });
   };
   let raf = 0;
   const loop = () => { sample('raf'); raf = requestAnimationFrame(loop); };
@@ -69,16 +80,42 @@ _SCROLL_UP_JS = """
 
 class _ReadingSample(TypedDict):
     anchorId: str | None
-    anchorTop: float
+    anchorTop: float | None
     exposedPullSpace: float
+    tops: dict[str, float]
+    st: float
+    sh: float
+    n: int
 
 
-def _reading_top(sample: _ReadingSample) -> float:
-    return sample["anchorTop"] - (sample["exposedPullSpace"] if sample["anchorId"] == "0.0" else 0)
+def _reading_top(sample: _ReadingSample, anchor_id: str | None = None) -> float:
+    target = anchor_id if anchor_id is not None else sample["anchorId"]
+    top = sample["tops"].get(target, sample["anchorTop"]) if target else sample["anchorTop"]
+    assert top is not None
+    return top - (sample["exposedPullSpace"] if target == "0.0" else 0)
+
+
+# meiva:note
+# Verify the captured reading row remains visible and stationary on every post-landing sample.
+def _assert_anchor_samples(
+    after: list[_ReadingSample], anchor_id: str, before_top: float, round_no: int
+) -> None:
+    for s in after:
+        assert anchor_id in s["tops"], (
+            f"round {round_no}: reading anchor {anchor_id} left the viewport across the landing "
+            f"(st={s['st']}, sh={s['sh']}, n={s['n']}, visible={list(s['tops'])})"
+        )
+        top = _reading_top(s, anchor_id)
+        assert abs(top - before_top) < 3.0, (
+            f"round {round_no}: reading position moved by "
+            f"{top - before_top:.1f}px beyond pull-space motion across the landing "
+            f"(before={before_top:.1f}, after={top:.1f}, "
+            f"st={s['st']}, sh={s['sh']}, n={s['n']}, anchor={anchor_id})"
+        )
 
 
 def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
-    samples = page.evaluate("window.__tl.samples")[sample_start:]
+    samples: list[_ReadingSample] = page.evaluate("window.__tl.samples")[sample_start:]
     landing_idx = next(
         (i for i, s in enumerate(samples) if i > 0 and s["n"] != samples[i - 1]["n"]),
         None,
@@ -87,15 +124,9 @@ def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
     before = [s for s in samples[:landing_idx] if s["anchorTop"] is not None]
     after = [s for s in samples[landing_idx:] if s["anchorTop"] is not None]
     assert before and after, f"round {round_no}: no anchor measurements around the landing"
-    before_top = _reading_top(before[-1])
-    for s in after:
-        top = _reading_top(s)
-        assert abs(top - before_top) < 3.0, (
-            f"round {round_no}: reading position moved by "
-            f"{top - before_top:.1f}px beyond pull-space motion across the landing "
-            f"(before={before_top:.1f}, after={top:.1f}, "
-            f"st={s['st']}, sh={s['sh']}, n={s['n']}, anchor={s['anchorId']})"
-        )
+    anchor_id = before[-1]["anchorId"]
+    assert anchor_id is not None
+    _assert_anchor_samples(after, anchor_id, _reading_top(before[-1], anchor_id), round_no)
     assert after[-1]["exposedPullSpace"] < 1, "the released pull left a blank space above history"
 
 
@@ -204,10 +235,31 @@ def _pull_history_page(page: Page, before_requests: list[str]) -> bool:
     return True
 
 
+_WAIT_WHEEL_SETTLED_JS = """
+() => new Promise(resolve => {
+  const vp = window.__tl.vp;
+  let last = vp.scrollTop;
+  let stableFrames = 0;
+  const check = () => {
+    const cur = vp.scrollTop;
+    stableFrames = cur === last ? stableFrames + 1 : 0;
+    last = cur;
+    if (stableFrames >= 15) resolve(cur);
+    else requestAnimationFrame(check);
+  };
+  requestAnimationFrame(check);
+})
+"""
+
+
 def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: list[Route]) -> None:
     assert _pull_history_page(page, before_requests), "the initial history page is unavailable"
 
     assert len(paused_routes) == 1, "the first paging request was not held"
+    # meiva:note
+    # Chromium's smooth wheel animation (~150ms) outlives the first paging request and is not
+    # cancelled by programmatic scrollTop assignment; wait for stationary RAF frames before setting 600.
+    page.evaluate(_WAIT_WHEEL_SETTLED_JS)
     before_n = page.evaluate(
         "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
     )

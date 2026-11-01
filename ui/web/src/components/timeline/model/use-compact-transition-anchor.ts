@@ -78,8 +78,28 @@ function matchesAnchor(
   );
 }
 
-/** Resolve auto-sized rows before using a newly keyed anchor's position. */
+function materializeNode(node: HTMLElement): boolean {
+  let changed = false;
+  if (node.classList.contains("timeline-item") && node.style.contentVisibility !== "visible") {
+    node.style.contentVisibility = "visible";
+    changed = true;
+  }
+  for (const child of node.querySelectorAll<HTMLElement>(".timeline-item")) {
+    if (child.style.contentVisibility !== "visible") {
+      child.style.contentVisibility = "visible";
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// meiva:note
+// Resolve auto-sized rows up to and including the newly keyed anchor before reading
+// its position, keeping measured heights until reconciliation so off-screen rows do
+// not collapse back to intrinsic placeholders before paint.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 function measureRenderedAnchor(viewport: HTMLElement, anchorNode: HTMLElement): number {
+  materializeNode(anchorNode);
   let anchorTop = anchorNode.getBoundingClientRect().top;
   for (;;) {
     let forced = false;
@@ -96,24 +116,43 @@ function measureRenderedAnchor(viewport: HTMLElement, anchorNode: HTMLElement): 
     anchorTop = nextTop;
   }
   void viewport.getBoundingClientRect();
-  // These nodes must keep their measured height until reconciliation. Newly
-  // keyed off-screen rows can lose their auto-size estimate again if restored
-  // before a paint, moving the anchor out of view before the next page lands.
   return anchorNode.getBoundingClientRect().top;
 }
 
-function materializeViewportRows(viewport: HTMLElement): void {
+function materializeViewportRows(viewport: HTMLElement): boolean {
   const bounds = viewport.getBoundingClientRect();
+  let forced = false;
   for (const node of viewport.querySelectorAll<HTMLElement>(".timeline-item")) {
+    if (node.style.contentVisibility === "visible") continue;
     const box = node.getBoundingClientRect();
     if (box.bottom > bounds.top && box.top < bounds.bottom) {
       node.style.contentVisibility = "visible";
+      forced = true;
     }
   }
   void viewport.getBoundingClientRect();
+  return forced;
 }
 
-/** Transfer a visible row across a compact re-key before the next paint. */
+function restoreAnchorScrollTop(viewport: HTMLElement, target: HTMLElement, screenTop: number): void {
+  viewport.scrollTop += measureRenderedAnchor(viewport, target) - screenTop;
+  for (let pass = 0; pass < 8; pass += 1) {
+    const materialized = materializeViewportRows(viewport);
+    const drift = target.getBoundingClientRect().top - screenTop;
+    if (Math.abs(drift) >= 0.5) {
+      viewport.scrollTop += drift;
+    }
+    if (!materialized || Math.abs(target.getBoundingClientRect().top - screenTop) < 0.5) {
+      break;
+    }
+  }
+}
+
+// meiva:note
+// Transfer a visible reading row across a compact re-key before the next browser paint.
+// The store announces the transition before publishing it to React so layout measurement
+// captures pre-mutation screen coordinates even when multiple writes batch into one render.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 export function useCompactTransitionAnchor(options: {
   controller: StickyController;
   viewportRef: { current: HTMLElement | null };
@@ -125,10 +164,8 @@ export function useCompactTransitionAnchor(options: {
   const [pin, setPin] = useState<CompactPin | null>(null);
   const compactReplaceSeq = useTimelineStore((s) => s.compactReplaceSeq);
 
-  // The store announces the transition before publishing it to React.
-  // Ordinary Zustand subscribers and layout cleanup can run after mutation.
   useLayoutEffect(() => subscribeBeforeCompactDisplayChange((change) => {
-    if (anchorRef.current) return; // multiple store writes can batch into one render
+    if (anchorRef.current) return;
     prependAnchorRef.current = null;
     if (controller.isSticky()) return;
     const viewport = viewportRef.current;
@@ -183,8 +220,10 @@ export function useCompactTransitionAnchor(options: {
     let target = nodes.find((node) => matchesAnchor(node, anchor, bufferedCoordinates)) ??
       nodes.find((node) => matchesAnchor(node, anchor, bufferedCoordinates, true));
     if (!target) {
-      // A finite retention budget may exclude the anchor. Use the nearest
+      // meiva:note
+      // A finite retention budget may exclude the anchor; fall back to the nearest
       // surviving coordinate in the same or adjacent segment.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
       let nearestDistance: [number, number, number] | null = null;
       for (const node of nodes) {
         const parts = nodeCoordinates(node, bufferedCoordinates).find((value) => value !== null);
@@ -207,9 +246,7 @@ export function useCompactTransitionAnchor(options: {
       }
     }
     if (target) {
-      viewport.scrollTop += measureRenderedAnchor(viewport, target) - anchor.screenTop;
-      materializeViewportRows(viewport);
-      viewport.scrollTop += target.getBoundingClientRect().top - anchor.screenTop;
+      restoreAnchorScrollTop(viewport, target, anchor.screenTop);
     }
     setPin(null);
   }, [compactBuffer, compactReplaceSeq, viewportRef]);
