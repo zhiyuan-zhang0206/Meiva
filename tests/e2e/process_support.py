@@ -628,6 +628,7 @@ def _signal_sweep_targets(
     inspection: ProcessInspection,
     stop_signal: int,
     receipt_path: Path | None,
+    send: Callable[[int, int], None] | None = None,
 ) -> None:
     """Recheck identity independently for each signal phase and target."""
     targets = [(pid, "group") for pid in plan.groups] + [(pid, "single") for pid in plan.singles]
@@ -643,13 +644,14 @@ def _signal_sweep_targets(
                 outcome="identity_skip",
             )
             continue
+        deliver = send if send is not None else os.killpg if kind == "group" else os.kill
         with contextlib.suppress(ProcessLookupError, PermissionError):
             _signal_cleanup(
                 receipt_path,
                 "sweep_signal",
                 pid,
                 stop_signal,
-                os.killpg if kind == "group" else os.kill,
+                deliver,
                 owner=process.run[0],
                 kind=kind,
             )
@@ -684,6 +686,7 @@ def sweep_stale_e2e_processes(
     include_own: bool = False,
     inspection: ProcessInspection | None = None,
     receipt_path: Path | None = None,
+    send: Callable[[int, int], None] | None = None,
 ) -> int:
     """Reap guarded stale-run residue; optionally include our own package residue.
 
@@ -718,7 +721,7 @@ def sweep_stale_e2e_processes(
     # killed pytest's pids can be recycled, and an unverified killpg/os.kill
     # would hit whatever now holds them. A leader whose identity no longer
     # holds is skipped; its members are still in `singles` and verified there.
-    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGTERM, receipt_path)
+    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGTERM, receipt_path, send)
     print(  # noqa: T201 -- must reach the terminal; loguru output is captured
         f"\nE2E RESIDUE: reaped {len(groups) + len(singles)} process(es) left by "
         f"dead pytest run(s) {sorted(owners)} (gateway/agent/daemon/frontend of a "
@@ -726,7 +729,7 @@ def sweep_stale_e2e_processes(
         file=sys.stderr,
     )
     time.sleep(_REAP_GRACE_SEC)
-    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGKILL, receipt_path)
+    _signal_sweep_targets(plan, process_by_pid, inspection, signal.SIGKILL, receipt_path, send)
     time.sleep(1.0)
     return len(groups) + len(singles)
 

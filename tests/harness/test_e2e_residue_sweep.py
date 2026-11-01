@@ -559,10 +559,23 @@ def _other_group(_pid: int) -> int:
     return 2
 
 
+# meiva:note
+# A refused delivery must come from the primitive, not from whose pid the fixture borrows.
+# Proving EPERM by signalling PID 1 only holds where that pid belongs to another user (macOS
+# launchd); inside the CI container PID 1 runs as the job's own user, so the signal is accepted
+# and the receipt records "sent".
+def _refusing(failure: type[Exception]) -> Callable[[int, int], None]:
+    def send(_pid: int, _signal: int) -> None:
+        raise failure(_pid)
+
+    return send
+
+
 @pytest.mark.parametrize("failure", [ProcessLookupError, PermissionError])
 def test_cleanup_receipt_keeps_signal_exception_contract(
     tmp_path: Path, failure: type[Exception]
 ) -> None:
+    send: Callable[[int, int], None] | None = None
     if failure is ProcessLookupError:
         with processes.managed_proc(
             [sys.executable, __file__, "exit-message", "done", "0"],
@@ -573,8 +586,9 @@ def test_cleanup_receipt_keeps_signal_exception_contract(
             target_pid = child.pid
         group_of = _same_group
     else:
-        target_pid = 1
+        target_pid = 900_001
         group_of = _other_group
+        send = _refusing(failure)
     inspection = processes.ProcessInspection(
         rows=lambda: [(target_pid, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1")],
         group=group_of,
@@ -582,7 +596,10 @@ def test_cleanup_receipt_keeps_signal_exception_contract(
         probe=_owner_gone,
     )
     path = tmp_path / "cleanup.jsonl"
-    assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
+    assert (
+        processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path, send=send)
+        == 1
+    )
     events = [json.loads(line) for line in path.read_text().splitlines()]
     assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
         "attempt",
