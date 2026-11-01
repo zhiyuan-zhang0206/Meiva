@@ -103,6 +103,8 @@ class Code(StrEnum):
     WIDE_PUBLIC_SURFACE = "wide-public-surface"
     WIDE_PARAMS = "wide-params"
     DEEP_ATTR_CHAIN = "deep-attr-chain"
+    FAKE_TEST_ONLY_ISLAND = "fake-test-only-island"
+    DISCONNECTED_ISLAND = "disconnected-island"
 
 
 # meiva:note

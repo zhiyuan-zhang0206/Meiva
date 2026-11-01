@@ -17,7 +17,7 @@ from meizel.contracts.explain import explain
 from meizel.contracts.policy import Surface, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import sync_manifests
-from meizel.graph import python_reverse_closure
+from meizel.graph import ReachabilityScope, python_reverse_closure, reachability_analysis
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.source_evidence import Evidence, load_report
 
@@ -232,6 +232,38 @@ def _build_parser() -> argparse.ArgumentParser:
     modes.add_parser("projects", help="print validated standalone projects for independent checks")
     modes.add_parser("check", help="fail on a stale generated region or a copy of a role's list")
     modes.add_parser("write", help="regenerate every generated region")
+    reachability_cmd = commands.add_parser(
+        "reachability",
+        help="reachability analysis: identify disconnected islands and fake-test-only islands from [roots]",
+    )
+    reachability_cmd.add_argument("paths", nargs="*", help="report only islands under these paths")
+    reachability_cmd.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="print machine-readable JSON output",
+    )
+    reachability_cmd.add_argument(
+        "--check",
+        action="store_true",
+        help="gate: fail (exit code 1) if unreachable or fake-test-only islands are found",
+    )
+    reachability_cmd.add_argument(
+        "--roots",
+        nargs="+",
+        metavar="file",
+        help="explicit production root paths (default: all [roots] in application manifests)",
+    )
+    reachability_cmd.add_argument(
+        "--include-inits",
+        action="store_true",
+        help="include __init__.py files in reported islands (default: false)",
+    )
+    reachability_cmd.add_argument(
+        "--limit",
+        type=int,
+        help="print at most this many diagnostics",
+    )
     return parser
 
 
@@ -516,6 +548,39 @@ def _run_tests(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) 
     )
 
 
+def _run_reachability(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+    raw_paths: list[str] = args.paths
+    targets = [_relative_target(root, base, p) for p in raw_paths]
+    universe = repo.universe()
+    analysis = analyze(universe, jobs=args.jobs)
+    scope = ReachabilityScope(
+        explicit_roots=args.roots,
+        target_paths=targets if targets else None,
+        include_inits=bool(getattr(args, "include_inits", False)),
+    )
+    report = reachability_analysis(
+        universe,
+        facts=analysis.facts,
+        manifests=analysis.manifests,
+        scope=scope,
+    )
+    if args.as_json:
+        print(json.dumps(report.to_dict(), indent=2))
+        return 1 if (args.check and not report.is_clean) else 0
+
+    print(report.summary_line())
+    shown = report.diagnostics if args.limit is None else report.diagnostics[: args.limit]
+    for diagnostic in shown:
+        print(diagnostic.render())
+    if args.limit is not None and len(report.diagnostics) > len(shown):
+        omitted = len(report.diagnostics) - len(shown)
+        print(f"meizel: ({omitted} diagnostics not shown)", file=sys.stderr)
+
+    if args.check and report.diagnostics:
+        return 1
+    return 0
+
+
 def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
     cmd = str(args.command)
     if cmd == "check":
@@ -530,6 +595,8 @@ def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -
         return _run_impacted(repo, root, base, args.paths, args.jobs)
     if cmd == "tests":
         return _run_tests(repo, root, base, args)
+    if cmd == "reachability":
+        return _run_reachability(repo, root, base, args)
     if cmd == "roles":
         return enumerations.run_roles(
             repo, read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))
