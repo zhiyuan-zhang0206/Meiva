@@ -251,20 +251,20 @@ def test_register_linux_missing_crontab_message_and_rc(
     )
 
 
-def test_unregister_linux_removes_only_the_probe_line() -> None:
+def test_unregister_linux_removes_only_the_probe_line(tmp_path: Path) -> None:
     probe = "*/5 * * * * /x/meiva cluster health-probe # meiva-health-probe"
     commands, host = _crontab(f"{probe}\n0 3 * * * backup\n")
 
-    assert health_job.unregister_linux(host=host) == 0
+    assert health_job.unregister_linux(host=host, roots=_roots(tmp_path)) == 0
     assert probe not in str(_written(commands))
     assert "0 3 * * * backup" in str(_written(commands))
 
 
-def test_unregister_linux_ignores_the_watchdog_probe_lines() -> None:
+def test_unregister_linux_ignores_the_watchdog_probe_lines(tmp_path: Path) -> None:
     probe_line = "*/1 * * * * /x/meiva cluster watchdog-probe --role gateway  # meiva-watchdog-probe.gateway.meiva-mine"
     commands, host = _crontab(f"{probe_line}\n")
 
-    assert health_job.unregister_linux(host=host) == 0
+    assert health_job.unregister_linux(host=host, roots=_roots(tmp_path)) == 0
     assert _written(commands) is None
 
 
@@ -285,6 +285,7 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines() -> None:
 )
 def test_unregister_linux_messages_and_success_gated_removal(
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
     read_rc: int,
     existing: str,
     write_rc: int,
@@ -293,7 +294,7 @@ def test_unregister_linux_messages_and_success_gated_removal(
 ) -> None:
     commands, host = _crontab(existing, read_rc=read_rc, write_rc=write_rc)
 
-    assert health_job.unregister_linux(host=host) == 0
+    assert health_job.unregister_linux(host=host, roots=_roots(tmp_path)) == 0
     assert capsys.readouterr() == (expected_out, "")
     assert (_written(commands) is not None) == should_write
 

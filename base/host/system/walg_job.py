@@ -80,6 +80,7 @@ def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
         entry,
         skip_phrase="WAL-G tick registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
+        user_home=roots.user_home,
         host=host,
     ):
         return 1
@@ -87,9 +88,9 @@ def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
     return 0
 
 
-def unregister_linux(*, host: Host) -> int:
+def unregister_linux(*, roots: JobRoots, host: Host) -> int:
     return mechanics.remove_crontab_entry(
-        content.MARKER, write_failure_rc=1, on_removed=None, host=host
+        content.MARKER, write_failure_rc=1, on_removed=None, user_home=roots.user_home, host=host
     )
 
 
@@ -126,6 +127,6 @@ def unregister_walg_job(*, host: Host, roots: JobRoots) -> None:
         return
     mechanics.unregister_platform_job(
         macos=lambda: unregister_macos(host=host, user_home=roots.user_home),
-        linux=lambda: unregister_linux(host=host),
+        linux=lambda: unregister_linux(roots=roots, host=host),
         host=host,
     )
