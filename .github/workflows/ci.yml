@@ -1393,13 +1393,6 @@ jobs:
           mkdir -p "$MEIVA_PG_THROWAWAY_BASE"
           echo "MEIVA_PG_THROWAWAY_BASE=$MEIVA_PG_THROWAWAY_BASE" >> "$GITHUB_ENV"
 
-      # Diagnostic only, not a gate: the orphaned-process suites this branch exists for.
-      - name: Diagnostic - orphaned-process suites (not a gate)
-        continue-on-error: true
-        run: |
-          uv run pytest -c pyproject.toml --rootdir=. -q -p no:cacheprovider \
-            base/sessions/tests/test_posixproc.py \
-            cli/commands/data_plane/tests/pooler/test_pgbouncer_ensure.py || true
       - name: Run selected pytest subset
         id: run-subset
         shell: bash
