@@ -32,6 +32,21 @@ class RateWindow:
 
 
 @dataclass(frozen=True)
+class WindowPair:
+    session: RateWindow | None = None
+    weekly: RateWindow | None = None
+
+    def has_any(self) -> bool:
+        return self.session is not None or self.weekly is not None
+
+
+@dataclass(frozen=True)
+class AntigravityQuotaGroups:
+    gemini: WindowPair | None = None
+    claude_gpt: WindowPair | None = None
+
+
+@dataclass(frozen=True)
 class CardReading:
     value: str
     detail: str

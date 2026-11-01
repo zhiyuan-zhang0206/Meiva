@@ -524,7 +524,7 @@ def test_probe_collector_dispatcher_openai_and_anthropic() -> None:
             "has_more": False,
         },
     )
-    assert r_oai.value == "$1.25 (30d)"
+    assert r_oai["oai"].value == "$1.25 (30d)"
 
     c_ant = CollectorConfig(
         id="ant",
@@ -549,4 +549,4 @@ def test_probe_collector_dispatcher_openai_and_anthropic() -> None:
             "has_more": False,
         },
     )
-    assert r_ant.value == "$2.50 (30d)"
+    assert r_ant["ant"].value == "$2.50 (30d)"

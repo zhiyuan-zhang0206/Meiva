@@ -11,6 +11,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from base.packages.plugins.extensions import PluginContributions
+from base.packages.plugins.surface.schedules import StatCardSpec
 
 ENV_NAME_RE = r"^[A-Z][A-Z0-9_]*$"
 CARD_ID_RE = r"^[a-z0-9][a-z0-9_-]*$"
@@ -19,6 +20,17 @@ _COMPILED_ENV_NAME_RE = re.compile(ENV_NAME_RE)
 _COMPILED_CARD_ID_RE = re.compile(CARD_ID_RE)
 
 ProviderKind = Literal["claude", "codex", "antigravity", "deepseek", "openai", "anthropic"]
+
+ANTIGRAVITY_GEMINI_SUFFIX = "-gemini"
+ANTIGRAVITY_CLAUDE_GPT_SUFFIX = "-claude-gpt"
+
+
+def antigravity_card_ids(collector_id: str) -> tuple[str, str]:
+    return (
+        f"{collector_id}{ANTIGRAVITY_GEMINI_SUFFIX}",
+        f"{collector_id}{ANTIGRAVITY_CLAUDE_GPT_SUFFIX}",
+    )
+
 
 _COMPILED_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -179,21 +191,20 @@ def _validate_collector_strings(collector: CollectorConfig) -> None:
         raise ValueError("machine must be non-empty without leading or trailing whitespace")
 
 
+def _validate_no_whitespace(val: str | None, name: str) -> None:
+    if val is not None and (not val.strip() or any(c.isspace() for c in val)):
+        raise ValueError(f"{name} must contain no whitespace")
+
+
+def _validate_no_outer_whitespace(val: str | None, name: str) -> None:
+    if val is not None and (not val.strip() or val != val.strip()):
+        raise ValueError(f"{name} must have no outer whitespace")
+
+
 def _validate_collector_optional_strings(collector: CollectorConfig) -> None:
-    if collector.credentials_path is not None and (
-        not collector.credentials_path.strip()
-        or collector.credentials_path != collector.credentials_path.strip()
-    ):
-        raise ValueError("credentials_path must have no outer whitespace")
-    if collector.keychain_account is not None and (
-        not collector.keychain_account.strip()
-        or any(c.isspace() for c in collector.keychain_account)
-    ):
-        raise ValueError("keychain_account must contain no whitespace")
-    if collector.account_email is not None and (
-        not collector.account_email.strip() or any(c.isspace() for c in collector.account_email)
-    ):
-        raise ValueError("account_email must contain no whitespace")
+    _validate_no_outer_whitespace(collector.credentials_path, "credentials_path")
+    _validate_no_whitespace(collector.keychain_account, "keychain_account")
+    _validate_no_whitespace(collector.account_email, "account_email")
 
 
 class CollectorConfig(BaseModel):
@@ -221,9 +232,19 @@ class CollectorConfig(BaseModel):
                 ordered.append(name)
         return tuple(ordered)
 
+    def stat_cards(self) -> tuple[StatCardSpec, ...]:
+        if self.provider == "antigravity":
+            gemini_id, claude_gpt_id = antigravity_card_ids(self.id)
+            return (
+                StatCardSpec(id=gemini_id, label=f"{self.label} · Gemini"),
+                StatCardSpec(id=claude_gpt_id, label=f"{self.label} · Claude & GPT"),
+            )
+        return (StatCardSpec(id=self.id, label=self.label),)
+
     @model_validator(mode="after")
     def validate_collector(self) -> Self:
         _validate_collector_strings(self)
+        self.stat_cards()
         _validate_env_var_name(self.key_env, "key_env")
         _validate_env_var_name(self.oauth_client_id_env, "oauth_client_id_env")
         _validate_env_var_name(self.oauth_client_secret_env, "oauth_client_secret_env")
@@ -242,11 +263,16 @@ class UsageConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_collectors(self) -> Self:
-        seen: set[str] = set()
+        seen_collector_ids: set[str] = set()
+        seen_card_ids: set[str] = set()
         for collector in self.collectors:
-            if collector.id in seen:
+            if collector.id in seen_collector_ids:
                 raise ValueError(f"Duplicate collector id: '{collector.id}'")
-            seen.add(collector.id)
+            seen_collector_ids.add(collector.id)
+            for card in collector.stat_cards():
+                if card.id in seen_card_ids:
+                    raise ValueError(f"Duplicate stat card id: '{card.id}'")
+                seen_card_ids.add(card.id)
         return self
 
 

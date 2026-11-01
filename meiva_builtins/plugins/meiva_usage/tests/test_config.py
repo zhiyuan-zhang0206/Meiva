@@ -5,9 +5,14 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel
 
+from base.packages.plugins.surface.schedules import StatCardSpec
+from meiva_builtins.plugins.meiva_usage import ui_stats
 from meiva_builtins.plugins.meiva_usage.default_config import (
+    ANTIGRAVITY_CLAUDE_GPT_SUFFIX,
+    ANTIGRAVITY_GEMINI_SUFFIX,
     CollectorConfig,
     UsageConfig,
+    antigravity_card_ids,
 )
 from meiva_builtins.plugins.meiva_usage.default_config import (
     contribute as contribute_default_config,
@@ -422,4 +427,124 @@ def test_known_balance_int_and_float_accepted_under_strict() -> None:
             key_env="OPENAI_KEY",
             known_balance_usd=-5.0,
             balance_as_of="2026-10-01",
+        )
+
+
+def test_antigravity_stat_cards_generation() -> None:
+    assert ANTIGRAVITY_GEMINI_SUFFIX == "-gemini"
+    assert ANTIGRAVITY_CLAUDE_GPT_SUFFIX == "-claude-gpt"
+    assert antigravity_card_ids("my-ag") == ("my-ag-gemini", "my-ag-claude-gpt")
+
+    ag = CollectorConfig(
+        id="ag-main",
+        label="AG Main",
+        provider="antigravity",
+        machine="host-a",
+    )
+    cards = ag.stat_cards()
+    assert len(cards) == 2
+    assert cards[0] == StatCardSpec(id="ag-main-gemini", label="AG Main · Gemini")
+    assert cards[1] == StatCardSpec(id="ag-main-claude-gpt", label="AG Main · Claude & GPT")
+
+    ds = CollectorConfig(
+        id="ds-main",
+        label="DeepSeek",
+        provider="deepseek",
+        machine="host-a",
+        key_env="DS_KEY",
+    )
+    assert ds.stat_cards() == (StatCardSpec(id="ds-main", label="DeepSeek"),)
+
+
+def test_ui_stats_contribute_emits_cards_for_providers() -> None:
+    cfg = UsageConfig(
+        collectors=(
+            CollectorConfig(
+                id="ag",
+                label="Antigravity",
+                provider="antigravity",
+                machine="box",
+            ),
+            CollectorConfig(
+                id="claude",
+                label="Claude",
+                provider="claude",
+                machine="box",
+            ),
+            CollectorConfig(
+                id="disabled-ag",
+                label="Disabled AG",
+                provider="antigravity",
+                machine="box",
+                enabled=False,
+            ),
+        )
+    )
+    cards = ui_stats.contribute(cfg)
+    assert len(cards) == 3
+    assert [c.id for c in cards] == ["ag-gemini", "ag-claude-gpt", "claude"]
+    assert [c.label for c in cards] == [
+        "Antigravity · Gemini",
+        "Antigravity · Claude & GPT",
+        "Claude",
+    ]
+
+
+def test_antigravity_overlong_id_fails_fast() -> None:
+    valid_id = "a" * 53
+    ag_valid = CollectorConfig(
+        id=valid_id,
+        label="AG",
+        provider="antigravity",
+        machine="box",
+    )
+    assert len(ag_valid.stat_cards()[1].id) == 64
+
+    overlong_id = "a" * 54
+    with pytest.raises(ValueError, match=r"StatCardSpec\.id"):
+        CollectorConfig(
+            id=overlong_id,
+            label="AG",
+            provider="antigravity",
+            machine="box",
+        )
+
+
+def test_antigravity_overlong_label_fails_fast() -> None:
+    valid_label = "x" * 65
+    ag_valid = CollectorConfig(
+        id="ag-valid",
+        label=valid_label,
+        provider="antigravity",
+        machine="box",
+    )
+    assert len(ag_valid.stat_cards()[1].label) == 80
+
+    overlong_label = "x" * 66
+    with pytest.raises(ValueError, match=r"StatCardSpec\.label"):
+        CollectorConfig(
+            id="ag-valid",
+            label=overlong_label,
+            provider="antigravity",
+            machine="box",
+        )
+
+
+def test_duplicate_stat_card_id_cross_collector_collision() -> None:
+    with pytest.raises(ValueError, match="Duplicate stat card id: 'ag-gemini'"):
+        UsageConfig(
+            collectors=(
+                CollectorConfig(
+                    id="ag",
+                    label="Antigravity",
+                    provider="antigravity",
+                    machine="box",
+                ),
+                CollectorConfig(
+                    id="ag-gemini",
+                    label="Claude Collision",
+                    provider="claude",
+                    machine="box",
+                ),
+            )
         )

@@ -8,19 +8,21 @@ import re
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import TypeGuard
+from typing import Literal, TypeGuard
 
 from meiva_builtins.plugins.meiva_usage.types import (
+    AntigravityQuotaGroups,
     CostBucketsPage,
     RateWindow,
     UsageProbeError,
+    WindowPair,
     parse_timestamp,
     parse_timestamp_opt,
 )
 
 __all__ = (
     "parse_anthropic_cost_report_page",
-    "parse_antigravity_windows",
+    "parse_antigravity_quota_groups",
     "parse_claude_windows",
     "parse_codex_primary_window",
     "parse_openai_costs_page",
@@ -94,26 +96,26 @@ def parse_claude_windows(
     return session_win, weekly_win
 
 
-def parse_codex_primary_window(payload: Mapping[str, object]) -> RateWindow:
-    candidate: Mapping[str, object] | None = None
+def _find_codex_candidate(payload: Mapping[str, object]) -> Mapping[str, object] | None:
     rate_limits = payload.get("rateLimits")
     if _is_mapping(rate_limits):
         primary = rate_limits.get("primary")
         if _is_mapping(primary):
-            candidate = primary
+            return primary
+    limits_by_id = payload.get("rateLimitsByLimitId")
+    if _is_mapping(limits_by_id):
+        codex_limits = limits_by_id.get("codex")
+        if _is_mapping(codex_limits):
+            primary = codex_limits.get("primary")
+            if _is_mapping(primary):
+                return primary
+    if "usedPercent" in payload:
+        return payload
+    return None
 
-    if candidate is None:
-        limits_by_id = payload.get("rateLimitsByLimitId")
-        if _is_mapping(limits_by_id):
-            codex_limits = limits_by_id.get("codex")
-            if _is_mapping(codex_limits):
-                primary = codex_limits.get("primary")
-                if _is_mapping(primary):
-                    candidate = primary
 
-    if candidate is None and "usedPercent" in payload:
-        candidate = payload
-
+def parse_codex_primary_window(payload: Mapping[str, object]) -> RateWindow:
+    candidate = _find_codex_candidate(payload)
     if candidate is None:
         raise UsageProbeError("Codex payload missing primary rate limit window")
 
@@ -133,14 +135,30 @@ def parse_codex_primary_window(payload: Mapping[str, object]) -> RateWindow:
     )
 
 
+def _is_token_revoked(combined: str) -> bool:
+    return "token_revoked" in combined or "token revoked" in combined
+
+
+def _is_unauthorized(combined: str, code: int | None, message: str) -> bool:
+    return "unauthorized" in combined or code in (401, -32401) or "401" in message
+
+
+def _is_forbidden(combined: str, code: int | None, message: str) -> bool:
+    return "forbidden" in combined or code in (403, -32403) or "403" in message
+
+
+def _is_rate_limited(combined: str, code: int | None, message: str) -> bool:
+    return "rate_limit" in combined or "rate limit" in combined or code == 429 or "429" in message
+
+
 def _match_known_rpc_error(combined: str, code: int | None, message: str) -> str | None:
-    if "token_revoked" in combined or "token revoked" in combined:
+    if _is_token_revoked(combined):
         return "Session expired (token_revoked); sign in again"
-    if "unauthorized" in combined or code in (401, -32401) or "401" in message:
+    if _is_unauthorized(combined, code, message):
         return "Unauthorized (401); sign in again"
-    if "forbidden" in combined or code in (403, -32403) or "403" in message:
+    if _is_forbidden(combined, code, message):
         return "Forbidden (403); check permissions"
-    if "rate_limit" in combined or "rate limit" in combined or code == 429 or "429" in message:
+    if _is_rate_limited(combined, code, message):
         return "Rate limit exceeded; retry later"
     return None
 
@@ -173,46 +191,8 @@ def sanitize_codex_rpc_error(error_payload: object) -> str:
     return clean
 
 
-def _is_gemini_group(group: Mapping[str, object]) -> bool:
-    name = str(
-        group.get("displayName", "") or group.get("name", "") or group.get("groupId", "")
-    ).lower()
-    if "gemini" in name:
-        return True
-    buckets = group.get("buckets")
-    if _is_list(buckets):
-        for b in buckets:
-            if _is_mapping(b):
-                bucket_id = str(b.get("bucketId", "")).lower()
-                if bucket_id.startswith("gemini-"):
-                    return True
-    return False
-
-
-def _select_antigravity_buckets(payload: Mapping[str, object]) -> list[object] | None:
-    resp = payload.get("response")
-    root = resp if _is_mapping(resp) else payload
-    groups = root.get("groups")
-    chosen_group: Mapping[str, object] | None = None
-
-    if _is_list(groups) and groups:
-        for group in groups:
-            if not _is_mapping(group):
-                continue
-            if _is_gemini_group(group):
-                chosen_group = group
-                break
-        if chosen_group is None:
-            first = groups[0]
-            if _is_mapping(first):
-                chosen_group = first
-
-    buckets: object = (
-        chosen_group.get("buckets") if chosen_group is not None else root.get("buckets")
-    )
-    if not _is_list(buckets):
-        return None
-    return buckets
+_CLAUDE_GPT_TOKENS = ("claude", "anthropic", "gpt", "openai", "3p", "third-party", "third_party")
+_CLAUDE_GPT_PREFIXES = ("3p-", "claude-", "anthropic-", "gpt-", "openai-")
 
 
 def _calc_antigravity_bucket_used(bucket: Mapping[str, object]) -> float:
@@ -242,19 +222,27 @@ def _classify_antigravity_window(window_id: str) -> str | None:
     return None
 
 
+def _extract_antigravity_bucket_kind(bucket: Mapping[str, object]) -> str | None:
+    candidates = (
+        bucket.get("window"),
+        bucket.get("windowId"),
+        bucket.get("bucketId"),
+        bucket.get("name"),
+    )
+    for cand in candidates:
+        if cand is not None:
+            kind = _classify_antigravity_window(str(cand).lower())
+            if kind is not None:
+                return kind
+    return None
+
+
 def _parse_antigravity_bucket(
     bucket: object,
 ) -> tuple[str, RateWindow] | None:
     if not _is_mapping(bucket):
         return None
-    raw_id = (
-        bucket.get("bucketId")
-        or bucket.get("window")
-        or bucket.get("windowId")
-        or bucket.get("name")
-        or ""
-    )
-    kind = _classify_antigravity_window(str(raw_id).lower())
+    kind = _extract_antigravity_bucket_kind(bucket)
     if kind is None:
         return None
     used_percent = _calc_antigravity_bucket_used(bucket)
@@ -264,17 +252,51 @@ def _parse_antigravity_bucket(
     return kind, RateWindow(used_percent=used_percent, resets_at=reset_dt, window_minutes=minutes)
 
 
-def parse_antigravity_windows(
-    payload: Mapping[str, object],
-) -> tuple[RateWindow | None, RateWindow | None]:
-    buckets_list = _select_antigravity_buckets(payload)
-    if buckets_list is None:
-        return None, None
+def _classify_group_from_description(desc: str) -> Literal["gemini", "claude_gpt"] | None:
+    has_claude_gpt = "claude" in desc or "gpt" in desc
+    has_gemini = "gemini" in desc
+    if has_claude_gpt and not has_gemini:
+        return "claude_gpt"
+    if has_gemini and not has_claude_gpt:
+        return "gemini"
+    return None
 
+
+def _matches_claude_gpt(label_text: str, bucket_ids: list[str]) -> bool:
+    if any(t in label_text for t in _CLAUDE_GPT_TOKENS):
+        return True
+    return any(bid.startswith(_CLAUDE_GPT_PREFIXES) for bid in bucket_ids)
+
+
+def _matches_gemini(label_text: str, bucket_ids: list[str]) -> bool:
+    if "gemini" in label_text:
+        return True
+    return any(bid.startswith("gemini-") for bid in bucket_ids)
+
+
+def _classify_antigravity_group(
+    group: Mapping[str, object],
+) -> Literal["gemini", "claude_gpt"] | None:
+    label_text = " ".join(
+        str(group.get(k, "") or "") for k in ("displayName", "name", "groupId")
+    ).lower()
+    raw_buckets = group.get("buckets")
+    buckets = raw_buckets if _is_list(raw_buckets) else []
+    bucket_ids = [str(b.get("bucketId", "") or "").lower() for b in buckets if _is_mapping(b)]
+
+    if _matches_claude_gpt(label_text, bucket_ids):
+        return "claude_gpt"
+    if _matches_gemini(label_text, bucket_ids):
+        return "gemini"
+
+    desc = str(group.get("description", "") or "").lower()
+    return _classify_group_from_description(desc)
+
+
+def _parse_buckets_window_pair(buckets: list[object]) -> WindowPair | None:
     session_win: RateWindow | None = None
     weekly_win: RateWindow | None = None
-
-    for bucket in buckets_list:
+    for bucket in buckets:
         parsed = _parse_antigravity_bucket(bucket)
         if parsed is None:
             continue
@@ -283,8 +305,65 @@ def parse_antigravity_windows(
             session_win = win
         elif kind == "weekly" and weekly_win is None:
             weekly_win = win
+    pair = WindowPair(session=session_win, weekly=weekly_win)
+    return pair if pair.has_any() else None
 
-    return session_win, weekly_win
+
+def _parse_antigravity_groups_list(
+    groups: list[object],
+) -> tuple[WindowPair | None, WindowPair | None]:
+    gemini: WindowPair | None = None
+    claude_gpt: WindowPair | None = None
+    for group in groups:
+        if not _is_mapping(group):
+            continue
+        kind = _classify_antigravity_group(group)
+        buckets = group.get("buckets")
+        if not _is_list(buckets):
+            continue
+        pair = _parse_buckets_window_pair(buckets)
+        if pair is None:
+            continue
+        if kind == "gemini" and gemini is None:
+            gemini = pair
+        elif kind == "claude_gpt" and claude_gpt is None:
+            claude_gpt = pair
+    return gemini, claude_gpt
+
+
+def _parse_flat_antigravity_buckets(
+    buckets: list[object],
+) -> tuple[WindowPair | None, WindowPair | None]:
+    claude_gpt_buckets: list[object] = []
+    gemini_buckets: list[object] = []
+    for b in buckets:
+        bid = str(b.get("bucketId", "") or "").lower() if _is_mapping(b) else ""
+        if bid.startswith(_CLAUDE_GPT_PREFIXES):
+            claude_gpt_buckets.append(b)
+        else:
+            gemini_buckets.append(b)
+    claude_gpt = _parse_buckets_window_pair(claude_gpt_buckets)
+    gemini = _parse_buckets_window_pair(gemini_buckets)
+    return gemini, claude_gpt
+
+
+def parse_antigravity_quota_groups(payload: Mapping[str, object]) -> AntigravityQuotaGroups:
+    resp = payload.get("response")
+    root = resp if _is_mapping(resp) else payload
+    groups = root.get("groups")
+    buckets = root.get("buckets")
+    gemini: WindowPair | None = None
+    claude_gpt: WindowPair | None = None
+
+    if _is_list(groups) and groups:
+        gemini, claude_gpt = _parse_antigravity_groups_list(groups)
+    elif _is_list(buckets):
+        gemini, claude_gpt = _parse_flat_antigravity_buckets(buckets)
+
+    if gemini is None and claude_gpt is None:
+        raise UsageProbeError("Antigravity quota payload is missing rate-limit windows")
+
+    return AntigravityQuotaGroups(gemini=gemini, claude_gpt=claude_gpt)
 
 
 def _parse_pagination_next_page(payload: Mapping[str, object], provider_name: str) -> str | None:
