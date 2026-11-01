@@ -40,9 +40,15 @@ def understand[TargetValue: str | list[str]](
 ) -> list[str]:
     """Answer a prompt about each target in parallel.
 
+    A separate model reads the material and returns text, so the files never enter
+    your own context. Prefer it when a text answer is enough and you want to keep your
+    context small, or when your own model cannot receive the file type; use
+    `meiva.self.attach` instead to see a file yourself when your model can receive it.
+
     Each target is a dict with `prompt` plus exactly one of `text` / `paths`.
     `paths` is a non-empty list of file paths (text, image, video, audio, PDF),
-    sent together in one model call; any media file routes the call to the media model.
+    sent together in one call to a model that accepts every type among them; a
+    mix that no such model accepts raises an error.
 
     `effort` (`none` … `max`, default `max`) sets the answering model's reasoning
     depth; `max_concurrent` (default 12) caps parallel targets. Results are

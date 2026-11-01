@@ -1,5 +1,5 @@
 # meiva:note
-# `LmSettings` (`base/config/domains/lm.py`) preserves the flat `.env` aliases for language-model settings. `llm_model` defaults to `deepseek-flash` with `capability="common"`, `scope="cluster-default"`, and `per_agent=True` so it serves as both the gateway spawn default and a per-agent overridable setting; `labeler_model` and `hierarchy_model` default to `deepseek-flash` with `capability="gateway"` so their provider keys survive the gateway profile pop; `understand_media_model` defaults to `gemini-3.8-flash`; and `gemini_api_key` carries `capability="common"` for both gateway-side embeddings and agent-side Gemini calls.
+# `LmSettings` (`base/config/domains/lm.py`) preserves the flat `.env` aliases for language-model settings. `llm_model` defaults to `deepseek-flash` with `capability="common"`, `scope="cluster-default"`, and `per_agent=True` so it serves as both the gateway spawn default and a per-agent overridable setting; `labeler_model` and `hierarchy_model` default to `deepseek-flash` with `capability="gateway"` so their provider keys survive the gateway profile pop; `meiva.understand` routes by content type, with `understand_text_model` and `understand_image_model` defaulting to `deepseek-flash` and `understand_pdf_model` / `understand_audio_model` / `understand_video_model` to `gemini-3.8-flash` (the retired `MEIVA_UNDERSTAND_MEDIA_MODEL` is no longer read; the `understand_media_*` knobs apply only to a media call a Gemini model answers); and `gemini_api_key` carries `capability="common"` for both gateway-side embeddings and agent-side Gemini calls.
 # meiva:link base/config/docs/process-profiles.meiva.okf.md
 from __future__ import annotations
 
@@ -458,7 +458,10 @@ class LmSettings(EnvSettings):
     understand_text_model: str = Field(
         default="deepseek-flash",
         alias="MEIVA_UNDERSTAND_TEXT_MODEL",
-        description="Model for `meiva.understand`'s text path (strings and text files). Any agent model id works.",
+        description=(
+            "Model for `meiva.understand` over text (strings and text files). Any agent "
+            "model id works."
+        ),
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -467,15 +470,58 @@ class LmSettings(EnvSettings):
         },
     )
 
-    understand_media_model: str = Field(
-        default="gemini-3.8-flash",
-        alias="MEIVA_UNDERSTAND_MEDIA_MODEL",
+    understand_image_model: str = Field(
+        default="deepseek-flash",
+        alias="MEIVA_UNDERSTAND_IMAGE_MODEL",
         description=(
-            "Model for `meiva.understand`'s media path (image/video/audio/PDF). "
-            "Must be a Gemini model — the media wire format is Gemini-specific, "
-            "so a non-Gemini id fails fast with a clear error. The provider "
-            "abstraction (factory routing / endpoint override / quality knobs) "
-            "is in place for a second media provider to plug in later."
+            "Model for `meiva.understand` over images. Must be a model whose catalog "
+            "entry accepts images. A target mixing media types goes to the first of the "
+            "video, audio, pdf, image and text models that accepts every type present."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_pdf_model: str = Field(
+        default="gemini-3.8-flash",
+        alias="MEIVA_UNDERSTAND_PDF_MODEL",
+        description=(
+            "Model for `meiva.understand` over PDFs. Must be a model whose catalog entry "
+            "accepts PDFs (Gemini, Claude)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_audio_model: str = Field(
+        default="gemini-3.8-flash",
+        alias="MEIVA_UNDERSTAND_AUDIO_MODEL",
+        description=(
+            "Model for `meiva.understand` over audio. Must be a model whose catalog entry "
+            "accepts audio (Gemini)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_video_model: str = Field(
+        default="gemini-3.8-flash",
+        alias="MEIVA_UNDERSTAND_VIDEO_MODEL",
+        description=(
+            "Model for `meiva.understand` over video. Must be a model whose catalog entry "
+            "accepts video (Gemini)."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -489,9 +535,9 @@ class LmSettings(EnvSettings):
         default="high",
         alias="MEIVA_UNDERSTAND_MEDIA_RESOLUTION",
         description=(
-            "Media resolution for `meiva.understand`'s media path: `low` / `medium` / "
-            "`high`. Higher costs more input tokens per image/frame; drop it to cut "
-            "cost on bulk media."
+            "Media resolution of a `meiva.understand` media call answered by a Gemini "
+            "model: `low` / `medium` / `high`. Higher costs more input tokens per "
+            "image/frame; drop it to cut cost on bulk media. Other providers ignore it."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -505,8 +551,10 @@ class LmSettings(EnvSettings):
         default="medium",
         alias="MEIVA_UNDERSTAND_MEDIA_THINKING_LEVEL",
         description=(
-            "Thinking level for `meiva.understand`'s media path: `minimal` / `low` / "
-            "`medium` / `high`. Higher = deeper but slower and pricier."
+            "Thinking level of a `meiva.understand` media call answered by a Gemini "
+            "model at the default effort: `minimal` / `low` / `medium` / `high`. Higher "
+            "= deeper but slower and pricier. Other providers map `effort` through their "
+            "own levels instead."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -520,11 +568,11 @@ class LmSettings(EnvSettings):
         default=None,
         alias="MEIVA_UNDERSTAND_MEDIA_BASE_URL",
         description=(
-            "Gemini endpoint override for `meiva.understand`'s media path (the "
-            "`generativelanguage.googleapis.com` base). None = the SDK default "
-            "official endpoint. Point it at a self-hosted relay or a provider "
-            "mirror without code changes; the same auth as Gemini is sent "
-            "(GEMINI_API_KEY). Non-gemini media models ignore it."
+            "Gemini endpoint override for a `meiva.understand` media call answered by "
+            "a Gemini model (the `generativelanguage.googleapis.com` base). None = the "
+            "SDK default official endpoint. Point it at a self-hosted relay or a "
+            "provider mirror without code changes; the same auth as Gemini is sent "
+            "(GEMINI_API_KEY). Other providers ignore it."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -561,7 +609,7 @@ class LmSettings(EnvSettings):
     gemini_api_key: SecretStr | None = Field(
         default=None,
         alias="GEMINI_API_KEY",
-        description="Google Gemini API key, used by `meiva.understand`'s media path and any gemini-* agent model. Empty = media understand raises.",
+        description="Google Gemini API key, used by any gemini-* model: `meiva.understand`'s default pdf/audio/video model and gemini-* agents. Empty = a call on a gemini-* model raises.",
         json_schema_extra={
             "capability": "common",
             "restart_required": "agent",

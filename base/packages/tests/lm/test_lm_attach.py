@@ -10,6 +10,8 @@ from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_FILES_PER_TURN,
     ATTACH_MAX_TOTAL_BYTES,
+    ATTACH_MEDIA_MIME,
+    media_type_for_mime,
 )
 from base.lm.attach.files import pack_attachments
 from base.lm.attach.packing import (
@@ -23,6 +25,7 @@ from base.lm.attach.packing import (
     ReadRequest,
     StatObserved,
     StatRequest,
+    file_size_error,
     plan_attachments,
 )
 from base.lm.catalog import ModelCatalog
@@ -560,3 +563,19 @@ def test_stat_outcomes_that_are_not_a_file_become_captioned_skips(
         "cannot stat file",
         "not a regular file",
     ]
+
+
+def test_every_suffix_of_the_shared_table_is_one_of_the_catalog_media_types() -> None:
+    types = {media_type_for_mime(mime) for mime in ATTACH_MEDIA_MIME.values()}
+
+    assert types == {"image", "pdf", "audio", "video"}
+
+
+def test_file_size_error_applies_the_shared_ceiling_then_the_provider_limit(
+    *, model_catalog: ModelCatalog
+) -> None:
+    assert file_size_error("deepseek-flash", "image", 1024, catalog=model_catalog) is None
+    assert "20" in (
+        file_size_error("deepseek-flash", "image", ATTACH_MAX_FILE_BYTES + 1, catalog=model_catalog)
+        or ""
+    )

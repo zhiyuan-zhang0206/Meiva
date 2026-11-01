@@ -15,6 +15,7 @@ from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_LABEL_CHARS,
     ATTACH_MEDIA_MIME,
+    media_type_for_mime,
 )
 
 ATTACH_CHANNEL = "attach"
@@ -59,8 +60,7 @@ def gated_members(reason: str | None) -> frozenset[str]:
 
 
 def modality_of(suffix: str) -> str:
-    mime = ATTACH_MEDIA_MIME[suffix]
-    return "pdf" if mime == "application/pdf" else mime.split("/", maxsplit=1)[0]
+    return media_type_for_mime(ATTACH_MEDIA_MIME[suffix])
 
 
 def refusal(facts: AttachFacts) -> Refusal | None:

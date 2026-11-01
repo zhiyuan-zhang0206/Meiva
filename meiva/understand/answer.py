@@ -33,10 +33,18 @@ from meiva.sdk_surface.pure.media.finding_plan import (
     findings_of,
     gather,
 )
-from meiva.understand import calls, outputs
+from meiva.understand import calls, outputs, routing
 from meiva.understand.calls import MediaSettings, ModelCall
+from meiva.understand.content import (
+    MediaPart,
+    Part,
+    TextPart,
+    content_for,
+    content_types,
+)
 from meiva.understand.errors import UnderstandError
 from meiva.understand.plans import Plan, TargetSpec
+from meiva.understand.routing import UnderstandModels
 
 __all__ = [
     "OVERFLOW_DIRNAME",
@@ -69,15 +77,15 @@ class OutputSite:
 
 
 # meiva:note
-# Everything `run` reads that is not its plan: the model facts, the configured models and knobs,
-# the directory relative paths resolve against, and where answers are saved.
+# Everything `run` reads that is not its plan: the model facts, the configured model of each
+# content type and the Gemini media knobs, the directory relative paths resolve against, and
+# where answers are saved.
 @dataclass(frozen=True)
 class UnderstandDeps:
     catalog: ModelCatalog
     keys: ProviderKeys
     overrides: ModelOverrides
-    text_model: str
-    media_model: str
+    models: UnderstandModels
     media_resolution: str
     media_thinking_level: str | None
     media_base_url: str | None
@@ -174,51 +182,39 @@ def _read_text_file(p: Path) -> str:
 
 
 # meiva:note
-# Read the file `path` names as one content part and its mime type: a media file (image, video,
-# audio, PDF by suffix) as a media part, any other file as UTF-8 text, which is also scanned.
-def _read_part(deps: UnderstandDeps, path: str | Path) -> Scanned[tuple[dict[str, Any], str]]:
+# Read the file `path` names as one part: a media file (image, video, audio, PDF by suffix) as its
+# bytes and MIME type, any other file as UTF-8 text, which is also scanned.
+def _read_part(deps: UnderstandDeps, path: str | Path) -> Scanned[Part]:
     p = resolve_in(deps.base_dir, Path(path).expanduser())
     if not p.is_file():
         raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({p})")
     mime = calls.media_mime(p.suffix)
     if mime is not None:
-        data = p.read_bytes()
-        calls.check_inline_size(len(data))
-        return Scanned(({"type": "media", "data": data, "mime_type": mime}, mime))
+        return Scanned(MediaPart(path=str(path), mime=mime, data=p.read_bytes()))
     content = _read_text_file(p)
-    return Scanned(
-        ({"type": "text", "text": content}, "text/plain"),
-        findings_of(content, "understand.input"),
-    )
+    return Scanned(TextPart(content), findings_of(content, "understand.input"))
 
 
 # meiva:note
-# Answer `prompt` over several files in ONE model call. Media files become media parts; any
-# other file is read as UTF-8 text and becomes a text part. If at least one part is media the
-# whole call runs on the media model (the media provider handles text parts natively); an
-# all-text list stays on the text model. Part order follows `paths`, prompt last. The findings of
-# the files read so far ride with the answer, and with the failure when reading or answering
-# fails.
+# Answer `prompt` over several files in ONE model call. The content types present pick the one
+# model (`routing.route`), whose provider receives the media blocks built for it; text files become
+# text parts. Part order follows `paths`, prompt last. Routing, effort and size refusals happen
+# before any model is built. The findings of the files read so far ride with the answer, and with
+# the failure when reading or answering fails.
 def _understand_paths(
     deps: UnderstandDeps,
     paths: tuple[str | Path, ...],
     prompt: str,
     effort: str | ReasoningEffort,
 ) -> Scanned[str]:
-    parts: list[Any] = []
-    mimes: list[str] = []
+    parts: list[Part] = []
     found: Findings = ()
     try:
         for path in paths:
             read = _read_part(deps, path)
-            parts.append(read.value[0])
-            mimes.append(read.value[1])
+            parts.append(read.value)
             found = (*found, *read.findings)
-        parts.append({"type": "text", "text": prompt})
-        if any(m != "text/plain" for m in mimes):
-            answer = _call_media(deps, parts, mime=",".join(dict.fromkeys(mimes)), effort=effort)
-        else:
-            answer = _call_text(deps, parts, effort=effort)
+        answer = _call_paths(deps, parts, prompt, effort=effort)
     except Exception as error:
         raise CarriedFindingsError(error, found) from error
     return Scanned(answer, found)
@@ -248,24 +244,26 @@ def _save_result(deps: UnderstandDeps, target: TargetSpec, result: str) -> None:
 
 def _call_text(deps: UnderstandDeps, content: list[Any], *, effort: str | ReasoningEffort) -> str:
     return _invoke(
-        deps, calls.plan_text_call(deps.text_model, deps.timeout_seconds, effort), content
+        deps, calls.plan_text_call(deps.models.text, deps.timeout_seconds, effort), content
     )
 
 
-def _call_media(
-    deps: UnderstandDeps, content: list[Any], *, mime: str, effort: str | ReasoningEffort
+def _call_paths(
+    deps: UnderstandDeps, parts: list[Part], prompt: str, *, effort: str | ReasoningEffort
 ) -> str:
-    call = calls.plan_media_call(
+    types = content_types(parts)
+    model = routing.route(deps.catalog, deps.models, types)
+    call = calls.plan_call(
         deps.catalog,
-        deps.media_model,
-        mime=mime,
+        model,
+        types,
         timeout=deps.timeout_seconds,
         effort=effort,
         settings=MediaSettings(
             deps.media_resolution, deps.media_thinking_level, deps.media_base_url
         ),
     )
-    return _invoke(deps, call, content)
+    return _invoke(deps, call, content_for(deps.catalog, model, parts, prompt))
 
 
 # meiva:note

@@ -3,21 +3,25 @@ name: models
 description: "Selects registered LLMs and config overlays for Meiva workers. Use when choosing a worker model, reasoning effort, or speed tier."
 ---
 
-# Model Selection — the Pareto Frontier and Cost Policy
+# Model Selection — choosing a model, effort and speed tier
 
 You pick a worker's model at spawn time:
 
 ```python
 from uuid import uuid4
 
-meiva.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4()))
+meiva.agents.spawn(prompt="...", config_overlay={"llm_model": model_id}, idempotency_key=str(uuid4()))
 ```
 
-Omitting the overlay is a valid choice — the child inherits the cluster default.
-The registry (`base/lm/registry.py`) is the authoritative list of available
-models (`spawnable=True`) and their prices; this skill carries the judgment the
-registry cannot: **which model a given sub-task deserves, and which registered
-models sit on the Pareto frontier.**
+`model_id` is an id read from the live roster (next section), never a name
+remembered from elsewhere. Omitting the overlay is a valid choice — the child
+inherits the cluster default, which is the operator's standing choice. An
+explicit overlay should mean a deliberate reason to differ from it.
+
+This skill carries judgment that holds whichever models are registered: how to
+choose, and how to spend. It names no model as preferred, required or
+forbidden; that kind of policy lives in the places listed under "Where policy
+lives".
 
 ## Where model names come from — enumerate, never hardcode
 
@@ -50,10 +54,26 @@ copied from an old doc or an old spawn; list the current roster first:
 - There is no dedicated `meiva models` CLI yet — the API above or the registry
   is how an agent lists models.
 
-This skill names concrete ids as **policy** — the standing choices, not the
-full roster. Before spawning, confirm the id exists in the registry; if this
-doc names a model the roster no longer has, update the doc — the registry is
-maintained as it ships, this skill is maintained as policy.
+A config naming an id that is not on the roster fails spawn validation as an
+unknown model; repair it by naming a current id from the roster.
+
+## Where policy lives
+
+Which models the operator wants used, and which are stopped, is configuration,
+not skill text:
+
+- The **cluster default** (`llm_model`) is what an omitted overlay inherits.
+- A **per-agent config** (the spawn overlay, or `meiva.self.restart(config_overlay=...)`)
+  pins one agent.
+- The registry's roster flags express availability: a model with
+  `spawnable=False` cannot be selected, and `superseded_by` hides a
+  still-serviceable old model from the picker while older configs keep working.
+
+A model that is stopped or withdrawn is expressed there — in the registry or
+the config — never in this skill. When the user names a model to use or avoid,
+that instruction is theirs to give per task or to record in the cluster
+configuration; do not look for it here, and confirm the id is on the roster
+before using it.
 
 ## Inference speed is part of the model ID
 
@@ -71,9 +91,10 @@ not promise cross-speed reuse. Inspect reported cache-read tokens. Faster
 inference can shorten a reasoning-heavy critical path; changing the ID does
 not prescribe more progress reports or polling.
 
-Fast services remain subject to the cost policy below. Claude Fast requires
-account access to its research preview. Usage and billing follow the actual
-service receipt, including OpenAI downgrades to Standard.
+Fast services are priced for speed; weigh them against cost like any other
+choice. Claude Fast requires account access to its research preview. Usage and
+billing follow the actual service receipt, including OpenAI downgrades to
+Standard.
 
 References: [Claude caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
 [Claude Fast](https://platform.claude.com/docs/en/build-with-claude/fast-mode),
@@ -81,80 +102,59 @@ References: [Claude caching](https://platform.claude.com/docs/en/build-with-clau
 [OpenAI caching](https://developers.openai.com/api/docs/guides/prompt-caching)
 (checked 2026-10-07).
 
-## Pareto frontier principle
+## Reasoning effort
 
-Only models on the intelligence Pareto frontier are eligible: a model is out
-once another registered model dominates it — strictly smarter at the same or
-lower cost, or equally smart at lower cost. Picking a dominated model is a
-policy bug, not a preference, so the frontier is actively maintained:
+Effort sets reasoning depth independently of the model and of inference speed.
+Each roster entry lists the levels it accepts (`reasoning_effort_options`); a
+level outside that list is rejected, so read the entry rather than assume a
+vocabulary. Higher effort costs more tokens and time; raise it for a task that
+needs depth, not by default.
 
-- When a new model lands, place it on the frontier **only if** it is not itself
-  dominated; register it, then update this skill's policy.
-- When a new model dominates a current one, replace it in this skill's policy and
-  note the dominance. A still-serviceable old model stays registered so older
-  configs work, with `superseded_by` hiding it from the picker. Remove an id
-  entirely when the provider can no longer serve it.
-- A dominance pair is worth stating explicitly, so a later reader does not
-  resurrect the dominated name out of habit.
+## Pareto dominance
 
-Current frontier state (user ruling 2026-09-10):
+Among the registered models, one dominates another when it is strictly smarter
+at the same or lower cost, or equally smart at lower cost. Choosing a dominated
+model is a mistake rather than a preference, so when two roster entries compare
+that way, take the dominating one unless a stated constraint (a capability such
+as vision, context window, speed, or the user's instruction) rules it out. A
+`superseded_by` entry on the roster says the registry already made that
+comparison. Compare on the live prices and capabilities, not on remembered ones.
 
-- `deepseek-flash` is the current DeepSeek id. A config naming an id that is
-  not on the roster fails spawn validation as an unknown model; repair it by
-  naming a current id from the roster. Use `deepseek-flash` for the DeepSeek
-  tier, including vision work.
+## Spending: decomposition, verification, cost
 
-## Current cost policy
+Complexity is best absorbed by structure before it is absorbed by a more
+expensive model. Three questions decide how much structure a sub-task gets:
 
-**One model: `deepseek-flash`** (user ruling 2026-09-10). Main agent and
-workers alike — orchestration, planning, synthesis, review, extraction, format
-transforms, scanning — run the same id on its V4.1 Flash backend.
-
-- Complexity is absorbed by **decomposition and verification waves**, not by
-  upgrading the model (next section).
-- Vision work uses plain `deepseek-flash`: it receives images natively
-  (user uploads, `meiva.self.attach`). PDF, audio and video still go through
-  `meiva.understand`.
-- Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
-  default policy: select one only when the user explicitly asks for that
-  model, and confirm it is on the roster first (section above).
-- `gemini-3.8-flash` (trialed 2026-09-06, user order) is **stopped** under the
-  still-valid stop ruling (pool: `model-policy-v2.3-gemini-flash-stop-20260903`)
-  — do not select it.
-- An already-running agent still on a non-flash model is moved with
-  `meiva.self.restart(config_overlay={"llm_model": "deepseek-flash"})`.
-- Ruling record: shared-pool note `dev/meiva-agent-model-flash-ruling-20260910.md`.
-
-## How to run sub-tasks (flash-only)
-
-There is no tier to pick; the same three questions now decide how much
-structure a sub-task gets:
-
-1. **Open-ended judgment, or bounded procedure?** Both run flash; open-ended
-   work is split into smaller, checkable steps first.
-2. **Blast radius of a wrong answer?** Large → add a verification wave (a
-   flash cross-check, or peer review between agents) instead of a more
-   expensive model.
+1. **Open-ended judgment, or bounded procedure?** Split open-ended work into
+   smaller, checkable steps first; a bounded procedure can run as one step.
+2. **Blast radius of a wrong answer?** Large → add a verification wave (an
+   independent cross-check, or peer review between agents) before trusting the
+   result, rather than trusting one unverified output.
 3. **Volume?** N parallel workers multiply cost by N — batch the work and
-   converge; that is where a flat policy pays. One-off calls barely matter.
+   converge. One-off calls barely matter.
 
-The typical dynamic-workflow shape that falls out:
+## Looking at media: `meiva.self.attach` or `meiva.understand`
 
-```
-deepseek-flash orchestrator
-  → deepseek-flash worker fleet
-  → deepseek-flash cross-checkers
-```
+Both reach a model that can read the file; they differ in where the pixels go.
+
+- `meiva.self.attach(path)` puts the file in your own context: you see it
+  natively at your next step, and it stays in the conversation. It needs a
+  model that can receive that file type; the roster entry lists the media types.
+- `meiva.understand(...)` has a separate model answer in text, so your context
+  stays small, and it can read types your own model cannot. Each content type
+  (text, image, PDF, audio, video) has its own configured model:
+  `MEIVA_UNDERSTAND_{TEXT,IMAGE,PDF,AUDIO,VIDEO}_MODEL`. Read the current values
+  from the configuration, and the media types a model accepts from
+  `GET /api/models`.
 
 ## Don't
 
-- Don't select anything outside `deepseek-flash` for Meiva-line agents
-  (workers, orchestrators, reviewers, synthesizers alike). Select another
-  roster model only when the user explicitly asks for it; vision work uses
-  `deepseek-flash`.
-- Don't hand flash an open-ended judgment task and trust the output
-  unverified — pair flash breadth with a flash cross-checking wave.
+- Don't hand an open-ended judgment task to any model and trust the output
+  unverified — pair breadth with a cross-checking wave.
 - Don't scatter hardcoded model names where the cluster default would do —
   an explicit overlay should mean a deliberate choice.
 - Don't trust a model name from an old spawn, an old chat, or a stale doc —
   enumerate first (`GET /api/models` or the registry).
+- Don't write model policy (preferred, required or stopped models) into a
+  skill; it belongs to the cluster default, the per-agent config and the
+  registry's roster flags.

@@ -201,19 +201,16 @@ def security_note_message(
 
 
 # meiva:note
+# The files registered by the `execute_code` call that just finished, as one message that follows
+# its result, so the model sees it at its next step. Content blocks are interleaved per file —
+# `[text(notice), text(line1), media1, text(line2), media2, ...]` — so every media block sits
+# directly after its own caption line (the timeline reads that pairing structurally via
+# `base/agents/history/timeline._attach_image_captions`).
 # `created_at` is also the moment the message is put into the context (`meiva_picked_up_at`): the
 # caller builds it at the injection point.
 def attach_message(
     *, blocks: list[dict[str, object]], text: str, created_at: datetime
 ) -> HumanMessage:
-    """Add files prepared during the preceding turn to the conversation.
-
-    The message is available to your next response. Content blocks are
-    interleaved per file — ``[text(notice), text(line1), media1, text(line2),
-    media2, ...]`` — so every media block sits directly after its own caption
-    line (the timeline reads that pairing structurally via
-    ``base/agents/history/timeline._attach_image_captions``).
-    """
     content_blocks: list[str | dict[str, Any]] = (
         [dict(block) for block in blocks] if blocks else [{"type": "text", "text": text}]
     )

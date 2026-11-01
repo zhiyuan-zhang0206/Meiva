@@ -140,14 +140,17 @@ def _assert_native_self_action(action: str, cur: _Cursor | None = None) -> None:
 
 
 def attach(path: str | Path, *, label: str | None = None) -> None:
-    """Register a local media file for your next turn.
+    """Look at any local media file yourself: it enters your own context natively.
 
-    Use this when your next response needs to inspect a file generated during
-    this turn. The file is read when this turn ends, so keep it available until
-    then. Your model receives supported media natively; a file whose modality
-    your model cannot receive (e.g. video on an image-only model) is rejected
-    with an error naming the allowed set. Attach at most 8 files and 48 MiB per
-    turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
+    Works for user uploads, screenshots, downloaded or generated images and any
+    other file on disk. The file is read when the current execute_code call
+    finishes and appears right after its result, so you see it at your next step
+    in the same turn; keep it in place until then. It stays in the conversation
+    and costs context at every later step; use `meiva.understand` instead when a
+    text answer about the file is enough. A file whose modality your model cannot
+    receive (e.g. video on an image-only model) is rejected with an error naming
+    the allowed set. Attach at most 8 files and 48 MiB per turn, with a 20 MiB
+    limit per file. Raises an error outside an agent turn.
     """
     _assert_native_self_action("attach")
     context = process_context.current_context()

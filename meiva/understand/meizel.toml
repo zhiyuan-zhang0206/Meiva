@@ -1,13 +1,26 @@
-exports = ["answer.py", "calls.py", "errors.py", "outputs.py", "plans.py", "wiring.py"]
+exports = [
+    "answer.py",
+    "calls.py",
+    "content.py",
+    "errors.py",
+    "outputs.py",
+    "plans.py",
+    "routing.py",
+    "wiring.py",
+]
 
 [uses]
 "__init__.py" = ["answer.py", "errors.py", "plans.py", "wiring.py"]
-"answer.py" = ["calls.py", "errors.py", "outputs.py", "plans.py"]
-"calls.py" = ["errors.py"]
-"wiring.py" = ["answer.py"]
+"answer.py" = ["calls.py", "content.py", "errors.py", "outputs.py", "plans.py", "routing.py"]
+"calls.py" = ["errors.py", "routing.py"]
+"content.py" = ["errors.py"]
+"routing.py" = ["errors.py"]
+"wiring.py" = ["answer.py", "routing.py"]
 
 [purity]
 "calls.py" = "strict"
+"content.py" = "strict"
 "errors.py" = "strict"
 "outputs.py" = "strict"
 "plans.py" = "strict"
+"routing.py" = "strict"

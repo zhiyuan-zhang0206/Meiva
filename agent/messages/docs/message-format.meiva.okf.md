@@ -48,8 +48,7 @@ stamp. Arrival-time formatting and source validation keep their existing order.
 - `created_at` is a required argument: every writer (exec node, repair hook, syntax-fix plugin) stamps `meiva_created_at`, which is also the read time
 
 ### Attachments (`attach_message`)
-- Appends one HumanMessage at the completed-turn boundary for files registered with `meiva.self.attach`
-- The leading notice is one complete system note inside its own text block; the caption lines follow it outside the note — `[text(<system_note> notice </system_note>), text(line1), media1, text(line2), media2, ...]`. A note spanning the captions would have to interleave with media blocks, so the notice states what the block is and the lines stay exactly where the pairing needs them; `meiva_msg_type="attach"` distinguishes the message without image URL metadata, and the timeline pairs every image with its own caption line structurally
+- The media message of the files one exec call registered with `meiva.self.attach`; see [[attachment-message.meiva.okf.md]]
 
 ### Chat Inbound Assembly (`_chat_inbound.py`)
 - Assembles `kind='chat'` inbound rows into `(HumanMessage, finding)`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model. `finding` is the injection-scan result for the row's text (None when clean); the claim node owns delivering it as a SECURITY note
@@ -66,5 +65,5 @@ stamp. Arrival-time formatting and source validation keep their existing order.
 - `agent/messages/__init__.py:system_note_message(...)` — system notification (with `NoteTag`)
 - `agent/messages/__init__.py:security_note_message(...)` — SECURITY note for one injection-scan finding
 - `agent/messages/__init__.py:exec_output_message(...)` — execution output; one shape for every ending. The structured record is `meiva_exec_status` (`ExecStatus`: completed / failed / timed_out / cancelled / halted / not_run / unknown), `meiva_exec_started_at` (the end is `meiva_created_at`), `meiva_exec_ms` and `meiva_exec_body_start` (where the body begins after the header); readers use these fields and never parse the header text, which is for the model. Results written before these fields existed carry no offset; the hierarchy catalog shows them whole, header included, instead of parsing the header
-- `agent/messages/__init__.py:attach_message(...)` — attached media for the next turn
+- `agent/messages/__init__.py:attach_message(...)` — the media message of the files attached by one exec call ([[attachment-message.meiva.okf.md]])
 - `agent/graph/claim/_chat_inbound.py` — chat inbound → (HumanMessage, scan finding) assembly (multimodal inline)
