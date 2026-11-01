@@ -293,6 +293,7 @@ def _collect_locality(
 class _TypeContext:
     universe: Universe
     sources: Sources
+    policy: allowances.Policy
     allowed: frozenset[str]
     packages: tuple[str, ...]
     files: set[Path]
@@ -303,7 +304,7 @@ class _TypeContext:
 
     def errors(self, rel: str, tree: ast.Module) -> list[str]:
         walrus = any(isinstance(n, ast.NamedExpr) for n in ast.walk(tree))
-        scan = scan_tree(self.universe, rel, tree, self.sources, walrus=walrus)
+        scan = scan_tree(self.universe, rel, tree, self.sources, walrus=walrus, policy=self.policy)
         return [
             f"{rel}:{line}: {message}"
             for line, message in type_checking_violations(
@@ -338,6 +339,7 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
         _TypeContext(
             universe,
             Sources(),
+            policy,
             frozenset(policy.reasons("type-checking", "files")),
             type_packages,
             set(_iter_py_files(roots, repo_root)),
