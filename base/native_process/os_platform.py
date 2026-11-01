@@ -17,8 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
-from base.paths.home import user_home
-
 
 @dataclass(frozen=True)
 class Platform:
@@ -301,8 +299,13 @@ def file_lock(path: Path, *, timeout_s: float | None = None) -> Generator[None]:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
+# meiva:note
+# The lock is one file per account, outside every home: a per-home lock would not serialize two
+# clusters sharing one crontab. Which account is a value the converge entry already read
+# (`UserSession.user_home`, carried in `JobRoots`), so the caller hands it in rather than this
+# function asking the process for its own home.
 @contextlib.contextmanager
-def crontab_lock() -> Generator[None]:
+def crontab_lock(*, user_home: Path) -> Generator[None]:
     """Serialize read-modify-write cycles over the user's crontab.
 
     `crontab -l` → filter → `crontab -` is three steps with no atomicity:
@@ -317,7 +320,7 @@ def crontab_lock() -> Generator[None]:
     home, so a /tmp sweep cannot unlink it mid-hold. It is advisory —
     every crontab rewrite in the repo must go through this lock.
     """
-    with file_lock(user_home() / ".meiva-crontab.lock"):
+    with file_lock(user_home / ".meiva-crontab.lock"):
         yield
 
 

@@ -82,14 +82,15 @@ def test_unregister_removes_the_meiva_lines_and_only_them(
     )
 
     host = _linux(crontab)
-    assert health_job.unregister_linux(host=host) == 0
+    roots = JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home)
+    assert health_job.unregister_linux(host=host, roots=roots) == 0
     for unregister in (
         logs_job.unregister_linux,
         packages_job.unregister_linux,
         pr_flow_job.unregister_linux,
         walg_job.unregister_linux,
     ):
-        assert unregister(host=host) == 0
+        assert unregister(host=host, roots=roots) == 0
 
     assert crontab.lines == [_UNRELATED]
 
@@ -135,7 +136,9 @@ def test_a_carried_note_is_not_duplicated(default_home: Path) -> None:
 # meiva:note
 # Two owned lines that disagree about the note leave the entry as the caller wrote it: picking one
 # would invent a provenance nobody wrote, and the note is only worth keeping if it is the operator's.
-def test_owned_lines_that_disagree_about_a_note_are_left_alone(default_home: Path) -> None:
+def test_owned_lines_that_disagree_about_a_note_are_left_alone(
+    default_home: Path, tmp_path: Path
+) -> None:
     del default_home
     crontab = FakeCrontab(
         "0 1 * * * first # meiva-logs-maintenance (restored by #7100)\n"
@@ -149,6 +152,7 @@ def test_owned_lines_that_disagree_about_a_note_are_left_alone(default_home: Pat
             "0 4 * * * canonical # meiva-logs-maintenance",
             skip_phrase="test",
             update_failure=lambda _message: None,
+            user_home=tmp_path,
             host=host,
         )
         == 0

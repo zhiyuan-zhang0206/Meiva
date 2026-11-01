@@ -154,13 +154,14 @@ def replace_crontab_entry(
     skip_phrase: str,
     update_failure: Callable[[str], None],
     owns_line: Callable[[str], bool] | None = None,
+    user_home: Path,
     host: Host,
 ) -> int:
     # meiva:note
     # Replace owned lines, defaulting to a marker substring match.
     #
     # The caller reports a failed write in its own channel.
-    with crontab_lock():
+    with crontab_lock(user_home=user_home):
         result = host.run(["crontab", "-l"], capture_output=True, text=True, timeout=TOOL_TIMEOUT_S)
         # meiva:note
         # Only benign "no crontab" means empty; other read failures must block a clobbering rewrite.
@@ -197,6 +198,7 @@ def remove_crontab_entry(
     owns_line: Callable[[str], bool] | None = None,
     on_read_failed: Callable[[], None] | None = None,
     on_absent: Callable[[], None] | None = None,
+    user_home: Path,
     host: Host,
 ) -> int:
     # meiva:note
@@ -204,7 +206,7 @@ def remove_crontab_entry(
     #
     # Read failure and absent callbacks run before their no-op return. Removal is
     # reported only after a successful write.
-    with crontab_lock():
+    with crontab_lock(user_home=user_home):
         result = host.run(["crontab", "-l"], capture_output=True, text=True, timeout=TOOL_TIMEOUT_S)
         if result.returncode != 0:
             if on_read_failed is not None:

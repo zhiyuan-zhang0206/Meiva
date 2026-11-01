@@ -122,9 +122,9 @@ def test_linux_crontab_failures_and_empty_table(
 
     crontab.read_returncode = 0
     assert (
-        job.unregister_linux(host=host),
+        job.unregister_linux(host=host, roots=job_roots),
         crontab.writes[-1],
-        job.unregister_linux(host=host),
+        job.unregister_linux(host=host, roots=job_roots),
         len(crontab.writes),
     ) == (0, "\n", 0, 2)
 
@@ -132,7 +132,7 @@ def test_linux_crontab_failures_and_empty_table(
     crontab.write_failure = "write denied"
     assert job.register_linux(roots=job_roots, tick_seconds=900, host=host) == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
-    assert job.unregister_linux(host=host) == 1
+    assert job.unregister_linux(host=host, roots=job_roots) == 1
     assert len(crontab.writes) == 2
 
 

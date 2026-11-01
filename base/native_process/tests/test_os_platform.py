@@ -16,6 +16,7 @@ import pytest
 
 from base.native_process.os_platform import (
     Platform,
+    crontab_lock,
     descends_from_launchd_job,
     ensure_line_buffered_stdio,
     primary_disk_path,
@@ -98,6 +99,20 @@ class TestEnsureLineBufferedStdio:
         stream = io.StringIO()
         ensure_line_buffered_stdio(streams=(stream, sys.stderr))
         ensure_line_buffered_stdio(streams=(stream, sys.stderr))
+
+
+# meiva:note
+# The crontab lock lives in the account home the caller names, so a converge that already read that
+# home decides where the lock is. A reader that fell back to its own `~` would lock another file.
+def test_crontab_lock_holds_the_file_under_the_home_it_is_given(tmp_path: Path) -> None:
+    home = tmp_path / "account"
+    home.mkdir()
+
+    with crontab_lock(user_home=home):
+        locked = home / ".meiva-crontab.lock"
+        assert locked.is_file()
+
+    assert locked.read_text() == ""
 
 
 class TestLaunchdOwnership:

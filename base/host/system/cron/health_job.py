@@ -191,6 +191,7 @@ def register_linux(interval_s: int, *, host: Host, roots: JobRoots) -> int:
         entry,
         skip_phrase="health-probe registration",
         update_failure=report_update_failure,
+        user_home=roots.user_home,
         host=host,
     )
     if rc == 0:
@@ -198,7 +199,7 @@ def register_linux(interval_s: int, *, host: Host, roots: JobRoots) -> int:
     return rc
 
 
-def unregister_linux(*, host: Host) -> int:
+def unregister_linux(*, roots: JobRoots, host: Host) -> int:
     # meiva:note
     # Remove the health-probe entry from the user's crontab.
 
@@ -223,6 +224,7 @@ def unregister_linux(*, host: Host) -> int:
         on_removed=report_removed,
         on_read_failed=report_read_failure,
         on_absent=report_absent,
+        user_home=roots.user_home,
         host=host,
     )
 
@@ -288,6 +290,6 @@ def unregister_os_cron(*, host: Host, roots: JobRoots) -> None:
         return
     mechanics.unregister_platform_job(
         macos=lambda: unregister_macos(host=host, user_home=roots.user_home),
-        linux=lambda: unregister_linux(host=host),
+        linux=lambda: unregister_linux(roots=roots, host=host),
         host=host,
     )

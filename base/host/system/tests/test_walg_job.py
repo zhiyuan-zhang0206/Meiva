@@ -119,11 +119,11 @@ def test_linux_without_crontab_reports_and_registers_nothing(
     )
 
 
-def test_linux_unregister_removes_the_line_and_keeps_the_rest() -> None:
+def test_linux_unregister_removes_the_line_and_keeps_the_rest(job_roots: JobRoots) -> None:
     other = "40 4 * * * /x/meiva logs rotate  # meiva-logs-maintenance"
     crontab = FakeCrontab(f"{other}\n25 6 * * * /x/meiva backup walg run  # meiva-walg\n")
 
-    assert job.unregister_linux(host=_linux(crontab)) == 0
+    assert job.unregister_linux(host=_linux(crontab), roots=job_roots) == 0
 
     assert crontab.table == other + "\n"
 
