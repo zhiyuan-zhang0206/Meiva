@@ -40,6 +40,7 @@ def main(argv: list[str]) -> int:
             environ=os.environ,
             home=Path(os.environ["MEIVA_HOME"]),
             enabled=scope == "operator",
+            pid=os.getpid(),
         ) as command:
             record_lifecycle_request("down", ["gateway"])
             print("command ran")

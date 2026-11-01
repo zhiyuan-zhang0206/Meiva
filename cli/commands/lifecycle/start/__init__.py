@@ -258,6 +258,7 @@ def _admit(start: _Start, *, retained_children: list[subprocess.Popen[bytes]]) -
                 reconcile=start.selection.reconcile,
                 helper=command.helper,
                 inputs=start.launch_inputs,
+                pid=command.pid,
             )
         if not live:
             rc = prepare_cold_start(
@@ -426,6 +427,7 @@ def _launch(
             honor_restart_budget=boot_attempt,
             inputs=start.launch_inputs,
             timers=start.command.timers,
+            pid=start.command.pid,
         )
     # meiva:note
     # Hand the launch failures to whoever runs this start from another process. Written
@@ -451,6 +453,7 @@ def _wait_ready(
             home=start.command.home,
             timers=start.command.timers,
             environ=start.command.config.process_environment(),
+            pid=start.command.pid,
         )
 
 
@@ -581,6 +584,7 @@ def cmd_start(
         database_factory=database_factory,
         environ=command.config.process_environment(),
         home=command.home,
+        pid=command.pid,
         enabled=not boot_attempt,
     ) as audit:
         code = cmd_start_body(

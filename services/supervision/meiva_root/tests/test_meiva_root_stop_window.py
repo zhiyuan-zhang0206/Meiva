@@ -215,7 +215,11 @@ async def test_down_over_the_control_socket_succeeds_for_a_unit_closing_past_ten
         await owner.start()
         await wait_file(ready)
         response = await asyncio.to_thread(
-            RootClient(short_tmp / "meiva-root.sock", caller=caller_identity({}), timeout=60).down,
+            RootClient(
+                short_tmp / "meiva-root.sock",
+                caller=caller_identity({}, pid=os.getpid()),
+                timeout=60,
+            ).down,
             "worker",
         )
         assert response["ok"] is True, response

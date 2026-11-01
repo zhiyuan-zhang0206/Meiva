@@ -27,6 +27,11 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.database.tests.lifecycle_rows import LifecycleRows
 from cli.database.tests.lifecycle_rows import lifecycle_rows as lifecycle_rows
 
+# meiva:note
+# The caller block carries this test process's own pid: the value travels through the driver, so
+# the assertion is about it reaching the wire, not about the driver reading it.
+_PID = os.getpid()
+
 
 def test_a_cold_start_records_its_units_before_the_manifest_is_published(
     short_tmp: Path, lifecycle_rows: LifecycleRows
@@ -48,7 +53,7 @@ def test_a_cold_start_records_its_units_before_the_manifest_is_published(
             (service(),),
             launch,
             {},
-            driver.root_client(short_tmp, environ=os.environ),
+            driver.root_client(short_tmp, environ=os.environ, pid=_PID),
             {},
             retained_children=children,
             helper=None,
@@ -79,7 +84,7 @@ def test_a_cold_start_records_its_units_and_publishes_the_manifest_before_the_ro
             (service(),),
             launch,
             {"units": []},
-            driver.root_client(short_tmp, environ=os.environ),
+            driver.root_client(short_tmp, environ=os.environ, pid=_PID),
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
@@ -97,7 +102,7 @@ def test_the_driver_records_the_units_before_it_asks_the_root(
     roster = (service(),)
 
     with scripted_root(short_tmp, [UnitRow("gateway", state="stopped")]) as root:
-        client = driver.root_client(short_tmp, environ=os.environ)
+        client = driver.root_client(short_tmp, environ=os.environ, pid=_PID)
         snapshot = driver.root_status(client)
         assert snapshot is not None
 
@@ -126,6 +131,7 @@ def test_a_stop_records_the_units_it_is_about_to_take_down(
             run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
             environ=os.environ,
+            pid=_PID,
         )
 
     assert lifecycle_rows.requests() == [("force-down", ["agent-host"])]
@@ -137,7 +143,7 @@ def test_a_stop_records_the_units_it_is_about_to_take_down(
 def test_the_caller_block_names_the_environment_the_shell_handed_in(short_tmp: Path) -> None:
     with scripted_root(short_tmp, [UnitRow("gateway")]) as root:
         client = driver.root_client(
-            short_tmp, environ={"MEIVA_AGENT_ID": "9", "MEIVA_OPERATION_ID": "op"}
+            short_tmp, environ={"MEIVA_AGENT_ID": "9", "MEIVA_OPERATION_ID": "op"}, pid=_PID
         )
         client.down("gateway")
 

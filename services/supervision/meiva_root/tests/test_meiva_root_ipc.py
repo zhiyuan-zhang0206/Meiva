@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -209,7 +210,7 @@ class TestServerClientRoundtrip:
         server = ControlServer(sock_path, refusing_handler)
         await server.start()
         try:
-            client = RootClient(sock_path, caller=caller_identity({}), timeout=5.0)
+            client = RootClient(sock_path, caller=caller_identity({}, pid=os.getpid()), timeout=5.0)
             refused = await asyncio.to_thread(client.restart, "worker")
             assert refused["ok"] is False
             assert refused.get("code") == ErrorCode.INTERNAL.value

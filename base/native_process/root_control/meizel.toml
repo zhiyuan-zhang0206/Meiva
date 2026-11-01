@@ -10,7 +10,6 @@ exports = ["client.py", "instance_lock.py", "ipc.py", "tests"]
 
 [debt.ambient-read]
 "client.py#cwd pathlib.Path.cwd" = 1
-"client.py#pid os.getpid" = 1
 "client.py#pid os.getppid" = 1
 "client.py#pid os.getuid" = 1
 "client.py#platform socket.gethostname" = 1

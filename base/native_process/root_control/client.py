@@ -126,10 +126,16 @@ def current_uid() -> int:
 # pid/ppid/uid/cwd/argv name the local process, `machine` names the host (so two
 # machines cannot be confused, as they were on 2026-10-15), and `env_keys` lists
 # only the *names* of credential-shaped variables that were set.
+#
+# `pid` is handed in because every caller here is the very process that already named itself
+# once where the command was composed (`CommandRuntime.pid`); reading it again here would answer
+# a second time a question the caller had already answered. The rest of the block stays read: the
+# parent, the working directory, the user id and the kernel hostname have no owner above these
+# call sites, and a parameter for them would move the read rather than remove it.
 # meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
-def caller_identity(environ: Mapping[str, str]) -> CallerPayload:
+def caller_identity(environ: Mapping[str, str], *, pid: int) -> CallerPayload:
     return CallerPayload(
-        pid=os.getpid(),
+        pid=pid,
         ppid=os.getppid(),
         uid=current_uid(),
         cwd=_bounded(str(Path.cwd())),

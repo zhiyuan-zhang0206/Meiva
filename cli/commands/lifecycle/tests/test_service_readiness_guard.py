@@ -14,10 +14,20 @@ from base.clock import SYSTEM_TIMERS
 from cli.commands.lifecycle import root_readiness
 from cli.commands.probe import ReadinessWait
 
+# meiva:note
+# The caller block carries this test process's own pid: the value travels through the driver, so
+# the assertion is about it reaching the wire, not about the driver reading it.
+_PID = os.getpid()
+
 
 def test_service_readiness_wait_reports_every_service_ready(tmp_path: Path) -> None:
     result = root_readiness.wait_for_service_tree(
-        (), timeout_s=180.0, home=tmp_path, timers=SYSTEM_TIMERS, environ=os.environ
+        (),
+        timeout_s=180.0,
+        home=tmp_path,
+        timers=SYSTEM_TIMERS,
+        environ=os.environ,
+        pid=_PID,
     )
 
     assert result == ReadinessWait((), 0.0, sessions_gone=False)

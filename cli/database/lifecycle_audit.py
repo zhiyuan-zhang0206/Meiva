@@ -141,6 +141,7 @@ def operator_lifecycle_audit(
     database_factory: DatabaseFactory,
     environ: Mapping[str, str],
     home: Path,
+    pid: int,
     enabled: bool = True,
 ) -> Generator[CommandAudit, None, None]:
     if not enabled:
@@ -148,7 +149,7 @@ def operator_lifecycle_audit(
             yield command
         return
     try:
-        caller = _caller_identity(environ)
+        caller = _caller_identity(environ, pid=pid)
     except Exception as exc:
         raise AuditUnavailableError(
             f"lifecycle audit cannot read the caller block ({exc}); rerun from a working directory"
@@ -186,10 +187,10 @@ def _agent_id(raw: str | None) -> int | None:
     return int(raw) if raw is not None and raw.isdigit() else None
 
 
-def _caller_identity(environ: Mapping[str, str]) -> CallerPayload:
+def _caller_identity(environ: Mapping[str, str], *, pid: int) -> CallerPayload:
     from base.native_process.root_control.client import caller_identity
 
-    return caller_identity(environ)
+    return caller_identity(environ, pid=pid)
 
 
 # meiva:note

@@ -20,6 +20,11 @@ from cli.commands.lifecycle.root_control.launch_plan import RootLaunch, plan_roo
 from cli.commands.lifecycle.tests.root_control.support import LAUNCHD_FACTS, refuse_launchctl
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 
+# meiva:note
+# The caller block carries this test process's own pid: the value travels through the driver, so
+# the assertion is about it reaching the wire, not about the driver reading it.
+_PID = os.getpid()
+
 pytestmark = pytest.mark.real_service_readiness_gate
 
 ROLES = frozenset({"gateway"})
@@ -52,6 +57,7 @@ def stop_tree(
             run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
             environ=os.environ,
+            pid=_PID,
         )
     return {unit_id: row.state for unit_id, row in root.units.items()}
 
@@ -90,6 +96,7 @@ def test_a_forced_stop_force_downs_every_unit(short_tmp: Path) -> None:
             run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
             environ=os.environ,
+            pid=_PID,
         )
 
     assert [verb for verb, _ in root.calls if verb != "status"] == ["force-down"]
@@ -108,6 +115,7 @@ def test_stopping_a_home_with_no_root_reports_no_custody(
         run=refuse_launchctl,
         timers=SYSTEM_TIMERS,
         environ=os.environ,
+        pid=_PID,
     )
 
     assert "no live owner or retained service custody" in capsys.readouterr().out
@@ -117,13 +125,15 @@ def test_the_stop_plan_names_the_units_the_root_runs_that_are_not_preserved(
     short_tmp: Path,
 ) -> None:
     with scripted_root(short_tmp, [UnitRow("gateway"), UnitRow("ops")]):
-        names = driver.root_tree_plan(frozenset({"ops"}), home=short_tmp, environ=os.environ)
+        names = driver.root_tree_plan(
+            frozenset({"ops"}), home=short_tmp, environ=os.environ, pid=_PID
+        )
 
     assert names == ["meiva-gateway"]
 
 
 def test_the_stop_plan_of_a_home_with_no_root_is_empty(short_tmp: Path) -> None:
-    assert driver.root_tree_plan(frozenset(), home=short_tmp, environ=os.environ) == []
+    assert driver.root_tree_plan(frozenset(), home=short_tmp, environ=os.environ, pid=_PID) == []
 
 
 def test_no_unit_goes_down_before_the_agent_host_has_exited(short_tmp: Path) -> None:
@@ -142,6 +152,7 @@ def test_no_unit_goes_down_before_the_agent_host_has_exited(short_tmp: Path) -> 
             force=False,
             home=short_tmp,
             environ=os.environ,
+            pid=_PID,
         )
 
     names = [name for name, _ in root.events]
@@ -161,6 +172,7 @@ def test_a_stop_whose_deadline_has_passed_takes_nothing_down(short_tmp: Path) ->
             force=False,
             home=short_tmp,
             environ=os.environ,
+            pid=_PID,
         )
 
     assert root.units["gateway"].state == "running"

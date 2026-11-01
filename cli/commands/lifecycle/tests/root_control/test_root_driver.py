@@ -13,8 +13,6 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
-from functools import partial
 from pathlib import Path
 
 import psutil
@@ -32,15 +30,12 @@ from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from cli.commands.lifecycle import root_driver as driver
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunch, plan_root_launch
 from cli.commands.lifecycle.root_control.snapshot import root_units
-from cli.commands.lifecycle.tests.root_control.snapshots import snapshot_with_root
 from cli.commands.lifecycle.tests.root_control.support import (
-    LAUNCHD_FACTS,
     custody_helper,
     fake_interpreter,
     git_repo,
     launch_delivery,
     launch_inputs,
-    refuse_launchctl,
     service,
     this_process,
 )
@@ -49,6 +44,12 @@ from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 from services.supervision.meiva_root.manifest import UnitManifest
 from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
+
+# meiva:note
+# The pid the caller block carries is this test process's own: the root records it beside every
+# state verb and the driver hands it in, so the assertion is about the value travelling, not about
+# a value the driver read.
+_PID = os.getpid()
 
 pytestmark = pytest.mark.real_service_readiness_gate
 
@@ -62,135 +63,6 @@ def launch_of(home: Path, interpreter: Path) -> RootLaunch:
         run_dir=root_run_dir(home),
         manifests=root_manifests_path(home),
     )
-
-
-# meiva:note
-# ── custody ──────────────────────────────────────────────────────────────────
-
-
-def test_the_custody_refusal_names_the_recovery(short_tmp: Path) -> None:
-    me = this_process()
-    keeper_of_another_root = ScriptedHelper(
-        ping={
-            "pong": True,
-            "root_stop_intent_v1": True,
-            "helper_shutdown_v1": True,
-            "pid": os.getppid(),
-        },
-        root_status={"pid": me.pid + 1, "run_dir": str(root_run_dir(short_tmp))},
-    )
-
-    with pytest.raises(driver.RootDriverError) as refusal:
-        driver.require_root_owner(
-            snapshot_with_root(me), helper=serve(keeper_of_another_root), home=short_tmp
-        )
-
-    assert "outside this home's signed-helper custody" in str(refusal.value)
-    assert "meiva start" in str(refusal.value)
-
-
-def test_a_root_the_helper_started_in_this_home_is_in_custody(short_tmp: Path) -> None:
-    me = this_process()
-
-    driver.require_root_owner(
-        snapshot_with_root(me), helper=serve(custody_helper(short_tmp, me)), home=short_tmp
-    )
-
-
-def test_a_helper_keeping_its_root_in_another_home_does_not_have_custody_here(
-    short_tmp: Path, tmp_path: Path
-) -> None:
-    me = this_process()
-    other_home = custody_helper(tmp_path, me)
-
-    with pytest.raises(driver.RootDriverError, match="signed-helper custody"):
-        driver.require_root_owner(snapshot_with_root(me), helper=serve(other_home), home=short_tmp)
-
-
-def test_a_helper_lacking_the_retirement_protocol_has_no_custody_to_offer(short_tmp: Path) -> None:
-    me = this_process()
-    old_helper = ScriptedHelper(ping={"pong": True, "pid": os.getppid()})
-
-    with pytest.raises(driver.RootDriverError, match="lacks lifecycle protocols"):
-        driver.require_root_owner(snapshot_with_root(me), helper=serve(old_helper), home=short_tmp)
-
-
-# meiva:note
-# The dormant-root stop over a macOS account whose launchd the test answers (or refuses) through
-# `run`.
-_stop_dormant = partial(
-    driver.stop_dormant_helper_root,
-    float("inf"),
-    facts=LAUNCHD_FACTS,
-    run=refuse_launchctl,
-    timers=SYSTEM_TIMERS,
-)
-
-
-def test_a_platform_without_a_helper_has_no_dormant_helper_root_to_stop(short_tmp: Path) -> None:
-    _stop_dormant(helper=None, home=short_tmp)
-
-
-def test_stop_without_root_ipc_cancels_pending_helper_restart(short_tmp: Path) -> None:
-    keeper = {"stop_requested": False}
-
-    def stop() -> RootStatus:
-        keeper["stop_requested"] = True
-        return {"state": "stopped", "seeded": True, "restarts": 1, "stop_requested": True}
-
-    helper = ScriptedHelper(
-        ping={"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True},
-        root_status={"state": "backoff", "seeded": True, "restarts": 1, "stop_requested": False},
-        stop_root=stop,
-    )
-
-    _stop_dormant(helper=serve(helper), home=short_tmp)
-
-    assert keeper["stop_requested"]
-
-
-def test_a_keeper_that_holds_a_root_without_ipc_is_not_stopped_blind(short_tmp: Path) -> None:
-    helper = ScriptedHelper(
-        root_status={
-            "state": "running",
-            "seeded": True,
-            "restarts": 0,
-            "stop_requested": False,
-            "pid": 4,
-        }
-    )
-
-    with pytest.raises(driver.RootDriverError, match="custody requires recovery"):
-        _stop_dormant(helper=serve(helper), home=short_tmp)
-
-
-@pytest.mark.parametrize("loaded", [False, True])
-def test_unusable_helper_socket_requires_positive_native_absence(
-    short_tmp: Path, loaded: bool
-) -> None:
-    # meiva:note
-    # launchd's answer is the one fact no local resource can produce: whether the helper job is
-    # loaded. `retirement_query` is that answer.
-    def runner(
-        cmd: Sequence[str],
-        /,
-        *,
-        timeout: float,
-        capture_output: bool = True,
-    ) -> subprocess.CompletedProcess[bytes]:
-        del timeout, capture_output
-        assert cmd[2].startswith(f"gui/{LAUNCHD_FACTS.uid}/")
-        if loaded:
-            return subprocess.CompletedProcess(cmd, 0, b"state = spawn scheduled\n", b"")
-        return subprocess.CompletedProcess(cmd, 113, b"", b"Could not find service")
-
-    unavailable = serve(ScriptedHelper(root_status=PermissionsHelperError("AF_UNIX path too long")))
-
-    if loaded:
-        with pytest.raises(driver.RootDriverError, match="custody is unavailable"):
-            _stop_dormant(helper=unavailable, home=short_tmp, run=runner)
-    else:
-        _stop_dormant(helper=unavailable, home=short_tmp, run=runner)
 
 
 # meiva:note
@@ -226,6 +98,7 @@ def test_live_admission_requires_positive_absence(short_tmp: Path, tmp_path: Pat
                 reconcile=True,
                 helper=refuse_helper,
                 inputs=launch_inputs(short_tmp),
+                pid=_PID,
             )
     finally:
         instance_lock.release_instance_lock(held)
@@ -235,7 +108,13 @@ def test_with_no_root_and_no_holder_the_start_is_cold(short_tmp: Path, tmp_path:
     repo = git_repo(tmp_path / "repo")
 
     live = driver.admit_live_start(
-        (), repo, ROLES, reconcile=True, helper=None, inputs=launch_inputs(short_tmp)
+        (),
+        repo,
+        ROLES,
+        reconcile=True,
+        helper=None,
+        inputs=launch_inputs(short_tmp),
+        pid=_PID,
     )
 
     assert live is False
@@ -284,6 +163,7 @@ def test_an_identical_live_generation_is_admitted(short_tmp: Path, tmp_path: Pat
             reconcile=True,
             helper=None,
             inputs=launch_inputs(short_tmp),
+            pid=_PID,
         )
 
     assert live is True
@@ -315,6 +195,7 @@ def test_a_live_generation_that_differs_is_refused_with_the_stop_that_resolves_i
             reconcile=True,
             helper=None,
             inputs=launch_inputs(short_tmp),
+            pid=_PID,
         )
 
 
@@ -350,6 +231,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
             timers=SYSTEM_TIMERS,
+            pid=_PID,
         )
 
     assert result.failed == ("meiva-gateway",)
@@ -376,6 +258,7 @@ def test_an_identical_generation_is_reused_and_only_its_stopped_units_are_brough
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
             timers=SYSTEM_TIMERS,
+            pid=_PID,
         )
 
     assert result == driver.LaunchOutcome(roster, ())
@@ -401,6 +284,7 @@ def test_a_core_unit_the_root_refuses_fails_the_whole_launch(
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
             timers=SYSTEM_TIMERS,
+            pid=_PID,
         )
 
     assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
@@ -431,6 +315,7 @@ def test_a_root_with_an_unreadable_status_fails_the_launch_without_raising(
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
             timers=SYSTEM_TIMERS,
+            pid=_PID,
         )
 
     assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
@@ -462,6 +347,7 @@ def test_a_unit_that_exits_again_after_up_is_reported_with_the_roots_last_error(
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
             timers=SYSTEM_TIMERS,
+            pid=_PID,
         )
 
     assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
@@ -569,7 +455,7 @@ def test_mac_helper_protocol_refuses_fallback(short_tmp: Path) -> None:
     with pytest.raises(RuntimeError, match="root_stop_intent_v1"):
         driver.bring_up_root(
             launch,
-            driver.root_client(short_tmp, environ=os.environ),
+            driver.root_client(short_tmp, environ=os.environ, pid=_PID),
             {},
             retained_children=[],
             helper=serve(silent),
@@ -653,7 +539,9 @@ def test_await_root_status_returns_the_snapshot_of_the_serving_root(short_tmp: P
 
     with scripted_root(short_tmp, [UnitRow("gateway")]):
         snapshot = driver.await_root_status(
-            driver.root_client(short_tmp, environ=os.environ), launch, timers=SYSTEM_TIMERS
+            driver.root_client(short_tmp, environ=os.environ, pid=_PID),
+            launch,
+            timers=SYSTEM_TIMERS,
         )
 
     assert list(root_units(snapshot)) == ["gateway"]
@@ -666,7 +554,7 @@ def test_a_root_that_never_serves_fails_with_the_tail_of_its_log(short_tmp: Path
 
     with pytest.raises(driver.RootDriverError, match="did not become ready within 0s") as failure:
         driver.await_root_status(
-            driver.root_client(short_tmp, environ=os.environ),
+            driver.root_client(short_tmp, environ=os.environ, pid=_PID),
             launch,
             timeout_s=0.0,
             interval_s=0.01,
@@ -684,7 +572,7 @@ def test_a_root_that_exits_before_serving_fails_with_its_code_and_log(short_tmp:
     with pytest.raises(driver.RootDriverError, match=r"exited before serving \(rc=3\)") as failure:
         driver.bring_up_root(
             launch,
-            driver.root_client(short_tmp, environ=os.environ),
+            driver.root_client(short_tmp, environ=os.environ, pid=_PID),
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
@@ -707,7 +595,7 @@ def test_a_direct_launch_retains_its_child_and_cannot_have_it_reaped_by_an_unrel
     with scripted_root(short_tmp):
         snapshot = driver.bring_up_root(
             launch,
-            driver.root_client(short_tmp, environ=os.environ),
+            driver.root_client(short_tmp, environ=os.environ, pid=_PID),
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
@@ -740,7 +628,7 @@ def reconcile(
 ) -> dict[str, str]:
     roster = tuple(service(session) for session in requested)
     with scripted_root(home, rows):
-        client = driver.root_client(home, environ=os.environ)
+        client = driver.root_client(home, environ=os.environ, pid=_PID)
         snapshot = driver.root_status(client)
         assert snapshot is not None
         refreshed = driver.reconcile_units(
