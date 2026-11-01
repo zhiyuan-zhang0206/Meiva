@@ -54,12 +54,14 @@ export const OVERFLOW_CLIP = "overflow-clip";
 
 // meiva:note
 // The right column's question region is pinned under the reading area, so its
-// height has to stop short of the column or a long question would starve the
-// document (and, on a phone, the reading view itself). 45vh keeps the title bar
-// and a usable reading area on every tier; a question past the cap scrolls
-// inside its own card (user 2026-10-30, who asked for the card at the bottom).
+// height stops at 70% of the dynamic viewport (70dvh): tall notices and multi-option
+// questions get generous room before scrolling while keeping the title bar and
+// reading area above reachable (user 2026-10-30, raised from 45vh on 2026-11-02).
+// Pass on ScrollArea's `viewportClassName`, never `className`: ScrollArea's root has
+// `height: auto`, so `size-full` (`height: 100%`) on the inner viewport resolves to
+// `auto` unless the max-height sits on the viewport itself.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
-export const QUESTION_REGION_MAX_HEIGHT_CLASS = "max-h-[45vh]";
+export const QUESTION_REGION_MAX_HEIGHT_CLASS = "max-h-[70dvh]";
 
 // ── The named invariants (I1–I6) ───────────────────────────────────────
 // One entry per invariant; `pages` says which page each applies to. Tests

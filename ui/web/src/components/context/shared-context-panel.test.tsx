@@ -5,6 +5,7 @@ import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { USER_SETTING_DEFAULTS, type NoticeItem } from "@/lib/contracts/types";
+import { QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { useToUser } from "@/lib/context/use-to-user";
 
@@ -296,4 +297,48 @@ it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   // the reading area; the position comes back from the panel's own record.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   expect(readingArea().scrollTop).toBe(180);
+});
+
+it("caps the notice viewport at 70dvh and scrolls inside the inner viewport instead of clipping on the root", () => {
+  // meiva:note
+  // Regression (user report 2026-11-02): placing QUESTION_REGION_MAX_HEIGHT_CLASS
+  // on ScrollArea's `className` put max-height on the `height: auto` root while
+  // the inner viewport (`size-full` -> `height: 100%`) resolved to `auto`, so
+  // tall notices were clipped by the root's `overflow-hidden` and could not scroll.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  expect(QUESTION_REGION_MAX_HEIGHT_CLASS).toBe("max-h-[70dvh]");
+  renderPanelView({
+    notices: [
+      {
+        ...notice(),
+        content: Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1}`).join("\n\n"),
+      },
+    ],
+  });
+
+  const region = screen.getByTestId("notice-region");
+  const root = region.querySelector<HTMLDivElement>('[data-slot="scroll-area"]')!;
+  const viewport = region.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
+  const scrollbar = region.querySelector<HTMLDivElement>('[data-slot="scroll-area-scrollbar"]')!;
+  const docScrollbar = screen
+    .getByTestId("shared-document")
+    .querySelector<HTMLDivElement>('[data-slot="scroll-area-scrollbar"]')!;
+
+  expect(root.className).not.toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
+  expect(root.className).not.toContain("max-h-");
+  expect(viewport.className).toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
+  expect(viewport.className).toContain("overscroll-y-contain");
+  expect(viewport.style.overflowY).toBe("scroll");
+
+  const docBody = readingArea();
+  docBody.scrollTop = 240;
+  Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1200 });
+  Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 560 });
+  viewport.scrollTop = 320;
+  fireEvent.scroll(viewport);
+
+  expect(viewport.scrollTop).toBe(320);
+  expect(scrollbar.getAttribute("data-visible")).toBe("true");
+  expect(docBody.scrollTop).toBe(240);
+  expect(docScrollbar.getAttribute("data-visible")).toBe("false");
 });

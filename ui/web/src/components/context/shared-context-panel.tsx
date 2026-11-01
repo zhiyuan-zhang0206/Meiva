@@ -98,7 +98,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
       {noticesFailed && <p role="status" className="shrink-0 border-t border-border/60 px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
       {notice && (
         <section data-testid="notice-region" className="shrink-0 border-t border-border/60" aria-label={t("notification")}>
-          <ScrollArea type="auto" className={QUESTION_REGION_MAX_HEIGHT_CLASS}>
+          <ScrollArea viewportClassName={cn("overscroll-y-contain", QUESTION_REGION_MAX_HEIGHT_CLASS)}>
             <div className="px-5 py-3">
               <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
             </div>
