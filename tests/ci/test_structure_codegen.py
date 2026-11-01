@@ -71,8 +71,7 @@ LOCAL_ONLY = {"check-git-hooks-install"}
 GENERATED_COMPONENTS = {
     "HTTPValidationError",
     "ValidationError",
-    "Body_upload_files_api_agents__agent_id__uploads_post",
-    "Body_upload_api_keyed_v1_agents__agent_id__uploads_post",
+    "Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post",
 }
 
 
