@@ -25,6 +25,8 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 "walg_content.py" = "strict"
 "__init__.py" = "strict"
 
+[roots]
+"hostport.py" = { kinds = ["pid"], why = "Host.system() is the door that builds the one Host this process has, and a Host must describe the process that built it: the user id it carries is the id a lock, a private directory and a socket path are later judged against, so one handed in from outside would let a component claim another process's identity — the single thing this value must not be able to say" }
+
 [debt.ambient-read]
-"hostport.py#pid base.native_process.root_control.client.current_uid" = 1
 "hostport.py#platform base.native_process.os_platform.Platform.current" = 1

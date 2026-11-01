@@ -8,9 +8,10 @@ exports = ["client.py", "instance_lock.py", "ipc.py", "tests"]
 "__init__.py" = "strict"
 "ipc.py" = "strict"
 
+[roots]
+"client.py" = { kinds = ["pid"], why = "current_uid() and caller_identity() are the boundary's own syscalls: across the root-control socket the far side must report the user it actually runs as and the parent that actually started it, because that is what the root decides a request's authority on. Handing either value in would let a privileged caller describe itself instead of the process the connection really belongs to" }
+
 [debt.ambient-read]
 "client.py#cwd pathlib.Path.cwd" = 1
-"client.py#pid os.getppid" = 1
-"client.py#pid os.getuid" = 1
 "client.py#platform socket.gethostname" = 1
 "instance_lock.py#pid os.getpid" = 1
