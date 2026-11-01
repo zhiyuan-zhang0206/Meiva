@@ -96,7 +96,7 @@ async def run_job(
             override = settings.throwaway_base
             request["pg_throwaway_base"] = None if override is None else str(override)
             operation_kind = restore_drill_kind(
-                tree, throwaway=ThrowawayConfig(override, home=tree.home)
+                tree, throwaway=ThrowawayConfig(override, home=tree.home, environ=launch.env)
             )
         case "dump":
             operation_kind = dump_kind(tree)
@@ -263,7 +263,7 @@ def execute(
             if raw_base is not None and not isinstance(raw_base, str):
                 raise TypeError("logical restore requires a string or null throwaway base")
             throwaway = ThrowawayConfig(
-                None if raw_base is None else Path(raw_base), home=tree.home
+                None if raw_base is None else Path(raw_base), home=tree.home, environ=env
             )
             artifact = newest_artifact(tree)
             scratch = work / "scratch"

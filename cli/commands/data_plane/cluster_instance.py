@@ -349,6 +349,7 @@ def _launch_postmaster(
     tuning: StartTuning,
     timers: Timers,
     system: str,
+    environ: Mapping[str, str],
 ) -> None:
     data = pg_data_dir(home)
     pg_isready = str(pg_tool("pg_isready", home=home))
@@ -369,7 +370,7 @@ def _launch_postmaster(
         data,
         pg_port,
         argv,
-        pg_start_env(),
+        pg_start_env(environ),
         ready=lambda: pg_running(pg_isready, pg_port, dial_host, timeout_s=tuning.pg_probe_s),
         timeout=tuning.pg_start_s,
         expected=owner,
@@ -395,6 +396,7 @@ def start_pg(
     tuning: StartTuning = PRODUCTION_TUNING,
     timers: Timers,
     system: str,
+    environ: Mapping[str, str],
 ) -> int:
     data = pg_data_dir(home)
     owner = ownership.require_postgres(data, pg_port, required=False)
@@ -426,6 +428,7 @@ def start_pg(
                     tuning=tuning,
                     timers=timers,
                     system=system,
+                    environ=environ,
                 )
             case pg_plan.ProveAuthentication():
                 ownership.require_postgres(data, pg_port)
@@ -752,6 +755,7 @@ def ensure_cluster_storage(
         machine=machine,
         timers=timers,
         system=system,
+        environ=environ,
     )
     if rc != 0:
         return rc

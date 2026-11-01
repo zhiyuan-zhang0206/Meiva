@@ -44,7 +44,9 @@ def walg_plane(config: ConfigBoot) -> DataPlaneConfig:
 # Where the drill and the daily tick may place scratch Postgres instances, read at the verb's door.
 def walg_throwaway(config: ConfigBoot, *, home: Path) -> ThrowawayConfig:
     return ThrowawayConfig(
-        configured_base(_delivered(config).view.data_plane.pg_throwaway_base), home=home
+        configured_base(_delivered(config).view.data_plane.pg_throwaway_base),
+        home=home,
+        environ=config.process_environment(),
     )
 
 

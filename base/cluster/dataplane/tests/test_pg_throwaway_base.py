@@ -14,6 +14,7 @@ real configured base.
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -224,7 +225,7 @@ def test_throwaway_postgres_creates_the_instance_under_the_given_base(
     Postgres socket path (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so a
     pytest `tmp_path` is too deep for a real cluster."""
     instances = Path(tempfile.mkdtemp(prefix="meiva-base-", dir="/tmp"))
-    config = ThrowawayConfig(instances, home=meiva_home())
+    config = ThrowawayConfig(instances, home=meiva_home(), environ=os.environ)
     try:
         abandoned = instances / "meiva-pg-abandoned"
         abandoned.mkdir()

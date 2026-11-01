@@ -103,6 +103,7 @@ def _start_with_hung_archive(
             machine=machine,
             timers=SYSTEM_TIMERS,
             system=NATIVE_TEST_SYSTEM,
+            environ=os.environ,
         )
         == 0
     )

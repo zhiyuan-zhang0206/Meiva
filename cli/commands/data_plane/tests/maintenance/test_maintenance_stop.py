@@ -267,6 +267,7 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
                 machine=command_machine,
                 timers=SYSTEM_TIMERS,
                 system=NATIVE_TEST_SYSTEM,
+                environ=os.environ,
             )
             == 0
         )
@@ -328,6 +329,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                     machine=command_machine,
                     timers=SYSTEM_TIMERS,
                     system=NATIVE_TEST_SYSTEM,
+                    environ=os.environ,
                 )
                 == 0
             )

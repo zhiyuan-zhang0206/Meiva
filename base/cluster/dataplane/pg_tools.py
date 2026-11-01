@@ -23,7 +23,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import NamedTuple, TypedDict, TypeGuard
@@ -47,7 +47,7 @@ from base.cluster.dataplane.pg_stall_watchdog import (
 )
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.log import logger
-from base.native_process.child_env import daemon_process_env
+from base.native_process.child_env import filter_daemon_env
 from base.native_process.os_platform import is_macos
 
 
@@ -59,8 +59,12 @@ def pg_tz_args() -> str:
     return PG_TZ_ARGS
 
 
-def pg_start_env() -> dict[str, str]:
-    return build_pg_start_env(daemon_process_env(), macos=is_macos())
+# meiva:note
+# The start environment for a postmaster: the daemon-safe subset of the environment its
+# `ThrowawayConfig` was handed, plus the macOS locale fallback. The caller names that environment;
+# nothing here reads the process again.
+def pg_start_env(environ: Mapping[str, str]) -> dict[str, str]:
+    return build_pg_start_env(filter_daemon_env(environ), macos=is_macos())
 
 
 # meiva:note
@@ -621,7 +625,7 @@ def throwaway_postgres(
                             *shlex.split(f"{pg_tz_args()} {pg_shm_args()}"),
                         ],
                         log=log,
-                        env=pg_start_env(),
+                        env=pg_start_env(config.environ),
                     )
                     wait_foreground_postgres(
                         process, log=log, port=port, data=data, timeout_s=readiness_timeout_s
@@ -646,7 +650,7 @@ def throwaway_postgres(
                         ],
                         check=True,
                         capture_output=True,
-                        env=pg_start_env(),
+                        env=pg_start_env(config.environ),
                     )
             except subprocess.CalledProcessError as exc:
                 if _is_port_bind_failure(exc, log) and attempt < _PG_START_ATTEMPTS:

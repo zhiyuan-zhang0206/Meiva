@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import getpass
+import os
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
@@ -42,6 +43,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> int:
         tuning=StartTuning(bind_wait_s=0.0),
         timers=SYSTEM_TIMERS,
         system=NATIVE_TEST_SYSTEM,
+        environ=os.environ,
     )
 
 

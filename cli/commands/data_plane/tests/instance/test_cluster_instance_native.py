@@ -260,6 +260,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             machine=command_machine,
             timers=SYSTEM_TIMERS,
             system=NATIVE_TEST_SYSTEM,
+            environ=os.environ,
         )
         == 0
     )
@@ -283,7 +284,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             ],
             check=True,
             capture_output=True,
-            env=pg_start_env(),
+            env=pg_start_env(os.environ),
         )
         try:
             foreign_url = (

@@ -560,7 +560,9 @@ def main(argv: list[str] | None = None) -> None:
     home = meiva_home()
     tree = BackupTree(home)
     throwaway = ThrowawayConfig(
-        configured_base(config.view.data_plane.pg_throwaway_base), home=home
+        configured_base(config.view.data_plane.pg_throwaway_base),
+        home=home,
+        environ=config.process_environment(),
     )
     image = LoadedCommit.capture()
     version = CodeVersion(image)
