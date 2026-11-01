@@ -92,21 +92,20 @@ def _tracked_test_directories() -> list[str]:
         text=True,
         check=True,
     )
+    hosts = frozenset(pytest_test_hosts(_PYPROJECT_TEXT))
     directories = {
         path.rsplit("/", 1)[0]
         for path in result.stdout.split("\0")
-        if path.split("/")[0] != "tests"
-        and path.split("/")[0] in pytest_test_hosts(_PYPROJECT_TEXT)
-        and "tests" in path.split("/")[:-1]
+        if (parts := path.split("/"))[0] != "tests" and parts[0] in hosts and "tests" in parts[:-1]
     }
     return sorted(directories)
 
 
 def test_every_package_tests_directory_is_held_to_the_tests_standard() -> None:
     wrong = {
-        directory: effective_rules(_PYRIGHT, directory)
+        directory: rules
         for directory in _tracked_test_directories()
-        if effective_rules(_PYRIGHT, directory) != TESTS_STANDARD
+        if (rules := effective_rules(_PYRIGHT, directory)) != TESTS_STANDARD
     }
     assert not wrong, (
         "these test directories are not type-checked to the tests standard "

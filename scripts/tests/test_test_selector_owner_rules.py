@@ -219,7 +219,14 @@ def test_a_module_named_base_agents_does_not_reference_the_agents_directory(
     assert "scripts/tests/test_imports_agents_module.py" not in result.tests
 
 
-def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> None:
+@pytest.fixture(scope="module")
+def real_checkout() -> test_selector.Checkout:
+    return test_selector.load_checkout(_REPO_ROOT)
+
+
+def test_the_real_repository_readers_of_hidden_directories_remain_covered(
+    real_checkout: test_selector.Checkout,
+) -> None:
     expectations = {
         ".github/workflows/ci.yml": (
             "tests/scripts/test_audit_branch_protection_contract.py",
@@ -228,13 +235,12 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> N
         ),
         ".agents/skills/inspect-a-trace/SKILL.md": ("tests/skills/test_inspect_a_trace_fetch.py",),
     }
-    checkout = test_selector.load_checkout(_REPO_ROOT)
     for changed, readers in expectations.items():
+        assert test_selector.classify_path(changed, real_checkout) is PathClass.TREE_SCAN_ONLY, (
+            changed
+        )
         root = changed.split("/", maxsplit=1)[0]
-        assert set(readers) <= test_selector.referencing_tests(root, checkout), changed
-    result = _select(_REPO_ROOT, ".github/workflows/ci.yml")
-    assert result.decision == "SELECTED", result.as_json()
-    assert set(expectations[".github/workflows/ci.yml"]) <= set(result.tests)
+        assert set(readers) <= test_selector.referencing_tests(root, real_checkout), changed
 
 
 def _manifest_repo(tmp_path: Path) -> Path:
@@ -343,28 +349,26 @@ def _tracked_paths() -> list[str]:
     return [path for path in completed.stdout.split("\0") if path]
 
 
-def test_every_tracked_path_has_an_owner() -> None:
-    checkout = test_selector.load_checkout(_REPO_ROOT)
-
+def test_every_tracked_path_has_an_owner(real_checkout: test_selector.Checkout) -> None:
     unmapped = [
         path
         for path in _tracked_paths()
-        if test_selector.classify_path(path, checkout) is PathClass.UNMAPPED
+        if test_selector.classify_path(path, real_checkout) is PathClass.UNMAPPED
     ]
 
     assert unmapped == []
 
 
-def test_the_real_root_conftest_plugins_are_global() -> None:
-    checkout = test_selector.load_checkout(_REPO_ROOT)
-
+def test_the_real_root_conftest_plugins_are_global(
+    real_checkout: test_selector.Checkout,
+) -> None:
     for path in (
         "conftest.py",
         "tests/fixtures/env_bootstrap.py",
         "tests/asyncio_stall_probe.py",
     ):
-        assert test_selector.classify_path(path, checkout) is PathClass.GLOBAL, path
+        assert test_selector.classify_path(path, real_checkout) is PathClass.GLOBAL, path
     assert (
-        test_selector.classify_path("cli/commands/tests/health_port_guard.py", checkout)
+        test_selector.classify_path("cli/commands/tests/health_port_guard.py", real_checkout)
         is PathClass.PACKAGE
     )
