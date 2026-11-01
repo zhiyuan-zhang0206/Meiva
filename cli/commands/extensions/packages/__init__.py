@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, TypeGuard
 
 from base.config import ConfigBoot
+from base.host.system.hostport import Host
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
 
@@ -292,6 +293,7 @@ def cmd_packages_status(
 def cmd_packages_refresh(
     *,
     config: ConfigBoot,
+    host: Host,
     repo: Path,
     home: Path,
     user_home: Path,
@@ -313,6 +315,7 @@ def cmd_packages_refresh(
 
     report = run_refresh(
         config=config,
+        host=host,
         repo=repo,
         home=home,
         user_home=user_home,

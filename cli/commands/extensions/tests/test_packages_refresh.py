@@ -9,9 +9,7 @@ machine).
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 from collections.abc import MutableMapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -35,6 +33,31 @@ from cli.commands.extensions.packages.refresh_rules import (
     core_fetch_needed,
     effective_interval_seconds,
     is_due,
+)
+from cli.commands.extensions.tests.support.packages_host import packages_host
+from cli.commands.extensions.tests.support.packages_repo import (
+    commit_push as _commit_push,
+)
+from cli.commands.extensions.tests.support.packages_repo import (
+    core_repo as core_repo,
+)
+from cli.commands.extensions.tests.support.packages_repo import (
+    git_in as _git,
+)
+from cli.commands.extensions.tests.support.packages_repo import (
+    head_of as _head,
+)
+from cli.commands.extensions.tests.support.packages_repo import (
+    mirror_installed_hash as _mirror_installed_hash,
+)
+from cli.commands.extensions.tests.support.packages_repo import (
+    row_of as _row,
+)
+from cli.commands.extensions.tests.support.packages_repo import (
+    seed_package as _seed,
+)
+from cli.commands.extensions.tests.support.packages_repo import (
+    write_skill as _write_skill,
 )
 
 
@@ -61,6 +84,7 @@ def _refresh(
 ) -> RefreshReport:
     return run_refresh(
         config=config,
+        host=packages_host(config),
         repo=repo,
         now=datetime.now(UTC),
         check_only=check_only,
@@ -73,112 +97,6 @@ def _refresh(
 
 def _home() -> Path:
     return resolve_meiva_home()
-
-
-def _git(cwd: Path, *args: str, check: bool = True) -> str:
-    env = {
-        **os.environ,
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_SYSTEM": os.devnull,
-    }
-    result = subprocess.run(
-        ["git", "-C", str(cwd), *args],
-        check=check,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return result.stdout
-
-
-def _write_skill(
-    repo: Path, name: str, body: str, manifest: dict[str, object] | None = None
-) -> None:
-    d = repo / "meiva_builtins" / "skills" / name
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: d\n---\n\n{body}", encoding="utf-8"
-    )
-    if manifest is not None:
-        (d / "meiva-plugin.json").write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-        )
-
-
-def _head(repo: Path) -> str:
-    return _git(repo, "rev-parse", "HEAD").strip()
-
-
-def _commit_push(repo: Path, message: str) -> str:
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", message)
-    _git(repo, "push", "-q", "origin", "main")
-    return _head(repo)
-
-
-@pytest.fixture
-def core_repo(tmp_path: Path) -> Path:
-    bare = tmp_path / "origin.git"
-    subprocess.run(
-        ["git", "init", "--bare", "-q", "--initial-branch=main", str(bare)],
-        check=True,
-        capture_output=True,
-    )
-    repo = tmp_path / "repo"
-    subprocess.run(
-        ["git", "init", "-q", "--initial-branch=main", str(repo)],
-        check=True,
-        capture_output=True,
-    )
-    _git(repo, "config", "user.email", "test@example.invalid")
-    _git(repo, "config", "user.name", "test")
-    _write_skill(repo, "foo", "# v1\n")
-    _write_skill(repo, "bar", "# v1\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "v1")
-    _git(repo, "remote", "add", "origin", str(bare))
-    _git(repo, "push", "-q", "-u", "origin", "main")
-    return repo
-
-
-def _seed(
-    repo: Path,
-    name: str,
-    *,
-    applied_rev: str | None,
-    mode: reg.UpdateMode | None = None,
-    last_check_at: str | None = None,
-) -> None:
-    src = repo / "meiva_builtins" / "skills" / name
-    dest = _home() / "skills" / name
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*reg.IGNORED_NAMES))
-    reg.register(
-        reg.InstalledPackage(
-            name=name,
-            type="skill",
-            origin="repo",
-            origin_path=str(src),
-            content_hash=reg.tree_hash(dest),
-            update=reg.UpdateState(applied_rev=applied_rev, mode=mode, last_check_at=last_check_at),
-        ),
-        home=meiva_home(),
-    )
-
-
-def _mirror_installed_hash(name: str) -> None:
-    """Give `name` the row shape `meiva skill install` writes: both edit guards set."""
-    with reg.mutate(home=meiva_home()) as registry:
-        row = next(p for p in registry.packages if p.name == name)
-        row.installed_hash = row.content_hash
-
-
-def _row(name: str) -> reg.InstalledPackage:
-    row = reg.get(name, home=meiva_home())
-    assert row is not None
-    return row
 
 
 # ── due / backoff / duration math ───────────────────────────────────────────
@@ -375,6 +293,7 @@ def test_git_channel_copy_edit_converges_to_incoming(
     sink = logger.add(lambda m: notes.append(str(m)), level="INFO", format="{message}")
     try:
         gate = Pass(
+            host=packages_host(refresh_config),
             config=refresh_config,
             check_only=False,
             only=None,
@@ -659,6 +578,7 @@ def test_refresh_cmd_json_shape(
     assert (
         cmd_packages_refresh(
             config=refresh_config,
+            host=packages_host(refresh_config),
             repo=core_repo,
             now=datetime.now(UTC),
             json_output=True,
