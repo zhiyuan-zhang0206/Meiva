@@ -150,7 +150,10 @@ def test_a_postmaster_that_never_becomes_ready_is_refused_on_the_callers_timers(
 ) -> None:
     data, port, children = postmaster
     manual = ManualTimers()
-    with _startup_gate(data), pytest.raises(RuntimeError, match="did not become ready"):
+    with (
+        _startup_gate(data),
+        pytest.raises(pg.PostgresNotReadyError) as refusal,
+    ):
         pg.start(
             data,
             port,
@@ -165,6 +168,12 @@ def test_a_postmaster_that_never_becomes_ready_is_refused_on_the_callers_timers(
 
     assert sum(manual.sleeps) == pytest.approx(2.0, abs=0.06)
     assert manual.monotonic() >= 2.0
+
+    # meiva:note
+    # The launch's readiness timeout has one type and one literal: the caller that owns the wait
+    # adds what it learned about its probe, and a postmaster that simply did not come up keeps
+    # reading exactly like this.
+    assert str(refusal.value) == "PostgreSQL did not become ready; captured custody is retained"
 
 
 def test_captured_postmaster_without_pidfile_resumes_full_admission(

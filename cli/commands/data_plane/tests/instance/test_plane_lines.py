@@ -14,6 +14,7 @@ from cli.commands.data_plane.instance.bringup_lines import (
     remote_ready,
     remote_redis_failure,
 )
+from cli.commands.data_plane.instance.probe import ProbeReading, ProbeState
 from cli.commands.data_plane.instance.status_lines import (
     failure_detail,
     local_pg_line,
@@ -30,13 +31,40 @@ def test_a_probe_line_carries_the_reading_as_its_mark() -> None:
 
 
 def test_a_stopped_postgres_is_unreachable() -> None:
-    line = local_pg_line(host="127.0.0.1", port=5433, running=False, connect_error=None)
+    line = local_pg_line(
+        host="127.0.0.1",
+        port=5433,
+        probe=ProbeReading(ProbeState.NOT_RUNNING),
+        connect_error=None,
+    )
     assert line == "  ✗ postgres (127.0.0.1:5433) unreachable"
+
+
+# meiva:note
+# The probe's own failure is not a reading about the server: the line says the probe has no answer
+# and prints its reason, instead of claiming a server nobody asked successfully is down.
+def test_a_probe_that_never_ran_is_not_a_server_that_is_down() -> None:
+    line = local_pg_line(
+        host="127.0.0.1",
+        port=5433,
+        probe=ProbeReading(
+            ProbeState.UNANSWERED, "pg_isready could not run: [Errno 2] No such file"
+        ),
+        connect_error=None,
+    )
+    assert line == (
+        "  ✗ postgres (127.0.0.1:5433) probe did not answer: "
+        "pg_isready could not run: [Errno 2] No such file"
+    )
+    assert "unreachable" not in line
 
 
 def test_a_server_that_refuses_the_login_is_never_a_green_tick() -> None:
     line = local_pg_line(
-        host="127.0.0.1", port=5433, running=True, connect_error="password authentication failed"
+        host="127.0.0.1",
+        port=5433,
+        probe=ProbeReading(ProbeState.RUNNING),
+        connect_error="password authentication failed",
     )
     assert line == (
         "  ✗ postgres (127.0.0.1:5433) reachable but connect failed: password authentication failed"
@@ -44,7 +72,9 @@ def test_a_server_that_refuses_the_login_is_never_a_green_tick() -> None:
 
 
 def test_a_server_that_answers_the_pooled_login_is_green() -> None:
-    line = local_pg_line(host="127.0.0.1", port=5433, running=True, connect_error=None)
+    line = local_pg_line(
+        host="127.0.0.1", port=5433, probe=ProbeReading(ProbeState.RUNNING), connect_error=None
+    )
     assert line == "  ✓ postgres (127.0.0.1:5433)"
 
 

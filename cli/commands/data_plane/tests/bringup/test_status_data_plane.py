@@ -20,6 +20,7 @@ from psycopg import sql
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
+from base.host.system.tests.fake_commands import real_commands_host
 from cli.commands.data_plane import bringup, cluster_instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import (
@@ -49,6 +50,7 @@ def _start_storage(cluster: NativeCluster, machine: MachineIdentityReader) -> No
     rc = cluster_instance.ensure_cluster_storage(
         cluster.plane,
         home=cluster.home,
+        host=cluster.host,
         pg_port=cluster.pg_port,
         redis_port=cluster.redis_port,
         redis_password=RUNTIME_PASSWORD,
@@ -93,7 +95,10 @@ def test_a_running_plane_whose_login_answers_is_green(
     operator_database.adopt_login(_dial(native_cluster, _LOGIN_PASSWORD))
 
     bringup.print_data_plane_status(
-        native_cluster.plane, home=native_cluster.home, database_factory=operator_database
+        native_cluster.plane,
+        home=native_cluster.home,
+        host=native_cluster.host,
+        database_factory=operator_database,
     )
 
     out = capsys.readouterr().out
@@ -116,7 +121,10 @@ def test_a_server_that_refuses_the_delivered_login_is_never_a_green_tick(
     operator_database.adopt_login(_dial(native_cluster, "not-the-password"))
 
     bringup.print_data_plane_status(
-        native_cluster.plane, home=native_cluster.home, database_factory=operator_database
+        native_cluster.plane,
+        home=native_cluster.home,
+        host=native_cluster.host,
+        database_factory=operator_database,
     )
 
     out = capsys.readouterr().out
@@ -130,7 +138,10 @@ def test_a_plane_that_is_not_running_is_unreachable_on_both_lines(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     bringup.print_data_plane_status(
-        native_cluster.plane, home=native_cluster.home, database_factory=operator_database
+        native_cluster.plane,
+        home=native_cluster.home,
+        host=native_cluster.host,
+        database_factory=operator_database,
     )
 
     out = capsys.readouterr().out
@@ -149,7 +160,10 @@ def test_the_pooler_line_says_so_when_the_home_has_no_registry_record(
     plane = dataclasses.replace(native_cluster.plane, pgbouncer_enabled=True)
 
     bringup.print_data_plane_status(
-        plane, home=native_cluster.home, database_factory=operator_database
+        plane,
+        home=native_cluster.home,
+        host=native_cluster.host,
+        database_factory=operator_database,
     )
 
     out = capsys.readouterr().out
@@ -169,7 +183,10 @@ def test_the_pooler_line_names_the_registry_port_and_why_its_console_is_unreadab
     listen = native_cluster.pooler_port
 
     bringup.print_data_plane_status(
-        plane, home=native_cluster.home, database_factory=operator_database
+        plane,
+        home=native_cluster.home,
+        host=native_cluster.host,
+        database_factory=operator_database,
     )
 
     out = capsys.readouterr().out
@@ -197,7 +214,9 @@ def test_a_remote_plane_is_probed_through_its_urls_and_has_no_pooler_line(
     )
     assert plane.is_remote
 
-    bringup.print_data_plane_status(plane, home=tmp_path, database_factory=operator_database)
+    bringup.print_data_plane_status(
+        plane, home=tmp_path, host=real_commands_host(), database_factory=operator_database
+    )
 
     out = capsys.readouterr().out
     assert "remote-managed" in out
@@ -224,7 +243,9 @@ def test_a_remote_redis_that_refuses_is_reported_with_its_dial_detail(
         remote_data_plane_config, redis_url=f"redis://meiva:pw@127.0.0.1:{_refused_port()}/0"
     )
 
-    bringup.print_data_plane_status(plane, home=tmp_path, database_factory=operator_database)
+    bringup.print_data_plane_status(
+        plane, home=tmp_path, host=real_commands_host(), database_factory=operator_database
+    )
 
     out = capsys.readouterr().out
     assert "✓ postgres (10.9.8.7:5432)" in out

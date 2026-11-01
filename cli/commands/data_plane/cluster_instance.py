@@ -63,6 +63,7 @@ from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
 from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 from base.native_process.child_env import filter_daemon_env, inherit_env
 from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -75,6 +76,7 @@ from cli.commands.data_plane.instance.redis_binaries import (
     redis_binary_source,
 )
 from cli.commands.data_plane.instance.storage_plan import require_storage_credentials
+from cli.commands.data_plane.pg_probe import PG_PROBE_TIMEOUT_S, PostmasterWait, launch_failure
 from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
 
@@ -84,7 +86,6 @@ from services.backup.walg.archive import archive_pg_args
 # services alone hold ~25, then ~3-4 per agent).
 _PG_MAX_CONNECTIONS = 500
 _PG_START_TIMEOUT_S = 60.0
-_PG_PROBE_TIMEOUT_S = 3.0
 _INITDB_TIMEOUT_S = 300.0
 _REDIS_PROBE_TIMEOUT_S = 5.0
 _REDIS_LAUNCH_TIMEOUT_S = 30.0
@@ -111,7 +112,7 @@ _HBA_PROOF_INTERVAL_S = 0.1
 class StartTuning:
     bind_wait_s: float = BIND_WAIT_TIMEOUT_S
     pg_start_s: float = _PG_START_TIMEOUT_S
-    pg_probe_s: float = _PG_PROBE_TIMEOUT_S
+    pg_probe_s: float = PG_PROBE_TIMEOUT_S
 
 
 PRODUCTION_TUNING = StartTuning()
@@ -283,10 +284,11 @@ def require_authenticated_hba(
 # Fresh initdb at `target` with `os_user` as the bootstrap superuser (mirrors
 # throwaway_postgres / the brew install convention).
 #
-# The `trust` default is never served: `start_pg` writes the always-auth hba first.
-def initdb(target: Path, *, os_user: str, home: Path) -> None:
+# The `trust` default is never served: `start_pg` writes the always-auth hba first. The program
+# runs through the host the caller hands in, like every other process this module starts.
+def initdb(target: Path, *, os_user: str, home: Path, host: Host) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    result = run_bounded(
+    result = host.run(
         [
             str(pg_tool("initdb", home=home)),
             "-D",
@@ -309,29 +311,15 @@ def initdb(target: Path, *, os_user: str, home: Path) -> None:
 # meiva:note
 # Ensure this cluster's pg data dir exists and is initialized, via the cached template (initdb
 # once per home, then copy). Returns the data dir.
-def ensure_pg_data(home: Path, *, os_user: str) -> Path:
+def ensure_pg_data(home: Path, *, os_user: str, host: Host) -> Path:
     data = pg_data_dir(home)
     if (data / "PG_VERSION").exists():
         return data
     template = pg_template_dir(home)
     if not (template / "PG_VERSION").exists():
-        initdb(template, os_user=os_user, home=home)
+        initdb(template, os_user=os_user, home=home, host=host)
     shutil.copytree(template, data)
     return data
-
-
-def pg_running(
-    pg_isready: str, pg_port: int, host: str, *, timeout_s: float = _PG_PROBE_TIMEOUT_S
-) -> bool:
-    try:
-        out = run_bounded(
-            [pg_isready, "-h", host, "-p", str(pg_port)],
-            capture_output=True,
-            timeout=timeout_s,
-        )
-    except subprocess.TimeoutExpired:
-        return False
-    return out.returncode == 0
 
 
 # meiva:note
@@ -342,6 +330,7 @@ def _launch_postmaster(
     pg_port: int,
     *,
     home: Path,
+    host: Host,
     dial_host: str,
     machine: MachineIdentityReader,
     retained_children: list[subprocess.Popen[bytes]],
@@ -366,18 +355,26 @@ def _launch_postmaster(
             archive_args=tuple(archive_pg_args(path=config.walg_config_file, home=home)),
         )
     )
-    owned_postgres.start(
-        data,
-        pg_port,
-        argv,
-        pg_start_env(environ),
-        ready=lambda: pg_running(pg_isready, pg_port, dial_host, timeout_s=tuning.pg_probe_s),
-        timeout=tuning.pg_start_s,
-        expected=owner,
-        retained_children=retained_children,
-        timers=timers,
-        system=system,
-    )
+
+    wait = PostmasterWait(pg_isready, pg_port, dial_host, host=host, timeout_s=tuning.pg_probe_s)
+    try:
+        owned_postgres.start(
+            data,
+            pg_port,
+            argv,
+            pg_start_env(environ),
+            ready=wait,
+            timeout=tuning.pg_start_s,
+            expected=owner,
+            retained_children=retained_children,
+            timers=timers,
+            system=system,
+        )
+    except owned_postgres.PostgresNotReadyError as exc:
+        # meiva:note
+        # A probe that answered leaves the custody boundary's literal alone; one that never answered
+        # adds its own words, so a broken probe is never read as a slow postmaster.
+        raise owned_postgres.PostgresNotReadyError(launch_failure(wait, exc)) from exc
 
 
 # meiva:note
@@ -391,6 +388,7 @@ def start_pg(
     pg_port: int,
     *,
     home: Path,
+    host: Host,
     retained_children: list[subprocess.Popen[bytes]],
     machine: MachineIdentityReader,
     tuning: StartTuning = PRODUCTION_TUNING,
@@ -406,21 +404,22 @@ def start_pg(
     for step in pg_plan.plan_pg_start(owner_retained=owner is not None, off_box_host=off_box):
         match step:
             case pg_plan.EnsureData():
-                ensure_pg_data(home, os_user=identity.os_user)
+                ensure_pg_data(home, os_user=identity.os_user, host=host)
             case pg_plan.WriteAuthentication():
                 (data / "pg_ident.conf").write_text(pg_plan.pg_ident_body(identity))
                 hba = pg_plan.pg_hba_body(
                     identity, reachable_host=off_box, trusted_cidrs=config.trusted_cidrs
                 )
                 (data / "pg_hba.conf").write_text(hba)
-            case pg_plan.AwaitReachableBind(host=host):
-                if not _await_bind("postgres", host, tuning, timers=timers):
+            case pg_plan.AwaitReachableBind(host=reachable):
+                if not _await_bind("postgres", reachable, tuning, timers=timers):
                     return 1
             case pg_plan.LaunchPostmaster():
                 _launch_postmaster(
                     config,
                     pg_port,
                     home=home,
+                    host=host,
                     dial_host=dial_host,
                     machine=machine,
                     retained_children=retained_children,
@@ -735,6 +734,7 @@ def ensure_cluster_storage(
     config: DataPlaneConfig,
     *,
     home: Path,
+    host: Host,
     pg_port: int,
     redis_port: int,
     redis_password: str,
@@ -751,6 +751,7 @@ def ensure_cluster_storage(
         config,
         pg_port,
         home=home,
+        host=host,
         retained_children=retained_children,
         machine=machine,
         timers=timers,

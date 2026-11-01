@@ -22,10 +22,13 @@ from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.machine import MachineIdentityReader
+from base.host.system.tests.fake_commands import real_commands_host
 from base.paths import meiva_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup, cluster_instance
 from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.instance.probe import ProbeState
+from cli.commands.data_plane.pg_probe import pg_running
 from cli.commands.data_plane.tests.data_plane_records import (
     remote_data_plane_config as remote_data_plane_config,
 )
@@ -53,6 +56,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> None:
     rc = cluster_instance.ensure_cluster_storage(
         cluster.plane,
         home=cluster.home,
+        host=cluster.host,
         pg_port=cluster.pg_port,
         redis_port=cluster.redis_port,
         redis_password=RUNTIME_PASSWORD,
@@ -70,6 +74,7 @@ def _stop(cluster: NativeCluster, producer: Callable[[], EventPipeline]) -> int:
     return bringup.stop_cluster_instance(
         cluster.plane,
         home=cluster.home,
+        host=cluster.host,
         retained_children=cluster.retained_children,
         producer=producer,
         macos=NATIVE_TEST_MACOS,
@@ -79,11 +84,14 @@ def _stop(cluster: NativeCluster, producer: Callable[[], EventPipeline]) -> int:
 
 
 def _answers(cluster: NativeCluster) -> tuple[bool, bool]:
-    postgres = cluster_instance.pg_running(
-        str(pg_tool("pg_isready", home=meiva_home())), cluster.pg_port, "127.0.0.1"
+    postgres = pg_running(
+        str(pg_tool("pg_isready", home=meiva_home())),
+        cluster.pg_port,
+        "127.0.0.1",
+        host=cluster.host,
     )
     redis = cluster_instance.redis_reachable(ADMIN_PASSWORD, cluster.redis_port, "127.0.0.1")
-    return postgres, redis
+    return postgres.state is ProbeState.RUNNING, redis
 
 
 def test_stop_takes_both_services_down_and_closes_postgres_custody(
@@ -142,6 +150,7 @@ def test_a_redis_that_the_admin_cannot_shut_down_is_a_failed_stop(
     rc = bringup.stop_cluster_instance(
         wrong_admin,
         home=native_cluster.home,
+        host=native_cluster.host,
         retained_children=native_cluster.retained_children,
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
@@ -216,6 +225,7 @@ def test_a_remote_plane_stops_nothing_and_says_so(
     rc = bringup.stop_cluster_instance(
         remote_data_plane_config,
         home=unit_home,
+        host=real_commands_host(),
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
@@ -252,6 +262,7 @@ def test_a_local_instance_left_behind_by_a_switch_to_remote_is_named_and_not_tou
     rc = bringup.stop_cluster_instance(
         switched,
         home=native_cluster.home,
+        host=native_cluster.host,
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,

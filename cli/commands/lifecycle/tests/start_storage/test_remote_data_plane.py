@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.system.tests.fake_commands import real_commands_host
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -68,6 +69,7 @@ def test_start_remote_skips_local_instance_and_probes(
     rc = bringup.ensure_gateway_data_plane(
         config,
         home=registered_home,
+        host=real_commands_host(),
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -98,6 +100,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
     rc = bringup.ensure_gateway_data_plane(
         remote_data_plane_config,
         home=registered_home,
+        host=real_commands_host(),
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -130,6 +133,7 @@ def test_start_remote_redis_unreachable_fails_after_the_database_answers(
     rc = bringup.ensure_gateway_data_plane(
         config,
         home=registered_home,
+        host=real_commands_host(),
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,

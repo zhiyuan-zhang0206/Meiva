@@ -205,6 +205,7 @@ def _stop_data_plane_step(
             stop_cluster_instance(
                 config,
                 home=command.home,
+                host=command.host,
                 macos=command.host.platform.system == "darwin",
                 timers=command.timers,
                 environ=command.config.process_environment(),

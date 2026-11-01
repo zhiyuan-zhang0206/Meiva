@@ -28,6 +28,7 @@ from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.machine import MachineIdentityReader
+from base.host.system.tests.fake_commands import real_commands_host
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -263,6 +264,7 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
                 plane,
                 port,
                 home=unit_home,
+                host=real_commands_host(),
                 retained_children=retained,
                 machine=command_machine,
                 timers=SYSTEM_TIMERS,
@@ -325,6 +327,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                     plane,
                     pg_port,
                     home=unit_home,
+                    host=real_commands_host(),
                     retained_children=retained,
                     machine=command_machine,
                     timers=SYSTEM_TIMERS,

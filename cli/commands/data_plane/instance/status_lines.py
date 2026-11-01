@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from cli.commands.data_plane.instance.probe import ProbeReading, ProbeState
+
 __all__ = [
     "failure_detail",
     "local_pg_line",
@@ -34,9 +36,15 @@ def remote_status_header() -> str:
 # `pg_isready` alone answers without authenticating, so a server that is up but refuses the
 # delivered gateway login reports `reachable but connect failed` rather than a false `✓`:
 # `connect_error` is the last line of the failed pooled `SELECT 1`, `None` when it succeeded.
-def local_pg_line(*, host: str, port: int, running: bool, connect_error: str | None) -> str:
+#
+# A probe that never answered gets its own line. `unreachable` would claim the server is down,
+# which is precisely what a failed probe did not learn; the line still marks `✗` (nothing here
+# invents a `✓`) and prints the probe's own reason.
+def local_pg_line(*, host: str, port: int, probe: ProbeReading, connect_error: str | None) -> str:
     where = f"{host}:{port}"
-    if not running:
+    if probe.state is ProbeState.UNANSWERED:
+        return f"  ✗ postgres ({where}) probe did not answer: {probe.detail}"
+    if probe.state is ProbeState.NOT_RUNNING:
         return f"  ✗ postgres ({where}) unreachable"
     if connect_error is not None:
         return f"  ✗ postgres ({where}) reachable but connect failed: {connect_error}"

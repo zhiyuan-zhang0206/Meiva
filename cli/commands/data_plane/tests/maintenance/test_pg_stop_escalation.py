@@ -25,6 +25,7 @@ from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.machine import MachineIdentityReader
+from base.host.system.tests.fake_commands import real_commands_host
 from base.native_process.ownership import capture_tree
 from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -89,7 +90,7 @@ def _start_with_hung_archive(
     retained: list[subprocess.Popen[bytes]],
     machine: MachineIdentityReader,
 ) -> None:
-    data = instance.ensure_pg_data(home, os_user=getpass.getuser())
+    data = instance.ensure_pg_data(home, os_user=getpass.getuser(), host=real_commands_host())
     with (data / "postgresql.auto.conf").open("a") as settings:
         settings.write("archive_mode = 'on'\n")
         settings.write(f"archive_command = 'sleep {HUNG_SECONDS}'\n")
@@ -99,6 +100,7 @@ def _start_with_hung_archive(
             private,
             port,
             home=home,
+            host=real_commands_host(),
             retained_children=retained,
             machine=machine,
             timers=SYSTEM_TIMERS,

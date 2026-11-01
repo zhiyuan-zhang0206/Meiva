@@ -45,6 +45,7 @@ def _start(
         cluster.plane,
         cluster.pg_port,
         home=cluster.home,
+        host=cluster.host,
         retained_children=cluster.retained_children,
         machine=machine,
         tuning=tuning,

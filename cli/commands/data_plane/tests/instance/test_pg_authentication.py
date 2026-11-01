@@ -38,6 +38,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> int:
         cluster.plane,
         cluster.pg_port,
         home=cluster.home,
+        host=cluster.host,
         retained_children=cluster.retained_children,
         machine=machine,
         tuning=StartTuning(bind_wait_s=0.0),

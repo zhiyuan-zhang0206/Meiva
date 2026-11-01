@@ -148,6 +148,7 @@ def _execute(
             print_data_plane_status(
                 data_plane_config_from_boot(command.config),
                 home=command.home,
+                host=command.host,
                 database_factory=database_factory,
             )
         case ReadHostResources():
