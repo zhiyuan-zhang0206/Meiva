@@ -29,8 +29,6 @@ runs. `ci.yml` therefore groups native concurrency as follows:
   cancels. A group holds one running and one pending run, and a newer pending
   run replaces the older one, so a ref-only group would drop a dispatch of a
   different commit.
-- Trunk merge-queue branches (`trunk-merge/...`) also run as `pull_request`,
-  but each has its own ref, so they never share a group with a PR.
 
 CI fan-out and summary jobs use `!cancelled()` to admit failed or skipped needs
 without resisting an issued workflow cancellation. Required summaries still

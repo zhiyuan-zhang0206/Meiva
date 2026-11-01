@@ -79,8 +79,8 @@ def _main_sha(repo: str, *, host: Host) -> str | None:
 
 # meiva:note
 # Returns ((base_sha, main_sha), False) when the PR's recorded baseRefOid differs from main,
-# (None, False) when they match, and (None, True) when either read is unknown. Advisory: an unknown
-# never blocks --merge, and --require-fresh-base refuses only on a stale base.
+# (None, False) when they match, and (None, True) when either read is unknown. Advisory: the
+# `--diagnose` classifier reports a stale base as an issue; nothing refuses on it.
 def base_freshness(pr: str, repo: str, *, host: Host) -> tuple[tuple[str, str] | None, bool]:
     base_sha = _sha_from(
         ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],

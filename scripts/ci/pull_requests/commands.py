@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Query or wait for genuine GitHub CI evidence; optional owner operations use the same CLI.
-
-`check_ci`, `CIResult` and `CIStatus` are stable reusable imports. Pending, missing,
-draft-skipped or unexecuted workflow evidence is never green. Limbo diagnostics
-name aged queued runs without changing that verdict.
-
-Usage:
-    .venv/bin/python scripts/ci/cli.py PR [--repo owner/repo] [--json]
-    .venv/bin/python scripts/ci/cli.py PR --wait [--timeout N]
-    .venv/bin/python scripts/ci/cli.py PR --diagnose [--json]
-    .venv/bin/python scripts/ci/cli.py PR --merge [--queue trunk]
-
-One-shot queries retain their reporting contract: pending/errors print a structured
-verdict and exit 0; settled failures exit 1. Waiting exits 0 only for ALL_PASSED,
-1 for not-green or timeout, and 3 for persistent query errors. Explicit owner
-operations retain queue authentication, cooldown, priority and job re-run behavior.
-No status override is supported.
-"""
+# meiva:note
+# Query or wait for genuine GitHub CI evidence; optional owner operations use the same CLI.
+#
+# `check_ci`, `CIResult` and `CIStatus` are stable reusable imports. Pending, missing,
+# draft-skipped or unexecuted workflow evidence is never green. Limbo diagnostics
+# name aged queued runs without changing that verdict.
+#
+# Usage:
+#     .venv/bin/python scripts/ci/cli.py PR [--repo owner/repo] [--json]
+#     .venv/bin/python scripts/ci/cli.py PR --wait [--timeout N]
+#     .venv/bin/python scripts/ci/cli.py PR --diagnose [--json]
+#     .venv/bin/python scripts/ci/cli.py PR --wait
+#
+# One-shot queries retain their reporting contract: pending/errors print a structured
+# verdict and exit 0; settled failures exit 1. Waiting exits 0 only for ALL_PASSED,
+# 1 for not-green or timeout, and 3 for persistent query errors. Explicit owner
+# operations retain GitHub job re-run behavior.
+# No status override is supported.
 
 from __future__ import annotations
 
@@ -33,10 +33,6 @@ from base.host.system.hostport import Host
 from scripts.ci.pull_requests import monitor
 from scripts.ci.pull_requests.accounting import DEFAULT_LEDGER, load_ledger, report_rows
 from scripts.ci.pull_requests.status import DEFAULT_REPO, POLL_INTERVAL
-
-# CLI metadata does not import the queue operations module.
-_QUEUE_CHOICES = ("trunk",)
-_TRUNK_PRIORITIES = ("urgent", "high", "medium", "low")
 
 
 def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -63,18 +59,8 @@ def _ci_usage_command(
     """
     if not args.ci_usage:
         return None
-    if (
-        args.wait
-        or args.merge
-        or args.rerun_failed_jobs
-        or args.queue_status
-        or args.evict
-        or args.diagnose
-    ):
-        parser.error(
-            "--ci-usage is exclusive with --wait/--merge/--rerun-failed-jobs/"
-            "--queue-status/--evict/--diagnose"
-        )
+    if args.wait or args.rerun_failed_jobs or args.diagnose:
+        parser.error("--ci-usage is exclusive with --wait/--rerun-failed-jobs/--diagnose")
     if args.pr is not None:
         parser.error("--ci-usage takes no PR number")
     rows = report_rows(
@@ -109,10 +95,8 @@ def _diagnose_command(
     """Dispatch --diagnose when set; None when not set."""
     if not args.diagnose:
         return None
-    if args.wait or args.merge or args.rerun_failed_jobs or args.queue_status or args.evict:
-        parser.error(
-            "--diagnose is exclusive with --wait/--merge/--rerun-failed-jobs/--queue-status/--evict"
-        )
+    if args.wait or args.rerun_failed_jobs:
+        parser.error("--diagnose is exclusive with --wait/--rerun-failed-jobs")
     if args.pr is None:
         parser.error("PR number is required with --diagnose")
     from scripts.ci.pull_requests.diagnose import diagnose_pr, print_diagnosis
@@ -141,13 +125,10 @@ def main(
     workflows: bool,
     ledger_path: Path = DEFAULT_LEDGER,
 ) -> int:
-    """CLI entry. Default: one-shot query (legacy behavior). `--wait`: poll
-    until the verdict settles with the monitor exit-code contract; `--merge`
-    implies `--wait` and submits to Trunk once green."""
     if env is None:
         env = os.environ
     p = argparse.ArgumentParser(description="Check CI status of a GitHub PR")
-    p.add_argument("pr", nargs="?", help="PR number (required except --queue-status)")
+    p.add_argument("pr", nargs="?", help="PR number")
     p.add_argument(
         "--repo",
         default=DEFAULT_REPO,
@@ -170,31 +151,6 @@ def main(
         type=int,
         default=0,
         help="with --wait: stop after N seconds still pending (0 = forever)",
-    )
-    p.add_argument(
-        "--merge",
-        action="store_true",
-        help="with --wait: enqueue the PR once CI is green and wait for the selected "
-        "merge queue to land it, with head-update cooldown (implies --wait; "
-        "default timeout 1800s)",
-    )
-    p.add_argument(
-        "--queue",
-        choices=_QUEUE_CHOICES,
-        default=None,
-        help="with --merge: merge queue (default: CI_QUEUE, else trunk)",
-    )
-    p.add_argument(
-        "--priority",
-        choices=tuple(_TRUNK_PRIORITIES),
-        default="medium",
-        help="with --queue trunk: queue priority (default: medium)",
-    )
-    p.add_argument(
-        "--require-fresh-base",
-        action="store_true",
-        help="with --merge: refuse to submit when main has advanced past the PR's "
-        "recorded base (the queue would re-test against the newer base)",
     )
     p.add_argument(
         "--ci-usage",
@@ -220,22 +176,9 @@ def main(
         action="store_true",
         help="diagnose why the PR's CI / queue attempt failed: reads the check "
         "rollup + job log tails, Trunk queue state, and the synthetic "
-        "trunk-merge test PRs, then prints classifications with suggested actions "
+        "Trunk-derived fields, then prints classifications with suggested actions "
         "(--json for the machine-readable report). Diagnosis only — no repair "
         "action is executed.",
-    )
-    p.add_argument(
-        "--evict",
-        action="store_true",
-        help="cancel the PR from the Trunk merge queue (requires TRUNK_API_TOKEN; "
-        "exit 0 cancelled, 1 not in queue, 4 queue error). Trunk's API has no "
-        "reorder operation, so a mid-queue reshuffle is cancel + re-submit.",
-    )
-    p.add_argument(
-        "--queue-status",
-        action="store_true",
-        help="show the Trunk merge queue state and enqueued PRs (requires "
-        "TRUNK_API_TOKEN); with --json, print the raw getQueue response",
     )
     p.add_argument(
         "--rerun-failed-jobs",
@@ -246,7 +189,7 @@ def main(
         "state no such precondition), so a still-running run is reported "
         "as waiting with the recovery action. Exit 0 when all failed "
         "jobs were re-run (or none were), 5 when failures remain whose run is "
-        "still going, 3 on errors. Exclusive with --wait/--merge/--json.",
+        "still going, 3 on errors. Exclusive with --wait/--json.",
     )
     p.add_argument(
         "--dry-run",
@@ -264,7 +207,7 @@ def main(
     if diagnose_rc is not None:
         return diagnose_rc
 
-    if args.merge or args.queue_status or args.evict or args.rerun_failed_jobs:
+    if args.rerun_failed_jobs:
         from scripts.ci.pull_requests.owner_operations import dispatch
 
         return dispatch(

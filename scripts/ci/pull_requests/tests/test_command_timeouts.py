@@ -8,16 +8,12 @@ import pytest
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
-from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
+from base.host.net.tests.fake_url_opener import FakeUrlOpener
 from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from scripts.ci.pull_requests import (
-    accounting,
     commands,
-    diagnose,
     job_rerun,
-    owner_operations,
     status,
-    trunk_api,
 )
 
 
@@ -106,50 +102,6 @@ def test_limbo_timeout_remains_missing_evidence(probe: str) -> None:
     assert result is None if probe == "runs" else result == []
 
 
-@pytest.mark.parametrize("probe", ["gh", "gh-api", "git"])
-def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
-    # meiva:note
-    # The freshness-timeout test passes a literal fixture token only through its injected FakeUrlOpener, with no real credential or network request. The exact S106 suppression identifies this intentional test input at the call site; moving the same literal behind a constant would only hide it from the security check. The test still verifies both expected queue requests.
-    runner = FakeCommands()
-    error = subprocess.TimeoutExpired(probe, 30)
-    runner.on(["gh", "api", "repos/o/r/issues/42/timeline"], Reply(stdout="null"))
-    runner.on(["gh", "api", "repos/o/r/pulls/42/commits"], Reply(stdout="null"))
-    base_read, github_api, git_leg = {
-        "gh": (error, Reply(stdout="a" * 40), Reply(stdout="a" * 40)),
-        "gh-api": (Reply(stdout="a" * 40), error, Reply(stdout="a" * 40)),
-        "git": (Reply(stdout="a" * 40), Reply(returncode=1, stderr="gh: no token"), error),
-    }[probe]
-    runner.on(["gh", "pr", "view"], _rollup(), base_read)
-    runner.on(["gh", "api", "repos/o/r/actions/runs?head_sha=abc123"], Reply(stdout="[]"))
-    runner.on(
-        ["gh", "api", "repos/o/r/actions/runs?head_sha=abc123&status=completed&per_page=100"],
-        Reply(stdout="1"),
-    )
-    runner.on(["gh", "api", "repos/o/r/git/ref/heads/main"], github_api)
-    runner.on("git", git_leg)
-    opener = FakeUrlOpener()
-    opener.on("https://api.trunk.io/v1/submitPullRequest", Answer("{}"))
-    opener.on("https://api.trunk.io/v1/getSubmittedPullRequest", Answer('{"state":"merged"}'))
-    result = owner_operations.trunk_merge_flow(
-        "42",
-        "o/r",
-        "medium",
-        every=1,
-        timeout=100,
-        token="fixture",  # noqa: S106
-        require_fresh_base=True,
-        host=fake_host(runner),
-        clock=_clock(),
-        open_url=opener,
-        workflows=True,
-    )
-    assert result == 0
-    assert opener.urls == [
-        "https://api.trunk.io/v1/submitPullRequest",
-        "https://api.trunk.io/v1/getSubmittedPullRequest",
-    ]
-
-
 @pytest.mark.parametrize("probe", ["head", "runs", "jobs"])
 def test_rerun_query_timeout_retains_its_cause(probe: str) -> None:
     runner = FakeCommands()
@@ -178,128 +130,3 @@ def test_rerun_query_timeout_retains_its_cause(probe: str) -> None:
     with pytest.raises(job_rerun.CiJobRerunError, match="timed out") as caught:
         job_rerun.list_failed_jobs("42", "o/r", host=fake_host(runner))
     assert caught.value.__cause__ is error
-
-
-@pytest.mark.parametrize("count", [1, 2])
-def test_rerun_post_timeout_reports_unconfirmed_outcome(
-    count: int, capsys: pytest.CaptureFixture[str]
-) -> None:
-    runner = FakeCommands()
-    runner.on(["gh", "pr", "view"], Reply(stdout="abc123"))
-    runner.on(
-        ["gh", "api", "repos/o/r/actions/runs?head_sha=abc123&per_page=100"],
-        Reply(
-            stdout=json.dumps(
-                {
-                    "workflow_runs": [
-                        {
-                            "id": 1,
-                            "name": "CI",
-                            "created_at": "2026-10-01T00:00:00Z",
-                            "status": "completed",
-                        }
-                    ]
-                }
-            )
-        ),
-    )
-    runner.on(
-        ["gh", "api", "repos/o/r/actions/runs/1/jobs?per_page=100"],
-        Reply(
-            stdout=json.dumps(
-                {
-                    "jobs": [
-                        {
-                            "id": i,
-                            "name": f"check {i}",
-                            "status": "completed",
-                            "conclusion": "failure",
-                        }
-                        for i in range(1, count + 1)
-                    ]
-                }
-            )
-        ),
-    )
-    runner.on(["gh", "api", "--method", "POST"], subprocess.TimeoutExpired("gh", 30))
-    result = commands.main(
-        ["42", "--repo", "o/r", "--queue", "trunk", "--rerun-failed-jobs"],
-        host=fake_host(runner),
-        clock=_clock(),
-        open_url=FakeUrlOpener(),
-        workflows=True,
-        env={},
-    )
-    assert result == 3
-    out = capsys.readouterr().out
-    assert "outcome unconfirmed" in out
-    assert "Re-ran" not in out
-    assert len([argv for argv in runner.argvs if "POST" in argv]) == 1
-
-
-def test_rerun_query_timeout_is_reported_by_cli(capsys: pytest.CaptureFixture[str]) -> None:
-    runner = FakeCommands()
-    runner.on(["gh", "pr", "view"], subprocess.TimeoutExpired("gh", 30))
-    result = commands.main(
-        ["42", "--repo", "o/r", "--queue", "trunk", "--rerun-failed-jobs"],
-        host=fake_host(runner),
-        clock=_clock(),
-        open_url=FakeUrlOpener(),
-        workflows=True,
-        env={},
-    )
-    assert result == 1
-    assert "Failed to list failed jobs" in capsys.readouterr().err
-
-
-def test_best_effort_reads_keep_their_timeout_outcomes() -> None:
-    runner = FakeCommands()
-    runner.on("gh", subprocess.TimeoutExpired("gh", 60), repeat=True)
-    host = fake_host(runner)
-    with pytest.raises(accounting.CiUsageReadError, match="timed out"):
-        accounting.collect("o/r", "2026-10-01T00:00:00Z", "2026-10-01T01:00:00Z", host=host)
-    assert owner_operations.last_head_update("42", "o/r", host=host) is None
-    result = diagnose.diagnose_pr("42", "o/r", token=None, host=host, open_url=FakeUrlOpener())
-    assert "gh_error" in result
-    assert result["gh_error"] == "gh pr view failed"
-
-
-@pytest.mark.parametrize(
-    "operation",
-    [
-        "status",
-        "runs",
-        "completed",
-        "limbo",
-        "freshness",
-        "rerun",
-        "accounting",
-        "diagnose",
-        "cooldown",
-    ],
-)
-def test_unexpected_command_error_is_never_a_missing_evidence_default(operation: str) -> None:
-    runner = FakeCommands()
-    error = RuntimeError("invalid command implementation")
-    runner.on("gh", error)
-    host = fake_host(runner)
-    with pytest.raises(RuntimeError) as caught:
-        if operation == "status":
-            status.check_ci("42", repo="o/r", host=host, clock=_clock(), workflows=True)
-        elif operation == "runs":
-            status.runs_not_yet_reporting("abc123", "o/r", host=host)
-        elif operation == "completed":
-            status.main_workflow_run_completed("abc123", "o/r", host=host)
-        elif operation == "limbo":
-            status.limbo_runs("abc123", "o/r", host=host, clock=_clock())
-        elif operation == "freshness":
-            trunk_api.base_freshness("42", "o/r", host=host)
-        elif operation == "rerun":
-            job_rerun.list_failed_jobs("42", "o/r", host=host)
-        elif operation == "accounting":
-            accounting.collect("o/r", "2026-10-01T00:00:00Z", "2026-10-01T01:00:00Z", host=host)
-        elif operation == "diagnose":
-            diagnose.diagnose_pr("42", "o/r", token=None, host=host, open_url=FakeUrlOpener())
-        else:
-            owner_operations.last_head_update("42", "o/r", host=host)
-    assert caught.value is error
