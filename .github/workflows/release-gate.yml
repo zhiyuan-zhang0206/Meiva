@@ -60,6 +60,7 @@ jobs:
       skip_train: ${{ steps.target.outputs.skip_train }}
       version: ${{ steps.target.outputs.version }}
       hotfix_of: ${{ steps.target.outputs.hotfix_of }}
+      durations_key: ${{ steps.durations.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,6 +111,11 @@ jobs:
             "") echo "no nightly run for $sha - the gate's own matrix is the full-suite evidence" ;;
             *) echo "nightly full suite for $sha: $conclusion" ;;
           esac
+
+      - name: Resolve the test durations
+        id: durations
+        if: steps.target.outputs.skip_train != 'true'
+        uses: ./.github/actions/resolve-test-durations
 
   static-and-structure:
     needs: precheck
@@ -187,7 +193,7 @@ jobs:
   backend-static:
     needs: precheck
     if: needs.precheck.outputs.skip_train != 'true'
-    name: Backend static contracts (${{ matrix.group }}/4)
+    name: Backend static contracts (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
@@ -199,11 +205,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4]
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.precheck.outputs.durations_key }}
 
       - name: Cache uv wheels
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -231,7 +242,7 @@ jobs:
         run: |
           mkdir -p tmp
           uv run pytest --test-environment=static -q -n 4 --dist=loadfile \
-            --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration \
+            --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration \
             -W error::pytest.PytestUnhandledThreadExceptionWarning \
             --junit-xml=tmp/junit-release-static-${{ matrix.group }}.xml -o junit_family=xunit1
 
@@ -356,6 +367,11 @@ jobs:
         with:
           ref: ${{ needs.precheck.outputs.sha }}
 
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.precheck.outputs.durations_key }}
+
       - name: Cache uv wheels
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -412,6 +428,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.precheck.outputs.durations_key }}
 
       - name: Cache uv wheels
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

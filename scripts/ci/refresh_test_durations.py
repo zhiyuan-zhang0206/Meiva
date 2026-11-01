@@ -59,8 +59,10 @@ from typing import Literal, Protocol, TypeGuard
 
 from base.host.atomic_io import write_text_atomic
 
+_STATIC_WORKERS = 4
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
 _E2E_WORKERS = 2  # mirrors the e2e-shard job (-n 2)
+STATIC_SHARDS = 8
 BACKEND_SHARDS = 8
 E2E_SHARDS = 4
 _MEASUREMENT_ATTEMPTS = 3
@@ -173,7 +175,25 @@ def _measure_shard(
     junit_path: Path | None = None,
 ) -> int:
     """Record one CI-equivalent shard, retrying only that isolated measurement."""
-    if suite == "backend":
+    if suite == "static":
+        groups = STATIC_SHARDS
+        pytest_args = [
+            "--test-environment=static",
+            "-q",
+            "-n",
+            str(_STATIC_WORKERS),
+            "--dist=loadfile",
+            "-W",
+            "error::pytest.PytestUnhandledThreadExceptionWarning",
+            "--splits",
+            str(groups),
+            "--group",
+            str(group),
+            "--splitting-algorithm",
+            "least_duration",
+        ]
+        coverage = True
+    elif suite == "backend":
         groups = BACKEND_SHARDS
         pytest_args = [
             "-q",
@@ -239,6 +259,7 @@ def _measure_shard(
 def _expected_measurement_paths(durations_dir: Path) -> list[Path] | None:
     """Return all required artifacts, or fail before an incomplete timing model publishes."""
     paths = [
+        *(durations_dir / f"static-{group}.json" for group in range(1, STATIC_SHARDS + 1)),
         *(durations_dir / f"backend-{group}.json" for group in range(1, BACKEND_SHARDS + 1)),
         *(durations_dir / f"e2e-{group}.json" for group in range(1, E2E_SHARDS + 1)),
     ]
@@ -358,7 +379,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     commands.add_parser("refresh", help="run both suites in one local process (default)")
 
     measure = commands.add_parser("measure", help="record one isolated CI-shaped shard")
-    measure.add_argument("suite", choices=("backend", "e2e"))
+    measure.add_argument("suite", choices=("static", "backend", "e2e"))
     measure.add_argument("--group", type=int, required=True)
     measure.add_argument("--output", type=Path, required=True)
     measure.add_argument(

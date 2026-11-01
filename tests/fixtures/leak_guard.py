@@ -448,6 +448,17 @@ class Run:
         self.ns += _now() - started
         return snapshot
 
+    # meiva:note
+    # The boundary check of one file move: sync the watch (a module an import added since the last
+    # file joins the next baseline), compare, and name what the file that ended left behind.
+    def boundary(self, label: str) -> list[_Finding]:
+        if label == self.files.label:
+            return []
+        self.watch.sync()
+        ended = self.files.label
+        replaced = self.files.track(self.watch.modules, label, restore=self.mode == "fail")
+        return _boundary_findings(ended if ended is not None else label, replaced)
+
     def compare(self, before: _Snapshot) -> list[_Finding]:
         started = _now()
         found = self._diff(before)
@@ -565,16 +576,6 @@ def _boundary_findings(ended: str | None, replaced: list[Any]) -> list[_Finding]
 
 
 # meiva:note
-# The boundary check of one file move: sync the watch (a module an import added since the last file
-# joins the next baseline), compare, and name what the file that ended left behind.
-def _boundary(run: Run, label: str) -> list[_Finding]:
-    run.watch.sync()
-    ended = run.files.label
-    replaced = run.files.track(run.watch.modules, label, restore=run.mode == "fail")
-    return _boundary_findings(ended if ended is not None else label, replaced)
-
-
-# meiva:note
 # The run ended inside a file: its boundary is here, and it carries no test to report on, so the
 # finding goes to the summary (and to the controller, through the worker's handoff).
 def _close_last_file() -> None:
@@ -606,7 +607,7 @@ def _leak_guard(request: pytest.FixtureRequest) -> Iterator[None]:
         yield
         return
     label = _file_label(item)
-    carried = _contained("file", item, _boundary, run, label)
+    carried = _contained("file", item, run.boundary, label)
     if carried:
         _contained("report", item, _record, item, carried)
     before = _contained("snapshot", item, run.capture)

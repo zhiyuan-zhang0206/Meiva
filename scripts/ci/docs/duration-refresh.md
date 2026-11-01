@@ -13,16 +13,17 @@ delay cron by hours) and on `workflow_dispatch`, on main only:
 
 1. `plan` resolves the newest existing cache so the measured shards split with the
    current model (the first run has none and splits by test count).
-2. `measure-backend` (8 shards) and `measure-e2e` (4) each run
-   `refresh_test_durations.py measure` on their own runner: the CI pytest arguments,
-   the CI coverage module list, `--store-durations --clean-durations`, three attempts
-   that each reseed the temporary duration input, so a failed attempt cannot leak a
-   partial measurement. The native backend population excludes the separately owned
-   static tests, as normal CI does. Both `measure-backend` and `measure-e2e` install
-   Node 22, pinned `pnpm`, and `ui/web`'s frontend deps (`pnpm install --frozen-lockfile`):
-   the backend population includes the TypeScript comment-parser tests against
-   `ui/web/node_modules/typescript`, and the e2e population builds the frontend.
-3. `publish` downloads the artifacts and runs `merge`, which requires all 12, rejects
+2. `measure-static` (8 shards in the pre-baked runner container), `measure-backend`
+   (8 shards) and `measure-e2e` (4) each run `refresh_test_durations.py measure` on
+   their own runner: the CI pytest arguments, the CI coverage module list (for static
+   and backend), `--store-durations --clean-durations`, three attempts that each reseed
+   the temporary duration input, so a failed attempt cannot leak a partial measurement.
+   `measure-static` measures `--test-environment=static` while `measure-backend`
+   excludes those separately owned static tests (`--omit-static-tests`), matching CI's
+   disjoint split. All three install `ui/web`'s frontend deps (`pnpm install --frozen-lockfile`):
+   the static and backend populations include the TypeScript source/comment-parser tests
+   against `ui/web/node_modules/typescript`, and the e2e population builds the frontend.
+3. `publish` downloads the artifacts and runs `merge`, which requires all 20, rejects
    empty or overlapping shards before touching anything, keeps every measured entry
    (fast and zero timings included), rounds to three decimals and writes
    `.test_durations` atomically. The file is saved as the cache
@@ -41,7 +42,9 @@ evicts caches.
   `test-durations-*` caches on `refs/heads/main` (the default branch's caches are the
   ones every pull request can read), takes the newest, retries the API three times,
   then restores it into `.test_durations` for the selector. The key is a job output.
-- `backend shard` and `e2e shard` run `actions/restore-test-durations` with that exact
+- `backend-static-tests`, `backend shard` and `e2e shard` in `ci.yml` (and
+  `backend-static`, `backend` and `e2e` in `release-gate.yml`, from `precheck`'s output)
+  run `actions/restore-test-durations` with that exact
   key. Resolving once per run matters: shards that split with different timings than
   their siblings would drop or duplicate tests, so a key that no longer restores
   (evicted mid-run) fails the shard instead of degrading silently.

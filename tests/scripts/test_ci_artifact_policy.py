@@ -61,7 +61,7 @@ def test_coverage_gate_records_the_groups_that_arrived() -> None:
     jobs = _workflow_jobs()
     shard_groups = cast("list[int]", jobs["backend-shard"]["strategy"]["matrix"]["group"])
     expected_groups = " ".join(
-        [*(str(group) for group in shard_groups), "serial", *(f"static-{g}" for g in (1, 2, 3, 4))]
+        [*(str(group) for group in shard_groups), "serial", *(f"static-{g}" for g in range(1, 9))]
     )
 
     backend_env = jobs["backend"]["env"]

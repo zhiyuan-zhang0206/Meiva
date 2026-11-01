@@ -287,8 +287,49 @@ def test_measure_e2e_uses_the_ci_pytest_arguments(tmp_path: Path) -> None:
     )
 
 
+def test_measure_static_uses_the_ci_pytest_arguments_and_coverage(tmp_path: Path) -> None:
+    source = tmp_path / ".test_durations"
+    source.write_text('{"tests/ci/test_existing.py::test_one": 1.5}\n')
+    output = tmp_path / "static-5.json"
+
+    def _record_static_arguments(
+        argv: Sequence[str], *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]:
+        pytest_args, durations_path, coverage = _suite_arguments(argv, cwd, check)
+        assert pytest_args == [
+            "--test-environment=static",
+            "-q",
+            "-n",
+            "4",
+            "--dist=loadfile",
+            "-W",
+            "error::pytest.PytestUnhandledThreadExceptionWarning",
+            "--splits",
+            "8",
+            "--group",
+            "5",
+            "--splitting-algorithm",
+            "least_duration",
+        ]
+        assert coverage is True
+        durations_path.write_text('{"tests/ci/test_recorded.py::test_one": 0.4}\n')
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert (
+        refresh.main(
+            ["measure", "static", "--group", "5", "--output", str(output)],
+            target_path=source,
+            run_process=_record_static_arguments,
+        )
+        == 0
+    )
+
+
 def _write_complete_measurements(durations_dir: Path) -> None:
-    """Write one unique timing record for every CI-shaped measurement shard."""
+    for group in range(1, 9):
+        (durations_dir / f"static-{group}.json").write_text(
+            json.dumps({f"tests/ci/test_static_{group}.py::test_one": 0.5})
+        )
     for group in range(1, 9):
         (durations_dir / f"backend-{group}.json").write_text(
             json.dumps({f"tests/components/agent/test_{group}.py::test_one": 1.0})
@@ -382,7 +423,8 @@ def test_merge_all_ci_shards_writes_the_compact_combined_durations(tmp_path: Pat
         == 0
     )
     combined = json.loads(target.read_text())
-    assert len(combined) == 12
+    assert len(combined) == 20
+    assert combined["tests/ci/test_static_8.py::test_one"] == 0.5
     assert combined["tests/components/agent/test_1.py::test_one"] == 0.019
     assert combined["tests/components/agent/test_8.py::test_one"] == 1.0
     assert combined["tests/e2e/test_4.py::test_one"] == 1.0

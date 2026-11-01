@@ -373,7 +373,7 @@ def test_the_total_job_expects_every_native_and_static_bucket() -> None:
     job = _JOBS["backend-test-counts"]
     shard_groups = _JOBS["backend-shard"]["strategy"]["matrix"]["group"]
     assert job["env"]["COUNT_GROUPS"] == " ".join(
-        [*map(str, shard_groups), "serial", *(f"static-{g}" for g in (1, 2, 3, 4))]
+        [*map(str, shard_groups), "serial", *(f"static-{g}" for g in range(1, 9))]
     )
 
 

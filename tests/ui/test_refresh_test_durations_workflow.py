@@ -36,16 +36,24 @@ def test_only_a_daily_schedule_and_dispatch_refresh_the_timings() -> None:
     assert workflow["permissions"] == {"actions": "read", "contents": "read"}
     assert "secrets." not in _WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow["jobs"]
-    assert set(jobs) == {"plan", "measure-backend", "measure-e2e", "verdict", "publish", "verify"}
+    assert set(jobs) == {
+        "plan",
+        "measure-static",
+        "measure-backend",
+        "measure-e2e",
+        "verdict",
+        "publish",
+        "verify",
+    }
     assert jobs["plan"]["if"] == "github.ref == 'refs/heads/main'"
-    for name in ("measure-backend", "measure-e2e"):
+    for name in ("measure-static", "measure-backend", "measure-e2e"):
         assert jobs[name]["needs"] == "plan"
 
 
 def test_measured_shards_split_with_the_model_resolved_once_by_plan() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
     assert jobs["plan"]["outputs"]["key"] == "${{ steps.durations.outputs.key }}"
-    for name in ("measure-backend", "measure-e2e"):
+    for name in ("measure-static", "measure-backend", "measure-e2e"):
         restore = _step(jobs[name]["steps"], "Restore the test durations")
         assert restore["uses"] == "./.github/actions/restore-test-durations"
         assert restore["with"]["key"] == "${{ needs.plan.outputs.key }}"
@@ -54,7 +62,8 @@ def test_measured_shards_split_with_the_model_resolved_once_by_plan() -> None:
 def test_the_cache_is_saved_only_after_a_complete_merge_under_a_dated_unique_key() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
     publish = jobs["publish"]
-    assert publish["needs"] == ["plan", "measure-backend", "measure-e2e"]
+    assert publish["needs"] == ["plan", "measure-static", "measure-backend", "measure-e2e"]
+    assert "needs.measure-static.result == 'success'" in publish["if"]
     assert "needs.measure-backend.result == 'success'" in publish["if"]
     assert "needs.measure-e2e.result == 'success'" in publish["if"]
     steps = publish["steps"]
@@ -96,7 +105,7 @@ def test_ci_resolves_once_in_classify_and_every_shard_restores_that_key() -> Non
     assert names.index("Restore the test durations") < names.index(
         "Select runtime-impact test subset"
     )
-    for name in ("backend-shard", "e2e-shard"):
+    for name in ("backend-static-tests", "backend-shard", "e2e-shard"):
         job = jobs[name]
         restore = _step(job["steps"], "Restore the test durations")
         assert restore["uses"] == "./.github/actions/restore-test-durations"
@@ -191,13 +200,19 @@ def test_ci_shards_never_record_or_upload_durations(suite: str) -> None:
 # them and the durations never refresh (task #5479, regressed by #8047).
 def test_measurement_jobs_frontend_dependencies() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
-    for job_name in ("measure-backend", "measure-e2e"):
+    static_job = jobs["measure-static"]
+    assert static_job["container"]["image"].startswith(
+        "ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:"
+    )
+    assert static_job["container"]["options"] == "--init --shm-size=2g"
+    for job_name in ("measure-static", "measure-backend", "measure-e2e"):
         steps = jobs[job_name]["steps"]
-        node = _step(steps, "Install Node")
-        assert node["uses"].startswith("actions/setup-node@")
-        assert node["with"]["node-version"] == 22
-        pnpm = _step(steps, "Install pnpm")
-        assert pnpm["uses"].startswith("pnpm/action-setup@")
+        if job_name != "measure-static":
+            node = _step(steps, "Install Node")
+            assert node["uses"].startswith("actions/setup-node@")
+            assert node["with"]["node-version"] == 22
+            pnpm = _step(steps, "Install pnpm")
+            assert pnpm["uses"].startswith("pnpm/action-setup@")
         installs = [
             step
             for step in steps
@@ -211,7 +226,7 @@ def test_the_nightly_verdict_is_its_own_leg_reading_junit_only() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
     verdict = jobs["verdict"]
 
-    assert verdict["needs"] == ["measure-backend", "measure-e2e"]
+    assert verdict["needs"] == ["measure-static", "measure-backend", "measure-e2e"]
     assert verdict["if"] == "always() && !cancelled()"
     download = _step(verdict["steps"], "Download shard junit results")
     assert download["with"]["pattern"] == "verdict-junit-*"
@@ -224,17 +239,20 @@ def test_the_nightly_verdict_is_its_own_leg_reading_junit_only() -> None:
 def test_the_duration_leg_still_publishes_without_the_verdict() -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
 
-    assert jobs["publish"]["needs"] == ["plan", "measure-backend", "measure-e2e"]
+    assert jobs["publish"]["needs"] == [
+        "plan",
+        "measure-static",
+        "measure-backend",
+        "measure-e2e",
+    ]
 
 
-@pytest.mark.parametrize("suite", ["backend", "e2e"])
+@pytest.mark.parametrize("suite", ["static", "backend", "e2e"])
 def test_each_measured_shard_hands_the_verdict_its_first_attempt_results(suite: str) -> None:
     jobs = _yaml(_WORKFLOW)["jobs"]
     measure = _step(jobs[f"measure-{suite}"]["steps"], f"Measure {suite} shard")
 
-    assert (
-        f'--junit-xml "$RUNNER_TEMP/verdict/{suite}-${{{{ matrix.group }}}}.xml"' in measure["run"]
-    )
+    assert f"verdict/{suite}-${{{{ matrix.group }}}}.xml" in measure["run"]
     upload = _step(jobs[f"measure-{suite}"]["steps"], f"Upload {suite} test results")
     assert upload["if"] == "always()"
     assert upload["with"]["name"] == f"verdict-junit-{suite}-${{{{ matrix.group }}}}"

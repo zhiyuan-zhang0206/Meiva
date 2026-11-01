@@ -216,7 +216,7 @@ jobs:
         run: |
           if [ "$EVENT" != "pull_request" ]; then
             {
-              echo "static_groups=[1, 2, 3, 4]"
+              echo "static_groups=[1, 2, 3, 4, 5, 6, 7, 8]"
               echo "run_serial=true"
               echo "run_pgvector_smoke=true"
               echo "run_helper_smoke=true"
@@ -264,7 +264,7 @@ jobs:
                   return False
 
               full_fanout = mode != "enforce" or decision != "SELECTED"
-              static_groups = "[1]" if decision == "SELECTED" else "[1, 2, 3, 4]"
+              static_groups = "[1]" if decision == "SELECTED" else "[1, 2, 3, 4, 5, 6, 7, 8]"
               run_serial = (
                   full_fanout
                   or any(
@@ -306,7 +306,7 @@ jobs:
               )
           except Exception as exc:
               print(f"::warning::Optional backend lane selector failed ({type(exc).__name__}); running all lanes")
-              static_groups = "[1, 2, 3, 4]"
+              static_groups = "[1, 2, 3, 4, 5, 6, 7, 8]"
               run_serial = True
               run_pgvector_smoke = True
               run_helper_smoke = True
@@ -448,8 +448,6 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
 
       - name: Install Gitleaks
         run: |
@@ -463,10 +461,41 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
-            if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
-              base="$(git rev-parse --verify HEAD^1)"
+            resolve_pr_base() {
+              if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+                if git merge-base HEAD^1 HEAD^2 >/dev/null 2>&1; then
+                  git rev-parse --verify HEAD^1 || true
+                fi
+              elif git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+                git merge-base "$BASE_SHA" HEAD || true
+              fi
+            }
+            range_is_complete() {
+              local candidate="$1"
+              [ -n "$candidate" ] || return 1
+              git merge-base --is-ancestor "$candidate" HEAD 2>/dev/null || return 1
+              local shallow_file
+              shallow_file="$(git rev-parse --git-path shallow)"
+              if [ -f "$shallow_file" ] && git rev-list "${candidate}..HEAD" | grep -Fxqf "$shallow_file"; then
+                return 1
+              fi
+              return 0
+            }
+            if [ -n "$BASE_SHA" ]; then
+              git fetch --no-tags --depth=64 origin "$(git rev-parse HEAD)" "$BASE_SHA"
             else
-              base="$(git merge-base "$BASE_SHA" HEAD)"
+              git fetch --no-tags --depth=64 origin "$(git rev-parse HEAD)"
+            fi
+            base="$(resolve_pr_base)"
+            if ! range_is_complete "$base"; then
+              if [ -n "$BASE_SHA" ] && [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+                git fetch --no-tags --unshallow origin "$BASE_SHA"
+              elif [ -n "$BASE_SHA" ]; then
+                git fetch --no-tags origin "$BASE_SHA"
+              elif [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+                git fetch --no-tags --unshallow origin
+              fi
+              base="$(resolve_pr_base)"
             fi
             : "${base:?unable to resolve base commit for pull request}"
             echo "scanning ${base}..HEAD"
@@ -794,7 +823,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: ${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4]') }}
+        group: ${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4, 5, 6, 7, 8]') }}
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -877,7 +906,7 @@ jobs:
             uv run pytest "${base_args[@]}" "${static_targets[@]}"
           else
             uv run pytest "${base_args[@]}" \
-              --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration \
+              --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration \
               --cov=agent --cov=meiva --cov=cli --cov=gateway --cov=base --cov=ui \
               --cov=ops --cov=services --cov=meiva_builtins
           fi
@@ -1772,7 +1801,7 @@ jobs:
     needs: [classify, backend-static, backend-static-tests, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke, host-marks]
     if: ${{ !cancelled() && (needs.classify.result == 'failure' || (needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success'))) }}
     env:
-      COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 serial static-1 static-2 static-3 static-4"
+      COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 serial static-1 static-2 static-3 static-4 static-5 static-6 static-7 static-8"
     steps:
       - name: Verify backend job results
         env:
@@ -1883,7 +1912,7 @@ jobs:
       contents: read
       actions: read
     env:
-      COUNT_GROUPS: "1 2 3 4 5 6 7 8 serial static-1 static-2 static-3 static-4"
+      COUNT_GROUPS: "1 2 3 4 5 6 7 8 serial static-1 static-2 static-3 static-4 static-5 static-6 static-7 static-8"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
