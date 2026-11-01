@@ -103,6 +103,21 @@ def test_lifecycle_never_reads_profile(post: PublicGateway) -> None:
     assert post.requests[-1]["json"] == {"force": True}
 
 
+# meiva:note
+# The key is validated where `--source` is: a key the wire cannot carry never reaches a write.
+def test_send_rejects_a_client_message_id_the_wire_cannot_carry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.parsers import build_parser
+
+    with pytest.raises(SystemExit) as exit_info:
+        build_parser().parse_args(
+            ["agents", "send", "1", "hi", "--source", "user", "--client-message-id", "x" * 129]
+        )
+    assert exit_info.value.code == 2
+    assert "1 to 128 characters" in capsys.readouterr().err
+
+
 def test_send_requires_source_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
     from cli.parsers import build_parser
 

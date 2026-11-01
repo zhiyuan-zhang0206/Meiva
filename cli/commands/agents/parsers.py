@@ -36,6 +36,18 @@ def _validated_config_json(value: str) -> str:
 
 
 # meiva:note
+# Argparse type for `--client-message-id`: reject a key the wire contract cannot carry
+# before anything is sent.
+def _validated_client_message_id(value: str) -> str:
+    from base.api_contracts.idempotency import validate_idempotency_key
+
+    try:
+        return validate_idempotency_key(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+# meiva:note
 # Argparse type for `--message`: reject empty or whitespace-only explanations.
 def _nonblank_message(value: str) -> str:
     stripped = value.strip()
@@ -312,6 +324,7 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     agents_send_p.add_argument(
         "--client-message-id",
         default=None,
+        type=_validated_client_message_id,
         help="caller-owned key naming one message: repeating it with the same --source, "
         "target and text reports the original delivery instead of sending twice "
         "(another sender reusing it is another message)",
