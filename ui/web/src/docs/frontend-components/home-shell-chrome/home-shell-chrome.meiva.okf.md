@@ -34,25 +34,14 @@ label read on every glance, so it reads in the Inspector's Liveness section besi
 model
 ([[ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md|shared context]]).
 
-## The bottom band
+## The bottom rules
 
-Every home column ends with the same band: a 1px rule, 12px (`pt-3`), one 36px
-control row, 24px (`pb-6`) — 73px in all (`BOTTOM_BAND_CLASS` +
-`BOTTOM_BAND_ROW_CLASS`, `BOTTOM_BAND_HEIGHT_PX` in
-`lib/layout/primitives/bars.ts`), giving the composer comfortable bottom
-viewport clearance while keeping the sidebar footer and the composer on one
-horizontal line across the bottom of the screen (user ruling 2026-10-29 &
-2026-10-31). The bands are bottom-anchored, so equal band heights are what make
-the rules equal; a column may not compose its own padding for this row.
+The sidebar footer and the composer each end their column with a rule of their
+own; the two are independent and never aligned by design. Their bands, their
+owners and the rulings behind them are in
+[[ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md|Bottom rules]].
 
-The composer's band is content-sized: a multi-line draft, the context-meter row
-or an upload hint grows it upward, so its rule rises with them. The sidebar
-footer keeps the resting band (`BOTTOM_BAND_HEIGHT_PX`) and follows no other
-column's geometry: the two rules are one line at rest, and only at rest (user
-report 2026-10-29 replaced the day the footer tracked the composer's published
-height).
-
-Above the rule, the gap between the last message row and the line is split
+Above the composer's rule, the gap between the last message row and the line is split
 between the list (`pb-6`, 24px) and the composer (`pt-0.5`, 2px) — 26px in all,
 giving the final agent message or Live Activity Window clear breathing room
 above the input bar (user ruling 2026-10-31). The list's share reaches the rule

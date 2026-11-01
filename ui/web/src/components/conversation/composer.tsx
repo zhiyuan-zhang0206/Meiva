@@ -39,13 +39,22 @@ import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import {
-  BOTTOM_BAND_CLASS,
-  BOTTOM_BAND_ROW_CLASS,
   FLEX,
   FLEX_1,
   FLEX_COL,
   MIN_W_0,
 } from "@/lib/layout/layout";
+
+// meiva:note
+// The composer's own bottom band: a 1px rule, 12px (`pt-3`), the control row,
+// 24px (`pb-6`) of viewport clearance (user ruling 2026-10-31) — 73px at rest.
+// The control row's minimum is the composer's own 36px controls (the `size-9`
+// upload button and the `min-h-9` textarea). The band belongs to the composer
+// alone: the sidebar footer draws a rule of its own, and the two are never
+// aligned by design (user ruling 2026-11-01).
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
+const COMPOSER_BAND_CLASS = "border-t border-border pt-3 pb-6";
+const COMPOSER_BAND_ROW_CLASS = "min-h-9";
 
 export type ComposerMode = "disabled" | "idle" | "busy";
 
@@ -405,8 +414,8 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
       // The 2026-10-29 ruling set 10px; the user read that line as too airy the
       // same day. Everything below the rule is the band, and
       // the band is content-sized: it grows upward with the draft, so its rule
-      // moves. The sidebar footer keeps the resting band height instead of
-      // following this one (user report 2026-10-29).
+      // moves. No other column follows it: the sidebar footer's rule is its
+      // own and never aligned with this one (user rulings 2026-10-29, 2026-11-01).
       // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
       className={cn(
         "mx-auto w-full px-4 pt-0.5 transition-colors",
@@ -416,7 +425,7 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
     >
       <div
         data-testid="composer-band"
-        className={cn("gap-2", BOTTOM_BAND_CLASS, FLEX, FLEX_COL)}
+        className={cn("gap-2", COMPOSER_BAND_CLASS, FLEX, FLEX_COL)}
       >
       <ComposerMetaRow
         commandHint={commandHint}
@@ -452,7 +461,7 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
           onSelect={runCommand}
           onOpenChange={handleAutocompleteOpenChange}
         />
-        <div className={cn("gap-2 items-end", BOTTOM_BAND_ROW_CLASS, FLEX)}>
+        <div className={cn("gap-2 items-end", COMPOSER_BAND_ROW_CLASS, FLEX)}>
         {children}
         <Textarea
           ref={taRef}

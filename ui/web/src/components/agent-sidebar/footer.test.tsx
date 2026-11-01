@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { fakeNavigation, navigationWrapper } from "@/lib/browser/navigation/testing";
 import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
-import { BOTTOM_BAND_CLASS, BOTTOM_BAND_ROW_CLASS, ICON_SIZE_CLASS } from "@/lib/layout/layout";
+import { ICON_SIZE_CLASS } from "@/lib/layout/layout";
 
 import { SidebarFooter } from "./footer";
 import { WallClockProvider } from "@/lib/transport/transport-context";
@@ -62,31 +62,27 @@ describe("SidebarFooter icon row", () => {
   });
 
   // meiva:note
-  // The footer keeps the resting band whatever the composer does: the composer's
-  // rule rises with a multi-line draft, and a divider that followed it read as
-  // its own apparatus (user report 2026-10-29).
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
-  it("keeps the resting band height instead of tracking the composer", () => {
+  // The footer's rule is its own and never aligned with the composer's (user
+  // ruling 2026-11-01): it neither tracks the composer's measured height (user
+  // report 2026-10-29 — a divider that followed the composer's line read as its
+  // own apparatus) nor borrows the composer's band (its `pt-3 pb-6` padding and
+  // `min-h-9` control row), which would make the footer's rule derive from the composer's.
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
+  it("keeps its own band height instead of tracking the composer", () => {
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const footer = screen.getByTestId("sidebar-footer");
     expect(footer.style.minHeight).toBe("");
     expect(footer.style.getPropertyValue("--composer-band-height")).toBe("");
   });
 
-  it("draws the shared bottom band, not a padding of its own", () => {
-    // meiva:note
-    // The footer's rule is the bottom rule of the screen: it must be the same
-    // band the composer draws, or the two land on different y (user ruling
-    // 2026-10-29 — they were 16px apart). Its padding box is the same 36px
-    // control row the composer's controls sit in.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  it("draws the sidebar's own compact band, not the composer's", () => {
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const footer = screen.getByTestId("sidebar-footer");
-    expect(footer.className).toContain(BOTTOM_BAND_CLASS);
-    expect(footer.className.split(" ")).toContain("border-t");
-    expect(footer.className).not.toContain("py-1.5");
+    const classes = footer.className.split(" ");
+    for (const cls of ["border-t", "pt-2", "pb-3"]) expect(classes).toContain(cls);
+    for (const cls of ["pt-3", "pb-6"]) expect(classes).not.toContain(cls);
     const row = footer.firstElementChild!;
-    expect(row.className).toContain(BOTTOM_BAND_ROW_CLASS);
+    expect(row.className.split(" ")).not.toContain("min-h-9");
   });
 
   it("puts every row glyph on the one shell icon size", () => {

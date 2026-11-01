@@ -78,7 +78,7 @@ with 52px (44px bar + 8px clearance, derived from `BAR_HEIGHT_PX`; user ruling
 2026-08-06) so a bar-height change cannot slide the first row underneath it. The
 composer stack lives in normal flow below the surface (user ruling 2026-08-06),
 separated from the last message row by `pb-6` + `pt-0.5` (26px) and from the
-bottom viewport edge by `BOTTOM_BAND_CLASS` (`pb-6`), and shares the same column
+bottom viewport edge by its own band's `pb-6`, and shares the same column
 cap with one `undefined`-means-full-width convention on narrow viewports.
 
 
