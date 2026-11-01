@@ -1,13 +1,13 @@
-"""Liveness + system status panel + dashboard endpoints.
-
-- `/api/health` — liveness probe (public allowlist; pings DB)
-- `/api/stats/dashboard` — sidebar stats card
-- `/api/status` — services / shells / cluster panel
-
-Cluster probe sub-fan-out lives here because /api/status is the
-consumer; agent-runner probes go through a `status_probe` op
-round-trip so it stays at constant wall-time regardless of N machines.
-"""
+# meiva:note
+# Liveness + system status panel + dashboard endpoints.
+# - `/api/health` — liveness probe (public allowlist; pings DB)
+# - `/api/stats/dashboard` — sidebar Status popover
+# - `/api/status` — services / shells / cluster panel
+#
+# Cluster probe sub-fan-out lives here because /api/status is the
+# consumer; agent-runner probes go through a `status_probe` op
+# round-trip so it stays at constant wall-time regardless of N machines.
+# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
 
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ router.add_api_route("/api/health", get_health, methods=["GET"], response_model=
 
 @router.get(
     "/api/stats/dashboard",
-    description="Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
 )
 def get_stats_dashboard(
     request: Request,
@@ -180,7 +180,7 @@ def _compute_stats_dashboard(
 
 
 # meiva:note
-# The runtime values behind plugin-declared statistics cards, for the response.
+# The runtime values behind plugin-declared status cards, for the response.
 # Not windowed: a plugin value is a point in time (`PluginStat`), and the console
 # joins these rows against `contributions.ui.stats` declarations by `(plugin, id)`.
 # meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md

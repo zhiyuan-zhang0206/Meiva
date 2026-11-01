@@ -53,7 +53,7 @@ launch deployments; a fleet update is the operator script `python -m cli.fleet_u
 
 ## `GET /api/stats/dashboard?hours=`
 
-Backs the stat cards at the top of the frontend sidebar in **one** round trip,
+Backs the status cards of the frontend sidebar's Status popover in **one** round trip,
 polled on one page-wide 30s cadence regardless of how many sidebar consumers
 are mounted. `hours` is the aggregation window, whitelisted to
 1 / 6 / 24 / 72 / 168 (default 24).

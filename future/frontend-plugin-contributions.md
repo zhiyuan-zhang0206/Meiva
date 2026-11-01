@@ -7,7 +7,7 @@ their plugin platform shipping). Status: **U1-U3 shipped** (plus the U1a
 themes end to end, and the plugin page mount + nav entries — plus the
 **inspector-widget registry** (task #2909, below): the host-rendered
 interactive lane, which is deliberately NOT a `contributions.ui` key — and
-**U6 shipped**: statistics-panel cards (declaration + value halves). The
+**U6 shipped**: status-panel cards (declaration + value halves). The
 remaining slices are at the bottom.
 
 ## Why now
@@ -159,7 +159,7 @@ panels, pet widgets) without growing the declaration vocabulary.
 |---|---|---|
 | `agentInspect` section | `{title, source, render: markdown\|kv\|table\|page}` | appends a section to the agent-inspect view (`gateway/inspect/router.py` feeds it); `source` is a path under the plugin's mount, fetched through the proxy and rendered by a generic markdown/kv/table renderer; `render: page` embeds the iframe with `?agent_id=` |
 | `nav` entry | `{location: sidebar\|settings\|fleet-toolbar, label, icon, page}` | a nav entry opening the plugin's page in an iframe |
-| `stat` card | `{id, label}` | one card in the sidebar Statistics panel; the declaration carries identity + label, the value is runtime data the plugin writes into `plugin_stats` keyed by `plugin/id` (see U6 below) |
+| `stat` card | `{id, label}` | one card in the sidebar status panel; the declaration carries identity + label, the value is runtime data the plugin writes into `plugin_stats` keyed by `plugin/id` (see U6 below) |
 | `theme` | `{name, tokens, darkTokens?}` | registers a skin — see below |
 | metrics / config | *no declaration* | already-automatic surfaces (below) |
 
@@ -377,7 +377,7 @@ composer/plugin extension point.
   plugin's own mount).
 - **U5 — bless the API**: serve `openapi.json` from the gateway + the
   `docs/conventions/` contract page with the stability statement (Lane 1).
-- **U6 — statistics-panel cards** — **shipped, declaration + values** (task
+- **U6 — status-panel cards** — **shipped, declaration + values** (task
   #2911): `contributions.ui.stats` declares cards (`{id, label}`; the id keys
   the plugin's value row and must survive as a `plugin_stats` primary key),
   `GET /api/ui/contributions` carries them attributed, and

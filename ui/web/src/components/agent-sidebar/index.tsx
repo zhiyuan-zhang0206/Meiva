@@ -226,9 +226,6 @@ function DesktopSidebar(props: DesktopProps) {
         }
       />
       <SidebarBody {...props} wide />
-      {/* Fixed bottom strip (user ruling 2026-08-05): Statistics popover +
-          the four nav shortcuts (Memory Graph / Fleet / Insights / Control)
-          live here — the spot an app's avatar row would occupy. */}
       <SidebarFooter activeAgentId={props.activeId} />
     </aside>
   );

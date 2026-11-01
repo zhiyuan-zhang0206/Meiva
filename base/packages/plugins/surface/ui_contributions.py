@@ -1,39 +1,26 @@
-"""`contributions.ui` — the declarative console-contribution schema (slice U1).
-
-Design: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md).
-A plugin contributes to the web console as **data**: agent-inspect sections,
-nav entries, statistics-panel cards, and theme token packs that the console's
-own generic components render. A stat card is a declaration (identity and
-label); its value is runtime data the plugin writes through
-`base/plugin_stats`, never part of the manifest. The frontend never executes third-party JavaScript as part of its own
-composition, so every field validated here is a closed-set enum, a relative
-path the gateway proxies, or a CSS color literal — nothing that can carry
-behavior into the app bundle.
-
-Declaration only, exactly like the shipped validator slices of plugin spec v2:
-nothing in this module renders, mounts, or serves anything. The aggregation
-endpoint, the page proxy, and the renderers are slices U2-U4. And like
-`skills`/`commands`, UI contributions are consumed straight from the manifest
-with no runtime `register_*` call, so the declared-vs-registered diff over
-`base/packages/plugins/contributions.py` has no registered side to compare against.
-
-Three vocabularies are closed, each for its own reason:
-
-- `THEME_TOKENS` — the console's own custom properties
-  (`ui/web/src/app/globals.css` `:root`). A skin re-values existing tokens; it
-  cannot invent one, and it cannot ship a selector or a rule. That is what
-  makes a skin survive UI refactors (the token layer is the stable interface,
-  component markup is not) and incapable of injecting layout or behavior.
-  `base/packages/plugins/tests/test_ui_contributions.py` locks the tuple against the
-  stylesheet, so a token added to the console fails the suite until it is
-  either offered to skins or listed as deliberately non-themable.
-- `NAV_ICONS` — lucide icon names, i.e. data rather than markup: the frontend
-  maps a name onto a component it already imports, so an unknown name has to
-  be a validator error instead of a blank nav row.
-- `UI_KEYS` / `INSPECT_RENDERERS` / `NAV_LOCATIONS` — v1 closed sets. Adding a
-  contribution type is a deliberate change to this file *and* to the component
-  that renders it; this is not an extension point.
-"""
+# meiva:link future/frontend-plugin-contributions.md
+# meiva:note
+# `contributions.ui` — the declarative console-contribution schema (slice U1).
+# A plugin contributes to the web console as data: agent-inspect sections,
+# nav entries, status-panel cards, and theme token packs that the console's
+# own generic components render. A status card is a declaration (identity and
+# label); its value is runtime data the plugin writes through
+# `base/plugin_stats`, never part of the manifest. The frontend never executes third-party JavaScript as part of its own
+# composition, so every field validated here is a closed-set enum, a relative
+# path the gateway proxies, or a CSS color literal — nothing that can carry
+# behavior into the app bundle.
+#
+# Declaration only, exactly like the shipped validator slices of plugin spec v2:
+# nothing in this module renders, mounts, or serves anything. The aggregation
+# endpoint, the page proxy, and the renderers are slices U2-U4. And like
+# `skills`/`commands`, UI contributions are consumed straight from the manifest
+# with no runtime `register_*` call, so the declared-vs-registered diff over
+# `base/packages/plugins/contributions.py` has no registered side to compare against.
+#
+# Three vocabularies are closed, each for its own reason:
+# - `THEME_TOKENS` — the console's own custom properties (`ui/web/src/app/globals.css` `:root`).
+# - `NAV_ICONS` — lucide icon names, i.e. data rather than markup.
+# - `UI_KEYS` / `INSPECT_RENDERERS` / `NAV_LOCATIONS` — v1 closed sets.
 
 from __future__ import annotations
 
@@ -179,10 +166,12 @@ NON_THEMABLE_TOKENS = ("--radius",)
 
 _THEME_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
-# A stat card id. Same shape as a theme name, and the stricter spelling
+# meiva:note
+# A status card id. Same shape as a theme name, and the stricter spelling
 # matters for the same class of reason: the id is the (plugin, id) key of the
 # plugin's value row in `plugin_stats`, so a card whose id a writer cannot
 # reproduce renders as a permanently empty card instead of an error.
+# meiva:link future/frontend-plugin-contributions.md
 _STAT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 # Color literals a token value may take: the two forms the console's own token
@@ -335,18 +324,18 @@ def _validate_nav(value: object, errors: list[str]) -> list[dict[str, Any]]:
     return entries
 
 
+# meiva:note
+# `stats` — cards the status panel renders, in declaration order.
+# A card is identity + label only. The card's value is not declared here:
+# it is runtime data keyed by `(plugin, id)` in `plugin_stats`, written by
+# the plugin's own code and joined into the panel by the console. A card
+# with no value row renders as an explicit empty state, which is what makes
+# the declaration the right place for the card's existence — a machine with
+# the plugin installed but no credentials shows the card, not nothing.
+# meiva:link future/frontend-plugin-contributions.md
 def _validate_stats(value: object, errors: list[str]) -> list[dict[str, Any]]:
-    """`stats` — cards the Statistics Panel renders, in declaration order.
-
-    A card is identity + label only. The card's value is not declared here:
-    it is runtime data keyed by `(plugin, id)` in `plugin_stats`, written by
-    the plugin's own code and joined into the panel by the console. A card
-    with no value row renders as an explicit empty state, which is what makes
-    the declaration the right place for the card's existence — a machine with
-    the plugin installed but no credentials shows the card, not nothing.
-    """
     if not _is_any_list(value):
-        errors.append("contributions.ui.stats: expected a list of stat cards")
+        errors.append("contributions.ui.stats: expected a list of status cards")
         return []
     cards: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -363,7 +352,7 @@ def _validate_stats(value: object, errors: list[str]) -> list[dict[str, Any]]:
             )
             continue
         if raw_id in seen:
-            errors.append(f"{what}.id: duplicate stat card {raw_id!r}")
+            errors.append(f"{what}.id: duplicate status card {raw_id!r}")
             continue
         label = _non_empty_str(data["label"], f"{what}.label", errors)
         if label is None:

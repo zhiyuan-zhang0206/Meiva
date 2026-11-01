@@ -7,6 +7,6 @@
 "footer.tsx" = ["icon-button.tsx", "links.ts"]
 "index.tsx" = ["body.tsx", "footer.tsx", "header.tsx", "icon-button.tsx", "links.ts", "search-overlay.tsx", "settings-popover.tsx", "spawn-popover.tsx", "types.ts"]
 "settings-popover.tsx" = ["icon-button.tsx"]
-"sidebar-stats-cards.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
+"sidebar-status-cards.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
 "sidebar-tree-and-search.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
 "spawn-popover.tsx" = ["icon-button.tsx"]

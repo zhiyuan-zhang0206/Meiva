@@ -202,21 +202,34 @@ class StatsTokens(BaseModel):
 PluginStatStatus = Literal["ok", "warn", "error"]
 
 
+# meiva:note
+# One declared status-panel card's current value (task #2911).
+# The declaration half (existence, label) arrives via
+# `GET /api/ui/contributions` (`UiStatContribution`); this is the runtime
+# half, keyed by `(plugin, id)` and joined against the declaration by the
+# console. Values are NOT windowed: the window selector governs the
+# console's own aggregates, while a usage meter's "current" is a
+# point-in-time fact and would be meaningless averaged over a horizon.
+# `updated_at` is when the plugin last wrote the row — the console renders
+# its age, so a refresh that stopped running cannot pass for a fresh value.
+# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
 class PluginStat(BaseModel):
-    """One declared statistics-panel card's current value (task #2911).
-
-    The declaration half (existence, label) arrives via
-    `GET /api/ui/contributions` (`UiStatContribution`); this is the runtime
-    half, keyed by `(plugin, id)` and joined against the declaration by the
-    console. Values are NOT windowed: the window selector governs the
-    console's own aggregates, while a usage meter's "current" is a
-    point-in-time fact and would be meaningless averaged over a horizon.
-
-    `updated_at` is when the plugin last wrote the row — the console renders
-    its age, so a refresh that stopped running cannot pass for a fresh value.
-    """
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": (
+                "One declared status-panel card's current value (task #2911).\n\n"
+                "The declaration half (existence, label) arrives via\n"
+                "`GET /api/ui/contributions` (`UiStatContribution`); this is the runtime\n"
+                "half, keyed by `(plugin, id)` and joined against the declaration by the\n"
+                "console. Values are NOT windowed: the window selector governs the\n"
+                "console's own aggregates, while a usage meter's \"current\" is a\n"
+                "point-in-time fact and would be meaningless averaged over a horizon.\n\n"
+                "`updated_at` is when the plugin last wrote the row — the console renders\n"
+                "its age, so a refresh that stopped running cannot pass for a fresh value."
+            )
+        },
+    )
 
     plugin: str
     id: str
@@ -227,44 +240,48 @@ class PluginStat(BaseModel):
     updated_by: str | None
 
 
+# meiva:note
+# GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.
+# All windowed fields aggregate over the applied_window_hours horizon.
+# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
 class StatsDashboard(BaseModel):
-    """GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.
-
-    All windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /
-    `warnings` / `errors`) aggregate over the `applied_window_hours` horizon.
-    `window_hours` echoes the selected value — `0` means five minutes; all
-    other values are hours.
-    `applied_window_hours` is the served window in hours: the requested one.
-
-    - `live_count`: current non-terminated count (from agents_meta, not
-      events; not windowed)
-    - `tokens`: windowed telemetry LLM token usage
-    - `cost_usd`: windowed LLM spend in USD, summed from the usage-time
-      `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;
-      events that pre-date the snapshot field contribute 0
-    - `avg_turn_seconds`: windowed avg LLM call wall time
-      (event=turn_end + ok=true)
-    - `warnings` / `errors`: raw event totals over the window (critical
-      folds into error). Agent trial-and-error (exec_failed) logs at INFO
-      and is deliberately NOT counted — these numbers are operator-facing
-      alerts, not agent activity.
-    - `alert_classes_active` / `alert_classes_dismissed`: how many distinct
-      (level, event_name, source, process) warning/error classes the window
-      holds, split by whether an active dismissal in `event_dismissals`
-      cancels the class — exact, or a wildcard row with an empty `process`.
-      The sidebar card shows `alert_classes_active`; the classes themselves
-      are `GET /api/stats/alert-classes`, which reads the same rows.
-
-    `avg_turn_seconds` None = zero turns in the window (new DB / no
-    activity); frontend renders "—".
-
-    `plugin_stats` is not windowed (see `PluginStat`): the runtime values
-    behind cards that plugins declare under `contributions.ui.stats`, joined
-    by the console on `(plugin, id)`.
-
-    `as_of` is the UTC time the payload's reads were assembled."""
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": (
+                "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\n"
+                "All windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n"
+                "`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n"
+                "`window_hours` echoes the selected value — `0` means five minutes; all\n"
+                "other values are hours.\n"
+                "`applied_window_hours` is the served window in hours: the requested one.\n\n"
+                "- `live_count`: current non-terminated count (from agents_meta, not\n"
+                "  events; not windowed)\n"
+                "- `tokens`: windowed telemetry LLM token usage\n"
+                "- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n"
+                "  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n"
+                "  events that pre-date the snapshot field contribute 0\n"
+                "- `avg_turn_seconds`: windowed avg LLM call wall time\n"
+                "  (event=turn_end + ok=true)\n"
+                "- `warnings` / `errors`: raw event totals over the window (critical\n"
+                "  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n"
+                "  and is deliberately NOT counted — these numbers are operator-facing\n"
+                "  alerts, not agent activity.\n"
+                "- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n"
+                "  (level, event_name, source, process) warning/error classes the window\n"
+                "  holds, split by whether an active dismissal in `event_dismissals`\n"
+                "  cancels the class — exact, or a wildcard row with an empty `process`.\n"
+                "  The sidebar card shows `alert_classes_active`; the classes themselves\n"
+                "  are `GET /api/stats/alert-classes`, which reads the same rows.\n\n"
+                "`avg_turn_seconds` None = zero turns in the window (new DB / no\n"
+                'activity); frontend renders "—".\n\n'
+                "`plugin_stats` is not windowed (see `PluginStat`): the runtime values\n"
+                "behind cards that plugins declare under `contributions.ui.stats`, joined\n"
+                "by the console on `(plugin, id)`.\n\n"
+                "`as_of` is the UTC time the payload's reads were assembled."
+            )
+        },
+    )
 
     live_count: NonNegativeInt
     window_hours: StatsWindowHours

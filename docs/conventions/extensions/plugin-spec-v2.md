@@ -428,7 +428,7 @@ agent hooks. A slow account API must not delay an agent's initialization,
 inbound claim, or execution. Declare a periodic collector in `services.py`
 through `ServiceSpec`; it publishes shared `plugin_stats` rows even while agents
 are idle or paused. Hosts read their own credentials and never copy tokens into
-agent state or the shared statistics table.
+agent state or the shared `plugin_stats` table.
 
 An external plugin may keep its protocol health probes in `services.py` and set
 `healthcheck_module=__name__`. Ops registers that exact module before executing

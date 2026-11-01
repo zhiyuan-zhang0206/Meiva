@@ -8,7 +8,7 @@ tags: [frontend]
 # Inspector Panel
 
 `components/inspector/inspector-panel.tsx` — the single-agent counterpart of the
-sidebar's fleet-wide stats card. Only the selected agent is read, only while the
+sidebar's cluster-wide Status popover. Only the selected agent is read, only while the
 panel is open; current state, window statistics and plugin widgets load and fail
 independently ([[ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md|reads and refresh]]),
 and each section's own rendering facts live in

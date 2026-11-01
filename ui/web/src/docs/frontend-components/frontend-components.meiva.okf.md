@@ -31,9 +31,9 @@ rows, attachment presentation and keyboard handling stay in `composer-helpers.ts
 - **HeaderBar** / **ConnectionNotice** / **PendingStrip** — current-agent title, the PanelLeft sidebar toggle (carrying the unresolved-alert count while the sidebar is collapsed, nothing at zero) and, on desktop with an agent, the PanelRight context toggle; the composer has no Details affordance — the tri-state All / Last / None lives only in Display settings → Timeline (`/control#display-timeline`), one `display.expand_runs_mode` row (`lib/layout/content-toggle-store.ts`, DB-backed, synced across devices); the inline SSE connection notice; the strip lists only user-originated queued messages — an agent message, a watcher / shell / schedule wake or a system note never appears (the gateway stamps each row's `sender`, a closed category of its `source` tag, so the frontend selects without parsing tags) — and hides messages the timeline already shows (a takeover-captured row stays pending until the executor's ACK). There is no React updating component/state: update hints reload through the always-up Gate, which solely renders maintenance. **CopyButton** (`copy-button.tsx` + `lib/clipboard.ts`)—corner copy for a code block whose surface offers it (the timeline's tool-call and tool-output blocks turn it off); `execCommand` fallback when Clipboard API fails.
 - **SpawnButton** — cross-machine placement, model and effort selection, mounted in the create popover and the empty-roster CTA; placement and selected-agent reason: [[ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md|Creation Availability]].
 
-Warnings / Errors stats card: [[ui/web/src/docs/frontend-components/alert-classes.meiva.okf.md|Warning and Error Counts]].
+Warnings / Errors status card: [[ui/web/src/docs/frontend-components/alert-classes.meiva.okf.md|Warning and Error Counts]].
 
-Plugin statistics use full-width rows: primary `value`, secondary `detail`,
+Plugin status cards use full-width rows: primary `value`, secondary `detail`,
 both wrap and preserve line breaks. No provider parsing. The sidebar popover
 fits the viewport and scrolls within available height; empty/error/stale states
 and update-age tooltips remain.

@@ -1,29 +1,30 @@
-"""Wire models of the extension surfaces: the cross-machine plugin + MCP
-enable matrix (`/api/inventory`), the installed-skills panel (`/api/skills`),
-and the console contribution aggregate (`/api/ui/contributions`).
-
-Skills are a single-host, gateway-local read: this host's `$MEIVA_HOME/skills/`
-load dir correlated with the install registry (`installed.json`). Skills are
-per-machine (the registry is machine-local; there is no cluster-shared row), so
-unlike the cross-machine plugin/MCP inventory this is not a `?machine=` matrix.
-
-The contribution aggregate is the wire form of what the cluster's enabled
-plugins declare under `contributions.ui` (`base/packages/plugins/surface/ui_contributions.py`).
-Every entry is name-attributed: the console labels provenance, and an operator
-tracing a surface back to the plugin that put it there reads one field. Themes,
-nav entries, and statistics-panel cards today — the slice that carries
-agent-inspect sections adds its own array beside these (additive, so an
-alternative frontend built against today's spec keeps working).
-
-FastAPI registers these unchanged, so the OpenAPI codegen is byte-identical to
-the wire before.
-"""
+# meiva:note
+# Wire models of the extension surfaces: the cross-machine plugin + MCP
+# enable matrix (`/api/inventory`), the installed-skills panel (`/api/skills`),
+# and the console contribution aggregate (`/api/ui/contributions`).
+#
+# Skills are a single-host, gateway-local read: this host's `$MEIVA_HOME/skills/`
+# load dir correlated with the install registry (`installed.json`). Skills are
+# per-machine (the registry is machine-local; there is no cluster-shared row), so
+# unlike the cross-machine plugin/MCP inventory this is not a `?machine=` matrix.
+#
+# The contribution aggregate is the wire form of what the cluster's enabled
+# plugins declare under `contributions.ui` (`base/packages/plugins/surface/ui_contributions.py`).
+# Every entry is name-attributed: the console labels provenance, and an operator
+# tracing a surface back to the plugin that put it there reads one field. Themes,
+# nav entries, and status-panel cards today — the slice that carries
+# agent-inspect sections adds its own array beside these (additive, so an
+# alternative frontend built against today's spec keeps working).
+#
+# FastAPI registers these unchanged, so the OpenAPI codegen is byte-identical to
+# the wire before.
+# meiva:link future/frontend-plugin-contributions.md
 
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class InventoryItemHostState(BaseModel):
@@ -183,16 +184,29 @@ class UiNavContribution(BaseModel):
     page: str
 
 
+# meiva:note
+# One status-panel card a plugin declares.
+# Declaration only: the card's existence and label. Its value is runtime
+# data keyed by `(plugin, id)` in `plugin_stats` (written by the plugin's own
+# refresh code, read through `GET /api/stats/dashboard`), and the panel joins
+# the two halves on `(plugin, id)`. A declared card with no value row is an
+# explicit empty state — a card can exist on a machine whose credentials do
+# not, which is the case this split exists to serve.
+# meiva:link future/frontend-plugin-contributions.md
 class UiStatContribution(BaseModel):
-    """One statistics-panel card a plugin declares.
-
-    Declaration only: the card's existence and label. Its value is runtime
-    data keyed by `(plugin, id)` in `plugin_stats` (written by the plugin's own
-    refresh code, read through `GET /api/stats/dashboard`), and the panel joins
-    the two halves on `(plugin, id)`. A declared card with no value row is an
-    explicit empty state — a card can exist on a machine whose credentials do
-    not, which is the case this split exists to serve.
-    """
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": (
+                "One status-panel card a plugin declares.\n\n"
+                "Declaration only: the card's existence and label. Its value is runtime\n"
+                "data keyed by `(plugin, id)` in `plugin_stats` (written by the plugin's own\n"
+                "refresh code, read through `GET /api/stats/dashboard`), and the panel joins\n"
+                "the two halves on `(plugin, id)`. A declared card with no value row is an\n"
+                "explicit empty state — a card can exist on a machine whose credentials do\n"
+                "not, which is the case this split exists to serve."
+            )
+        }
+    )
 
     plugin: str
     id: str

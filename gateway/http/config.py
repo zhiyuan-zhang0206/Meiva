@@ -231,7 +231,7 @@ class GatewayConfig:
     # (a nested checkout) deadlocks a pool this small, which is what a test sets it to.
     db_pool_max_size: int = 8
     # meiva:note
-    # The sidebar stats card, the alert-class list and the ops monitor read a window of
+    # The sidebar Status popover, the alert-class list and the ops monitor read a window of
     # `telemetry_events`; a read past this many milliseconds is cancelled and answered as a
     # retriable 503.
     stats_statement_timeout_ms: int = 8000
