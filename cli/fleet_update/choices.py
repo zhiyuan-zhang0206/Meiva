@@ -290,17 +290,27 @@ def _resolve_single_mode(
     return TargetRequest(target_mode="commit", commit_rev=rev), []
 
 
+# meiva:note
+# One target per invocation: the flags name at most one of `--channel`, `--release`,
+# `--track-branch` and `--new`. `--track-branch BRANCH --new SHA` is that one mode, the commit
+# supplying where the branch starts; every other pair names two targets and is refused.
 def _select_target_mode(
     channels: list[str], releases: list[str], branches: list[str], commits: list[str]
 ) -> tuple[str, list[str]] | None:
-    if channels and not (releases or branches or commits):
-        return "channel", channels
-    if releases and not (channels or branches or commits):
-        return "release", releases
-    if branches and not (channels or releases):
+    named = [
+        (mode, values)
+        for mode, values in (
+            ("channel", channels),
+            ("release", releases),
+            ("branch", branches),
+            ("commit", commits),
+        )
+        if values
+    ]
+    if len(named) == 1:
+        return named[0]
+    if {mode for mode, _ in named} == {"branch", "commit"}:
         return "branch", branches
-    if commits and not (channels or releases or branches):
-        return "commit", commits
     return None
 
 
