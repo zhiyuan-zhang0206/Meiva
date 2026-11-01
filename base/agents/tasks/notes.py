@@ -24,6 +24,8 @@ from base.clock import Clock
 
 
 # meiva:note
-# `note` as one stamped, newline-terminated line for `agent_tasks.results`, stamped `now`.
+# `note` as one stamped, double-newline-terminated block for `agent_tasks.results`, stamped `now`.
+# Each note ends with `\n\n` so that CommonMark Markdown renders consecutive notes as distinct
+# paragraphs instead of collapsing soft single newlines into spaces.
 def task_note_line(note: str, *, clock: Clock, now: datetime) -> str:
-    return f"{clock.format_timestamp(now)} {note}\n"
+    return f"{clock.format_timestamp(now)} {note}\n\n"
