@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
+import { announceBeforeCompactDisplayChange, captureCompactTransition, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
@@ -37,6 +37,86 @@ describe("continuous compact history", () => {
     expect(screen.getAllByText("recent reply")).toHaveLength(1);
     expect(container.querySelectorAll('[data-timeline-source="buffer"][data-display-rank="1"]')).not.toHaveLength(0);
     expect(container.querySelectorAll('[data-timeline-source="canonical"][data-item-id="1.0"]')).not.toHaveLength(0);
+  });
+  it("keeps a middle reply anchored without clamping when two tall tails re-key at intrinsic placeholder height", () => {
+    const preItems = [
+      makeItem({ item_id: "s1.prev.1.0", kind: "agent_chat", payload: "FIRST_REPLY" }),
+      makeItem({ item_id: "s1.prev.2.0", kind: "agent_chat", payload: "FIRST_TAIL" }),
+      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "sys" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "BETWEEN_REPLY" }),
+      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "BETWEEN_TAIL" }),
+    ];
+    const realHeights: Record<string, number> = {
+      "s1.prev.1.0": 45,
+      "s1.prev.2.0": 1158,
+      "0.0": 32,
+      "1.0": 45,
+      "2.0": 1158,
+    };
+    const { rerender } = render(<TimelineView items={preItems} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const rowHeight = (el: HTMLElement): number => {
+      const id = el.dataset.itemId ?? "";
+      const full = realHeights[id] ?? 80;
+      if (!el.classList.contains("timeline-item") || el.dataset.timelineSource !== "buffer") return full;
+      return el.style.contentVisibility === "visible" ? full : 80;
+    };
+    const renderedRows = (): HTMLElement[] =>
+      Array.from(viewport.querySelectorAll<HTMLElement>('[role="log"] > [data-virtual-group] > *'));
+    const totalScrollHeight = (): number =>
+      80 + renderedRows().reduce((sum, el) => sum + rowHeight(el), 0) + 24;
+    let currentScrollTop = 0;
+    const clampScrollTop = (): number => {
+      currentScrollTop = Math.max(0, Math.min(currentScrollTop, totalScrollHeight() - 613.5));
+      return currentScrollTop;
+    };
+    Object.defineProperty(viewport, "clientHeight", { value: 613.5, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { get: totalScrollHeight, configurable: true });
+    Object.defineProperty(viewport, "scrollTop", {
+      get: clampScrollTop,
+      set: (next: number) => {
+        currentScrollTop = Math.max(0, Math.min(next, totalScrollHeight() - 613.5));
+      },
+      configurable: true,
+    });
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) {
+        return { top: 56, bottom: 669.5, height: 613.5, left: 0, right: 800, width: 800, x: 0, y: 56, toJSON: () => ({}) };
+      }
+      const rows = renderedRows();
+      const idx = rows.indexOf(this);
+      if (idx >= 0) {
+        let docTop = 80;
+        for (let i = 0; i < idx; i += 1) docTop += rowHeight(rows[i]);
+        const h = rowHeight(this);
+        const top = 56 + docTop - clampScrollTop();
+        return { top, bottom: top + h, height: h, left: 0, right: 800, width: 800, x: 0, y: top, toJSON: () => ({}) };
+      }
+      return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) };
+    });
+    try {
+      viewport.scrollTop = totalScrollHeight();
+      act(() => {
+        viewport.dispatchEvent(new Event("scroll"));
+      });
+      viewport.scrollTop = 1040;
+      act(() => {
+        viewport.dispatchEvent(new Event("scroll"));
+      });
+      const findReply = () =>
+        viewport.querySelector<HTMLElement>('[data-virtual-group] [data-item-id="1.0"][data-display-rank="0"], [data-virtual-group] [data-item-id="1.0"][data-display-rank="1"]')!;
+      const beforeTop = findReply().getBoundingClientRect().top;
+      expect(beforeTop).toBe(331);
+      const nextBuffer = captureCompactTransition(preItems, null, 42, 1, false)!;
+      const postItems = [makeItem({ item_id: "0.0", kind: "system_prompt", payload: "new sys" })];
+      act(() => {
+        announceBeforeCompactDisplayChange({ items: preItems, buffer: null, rankShift: 1 });
+        rerender(<TimelineView items={postItems} compactBuffer={nextBuffer} />);
+      });
+      expect(findReply().getBoundingClientRect().top).toBe(beforeTop);
+    } finally {
+      rectSpy.mockRestore();
+    }
   });
   it("renders each segment in order without compact separators", () => {
     const items = [

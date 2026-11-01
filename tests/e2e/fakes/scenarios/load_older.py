@@ -11,7 +11,11 @@ def _turn(i: int) -> AIMessage:
     return AIMessage(
         content=[
             {"type": "thinking", "thinking": f"\u7b2c {i} \u6b65\u601d\u8003\u3002", "index": 0},
-            {"type": "text", "text": f"\u6267\u884c\u7b2c {i} \u6b65\u3002", "index": 1},
+            {
+                "type": "text",
+                "text": f"\u6267\u884c\u7b2c {i} \u6b65\u3002" + " step detail" * 40,
+                "index": 1,
+            },
         ],
         tool_calls=[
             {

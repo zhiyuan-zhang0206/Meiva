@@ -17,11 +17,11 @@ _SCRIPT = tuple(
     AIMessage(content=text, usage_metadata=_USAGE)
     for text in (
         FIRST_REPLY,
-        FIRST_TAIL + " filler" * 400,
+        FIRST_TAIL + " filler" * 800,
         "TRANSITION_FIRST_SUMMARY",
         FIRST_NARRATION,
         BETWEEN_REPLY,
-        BETWEEN_TAIL + " filler" * 400,
+        BETWEEN_TAIL + " filler" * 800,
         "TRANSITION_SECOND_SUMMARY",
         SECOND_NARRATION,
     )
