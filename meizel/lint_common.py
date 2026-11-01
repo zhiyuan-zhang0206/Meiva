@@ -248,6 +248,29 @@ def read_utf8_text(path: Path) -> str | None:
 
 
 # meiva:note
+# The frontend dependencies the analyzers load, addressed from this file so the message names a
+# path the reader can act on.
+_FRONTEND = Path(__file__).parents[1] / "ui" / "web"
+
+
+# meiva:note
+# Node reports a missing analyzer dependency as a module-not-found stack raised from `ui/web`,
+# which never says that the *checkout* lacks the dependencies. #8085 moved the frontend to pnpm,
+# so a worktree created outside `scripts/setup-worktree.sh` has no `ui/web/node_modules`, and
+# every Python-side hook then fails with a stack that reads like a regression in the change.
+# Name the fix instead of the stack.
+def _missing_frontend_dependencies(stderr: str) -> str | None:
+    if "Cannot find module 'typescript'" not in stderr and "MODULE_NOT_FOUND" not in stderr:
+        return None
+    return (
+        f"this checkout has no installed frontend dependencies in {_FRONTEND}, so the analyzer "
+        "cannot load the `typescript` the lockfile pins. Run `bash scripts/setup-worktree.sh` "
+        "inside this worktree (it installs ui/web with the lockfile), or run "
+        "`pnpm install --frozen-lockfile` in ui/web"
+    )
+
+
+# meiva:note
 # This I/O boundary starts one tool-owned analyzer with JSON stdin and bounded heap/time.
 # Successful fact production is not a semantic purity proof of the scanned code.
 # meiva:link meizel/docs/checker/typescript.meiva.okf.md
@@ -266,5 +289,8 @@ def run_node_analyzer(producer: Path, payload: str) -> str:
             f"TypeScript compiler unavailable: {error}; install Node and the tool's locked ui/web dependencies"
         ) from error
     if result.returncode != 0:
+        hint = _missing_frontend_dependencies(result.stderr)
+        if hint is not None:
+            raise MeizelError(f"TypeScript compiler failed: {hint}")
         raise MeizelError(f"TypeScript compiler failed: {result.stderr.strip()}")
     return result.stdout

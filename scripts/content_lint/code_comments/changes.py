@@ -166,7 +166,15 @@ def parse_blobs(root: Path, contents: dict[str, str]) -> dict[str, Source]:
             timeout=60,
         )
         if result.returncode:
-            raise ValueError(f"TypeScript blob parser failed: {result.stderr.strip()}")
+            stderr = result.stderr.strip()
+            if "Cannot find module 'typescript'" in stderr:
+                raise ValueError(
+                    "TypeScript blob parser failed: this checkout has no installed frontend "
+                    f"dependencies in {root / 'ui' / 'web'}, so the parser cannot load the "
+                    "`typescript` the lockfile pins. Run `bash scripts/setup-worktree.sh` inside "
+                    "this worktree, or `pnpm install --frozen-lockfile` in ui/web"
+                )
+            raise ValueError(f"TypeScript blob parser failed: {stderr}")
         sources.update(parsed_sources(result.stdout, scripts))
     return sources
 

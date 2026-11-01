@@ -216,3 +216,29 @@ def test_a_file_deleted_after_the_listing_is_skipped(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     (root / "app/gone.py").unlink()
     assert _regular(root) == {"app/keep.py"}
+
+
+# meiva:note
+# #8085 moved ui/web to pnpm, so a worktree created outside `scripts/setup-worktree.sh` has no
+# `node_modules` and the analyzer dies with a module-not-found stack that reads like a regression
+# in the change under test. The failure names the fix instead; any other analyzer failure keeps
+# its own message.
+def test_a_missing_analyzer_dependency_names_the_fix(tmp_path: Path) -> None:
+    producer = tmp_path / "producer.mjs"
+    producer.write_text("import 'no-such-analyzer-dependency';\n", encoding="utf-8")
+
+    with pytest.raises(lint_common.MeizelError) as caught:
+        lint_common.run_node_analyzer(producer, "{}")
+
+    assert "scripts/setup-worktree.sh" in str(caught.value)
+
+
+def test_an_analyzer_failure_keeps_its_own_message(tmp_path: Path) -> None:
+    producer = tmp_path / "producer.mjs"
+    producer.write_text("throw new Error('boom');\n", encoding="utf-8")
+
+    with pytest.raises(lint_common.MeizelError) as caught:
+        lint_common.run_node_analyzer(producer, "{}")
+
+    assert "scripts/setup-worktree.sh" not in str(caught.value)
+    assert "boom" in str(caught.value)
