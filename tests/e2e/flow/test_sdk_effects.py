@@ -125,15 +125,24 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
         agent, home=meiva_home(), name=world.UPLOAD_DIR_NAME, create=False
     )
     try:
+        staged_resp = httpx.post(
+            f"{GATEWAY_URL}/api/keyed/v1/agents/{agent}/uploads/staged",
+            headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
+            files={"file": (world.UPLOAD_NAME, world.UPLOAD_TEXT.encode(), "text/plain")},
+            timeout=30.0,
+        )
+        assert staged_resp.status_code == 201, staged_resp.text
+        staged = staged_resp.json()
+
         resp = httpx.post(
             f"{GATEWAY_URL}/api/keyed/v1/agents/{agent}/uploads",
             headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
-            files=[("files", (world.UPLOAD_NAME, world.UPLOAD_TEXT.encode(), "text/plain"))],
+            json={"file_ids": [staged["file_id"]], "text": ""},
             timeout=30.0,
         )
         assert resp.status_code == 202, resp.text
         accepted = resp.json()
-        saved = saved_dir / ".delivered-v1" / accepted["batch_id"] / accepted["files"][0]["name"]
+        saved = saved_dir / accepted["directory"] / accepted["files"][0]["name"]
 
         poll_until(
             lambda: (len(model_inputs(agent)) >= 2, len(model_inputs(agent))),
@@ -143,7 +152,7 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
         )
         calls = model_inputs(agent)
         announced = _human_text(calls[0])
-        assert accepted["batch_id"] in announced, announced[-500:]
+        assert accepted["directory"] in announced, announced[-500:]
         assert accepted["files"][0]["name"] in announced, announced[-500:]
         assert saved.read_text() == world.UPLOAD_TEXT
         assert f"upload-content {world.UPLOAD_TEXT}" in _last_tool(calls[1])

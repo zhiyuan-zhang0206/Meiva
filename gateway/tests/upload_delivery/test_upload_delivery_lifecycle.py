@@ -15,7 +15,8 @@ import psycopg
 import pytest
 
 from base.agents.upload_delivery import source, storage
-from base.agents.upload_delivery.models import NAMESPACE, UploadDeliveryConflictError
+from base.agents.upload_delivery.models import UploadDeliveryConflictError
+from base.agents.upload_delivery.paths import staged_path
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -36,6 +37,7 @@ from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     recovery_for,
     register_second_home,
     request_for,
+    stage,
 )
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     uploaded_agent as uploaded_agent,
@@ -43,11 +45,11 @@ from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
 from gateway.upload_delivery.worker import UploadRecovery
 
 
-@pytest.mark.parametrize("stage", ["before-link", "after-link"])
+@pytest.mark.parametrize("crash_stage", ["before-link", "after-link"])
 def test_hard_death_native_temp_not_double_charged_or_cleaned(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
-    stage: str,
+    crash_stage: str,
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
@@ -55,23 +57,22 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
     # Publication cannot start: the staging root is a file, so it cannot hold the agent's
     # directory (a fault that binds the root as well, unlike a permission bit). Nothing was
     # uploaded before this test, so no earlier request created the root.
-    staging = client.app.state.gateway_config.upload_staging_root
-    staging.write_text("not a directory")
-    assert post(client, agent).status_code == 500
-    staging.unlink()
-    row = db_conn.execute("SELECT manifest FROM upload_delivery_batches").fetchone()
+    staging_root = client.app.state.gateway_config.upload_staging_root
+    staging_root.write_text("not a directory")
+    assert stage(client, agent, key="hard-death").status_code == 500
+    staging_root.unlink()
+    row = db_conn.execute("SELECT file_id FROM upload_staged_files").fetchone()
     assert row is not None
-    manifest = source.Manifest.model_validate(row[0])
     directory = source.agent_upload_dir(
         agent, create=False, root=client.app.state.gateway_config.upload_staging_root
     ).resolve()
-    final = storage.object_path(directory, manifest, manifest.objects[0])
+    final = staged_path(directory, str(row[0]))
     result = subprocess.run(  # noqa: S603 -- fixed interpreter/script and isolated fixture arguments
         [
             sys.executable,
             str(Path(__file__).with_name("child_native_link_crash.py")),
             str(final),
-            stage,
+            crash_stage,
         ],
         env=dict(os.environ),
         check=False,
@@ -92,7 +93,7 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
             5,
             1,
         )
-    assert post(client, agent).status_code == 202
+    assert stage(client, agent, key="hard-death").status_code == 201
     assert final.read_bytes() == b"bytes"
     assert temps[0].exists()  # No orphan cleanup or inferred writer-dead takeover.
 
@@ -125,7 +126,7 @@ def test_hold_is_not_automatically_unsealed_by_late_copy_proof(
 
 @pytest.mark.parametrize(
     "directory",
-    ["relative", "/elsewhere", "/nowhere/workspaces/1/uploads/.delivered-v1/wrong"],
+    ["relative", "/elsewhere", "/nowhere/workspaces/1/uploads/20260419-142305"],
 )
 def test_unusable_native_directory_never_accepts_inbound(
     uploaded_agent: tuple[GatewayTestClient, int],
@@ -210,7 +211,7 @@ def _inbound_wakes(bus: EventBus, agent: int) -> Generator[Callable[[], list[str
 
 
 @pytest.mark.asyncio
-async def test_accepted_upload_wakes_once(
+async def test_accepted_upload_wakes_once_and_releases_staged_bytes(
     uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentityReader
 ):
     client, agent = uploaded_agent
@@ -224,14 +225,24 @@ async def test_accepted_upload_wakes_once(
     status = source.status(client.app.state.db_pool, agent, batch_id)
     assert status.state == "accepted" and status.inbound_id is not None
     # meiva:note
-    # The accepted chat is a system-sourced notice (the list of files, not the human
-    # speaking) — and it still wakes the agent, which is what makes the delivery reach the
-    # model.
+    # The accepted batch writes a system-sourced upload notice followed by the user message
+    # in one transaction, and wakes the agent once with the user message's inbound_id.
     # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
     with client.app.state.db_pool.connection() as conn:
         assert conn.execute(
-            "SELECT source FROM inbound_messages WHERE id=%s", (status.inbound_id,)
-        ).fetchone() == ("system:upload",)
+            "SELECT source FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent,)
+        ).fetchall() == [("system:upload",), ("user",)]
+        assert conn.execute(
+            "SELECT state FROM upload_staged_files WHERE file_id=%s",
+            (status.files[0].staged_id,),
+        ).fetchone() == ("released",)
+    staged = staged_path(
+        source.agent_upload_dir(
+            agent, create=False, root=client.app.state.gateway_config.upload_staging_root
+        ),
+        status.files[0].staged_id,
+    )
+    assert not staged.exists()
     # meiva:note
     # One wake at acceptance; the still-pending chat is never re-announced by a scan.
     assert woken == [str(status.inbound_id)]
@@ -280,7 +291,7 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
     # meiva:note
     # The receiving runner never answers the receive op.
     with runner_ops(
-        db_conn, unit.machine, {"upload-receive-v1": refused(404, "receiver unreachable")}
+        db_conn, unit.machine, {"upload-receive-v2": refused(404, "receiver unreachable")}
     ) as runner:
         register_second_home(db_conn, unit, url=runner.url)
         batch_id = post(client, agent).json()["batch_id"]
@@ -311,15 +322,14 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
     assert (final.state, final.attempts) == ("hold", source.MAX_COPY_ATTEMPTS)
     # meiva:note
     # Held is not lost: the bytes the gateway received are still in staging, so a person's
-    # re-upload of the same files finds them and the hold never deletes evidence.
-    staged = (
+    # retry or restore of the same files finds them and the hold never deletes evidence.
+    staged = staged_path(
         source.agent_upload_dir(
             agent, create=False, root=client.app.state.gateway_config.upload_staging_root
-        )
-        / NAMESPACE
-        / batch_id
+        ),
+        final.files[0].staged_id,
     )
-    assert [path.read_bytes() for path in staged.iterdir()] == [b"bytes"]
+    assert staged.read_bytes() == b"bytes"
 
 
 @pytest.mark.asyncio
@@ -382,8 +392,8 @@ async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
 
 
 # meiva:note
-# A real gateway lifespan drives its own recovery loop through the runner's `upload-receive-v1`
-# op to exactly one accepted chat. The copy is a receiver's copy even on the gateway's own
+# A real gateway lifespan drives its own recovery loop through the runner's `upload-receive-v2`
+# op to accepted chat delivery. The copy is a receiver's copy even on the gateway's own
 # machine — staging is not the agent's workspace — so the loop needs a runner that answers, as a
 # remote batch does.
 def test_actual_gateway_lifespan_recovers_one_chat_through_its_receiver(
@@ -409,7 +419,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_through_its_receiver(
             client.app.state.gateway_access, gateway_url=source_url
         )
         receive = receiver_op(client, receiver_for(client, unit))
-        with runner_ops(db_conn, unit.machine, {"upload-receive-v1": receive}) as runner:
+        with runner_ops(db_conn, unit.machine, {"upload-receive-v2": receive}) as runner:
             db_conn.execute(
                 "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
                 "VALUES (%s,%s,true,%s)",
@@ -426,7 +436,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_through_its_receiver(
             assert recovery.task is not None and not recovery.task.done()
             assert db_conn.execute(
                 "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-            ).fetchone() == (1,)
+            ).fetchone() == (2,)
     assert recovery.task.done() and not recovery.calls
     assert client.app.state.db_pool.closed
 

@@ -6,10 +6,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TypeGuard
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+# meiva:note
 # Suffix -> MIME for image uploads that can be inlined as native model content.
 # Mirrors the image row of `meiva._understand`'s media map; a suffix not listed
-# here is not treated as an inlineable image (the message endpoint 422s a
-# reference to it, the claim node never base64-inlines it).
+# here is not treated as an inlineable image (the claim node never base64-inlines it).
 IMAGE_MIME: dict[str, str] = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -17,6 +19,15 @@ IMAGE_MIME: dict[str, str] = {
     ".webp": "image/webp",
     ".gif": "image/gif",
 }
+
+
+class TimelineUploadFile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    size: int = Field(ge=0)
+    content_type: str = Field(min_length=1)
+    url: str = Field(min_length=1)
 
 
 def _is_object_list(value: object) -> TypeGuard[list[Any]]:
@@ -47,17 +58,6 @@ def image_mime_for(name: str) -> str | None:
 
 
 def inbound_image_urls(agent_id: int, payload: Mapping[str, object] | None) -> list[str] | None:
-    """Image reference urls of a stored multimodal inbound, or None.
-
-    The stored `content_blocks` mirror the POST body; a block counts as a
-    renderable image only when it passes the same gate `_validate_image_ref`
-    (gateway/agents/state.py) applied at write time — one of this
-    agent's upload urls carrying a recognized image suffix. That keeps the
-    strip's thumbnails on the exact url contract the timeline uses
-    (`meiva_image_urls`), never a path the browser cannot load. Malformed
-    blocks are skipped, not fatal: a queue read degrades a row rather than
-    failing the whole strip.
-    """
     raw_blocks = payload.get("content_blocks") if payload else None
     if not _is_object_list(raw_blocks):
         return None
@@ -81,3 +81,50 @@ def inbound_image_urls(agent_id: int, payload: Mapping[str, object] | None) -> l
             continue
         urls.append(url)
     return urls or None
+
+
+class _StoredUploadFile(BaseModel):
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    name: str = Field(min_length=1)
+    size: int = Field(ge=0)
+    content_type: str = Field(min_length=1)
+    batch_id: str = Field(min_length=32, max_length=32)
+    ordinal: int = Field(ge=0)
+
+
+def _parse_upload_file(agent_id: int, raw: object) -> TimelineUploadFile | None:
+    try:
+        item = _StoredUploadFile.model_validate(raw)
+    except ValidationError:
+        return None
+    return TimelineUploadFile(
+        name=item.name,
+        size=item.size,
+        content_type=item.content_type,
+        url=f"/api/agents/{agent_id}/uploads/{item.batch_id}/{item.ordinal}",
+    )
+
+
+def inbound_upload_files(
+    agent_id: int, payload: Mapping[str, object] | None
+) -> list[TimelineUploadFile] | None:
+    raw_files = payload.get("upload_files") if payload else None
+    if not _is_object_list(raw_files):
+        return None
+    files = [
+        parsed for raw in raw_files if (parsed := _parse_upload_file(agent_id, raw)) is not None
+    ]
+    return files or None
+
+
+def kwargs_upload_files(raw: object) -> list[TimelineUploadFile] | None:
+    if not _is_object_list(raw):
+        return None
+    files: list[TimelineUploadFile] = []
+    for item in raw:
+        try:
+            files.append(TimelineUploadFile.model_validate(item))
+        except ValidationError:
+            continue
+    return files or None

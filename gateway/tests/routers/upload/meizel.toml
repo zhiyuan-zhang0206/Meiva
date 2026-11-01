@@ -1,2 +1,0 @@
-[uses]
-"test_upload_batch_faults.py" = ["child_batch_writer.py"]

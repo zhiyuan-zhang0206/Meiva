@@ -427,15 +427,12 @@ export type UiContributionsResponse = Schemas["UiContributionsResponse"];
 
 // --- File Upload ---
 
-export type UploadedFile = Schemas["UploadedFile"];
-export type UploadedBatch = Schemas["UploadedBatch"];
+export type StagedFile = Schemas["StagedFile"];
+export type UploadSendRequest = Schemas["UploadSendRequest"];
+export type DeliveredUploadObject = Schemas["Object"];
 export type DeliveredUploadAcceptance = Schemas["Acceptance"];
-
-// --- Multimodal message content (POST /api/agents/{id}/messages) ---
-
-export type TextContentBlock = Schemas["TextContentBlock"];
-export type ImageUrlContentBlock = Schemas["ImageUrlContentBlock"];
-export type ContentBlock = TextContentBlock | ImageUrlContentBlock;
+export type DeliveredUploadStatus = Schemas["DeliveryStatus"];
+export type TimelineUploadFile = Schemas["TimelineUploadFile"];
 
 // --- Schedules (GET /api/schedules) ---
 

@@ -10,6 +10,8 @@ export class FakeUpload implements UploadRequest {
   withCredentials = false;
   onload: UploadRequest["onload"] = null;
   onerror: UploadRequest["onerror"] = null;
+  onabort: UploadRequest["onabort"] = null;
+  aborted = false;
   readonly upload = new EventTarget();
   readonly headers: [string, string][] = [];
   opened: [string, string] | null = null;
@@ -25,6 +27,11 @@ export class FakeUpload implements UploadRequest {
 
   send(body: FormData): void {
     this.sent = body;
+  }
+
+  abort(): void {
+    this.aborted = true;
+    this.onabort?.call(this as unknown as XMLHttpRequest, new Event("abort") as ProgressEvent);
   }
 
   progress(loaded: number, total: number, lengthComputable: boolean): void {

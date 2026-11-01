@@ -13,7 +13,9 @@ import type {
   ConversationSnapshotResponse,
   ContextBreakdownResponse,
   CommandItem,
-  ContentBlock,
+  DeliveredUploadAcceptance,
+  DeliveredUploadStatus,
+  StagedFile,
   TaskListResponse,
   TaskFields,
   TaskRow,
@@ -28,7 +30,6 @@ import type {
   TimelineResponse,
   TokenUsageResponse,
   ReplySuggestionResponse,
-  UploadedBatch,
 } from "../../contracts/types";
 import { projectAgentStatus } from "../../contracts/types";
 import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath, tasksPath } from "./routes/agent-routes";
@@ -46,7 +47,12 @@ import {
   timelinePath,
   type RunTimelineWindow,
 } from "./routes/timeline-routes";
-import { submitUploadedFiles, uploadFiles } from "./upload-delivery";
+import {
+  deleteStagedUploadFile,
+  getUploadDeliveryStatus,
+  stageUploadFile,
+  submitUploadedFiles,
+} from "./upload-delivery";
 
 export type Api = ReturnType<typeof createApi>;
 
@@ -185,7 +191,7 @@ export function createApi(http: Http) {
 
     sendMessage: (
       agentId: number,
-      content: string | ContentBlock[],
+      content: string,
       clientMessageId: string,
     ): Promise<AgentMessageEnqueued> => {
       return sendMessageWithReconciliation(http, agentId, content, clientMessageId);
@@ -221,19 +227,32 @@ export function createApi(http: Http) {
       );
     },
 
+    stageUploadFile: (
+      agentId: number,
+      file: File,
+      operationKey: string = http.newOperationKey(),
+      onProgress?: (pct: number) => void,
+      signal?: AbortSignal,
+    ): Promise<StagedFile> => stageUploadFile(http, agentId, file, operationKey, onProgress, signal),
+
+    deleteStagedUploadFile: (
+      agentId: number,
+      fileId: string,
+    ): Promise<void> => deleteStagedUploadFile(http, agentId, fileId),
+
     submitUploadedFiles: (
       agentId: number,
-      files: File[],
+      fileIds: readonly string[],
+      text: string,
       operationKey: string,
-      onProgress?: (pct: number) => void,
-    ) => submitUploadedFiles(http, agentId, files, operationKey, onProgress),
+    ): Promise<DeliveredUploadAcceptance> =>
+      submitUploadedFiles(http, agentId, fileIds, text, operationKey),
 
-    uploadFiles: (
+    getUploadDeliveryStatus: (
       agentId: number,
-      files: File[],
-      onProgress?: (pct: number) => void,
-      operationKey: string = http.newOperationKey(),
-    ): Promise<UploadedBatch> => uploadFiles(http, agentId, files, onProgress, operationKey),
+      batchId: string,
+      signal?: AbortSignal,
+    ): Promise<DeliveredUploadStatus> => getUploadDeliveryStatus(http, agentId, batchId, signal),
 
     newOperationKey: http.newOperationKey,
 

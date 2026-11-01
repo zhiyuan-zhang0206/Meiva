@@ -3,28 +3,25 @@
 # difference is the point:
 #
 # - the staging directory (`<MEIVA_HOME>/uploads/<agent_id>`, overridable) is where the gateway
-#   writes the raw bytes it received and serves them back from;
-# - the delivered directory (`<MEIVA_HOME>/workspaces/<agent_id>/<name>`) is on the machine that
-#   runs the agent, inside that agent's own workspace — the place the agent can read.
+#   keeps the bytes a person picked until they send them (`.staged/<file id>`), then until the
+#   agent's unit has a verified copy. Once the send is accepted the staged bytes are deleted;
+# - the delivered directory (`<MEIVA_HOME>/workspaces/<agent_id>/<name>/<send time>`) is on the
+#   machine that runs the agent, inside that agent's own workspace — the place the agent can
+#   read, under the person's own file names.
 #
 # The staging root is the same on every gateway; the delivered root is the target machine's own
 # home (`UnitIdentity.home`), so a copy that crosses machines lands in the receiver's workspace,
-# not in a directory on the sender. Silent native-image uploads
-# (`/api/agents/N/uploads/<name>`) stay in staging: the claim node fetches them over HTTP instead
-# of reading the gateway's disk, so they have no delivered copy.
-#
-# Three call sites must agree on the mapping: the gateway upload endpoint (writes and serves), the
-# gateway message endpoint (validates a referenced image is this agent's), and the claim node
-# (fetches an upload to inline it). Centralizing the path <-> url mapping keeps those three in
-# lockstep.
+# not in a directory on the sender. The flat `meiva-upload-<uuid>-<n><suffix>` files that earlier
+# native-image uploads left in staging are only read back (`/api/agents/N/uploads/<name>`), for
+# the old messages that name them; nothing writes one any more.
 
 from __future__ import annotations
 
 import base64
-import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import quote
 
 from base.agents.messages.inbound_images import image_mime_for
 from base.paths import workspace_path
@@ -48,6 +45,16 @@ def agent_upload_dir(agent_id: int, *, root: Path, create: bool = True) -> Path:
 
 
 # meiva:note
+# Where a staged file's bytes live inside the agent's staging directory. The name is the
+# file's own id, never the person's file name, so no caller-chosen name reaches a path.
+STAGED_NAMESPACE = ".staged"
+
+
+def staged_path(directory: Path, file_id: str) -> Path:
+    return directory / STAGED_NAMESPACE / file_id
+
+
+# meiva:note
 # The delivered copy lives in the agent's own workspace, derived from the home of the
 # machine that runs it (`UnitIdentity.home`), never from the sender's. `workspace_path` is
 # the pure derivation there; this function only adds the per-cluster directory name the
@@ -57,30 +64,13 @@ def delivered_upload_dir(agent_id: int, *, home: Path, name: str, create: bool =
     return ensure_private_dir(directory) if create else directory
 
 
-def sanitize_upload_name(filename: str) -> str:
-    """Strip directory separators from an uploaded filename (no traversal on write)."""
-    return filename.replace("/", "_").replace("\\", "_")
-
-
-# meiva:note
-# A display filename is text, never a path: `source.complete` echoes it verbatim into
-# the system message that announces a delivered batch, one `- name: path` line per
-# object. A control character there would let the name forge another line, so the
-# character class is owned once, here, and enforced twice: at the intake boundary
-# (a 422 the caller can act on) and in `Object.filename` (the record itself, which
-# also covers replay of a stored manifest) — task #5855.
-# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
-CONTROL_CHARACTERS = r"\x00-\x1f\x7f"
-FILENAME_PATTERN = rf"^[^{CONTROL_CHARACTERS}]+$"
-
-
-def has_control_characters(name: str) -> bool:
-    return re.search(rf"[{CONTROL_CHARACTERS}]", name) is not None
-
-
 def upload_url(agent_id: int, name: str) -> str:
     """The HTTP path an uploaded file is addressed by."""
     return f"/api/agents/{agent_id}/uploads/{name}"
+
+
+def delivered_upload_url(agent_id: int, batch_id: str, ordinal: int) -> str:
+    return f"/api/agents/{agent_id}/uploads/{batch_id}/{ordinal}"
 
 
 # meiva:note
@@ -95,24 +85,14 @@ def resolve_upload_path(directory: Path, name: str) -> Path:
     return target
 
 
+# meiva:note
+# Fetch a historical native-image upload from the gateway over HTTP and return
+# (mime_type, base64_ascii). Only an inbound queued with an `image_url` block before
+# uploads unified onto file delivery still names one; nothing writes such a block now.
+# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
 def fetch_upload_b64(
     agent_id: int, name: str, *, client: Callable[[], UploadClient]
 ) -> tuple[str, str]:
-    """Fetch an uploaded image from the gateway over HTTP and return
-    (mime_type, base64_ascii).
-
-    The upload physically lives on the gateway (the frontend's single entry
-    point writes it there); its address is the `/api/agents/<id>/uploads/<name>`
-    URL. Fetching that URL is the one uniform path for every agent — a remote
-    runner's claim node must not read the gateway's local disk (the same-host
-    assumption class as the inspector's local session probe). The fetch carries
-    the cluster-secret bearer, same as every other agent -> gateway dial.
-
-    Raises:
-        ValueError: `name` is not a recognized image type.
-        OSError: the upload is gone or the gateway is unreachable (the claim
-            node degrades the image block to a text note on this).
-    """
     mime = image_mime_for(name)
     if mime is None:
         raise ValueError(f"upload {name!r} is not a recognized image type")
@@ -138,6 +118,7 @@ def fetch_upload_b64(
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # per file — read-into-memory + disk cap
 MAX_AGENT_UPLOAD_BYTES = 500 * 1024 * 1024  # total per agent (quota)
 MAX_AGENT_UPLOAD_FILES = 1000  # file count per agent (inode-ish bound)
+STAGED_FILE_TTL_SECONDS = 24 * 60 * 60
 
 # Suffixes whose content executes in a browser when served inline (direct
 # navigation / iframe). Served with Content-Disposition: attachment +
@@ -156,3 +137,27 @@ def render_safe_headers(name: str) -> dict[str, str]:
     if Path(name).suffix.lower() in _RENDERABLE_SUFFIXES:
         headers["Content-Disposition"] = f'attachment; filename="{Path(name).name}"'
     return headers
+
+
+_INLINE_RASTER_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "image/png": (".png",),
+    "image/jpeg": (".jpg", ".jpeg"),
+    "image/gif": (".gif",),
+    "image/webp": (".webp",),
+    "image/avif": (".avif",),
+    "image/bmp": (".bmp",),
+}
+
+
+def delivered_upload_headers(name: str, content_type: str, sha256: str) -> dict[str, str]:
+    media = content_type.split(";", 1)[0].strip().lower()
+    suffix = Path(name).suffix.lower()
+    allowed_suffixes = _INLINE_RASTER_SUFFIXES.get(media, ())
+    disposition = "inline" if suffix in allowed_suffixes else "attachment"
+    return {
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "ETag": f'"{sha256}"',
+    }

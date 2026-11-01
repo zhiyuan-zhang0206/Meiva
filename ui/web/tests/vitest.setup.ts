@@ -134,17 +134,18 @@ globalThis.fetch = (input: RequestInfo | URL) => {
 };
 
 class GuardedXMLHttpRequest {
-  // Minimal surface api.ts's uploadFiles() touches before send() — enough that
-  // assigning to them doesn't throw for a caller that hasn't hit the guard yet.
   upload: { onprogress: ((e: ProgressEvent) => void) | null } = { onprogress: null };
   withCredentials = false;
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
   private targetUrl = "(unknown — open() was never called)";
 
   open(_method: string, target: string | URL): void {
     this.targetUrl = String(target);
   }
+
+  abort(): void {}
 
   send(): void {
     // Real XMLHttpRequest.send() is synchronous-looking but async under the

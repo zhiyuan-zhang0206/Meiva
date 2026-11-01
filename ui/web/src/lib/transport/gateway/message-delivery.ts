@@ -1,4 +1,4 @@
-import type { AgentMessageEnqueued, ContentBlock } from "../../contracts/types";
+import type { AgentMessageEnqueued } from "../../contracts/types";
 import {
   messageInit,
   MessageDeliveryUnknownError,
@@ -10,7 +10,7 @@ import type { Http } from "./http";
 export function sendMessageWithReconciliation(
   http: Http,
   agentId: number,
-  content: string | ContentBlock[],
+  content: string,
   clientMessageId: string,
 ): Promise<AgentMessageEnqueued> {
   const path = `/api/agents/${agentId}/messages`;

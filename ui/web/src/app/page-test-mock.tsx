@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup } from "@testing-library/react";
 
 import { renderWithBrowser } from "@/test-support/render";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { ComponentProps } from "react";
 import { vi } from "vitest";
 
@@ -74,8 +74,7 @@ export function ComposerMock({
   mode,
   onSend,
   onStop,
-  onUploadFiles,
-  onAttachImage,
+  stageQueue,
   showContextMeter,
   children,
   details,
@@ -84,25 +83,14 @@ export function ComposerMock({
 }: {
   suggestions?: readonly string[] | null;
   mode: string;
-  onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
+  onSend: (s: string, fileIds: string[], clientMessageId: string) => Promise<boolean>;
   onStop: () => void;
-  onUploadFiles?: (files: File[]) => void;
-  onAttachImage?: (file: File) => Promise<string>;
+  stageQueue?: { seq: number; files: readonly File[] } | null;
   showContextMeter?: boolean;
   children?: React.ReactNode;
   details?: React.ReactNode;
   maxWidthCss?: string;
 }) {
-  const [thumbnail, setThumbnail] = useState<string | null>(null);
-  const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const image = Array.from(event.clipboardData.files).find((file) =>
-      file.type.startsWith("image/"),
-    );
-    if (!image) return;
-    event.preventDefault();
-    if (onAttachImage) void onAttachImage(image).then(setThumbnail);
-    else onUploadFiles?.([image]);
-  };
   return (
     <div
       data-testid="composer"
@@ -110,15 +98,15 @@ export function ComposerMock({
       data-context-meter={String(showContextMeter ?? false)}
       data-max-width={maxWidthCss ?? "undefined"}
       data-suggestion={suggestions?.join("|") ?? ""}
+      data-stage-seq={String(stageQueue?.seq ?? 0)}
+      data-stage-files={stageQueue?.files.map((f) => f.name).join(",") ?? ""}
     >
-      <textarea data-testid="composer-paste-target" onPaste={pasteImage} />
-      {thumbnail ? <div data-testid="composer-image-thumbnail" data-url={thumbnail} /> : null}
+      <textarea data-testid="composer-paste-target" />
       <button data-testid="composer-send" onClick={() => void onSend("hi", [], "test-client-message-id")}>send</button>
       <button data-testid="composer-send-multi" onClick={() => void onSend("/compact /update", [], "test-client-message-id")}>send multi</button>
       <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [], "test-client-message-id")}>send multi args</button>
       <button data-testid="composer-stop" onClick={() => onStop()}>stop</button>
       <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
-      <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
       {details}
       {children}
     </div>
@@ -185,8 +173,15 @@ export function TimelineViewMock({ turnActive, maxWidthCss, items }: ComponentPr
   );
 }
 
-export function UploadButtonMock({ agentId }: ComponentProps<typeof UploadButtonComponent>) {
-  return <div data-testid="upload-button" data-agent-id={agentId ?? "null"} />;
+export function UploadButtonMock({ agentId, onUpload }: ComponentProps<typeof UploadButtonComponent>) {
+  return (
+    <button
+      type="button"
+      data-testid="upload-button"
+      data-agent-id={agentId ?? "null"}
+      onClick={() => void onUpload([new File(["x"], "picked.txt", { type: "text/plain" })])}
+    />
+  );
 }
 
 export function ContextPanelMock({ agentId }: ComponentProps<typeof ContextPanelComponent>) {
@@ -337,8 +332,10 @@ export async function resetHomePageTestState() {
   resetStreamHandlers();
   transport.sendMessage.mockResolvedValue(undefined);
   transport.cancel.mockResolvedValue(undefined);
-  transport.uploadFiles.mockResolvedValue(undefined);
+  transport.stageUploadFile.mockResolvedValue(undefined);
+  transport.deleteStagedUploadFile.mockResolvedValue(undefined);
   transport.submitUploadedFiles.mockResolvedValue(undefined);
+  transport.getUploadDeliveryStatus.mockResolvedValue(undefined);
   transport.listPages.mockResolvedValue([]);
   homePageApi = {
     ...homePageRig.api,
@@ -349,8 +346,10 @@ export async function resetHomePageTestState() {
     newOperationKey: transport.newOperationKey,
     sendMessage: transport.sendMessage,
     cancel: transport.cancel,
-    uploadFiles: transport.uploadFiles,
+    stageUploadFile: transport.stageUploadFile,
+    deleteStagedUploadFile: transport.deleteStagedUploadFile,
     submitUploadedFiles: transport.submitUploadedFiles,
+    getUploadDeliveryStatus: transport.getUploadDeliveryStatus,
     listPages: transport.listPages,
     getReplySuggestion: transport.getReplySuggestion,
   };

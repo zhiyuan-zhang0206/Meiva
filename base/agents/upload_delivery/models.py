@@ -8,14 +8,20 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from base.agents.upload_delivery.paths import FILENAME_PATTERN, MAX_UPLOAD_BYTES
+from base.agents.upload_delivery.naming import (
+    MAX_NAME_BYTES,
+    SEND_DIRECTORY_PATTERN,
+    name_key,
+)
+from base.agents.upload_delivery.paths import MAX_UPLOAD_BYTES
 from base.host.db_authority.unit import UnitIdentity
 
-NAMESPACE = ".delivered-v1"
+# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
+PROTOCOL = 2
 BATCH_ID_PATTERN = r"^[0-9a-f]{32}$"
-# Reserve the native create_private_bytes dot/UUID/temp-name overhead (38 bytes).
-MAX_OBJECT_NAME_BYTES = 217
-OBJECT_NAME_PATTERN = r"^[0-9a-f]{32}-[0-9]+(?:\.[^/\\\x00-\x1f\x7f?#%]+)?$"
+FILE_ID_PATTERN = r"^[0-9a-f]{32}$"
+NAME_PATTERN = r"^[^/\\\x00-\x1f\x7f]+$"
+STATE = Literal["pending", "accepted", "hold"]
 
 
 class UploadDeliveryConflictError(ValueError):
@@ -30,50 +36,70 @@ class Record(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
 
 
+class StagedFile(Record):
+    file_id: str = Field(pattern=FILE_ID_PATTERN)
+    name: str = Field(min_length=1, pattern=NAME_PATTERN)
+    size: int = Field(ge=0, le=MAX_UPLOAD_BYTES)
+    content_type: str = Field(min_length=1, max_length=255, pattern=r"^[\x20-\x7e]+$")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class Object(Record):
     ordinal: int = Field(ge=0, lt=1000)
-    filename: str = Field(min_length=1, max_length=4096, pattern=FILENAME_PATTERN)
-    name: str = Field(pattern=OBJECT_NAME_PATTERN)
+    name: str = Field(min_length=1, pattern=NAME_PATTERN)
+    staged_id: str = Field(pattern=FILE_ID_PATTERN)
     size: int = Field(ge=0, le=MAX_UPLOAD_BYTES)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     content_type: str = Field(min_length=1, max_length=255, pattern=r"^[\x20-\x7e]+$")
 
     @model_validator(mode="after")
     def bounded_name(self) -> Self:
-        if len(self.name.encode()) > MAX_OBJECT_NAME_BYTES:
-            raise ValueError("upload name exceeds the immutable filesystem contract")
+        if len(self.name.encode()) > MAX_NAME_BYTES or self.name.strip(" .") == "":
+            raise ValueError("upload name is not a bounded file name")
         return self
 
 
 class Manifest(Record):
     batch_id: str = Field(pattern=BATCH_ID_PATTERN)
     agent_id: int = Field(gt=0, lt=2**63)
+    sent_at: str = Field(min_length=1, max_length=64)
+    directory: str = Field(pattern=SEND_DIRECTORY_PATTERN)
     objects: list[Object] = Field(min_length=1, max_length=1000)
+
+    @field_validator("sent_at")
+    @classmethod
+    def iso_time(cls, value: str) -> str:
+        datetime.fromisoformat(value)
+        return value
 
     @model_validator(mode="after")
     def ordered_names(self) -> Self:
         for ordinal, item in enumerate(self.objects):
-            if (
-                item.ordinal != ordinal
-                or item.name.split(".", 1)[0] != f"{self.batch_id}-{ordinal}"
-            ):
-                raise ValueError("manifest objects require ordered batch-owned names")
-        if len({item.name for item in self.objects}) != len(self.objects):
+            if item.ordinal != ordinal:
+                raise ValueError("manifest objects require ordered ordinals")
+        if len({name_key(item.name) for item in self.objects}) != len(self.objects):
             raise ValueError("manifest object names must be unique")
+        if len({item.staged_id for item in self.objects}) != len(self.objects):
+            raise ValueError("manifest objects must be distinct staged files")
         return self
 
     def fingerprint(self) -> str:
         return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
 
 
+class FrozenMessage(Record):
+    text: str = Field(max_length=1_048_576)
+    source: Literal["user"]
+
+
 class VersionedRecord(Record):
-    version: Literal[1]
+    version: Literal[2]
 
     @field_validator("version", mode="before")
     @classmethod
     def explicit_integer_version(cls, value: object) -> object:
         if type(value) is not int:
-            raise ValueError("upload protocol version must be the explicit integer 1")
+            raise ValueError("upload protocol version must be the explicit integer 2")
         return value
 
 
@@ -96,19 +122,29 @@ class CopyProof(VersionedRecord):
         return value
 
 
+class ObjectReadRequest(Record):
+    agent_id: int = Field(gt=0, lt=2**63)
+    batch_id: str = Field(pattern=BATCH_ID_PATTERN)
+    ordinal: int = Field(ge=0, lt=1000)
+
+
 class Acceptance(Record):
     """Historical source acceptance; not copy readiness or agent execution."""
 
     batch_id: str
     agent_id: int
+    directory: str
     files: list[Object]
     status_url: str
 
 
 class DeliveryStatus(Record):
-    acceptance: Acceptance | None
-    state: Literal["receiving", "pending", "accepted", "hold"]
+    batch_id: str
+    state: STATE
     reason: str | None
+    directory: str
+    message_text: str
+    files: list[Object]
     inbound_id: int | None
     source: UnitIdentity
     target: UnitIdentity
@@ -124,37 +160,15 @@ def current_unit(
     return UnitIdentity(machine=local_machine, home=str(home.resolve()))
 
 
-def make_manifest(
-    agent_id: int,
-    names: list[str],
-    batch: list[tuple[str, bytes, str]],
-    *,
-    key: str = "",
-) -> Manifest:
-    batch_id = hashlib.sha256(
-        f"{agent_id}:{key}:{request_hash(names, batch)}".encode()
-    ).hexdigest()[:32]
-    objects: list[Object] = []
-    for ordinal, (name, (_, contents, content_type)) in enumerate(zip(names, batch, strict=True)):
-        suffix = Path(name.replace("\\", "/")).suffix
-        objects.append(
-            Object(
-                ordinal=ordinal,
-                filename=name,
-                name=f"{batch_id}-{ordinal}{suffix}",
-                size=len(contents),
-                sha256=hashlib.sha256(contents).hexdigest(),
-                content_type=content_type,
-            )
-        )
-    return Manifest(batch_id=batch_id, agent_id=agent_id, objects=objects)
-
-
-def request_hash(names: list[str], batch: list[tuple[str, bytes, str]]) -> str:
-    value = [
-        [name, len(contents), hashlib.sha256(contents).hexdigest(), content_type]
-        for name, (_, contents, content_type) in zip(names, batch, strict=True)
-    ]
+def request_hash(agent_id: int, file_ids: list[str], text: str) -> str:
     return hashlib.sha256(
-        json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode()
+        json.dumps([agent_id, file_ids, text], ensure_ascii=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def staged_request_hash(name: str, size: int, sha256: str, content_type: str) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            [name, size, sha256, content_type], ensure_ascii=True, separators=(",", ":")
+        ).encode()
     ).hexdigest()

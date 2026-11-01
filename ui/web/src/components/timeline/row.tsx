@@ -22,7 +22,7 @@ import {
   MessageCard,
   messageCardConfig,
 } from "./card";
-import { copyPayloadFor, ItemView } from "./item";
+import { copyPayloadFor, ItemView, splitEnvelope } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
 import { inboundKind } from "./model/runs";
 
@@ -146,9 +146,23 @@ export const TimelineRow = memo(function TimelineRow({
   // Window omit timestamps and render an inline top-right Copy button only when
   // `config.copy` is true (inter-agent messages and non-user-facing agent_chat).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  const isHumanBubble = item.kind === "inbound_chat" && inboundKind(item.source) === "human";
+  const isUploadRow =
+    item.kind === "inbound_chat" &&
+    (item.source === "system:upload" || Boolean(item.files?.length));
+  const isHumanBubble =
+    item.kind === "inbound_chat" && (inboundKind(item.source) === "human" || isUploadRow);
   const isAgentProse = item.kind === "agent_chat" && item.user_facing !== false;
   const isPrimaryMessage = isHumanBubble || isAgentProse;
+
+  if (
+    item.kind === "inbound_chat" &&
+    item.source === "user" &&
+    !item.files?.length &&
+    !item.images?.length &&
+    splitEnvelope(item.payload).body === "[files]"
+  ) {
+    return null;
+  }
 
   const stamp =
     isPrimaryMessage && config.showTimestamp && item.created_at ? (

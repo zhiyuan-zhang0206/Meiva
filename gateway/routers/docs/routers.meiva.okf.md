@@ -61,7 +61,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — [[memory.meiva.okf.md|shared checkout ownership and bounded search]]; a search stops when its client disconnects
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation
-- **uploads** (`/api/agents/{id}/uploads`) — [[upload-batches.meiva.okf.md|keyed silent batch acceptance]] and the saved-file download; delivery to the agent is the keyed `/api/keyed/v1/agents/{id}/uploads` route.
+- **uploads** (`/api/agents/{id}/uploads/{filename}`) — [[upload-batches.meiva.okf.md|delivered workspace file download]]; staged intake and batch delivery to the agent live on `/api/keyed/v1/agents/{id}/uploads*`.
 
 ## Design principles
 

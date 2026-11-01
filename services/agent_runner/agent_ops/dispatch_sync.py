@@ -71,7 +71,7 @@ def dispatch_sync(
                 # meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
                 return OpStatus.FAILED, read_failure_payload(exc)
             return OpStatus.COMPLETED, document.model_dump(mode="json")
-        case "upload-receive-v1":
+        case "upload-receive-v2":
             return _upload_arm(payload, pool, receiver=receiver)
         case "status_probe":
             return OpStatus.COMPLETED, cluster.cluster_status_op(

@@ -203,7 +203,7 @@ export function messageCardConfig(
           copy: true,
         };
       }
-      if (kind === "human") {
+      if (kind === "human" || item.source === "system:upload" || Boolean(item.files?.length)) {
         return {
           rich: null,
           icon: User,
@@ -212,8 +212,8 @@ export function messageCardConfig(
           border: colors.inbound_human.border,
           bg: colors.inbound_human.bg ?? "",
           fixedDefault: true,
-          showTimestamp: true,
-          copy: true,
+          showTimestamp: kind === "human",
+          copy: kind === "human",
         };
       }
       return {

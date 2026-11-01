@@ -178,6 +178,36 @@ class TestMultimodalInbound:
         assert items[0].images == ["/api/agents/7/uploads/a.png"]
         assert "QUJD" not in items[0].payload
 
+    def test_upload_files_projected_on_inbound_item(self) -> None:
+        batch_id = "b" * 32
+        msg = HumanMessage(
+            content="<system-note>\nFiles uploaded with the next message:\n- report.pdf\n</system-note>",
+            additional_kwargs={
+                "meiva_msg_type": "inbound",
+                "meiva_source": "system:upload",
+                "meiva_inbound_id": 3,
+                "meiva_upload_files": [
+                    {
+                        "name": "report.pdf",
+                        "size": 1024,
+                        "content_type": "application/pdf",
+                        "url": f"/api/agents/7/uploads/{batch_id}/0",
+                    }
+                ],
+            },
+        )
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
+        assert len(items) == 1
+        assert items[0].files is not None
+        assert [f.model_dump() for f in items[0].files] == [
+            {
+                "name": "report.pdf",
+                "size": 1024,
+                "content_type": "application/pdf",
+                "url": f"/api/agents/7/uploads/{batch_id}/0",
+            }
+        ]
+
 
 class TestSystemPromptInColdLoad:
     """#570: the expandable prompt card's data source.

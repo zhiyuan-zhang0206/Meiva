@@ -1,4 +1,5 @@
 {
   "pending": "{count} 条待处理",
-  "imageAlt": "待处理图片"
+  "imageAlt": "待处理图片",
+  "delivering": "正在投递 {count} 个文件…"
 }

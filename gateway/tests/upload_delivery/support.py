@@ -1,6 +1,6 @@
 # meiva:note
 # Delivery support that runs in this process: the gateway's object endpoint on a loopback port,
-# and the receiving runner's `upload-receive-v1` op.
+# and the receiving runner's `upload-receive-v2` op.
 #
 # A delivered upload is a receiver's copy now — the staging directory the gateway received the
 # bytes in is not the agent's workspace — so a test that copies a batch needs two things a bare
@@ -72,7 +72,7 @@ def receiver_for(client: GatewayTestClient, unit: UnitIdentity) -> receiver.Rece
 
 
 # meiva:note
-# The receiving runner's `upload-receive-v1` op: the real receive code, in this process.
+# The receiving runner's `upload-receive-v2` op: the real receive code, in this process.
 #
 # With `lose_first_response` the first call completes its work (the bytes are published and the
 # ready marker committed) and the caller then sees the connection answer 404.
@@ -88,7 +88,7 @@ def receiver_op(
         nonlocal calls
         calls += 1
         assert call.idempotency_key is None
-        assert call.kind == "upload-receive-v1"
+        assert call.kind == "upload-receive-v2"
         proof = receiver.copy_batch(
             client.app.state.db_pool,
             ReceiveRequest.model_validate(call.payload),

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -20,15 +18,13 @@ from base.agents.history.context_breakdown import latest_request_breakdown
 from base.agents.history.context_response import (
     ContextBreakdownResponse,
     context_breakdown_response,
-    resolve_agent_model,
 )
 from base.agents.inbox.chat_delivery import ClientMessageConflictError
 from base.agents.inbox.rows import list_pending_inbounds
 from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
-from base.agents.messages.inbound_images import image_mime_for, inbound_image_urls, parse_upload_url
+from base.agents.messages.inbound_images import inbound_image_urls, inbound_upload_files
 from base.agents.model.model_overrides import agent_overrides
-from base.agents.upload_delivery.paths import agent_upload_dir, resolve_upload_path
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
@@ -53,7 +49,7 @@ from gateway.http.model_catalog import request_default_model, require_model_cata
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.lifecycle.delivery import deliver_chat_inbound, reconcile_chat_delivery
-from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
+from ops.rpc_schemas import AgentMessageIn
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -62,79 +58,8 @@ _log = logging.getLogger(__name__)
 _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 
 
-def _validate_image_ref(agent_id: int, url: str, *, upload_root: Path) -> None:
-
-    parsed = parse_upload_url(url)
-    if parsed is None:
-        raise HTTPException(422, f"image_url {url!r} is not an upload reference")
-    ref_agent, name = parsed
-    if ref_agent != agent_id:
-        raise HTTPException(422, f"image_url {url!r} references a different agent's upload")
-    if image_mime_for(name) is None:
-        raise HTTPException(422, f"image_url {url!r} is not a recognized image type")
-    try:
-        path = resolve_upload_path(agent_upload_dir(agent_id, create=False, root=upload_root), name)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from e
-    if not path.is_file():
-        raise HTTPException(404, f"image upload {name!r} not found; upload it first")
-
-
-def _prepare_message_content(
-    request: Request, agent_id: int, content: str | list[ContentBlock]
-) -> tuple[str, dict[str, object] | None]:
-
-    from base.lm.factory import model_supports_vision, vision_capable_provider_names
-
-    if isinstance(content, str):
-        return content, None
-
-    blocks = content
-    if any(isinstance(b, ImageUrlContentBlock) for b in blocks):
-        catalog = require_model_catalog(request)
-        model = resolve_agent_model(
-            request.app.state.db_pool,
-            agent_id,
-            catalog=catalog,
-            default_model=request_default_model(request),
-        )
-        if not model_supports_vision(model, catalog=catalog):
-            raise HTTPException(
-                422,
-                f"agent {agent_id}'s model {model!r} cannot see images — "
-                "switch it to a vision-capable model "
-                f"({', '.join(vision_capable_provider_names(catalog=catalog))})",
-            )
-        upload_root = request.app.state.gateway_config.upload_staging_root
-        for b in blocks:
-            if isinstance(b, ImageUrlContentBlock):
-                _validate_image_ref(agent_id, b.image_url.url, upload_root=upload_root)
-
-    return _normalize_message_content(content)
-
-
-def _normalize_message_content(
-    content: str | list[ContentBlock],
-) -> tuple[str, dict[str, object] | None]:
-
-    if isinstance(content, str):
-        return content, None
-    text = "\n".join(
-        block.text
-        for block in content
-        if isinstance(block, TextContentBlock) and block.text.strip()
-    )
-
-    text = text or "[image]"
-    payload: dict[str, object] = {"content_blocks": [block.model_dump() for block in content]}
-    return text, payload
-
-
-def _message_content_size_bytes(content: str | list[ContentBlock]) -> int:
-    if isinstance(content, str):
-        return len(content.encode("utf-8"))
-    wire_content = [block.model_dump(mode="json") for block in content]
-    return len(json.dumps(wire_content, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+def _message_content_size_bytes(content: str) -> int:
+    return len(content.encode("utf-8"))
 
 
 def scoped_message_key(request: Request, key: str) -> str:
@@ -171,7 +96,7 @@ def _completion_delivery_required(
 @router.post(
     "/api/agents/{agent_id}/messages",
     status_code=201,
-    description="Deliver a chat inbound to the specified agent.\n\n`content` is either a plain string or a list of OpenAI-shaped content blocks\n(multimodal: text + `image_url` referencing an upload of this agent). A\nstring is a pure INSERT + return; a block list is capability-gated (422 if\nthe agent's model cannot see images) and stored with the blocks in the\ninbound's JSONB payload for the claim node to inline natively.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` (always sent with `Idempotency-Scope: principal-v1`) is\nstored transactionally with the inbound; same-key retries return the same\n`inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n413: message content exceeds the 1 MiB transport limit.\n422: a block list gated out (non-vision model) or referencing a bad upload,\nor a key without the principal-v1 scope header.",
+    description="Deliver a plain-text chat inbound to the specified agent.\n\n`content` is a non-empty plain string. File and image attachments are sent via\n`POST /api/keyed/v1/agents/{agent_id}/uploads`.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` (always sent with `Idempotency-Scope: principal-v1`) is\nstored transactionally with the inbound; same-key retries return the same\n`inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n413: message content exceeds the 1 MiB transport limit.\n422: invalid content or a key without the principal-v1 scope header.",
 )
 async def post_agent_message(
     agent_id: int,
@@ -196,7 +121,6 @@ async def post_agent_message(
 
     await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     if idempotency_key is not None:
-        normalized_text, normalized_payload = _normalize_message_content(body.content)
         try:
             existing = await reconcile_chat_delivery(
                 request.app.state.db_pool,
@@ -204,9 +128,9 @@ async def post_agent_message(
                 request.app.state.bus,
                 agent_id,
                 client_message_id=idempotency_key,
-                content=normalized_text,
+                content=body.content,
                 source=body.source,
-                payload=normalized_payload,
+                payload=None,
                 local_machine=request.app.state.machine.name(),
                 rpc=gateway_rpc(request),
             )
@@ -215,8 +139,6 @@ async def post_agent_message(
         if existing is not None:
             return AgentMessageEnqueued(status=existing.status, inbound_id=existing.inbound_id)
     if body.completion_notice:
-        if not isinstance(body.content, str):
-            raise RuntimeError("completion notice schema admitted non-string content")
         notice = CompletionNotice(source=body.source, content=body.content)
         if not await asyncio.to_thread(
             _completion_delivery_required,
@@ -229,16 +151,15 @@ async def post_agent_message(
                 status=await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id),
                 inbound_id=None,
             )
-    text, payload = _prepare_message_content(request, agent_id, body.content)
     try:
         delivery = await deliver_chat_inbound(
             request.app.state.db_pool,
             request.app.state.db,
             request.app.state.bus,
             agent_id,
-            prepare=lambda _conn: text,
+            prepare=lambda _conn: body.content,
             source=body.source,
-            payload=payload,
+            payload=None,
             client_message_id=idempotency_key,
             provenance=provenance,
             local_machine=request.app.state.machine.name(),
@@ -336,7 +257,6 @@ async def reconcile_agent_message(
             ),
         )
     await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
-    text, payload = _normalize_message_content(body.content)
     try:
         delivery = await reconcile_chat_delivery(
             request.app.state.db_pool,
@@ -344,9 +264,9 @@ async def reconcile_agent_message(
             request.app.state.bus,
             agent_id,
             client_message_id=idempotency_key,
-            content=text,
+            content=body.content,
             source=body.source,
-            payload=payload,
+            payload=None,
             local_machine=request.app.state.machine.name(),
             rpc=gateway_rpc(request),
         )
@@ -465,6 +385,7 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
             sender=sender_class(r.source),
             content=r.content,
             images=inbound_image_urls(agent_id, r.payload),
+            files=inbound_upload_files(agent_id, r.payload),
             created_at=r.created_at,
         )
         for r in rows

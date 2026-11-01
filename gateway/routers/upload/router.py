@@ -1,136 +1,99 @@
-"""File upload endpoints — /api/agents/{agent_id}/uploads.
-
-POST saves each uploaded file silently and returns each file's reference url —
-the native-image-attachment path, where the frontend then sends the url inside
-the next multimodal message. It requires `Idempotency-Key` and
-`Idempotency-Scope: principal-v1`: the batch is claimed under that identity, then
-published as immutable objects, and a retry of the same key replays the receipt.
-Delivering a batch to the agent is `POST /api/keyed/v1/agents/{id}/uploads`
-(`gateway/upload_delivery/router.py`).
-
-GET serves a saved file back (image thumbnails in the timeline, and any client
-that wants to fetch an upload by its reference url).
-"""
+# meiva:link gateway/routers/docs/upload-batches.meiva.okf.md
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
+import httpx
+from fastapi import APIRouter, HTTPException, Path, Request, Response
 from fastapi.responses import FileResponse
 
+from base.agents.upload_delivery import source
+from base.agents.upload_delivery.models import (
+    BATCH_ID_PATTERN,
+    ObjectReadRequest,
+    UploadDeliveryConflictError,
+)
 from base.agents.upload_delivery.paths import (
     agent_upload_dir,
-    has_control_characters,
+    delivered_upload_headers,
     render_safe_headers,
     resolve_upload_path,
-    sanitize_upload_name,
 )
 from base.api_contracts.agent_contract import AgentNotFound
+from base.cluster.machine import gateway_auth_headers
+from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from base.db import agent_exists
-from gateway.http.auth.request_principal import (
-    PRINCIPAL_SCOPE,
-    SCOPE_HEADER,
-    AuthPrincipal,
-    principal_key,
-)
-from gateway.http.config import GatewayConfig
-from gateway.routers.upload.batches import save_keyed_batch
-from gateway.schemas.uploads import UploadedBatch
 
 router = APIRouter()
 
-type _UploadBatchItem = tuple[str, bytes, str]
+
+async def _fetch_delivered_object(
+    client: httpx.AsyncClient,
+    url: str,
+    query: ObjectReadRequest,
+    headers: dict[str, str],
+    *,
+    expected_size: int,
+    expected_sha256: str,
+) -> bytes:
+    async with client.stream("POST", url, json=query.model_dump(), headers=headers) as response:
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail="upload not found")
+        if response.status_code != 200:
+            raise HTTPException(status_code=502, detail="delivered upload could not be read")
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            content.extend(chunk)
+            if len(content) > expected_size:
+                raise HTTPException(status_code=404, detail="upload not found")
+    data = bytes(content)
+    if len(data) != expected_size or hashlib.sha256(data).hexdigest() != expected_sha256:
+        raise HTTPException(status_code=404, detail="upload not found")
+    return data
 
 
-def operation_key(
+@router.get("/api/agents/{agent_id}/uploads/{batch_id}/{ordinal}", response_model=None)
+async def serve_delivered_upload(
+    agent_id: Annotated[int, Path(gt=0, lt=2**63)],
+    batch_id: Annotated[str, Path(pattern=BATCH_ID_PATTERN)],
+    ordinal: Annotated[int, Path(ge=0, lt=1000)],
     request: Request,
-    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-    idempotency_scope: str = Header(alias=SCOPE_HEADER),
-) -> str:
-    """The stored identity of one upload operation: verified principal, route and caller key."""
-    principal = getattr(request.state, "auth_principal", None)
-    if idempotency_scope != PRINCIPAL_SCOPE or not isinstance(principal, AuthPrincipal):
-        raise HTTPException(422, "uploads require verified principal-v1 scope")
-    return principal_key(principal, request.method, request.url.path, idempotency_key)
-
-
-def _per_file_quota_error(safe_name: str, max_file_bytes: int) -> HTTPException:
-    return HTTPException(
-        status_code=413,
-        detail=f"upload {safe_name!r} exceeds the {max_file_bytes:,}-byte per-file limit",
-    )
-
-
-async def read_upload_batch(
-    files: list[UploadFile], *, max_file_bytes: int
-) -> list[_UploadBatchItem]:
-    """Read and size-check every file before the batch can write a final name."""
-    batch: list[_UploadBatchItem] = []
-    for file in files:
-        safe_name = sanitize_upload_name(file.filename or "untitled")
-        if has_control_characters(safe_name):
-            raise HTTPException(
-                422,
-                f"upload {safe_name!r} has a control character; it cannot be announced "
-                "as a file name",
-            )
-        contents = await file.read(max_file_bytes + 1)
-        if len(contents) > max_file_bytes:
-            raise _per_file_quota_error(safe_name, max_file_bytes)
-        batch.append((safe_name, contents, file.content_type or "application/octet-stream"))
-    return batch
-
-
-@router.post("/api/agents/{agent_id}/uploads", response_model=UploadedBatch)
-async def upload_files(
-    agent_id: int,
-    request: Request,
-    key: Annotated[str, Depends(operation_key)],
-    files: list[UploadFile] = File(...),  # noqa: B008
-    deliver: bool = Query(default=False),  # noqa: FBT001 — FastAPI query param, not a flag arg
-) -> UploadedBatch:
-    """Save one or more files silently and return each file's reference url.
-
-    No inbound is queued: the caller carries the returned urls into a later
-    multimodal message. `deliver=true` is refused; delivering a batch to the
-    agent is `POST /api/keyed/v1/agents/{id}/uploads`.
-
-    response_model makes FastAPI validate the return + emit the schema into
-    OpenAPI components; the frontend codegen auto-syncs to types-generated.ts."""
-
-    if deliver:
-        raise HTTPException(
-            422,
-            "this route saves silently; deliver a batch with POST /api/keyed/v1/agents/{id}/uploads",
+) -> Response:
+    try:
+        target, _directory, item = await asyncio.to_thread(
+            source.accepted_object, request.app.state.db_pool, agent_id, batch_id, ordinal
         )
-    config: GatewayConfig = request.app.state.gateway_config
-    batch = await read_upload_batch(files, max_file_bytes=config.max_upload_bytes)
-    return await asyncio.to_thread(
-        save_keyed_batch,
-        request.app.state.db_pool,
-        key,
-        agent_id,
-        agent_upload_dir(agent_id, create=False, root=config.upload_staging_root),
-        batch,
-        [file.filename or "untitled" for file in files],
-        batch_id=UUID(int=config.rng.getrandbits(128), version=4).hex,
-        staging_id=UUID(int=config.rng.getrandbits(128), version=4).hex,
-        max_bytes=config.max_agent_upload_bytes,
-        max_files=config.max_agent_upload_files,
-        local_machine=request.app.state.machine.name(),
+    except (AgentNotFound, UploadDeliveryConflictError) as exc:
+        raise HTTPException(status_code=404, detail="upload not found") from exc
+    access = request.app.state.gateway_access
+    query = ObjectReadRequest(agent_id=agent_id, batch_id=batch_id, ordinal=ordinal)
+    try:
+        ops_url = await asyncio.to_thread(lookup, request.app.state.db, target.machine)
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30, connect=3), trust_env=False
+        ) as client:
+            content = await _fetch_delivered_object(
+                client,
+                f"{ops_url.rstrip('/')}/upload-delivery/object",
+                query,
+                gateway_auth_headers(access),
+                expected_size=item.size,
+                expected_sha256=item.sha256,
+            )
+    except (httpx.HTTPError, MachineGatewayUrlMissing, MachineNotRegistered) as exc:
+        raise HTTPException(status_code=503, detail="The agent's machine is unavailable") from exc
+    return Response(
+        content,
+        media_type=item.content_type,
+        headers=delivered_upload_headers(item.name, item.content_type, item.sha256),
     )
 
 
 @router.get("/api/agents/{agent_id}/uploads/{filename}")
 def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse:
-    """Serve one saved upload back (image thumbnails in the timeline).
-
-    Traversal-safe: `resolve_upload_path` refuses any name escaping the agent's
-    upload dir. 404 when the agent or the file does not exist.
-    """
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
@@ -142,7 +105,6 @@ def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse
             filename,
         )
     except ValueError as e:
-        # A traversal attempt is a bad request, not a server error.
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"upload {filename!r} not found")

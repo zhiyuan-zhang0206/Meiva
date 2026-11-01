@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage
 from agent.db import ClaimedInbound
 from agent.messages import InboundTimes, inbound_message
 from base.agents.messages.envelope import inbound_head, inbound_tail
-from base.agents.messages.inbound_images import parse_upload_url
+from base.agents.messages.inbound_images import inbound_upload_files, parse_upload_url
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -73,6 +73,7 @@ def build_chat_inbound(
         raw = expand_command(item.content)
         finding = scan_inbound_content(raw, source=scan_src, enabled=read_security_enabled())
         head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
+        upload_files = inbound_upload_files(item.agent_id, item.payload)
         message = inbound_message(
             content=head + raw + inbound_tail(item.source),
             source=item.source,
@@ -80,6 +81,10 @@ def build_chat_inbound(
             body_start=len(head),
             times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
         )
+        if upload_files:
+            message.additional_kwargs["meiva_upload_files"] = [
+                file.model_dump() for file in upload_files
+            ]
         return message, finding
     blocks: list[dict[str, Any]] = [
         {str(k): v for k, v in b.items()} for b in raw_blocks if _is_object_dict(b)

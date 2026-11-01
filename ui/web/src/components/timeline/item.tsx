@@ -18,6 +18,7 @@
 // while the ephemeral families (compact_done / cancelled / error / unrecognized)
 // have no card and render bare through EphemeralSystemMarker.
 
+import { FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -25,10 +26,10 @@ import { createPortal } from "react-dom";
 import { ChatMarkdown } from "@/components/content/markdown";
 import { PythonCode } from "@/components/content/python-code";
 import { assetUrl } from "@/lib/transport/api";
-import type { BackendTimelineItem } from "@/lib/contracts/types";
+import type { BackendTimelineItem, TimelineUploadFile } from "@/lib/contracts/types";
 import { SSE_EVENT_WINDOW_MS } from "@/lib/contracts/constants-generated";
 import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
-import { cn } from "@/lib/format/utils";
+import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 
 import { EphemeralSystemMarker, MarkerBody } from "./markers";
 import { classifyMarker } from "./model/marker-classify";
@@ -100,7 +101,15 @@ export function copyPayloadFor(item: BackendTimelineItem): string {
 // instead of navigating away. Multimodal inbound_chat keeps the envelope layout but
 // shares the same lightbox thumbnails.
 // meiva:link agent/messages/docs/message-format.meiva.okf.md
-function Thumbnail({ src, alt }: { src: string; alt: string }) {
+function Thumbnail({
+  src,
+  alt,
+  onError,
+}: {
+  src: string;
+  alt: string;
+  onError?: () => void;
+}) {
   // Click-to-zoom overlay: no navigation (user ruling 2026-08-27 — the old
   // <a target="_blank"> opened the raw data-URI in a new tab). Click anywhere
   // on the backdrop (or the image) or press Escape to close. While open the
@@ -155,6 +164,7 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
           alt={alt}
           crossOrigin="use-credentials"
           loading="lazy"
+          onError={onError}
           className="absolute inset-0 m-auto max-h-48 max-w-[16rem] rounded border border-border object-contain"
         />
       </button>
@@ -266,9 +276,50 @@ function AttachContent({
   );
 }
 
+const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024;
+
+function UploadedFileCard({ file }: { file: TimelineUploadFile }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const canPreviewImage =
+    isRasterImageType(file.content_type) && file.size <= MAX_INLINE_IMAGE_BYTES;
+  const resolvedUrl = assetUrl(file.url);
+  return (
+    <div data-testid="timeline-upload-file" className="space-y-1.5">
+      {canPreviewImage && !imgFailed ? (
+        <Thumbnail
+          src={resolvedUrl}
+          alt={file.name}
+          onError={() => setImgFailed(true)}
+        />
+      ) : null}
+      <div
+        className={cn(
+          "items-center gap-2 rounded-md border border-border/70 bg-background/60 px-2.5 py-1.5 text-xs",
+          FLEX,
+        )}
+      >
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        <a
+          href={resolvedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="truncate font-mono font-medium text-foreground underline-offset-2 hover:underline"
+        >
+          {file.name}
+        </a>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {formatFileSize(file.size)} · {file.content_type}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function EnvelopeContent({
   payload,
   images,
+  files,
+  source = null,
   attachMode = false,
   plainMessage = false,
   hideHeader = false,
@@ -280,6 +331,8 @@ function EnvelopeContent({
   // Image reference urls on a multimodal inbound — rendered as thumbnails below
   // the text. Gateway-relative, so each is resolved through assetUrl.
   images?: string[] | null;
+  files?: TimelineUploadFile[] | null;
+  source?: string | null;
   /** Attach items render their caption lines interleaved with thumbnails. */
   attachMode?: boolean;
   /** Impersonation messages store the original body without an envelope. */
@@ -293,9 +346,12 @@ function EnvelopeContent({
 }) {
   const t = useTranslations("timeline");
   const { header, body } = plainMessage ? { header: "", body: payload } : splitEnvelope(payload);
-  // An image-only message stores "[image]" as its text placeholder; suppress that
-  // literal in the body when real thumbnails render below.
-  const showBody = Boolean(body) && !(images?.length && body === "[image]");
+  const isUploadBatchWithFiles = source === "system:upload" && Boolean(files?.length);
+  const showBody =
+    !isUploadBatchWithFiles &&
+    Boolean(body) &&
+    !(images?.length && body === "[image]") &&
+    !((Boolean(files?.length) || source === "user") && body === "[files]");
   // Attach items carry data URIs (self.attach media) — those render raw;
   // gateway-relative urls (user uploads) resolve through assetUrl.
   const resolveImageSrc = (src: string) => (src.startsWith("data:") ? src : assetUrl(src));
@@ -314,7 +370,7 @@ function EnvelopeContent({
   }
   return (
     <>
-      {header && !hideHeader ? (
+      {header && !hideHeader && !isUploadBatchWithFiles ? (
         <div className="mb-1">
           <span className="font-mono text-[11px] leading-relaxed text-muted-foreground/75 [overflow-wrap:anywhere]">
             {header}
@@ -334,6 +390,13 @@ function EnvelopeContent({
             {body}
           </pre>
         )
+      ) : null}
+      {files?.length ? (
+        <div className={cn("flex-wrap gap-2", showBody && "mt-2", FLEX)}>
+          {files.map((file, idx) => (
+            <UploadedFileCard key={`${idx}:${file.url}`} file={file} />
+          ))}
+        </div>
       ) : null}
       {images?.length ? (
         <div className={cn("mt-2 flex-wrap gap-2", FLEX)}>
@@ -397,8 +460,12 @@ export const ItemView = memo(function ItemView({
         <EnvelopeContent
           payload={item.payload}
           images={item.images}
+          files={item.files}
+          source={item.source}
           plainMessage={Boolean(item.impersonation)}
-          hideHeader={isHumanUser && item.source === "user"}
+          hideHeader={
+            (isHumanUser && item.source === "user") || item.source === "system:upload"
+          }
           markdown
         />
       );

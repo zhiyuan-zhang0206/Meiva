@@ -11,7 +11,6 @@ Tests run against the real app + test DB (TestClient + lifespan).
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 
@@ -32,8 +31,6 @@ from gateway.tests.support.runner_ops.ops_stub import (
 )
 
 _HOME_RUNNER = "idem-runner"
-_VISION_MODEL = "claude-sonnet-5-5"
-_TEXT_ONLY_MODEL = "glm-5.2"
 
 
 @pytest.fixture
@@ -70,14 +67,6 @@ def count_inbounds(conn: psycopg.Connection, agent_id: int, content: str) -> int
         return int(row[0])
 
 
-def _set_model(conn: psycopg.Connection, agent_id: int, model: str) -> None:
-    conn.execute(
-        "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
-        (json.dumps({"llm_model": model}), agent_id),
-    )
-    conn.commit()
-
-
 def test_reconcile_endpoint_finds_the_durable_inbound(
     client: GatewayTestClient, agent_id: int
 ) -> None:
@@ -100,57 +89,37 @@ def test_reconcile_endpoint_finds_the_durable_inbound(
 
 
 # meiva:note
-# A receipt survives model/upload changes after the original commit: the agent moves to a
-# model that cannot see images and the upload is gone, yet the same key still resolves.
-def test_reconcile_does_not_repeat_mutable_multimodal_validation(
-    client: GatewayTestClient, db_conn: psycopg.Connection, agent_id: int
+# Content block lists are rejected on `/api/agents/{id}/messages` without claiming the key;
+# file and image attachments use `/api/keyed/v1/agents/{id}/uploads`.
+def test_message_route_rejects_content_blocks_without_claiming_key(
+    client: GatewayTestClient, agent_id: int
 ) -> None:
-    from base.agents.upload_delivery.paths import agent_upload_dir
-
-    upload_dir = agent_upload_dir(
-        agent_id, root=client.app.state.gateway_config.upload_staging_root
+    rejected = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json={
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"/api/agents/{agent_id}/uploads/gone.png"},
+                }
+            ],
+            "source": "user",
+        },
+        headers=keyed_headers("key-plain-after-rejected-blocks"),
     )
-    image = upload_dir / "gone.png"
-    image.write_bytes(b"test image")
-    _set_model(db_conn, agent_id, _VISION_MODEL)
+    assert rejected.status_code == 422
 
-    body = {
-        "content": [
-            {
-                "type": "image_url",
-                "image_url": {"url": f"/api/agents/{agent_id}/uploads/gone.png"},
-            }
-        ],
-        "source": "user",
-    }
     sent = client.post(
         f"/api/agents/{agent_id}/messages",
-        json=body,
-        headers=keyed_headers("key-multimodal-reconcile"),
+        json={"content": "plain message", "source": "user"},
+        headers=keyed_headers("key-plain-after-rejected-blocks"),
     )
     assert sent.status_code == 201, sent.text
 
-    image.unlink()
-    _set_model(db_conn, agent_id, _TEXT_ONLY_MODEL)
-    fresh = client.post(
-        f"/api/agents/{agent_id}/messages",
-        json=body,
-        headers=keyed_headers("key-new-intent"),
-    )
-    assert fresh.status_code == 422, "the current model and uploads gate a new message"
-
-    retried = client.post(
-        f"/api/agents/{agent_id}/messages",
-        json=body,
-        headers=keyed_headers("key-multimodal-reconcile"),
-    )
-    assert retried.status_code == 201, retried.text
-    assert retried.json()["inbound_id"] == sent.json()["inbound_id"]
-
     receipt = client.post(
         f"/api/agents/{agent_id}/messages/reconcile",
-        json=body,
-        headers=keyed_headers("key-multimodal-reconcile"),
+        json={"content": "plain message", "source": "user"},
+        headers=keyed_headers("key-plain-after-rejected-blocks"),
     )
     assert receipt.status_code == 200, receipt.text
     assert receipt.json()["inbound_id"] == sent.json()["inbound_id"]

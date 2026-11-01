@@ -7,10 +7,18 @@ tags: [gateway, uploads]
 
 # Delivered upload source publication and quota
 
-`base.agents.upload_delivery.source` owns `upload_delivery_batches`. Tx A takes
+`base.agents.upload_delivery.source` owns `upload_delivery_batches` and
+`base.agents.upload_delivery.staging` owns `upload_staged_files`.
+`POST /api/keyed/v1/agents/{id}/uploads/staged` stages one file under `principal-v1`
+and `Idempotency-Key` into `.staged-v1/{agent_id}/{file_id}`;
+`DELETE /api/keyed/v1/agents/{id}/uploads/staged/{file_id}` removes an unreferenced
+staged file (409 when referenced by a batch). Tx A takes
 the existing agent upload xact gate, consults retained key identity **before**
-mutable target existence, then freezes source/target `UnitIdentity`, manifest,
-physical root and verified `InboundProvenance`. The target is the unique serving
+mutable target existence, disambiguates human-readable workspace filenames
+(`naming.disambiguate_filename`), then freezes source/target `UnitIdentity`, manifest,
+physical root and verified `InboundProvenance`. When accepting from staged files
+(`accept_from_staged`), Tx A locks the referenced `upload_staged_files` rows and
+links their `.staged-v1/` bytes into `.delivered-v1/{batch}/{object}`. The target is the unique serving
 runner unit whose URL matches the machine's registered Ops address. Receiver
 compares actual machine/home; a changed registry URL cannot silently redirect a
 batch to another home. Unbound or ambiguous fresh placement rejects before claim.

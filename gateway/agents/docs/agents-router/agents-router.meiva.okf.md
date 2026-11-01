@@ -107,12 +107,10 @@ Receipts: [[system-note.meiva.okf.md]], [[gateway/agents/docs/launch-retry.meiva
 ## Recovery and message boundaries
 
 A failed catalog does not invalidate an already committed chat receipt. Replay
-compares the normalized original content before current image/model checks;
-missing receipts still validate uploaded images before inserting anything.
-Plain text delivery does not need model metadata. Image references must belong
-to the addressed agent's existing upload; arbitrary filesystem paths and remote
-URLs are not admitted as uploads. An image-only inbound retains a text placeholder
-for envelope/timeline consumers alongside its native content blocks. The 1 MiB
+compares the normalized original content before current model checks.
+Plain text delivery (`POST /api/agents/{id}/messages`) does not need model metadata;
+file and image uploads use the staged + batch upload delivery routes
+(`/api/keyed/v1/agents/{id}/uploads*`). The 1 MiB
 message limit bounds pending/checkpoint storage and telemetry volume.
 
 Termination's open-task hint and shell-TTL cleanup are advisory after acceptance.

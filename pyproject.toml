@@ -1339,11 +1339,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "gateway/routers/upload/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "gateway/schedules/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

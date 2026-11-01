@@ -2207,16 +2207,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/uploads": {
+    "/api/agents/{agent_id}/uploads/{batch_id}/{ordinal}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["serve_delivered_upload_api_agents__agent_id__uploads__batch_id___ordinal__get"];
         put?: never;
-        post: operations["upload_files_api_agents__agent_id__uploads_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2234,6 +2234,38 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/uploads/staged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/uploads/staged/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["discard_staged_upload_api_keyed_v1_agents__agent_id__uploads_staged__file_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2294,6 +2326,7 @@ export interface components {
         Acceptance: {
             batch_id: string;
             agent_id: number;
+            directory: string;
             files: components["schemas"]["Object"][];
             status_url: string;
         };
@@ -2403,7 +2436,7 @@ export interface components {
             inbound_id?: number | null;
         };
         AgentMessageIn: {
-            content: string | (components["schemas"]["TextContentBlock"] | components["schemas"]["ImageUrlContentBlock"])[];
+            content: string;
             source: string;
             completion_notice: boolean;
         };
@@ -2625,11 +2658,8 @@ export interface components {
             timezone: string;
         };
         AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
-        Body_upload_api_keyed_v1_agents__agent_id__uploads_post: {
-            files: string[];
-        };
-        Body_upload_files_api_agents__agent_id__uploads_post: {
-            files: string[];
+        Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post: {
+            file: string;
         };
         BornChainResponse: {
             ancestors: components["schemas"]["BornChainRow"][];
@@ -2829,9 +2859,12 @@ export interface components {
             model: string;
         };
         DeliveryStatus: {
-            acceptance: components["schemas"]["Acceptance"] | null;
-            state: "receiving" | "pending" | "accepted" | "hold";
+            batch_id: string;
+            state: "pending" | "accepted" | "hold";
             reason: string | null;
+            directory: string;
+            message_text: string;
+            files: components["schemas"]["Object"][];
             inbound_id: number | null;
             source: components["schemas"]["UnitIdentity"];
             target: components["schemas"]["UnitIdentity"];
@@ -2989,13 +3022,6 @@ export interface components {
             required_total: number;
             required_missing: number;
             items: components["schemas"]["PermissionItemRow"][];
-        };
-        ImageUrlContentBlock: {
-            type: "image_url";
-            image_url: components["schemas"]["ImageUrlRef"];
-        };
-        ImageUrlRef: {
-            url: string;
         };
         ImpersonationMetadata: {
             agent_id: number;
@@ -3369,8 +3395,8 @@ export interface components {
         };
         Object: {
             ordinal: number;
-            filename: string;
             name: string;
+            staged_id: string;
             size: number;
             sha256: string;
             content_type: string;
@@ -3448,6 +3474,7 @@ export interface components {
             sender: "user" | "agent" | "automation" | "system";
             content: string;
             images: string[] | null;
+            files?: components["schemas"]["TimelineUploadFile"][] | null;
             created_at: string;
         };
         PermissionItemRow: {
@@ -3893,6 +3920,13 @@ export interface components {
             publish_error: number;
             event_log_drop: number;
         };
+        StagedFile: {
+            file_id: string;
+            name: string;
+            size: number;
+            content_type: string;
+            sha256: string;
+        };
         StatsDashboard: {
             live_count: number;
             window_hours: components["schemas"]["StatsWindowHours"];
@@ -4035,10 +4069,6 @@ export interface components {
             shell_sessions?: components["schemas"]["ShellSessionsKill"] | null;
         };
         TerminateResult: "enqueued" | "already_terminated";
-        TextContentBlock: {
-            type: "text";
-            text: string;
-        };
         TextQuestion: {
             type: "text";
         };
@@ -4060,6 +4090,7 @@ export interface components {
             show_timestamp: boolean;
             user_facing: boolean;
             images?: string[] | null;
+            files?: components["schemas"]["TimelineUploadFile"][] | null;
             image_captions?: string[] | null;
             sdk_calls?: components["schemas"]["SdkCall"][] | null;
             code_elapsed_ms?: number | null;
@@ -4068,6 +4099,12 @@ export interface components {
             items: components["schemas"]["TimelineItem"][];
             msg_count: number;
             has_more: boolean;
+        };
+        TimelineUploadFile: {
+            name: string;
+            size: number;
+            content_type: string;
+            url: string;
         };
         ToUserDocument: {
             content: string | null;
@@ -4148,15 +4185,9 @@ export interface components {
             machine: string;
             home: string;
         };
-        UploadedBatch: {
-            files: components["schemas"]["UploadedFile"][];
-        };
-        UploadedFile: {
-            filename: string;
-            path: string;
-            url: string;
-            size: number;
-            content_type: string;
+        UploadSendRequest: {
+            file_ids: string[];
+            text: string;
         };
         UserSettingListResponse: {
             settings: components["schemas"]["UserSettingRow"][];
@@ -8707,32 +8738,25 @@ export interface operations {
             };
         };
     };
-    upload_files_api_agents__agent_id__uploads_post: {
+    serve_delivered_upload_api_agents__agent_id__uploads__batch_id___ordinal__get: {
         parameters: {
-            query?: {
-                deliver?: boolean;
-            };
-            header: {
-                "Idempotency-Key": string;
-                "Idempotency-Scope": string;
-            };
+            query?: never;
+            header?: never;
             path: {
                 agent_id: number;
+                batch_id: string;
+                ordinal: number;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_upload_files_api_agents__agent_id__uploads_post"];
-            };
-        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UploadedBatch"];
+                    "application/json": unknown;
                 };
             };
             422: {
@@ -8775,6 +8799,70 @@ export interface operations {
             };
         };
     };
+    stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagedFile"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_staged_upload_api_keyed_v1_agents__agent_id__uploads_staged__file_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     upload_api_keyed_v1_agents__agent_id__uploads_post: {
         parameters: {
             query?: never;
@@ -8789,7 +8877,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_upload_api_keyed_v1_agents__agent_id__uploads_post"];
+                "application/json": components["schemas"]["UploadSendRequest"];
             };
         };
         responses: {

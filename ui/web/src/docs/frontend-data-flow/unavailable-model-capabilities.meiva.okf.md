@@ -14,18 +14,15 @@ lifecycle SSE events remain invalidation hints and cannot resurrect old metadata
 Agent status, history selection and bounded directory pagination retain their
 existing meanings. See [[base/agents/observation/docs/observation.meiva.okf.md]].
 
-For a Meiva harness, the composer explains null capability and enables native
-image attachment only for true. External harness adapters currently accept text,
-so a selected model with vision never enables native image attachment
-for them. Pasted and dropped images use ordinary file delivery instead, with a
-workspace file receipt rather than a model-image thumbnail. File delivery remains
-a separate upload/receipt operation. Native image attachments belong to the
-selected agent and the current native-image capability. Changing either clears
-pending and ready attachments before another send and releases their local
-previews, including uploads started before the thumbnail first renders. A completed upload updates only an attachment still in that scope; an
-old completion cannot restore a removed image after switching back. Text drafts
-retain their existing per-agent persistence and ordinary file delivery is
-unchanged. Replacing the attachment callback alone does not discard images.
+For a Meiva harness, the home view explains null capability (`supports_vision === null`)
+with the unavailable-capabilities notice. All file and image uploads (selected, pasted
+or dropped) use unified staged + batch workspace delivery across every harness and
+model (`POST /api/keyed/v1/agents/{id}/uploads/staged` followed by
+`POST /api/keyed/v1/agents/{id}/uploads`), delivering files to the agent's workspace
+where `meiva.understand` or workspace tools inspect them. Staged attachments belong
+to the selected agent; switching agents clears the composer's staged attachments
+while preserving per-agent active batch tracking in `sessionStorage`. Text drafts
+retain their existing per-agent persistence.
 Text sending and exact-work stop remain accessible; their accepted receipts do
 not claim model execution or work completion. A failed models query hides cached
 model choices and disables spawning, with an unavailable label in both expanded

@@ -6,9 +6,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ComposerAttachmentStrip,
+  ComposerHeldBatchBanner,
   ComposerMetaRow,
   handleComposerKeyDown,
-  type PendingImage,
 } from "@/components/conversation/composer-helpers";
 import {
   draftKey,
@@ -22,6 +22,10 @@ import {
   type SendAttempt,
 } from "@/components/conversation/composer-session";
 import {
+  useComposerUploads,
+  type StageQueueBatch,
+} from "@/components/conversation/composer-uploads";
+import {
   parseSlash,
   SlashAutocomplete,
   type SlashAutocompleteHandle,
@@ -34,7 +38,7 @@ import type { Diagnostics } from "@/lib/transport/transport";
 import { errMsg } from "@/lib/contracts/errors";
 import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
 import { track } from "@/lib/telemetry/telemetry";
-import type { CommandItem } from "@/lib/contracts/types";
+import type { CommandItem, DeliveredUploadStatus } from "@/lib/contracts/types";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
@@ -57,6 +61,7 @@ const COMPOSER_BAND_CLASS = "border-t border-border pt-3 pb-6";
 const COMPOSER_BAND_ROW_CLASS = "min-h-9";
 
 export type ComposerMode = "disabled" | "idle" | "busy";
+export type { StageQueueBatch } from "@/components/conversation/composer-uploads";
 
 interface Props {
   // meiva:note
@@ -66,10 +71,13 @@ interface Props {
   diagnostics: Diagnostics;
   mode: ComposerMode;
   children?: React.ReactNode;
-  onSend: (content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
+  onSend: (content: string, fileIds: string[], clientMessageId: string) => Promise<boolean>;
   onStop: () => void;
   onUploadFiles?: (files: File[]) => void;
-  onAttachImage?: (file: File) => Promise<string>;
+  stageQueue?: StageQueueBatch | null;
+  onDeliveringBatchChange?: (batch: DeliveredUploadStatus | null) => void;
+  onUploadSent?: () => void;
+  onUploadError?: (msg: string) => void;
   filesUploading?: boolean;
   focusToken?: number;
   contextTokens: number;
@@ -84,7 +92,30 @@ interface Props {
   suggestions?: readonly string[] | null;
 }
 
-export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
+export function Composer({
+  diagnostics,
+  mode,
+  onSend,
+  onStop,
+  onUploadFiles,
+  stageQueue = null,
+  onDeliveringBatchChange,
+  onUploadSent,
+  onUploadError,
+  filesUploading = false,
+  focusToken,
+  contextTokens,
+  contextPending = false,
+  maxContextTokens = 0,
+  softCompactTokens = 0,
+  hardCompactTokens = 0,
+  agentId = null,
+  agentTerminated = false,
+  showContextMeter = false,
+  maxWidthCss,
+  suggestions = null,
+  children,
+}: Props) {
   const client = useApi();
   const wallNow = useWallNow();
   const t = useTranslations("common");
@@ -93,8 +124,8 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
   const objectUrls = browser.objectUrls;
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
-    if (agentId == null) return '';
-    return readSession(session, draftKey(agentId)) ?? '';
+    if (agentId == null) return "";
+    return readSession(session, draftKey(agentId)) ?? "";
   });
   const [replySelection, setReplySelection] = useState<{
     options: readonly string[];
@@ -104,18 +135,11 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
   } | null>(null);
   const currentReplySelection =
     replySelection !== null && replySelection.options === suggestions && replySelection.agentId === agentId
-      ? replySelection : null;
+      ? replySelection
+      : null;
   const replyIndex = currentReplySelection?.index ?? 0;
   const [caret, setCaret] = useState(() => value.length);
   const [dragOver, setDragOver] = useState(false);
-  const [images, setImages] = useState<PendingImage[]>([]);
-  const imagesEnabled = onAttachImage !== undefined;
-  const [imageScope, setImageScope] = useState({ agentId, enabled: imagesEnabled });
-  // meiva:link ui/web/src/docs/frontend-data-flow/unavailable-model-capabilities.meiva.okf.md
-  if (imageScope.agentId !== agentId || imageScope.enabled !== imagesEnabled) {
-    setImageScope({ agentId, enabled: imagesEnabled });
-    setImages([]);
-  }
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [initialSendAttempt] = useState<SendAttempt | null>(() =>
@@ -128,6 +152,33 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
   // the next voice/paste commit is lost silently.
   // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
   const composerLocked = sending;
+
+  const {
+    attachments,
+    readyFileIds,
+    hasPendingStage,
+    deliveryInFlight,
+    heldBatch,
+    stageFiles,
+    removeAttachment,
+    retryAttachment,
+    clearSubmittedAttachments,
+    recordBatchAccepted,
+    restoreHeldBatch,
+    retryHeldBatch,
+  } = useComposerUploads({
+    agentId,
+    client,
+    session,
+    objectUrls,
+    composerLocked,
+    stageQueue,
+    onUploadFiles,
+    onDeliveringBatchChange,
+    onUploadSent,
+    onUploadError,
+  });
+
   const { data: commands = [] } = useQuery({
     queryKey: ["agent-commands", agentId],
     queryFn: async () => {
@@ -185,24 +236,6 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
     ta.setSelectionRange(pos, pos);
   }, [value, caret]);
 
-  const clearImages = () => setImages([]);
-  const imagePreviewsRef = useRef(new Map<string, string>());
-  useEffect(() => {
-    for (const [key, previewUrl] of imagePreviewsRef.current) {
-      if (!images.some((image) => image.key === key)) {
-        objectUrls.revoke(previewUrl);
-        imagePreviewsRef.current.delete(key);
-      }
-    }
-  }, [images, objectUrls]);
-  useEffect(() => {
-    const previews = imagePreviewsRef.current;
-    return () => {
-      for (const previewUrl of previews.values()) objectUrls.revoke(previewUrl);
-      previews.clear();
-    };
-  }, [objectUrls]);
-
   const valueRef = useRef(value);
   useEffect(() => {
     valueRef.current = value;
@@ -238,41 +271,7 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
     }
   }, [value, agentId, session]);
 
-  const removeImage = (key: string) => {
-    if (composerLocked) return;
-    setImages((prev) => prev.filter((image) => image.key !== key));
-  };
-
-  const attachImages = (files: File[]) => {
-    if (composerLocked || !onAttachImage) return;
-    for (const file of files) {
-      // meiva:note
-      // A pending attachment previews from an object URL, so the page image policy must allow blob:.
-      // The URL is the attachment's identity while it is pending: it is unique per paste, and the
-      // preview and the key that releases it are the same value.
-      // meiva:link ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md
-      const previewUrl = objectUrls.create(file);
-      const key = previewUrl;
-      imagePreviewsRef.current.set(key, previewUrl);
-      setImages((prev) => [...prev, { key, name: file.name, previewUrl, status: "uploading" }]);
-      onAttachImage(file)
-        .then((u) =>
-          setImages((prev) =>
-            prev.map((i) => (i.key === key ? { ...i, url: u, status: "ready" as const } : i)),
-          ),
-        )
-        .catch(() =>
-          setImages((prev) =>
-            prev.map((i) => (i.key === key ? { ...i, status: "error" as const } : i)),
-          ),
-        );
-    }
-  };
-
-  const send = async (
-    content: string,
-    imageUrls: string[],
-  ) => {
+  const send = async (content: string, fileIds: string[]) => {
     if (sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
@@ -284,7 +283,7 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
         sendAttemptRef.current,
         sendingAgentId,
         content,
-        imageUrls,
+        fileIds,
         client.newOperationKey,
       );
       activeAttempt = attempt;
@@ -293,18 +292,38 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
         writeSession(session, sendAttemptKey(sendingAgentId), JSON.stringify(attempt));
         markMessageSent(sendingAgentId, wallNow());
       }
-      const ok = await onSend(content, imageUrls, attempt.clientMessageId);
+      let ok = false;
+      if (fileIds.length > 0 && sendingAgentId != null) {
+        try {
+          const accepted = await client.submitUploadedFiles(
+            sendingAgentId,
+            fileIds,
+            content,
+            attempt.clientMessageId,
+          );
+          recordBatchAccepted(accepted, content);
+          ok = true;
+        } catch (err: unknown) {
+          onUploadError?.(errMsg(err));
+          ok = false;
+        }
+      } else {
+        ok = await onSend(content, fileIds, attempt.clientMessageId);
+      }
       if (ok) {
         track("composer-send");
         if (prevAgentIdRef.current === sendingAgentId) {
           if (suggestions) {
             setReplySelection({
-              options: suggestions, agentId: sendingAgentId, index: replyIndex, consumed: true,
+              options: suggestions,
+              agentId: sendingAgentId,
+              index: replyIndex,
+              consumed: true,
             });
           }
           setValue((current) => (current.trim() === content ? "" : current));
           setCaret(0);
-          clearImages();
+          clearSubmittedAttachments();
         }
         if (sendingAgentId != null) {
           removeSession(session, draftKey(sendingAgentId));
@@ -327,15 +346,11 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
     }
   };
 
-  const readyImageUrls = images.flatMap((i) => (i.status === "ready" && i.url ? [i.url] : []));
-  const uploadingImages = images.some((i) => i.status === "uploading");
-
   const submit = () => {
-    if (composerLocked) return;
+    if (composerLocked || hasPendingStage || deliveryInFlight) return;
     const content = value.trim();
-    if (uploadingImages) return;
-    if (!content && readyImageUrls.length === 0) return;
-    void send(content, readyImageUrls);
+    if (!content && readyFileIds.length === 0) return;
+    void send(content, readyFileIds);
   };
 
   const runCommand = (cmd: CommandItem) => {
@@ -352,33 +367,25 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
 
   const offeredSuggestion =
     value === "" && !currentReplySelection?.consumed && suggestions?.length
-      ? suggestions[replyIndex] : null;
+      ? suggestions[replyIndex]
+      : null;
   const suggestionPlaceholder =
     offeredSuggestion !== null && suggestions && suggestions.length > 1
-      ? `[${replyIndex + 1}/${suggestions.length}] ${offeredSuggestion}` : offeredSuggestion;
+      ? `[${replyIndex + 1}/${suggestions.length}] ${offeredSuggestion}`
+      : offeredSuggestion;
   const acceptSuggestion = (text: string) => {
     pendingCaret.current = text.length;
     setCaret(text.length);
     setValue(text);
   };
 
-  const routeFiles = (files: File[]) => {
-    if (composerLocked) return;
-    const imgs = files.filter((f) => f.type.startsWith("image/"));
-    const others = files.filter((f) => !f.type.startsWith("image/"));
-    if (imgs.length > 0) {
-      if (onAttachImage) attachImages(imgs);
-      else onUploadFiles?.(imgs);
-    }
-    if (others.length > 0) onUploadFiles?.(others);
-  };
-  const canReceiveFiles = !composerLocked && (!!onUploadFiles || !!onAttachImage);
+  const canReceiveFiles = !composerLocked && mode !== "disabled";
   const handleDrop = (e: React.DragEvent) => {
     if (!canReceiveFiles) return;
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) routeFiles(files);
+    if (files.length > 0) stageFiles(files);
   };
   const handleDragOver = (e: React.DragEvent) => {
     if (!canReceiveFiles || !e.dataTransfer.types.includes("Files")) return;
@@ -390,16 +397,18 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
     const files = Array.from(e.clipboardData.files);
     if (files.length > 0) {
       e.preventDefault();
-      routeFiles(files);
+      stageFiles(files);
     }
   };
 
   const trimmed = value.trim();
-  const hasContent = !!trimmed || readyImageUrls.length > 0;
+  const hasContent = !!trimmed || readyFileIds.length > 0;
   const coarsePointer = useCoarsePointer();
   const showStop = mode === "busy" && !hasContent && !composerLocked;
   const buttonDisabled =
-    composerLocked || mode === "disabled" || uploadingImages || (!showStop && !hasContent);
+    composerLocked ||
+    mode === "disabled" ||
+    (!showStop && (hasPendingStage || deliveryInFlight || !hasContent));
 
   return (
     <div
@@ -427,97 +436,118 @@ export function Composer({ diagnostics, mode, onSend, onStop, onUploadFiles, onA
         data-testid="composer-band"
         className={cn("gap-2", COMPOSER_BAND_CLASS, FLEX, FLEX_COL)}
       >
-      <ComposerMetaRow
-        commandHint={commandHint}
-        showContextMeter={showContextMeter}
-        contextTokens={contextTokens}
-        contextPending={contextPending}
-        agentId={agentId}
-        breakdownOpen={breakdownOpen}
-        onBreakdownOpenChange={handleBreakdownOpenChange}
-        maxContextTokens={maxContextTokens}
-        softCompactTokens={softCompactTokens}
-        hardCompactTokens={hardCompactTokens}
-      />
-      {filesUploading ? (
-        <div
-          role="status"
-          data-testid="composer-upload-hint"
-          className="px-0.5 text-xs leading-4 text-muted-foreground"
-        >
-          {t("filesUploadingHint")}
-        </div>
-      ) : null}
-      <ComposerAttachmentStrip
-        images={images}
-        composerLocked={composerLocked}
-        onRemove={removeImage}
-      />
-      <div className="relative">
-        <SlashAutocomplete
-          ref={acRef}
-          commands={commands}
-          query={query}
-          onSelect={runCommand}
-          onOpenChange={handleAutocompleteOpenChange}
+        <ComposerMetaRow
+          commandHint={commandHint}
+          showContextMeter={showContextMeter}
+          contextTokens={contextTokens}
+          contextPending={contextPending}
+          agentId={agentId}
+          breakdownOpen={breakdownOpen}
+          onBreakdownOpenChange={handleBreakdownOpenChange}
+          maxContextTokens={maxContextTokens}
+          softCompactTokens={softCompactTokens}
+          hardCompactTokens={hardCompactTokens}
         />
-        <div className={cn("gap-2 items-end", COMPOSER_BAND_ROW_CLASS, FLEX)}>
-        {children}
-        <Textarea
-          ref={taRef}
-          data-testid="composer-input"
-          aria-label={t("composerInput")}
-          aria-description={offeredSuggestion !== null ? t("replySuggestionKeys") : undefined}
-          placeholder={
-            suggestionPlaceholder ??
-            (agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder"))
-          }
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            syncCaret(e.target);
-          }}
-          onKeyUp={(e) => syncCaret(e.currentTarget)}
-          onClick={(e) => syncCaret(e.currentTarget)}
-          onSelect={(e) => syncCaret(e.currentTarget)}
-          onPaste={handlePaste}
-          disabled={mode === "disabled"}
-          focusVisible={false}
-          className={cn("font-mono text-base resize-none max-h-[50vh] overflow-y-auto min-h-9 py-1.5 leading-5", FLEX_1)}
-          suppressHydrationWarning
-          onKeyDown={(e) =>
-            handleComposerKeyDown(e, {
-              ac: acRef.current,
-              offeredSuggestion,
-              composerLocked,
-              suggestions,
-              replyIndex,
-              agentId,
-              mode,
-              coarsePointer,
-              acceptSuggestion,
-              onCycleSuggestion: (nextIndex) => {
-                if (!suggestions) return;
-                setReplySelection({
-                  options: suggestions,
-                  agentId,
-                  index: nextIndex,
-                  consumed: false,
-                });
-              },
-              submit,
+        {filesUploading || deliveryInFlight ? (
+          <div
+            role="status"
+            data-testid="composer-upload-hint"
+            className="px-0.5 text-xs leading-4 text-muted-foreground"
+          >
+            {deliveryInFlight ? t("deliveringUploadsHint") : t("filesUploadingHint")}
+          </div>
+        ) : null}
+        <ComposerHeldBatchBanner
+          heldBatch={heldBatch}
+          composerLocked={composerLocked}
+          onRestore={() =>
+            restoreHeldBatch((restoredText) => {
+              setValue((cur) => (cur.trim() ? cur : restoredText));
             })
           }
+          onRetry={() => void retryHeldBatch()}
         />
-        <SendButton
-          data-testid="composer-send"
-          state={sending ? "sending" : showStop ? "stop" : "send"}
-          aria-label={sending ? "Sending" : showStop ? "Stop current turn" : "Send message"}
-          disabled={buttonDisabled}
-          onClick={() => { if (showStop) { track("composer-stop"); onStop(); } else { submit(); } }}
+        <ComposerAttachmentStrip
+          attachments={attachments}
+          composerLocked={composerLocked}
+          onRemove={removeAttachment}
+          onRetry={retryAttachment}
         />
+        <div className="relative">
+          <SlashAutocomplete
+            ref={acRef}
+            commands={commands}
+            query={query}
+            onSelect={runCommand}
+            onOpenChange={handleAutocompleteOpenChange}
+          />
+          <div className={cn("gap-2 items-end", COMPOSER_BAND_ROW_CLASS, FLEX)}>
+            {children}
+            <Textarea
+              ref={taRef}
+              data-testid="composer-input"
+              aria-label={t("composerInput")}
+              aria-description={offeredSuggestion !== null ? t("replySuggestionKeys") : undefined}
+              placeholder={
+                suggestionPlaceholder ??
+                (agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder"))
+              }
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                syncCaret(e.target);
+              }}
+              onKeyUp={(e) => syncCaret(e.currentTarget)}
+              onClick={(e) => syncCaret(e.currentTarget)}
+              onSelect={(e) => syncCaret(e.currentTarget)}
+              onPaste={handlePaste}
+              disabled={mode === "disabled"}
+              focusVisible={false}
+              className={cn(
+                "font-mono text-base resize-none max-h-[50vh] overflow-y-auto min-h-9 py-1.5 leading-5",
+                FLEX_1,
+              )}
+              suppressHydrationWarning
+              onKeyDown={(e) =>
+                handleComposerKeyDown(e, {
+                  ac: acRef.current,
+                  offeredSuggestion,
+                  composerLocked,
+                  suggestions,
+                  replyIndex,
+                  agentId,
+                  mode,
+                  coarsePointer,
+                  acceptSuggestion,
+                  onCycleSuggestion: (nextIndex) => {
+                    if (!suggestions) return;
+                    setReplySelection({
+                      options: suggestions,
+                      agentId,
+                      index: nextIndex,
+                      consumed: false,
+                    });
+                  },
+                  submit,
+                })
+              }
+            />
+            <SendButton
+              data-testid="composer-send"
+              state={sending ? "sending" : showStop ? "stop" : "send"}
+              aria-label={sending ? "Sending" : showStop ? "Stop current turn" : "Send message"}
+              disabled={buttonDisabled}
+              onClick={() => {
+                if (showStop) {
+                  track("composer-stop");
+                  onStop();
+                } else {
+                  submit();
+                }
+              }}
+            />
+          </div>
         </div>
-      </div>
       </div>
     </div>
   );

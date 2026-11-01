@@ -1,4 +1,3 @@
-import type { ContentBlock } from "../../../contracts/types";
 import { keyedHeaders } from "./key-plan";
 import { hasHttpStatus, isAmbiguousDeliveryError } from "./response-plan";
 
@@ -20,7 +19,7 @@ export class MessageDeliveryUnknownError extends Error {
   }
 }
 
-export function messageInit(content: string | ContentBlock[], clientMessageId: string): RequestInit {
+export function messageInit(content: string, clientMessageId: string): RequestInit {
   return {
     method: "POST",
     headers: { "content-type": "application/json", ...keyedHeaders(clientMessageId) },

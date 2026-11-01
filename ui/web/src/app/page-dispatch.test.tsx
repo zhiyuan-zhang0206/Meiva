@@ -149,19 +149,8 @@ describe("UploadButton receives activeId", () => {
   });
 });
 
-describe("pasted image routing", () => {
-  const uploadResult = {
-    files: [
-      {
-        filename: "paste.png",
-        path: "/tmp/paste.png",
-        url: "/api/agents/5/uploads/paste.png",
-        size: 3,
-        content_type: "image/png",
-      },
-    ],
-  };
-  it("explains unknown model capabilities while text and stop remain available", async () => {
+describe("model capability notice & unified file staging", () => {
+  it("explains unknown model capabilities while text, stop and file staging remain available", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: null, status: "running" })];
     wrap(<HomePage />);
@@ -172,80 +161,27 @@ describe("pasted image routing", () => {
     fireEvent.click(screen.getByTestId("composer-stop"));
     await waitFor(() => expect(transport.cancel).toHaveBeenCalledWith(5));
     expect(hooksState.agents[0].status).toBe("running");
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    expect(transport.uploadFiles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("upload-button"));
+    expect(screen.getByTestId("composer").getAttribute("data-stage-seq")).toBe("1");
+    expect(screen.getByTestId("composer").getAttribute("data-stage-files")).toBe("picked.txt");
   });
-  it("uses file delivery without a native thumbnail for a text-only agent", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-    wrap(<HomePage />);
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    // meiva:note
-    // The upload's idempotency key is the transport's to mint — this case is about the delivery
-    // path, so the key is asserted as a string, not as a UUID shape the page would have to know.
-    expect(transport.submitUploadedFiles).toHaveBeenCalledWith(
-      5,
-      [image],
-      expect.any(String),
-      expect.any(Function),
-    );
-    expect(transport.uploadFiles).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
-  });
-  it.each(["claude_code", "codex"] as const)("routes images as files and hides native context for %s", async (harness) => {
+
+  it.each(["claude_code", "codex"] as const)("hides native context meter for %s while keeping file staging", (harness) => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, harness, supports_vision: true })];
     hooksState.settings["display.composer_context_meter"] = true;
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("false");
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    expect(transport.uploadFiles).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
+    fireEvent.click(screen.getByTestId("upload-button"));
+    expect(screen.getByTestId("composer").getAttribute("data-stage-files")).toBe("picked.txt");
   });
-  it("keeps the native image attachment path for a vision-capable agent", async () => {
+
+  it("enables the native context meter for a meiva agent when opted in", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: true })];
     hooksState.settings["display.composer_context_meter"] = true;
-    transport.uploadFiles.mockResolvedValueOnce(uploadResult);
-    const image = new File(["png"], "paste.png", { type: "image/png" });
     wrap(<HomePage />);
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    await waitFor(() =>
-      expect(transport.uploadFiles).toHaveBeenCalledWith(5, [image]),
-    );
-    expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
     expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("true");
-  });
-  it("takes the submit's client message id from the transport, not from the page", async () => {
-    // meiva:note
-    // A plain-HTTP origin has no `crypto.randomUUID`, so the key source falls back to random bytes
-    // (key-plan.test.ts pins that shape). What this page test owns is the seam: the composer asks
-    // the transport it was given for the id and hands that id to the submit call.
-    transport.newOperationKey.mockReturnValue("operation-key-from-the-client");
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-    wrap(<HomePage />);
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    expect(transport.submitUploadedFiles.mock.calls[0][2]).toBe("operation-key-from-the-client");
-    expect(transport.uploadFiles).not.toHaveBeenCalled();
   });
 });
 
@@ -285,21 +221,6 @@ describe("multi-command dispatch", () => {
     expect(transport.sendMessage).toHaveBeenCalledWith(
       5,
       "plain text",
-      expect.any(String),
-    );
-  });
-  it("attaches images to the one command message", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send-multi-image"));
-    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalledTimes(1));
-    expect(transport.sendMessage).toHaveBeenCalledWith(
-      5,
-      [
-        { type: "text", text: "/compact /update" },
-        { type: "image_url", image_url: { url: "/api/agents/5/uploads/a.png" } },
-      ],
       expect.any(String),
     );
   });

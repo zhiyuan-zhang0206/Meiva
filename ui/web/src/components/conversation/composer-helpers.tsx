@@ -1,20 +1,29 @@
 "use client";
 
+import { FileText, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { type SlashAutocompleteHandle } from "@/components/conversation/slash-autocomplete";
 import { ContextButton } from "@/components/inspector/context-breakdown";
 import { ContextMeterGhost } from "@/components/inspector/context-meter";
-import { cn } from "@/lib/format/utils";
+import type { DeliveredUploadStatus } from "@/lib/contracts/types";
+import { cn, formatFileSize } from "@/lib/format/utils";
 import { isImeComposition, isSendEnter, type KeyStroke } from "@/lib/input/enter-to-send";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
-export interface PendingImage {
-  key: string;
-  name: string;
-  previewUrl: string;
-  url?: string;
-  status: "uploading" | "ready" | "error";
+export interface StagedAttachment {
+  readonly key: string;
+  readonly agentId: number | null;
+  readonly file: File | null;
+  readonly name: string;
+  readonly size: number;
+  readonly contentType: string;
+  readonly previewUrl: string | null;
+  readonly operationKey: string;
+  readonly status: "uploading" | "ready" | "error";
+  readonly progress: number;
+  readonly fileId: string | null;
+  readonly error: string | null;
 }
 
 export function ComposerMetaRow({
@@ -68,49 +77,140 @@ export function ComposerMetaRow({
   );
 }
 
-export function ComposerAttachmentStrip({
-  images,
+export function ComposerHeldBatchBanner({
+  heldBatch,
   composerLocked,
-  onRemove,
+  onRestore,
+  onRetry,
 }: {
-  images: PendingImage[];
+  heldBatch: DeliveredUploadStatus | null;
   composerLocked: boolean;
-  onRemove: (key: string) => void;
+  onRestore: () => void;
+  onRetry: () => void;
 }) {
   const t = useTranslations("common");
-  if (images.length === 0) return null;
+  if (heldBatch?.state !== "hold") return null;
+  return (
+    <div
+      role="alert"
+      data-testid="composer-held-batch"
+      className={cn(
+        "items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 text-xs",
+        FLEX,
+      )}
+    >
+      <span className={cn("truncate text-destructive", MIN_W_0)}>
+        {t("heldUploadNotice", { reason: heldBatch.reason ?? "delivery failed" })}
+      </span>
+      <div className={cn("shrink-0 items-center gap-1.5", FLEX)}>
+        <button
+          type="button"
+          data-testid="composer-held-restore"
+          onClick={onRestore}
+          disabled={composerLocked}
+          className="rounded border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-50"
+        >
+          {t("heldUploadRestore")}
+        </button>
+        <button
+          type="button"
+          data-testid="composer-held-retry"
+          onClick={onRetry}
+          disabled={composerLocked}
+          className="rounded border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-50"
+        >
+          {t("heldUploadRetry")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function ComposerAttachmentStrip({
+  attachments,
+  composerLocked,
+  onRemove,
+  onRetry,
+}: {
+  attachments: readonly StagedAttachment[];
+  composerLocked: boolean;
+  onRemove: (key: string) => void;
+  onRetry: (key: string) => void;
+}) {
+  const t = useTranslations("common");
+  if (attachments.length === 0) return null;
   return (
     <div className={cn("flex-wrap gap-2 px-0.5 pb-1", FLEX)} data-testid="composer-attachments">
-      {images.map((img) => (
-        <div key={img.key} className="relative">
-          <picture>
-            <img
-              src={img.previewUrl}
-              alt={img.name}
+      {attachments.map((att) => (
+        <div
+          key={att.key}
+          data-testid="composer-attachment-card"
+          data-status={att.status}
+          className="relative"
+        >
+          {att.previewUrl ? (
+            <picture>
+              <img
+                src={att.previewUrl}
+                alt={att.name}
+                className={cn(
+                  "h-14 w-14 rounded border border-border object-cover",
+                  att.status === "uploading" && "opacity-50",
+                  att.status === "error" && "ring-1 ring-destructive",
+                )}
+              />
+            </picture>
+          ) : (
+            <div
               className={cn(
-                "h-14 w-14 rounded border border-border object-cover",
-                img.status === "uploading" && "opacity-50",
-                img.status === "error" && "ring-1 ring-destructive",
-              )}
-            />
-          </picture>
-          {img.status !== "ready" ? (
-            <span
-              className={cn(
-                "absolute inset-0 items-center justify-center text-[10px]",
-                img.status === "error" ? "text-destructive" : "text-muted-foreground",
+                "h-14 max-w-48 items-center gap-2 rounded border border-border bg-muted/40 px-2.5 py-1.5",
+                att.status === "uploading" && "opacity-60",
+                att.status === "error" && "border-destructive ring-1 ring-destructive",
                 FLEX,
               )}
             >
-              {img.status === "error" ? t("failed") : "…"}
+              <FileText className="size-4 shrink-0 text-muted-foreground" />
+              <div className={MIN_W_0}>
+                <div className="truncate font-mono text-xs text-foreground">{att.name}</div>
+                <div className="text-[10px] text-muted-foreground">{formatFileSize(att.size)}</div>
+              </div>
+            </div>
+          )}
+          {att.status !== "ready" ? (
+            <span
+              className={cn(
+                "absolute inset-0 items-center justify-center rounded bg-background/60 text-[10px] font-medium",
+                att.status === "error" ? "text-destructive" : "text-muted-foreground",
+                FLEX,
+              )}
+            >
+              {att.status === "error" ? t("failed") : `${att.progress}%`}
             </span>
+          ) : null}
+          {att.status === "error" && att.file !== null ? (
+            <button
+              type="button"
+              aria-label={t("retryUpload", { name: att.name })}
+              title={att.error ?? undefined}
+              onClick={() => onRetry(att.key)}
+              disabled={composerLocked}
+              className={cn(
+                "absolute -bottom-1.5 -right-1.5 h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm hover:bg-accent",
+                FLEX,
+              )}
+            >
+              <RotateCcw className="size-2.5" />
+            </button>
           ) : null}
           <button
             type="button"
-            aria-label={t("removeImage", { name: img.name })}
-            onClick={() => onRemove(img.key)}
+            aria-label={t("removeImage", { name: att.name })}
+            onClick={() => onRemove(att.key)}
             disabled={composerLocked}
-            className={cn("absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none", FLEX)}
+            className={cn(
+              "absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none",
+              FLEX,
+            )}
           >
             ×
           </button>

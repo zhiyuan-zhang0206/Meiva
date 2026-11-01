@@ -1,8 +1,4 @@
-"""Upload delivery rounds: copy each accepted batch, accept one chat, wake once.
-
-A batch gets at most `source.MAX_COPY_ATTEMPTS` copy attempts; the round then holds it
-and emits `upload_delivery_held`. Rounds drain before the Gateway closes its pool.
-"""
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
 
 import asyncio
 import logging
@@ -18,12 +14,13 @@ from pydantic import ValidationError
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
-from base.agents.upload_delivery import source
+from base.agents.upload_delivery import source, staging
 from base.agents.upload_delivery.models import (
     CopyProof,
     ReceiveRequest,
     UploadDeliveryConflictError,
 )
+from base.agents.upload_delivery.paths import STAGED_FILE_TTL_SECONDS
 from base.api_contracts.agent_contract import AgentNotFound
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
@@ -56,8 +53,12 @@ class UploadRecovery:
         self.home = home
         self.claim_seconds = claim_seconds
         self.stopped = asyncio.Event()
+        self.nudged = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
+
+    def nudge(self) -> None:
+        self.nudged.set()
 
     async def native[T](self, call: Callable[..., T], *args: object, **kwargs: object) -> T:
         task = asyncio.get_running_loop().run_in_executor(None, partial(call, *args, **kwargs))
@@ -77,6 +78,7 @@ class UploadRecovery:
 
     async def close(self) -> None:
         self.stopped.set()
+        self.nudged.set()
         cancelled = False
         if self.task is not None:
             while not self.task.done():
@@ -94,6 +96,7 @@ class UploadRecovery:
 
     async def run(self) -> None:
         while not self.stopped.is_set():
+            self.nudged.clear()
             try:
                 if not is_stopping():
                     await self.round()
@@ -101,21 +104,38 @@ class UploadRecovery:
                 _log.exception(
                     "delivered upload recovery round failed; retained intents remain recoverable"
                 )
+            if self.stopped.is_set():
+                break
             with suppress(TimeoutError):
-                await asyncio.wait_for(self.stopped.wait(), timeout=5.0)
+                await asyncio.wait_for(self.nudged.wait(), timeout=5.0)
 
     async def round(self) -> None:
+        machine_name = self.machine.name()
         requests = await self.native(
             source.due,
             self.pool,
             4,
-            local_machine=self.machine.name(),
+            local_machine=machine_name,
             home=self.home,
             claim_seconds=self.claim_seconds,
         )
         async with asyncio.TaskGroup() as group:
             for request in requests:
                 group.create_task(self.copy(request))
+        if not self.stopped.is_set():
+            await self.native(
+                staging.release_accepted,
+                self.pool,
+                local_machine=machine_name,
+                home=self.home,
+            )
+            await self.native(
+                staging.sweep_unsent,
+                self.pool,
+                local_machine=machine_name,
+                home=self.home,
+                ttl_seconds=STAGED_FILE_TTL_SECONDS,
+            )
 
     async def wake(self, agent_id: int, inbound_id: int) -> None:
         """Wake the target once after acceptance; a failure is logged and not retried.
@@ -170,6 +190,20 @@ class UploadRecovery:
         except Exception as exc:
             await self.failure(request, CopyFailure(type(exc).__name__, hold=False))
         else:
+            try:
+                await self.native(
+                    staging.release_accepted,
+                    self.pool,
+                    local_machine=self.machine.name(),
+                    home=self.home,
+                    batch_id=request.manifest.batch_id,
+                )
+            except Exception:
+                _log.warning(
+                    "staged upload release failed for batch=%s; will retry on next round",
+                    request.manifest.batch_id,
+                    exc_info=True,
+                )
             await self.wake(request.manifest.agent_id, inbound_id)
 
     # meiva:note
@@ -182,7 +216,7 @@ class UploadRecovery:
         result = await self.rpc.dispatch_to_machine(
             self.db,
             request.target.machine,
-            "upload-receive-v1",
+            "upload-receive-v2",
             request.model_dump(mode="json"),
             timeout_s=130.0,
             retries=0,

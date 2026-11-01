@@ -1,4 +1,4 @@
-exports = ["models.py", "stats.py", "tasks.py", "uploads.py"]
+exports = ["models.py", "stats.py", "tasks.py"]
 
 [uses]
 "__init__.py" = ["errors.py", "fleet_graph.py", "frontend_telemetry.py", "host_permissions.py", "memory.py", "pages.py", "shell.py", "user_settings.py"]
@@ -17,5 +17,4 @@ exports = ["models.py", "stats.py", "tasks.py", "uploads.py"]
 "shell.py" = "strict"
 "stats.py" = "strict"
 "tasks.py" = "strict"
-"uploads.py" = "strict"
 "user_settings.py" = "strict"

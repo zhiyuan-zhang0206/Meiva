@@ -9,16 +9,17 @@ tags: [gateway, idempotency]
 
 | Route | Retry policy | Evidence |
 | --- | --- | --- |
-| `POST /api/agents/{agent_id}/uploads` | keyed / receipt | required verified principal-v1/key; silent save only, claimed then published as immutable objects, replay returns the original receipt |
-| `POST /api/keyed/v1/agents/{agent_id}/uploads` | keyed / transactional | required verified principal-v1/key; immutable source acceptance, versioned create-only copy and one retained native inbound outcome |
+| `POST /api/keyed/v1/agents/{agent_id}/uploads/staged` | keyed / transactional | required verified principal-v1/key; per-file staging in `.staged-v1/` and `upload_staged_files`, replay returns the original staged receipt |
+| `DELETE /api/keyed/v1/agents/{agent_id}/uploads/staged/{file_id}` | natural | unreferenced staged file deletion (204); 409 if referenced by a delivery batch |
+| `POST /api/keyed/v1/agents/{agent_id}/uploads` | keyed / transactional | required verified principal-v1/key; immutable source acceptance (from `file_ids` + `text` or multipart), versioned create-only copy and retained native inbound outcome |
 
-Browser file delivery submits one batch/key to the new route and validates its
-202 source receipt. There is no client Outbox or automatic resend;
-silent native-image uploads use the silent route above and SDK/MCP consumers are not activated.
+Browser file and image uploads stage each file immediately via `/uploads/staged` and
+submit one batch/key to `/api/keyed/v1/agents/{agent_id}/uploads`, validating its
+202 source receipt. SDK/MCP consumers are not activated.
 Old consumers cannot effect the new path/kind. 202 reports historical source acceptance, not remote readiness or
 agent execution. Copy is attempted at most three times; retained status distinguishes
-pending retries from inspectable HOLD, and a HOLD is not retried. There is no
-time-based reservation expiration or operator cancel endpoint.
+pending retries from inspectable HOLD, and a HOLD is not automatically retried (the
+composer offers Restore to staged attachments or explicit Retry with a new batch key).
 
 Current owner: [delivered uploads](../../../upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md).
-Silent native-image saves: [upload batches](../../../routers/docs/upload-batches.meiva.okf.md).
+Saved-file serving: [upload batches](../../../routers/docs/upload-batches.meiva.okf.md).

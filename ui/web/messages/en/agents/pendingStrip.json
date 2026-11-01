@@ -1,4 +1,5 @@
 {
   "pending": "{count} pending",
-  "imageAlt": "pending image"
+  "imageAlt": "pending image",
+  "delivering": "Delivering {count} file(s)…"
 }

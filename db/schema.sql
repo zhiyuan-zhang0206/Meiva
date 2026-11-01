@@ -2614,7 +2614,7 @@ CREATE TABLE agent_upload_batches (
 CREATE INDEX agent_upload_batches_receiving_agent_idx
     ON agent_upload_batches (agent_id) WHERE receipt IS NULL;
 COMMENT ON TABLE agent_upload_batches IS
-    'Silent upload identities; receiving manifests reserve quota without expiry, ready receipts replay acceptance.';
+    'Historical silent native-image upload identities (nothing writes one now); receiving manifests keep reserving quota without expiry, ready receipts replay acceptance.';
 
 CREATE TABLE task_patch_receipts (
     path TEXT NOT NULL,
@@ -2790,10 +2790,19 @@ CREATE TABLE upload_delivery_batches (
     copy_proof jsonb,
     inbound_id bigint,
     outcome jsonb,
+    protocol smallint NOT NULL DEFAULT 1,
+    send_directory text,
+    message jsonb,
     CHECK ((state='accepted') = (inbound_id IS NOT NULL AND outcome IS NOT NULL)),
-    CHECK ((ready_at IS NULL) = (acceptance IS NULL))
+    CHECK ((ready_at IS NULL) = (acceptance IS NULL)),
+    CONSTRAINT upload_delivery_batches_protocol_check CHECK (
+        protocol IN (1, 2)
+        AND (protocol = 1 OR (send_directory IS NOT NULL AND message IS NOT NULL))
+    )
 );
 CREATE INDEX upload_delivery_due ON upload_delivery_batches (next_attempt_at, batch_id) WHERE state='pending';
+CREATE UNIQUE INDEX upload_delivery_send_directory
+    ON upload_delivery_batches (agent_id, send_directory) WHERE send_directory IS NOT NULL;
 CREATE TABLE upload_delivery_copies (
     batch_id text NOT NULL,
     unit_home text NOT NULL,
@@ -2806,6 +2815,29 @@ CREATE TABLE upload_delivery_copies (
     PRIMARY KEY (batch_id, storage_machine, unit_home)
 );
 COMMENT ON TABLE upload_delivery_batches IS 'Retained source acceptance, physical receiving quota and original inbound outcome; no TTL or mutable target FK.';
+COMMENT ON COLUMN upload_delivery_batches.protocol IS '1: the earlier multipart-upload layout, never copied by the current code. 2: a send of staged files with its frozen message and send directory.';
+CREATE TABLE upload_staged_files (
+    file_id text PRIMARY KEY CHECK (file_id ~ '^[0-9a-f]{32}$'),
+    operation_key text NOT NULL UNIQUE,
+    agent_id bigint NOT NULL CHECK (agent_id > 0),
+    request_hash text NOT NULL CHECK (length(request_hash) = 64),
+    name text NOT NULL,
+    size bigint NOT NULL CHECK (size >= 0),
+    sha256 text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    content_type text NOT NULL,
+    source_unit jsonb NOT NULL,
+    storage_machine text NOT NULL,
+    storage_directory text NOT NULL,
+    state text NOT NULL DEFAULT 'receiving' CHECK (state IN ('receiving', 'ready', 'released')),
+    batch_id text REFERENCES upload_delivery_batches (batch_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    released_at timestamptz,
+    CHECK ((state = 'released') = (released_at IS NOT NULL)),
+    CHECK (state <> 'released' OR batch_id IS NOT NULL)
+);
+CREATE INDEX upload_staged_unsent ON upload_staged_files (created_at) WHERE batch_id IS NULL;
+CREATE INDEX upload_staged_batch ON upload_staged_files (batch_id) WHERE batch_id IS NOT NULL;
+COMMENT ON TABLE upload_staged_files IS 'Files a person picked for their next send: bytes staged on the gateway, taken by at most one live batch. An untaken row and its bytes are swept after the staged-file TTL; a taken one keeps its row as evidence after the accepted batch''s bytes are deleted.';
 COMMENT ON TABLE upload_delivery_copies IS 'Retained immutable copy intent and physical-root reservation; MEIVA_HOME is target identity, not quota partition.';
 
 -- Only new guarded drafts opt in; no guessed backfill of mutable birth history.

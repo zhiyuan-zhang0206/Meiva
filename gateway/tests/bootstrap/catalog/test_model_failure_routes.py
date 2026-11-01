@@ -123,13 +123,6 @@ def test_model_requests_report_unavailable(
             f"/api/agents/{agent_id}/restart",
             {"config_overlay": {"llm_model": "deepseek-flash"}},
         ),
-        (
-            f"/api/agents/{agent_id}/messages",
-            {
-                "source": "user",
-                "content": [{"type": "image_url", "image_url": {"url": "upload://1/missing.png"}}],
-            },
-        ),
     ):
         response = client.post(path, json=body)
         assert response.status_code == 503, (path, response.text)
