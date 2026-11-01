@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,6 +97,20 @@ class Checkout(Protocol):
 
     def grep_words(self, words: Collection[str], suffix: str) -> list[str]: ...
 
+    def untracked_files(self) -> tuple[str, ...]: ...
+
+    def file_digests(self) -> dict[str, str]: ...
+
+    def scanner_digest(self) -> str: ...
+
+    def cache_get_many(self, keys: Collection[str]) -> dict[str, str]: ...
+
+    def cache_put_many(self, entries: Mapping[str, str]) -> None: ...
+
+    def memo_get(self, key: str) -> object | None: ...
+
+    def memo_put(self, key: str, value: object) -> None: ...
+
     def universe(self) -> Universe: ...
 
     def checkout(self, ref: str) -> AbstractContextManager[Checkout]: ...
@@ -149,6 +163,7 @@ class Universe:
         self.roots = self.roots | frozenset(self._python_aliases)
         self._modules: dict[str, Module | None] = {}
         self._project_views: dict[str | None, Universe] = {project: self}
+        self._digests: dict[str, str] | None = None
 
     @staticmethod
     def _add_chain(children: dict[str, set[str]], path: str) -> None:
@@ -210,6 +225,11 @@ class Universe:
 
     def is_first_party_name(self, dotted: str) -> bool:
         return dotted.split(".", 1)[0] in self.roots
+
+    def file_digests(self) -> dict[str, str]:
+        if self._digests is None:
+            self._digests = self.repo.file_digests()
+        return self._digests
 
     def source_files(
         self, ts_scopes: tuple[str, ...] = (), ts_extensions: tuple[str, ...] = (".ts", ".tsx")

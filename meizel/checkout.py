@@ -9,17 +9,22 @@
 from __future__ import annotations
 
 import errno
+import hashlib
+import json
 import os
+import sqlite3
 import stat
 import subprocess
-from collections.abc import Callable, Collection, Generator, Mapping
-from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+import sys
+from collections.abc import Callable, Collection, Generator, Mapping, Sequence
+from contextlib import closing, contextmanager, suppress
+from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 
-from meizel.graph import project_metadata_paths, standalone_projects
+from meizel.graph import project_metadata_paths, python_reverse_closure, standalone_projects
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import MANIFEST, EditPlan, Universe
+from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, EditPlan, Universe
 from meizel.roles import parse_roles
 
 __all__ = [
@@ -27,6 +32,7 @@ __all__ = [
     "apply_plan",
     "has_file",
     "load_universe",
+    "python_reverse_closure_at",
     "read_bytes",
     "read_roles",
     "read_text",
@@ -53,6 +59,14 @@ def read_roles(repo: GitRepo) -> Mapping[str, tuple[str, ...]]:
 # command that runs on this repository is the one place allowed to build one.
 def roles_at(root: Path) -> Mapping[str, tuple[str, ...]]:
     return read_roles(GitRepo(root))
+
+
+# meiva:note
+# Reverse Python import closure for a checkout root, returning None on any read or syntax error.
+def python_reverse_closure_at(
+    root: Path, changed_files: Sequence[str], *, jobs: int | None = None
+) -> frozenset[str] | None:
+    return python_reverse_closure(load_universe(root), changed_files, jobs=jobs)
 
 
 # meiva:note
@@ -127,6 +141,7 @@ def apply_plan(plan: EditPlan) -> None:
 @dataclass(frozen=True, slots=True)
 class GitRepo:
     root: Path
+    _memo: dict[str, object] = field(default_factory=dict[str, object], repr=False, compare=False)
 
     def has_file(self, rel: str) -> bool:
         return has_file(self.root, rel)
@@ -203,8 +218,9 @@ class GitRepo:
     def grep_files(self, marker: str, suffixes: tuple[str, ...]) -> list[str]:
         # meiva:note
         # Lists tracked files containing a fixed marker via git grep without invoking a shell.
+        specs = [f"*{s}" for s in suffixes] if suffixes else ["."]
         done = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.root), "grep", "-l", "-F", marker, "--", "."],
+            ["git", "-C", str(self.root), "grep", "-l", "-F", "-e", marker, "--", *specs],
             capture_output=True,
             text=True,
             check=False,
@@ -234,12 +250,88 @@ class GitRepo:
             raise MeizelError(f"git grep failed: {done.stderr.strip()}")
         return sorted(done.stdout.splitlines())
 
+    def untracked_files(self) -> tuple[str, ...]:
+        # meiva:note
+        # Lists non-ignored untracked files via fixed git ls-files argv without invoking a shell.
+        result = subprocess.run(  # noqa: S603
+            ["git", "-C", str(self.root), "ls-files", "--others", "--exclude-standard", "-z"],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise MeizelError(
+                f"git ls-files failed: {result.stderr.decode(errors='replace').strip()}"
+            )
+        candidates = [
+            name
+            for raw in result.stdout.split(b"\0")
+            if raw
+            and (
+                (name := raw.decode()).endswith(SOURCE_EXTENSIONS)
+                or name.rsplit("/", 1)[-1] == MANIFEST
+            )
+        ]
+        if not candidates:
+            return ()
+        return tuple(sorted(set(_regular_paths(self.root, candidates, lstat=os.lstat))))
+
+    def file_digests(self) -> dict[str, str]:
+        if _common_git_dir(self.root) is None:
+            return {}
+        return _working_tree_digests(self.root)
+
+    def scanner_digest(self) -> str:
+        return _process_scanner_digest()
+
+    def cache_get_many(self, keys: Collection[str]) -> dict[str, str]:
+        unique = list(dict.fromkeys(keys))
+        if not unique:
+            return {}
+        common = _common_git_dir(self.root)
+        if common is None:
+            return {}
+        db_path = common / _CACHE_DB
+        try:
+            if not db_path.is_file():
+                return {}
+            with closing(sqlite3.connect(db_path, timeout=5.0)) as conn:
+                rows = conn.execute(_CACHE_GET_SQL, (json.dumps(unique),)).fetchall()
+            return {str(key): str(val) for key, val in rows}
+        except (sqlite3.Error, OSError):
+            return {}
+
+    def cache_put_many(self, entries: Mapping[str, str]) -> None:
+        if not entries:
+            return
+        common = _common_git_dir(self.root)
+        if common is None:
+            return
+        db_path = common / _CACHE_DB
+        with (
+            suppress(sqlite3.Error, OSError),
+            closing(sqlite3.connect(db_path, timeout=5.0)) as conn,
+        ):
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute(_CACHE_DDL)
+            with conn:
+                conn.executemany(_CACHE_PUT_SQL, entries.items())
+
+    def memo_get(self, key: str) -> object | None:
+        return self._memo.get(key)
+
+    def memo_put(self, key: str, value: object) -> None:
+        if len(self._memo) >= 32_768:
+            self._memo.clear()
+        self._memo[key] = value
+
     # meiva:note
     # The file index of this checkout: the tracked regular files and the directories above them.
     # Built here, where the repository is read, so a caller holds the value instead of a path it
     # would rebuild the index from.
     def universe(self) -> Universe:
-        return load_universe(self.root)
+        return load_universe(self.root, repo=self)
 
     @contextmanager
     def checkout(self, ref: str) -> Generator[GitRepo]:
@@ -253,7 +345,7 @@ class GitRepo:
         try:
             self.run_bytes("worktree", "add", "--detach", str(target), ref)
             try:
-                yield GitRepo(target)
+                yield GitRepo(target, _memo=self._memo)
             finally:
                 self.run_bytes("worktree", "remove", "--force", str(target))
         finally:
@@ -356,14 +448,137 @@ def tracked_files(
     return _regular_paths(repo_root, names, lstat=lstat)
 
 
-def load_universe(root: Path, *, include_untracked: bool = False) -> Universe:
-    repo = GitRepo(root)
+def load_universe(
+    root: Path, *, include_untracked: bool = False, repo: GitRepo | None = None
+) -> Universe:
+    seat = repo if repo is not None else GitRepo(root)
     files = sorted(set(tracked_files(root, include_untracked=include_untracked, regular=True)))
-    root_manifest = repo.load_text(MANIFEST) if MANIFEST in files else ""
+    root_manifest = seat.load_text(MANIFEST) if MANIFEST in files else ""
     projects = {
-        name: repo.load_text(name)
+        name: seat.load_text(name)
         for name in project_metadata_paths(frozenset(files), root_manifest)
     }
     return Universe(
-        repo, files, projects=standalone_projects(frozenset(files), root_manifest, projects)
+        seat, files, projects=standalone_projects(frozenset(files), root_manifest, projects)
     )
+
+
+_CACHE_DB = "meizel-scan-cache-v1.sqlite3"
+_CACHE_DDL = (
+    "CREATE TABLE IF NOT EXISTS scan_cache (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID"
+)
+_CACHE_GET_SQL = "SELECT s.k, s.v FROM scan_cache AS s JOIN json_each(?) AS j ON s.k = j.value"
+_CACHE_PUT_SQL = "INSERT OR REPLACE INTO scan_cache (k, v) VALUES (?, ?)"
+_COMMON_DIRS: dict[tuple[Path, int], Path] = {}
+
+
+def _common_git_dir(root: Path) -> Path | None:
+    try:
+        ino = (root / ".git").lstat().st_ino
+        resolved = root.resolve()
+    except OSError:
+        return None
+    cached = _COMMON_DIRS.get((resolved, ino))
+    if cached is not None:
+        return cached
+    # meiva:note
+    # Resolves the checkout toplevel and shared git-common-dir via fixed git rev-parse argv.
+    done = subprocess.run(  # noqa: S603
+        [
+            "git",
+            "-C",
+            str(root),
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-common-dir",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    lines = done.stdout.splitlines() if done.returncode == 0 else []
+    if len(lines) != 2:
+        return None
+    try:
+        if Path(lines[0]).resolve() != resolved:
+            return None
+        common = Path(lines[1])
+        if not common.is_dir():
+            return None
+    except OSError:
+        return None
+    _COMMON_DIRS[(resolved, ino)] = common
+    return common
+
+
+def _working_tree_digests(root: Path) -> dict[str, str]:
+    # meiva:note
+    # Reads git index blob SHAs and dirty working-tree paths via fixed git argv without a shell.
+    staged = subprocess.run(  # noqa: S603
+        ["git", "-C", str(root), "ls-files", "-s", "-z"],
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    if staged.returncode != 0:
+        return {}
+    # meiva:note
+    # Detects working-tree modifications (including racy-git entries) via fixed git diff-files argv.
+    modified = subprocess.run(  # noqa: S603
+        ["git", "-C", str(root), "diff-files", "--name-only", "-z"],
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    if modified.returncode != 0:
+        return {}
+    digests: dict[str, str] = {}
+    dirty: set[str] = {raw.decode() for raw in modified.stdout.split(b"\0") if raw}
+    for record in staged.stdout.split(b"\0"):
+        if not record:
+            continue
+        meta, sep, raw_path = record.partition(b"\t")
+        if not sep:
+            continue
+        path = raw_path.decode()
+        parts = meta.split()
+        if len(parts) == 3 and parts[2] == b"0":
+            digests[path] = f"git:{parts[1].decode()}"
+        else:
+            dirty.add(path)
+    for path in dirty:
+        try:
+            data = (root / path).read_bytes()
+        except OSError:
+            digests.pop(path, None)
+            continue
+        digests[path] = f"raw:{hashlib.sha256(data).hexdigest()}"
+    return digests
+
+
+@cache
+def _process_scanner_digest() -> str:
+    pkg_dir = Path(__file__).resolve().parent
+    hasher = hashlib.sha256()
+    ver = sys.version_info
+    hasher.update(f"py:{ver.major}.{ver.minor}.{ver.micro}\0".encode())
+    sources = sorted(
+        (path.relative_to(pkg_dir).as_posix(), path)
+        for path in pkg_dir.rglob("*")
+        if path.suffix in {".py", ".mjs"}
+        and "tests" not in path.relative_to(pkg_dir).parts
+        and "__pycache__" not in path.relative_to(pkg_dir).parts
+        and path.is_file()
+    )
+    for rel, path in sources:
+        hasher.update(rel.encode())
+        hasher.update(b"\0")
+        hasher.update(path.read_bytes())
+        hasher.update(b"\0")
+    policy_path = pkg_dir.parent / "meizel.policy.toml"
+    if policy_path.is_file():
+        hasher.update(b"policy\0")
+        hasher.update(policy_path.read_bytes())
+    return hasher.hexdigest()

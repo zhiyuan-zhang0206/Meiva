@@ -9,7 +9,7 @@ tags:
 
 # meizel/ — Collaborator Any Ratchet
 
-`typing.Any` on a parameter, return, or class-field annotation disables static type checking across a collaborator boundary without narrowing or validating the contract. `meizel` reports every direct canonical `typing.Any` annotation in tracked production Python as `any-collaborator`.
+`typing.Any` on a parameter, return, or class-field annotation disables static type checking across a collaborator boundary without narrowing or validating the contract. `meizel` reports every direct canonical `typing.Any` annotation in tracked production Python as `any-collaborator`. Replace `Any` with a concrete collaborator type, a `Protocol`, or `object`/`Mapping` narrowed with `TypeGuard`/`TypeIs` or `isinstance` (never `typing.cast`, which `[type-cast]` forbids).
 
 Existing annotations are bounded in `[debt.any-collaborator]` tables inside `meizel.toml` manifests whose `ledger` is `strict-to-be`, using the same non-increasing debt ledger as other debtable `meizel` codes (`python -m meizel debt diff --against <ref>`). An unauthorized key or a count increase fails `python -m meizel check`.
 

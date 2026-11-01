@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import NamedTuple
 
 __all__ = [
     "INTERVAL_CLOCKS",
@@ -215,8 +216,7 @@ def stdlib_kind(dotted: str) -> tuple[AmbientKind, str] | None:
     return None
 
 
-@dataclass(frozen=True, slots=True)
-class Fact:
+class Fact(NamedTuple):
     """File `src` uses `dst`: a file, or a directory for a declared dynamic load."""
 
     src: str

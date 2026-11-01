@@ -264,4 +264,9 @@ def test_strict_owner_and_unauthorized_key_fail_check(make_repo: RepoFactory) ->
             "strict_pkg/app.py": "from typing import Any\ndef f(x: Any) -> int:\n    return 1\n",
         }
     )
-    assert [d.code for d in analysis_of(root).verdict] == [Code.ANY_COLLABORATOR]
+    verdict = analysis_of(root).verdict
+    assert [d.code for d in verdict] == [Code.ANY_COLLABORATOR]
+    hint_text = "\n".join(verdict[0].hints)
+    assert "Protocol" in hint_text
+    assert "TypeGuard/TypeIs" in hint_text
+    assert "do not use typing.cast, which [type-cast] forbids" in hint_text

@@ -176,27 +176,44 @@ def _apply(repo: Checkout, removals: Removals) -> None:
     repo.apply_plan(plan_removals(repo.root, texts, removals))
 
 
-def prune(repo: Checkout, jobs: int | None = None) -> list[str]:
-    """Remove stale declarations until none remain; returns a line per removal."""
+# meiva:note
+# Remove stale declarations until none remain; returns removal lines and final analysis.
+def prune(repo: Checkout, jobs: int | None = None) -> tuple[list[str], Analysis]:
     changes: list[str] = []
     while True:
         # meiva:note
         # Each round reads the tree the previous round left, not the snapshot it started from.
-        removals, found = _collect(analyze(repo.universe(), jobs=jobs))
+        analysis = analyze(repo.universe(), jobs=jobs)
+        removals, found = _collect(analysis)
         if not removals:
-            return changes
+            return changes, analysis
         changes.extend(found)
         _apply(repo, {manifest_path(d): sections for d, sections in removals.items()})
+
+
+def _refuse_untracked(repo: Checkout) -> None:
+    untracked = repo.untracked_files()
+    if not untracked:
+        return
+    sample = ", ".join(untracked[:3])
+    raise MeizelError(
+        f"refusing to sync with {len(untracked)} untracked source/manifest file(s) "
+        f"(e.g. {sample}) invisible to git-indexed analysis; "
+        f"run 'git add -N {untracked[0]}' first so declarations for new files are not pruned"
+    )
 
 
 def sync_manifests(
     repo: Checkout, targets: list[str] | None, jobs: int | None, *, do_declare: bool
 ) -> tuple[list[str], list[str]]:
-    lines = list(prune(repo, jobs))
+    _refuse_untracked(repo)
+    pruned, analysis = prune(repo, jobs)
+    lines = list(pruned)
     if not do_declare:
         return lines, []
-    lines.extend(prune_debt(repo, jobs))
-    declared, left = declare(repo, targets, jobs)
+    lowered = prune_debt(repo, jobs, analysis=analysis)
+    lines.extend(lowered)
+    declared, left = declare(repo, targets, jobs, analysis=None if lowered else analysis)
     lines.extend(declared)
     return lines, left
 

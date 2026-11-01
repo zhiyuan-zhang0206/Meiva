@@ -3,13 +3,15 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 [purity]
 "." = "strict"
 "graphs.py" = "strict"
+"impacted.py" = "strict"
 "imports.py" = "strict"
 "model.py" = "strict"
 "scopes.py" = "strict"
 "python_layout.py" = "strict"
 
 [uses]
+"impacted.py" = ["scopes.py", "universe.py"]
 "imports.py" = ["model.py", "scopes.py", "universe.py"]
-"__init__.py" = ["python_layout.py"]
+"__init__.py" = ["impacted.py", "python_layout.py"]
 "universe.py" = ["python_layout.py"]
 "python_layout.py" = ["model.py"]

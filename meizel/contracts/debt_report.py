@@ -232,9 +232,10 @@ def manifest_texts_at(repo: Checkout, ref: str) -> dict[str, str]:
     return texts
 
 
-def totals_at(repo: Checkout, ref: str) -> Counter[str]:
+def totals_at(repo: Checkout, ref: str, *, texts: Mapping[str, str] | None = None) -> Counter[str]:
     totals: Counter[str] = Counter()
-    for text in manifest_texts_at(repo, ref).values():
+    source = manifest_texts_at(repo, ref) if texts is None else texts
+    for text in source.values():
         totals.update(_totals_in(text))
     return totals
 
@@ -254,9 +255,10 @@ def _recorded(baselines: Baselines) -> Recorded:
 
 # meiva:note
 # What `ref` records, entry by entry. `manifest_texts_at` reads the blobs, so a ref costs no checkout.
-def _recorded_at(repo: Checkout, ref: str) -> Recorded:
+def _recorded_at(repo: Checkout, ref: str, *, texts: Mapping[str, str] | None = None) -> Recorded:
     recorded: Recorded = {}
-    for path, text in manifest_texts_at(repo, ref).items():
+    source = manifest_texts_at(repo, ref) if texts is None else texts
+    for path, text in source.items():
         cells = _cells_in(text)
         if cells:
             recorded[parent_of(path)] = cells
@@ -291,9 +293,14 @@ def _common_ancestor(repo: Checkout, ref: str) -> str:
 # An entry both sides moved keeps the change's own count. Its merged count is settled when the author
 # resolves the merge, and until then the change's own number can accuse a change of debt it did not
 # add, but it can never hide debt the change did add.
-def recorded_when_merged(repo: Checkout, ref: str) -> Recorded:
-    started = _recorded_at(repo, _common_ancestor(repo, ref))
-    return _merged(started, _recorded_at(repo, ref), _recorded(read_baselines(repo.universe())))
+def recorded_when_merged(
+    repo: Checkout, ref: str, *, texts: Mapping[str, str] | None = None
+) -> Recorded:
+    ancestor = _common_ancestor(repo, ref)
+    now = _recorded_at(repo, ref, texts=texts)
+    ref_sha = repo.run_text("rev-parse", f"{ref}^{{commit}}").strip()
+    started = now if ancestor == ref_sha else _recorded_at(repo, ancestor)
+    return _merged(started, now, _recorded(read_baselines(repo.universe())))
 
 
 def _merged(started: Recorded, now: Recorded, change: Recorded) -> Recorded:
@@ -317,14 +324,16 @@ def _merged(started: Recorded, now: Recorded, change: Recorded) -> Recorded:
     return merged
 
 
-def diff(repo: Checkout, ref: str) -> tuple[list[str], bool]:
+def diff(
+    repo: Checkout, ref: str, *, texts: Mapping[str, str] | None = None
+) -> tuple[list[str], bool]:
     """Per-code totals against `ref`, and whether any code grew.
 
     Totals, not directories, are compared: debt that moves with a file between directories
     leaves them unchanged.
     """
-    before = totals_at(repo, ref)
-    after = _recorded_totals(recorded_when_merged(repo, ref))
+    before = totals_at(repo, ref, texts=texts)
+    after = _recorded_totals(recorded_when_merged(repo, ref, texts=texts))
     codes = sorted(set(before) | set(after))
     lines = [f"{'code':<20}{ref[:12]:>14}{'tree':>8}{'change':>8}"]
     grew = False

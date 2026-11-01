@@ -26,10 +26,12 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 import re
 import sys
 import tomllib
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
@@ -284,12 +286,119 @@ def _toml(
     return found
 
 
+def _copy_candidates(
+    universe: Universe,
+    eligible: list[tuple[str, ...]],
+    changed: Collection[str] | None,
+) -> list[str]:
+    if not eligible:
+        return []
+    anchors = sorted({max(members, key=len) for members in eligible})
+    hits: set[str] = set()
+    for anchor in anchors:
+        hits.update(universe.repo.grep_files(anchor, (".py", ".toml")))
+    if changed is not None:
+        hits.update(p for p in changed if p.endswith((".py", ".toml")))
+    return sorted(
+        p for p in hits if p in universe.files and not _outside_rule(p) and p != "meizel.toml"
+    )
+
+
+def _roles_cache_key(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> str:
+    digests = universe.file_digests()
+    if not digests:
+        return ""
+    text_files = [p for p in sorted(universe.files) if p.endswith(_TEXT_SUFFIXES)]
+    if any(p not in digests for p in text_files):
+        return ""
+    hasher = hashlib.sha256()
+    roles_json = json.dumps(
+        [[k, list(v)] for k, v in sorted(declared.items())], separators=(",", ":")
+    )
+    hasher.update(f"{universe.repo.scanner_digest()}\0{roles_json}\0".encode())
+    for path in text_files:
+        hasher.update(f"{path}:{digests[path]}\0".encode())
+    return f"roles:v1:{hasher.hexdigest()}"
+
+
+def _decode_cached_roles(text: str) -> list[Diagnostic] | None:
+    try:
+        raw: object = json.loads(text)
+    except ValueError:
+        return None
+    if not _is_object_list(raw):
+        return None
+    found: list[Diagnostic] = []
+    for item in raw:
+        if not _is_object_list(item) or len(item) != 4:
+            return None
+        path, line, code, msg = item
+        if (
+            not isinstance(path, str)
+            or type(line) is not int
+            or not isinstance(code, str)
+            or not isinstance(msg, str)
+        ):
+            return None
+        try:
+            found.append(Diagnostic(path, line, Code(code), msg))
+        except ValueError:
+            return None
+    return found
+
+
+def _load_cached_roles(universe: Universe, cache_key: str) -> list[Diagnostic] | None:
+    if not cache_key:
+        return None
+    hit = universe.repo.cache_get_many((cache_key,)).get(cache_key)
+    return None if hit is None else _decode_cached_roles(hit)
+
+
+def _store_cached_roles(universe: Universe, cache_key: str, result: list[Diagnostic]) -> None:
+    if not cache_key:
+        return
+    encoded = json.dumps(
+        [[d.path, d.line, d.code.value, d.message] for d in result], separators=(",", ":")
+    )
+    universe.repo.cache_put_many({cache_key: encoded})
+
+
+def _scan_copy_candidates(
+    universe: Universe,
+    declared: Mapping[str, tuple[str, ...]],
+    spans: Mapping[str, list[tuple[int, int]]],
+    changed: Collection[str] | None,
+) -> list[Diagnostic]:
+    eligible = [members for members in declared.values() if len(members) >= _MIN_ROLE_SIZE]
+    found: list[Diagnostic] = []
+    for path in _copy_candidates(universe, eligible, changed):
+        try:
+            text = universe.repo.load_text(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not any(all(pkg in text for pkg in members) for members in eligible):
+            continue
+        scan = _python if path.endswith(".py") else _toml
+        found.extend(scan(path, text, declared, spans.get(path, [])))
+    return found
+
+
 # meiva:note
 # Global generated freshness and package-list copies, using validated declarations.
-def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[Diagnostic]:
+def check(
+    universe: Universe,
+    declared: Mapping[str, tuple[str, ...]],
+    *,
+    changed: Collection[str] | None = None,
+) -> list[Diagnostic]:
+    cache_key = _roles_cache_key(universe, declared)
+    cached = _load_cached_roles(universe, cache_key)
+    if cached is not None:
+        return cached
     texts = _candidate_texts(universe)
     items = parse_regions(texts)
     if not declared and not items:
+        _store_cached_roles(universe, cache_key, [])
         return []
     spans: dict[str, list[tuple[int, int]]] = {}
     for region in items:
@@ -304,18 +413,10 @@ def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[D
                 "generated role regions require a root [roles] declaration",
             )
         )
-    for path in universe.python_files + tuple(
-        p for p in sorted(universe.files) if p.endswith(".toml")
-    ):
-        if _outside_rule(path) or path == "meizel.toml":
-            continue
-        try:
-            text = universe.repo.load_text(path)
-        except (OSError, UnicodeDecodeError):
-            continue
-        scan = _python if path.endswith(".py") else _toml
-        found.extend(scan(path, text, declared, spans.get(path, [])))
-    return sorted(found, key=lambda d: (d.path, d.line, d.message))
+    found.extend(_scan_copy_candidates(universe, declared, spans, changed))
+    result = sorted(found, key=lambda d: (d.path, d.line, d.message))
+    _store_cached_roles(universe, cache_key, result)
+    return result
 
 
 def run_roles(repo: Checkout, declared: Roles, mode: str, role_names: tuple[str, ...] = ()) -> int:

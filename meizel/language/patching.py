@@ -65,6 +65,7 @@ class PatchForms(PythonCommands):
         self.test_file = fixtures.is_test_file(path)
         self.purity_state = purity.make_state(universe)
         self.patches: list[Patch] = []
+        self.binding_files: set[str] = set()
 
     # meiva:note
     # The call forms that replace something: `mock.patch`, `monkeypatch`, the builtin
@@ -105,7 +106,7 @@ class PatchForms(PythonCommands):
     # The concrete first-party class outside tests that a base expression names, or None.
     def production_class(self, base: ast.expr) -> ClassFacts | None:
         dotted = self.dotted(base.value if isinstance(base, ast.Subscript) else base)
-        info = None if dotted is None else find_class(self.u, dotted)
+        info = None if dotted is None else find_class(self.u, dotted, seen=self.binding_files)
         if info is None or info.abstract or info.file == self.path:
             return None
         return None if is_test_path(info.file) or fixtures.is_test_file(info.file) else info
@@ -113,7 +114,7 @@ class PatchForms(PythonCommands):
     def record_overrides(
         self, info: ClassFacts, methods: list[ast.FunctionDef | ast.AsyncFunctionDef]
     ) -> None:
-        inherited = overridable_methods(self.u, info)
+        inherited = overridable_methods(self.u, info, seen=self.binding_files)
         for method in methods:
             if method.name in inherited:
                 target = f"{info.module}.{info.name}.{method.name}"
@@ -145,7 +146,9 @@ class PatchForms(PythonCommands):
             return False
         if self.u.resolve_module(f"{dotted}.{name}") is not None:
             return False
-        return is_imported_binding(module_bindings(self.u, module.file), name)
+        return is_imported_binding(
+            module_bindings(self.u, module.file, seen=self.binding_files), name
+        )
 
     def written(self, owner: ast.expr, names: tuple[str, ...], line: int, form: str) -> None:
         dotted = self.dotted(owner)
@@ -189,7 +192,7 @@ class PatchForms(PythonCommands):
         module = self.u.resolve_module(dotted)
         if module is None or module.file is None or module.file == self.path:
             return
-        bindings = module_bindings(self.u, module.file)
+        bindings = module_bindings(self.u, module.file, seen=self.binding_files)
         for name in names:
             if provides(bindings, name) or self.u.resolve_module(f"{dotted}.{name}") is not None:
                 continue

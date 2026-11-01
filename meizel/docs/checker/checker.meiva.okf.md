@@ -17,7 +17,9 @@ facts from source and fails when a fact is not covered by a declaration. The
 decision and its rationale live in
 [the accepted decision](../../../docs/decisions/engineering/design/simplification/2026-10-11-meizel-nested-dag-locality.md).
 
-The checker never executes inspected source. Tracked files come from `git ls-files -z`.
+The checker never executes inspected source. Tracked files come from `git ls-files -z`
+(untracked source/manifest files trigger a `stderr` warning suggesting `git add -N`);
+scan results are cached by content digest in `<git-common-dir>/meizel-scan-cache-v1.sqlite3`.
 Python uses stdlib AST; TypeScript uses the locked Node compiler. See TypeScript
 scanning below for setup and coverage.
 
@@ -25,6 +27,7 @@ scanning below for setup and coverage.
 python -m meizel check [paths... | --changed files...] [--limit N]
 python -m meizel debt [--json] | record <paths...> | prune | carry | diff --against <ref> --on-growth fail|warn
 python -m meizel explain <path>
+python -m meizel impacted [--python] [paths...]
 python -m meizel sync [--prune] [--declare [paths...]]
 python -m meizel bootstrap --out <dir>
 python -m meizel roles list <role>... | projects | check | write
@@ -40,6 +43,9 @@ python -m meizel roles list <role>... | projects | check | write
 - `debt` manages recorded violations, a per-directory baseline that may only
   shrink: [[meizel/docs/checker/debt/debt.meiva.okf.md|recorded debt]].
 - `explain` shows graph edges and bounded [[meizel/docs/checker/explain.meiva.okf.md|Python source evidence]].
+- `impacted` prints tracked `.py` paths in the transitive reverse-import closure
+  of `paths` (default: files changed since `origin/main`), exiting 2 (fail-closed)
+  if any tracked `.py` file cannot be read or parsed.
 - `sync --prune` drops stale declarations; `sync --declare` writes the legal new
   dependencies of the changed files: [[meizel/docs/checker/sync.meiva.okf.md|keeping manifests current]].
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
@@ -89,38 +95,9 @@ that is loading and creates no edge.
 
 ## Restricted Python
 
-Binding resolution finds these through aliases (`from importlib import
-import_module as im`): `importlib.import_module`, `__import__`,
-`runpy.run_module`, `runpy.run_path`, `importlib.util.spec_from_file_location`,
-`exec`, `compile`, a Python subprocess that runs anything but a literal file or module
-([[meizel/docs/checker/python-commands.meiva.okf.md|commands]]), a `pytest_plugins` that is not a literal, string patch
-targets that name first-party code (`mock.patch("a.b")`, `monkeypatch.setattr("a.b", v)`;
-stdlib and third-party targets are fine, an unreadable target is not), and
-writing a first-party module into `sys.modules` by name (`sys.modules["a.b"] = ...`,
-`del`, `pop`, `setdefault`, `update`, `monkeypatch.setitem/delitem`, `patch.dict`).
-Reading `sys.modules` is not restricted. A file that owns a dynamic load declares it:
-
-```toml
-[loads]
-"loader.py" = ["meiva_builtins"]   # repository-relative directories
-```
-
-Each entry becomes a fact edge from the file to the directory, judged by the
-same rule; the file is then exempt from the restricted-form errors. A loading file only loads.
-
-A file that runs code from outside the repository (user scripts, agent code, a
-module named by operator configuration) declares it under `[external]` with a reason:
-
-```toml
-[external]
-"runner.py" = "executes the schedule script the user wrote"
-```
-
-The file is then exempt from `exec`, `compile` and the dynamic-import forms; no edge is made. Other restricted forms (`sys.modules` writes, python commands,
-string patches) still apply. The reason must be non-empty; an entry whose file
-has none of the exempt forms is `stale-external`.
-
-Plugin and schedule-script discovery is `[external]`, not `[loads]`.
+Dynamic imports, `exec`/`compile`, non-literal Python subprocesses, string patch targets
+on first-party code, and `sys.modules` writes are governed by
+[[meizel/docs/checker/restricted/restricted.meiva.okf.md|restricted Python, `[loads]`, and `[external]`]].
 
 ## Manifest
 
