@@ -4,12 +4,14 @@ import dataclasses
 import threading
 from typing import Any
 
+import psycopg
 import pytest
 
 from base.config import get_field, set_field, settings
 from base.db import Database, DbConfig, connect, connections
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
+from base.db.pooled_session import RestoreAbandonedError
 
 _URL = "postgresql://handle_user:pw@db.example:5432/handle_db"
 
@@ -213,3 +215,77 @@ def test_all_handle_dials_use_their_retained_authority_refusal(
             handle.pool(direct=True)
         else:
             handle.async_pool(AsyncConnectionPool, min_size=1, max_size=2, timeout=1)
+
+
+def test_connect_retries_transient_dial_errors_and_succeeds(
+    database_gate: ProcessDbGate,
+) -> None:
+    attempts = 0
+
+    def flaky_dial(_url: str, **_kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise psycopg.OperationalError(
+                "consuming input failed: could not receive data from server: Operation timed out"
+            )
+        return _FakeConn()
+
+    conn = Database(_config(), gate=database_gate, dial=flaky_dial).connect()
+    assert isinstance(conn, _FakeConn)
+    assert attempts == 3
+
+
+def test_connect_does_not_retry_non_transient_dial_error(
+    database_gate: ProcessDbGate,
+) -> None:
+    attempts = 0
+
+    def bad_dial(_url: str, **_kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        raise ValueError("bad dial argument")
+
+    with pytest.raises(ValueError, match="bad dial argument"):
+        Database(_config(), gate=database_gate, dial=bad_dial).connect()
+    assert attempts == 1
+
+
+@pytest.mark.parametrize(
+    "restore_error",
+    [
+        RestoreAbandonedError("session restore abandoned"),
+        psycopg.errors.TransactionTimeout("terminating connection due to transaction timeout"),
+        psycopg.errors.QueryCanceled("canceling statement due to statement timeout"),
+        psycopg.OperationalError("server closed the connection unexpectedly"),
+    ],
+)
+def test_connect_closes_failed_restore_connection_and_retries_transient_restore_errors(
+    database_gate: ProcessDbGate,
+    restore_error: Exception,
+) -> None:
+    class _ClosableFakeConn(_FakeConn):
+        def __init__(self, *, fail_restore: bool) -> None:
+            self._fail_restore = fail_restore
+            self.closed = False
+
+        def execute(self, *_args: object, **_kwargs: object) -> _ClosableFakeConn:
+            if self._fail_restore:
+                raise restore_error
+            return self
+
+        def close(self) -> None:
+            self.closed = True
+
+    created: list[_ClosableFakeConn] = []
+
+    def dial_seq(_url: str, **_kwargs: Any) -> Any:
+        conn = _ClosableFakeConn(fail_restore=len(created) == 0)
+        created.append(conn)
+        return conn
+
+    conn = Database(_config(), gate=database_gate, dial=dial_seq).connect()
+    assert len(created) == 2
+    assert created[0].closed is True
+    assert conn is created[1]
+    assert created[1].closed is False

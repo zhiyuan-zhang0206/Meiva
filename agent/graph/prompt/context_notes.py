@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
+from base.agents.messages.delivery.retry import retryable_database_error
 from base.agents.to_user import read_document
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
@@ -108,11 +109,21 @@ def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
     )
 
 
+_LABEL_QUERY_ATTEMPTS = 3
+
+
 def own_label(ctx: MeivaContext, agent_id: int) -> str | None:
 
-    with ctx.sql.cursor() as cur:
-        cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
-        return label_from_row(cur.fetchone())
+    for attempt in range(1, _LABEL_QUERY_ATTEMPTS + 1):
+        try:
+            with ctx.sql.cursor() as cur:
+                cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
+                return label_from_row(cur.fetchone())
+        except Exception as exc:
+            if attempt >= _LABEL_QUERY_ATTEMPTS or not retryable_database_error(exc):
+                raise
+            ctx.sql.close()
+    raise AssertionError("unreachable")
 
 
 def machine_clause(ctx: MeivaContext) -> str | None:

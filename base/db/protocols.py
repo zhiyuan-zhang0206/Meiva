@@ -59,6 +59,14 @@ class DbConfig:
     db_authority_refusal: str | None = field(default=None, repr=False)
 
 
+# meiva:note
+# Raised when a pooled session restore ran past its client deadline. It is a
+# TimeoutError so callers that treat a timed-out borrow as a retryable stall
+# keep doing so.
+class RestoreAbandonedError(TimeoutError):
+    pass
+
+
 def db_config_from_boot(boot: _ConfigBoot) -> DbConfig:
     view = boot.view
     data_plane = view.data_plane

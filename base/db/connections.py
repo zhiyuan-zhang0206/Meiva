@@ -15,6 +15,8 @@ from base.db.pooled_session import (
     PG_STATEMENT_TIMEOUT_OPTIONS,
     restore_pooled_session,
     restore_pooled_session_async,
+    retryable_connection_error,
+    retryable_restore_error,
 )
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
@@ -232,7 +234,11 @@ def _dial_url(cfg: DbConfig, *, direct: bool, direct_url: DirectUrlResolver | No
 # meiva:note
 # `dial` is the effect this door performs: psycopg's own `connect` unless the caller names
 # another, so every existing caller dials exactly what it dialed before and a test hands in the
-# one it needs.
+# one it needs. As in psycopg_pool's check hook, a transient dial failure or failed pooled
+# session restore closes the connection and retries against a fresh backend.
+_CONNECT_ATTEMPTS = 3
+
+
 def connect(
     *,
     autocommit: bool = False,
@@ -251,27 +257,44 @@ def connect(
         refusal=cfg.db_authority_refusal,
     )
     sslmode = sslmode_for_url(url, cfg.db_sslmode)
-    conn = dial(
-        url,
-        autocommit=autocommit,
-        prepare_threshold=None,
+    dial_kwargs = {
+        "autocommit": autocommit,
+        "prepare_threshold": None,
         # sslmode only when the URL is silent (config is the fallback, never an override).
         **({"sslmode": sslmode} if sslmode else {}),
         # Through the pooler the connection names its process and code version,
         # so PgBouncer's SHOW CLIENTS shows who holds it.
         **({} if direct else {"application_name": gate.application_name()}),
         **_transport_kwargs(url, unbounded=unbounded),
-    )
-    if not direct and not unbounded:
-        # Pooled dial: PgBouncer dropped the `options` startup parameter above
-        # AND does not reset backend session state between clients, so scrub
-        # the session back to baseline (RESET ALL + statement ceiling) before
-        # handing the connection to the caller — a backend polluted by another
-        # client's session-level SET must not reach this caller's writes
-        # (2026-09-02 P0; direct dials already got the ceiling via options and
-        # own their backend exclusively, so no scrub is needed there).
-        restore_pooled_session(conn, gate=gate)
-    return conn
+    }
+    for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+        try:
+            conn = dial(url, **dial_kwargs)
+        except Exception as exc:
+            if attempt >= _CONNECT_ATTEMPTS or not retryable_connection_error(exc):
+                raise
+            continue
+        if not direct and not unbounded:
+            # Pooled dial: PgBouncer dropped the `options` startup parameter above
+            # AND does not reset backend session state between clients, so scrub
+            # the session back to baseline (RESET ALL + statement ceiling) before
+            # handing the connection to the caller — a backend polluted by another
+            # client's session-level SET must not reach this caller's writes
+            # (2026-09-02 P0; direct dials already got the ceiling via options and
+            # own their backend exclusively, so no scrub is needed there).
+            try:
+                restore_pooled_session(conn, gate=gate)
+            except BaseException as exc:
+                conn.close()
+                if (
+                    attempt >= _CONNECT_ATTEMPTS
+                    or not isinstance(exc, Exception)
+                    or not retryable_restore_error(exc)
+                ):
+                    raise
+                continue
+        return conn
+    raise AssertionError("unreachable")
 
 
 # meiva:note

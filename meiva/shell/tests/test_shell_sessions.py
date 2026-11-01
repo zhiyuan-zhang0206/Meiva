@@ -148,3 +148,58 @@ def test_kill_all_removes_every_session_of_the_agent(
 
     assert live_shell.kill_all() == 2
     assert live_shell.list() == {}
+
+
+def test_ttl_store_retries_transient_connection_failures_and_wraps_abandoned_restore(
+    live_shell: ShellSessions, database: Database
+) -> None:
+    from typing import Any
+
+    import psycopg
+
+    from base.db.protocols import RestoreAbandonedError
+    from meiva.shell import ttl_store
+
+    calls = 0
+
+    class _FlakyThenRealDb:
+        def connect(self, *, autocommit: bool = False) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise psycopg.OperationalError(
+                    "consuming input failed: could not receive data from server: Operation timed out"
+                )
+            return database.connect(autocommit=autocommit)
+
+    flaky_db: Any = _FlakyThenRealDb()
+    session_id = ttl_store.next_session_index(flaky_db, live_shell.agent_id)
+    assert session_id == 0
+    assert calls == 2
+
+    calls = 0
+    ttl_store.record_ttl(flaky_db, live_shell.agent_id, session_id, 120.0)
+    assert calls == 2
+
+    calls = 0
+    prev_expires = ttl_store.read_expiry(flaky_db, live_shell.agent_id, session_id)
+    assert prev_expires is not None
+    assert calls == 2
+
+    calls = 0
+    new_expires = ttl_store.apply_renewal(
+        flaky_db, live_shell.agent_id, session_id, 180.0, prev_expires
+    )
+    assert new_expires > prev_expires
+    assert calls == 2
+
+    class _AlwaysAbandonedDb:
+        def connect(self, *, autocommit: bool = False) -> Any:
+            del autocommit
+            raise RestoreAbandonedError("session restore abandoned")
+
+    abandoned_db: Any = _AlwaysAbandonedDb()
+    with pytest.raises(RuntimeError, match="failed to renew session 0"):
+        ttl_store.read_expiry(abandoned_db, live_shell.agent_id, session_id)
+    with pytest.raises(RuntimeError, match="failed to renew session 0"):
+        ttl_store.apply_renewal(abandoned_db, live_shell.agent_id, session_id, 180.0, new_expires)

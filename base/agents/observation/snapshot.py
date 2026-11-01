@@ -323,12 +323,21 @@ def agent_model_target(
     generation must not die on a bookkeeping miss.
     """
     from base.config.agent_pins import resolve_agent_config_pins
+    from base.db.pooled_session import retryable_connection_error
 
+    row: tuple[Any, ...] | None = None
     try:
-        with db.connect(autocommit=True) as conn:
-            row = conn.execute(
-                "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
-            ).fetchone()
+        for attempt in range(1, 4):
+            try:
+                with db.connect(autocommit=True) as conn:
+                    row = conn.execute(
+                        "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s",
+                        (agent_id,),
+                    ).fetchone()
+                break
+            except Exception as exc:
+                if attempt >= 3 or not retryable_connection_error(exc):
+                    raise
     except Exception as exc:
         logger.warning(
             "agent {agent}: effective-model lookup failed ({error!r}); falling back to {model}",

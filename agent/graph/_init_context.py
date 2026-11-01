@@ -15,6 +15,7 @@ from agent.impersonation_handoff import introduction_note, note_stamp
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.agents.messages.delivery.retry import retryable_database_error
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.handoff import ClusterFact, Handoff
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, handoff_for
@@ -38,16 +39,30 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
+_CLUSTER_QUERY_ATTEMPTS = 3
+
+
+def _query_machines(ctx: MeivaContext) -> list[tuple[Any, ...]]:
+    for attempt in range(1, _CLUSTER_QUERY_ATTEMPTS + 1):
+        try:
+            with ctx.sql.cursor() as cur:
+                cur.execute(
+                    "SELECT name, role, description FROM machines WHERE paused_at IS NULL ORDER BY name"
+                )
+                return cur.fetchall()
+        except Exception as exc:
+            if attempt >= _CLUSTER_QUERY_ATTEMPTS or not retryable_database_error(exc):
+                raise
+            ctx.sql.close()
+    raise AssertionError("unreachable")
+
+
+def cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
     if ctx.ops_pool is None or ctx.identity is None:
         machine = machine_clause(ctx)
         return (ClusterFact(machine, "agent-runner"),) if machine else ()
     try:
-        with ctx.sql.cursor() as cur:
-            cur.execute(
-                "SELECT name, role, description FROM machines WHERE paused_at IS NULL ORDER BY name"
-            )
-            rows = cur.fetchall()
+        rows = _query_machines(ctx)
     except Exception:
         logger.opt(exception=True).warning(
             "Failed to query machines table for handoff cluster facts; using local machine clause"
@@ -81,7 +96,7 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
     label = (
         own_label(ctx, agent_id) if ctx.ops_pool is not None and ctx.identity is not None else None
     )
-    cluster = _cluster_facts(ctx)
+    cluster = cluster_facts(ctx)
     handoff = handoff_for(
         ctx.harness,
         agent_id=agent_id,

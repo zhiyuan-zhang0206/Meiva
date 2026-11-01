@@ -3,25 +3,44 @@
 # meiva:link meiva/shell/docs/shell.meiva.okf.md
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 
 import psycopg
 
 from base.agents.context.clients import DatabaseHandle
+from base.agents.messages.delivery.retry import retryable_database_error
+from base.db.protocols import RestoreAbandonedError
+
+_TTL_QUERY_ATTEMPTS = 3
+
+
+def _run_with_transient_retry[T](operation: Callable[[], T]) -> T:
+    for attempt in range(1, _TTL_QUERY_ATTEMPTS + 1):
+        try:
+            return operation()
+        except Exception as exc:
+            if attempt >= _TTL_QUERY_ATTEMPTS or not retryable_database_error(exc):
+                raise
+    raise AssertionError("unreachable")
 
 
 # meiva:note
 # Atomically increments agents_meta.session_index and returns the id to use (shared by shells and watchers); `UPDATE ... RETURNING` keeps it safe under concurrency. There is no fallback: an unavailable database, or an agent that is not in agents_meta, raises. The connect cap of `Database.connect` keeps a black-holing database from hanging `meiva.shell.sessions.new()` on the OS TCP-retransmit timeout.
 def next_session_index(database: DatabaseHandle, agent_id: int) -> int:
-    with database.connect() as conn, conn.cursor() as cur:
-        cur.execute("SET TRANSACTION READ WRITE")
-        cur.execute(
-            "UPDATE agents_meta SET session_index = session_index + 1 "
-            "WHERE id = %s RETURNING session_index",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-        conn.commit()
+    def _allocate() -> tuple[int, ...] | None:
+        with database.connect() as conn, conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ WRITE")
+            cur.execute(
+                "UPDATE agents_meta SET session_index = session_index + 1 "
+                "WHERE id = %s RETURNING session_index",
+                (agent_id,),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row
+
+    row = _run_with_transient_retry(_allocate)
     if row is None:
         raise RuntimeError(
             f"agent {agent_id} not in agents_meta table — cannot allocate session_index"
@@ -32,7 +51,7 @@ def next_session_index(database: DatabaseHandle, agent_id: int) -> int:
 # meiva:note
 # Writes the session's mandatory deadline row to `agent_shell_ttls`, which the TTL reaper reads (the runner role holds INSERT). Fail-loud: without the row the reaper can never reclaim the session, so the caller aborts the creation it just made. `SET TRANSACTION READ WRITE` leads the transaction so a pooled backend handed over with session-level read-only poison cannot reject the write.
 def record_ttl(database: DatabaseHandle, agent_id: int, session_id: int, ttl: float) -> None:
-    try:
+    def _insert() -> None:
         with database.connect() as conn, conn.cursor() as cur:
             cur.execute("SET TRANSACTION READ WRITE")
             cur.execute(
@@ -41,6 +60,9 @@ def record_ttl(database: DatabaseHandle, agent_id: int, session_id: int, ttl: fl
                 (agent_id, session_id, ttl),
             )
             conn.commit()
+
+    try:
+        _run_with_transient_retry(_insert)
     except Exception as exc:
         raise RuntimeError(f"failed to track TTL for session {session_id}") from exc
 
@@ -65,14 +87,17 @@ def renewal_update(
 # meiva:note
 # The session's current deadline; None when the row is absent.
 def read_expiry(database: DatabaseHandle, agent_id: int, session_id: int) -> datetime | None:
-    try:
+    def _select() -> tuple[datetime, ...] | None:
         with database.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
                 (agent_id, session_id),
             )
-            row = cur.fetchone()
-    except psycopg.Error as exc:
+            return cur.fetchone()
+
+    try:
+        row = _run_with_transient_retry(_select)
+    except (psycopg.Error, RestoreAbandonedError) as exc:
         raise RuntimeError(f"failed to renew session {session_id}") from exc
     return row[0] if row is not None else None
 
@@ -82,21 +107,23 @@ def read_expiry(database: DatabaseHandle, agent_id: int, session_id: int) -> dat
 def apply_renewal(
     database: DatabaseHandle, agent_id: int, session_id: int, ttl: float, prev_expires: datetime
 ) -> datetime:
-    new_expires: datetime | None = None
-    try:
+    def _update() -> datetime | None:
         with database.connect() as conn, conn.cursor() as cur:
             cur.execute("SET TRANSACTION READ WRITE")
             updated = renewal_update(cur, agent_id, session_id, ttl)
             if updated is not None:
-                new_expires = updated
                 cur.execute(
                     "INSERT INTO agent_shell_ttl_renewals "
                     "(agent_id, session_id, requested_ttl_seconds, prev_expires_at, "
                     "new_expires_at) VALUES (%s, %s, %s, %s, %s)",
-                    (agent_id, session_id, ttl, prev_expires, new_expires),
+                    (agent_id, session_id, ttl, prev_expires, updated),
                 )
                 conn.commit()
-    except psycopg.Error as exc:
+            return updated
+
+    try:
+        new_expires = _run_with_transient_retry(_update)
+    except (psycopg.Error, RestoreAbandonedError) as exc:
         raise RuntimeError(f"failed to renew session {session_id}") from exc
     if new_expires is None:
         raise ValueError(
