@@ -21,19 +21,7 @@ __all__ = [
     "record_function",
 ]
 
-DEFAULT_IMPURE_FIXTURES = frozenset(
-    {
-        "db_conn",
-        "database_gate",
-        "database",
-        "operator_database",
-        "aops_pool",
-        "pool",
-        "event_bus",
-        "redis_url",
-        "monkeypatch",
-    }
-)
+DEFAULT_IMPURE_FIXTURES = frozenset({"monkeypatch"})
 
 _FIXTURE_DECORATORS = frozenset({"pytest.fixture", "pytest_asyncio.fixture"})
 _PARAMETRIZE = "pytest.mark.parametrize"
@@ -57,6 +45,13 @@ class FixtureFunction:
     registered: str | None
     module_owned: bool
     parameters_known: bool
+    end_line: int = 0
+    is_async: bool = False
+    requests: tuple[str, ...] = ()
+    imported_modules: tuple[str, ...] = ()
+    callees: tuple[str, ...] = ()
+    local_calls: tuple[str, ...] = ()
+    names_loaded: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +62,7 @@ class FixtureState:
     requests: list[FixtureRequest] = field(default_factory=list[FixtureRequest])
     plugins: list[tuple[str, int]] = field(default_factory=list[tuple[str, int]])
     functions: list[FixtureFunction] = field(default_factory=list[FixtureFunction])
+    helpers: list[FixtureFunction] = field(default_factory=list[FixtureFunction])
 
 
 def is_test_file(path: str) -> bool:
@@ -198,6 +194,73 @@ def _literal_names(value: ast.expr) -> bool:
     )
 
 
+def _inspect_call(
+    child: ast.Call,
+    dotted: _Dotted,
+    reqs: list[str],
+    callees: list[str],
+    local_calls: list[str],
+) -> None:
+    d = dotted(child.func)
+    if d:
+        callees.append(d)
+    if isinstance(child.func, ast.Name):
+        local_calls.append(child.func.id)
+    if (
+        isinstance(child.func, ast.Attribute)
+        and child.func.attr == "getfixturevalue"
+        and child.args
+        and isinstance(child.args[0], ast.Constant)
+        and isinstance(child.args[0].value, str)
+    ):
+        reqs.append(child.args[0].value)
+
+
+def _inspect_function_ast(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    dotted: _Dotted,
+) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+    reqs = list(_requested_names(node, dotted))
+    imported: list[str] = []
+    callees: list[str] = []
+    local_calls: list[str] = []
+    names_loaded: list[str] = []
+    for child in ast.walk(node):
+        if isinstance(child, ast.Import):
+            imported.extend(a.name for a in child.names)
+        elif isinstance(child, ast.ImportFrom) and child.module:
+            imported.append(child.module)
+            for a in child.names:
+                imported.append(f"{child.module}.{a.name}")
+        elif isinstance(child, ast.Call):
+            _inspect_call(child, dotted, reqs, callees, local_calls)
+        elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+            names_loaded.append(child.id)
+    return reqs, imported, callees, local_calls, names_loaded
+
+
+def _record_fixture_entry(
+    state: FixtureState,
+    func_info: FixtureFunction,
+    *,
+    is_target: bool,
+    is_helper: bool,
+) -> None:
+    if is_target:
+        state.functions.append(func_info)
+        for name in func_info.requests:
+            state.requests.append(
+                FixtureRequest(
+                    name,
+                    func_info.line,
+                    skip_self=name == func_info.registered,
+                    requester_line=func_info.line,
+                )
+            )
+    elif is_helper:
+        state.helpers.append(func_info)
+
+
 def record_function(
     state: FixtureState,
     node: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -211,23 +274,30 @@ def record_function(
     if registered is not None:
         state.defs.add(registered)
     is_test = test_file and top_level and node.name.startswith("test")
-    if registered is None and not is_test:
+    if registered is None and not is_test and not (test_file and top_level):
         return
-    state.functions.append(
-        FixtureFunction(
-            node.name,
-            node.lineno,
-            registered,
-            module_owned and _literal_registration(node, dotted),
-            _parameters_known(node, dotted),
-        )
+
+    reqs, imported, callees, local_calls, names_loaded = _inspect_function_ast(node, dotted)
+    func_info = FixtureFunction(
+        node.name,
+        node.lineno,
+        registered,
+        module_owned and _literal_registration(node, dotted),
+        _parameters_known(node, dotted),
+        end_line=getattr(node, "end_lineno", node.lineno),
+        is_async=isinstance(node, ast.AsyncFunctionDef),
+        requests=tuple(reqs),
+        imported_modules=tuple(imported),
+        callees=tuple(callees),
+        local_calls=tuple(local_calls),
+        names_loaded=tuple(names_loaded),
     )
-    for name in _requested_names(node, dotted):
-        state.requests.append(
-            FixtureRequest(
-                name, node.lineno, skip_self=name == registered, requester_line=node.lineno
-            )
-        )
+    _record_fixture_entry(
+        state,
+        func_info,
+        is_target=registered is not None or is_test,
+        is_helper=test_file and top_level,
+    )
 
 
 def record_call(
@@ -273,7 +343,7 @@ def plugin_names(value: ast.expr) -> list[str] | None:
 class FixtureIndex:
     """What each scanned file defines, for resolving a request to its definer."""
 
-    universe: Universe
+    universe: Universe | None
     defined: dict[str, set[str]]
     plugins: dict[str, list[str]]
     _plugin_cache: dict[str, list[str]] = field(
@@ -284,6 +354,8 @@ class FixtureIndex:
         return self.defined.get(path) or set()
 
     def plugin_files(self, path: str, seen: set[str] | None = None) -> list[str]:
+        if self.universe is None:
+            return []
         if seen is None and path in self._plugin_cache:
             return self._plugin_cache[path]
         top = seen is None

@@ -70,7 +70,7 @@ explicitly targeted. Instead, a test file whose first-party targets are all `str
 | Code | Scope | What it catches |
 |---|---|---|
 | `impure-edge` | `strict`, `strict-to-be` module | Importing or reading an attribute from a first-party module whose effective purity is `none` |
-| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`DEFAULT_IMPURE_IMPORTS` plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.*`, `datetime.now`, `os.environ`, `random.*`, `uuid.uuid4`, `open`, the `os` file and descriptor calls, `Path` I/O methods; list: `DEFAULT_IMPURE_CALLS` plus policy `impure-calls`) |
+| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an impure standard library module (from complete `sys.stdlib_module_names` classification), importing any third-party package not listed in `pure-third-party` (fail-closed), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.*`, `datetime.now`, `os.environ`, `random.*`, `uuid.uuid4`, `open`, the `os` file and descriptor calls, `Path` I/O methods; list: `DEFAULT_IMPURE_CALLS` plus policy `impure-calls`) |
 | `unfrozen-value` | `strict`, `strict-to-be` module | A class that is not an Enum, Exception, Protocol, TypedDict, NamedTuple, frozen `BaseModel`, or `@dataclass(frozen=True)`, or a module-level mutable literal/comprehension/call assigned to a binding |
 | `untyped-export` | `strict`, `strict-to-be` module | A public function (or exported symbol) missing parameter or return type annotations, or annotated with `Any` or bare `dict` |
 | `pass-through-function` | `strict`, `strict-to-be` module | A public undecorated function whose body only forwards its exact parameters to another function or module attribute call |
@@ -82,7 +82,7 @@ explicitly targeted. Instead, a test file whose first-party targets are all `str
 | `wide-public-surface` | `strict`, `strict-to-be` module | A module defining more than `max-public-symbols` public behavioral symbols (default 6; frozen values, Enums, Protocols, TypedDicts, NamedTuples and Exceptions do not count) |
 | `wide-params` | `strict`, `strict-to-be` module | A function or method taking more than `max-params` parameters excluding `self`/`cls` (default 6) |
 | `deep-attr-chain` | `strict`, `strict-to-be` module | An expression chaining more than `max-attr-hops` non-module attribute accesses (`a.b.c.d`, default 3) |
-| `impure-test-fixture` | test of `strict` / `strict-to-be` | Requesting `monkeypatch`, `mocker`, or heavy I/O fixtures configured in policy `impure-fixtures` when all first-party targets under test are `strict` or `strict-to-be` |
+| `impure-test-fixture` | test of `strict` / `strict-to-be` | Requesting `monkeypatch`, or any fixture transitively inferred impure via AST taint graph analysis (connecting to runtime infrastructure, async fixtures, impure stdlib/third-party imports, ambient reads) plus optional policy `impure-fixtures` when all first-party targets under test are `strict` or `strict-to-be` |
 | `nested-patch-target` | test of `strict` / `strict-to-be` | Patching through a multi-hop attribute chain (`monkeypatch.setattr(a.b, "c", ...)` or dotted string with $\ge 2$ attribute hops) |
 
 ## Policy configuration
@@ -92,9 +92,9 @@ Repository-specific additions and container budget thresholds live under `[purit
 
 ```toml
 [purity]
-impure-imports = ["psycopg", "psycopg_pool", "redis", "fastapi", "uvicorn", "aiohttp", "websockets", "starlette", "sqlalchemy", "alembic", " celery", "kombu"]
-impure-calls = ["logging.info", "logging.error", "meizel.graph.universe.GitRepo"]
-impure-fixtures = ["db_session", "postgres_container", "redis_container"]
+pure-third-party = ["pydantic", "dotenv", "feedparser", "loguru", "mcp", "yaml"]
+impure-calls = ["logging.info", "logging.error"]
+impure-fixtures = []
 max-uses = 8
 max-exports = 4
 max-public-symbols = 6

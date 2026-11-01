@@ -33,7 +33,9 @@ _FIX = (
 
 # meiva:note
 # The convention that states the rule; the message of this owner points here.
-_DOC = "docs/conventions/python-conventions.md (Rule 6, no path imports under meiva_builtins/)"
+_DOC = (
+    "docs/conventions/python-conventions.md (Rule 6, no path imports under governed script scopes)"
+)
 
 # meiva:note
 # What a path import costs: the loaded module has no edge in the import graph, so its identity is

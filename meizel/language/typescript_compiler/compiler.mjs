@@ -6,9 +6,9 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 
-function lockedTypescriptVersion(lockText) {
+function lockedTypescriptVersion(lockText, pkgDir = '') {
   if (!/^lockfileVersion:\s*['"]?9\.0['"]?\s*$/m.test(lockText)) {
-    throw new Error('invalid pnpm-lock.yaml header in ui/web');
+    throw new Error(`invalid pnpm-lock.yaml header in ${pkgDir || '.'}`);
   }
   let scope = ['', '', '', ''];
   for (const rawLine of lockText.split(/\r?\n/)) {
@@ -36,17 +36,54 @@ function lockedTypescriptVersion(lockText) {
       return version;
     }
   }
-  throw new Error('missing typescript version in ui/web/pnpm-lock.yaml');
+  throw new Error(`missing typescript version in ${pkgDir ? `${pkgDir}/` : ''}pnpm-lock.yaml`);
+}
+
+function findPackageDir(toolRoot) {
+  if (process.env.MEIZEL_TS_PACKAGE_DIR) {
+    return process.env.MEIZEL_TS_PACKAGE_DIR;
+  }
+  const policyPath = path.join(toolRoot, 'meizel.policy.toml');
+  if (fs.existsSync(policyPath)) {
+    const text = fs.readFileSync(policyPath, 'utf8');
+    const match = text.match(/package-dir\s*=\s*\[\s*["']([^"']+)["']/);
+    if (match) return match[1];
+  }
+  try {
+    for (const entry of fs.readdirSync(toolRoot, { withFileTypes: true })) {
+      if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+        if (fs.existsSync(path.join(toolRoot, entry.name, 'pnpm-lock.yaml'))) {
+          return entry.name;
+        }
+        try {
+          for (const sub of fs.readdirSync(path.join(toolRoot, entry.name), { withFileTypes: true })) {
+            if (sub.isDirectory() && fs.existsSync(path.join(toolRoot, entry.name, sub.name, 'pnpm-lock.yaml'))) {
+              return `${entry.name}/${sub.name}`;
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return '';
 }
 
 export const tool = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const require = createRequire(path.join(tool, 'ui/web/package.json'));
+export const packageDir = findPackageDir(tool);
+const packageJsonPath = packageDir ? path.join(tool, packageDir, 'package.json') : path.join(tool, 'package.json');
+const require = createRequire(packageJsonPath);
 export const ts = require('typescript');
 export const compiler = fs.realpathSync(require.resolve('typescript'));
-const expected = path.join(tool, 'ui/web/node_modules/typescript/lib/typescript.js');
+const expected = packageDir
+  ? path.join(tool, packageDir, 'node_modules/typescript/lib/typescript.js')
+  : path.join(tool, 'node_modules/typescript/lib/typescript.js');
 if (compiler !== fs.realpathSync(expected)) throw new Error('unexpected TypeScript compiler import path');
-const lockedVersion = lockedTypescriptVersion(fs.readFileSync(path.join(tool, 'ui/web/pnpm-lock.yaml'), 'utf8'));
-const installed = JSON.parse(fs.readFileSync(path.join(tool, 'ui/web/node_modules/typescript/package.json'), 'utf8'));
+const lockPath = packageDir ? path.join(tool, packageDir, 'pnpm-lock.yaml') : path.join(tool, 'pnpm-lock.yaml');
+const packageLockInstalled = packageDir
+  ? path.join(tool, packageDir, 'node_modules/typescript/package.json')
+  : path.join(tool, 'node_modules/typescript/package.json');
+const lockedVersion = lockedTypescriptVersion(fs.readFileSync(lockPath, 'utf8'), packageDir);
+const installed = JSON.parse(fs.readFileSync(packageLockInstalled, 'utf8'));
 if (ts.version !== installed.version || ts.version !== lockedVersion) {
-  throw new Error('TypeScript compiler differs from the tool lock; run pnpm install --frozen-lockfile in ui/web');
+  throw new Error(`TypeScript compiler differs from the tool lock; run pnpm install --frozen-lockfile in ${packageDir || '.'}`);
 }

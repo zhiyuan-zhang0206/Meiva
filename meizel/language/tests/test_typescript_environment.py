@@ -6,13 +6,14 @@ from typing import Protocol
 
 import pytest
 
-from meizel.allowances import Policy
+from meizel.allowances import parse_snapshot
 from meizel.checkout import GitRepo
 from meizel.graph.model import Sources
 from meizel.graph.universe import Universe
 from meizel.language.typescript import scan_batch
 
 BUNDLED = "ui/web/src/lib/x.ts"
+_POLICY, _ = parse_snapshot('[typescript]\ninlined-env-roots = ["ui/web/src/"]\n')
 UNBUNDLED_READ = "export const base = process.env.NEXT_PUBLIC_API_BASE;\n"
 UNBUNDLED_PATHS = (
     "ui/web/next.config.ts",
@@ -222,7 +223,7 @@ def acquired() -> Acquired:
     synthetic_by_case = {case: _synthetic_path(case[0], index) for index, case in enumerate(cases)}
     contents = {synthetic: source for (_, source), synthetic in synthetic_by_case.items()}
     scans = scan_batch(
-        Universe(GitRepo(Path("/repo")), list(contents)), contents, Policy(), Sources()
+        Universe(GitRepo(Path("/repo")), list(contents)), contents, _POLICY, Sources()
     )
     results = {
         case: [(item.kind.value, item.target) for item in scans[synthetic].ambient]

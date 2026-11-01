@@ -367,6 +367,8 @@ def test_impure_test_fixture_flags_heavy_fixtures_and_monkeypatch_for_strict_tes
 ) -> None:
     root = make_repo(
         {
+            "meizel.policy.toml": render_policy({}, {})
+            + '\n[purity]\nimpure-fixtures = ["db_conn"]\n',
             "pkg/__init__.py": "",
             "pkg/domain.py": "def calc(x: int) -> int:\n    return x + 1\n",
             "pkg/meizel.toml": 'purity = "strict"\nexports = ["domain.py"]\n\n[uses]\n"tests" = ["domain.py"]\n',
@@ -737,7 +739,7 @@ def test_a_shell_constructor_the_policy_lists_is_an_impure_call(make_repo: RepoF
     root = make_repo(
         {
             "meizel.policy.toml": render_policy({}, {})
-            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
+            + '\n[purity]\npure-third-party = ["meizel"]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
             "pkg/__init__.py": "",
             "pkg/a.py": (
                 "from meizel.graph.universe import GitRepo\n\n"
@@ -765,7 +767,7 @@ def test_a_policy_listed_constructor_named_without_a_call_is_an_impure_call(
     root = make_repo(
         {
             "meizel.policy.toml": render_policy({}, {})
-            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo", "meizel.graph.universe.load_universe"]\n',
+            + '\n[purity]\npure-third-party = ["meizel"]\nimpure-calls = ["meizel.graph.universe.GitRepo", "meizel.graph.universe.load_universe"]\n',
             "pkg/__init__.py": "",
             "pkg/a.py": source,
             "pkg/meizel.toml": 'purity = "strict-to-be"\n',
@@ -784,7 +786,7 @@ def test_a_shell_constructor_named_in_an_annotation_is_not_an_impure_call(
     root = make_repo(
         {
             "meizel.policy.toml": render_policy({}, {})
-            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
+            + '\n[purity]\npure-third-party = ["meizel"]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
             "pkg/__init__.py": "",
             "pkg/a.py": (
                 "from meizel.graph.universe import GitRepo\n\n"
