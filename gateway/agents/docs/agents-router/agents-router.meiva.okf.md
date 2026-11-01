@@ -110,7 +110,10 @@ A failed catalog does not invalidate an already committed chat receipt. Replay
 compares the normalized original content before current model checks.
 Plain text delivery (`POST /api/agents/{id}/messages`) does not need model metadata;
 file and image uploads use the staged + batch upload delivery routes
-(`/api/keyed/v1/agents/{id}/uploads*`). The 1 MiB
+(`/api/keyed/v1/agents/{id}/uploads*`). A keyed delivery's receipt answers
+`duplicate: true` when the key already names a stored message — the original row
+comes back and nothing new is queued. That key space is cluster-wide, so a caller
+scopes its own keys by sender and target. The 1 MiB
 message limit bounds pending/checkpoint storage and telemetry volume.
 
 Termination's open-task hint and shell-TTL cleanup are advisory after acceptance.

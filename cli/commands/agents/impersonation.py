@@ -201,14 +201,14 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
     )
     lease = control.require_active(db, lease_id, local_machine=args.runtime.machine.name())
     source = f"agent:{lease['agent_id']}"
-    status = send_agent_message(
+    receipt = send_agent_message(
         gateway_access_from_boot(args.runtime.config),
         args.target_agent_id,
         content,
         source=source,
         idempotency_key=args.runtime.new_id(),
     )
-    _emit({"status": status, "to": args.target_agent_id, "source": source})
+    _emit({"status": receipt.status, "to": args.target_agent_id, "source": source})
     return 0
 
 

@@ -8889,6 +8889,11 @@
               }
             ],
             "title": "Inbound Id"
+          },
+          "duplicate": {
+            "type": "boolean",
+            "title": "Duplicate",
+            "default": false
           }
         },
         "type": "object",

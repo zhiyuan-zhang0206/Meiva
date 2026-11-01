@@ -2434,6 +2434,7 @@ export interface components {
         AgentMessageEnqueued: {
             status: components["schemas"]["AgentStatus"];
             inbound_id?: number | null;
+            duplicate: boolean;
         };
         AgentMessageIn: {
             content: string;

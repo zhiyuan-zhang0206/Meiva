@@ -52,6 +52,7 @@ def direct(mode: str) -> int:
                 source=None if mode.endswith("missing") else "bogus",
                 tail_file=None,
                 completion=False,
+                client_message_id=None,
                 runtime=_runtime(),
             )
         )

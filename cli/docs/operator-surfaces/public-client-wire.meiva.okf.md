@@ -34,8 +34,11 @@ that failed to boot; it does not manufacture exception objects in the parent.
 Agent list rendering preserves stable columns, the continuation cursor and
 omission of runner-local workspace paths. Send retains its explicit source,
 bounded last-three-line/2048-byte tail, unreadable-tail delivery and empty-tail
-behavior. Terminate and kill retain their force and shell-session flags,
-asynchronous acceptance and present/missing shell-kill reports. Explicit source
+behavior. A caller-supplied client message id becomes a key scoped by that
+sender and target — identical twice, distinct across senders — and a
+duplicate reply prints the original delivery instead of claiming a new one.
+Terminate and kill retain their force and shell-session flags, asynchronous
+acceptance and present/missing shell-kill reports. Explicit source
 provenance is unchanged with a real external-caller environment present or
 absent; missing or invalid source never becomes an HTTP write. Parse errors and
 programmatic command failures keep their distinct exit/error contracts.

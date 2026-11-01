@@ -88,6 +88,7 @@ def h_agents_send(args: argparse.Namespace) -> int:
             args.tail_file,
             completion=args.completion,
             idempotency_key=args.runtime.new_id(),
+            client_message_id=args.client_message_id,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -307,6 +308,13 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "--completion",
         action="store_true",
         help="mark this shell/watcher send as a platform completion (the agent's notice policy applies)",
+    )
+    agents_send_p.add_argument(
+        "--client-message-id",
+        default=None,
+        help="caller-owned key naming one message: repeating it with the same --source, "
+        "target and text reports the original delivery instead of sending twice "
+        "(another sender reusing it is another message)",
     )
     agents_send_p.set_defaults(func=h_agents_send)
 
