@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 from typing import Any, cast
 
@@ -66,6 +67,7 @@ def _runtime(
     return Runtime(
         context=MeivaContext(
             meiva_home=resolve_meiva_home(),
+            environ=os.environ,
             hosted_resources=hosted_resources,
             ops_pool=ops_pool,
             llm=cast(BaseChatModel, model),

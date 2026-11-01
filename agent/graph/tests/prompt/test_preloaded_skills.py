@@ -8,6 +8,7 @@
 # real install registry in a per-test unit home.
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,6 +33,8 @@ from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.skills.tree import Skill, identifier
 from base.paths import meiva_home, skills_dir
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
+
+ENVIRON = dict(os.environ)
 
 _PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -240,6 +243,7 @@ def _context(**pins: object) -> MeivaContext:
         meiva_home=meiva_home(),
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         clock_factory=_clock,
+        environ=ENVIRON,
     )
 
 
@@ -281,7 +285,9 @@ def test_no_note_without_configured_skills() -> None:
 def test_fork_tail_note_grafts_the_named_installed_skills() -> None:
     _install_skill("extra", "the extra skill", "EXTRA body")
 
-    note = fork_tail_skills_note(["extra"], [], home=meiva_home(), created_at=_PICKED_UP_AT)
+    note = fork_tail_skills_note(
+        ["extra"], [], home=meiva_home(), created_at=_PICKED_UP_AT, environ=ENVIRON
+    )
 
     assert note is not None
     text = _text(note)
@@ -295,6 +301,8 @@ def test_fork_tail_note_is_empty_when_the_skills_surface_is_disabled() -> None:
     _install_skill("extra", "the extra skill", "EXTRA body")
 
     assert (
-        fork_tail_skills_note(["extra"], ["skills"], home=meiva_home(), created_at=_PICKED_UP_AT)
+        fork_tail_skills_note(
+            ["extra"], ["skills"], home=meiva_home(), created_at=_PICKED_UP_AT, environ=ENVIRON
+        )
         is None
     )

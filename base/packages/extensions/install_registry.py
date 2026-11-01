@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
@@ -499,18 +499,21 @@ def trust_by_name(*, home: Path) -> dict[str, TrustTier]:
     return {p.name: p.trust for p in load(home=home).packages}
 
 
-def host_contract_reason(pkg_dir: Path) -> str | None:
+# meiva:note
+# `environ` is what the gate's `git` subprocesses run under; the caller names it (a turn context's
+# `require_environ()`, a `ConfigBoot`).
+def host_contract_reason(pkg_dir: Path, *, environ: Mapping[str, str]) -> str | None:
     """Why the package at `pkg_dir` is NOT loadable on this host, or None when
     it is. Thin wrapper over `base.packages.plugins.manifest.host_contract_errors_dir`
     — the runtime half of the §5.5 version gate, shared by the skill scan and
     `meiva packages status`."""
     from base.packages.plugins import manifest
 
-    errors = manifest.host_contract_errors_dir(pkg_dir)
+    errors = manifest.host_contract_errors_dir(pkg_dir, environ=environ)
     return "; ".join(errors) if errors else None
 
 
-def loadable_skill_names(*, home: Path) -> set[str]:
+def loadable_skill_names(*, home: Path, environ: Mapping[str, str]) -> set[str]:
     """`enabled_skill_names()` minus packages whose manifest excludes this host.
 
     The runtime side of the version gate (design §5.5): a skill package whose
@@ -523,7 +526,7 @@ def loadable_skill_names(*, home: Path) -> set[str]:
     return {
         name
         for name in enabled_skill_names(home=home)
-        if host_contract_reason(skills_root / name) is None
+        if host_contract_reason(skills_root / name, environ=environ) is None
     }
 
 

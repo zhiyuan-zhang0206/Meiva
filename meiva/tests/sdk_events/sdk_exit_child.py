@@ -35,6 +35,7 @@ def main() -> None:
     attachment = ClientSet()
     process_context.bind_context(
         MeivaContext(
+            environ=os.environ,
             clients=attachment,
             identity=AgentIdentity(agent_id=6111, owns_loop=False),
             meiva_home=meiva_home(),

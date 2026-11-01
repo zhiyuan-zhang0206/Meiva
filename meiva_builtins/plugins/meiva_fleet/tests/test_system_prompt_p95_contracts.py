@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 
 import pytest
@@ -23,6 +24,8 @@ from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
+
+ENVIRON = dict(os.environ)
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +67,9 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
     )
 
     text = sdk_expand_section(
-        SectionInputs(slices, model_catalog, read_live_sdk(slices.prompt, home=meiva_home()))
+        SectionInputs(
+            slices, model_catalog, read_live_sdk(slices.prompt, home=meiva_home(), environ=ENVIRON)
+        )
     )
 
     for module in ["shell", "files", "agents", "tasks"]:

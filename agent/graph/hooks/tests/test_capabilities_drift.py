@@ -12,6 +12,7 @@ agent/graph/tests/prompt/test_capabilities_index.py.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
@@ -45,6 +46,8 @@ from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
+ENVIRON = dict(os.environ)
+
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
 
 
@@ -71,6 +74,7 @@ def _runtime(
             bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
+            environ=ENVIRON,
         )
     )
 
@@ -117,14 +121,16 @@ def test_drift_reports_only_what_appeared_since_the_snapshot(skills_dir: Path) -
     """The whole point: a skill installed after the index was rendered shows up
     as an addition, and one that was already indexed does not show up again."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home()))
+    snapshot = indexed_skill_identifiers(
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)
+    )
     assert snapshot == {"alpha"}
 
     _install(skills_dir, "beta", "Beta desc")
 
     drift = index_drift(
         snapshot,
-        skill_view(_slices().prompt, home=meiva_home()),
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON),
     )
     assert [s["name"] for s in drift.added] == ["beta"]
     assert drift.identifiers == {"alpha", "beta"}
@@ -133,8 +139,8 @@ def test_drift_reports_only_what_appeared_since_the_snapshot(skills_dir: Path) -
 def test_drift_is_empty_when_the_catalog_has_not_moved(skills_dir: Path) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
     drift = index_drift(
-        indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home())),
-        skill_view(_slices().prompt, home=meiva_home()),
+        indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)),
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON),
     )
     assert drift.added == []
 
@@ -145,12 +151,14 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
     """Only additions are reported, but membership is replaced rather than
     unioned — otherwise a skill removed and put back would stay silent."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home()))
+    snapshot = indexed_skill_identifiers(
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)
+    )
 
     shutil.rmtree(skills_dir / "alpha")
     after_removal = index_drift(
         snapshot,
-        skill_view(_slices().prompt, home=meiva_home()),
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON),
     )
     assert after_removal.added == []
     assert after_removal.identifiers == set()
@@ -160,7 +168,7 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
         s["name"]
         for s in index_drift(
             after_removal.identifiers,
-            skill_view(_slices().prompt, home=meiva_home()),
+            skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON),
         ).added
     ] == ["alpha"]
 
@@ -174,7 +182,9 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(
     """The note has to read as more of the `# Capabilities` listing, so it uses
     the same `- \\`meiva.skills.<path>\\` — description` line the index does."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home()))
+    snapshot = indexed_skill_identifiers(
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)
+    )
     _install(skills_dir, "beta", "Beta desc")
 
     update = await _run_hook(snapshot, database_gate, aops_pool)
@@ -190,7 +200,9 @@ async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
     skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home()))
+    snapshot = indexed_skill_identifiers(
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)
+    )
     _install(skills_dir, "beta", "Beta desc")
 
     update = await _run_hook(snapshot, database_gate, aops_pool)
@@ -207,7 +219,9 @@ async def test_hook_is_silent_when_nothing_was_installed(
     _install(skills_dir, "alpha", "Alpha desc")
     assert (
         await _run_hook(
-            indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home())),
+            indexed_skill_identifiers(
+                skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)
+            ),
             database_gate,
             aops_pool,
         )
@@ -272,7 +286,9 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     that composition end to end; this pins the predicate the defer is gated on.
     """
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home()))
+    snapshot = indexed_skill_identifiers(
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)
+    )
     _install(skills_dir, "beta", "Beta desc")
     over_the_ceiling: list[AnyMessage] = [
         SystemMessage(content="<sys>"),
@@ -309,7 +325,9 @@ async def test_container_mode_writes_nothing(
     its head by. An eval's context is deterministic by construction, and this
     note's trigger is whatever the host filesystem gained mid-run."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt, home=meiva_home()))
+    snapshot = indexed_skill_identifiers(
+        skill_view(_slices().prompt, home=meiva_home(), environ=ENVIRON)
+    )
     _install(skills_dir, "beta", "Beta desc")
 
     state = _state(snapshot)
@@ -332,7 +350,9 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
     drift, and a skill outside the list never becomes drift."""
     pins = {"skills_to_inject_into_system_prompt": ["beta"]}
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(skill_view(_slices(pins).prompt, home=meiva_home()))
+    snapshot = indexed_skill_identifiers(
+        skill_view(_slices(pins).prompt, home=meiva_home(), environ=ENVIRON)
+    )
     assert snapshot == set()  # `beta` is configured but not installed yet
 
     _install(skills_dir, "beta", "Beta desc")

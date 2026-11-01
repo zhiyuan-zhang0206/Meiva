@@ -143,7 +143,11 @@ def _status_rows(
         policy = install_registry.resolved_policy(pkg, defaults_reader=lambda: config.view.packages)
         root = _package_root(pkg, home)
         manifest, manifest_error = _read_declared_range(root)
-        host_blocked = install_registry.host_contract_reason(root) if root is not None else None
+        host_blocked = (
+            install_registry.host_contract_reason(root, environ=config.process_environment())
+            if root is not None
+            else None
+        )
         rows.append(
             _Row(
                 name=pkg.name,
@@ -244,8 +248,9 @@ def cmd_packages_status(
 
     registry = install_registry.place_sources(install_registry.load(home=home), user_home=user_home)
     try:
-        host_bare: str | None = host_version_mod.host_version()
-        host_display: str | None = host_version_mod.host_version_display()
+        environ = config.process_environment()
+        host_bare: str | None = host_version_mod.host_version(environ=environ)
+        host_display: str | None = host_version_mod.host_version_display(environ=environ)
     except host_version_mod.HostVersionError:
         host_bare = None
         host_display = "unknown"

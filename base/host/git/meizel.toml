@@ -5,17 +5,8 @@ exports = ["gitenv.py", "host_version.py", "host_version_plan.py"]
 "tests" = ["gitenv.py", "host_version.py", "host_version_plan.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
-"gitenv.py" = "strict-to-be"
+"gitenv.py" = "strict"
 "host_version.py" = { mode = "none", why = "the shell that derives the host version of a checkout: it runs git log for the HEAD commit, reads the checkout's pyproject.toml and falls back from the first to the second; how git's output and the pyproject text become a version, and how a derived version is shown, are decided in host_version_plan.py" }
 "host_version_plan.py" = "strict"
-
-[roots]
-"gitenv.py" = { kinds = ["environ"], why = "git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Meiva runtime config" }
-
-[debt.ambient-read]
-"host_version.py#environ base.host.git.gitenv.git_env" = 1
-
-[debt.impure-call]
-"gitenv.py#os.environ" = 1

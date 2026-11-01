@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -251,13 +252,15 @@ def _narrow_commands(
 # contributing project-local roots only for this call. The provider is scoped to this call (and
 # only it is taken back), so one request cannot leak its project skills into a later agent's
 # result. The result also carries this runner's enabled MCP names as phase-2 groundwork.
-def agent_skill_view_op(agent_id: int, pool: ConnectionPool, *, home: Path) -> AgentSkillViewResult:
+def agent_skill_view_op(
+    agent_id: int, pool: ConnectionPool, *, home: Path, environ: Mapping[str, str]
+) -> AgentSkillViewResult:
     from base.packages.composer_commands import CommandCatalog, load_skill_names
     from base.packages.mcp_config import load_mcp_config
     from base.packages.plugins.mcp_enabled import read_enabled
 
     cwd, wanted, harness = agent_skill_view_inputs(pool, agent_id)
-    loaded = load_skill_names(_project_skill_roots(cwd), home=home)
+    loaded = load_skill_names(_project_skill_roots(cwd), home=home, environ=environ)
     commands = _narrow_commands(
         CommandCatalog.system(skills=lambda: loaded, home=home).discover(), wanted, loaded
     )

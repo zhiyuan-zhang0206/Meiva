@@ -46,6 +46,7 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         ),
         home=args.runtime.home,
         now=args.runtime.clock.now(),
+        environ=args.runtime.config.process_environment(),
     )
 
 
@@ -163,6 +164,7 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         machine=args.runtime.machine,
         home=args.runtime.home,
         now=args.runtime.clock.now(),
+        environ=args.runtime.config.process_environment(),
     )
 
 

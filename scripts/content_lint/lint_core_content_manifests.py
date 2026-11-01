@@ -30,8 +30,10 @@ exit 2).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from base.host.env.boot_actions import enter_scratch_home
@@ -153,7 +155,7 @@ def _missing_plugin_manifests(*, repo_root: Path = _REPO_ROOT) -> int:
     return missing
 
 
-def _core_errors(derived: str, *, repo_root: Path = _REPO_ROOT) -> int:
+def _core_errors(derived: str, *, environ: Mapping[str, str], repo_root: Path = _REPO_ROOT) -> int:
     """Check every tracked core manifest against the derived host version; the error count."""
     errors = _missing_plugin_manifests(repo_root=repo_root)
     for path in _tracked_manifests(_CORE_ROOT, repo_root=repo_root):
@@ -167,7 +169,7 @@ def _core_errors(derived: str, *, repo_root: Path = _REPO_ROOT) -> int:
         for problem in pm.check_host_engine(manifest, derived):
             print(f"{rel}: {problem} (host version is the derived {derived})")
             errors += 1
-        for problem in pm.check_host_commit(manifest, repo_root):
+        for problem in pm.check_host_commit(manifest, repo_root, environ=environ):
             print(f"{rel}: {problem}")
             errors += 1
     return errors
@@ -189,12 +191,12 @@ def main(
         return failure
 
     try:
-        derived = host_version.host_version(root)
+        derived = host_version.host_version(root, environ=os.environ)
     except host_version.HostVersionError as e:
         print(f"cannot determine the repo's derived host version: {e}", file=sys.stderr)
         return 1
 
-    errors = _core_errors(derived, repo_root=root)
+    errors = _core_errors(derived, repo_root=root, environ=os.environ)
 
     audit = [
         p for p in _tracked_manifests(repo_root=root) if not p.is_relative_to(root / _CORE_ROOT)

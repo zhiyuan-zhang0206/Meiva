@@ -1,3 +1,4 @@
+import os
 from typing import Any, cast
 
 import pytest
@@ -12,6 +13,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home
+
+ENVIRON = dict(os.environ)
 
 
 def _slices(**changes: Any) -> AgentSlices:
@@ -29,7 +32,12 @@ def test_initial_human_response_is_present_without_plugins(style: str) -> None:
     slices = _slices(agent__agent_communication_style=style)
 
     prompt = build_system_prompt(
-        EMPTY, slices, agent_id=1, catalog=build_model_catalog(home=meiva_home()), home=meiva_home()
+        EMPTY,
+        slices,
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert prompt.count(user_reply_section(_inputs(slices))) == 1
@@ -55,7 +63,12 @@ def test_initial_human_response_is_present_without_plugins(style: str) -> None:
 def test_reply_routing_and_handoff_policy_survive_every_style(style: str) -> None:
     slices = _slices(agent__agent_communication_style=style)
     prompt = build_system_prompt(
-        EMPTY, slices, agent_id=1, catalog=build_model_catalog(home=meiva_home()), home=meiva_home()
+        EMPTY,
+        slices,
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert prompt.count("Reply in ordinary assistant text in this conversation") == 1
@@ -82,7 +95,12 @@ def communication_prompt(request: pytest.FixtureRequest) -> tuple[str, str]:
     )
 
     return style, build_system_prompt(
-        EMPTY, slices, agent_id=1, catalog=build_model_catalog(home=meiva_home()), home=meiva_home()
+        EMPTY,
+        slices,
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
+        environ=ENVIRON,
     )
 
 

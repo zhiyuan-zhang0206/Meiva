@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import inspect
 import io
+import os
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -67,7 +68,9 @@ def capture(emitted_events: EmittedEvents) -> Iterator[ClientSet]:
     """Bind a context whose clients' event pipeline is the capture, and put the previous one back."""
     clients = ClientSet(pipeline_factory=emitted_events.producer)
     previous = process_context.unbind_context()
-    process_context.bind_context(MeivaContext(clients=clients, meiva_home=meiva_home()))
+    process_context.bind_context(
+        MeivaContext(clients=clients, meiva_home=meiva_home(), environ=os.environ)
+    )
     try:
         yield clients
     finally:
@@ -218,7 +221,9 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member() -> None:
 
     machine = MachineFacts.of(name="", role=(), host="", description=None)
     prior = process_context.unbind_context()
-    process_context.bind_context(MeivaContext(machine=machine, meiva_home=meiva_home()))
+    process_context.bind_context(
+        MeivaContext(machine=machine, meiva_home=meiva_home(), environ=os.environ)
+    )
     try:
         # sanity: normal attribute access really does raise under this condition
         with pytest.raises(base.cluster.machine.MachineNameMissing):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,6 +53,8 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home, resolve_meiva_home
+
+ENVIRON = dict(os.environ)
 
 _PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -209,6 +212,7 @@ async def test_compact_contract_reaches_request_without_resident_self(meiva_comp
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
     assert "## meiva.self\n" not in system_prompt
     head = SystemMessage(content=system_prompt)

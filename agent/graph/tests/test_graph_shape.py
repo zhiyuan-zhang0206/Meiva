@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 
 # meiva:note
@@ -92,6 +93,7 @@ class FakeEngine:
 def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
     return MeivaContext(
         meiva_home=resolve_meiva_home(),
+        environ=os.environ,
         harness=harness,
         harness_bridge=engine,
         llm=MagicMock(),

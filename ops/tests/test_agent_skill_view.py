@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -18,6 +19,8 @@ from base.packages.extensions.install_registry import InstalledPackage, register
 from base.packages.plugins.mcp_enabled import set_mcp_enabled
 from base.paths import meiva_home, skills_dir
 from ops.cluster import operations as cluster
+
+ENVIRON = dict(os.environ)
 
 
 def _write_skill(root: Path, name: str, description: str = "project skill") -> None:
@@ -105,7 +108,7 @@ def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
 def test_agent_skill_view_missing_row_is_load_dir_only(
     db_conn: psycopg.Connection, skill_pool: ConnectionPool, load_dir: Path
 ) -> None:
-    view = cluster.agent_skill_view_op(999_999_999, skill_pool, home=meiva_home())
+    view = cluster.agent_skill_view_op(999_999_999, skill_pool, home=meiva_home(), environ=ENVIRON)
 
     assert [command.name for command in view.commands] == ["compact", "load-skill", "recap"]
 
@@ -116,7 +119,7 @@ def test_agent_skill_view_includes_project_skills_for_persisted_cwd(
     repo, _ = _project_with_skill(tmp_path)
     agent_id = _agent(db_conn, repo, ["*"])
 
-    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home())
+    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home(), environ=ENVIRON)
 
     assert [command.name for command in view.commands] == [
         "compact",
@@ -133,8 +136,12 @@ def test_agent_skill_view_without_cwd_or_repo_is_load_dir_only(
     non_repo_id = _agent(db_conn, tmp_path / "not-a-repo", ["*"])
     pool = skill_pool
 
-    missing_cwd_view = cluster.agent_skill_view_op(no_cwd_id, pool, home=meiva_home())
-    non_repo_view = cluster.agent_skill_view_op(non_repo_id, pool, home=meiva_home())
+    missing_cwd_view = cluster.agent_skill_view_op(
+        no_cwd_id, pool, home=meiva_home(), environ=ENVIRON
+    )
+    non_repo_view = cluster.agent_skill_view_op(
+        non_repo_id, pool, home=meiva_home(), environ=ENVIRON
+    )
 
     assert [command.name for command in missing_cwd_view.commands] == [
         "compact",
@@ -158,11 +165,15 @@ def test_agent_skill_view_clears_project_provider_after_each_op(
 
     assert [
         command.name
-        for command in cluster.agent_skill_view_op(project_agent, pool, home=meiva_home()).commands
+        for command in cluster.agent_skill_view_op(
+            project_agent, pool, home=meiva_home(), environ=ENVIRON
+        ).commands
     ] == ["compact", "load-skill", "project-skill", "recap"]
     assert [
         command.name
-        for command in cluster.agent_skill_view_op(local_agent, pool, home=meiva_home()).commands
+        for command in cluster.agent_skill_view_op(
+            local_agent, pool, home=meiva_home(), environ=ENVIRON
+        ).commands
     ] == ["compact", "load-skill", "recap"]
 
 
@@ -173,7 +184,7 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
     register(InstalledPackage(name="other-skill", type="skill"), home=meiva_home())
     agent_id = _agent(db_conn, None, ["load_skill"])
 
-    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home())
+    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home(), environ=ENVIRON)
 
     assert [command.name for command in view.commands] == ["compact", "load-skill", "recap"]
 
@@ -188,7 +199,7 @@ def test_agent_skill_view_includes_sorted_enabled_mcp_names(
     set_mcp_enabled("zeta", enabled=True, home=meiva_home())
     agent_id = _agent(db_conn, None, ["*"])
 
-    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home())
+    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home(), environ=ENVIRON)
 
     assert view.mcp_names == ["alpha", "zeta"]
 
@@ -203,7 +214,7 @@ def test_agent_skill_view_excludes_disabled_mcp_names(
     set_mcp_enabled("disabled", enabled=False, home=meiva_home())
     agent_id = _agent(db_conn, None, ["*"])
 
-    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home())
+    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home(), environ=ENVIRON)
 
     assert view.mcp_names == ["enabled"]
 
@@ -213,7 +224,7 @@ def test_agent_skill_view_without_machine_mcp_config_returns_empty_names(
 ) -> None:
     agent_id = _agent(db_conn, None, ["*"])
 
-    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home())
+    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home(), environ=ENVIRON)
 
     assert view.mcp_names == []
 
@@ -223,6 +234,6 @@ def test_agent_skill_view_excludes_compact_for_external_harness(
 ) -> None:
     agent_id = _agent(db_conn, None, ["*"], harness="claude_code")
 
-    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home())
+    view = cluster.agent_skill_view_op(agent_id, skill_pool, home=meiva_home(), environ=ENVIRON)
 
     assert [command.name for command in view.commands] == ["load-skill", "recap"]

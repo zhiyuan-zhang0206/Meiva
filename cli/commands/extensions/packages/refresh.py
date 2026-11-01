@@ -555,7 +555,7 @@ class Pass:
         staged_hash = install_registry.tree_hash(staged)
         if dest_hash is not None and staged_hash == dest_hash:
             return "up_to_date", None
-        gate_error = staged_gate_error(staged, self.repo)
+        gate_error = staged_gate_error(staged, self.repo, environ=self.config.process_environment())
         if gate_error is not None:
             return gate_error, None
         if dest_hash is not None and dest_hash != (pkg.installed_hash or pkg.content_hash):

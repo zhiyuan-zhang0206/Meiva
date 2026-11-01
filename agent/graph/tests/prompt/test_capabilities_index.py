@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -22,6 +23,8 @@ from base.packages.plugins.extensions import EMPTY
 from base.packages.skills.tree import Skill
 from base.paths import meiva_home, skills_dir
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
+
+ENVIRON = dict(os.environ)
 
 CHROME = McpServer("chrome", "Drive a browser")
 
@@ -308,6 +311,7 @@ def test_building_the_prompt_indexes_installed_skills_and_never_their_bodies() -
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "## meiva.skills" not in prompt
@@ -327,6 +331,7 @@ def test_a_skill_outside_the_registry_is_not_indexed() -> None:
         agent_id=1,
         catalog=build_model_catalog(home=meiva_home()),
         home=meiva_home(),
+        environ=ENVIRON,
     )
 
     assert "meiva.skills.alpha" in prompt

@@ -8,6 +8,7 @@ legacy paths (covered by the existing install tests).
 """
 
 import json
+import os
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,8 @@ from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.commands.extensions.tests.support.uv_support import fake_uv_build
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+
+ENVIRON = dict(os.environ)
 
 
 class RecordingGateway:
@@ -171,7 +174,13 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "break engines")
     assert (
-        cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
+        cmd_mcp_upgrade(
+            "acme",
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            user_home=unit_home,
+        )
         == 1
     )
     assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
@@ -212,6 +221,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
             binding=PROD_ELSEWHERE,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -243,6 +253,7 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
             binding=PROD_ELSEWHERE,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -268,6 +279,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
             machine=command_machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -298,6 +310,7 @@ def test_skill_install_valid_manifest_proceeds(
             machine=command_machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )

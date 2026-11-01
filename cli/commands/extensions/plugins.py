@@ -30,6 +30,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -330,6 +331,7 @@ def cmd_plugins_install(
     binding: SourceBinding,
     home: Path,
     now: datetime,
+    environ: Mapping[str, str],
 ) -> int:
     """`meiva plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
     install an external package.
@@ -353,7 +355,7 @@ def cmd_plugins_install(
             print(f"[meiva plugins install] path '{path}' not found in source.", file=sys.stderr)
             return 1
 
-        if gate_refuses(pkg_dir, command="plugins install"):
+        if gate_refuses(pkg_dir, command="plugins install", environ=environ):
             return 1
 
         from base.packages.skills import SkillFormatError

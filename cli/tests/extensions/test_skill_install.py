@@ -11,6 +11,7 @@ Local-path sources are used in place; git sources go through a local `file://`
 fixture repo, so no test touches the network. `unit_home` isolates `~/.meiva`.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from cli.commands.extensions.skill import cmd_skill_install
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
+
+ENVIRON = dict(os.environ)
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare
@@ -109,6 +112,7 @@ def test_bare_standard_skill_from_local_path(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -143,6 +147,7 @@ def test_optional_standard_fields_do_not_block_the_mount(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -177,6 +182,7 @@ def test_claude_code_skills_tree(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -212,6 +218,7 @@ def test_skills_collection_keeps_nested_subskills(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -243,6 +250,7 @@ def test_bare_collection_of_skill_folders(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -269,6 +277,7 @@ def test_path_selects_a_subdirectory(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -299,6 +308,7 @@ def test_crlf_and_bom_skill_installs(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -327,6 +337,7 @@ def test_collision_leaves_the_load_dir_untouched(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -340,6 +351,7 @@ def test_collision_leaves_the_load_dir_untouched(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -368,6 +380,7 @@ def test_no_skill_in_source_fails_fast(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -397,6 +410,7 @@ def test_malformed_skill_md_fails_fast(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -421,6 +435,7 @@ def test_missing_path_in_source_errors(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -451,6 +466,7 @@ def test_install_skips_junk_names(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -483,6 +499,7 @@ def test_install_records_explicit_update_policy(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -513,6 +530,7 @@ def test_install_rejects_a_bad_check_every(
             machine=command_runtime.machine,
             home=unit_home,
             now=command_runtime.clock.now(),
+            environ=ENVIRON,
         )
         == 1
     )

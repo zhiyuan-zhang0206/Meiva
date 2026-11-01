@@ -77,7 +77,11 @@ class SkillRecallHook(Hook):
         candidates = [
             c
             for c in recall_candidates(
-                skill_view(agent.prompt, home=runtime.context.require_meiva_home())
+                skill_view(
+                    agent.prompt,
+                    home=runtime.context.require_meiva_home(),
+                    environ=runtime.context.require_environ(),
+                )
             )
             if c.identifier not in excluded
         ]

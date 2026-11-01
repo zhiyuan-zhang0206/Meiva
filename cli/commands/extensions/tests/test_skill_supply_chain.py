@@ -10,6 +10,7 @@ verb that says "a person read this" is separate from every install.
 
 import base64
 import json
+import os
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -35,6 +36,8 @@ from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
+
+ENVIRON = dict(os.environ)
 
 
 @dataclass
@@ -110,6 +113,7 @@ def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -142,6 +146,7 @@ def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 1
     )
@@ -169,6 +174,7 @@ def test_accept_risk_installs_and_records_what_it_waived(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -200,6 +206,7 @@ def test_a_clean_third_party_install_is_still_unreviewed(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -272,6 +279,7 @@ def test_trust_is_a_separate_human_verb(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -308,6 +316,7 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -340,6 +349,7 @@ def test_scan_surfaces_previously_accepted_findings(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -371,6 +381,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -412,6 +423,7 @@ def test_install_registers_through_the_gateway_before_the_local_copy(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 0
     )
@@ -447,6 +459,7 @@ def test_a_refused_registration_fails_the_install_and_copies_nothing(
             machine=command_runtime.machine,
             home=unit_home,
             now=datetime.now(UTC),
+            environ=ENVIRON,
         )
         == 1
     )

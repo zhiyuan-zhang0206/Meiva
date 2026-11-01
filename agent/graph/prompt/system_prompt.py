@@ -2,7 +2,7 @@
 # Plugin expansions lead the deduplicated configured expansion list. Wildcards recursively discover public namespaces while excluding disabled entries and capability surfaces; explicitly naming a capability member is refused to avoid injecting whole skill bodies or tool schemas and falsely attributing them as loaded. Media filtering is per rendering call, and installed extensions are visible before rendering captures the SDK overview. The system prompt can be rebuilt when an empty context window is initialized. Delegation checks give the exact `meiva.help(meiva.skills.meiva_workflow)` invocation syntax for non-trivial work.
 import hashlib
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from agent.hooks.history_dump import workspace_section_hint
@@ -508,6 +508,7 @@ def build_system_prompt(
     agent_id: int | None,
     catalog: ModelCatalog,
     home: Path,
+    environ: Mapping[str, str],
 ) -> str:
 
     from ._base_prompt import (
@@ -532,7 +533,9 @@ def build_system_prompt(
     parts.extend(
         _framework_parts(
             FRAMEWORK_SECTIONS,
-            SectionInputs(slices, catalog, read_live_sdk(slices.prompt, home=home)),
+            SectionInputs(
+                slices, catalog, read_live_sdk(slices.prompt, home=home, environ=environ)
+            ),
             agent_id=agent_id,
         )
     )
@@ -611,10 +614,11 @@ def build_harness_system_prompt(
     agent_id: int | None,
     catalog: ModelCatalog,
     home: Path,
+    environ: Mapping[str, str],
 ) -> str:
     parts = _framework_parts(
         HARNESS_FRAMEWORK_SECTIONS,
-        SectionInputs(slices, catalog, read_live_sdk(slices.prompt, home=home)),
+        SectionInputs(slices, catalog, read_live_sdk(slices.prompt, home=home, environ=environ)),
         agent_id=agent_id,
     )
     parts.extend(

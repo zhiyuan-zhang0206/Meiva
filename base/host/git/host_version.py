@@ -19,6 +19,7 @@ Fallback chain: git-derived date -> `[project].version` from `pyproject.toml`
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from base.host.git.gitenv import git_env
@@ -59,14 +60,14 @@ def host_version_from_repo(repo: Path) -> str:
         raise HostVersionError(str(e)) from e
 
 
-def _derived(repo: Path) -> tuple[str, str] | None:
+def _derived(repo: Path, environ: Mapping[str, str]) -> tuple[str, str] | None:
     """(bare version, short sha) from `repo`'s HEAD commit, or None."""
     try:
         result = run_bounded(  # git + fixed args, no user input
             ["git", "-C", str(repo), "log", "-1", "--format=%cd|%h", "--date=short"],
             capture_output=True,
             text=True,
-            env=git_env(),
+            env=git_env(environ),
             timeout=_GIT_TIMEOUT_S,
         )
     except (OSError, SubprocessError):
@@ -74,24 +75,28 @@ def _derived(repo: Path) -> tuple[str, str] | None:
     return derived_from_log(result.returncode, result.stdout)
 
 
-def host_version(repo: Path | None = None) -> str:
+# meiva:note
+# `environ` is the environment the `git log` subprocess runs under, named by the caller (a `Host`,
+# a `ConfigBoot`, a turn context's `require_environ()`); deriving a version is not a reason to read
+# the live process environment.
+def host_version(repo: Path | None = None, *, environ: Mapping[str, str]) -> str:
     """The gate-comparable host version: bare `YYYY.M.D`.
 
     Raises:
         HostVersionError: no git commit and no readable pyproject version.
     """
     repo = repo or _repo_root()
-    derived = _derived(repo)
+    derived = _derived(repo, environ)
     if derived is not None:
         return derived[0]
     return host_version_from_repo(repo)
 
 
-def host_version_display(repo: Path | None = None) -> str:
+def host_version_display(repo: Path | None = None, *, environ: Mapping[str, str]) -> str:
     """The human-facing form: `YYYY.M.D+g<short-sha>` when the checkout is a
     git repo, bare otherwise (falls back through `host_version`)."""
     repo = repo or _repo_root()
-    derived = _derived(repo)
+    derived = _derived(repo, environ)
     if derived is not None:
         return display_form(derived)
-    return host_version(repo)
+    return host_version(repo, environ=environ)

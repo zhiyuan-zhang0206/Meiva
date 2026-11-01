@@ -4,8 +4,8 @@
 # a test's own home, never the worker-shared session home (tests ambient-state audit H-1),
 # because a discoverable plugin or a plugins_config.json left in `$MEIVA_HOME` changes what later
 # tests in the same worker see.
-
 import json
+import os
 import shutil
 import subprocess
 from datetime import UTC, datetime
@@ -28,6 +28,8 @@ from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
+
+ENVIRON = dict(os.environ)
 
 
 class RecordingGateway:
@@ -148,6 +150,7 @@ def _install(
         binding=PROD_ELSEWHERE,
         home=home,
         now=datetime.now(UTC),
+        environ=ENVIRON,
     )
 
 

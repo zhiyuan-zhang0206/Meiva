@@ -545,7 +545,12 @@ def create_app(
     if isinstance(catalog, ModelCatalog):
         app.state.memory_embedder = memory_router.build_embedder(config.memory_search, catalog)
     app.state.command_catalog = CommandCatalog.system(
-        skills=partial(load_skill_names, home=process.home), home=process.home
+        skills=partial(
+            load_skill_names,
+            home=process.home,
+            environ=process.config.process_environment(),
+        ),
+        home=process.home,
     )
     app.state.memory_unreadable_reports = memory_router.unreadable_reports()
     app.state.gateway_process = process

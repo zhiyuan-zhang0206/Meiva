@@ -139,12 +139,14 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
     first_machine.set(name="first-sdk-owner")
     second_machine.set(name="second-sdk-owner")
     old_context = MeivaContext(
+        environ=os.environ,
         identity=AgentIdentity(6111, False),
         clients=first,
         machine=first_machine,
         meiva_home=meiva_home(),
     )
     new_context = MeivaContext(
+        environ=os.environ,
         identity=AgentIdentity(6112, False),
         clients=second,
         machine=second_machine,
@@ -200,6 +202,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
     attachment = ClientSet(pipeline_factory=lambda: pytest.fail("closed attachment was borrowed"))
     process_context.bind_context(
         MeivaContext(
+            environ=os.environ,
             clients=attachment,
             identity=AgentIdentity(agent_id=6111, owns_loop=False),
             meiva_home=meiva_home(),
