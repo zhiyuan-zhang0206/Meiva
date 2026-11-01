@@ -67,11 +67,17 @@ def build_command(model: str, *, agent_id: int | None) -> RecordingModel:
 
 
 def build_upload(model: str, *, agent_id: int | None) -> RecordingModel:
+    # meiva:note
+    # The upload the fake agent reads is one the note named: the script searches the delivered
+    # upload directory rather than a batch layout, so the delivery protocol's own directory
+    # naming decides where the file lands. The test separately pins the note to this file's
+    # exact path; neither side repeats the other's assumption (protocol 2 nests one send
+    # directory, protocol 1 nested `.delivered-v1/<batch>`).
     code = (
         "import meiva\n"
-        f"root = meiva.files.workspace_base() / {UPLOAD_DIR_NAME!r} / '.delivered-v1'\n"
-        "p = next(q for q in root.glob('*/*') if not q.name.startswith('.'))\n"
-        "print('upload-content', p.read_text())"
+        f"root = meiva.files.workspace_base() / {UPLOAD_DIR_NAME!r}\n"
+        "files = sorted(q for q in root.rglob('*') if q.is_file() and not q.name.startswith('.'))\n"
+        "print('upload-content', files[0].read_text())"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
 

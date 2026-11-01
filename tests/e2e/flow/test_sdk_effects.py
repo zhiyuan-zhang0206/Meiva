@@ -154,6 +154,7 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
         announced = _human_text(calls[0])
         assert accepted["directory"] in announced, announced[-500:]
         assert accepted["files"][0]["name"] in announced, announced[-500:]
+        assert str(saved) in announced, announced[-500:]
         assert saved.read_text() == world.UPLOAD_TEXT
         assert f"upload-content {world.UPLOAD_TEXT}" in _last_tool(calls[1])
     finally:
