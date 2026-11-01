@@ -337,10 +337,11 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     msgs = cmd.update["messages"]  # type: ignore[index]
     from agent.messages.guard import guarded_add_messages
 
-    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
+    assert len(msgs) == 3  # pyright: ignore[reportUnknownArgumentType]
     assert [m.additional_kwargs.get("meiva_note_tag") for m in msgs] == [  # pyright: ignore[reportUnknownMemberType]
         "lifecycle_fork",
         "agent_id",
+        "non_human_wake",
     ]
     lifecycle = msgs[0]
     merged = guarded_add_messages(
@@ -408,8 +409,9 @@ async def test_claim_fork_preserves_the_inherited_prefix(
         "lifecycle_fork",
         "agent_id",
         "agent_memory",
+        "non_human_wake",
     ]
-    grafted_content: object = tail[-1].content
+    grafted_content: object = tail[2].content
     assert isinstance(grafted_content, str) and "source's memory" not in grafted_content
 
 

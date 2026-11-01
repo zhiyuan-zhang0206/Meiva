@@ -26,6 +26,7 @@ export const NOTE_SOURCES = new Set([
   "memory_write_check",
   "to_user_soft_limit",
   "agent_reply",
+  "non_human_wake",
   "task",
   "compact_reminder",
   "history_dump",

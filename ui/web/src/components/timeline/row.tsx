@@ -52,6 +52,7 @@ export const TimelineRow = memo(function TimelineRow({
   streaming,
   expanded,
   copyable,
+  promotedPrimary = false,
   onToggle,
   timelineSource = "canonical",
   displayRank,
@@ -65,6 +66,7 @@ export const TimelineRow = memo(function TimelineRow({
   // config.copy to gate the inline Copy button on secondary message cards.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   copyable: boolean;
+  promotedPrimary?: boolean;
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
@@ -118,7 +120,8 @@ export const TimelineRow = memo(function TimelineRow({
     (item.source === "system:upload" || Boolean(item.files?.length));
   const isHumanBubble =
     item.kind === "inbound_chat" && (inboundKind(item.source) === "human" || isUploadRow);
-  const isAgentProse = item.kind === "agent_chat" && item.user_facing !== false;
+  const isAgentProse =
+    item.kind === "agent_chat" && (item.user_facing !== false || promotedPrimary);
   const isPrimaryMessage = isHumanBubble || isAgentProse;
 
   if (isSilentTimelineItem(item)) {

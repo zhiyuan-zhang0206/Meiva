@@ -26,11 +26,15 @@ bucketing old history correctly.
 
 ## Background-wake user-reply header
 
-`USER_REPLY_HEADER` (`"Meiva agent to user:"`) and `USER_REPLY_PREFIX`
-(`"Meiva agent to user: "`) in `base/agents/messages/reply_intent.py` disambiguate
-proactive user-facing replies from internal work-log text on runs woken without
-human input (`meiva_non_human_wake=True`). Both `scripts/codegen/dump_frontend_constants.py`
-and `base/agents/history/timeline.py` read from `reply_intent.py`, keeping live
-SSE stream folding (`ui/web/src/lib/fold/timeline.ts`), committed `TimelineItem`
+`USER_REPLY_HEADER` (`"Meiva agent to user:"`), `USER_REPLY_PREFIX`
+(`"Meiva agent to user: "`), and `NON_HUMAN_WAKE_REMINDER` in
+`base/agents/messages/reply_intent.py` disambiguate proactive user-facing replies
+from internal work-log text on runs woken without human input
+(`meiva_non_human_wake=True`). When `claim` transitions an agent into a
+`non_human_wake=True` LLM/harness turn, it appends one silent `NoteTag.NON_HUMAN_WAKE`
+system note carrying `NON_HUMAN_WAKE_REMINDER` as a recency anchor beside the waking
+inbound batch. Both `scripts/codegen/dump_frontend_constants.py` and
+`base/agents/history/timeline.py` read from `reply_intent.py`, keeping live SSE
+stream folding (`ui/web/src/lib/fold/timeline.ts`), committed `TimelineItem`
 projection (`user_facing`), and `agents_meta.last_message_text` normalization
 aligned on one constant owner.

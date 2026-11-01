@@ -496,10 +496,16 @@ describe("ItemView: monochrome secondary headers and turn child defaults", () =>
             user_facing: false,
             payload: "internal background note",
           }),
+          makeItem({
+            item_id: "2.0",
+            kind: "agent_chat",
+            user_facing: true,
+            payload: "final user reply",
+          }),
         ]}
       />,
     );
-    expect(container.querySelector('[data-testid="agent-message-prose"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="agent-message-prose"]')).toHaveLength(1);
     fireEvent.click(screen.getByTestId("turn-toggle"));
     const toggles = screen.getAllByTestId("card-toggle");
     expect(toggles[0].getAttribute("aria-expanded")).toBe("false");
@@ -508,5 +514,54 @@ describe("ItemView: monochrome secondary headers and turn child defaults", () =>
     expect(screen.getByText("internal background note")).toBeTruthy();
     fireEvent.click(toggles[1]);
     expect(screen.queryByText("internal background note")).toBeNull();
+  });
+
+  it("surfaces the timeline's last non-empty agent_chat on the main canvas as fallback and refolds it when a newer agent_chat arrives", () => {
+    const { container, rerender } = render(
+      <TimelineView
+        items={[
+          makeItem({
+            item_id: "1.0",
+            kind: "agent_reasoning",
+            payload: "background reasoning",
+          }),
+          makeItem({
+            item_id: "1.1",
+            kind: "agent_chat",
+            user_facing: false,
+            payload: "Fallback visible closing text",
+          }),
+        ]}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="agent-message-prose"]')).toHaveLength(1);
+    expect(screen.getByText("Fallback visible closing text")).toBeTruthy();
+
+    rerender(
+      <TimelineView
+        items={[
+          makeItem({
+            item_id: "1.0",
+            kind: "agent_reasoning",
+            payload: "background reasoning",
+          }),
+          makeItem({
+            item_id: "1.1",
+            kind: "agent_chat",
+            user_facing: false,
+            payload: "Fallback visible closing text",
+          }),
+          makeItem({
+            item_id: "2.0",
+            kind: "agent_chat",
+            user_facing: false,
+            payload: "Newer closing text",
+          }),
+        ]}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="agent-message-prose"]')).toHaveLength(1);
+    expect(screen.queryByText("Fallback visible closing text")).toBeNull();
+    expect(screen.getByText("Newer closing text")).toBeTruthy();
   });
 });

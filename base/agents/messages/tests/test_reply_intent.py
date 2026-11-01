@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from base.agents.messages.reply_intent import (
+    NON_HUMAN_WAKE_REMINDER,
     USER_REPLY_HEADER,
     USER_REPLY_PREFIX,
     normalize_last_message_text,
@@ -15,6 +16,8 @@ def test_header_constants_match_contract() -> None:
     assert USER_REPLY_HEADER == "Meiva agent to user:"
     assert USER_REPLY_PREFIX == "Meiva agent to user: "
     assert USER_REPLY_PREFIX.startswith(USER_REPLY_HEADER)
+    assert f"`{USER_REPLY_PREFIX}`" in NON_HUMAN_WAKE_REMINDER
+    assert "\n" not in NON_HUMAN_WAKE_REMINDER
 
 
 @pytest.mark.parametrize(

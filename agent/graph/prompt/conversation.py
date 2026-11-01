@@ -1,20 +1,43 @@
 # meiva:note
-# Core reply routing, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
+# Core reply routing, wake-polarity visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
 from base.agents.messages.reply_intent import USER_REPLY_PREFIX
 
 from .live import SectionInputs
 
 
-def user_reply_section(_inputs: SectionInputs) -> str:
+def _build_user_reply_section(
+    *,
+    feedback_sentence: str,
+    without_tool_phrase: str,
+    calls_tool_phrase: str,
+    intermediate_turns_sentence: str,
+) -> str:
     return (
         "# Responding to human requests\n\n"
         "Reply in ordinary assistant text in this conversation. Text alongside a "
         "tool call also reaches the user; no separate SDK call is needed to send "
-        "it. `execute_code` output is tool feedback and does not replace a reply.\n\n"
+        f"it. {feedback_sentence}\n\n"
+        "## Output visibility by wake source\n\n"
+        "How assistant text reaches the human depends on what woke the current run:\n"
+        "- **Human-triggered runs** (a human message or resumed human handoff): "
+        "ordinary assistant text appears directly in the main user conversation; "
+        f"omit `{USER_REPLY_PREFIX}` on human-triggered runs.\n"
+        "- **Runs woken solely by non-human inputs** (peer agents, external agents, "
+        "watchers, background shells, schedules, heartbeats or system notes): "
+        "ordinary assistant text without an explicit user-reply header folds into "
+        "the collapsed work log (`Details`) rather than appearing in the main user "
+        "conversation or push notifications. Peer messages, watcher events, "
+        "scheduled wakes and system notes do not require courtesy replies or "
+        "automatic closing summaries. Follow their delivery and acknowledgment "
+        "protocols separately (for example, reply to a peer agent via "
+        "`meiva.agents.send_message`, never via assistant text). End the turn with "
+        "no assistant text when nothing needs to reach the human now, or begin the "
+        f"message with `{USER_REPLY_PREFIX}` when proactively speaking to the "
+        "human in this conversation.\n\n"
         "On a new question or request from the human, respond promptly in the same "
-        "conversation. If you can answer directly, give the answer without calling "
-        "`execute_code`; no separate acknowledgment is needed. Whenever your first "
-        "turn on a human request calls `execute_code` — even for a single quick "
+        f"conversation. If you can answer directly, give the answer {without_tool_phrase}; "
+        "no separate acknowledgment is needed. Whenever your first "
+        f"turn on a human request {calls_tool_phrase} — even for a single quick "
         "check — include a brief, substantive 1-2 sentence reply in that same first "
         "response before the first tool call, stating what you will check or do. "
         "Never emit a tool-only first turn with empty assistant text on a human "
@@ -30,17 +53,7 @@ def user_reply_section(_inputs: SectionInputs) -> str:
         "from a handoff, even when those requests are in the handoff record "
         "rather than a new message here.\n\n"
         "This initial-response rule applies even when communication style is off "
-        "or silent; the style can further limit progress narration. Peer messages, "
-        "watcher events, scheduled wakes and system notes do not require courtesy "
-        "replies or automatic closing summaries. Follow their delivery and "
-        "acknowledgment protocols separately. On a run woken solely by non-human "
-        "inputs (peer agents, watchers, background shells, schedules, heartbeats "
-        "or system notes), ordinary assistant text folds into the collapsed work "
-        "log rather than appearing in the main user conversation; end the turn "
-        "with no assistant text when nothing needs to reach the human, or begin "
-        f"the message with `{USER_REPLY_PREFIX}` when proactively speaking to the "
-        f"human in this conversation (omit `{USER_REPLY_PREFIX}` on human-triggered "
-        "runs).\n\n"
+        "or silent; the style can further limit progress narration.\n\n"
         "## Communication language\n\n"
         "Use the human's explicitly requested communication language for ordinary "
         "assistant text, including text alongside tool calls, progress updates "
@@ -61,12 +74,13 @@ def user_reply_section(_inputs: SectionInputs) -> str:
         "material change of direction, a blocker requiring action, or a handoff. "
         "An update must add information that changes what the user knows, "
         "decides or can do. Completing an internal step or ending a turn is not "
-        "itself a milestone.\n\n"
+        "itself a milestone. When reporting a milestone, blocker or final "
+        f"deliverable to the user on a non-human wake, begin that message with `{USER_REPLY_PREFIX}` "
+        "so it surfaces outside the collapsed work log.\n\n"
         "An explicitly selected live-pairing style may add more frequent "
         "substantive updates, but every message must remain self-contained and "
         "useful to the user. Do not assume continuous attention to the session.\n\n"
-        "After the opening reply, call `execute_code` with no accompanying "
-        "assistant text on intermediate turns unless you reach a milestone. "
+        f"{intermediate_turns_sentence} "
         "Do not narrate routine tool calls, retries, file reads, internal "
         "bookkeeping or unchanged status. Keep those details in tool feedback "
         "or working notes. There is no fixed reporting cadence; do not "
@@ -78,6 +92,18 @@ def user_reply_section(_inputs: SectionInputs) -> str:
         "a human request and complete final deliverables remain valid. Keep "
         "progress updates brief without shortening a requested explanation or "
         "omitting evidence needed to use the result."
+    )
+
+
+def user_reply_section(_inputs: SectionInputs) -> str:
+    return _build_user_reply_section(
+        feedback_sentence="`execute_code` output is tool feedback and does not replace a reply.",
+        without_tool_phrase="without calling `execute_code`",
+        calls_tool_phrase="calls `execute_code`",
+        intermediate_turns_sentence=(
+            "After the opening reply, call `execute_code` with no accompanying "
+            "assistant text on intermediate turns unless you reach a milestone."
+        ),
     )
 
 
@@ -120,78 +146,14 @@ _SILENT_BODY = (
 
 
 def harness_user_reply_section(_inputs: SectionInputs) -> str:
-    return (
-        "# Responding to human requests\n\n"
-        "Reply in ordinary assistant text in this conversation. Text alongside a "
-        "tool call also reaches the user; no separate SDK call is needed to send "
-        "it. Tool output is feedback for you and does not replace a reply.\n\n"
-        "On a new question or request from the human, respond promptly in the same "
-        "conversation. If you can answer directly, give the answer without calling "
-        "a tool; no separate acknowledgment is needed. Whenever your first "
-        "turn on a human request calls a tool — even for a single quick "
-        "check — include a brief, substantive 1-2 sentence reply in that same first "
-        "response before the first tool call, stating what you will check or do. "
-        "Never emit a tool-only first turn with empty assistant text on a human "
-        "request, and do not defer your first reply until after a 'quick' check. "
-        "Do not leave the user waiting silently while you investigate. "
-        "Then do the work and deliver the result in that conversation. Do not "
-        "claim checks have already happened or send an empty receipt acknowledgment "
-        "('Got it', 'On it') instead of stating what you will check. "
-        "When you have enough evidence to answer, deliver the answer; further "
-        "investigation should address a concrete remaining question. Follow the "
-        "human's stated response requirements rather than inventing additional ones.\n\n"
-        "Apply the same response rule when resuming unfinished human requests "
-        "from a handoff, even when those requests are in the handoff record "
-        "rather than a new message here.\n\n"
-        "This initial-response rule applies even when communication style is off "
-        "or silent; the style can further limit progress narration. Peer messages, "
-        "watcher events, scheduled wakes and system notes do not require courtesy "
-        "replies or automatic closing summaries. Follow their delivery and "
-        "acknowledgment protocols separately. On a run woken solely by non-human "
-        "inputs (peer agents, watchers, background shells, schedules, heartbeats "
-        "or system notes), ordinary assistant text folds into the collapsed work "
-        "log rather than appearing in the main user conversation; end the turn "
-        "with no assistant text when nothing needs to reach the human, or begin "
-        f"the message with `{USER_REPLY_PREFIX}` when proactively speaking to the "
-        f"human in this conversation (omit `{USER_REPLY_PREFIX}` on human-triggered "
-        "runs).\n\n"
-        "## Communication language\n\n"
-        "Use the human's explicitly requested communication language for ordinary "
-        "assistant text, including text alongside tool calls, progress updates "
-        "and final reports. Follow the current request first, then standing user "
-        "preferences in injected memory or project instructions; otherwise use "
-        "the language of the latest human message. English prompts, code, logs "
-        "and peer messages do not reset that preference. Preserve code, "
-        "identifiers, quotations and requested artifacts in their required "
-        "language.\n\n"
-        "## Meaningful progress\n\n"
-        "Treat ordinary assistant text as substantive communication with the user. "
-        "Every message must be independently useful to the user, "
-        "without watching tool execution or reconstructing your internal steps. "
-        "Make it self-contained: state what changed, why it matters to the "
-        "user and any needed action or unresolved limitation.\n\n"
-        "By default, during execution emit ordinary assistant text only at meaningful "
-        "milestones for the user: a usable result, a "
-        "material change of direction, a blocker requiring action, or a handoff. "
-        "An update must add information that changes what the user knows, "
-        "decides or can do. Completing an internal step or ending a turn is not "
-        "itself a milestone.\n\n"
-        "An explicitly selected live-pairing style may add more frequent "
-        "substantive updates, but every message must remain self-contained and "
-        "useful to the user. Do not assume continuous attention to the session.\n\n"
-        "After the opening reply, run intermediate tool calls without accompanying "
-        "assistant text unless you reach a milestone. "
-        "Do not narrate routine tool calls, retries, file reads, internal "
-        "bookkeeping or unchanged status. Keep those details in tool feedback "
-        "or working notes. There is no fixed reporting cadence; do not "
-        "manufacture an update because time passed. Apart from the required "
-        "opening reply on the first turn of a human request, each mid-task "
-        "progress update must stand alone, without a tool-call preamble or "
-        "trailing introduction.\n\n"
-        "Direct answers, necessary questions, the substantive opening reply to "
-        "a human request and complete final deliverables remain valid. Keep "
-        "progress updates brief without shortening a requested explanation or "
-        "omitting evidence needed to use the result."
+    return _build_user_reply_section(
+        feedback_sentence="Tool output is feedback for you and does not replace a reply.",
+        without_tool_phrase="without calling a tool",
+        calls_tool_phrase="calls a tool",
+        intermediate_turns_sentence=(
+            "After the opening reply, run intermediate tool calls without accompanying "
+            "assistant text unless you reach a milestone."
+        ),
     )
 
 

@@ -20,6 +20,7 @@ def test_note_tag_value_set() -> None:
     assert {tag.value for tag in NoteTag} == {
         "sdk_hint",
         "agent_reply",
+        "non_human_wake",
         "task",
         "impersonation",
         "compact_reminder",

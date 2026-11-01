@@ -9,6 +9,17 @@ from __future__ import annotations
 USER_REPLY_HEADER = "Meiva agent to user:"
 USER_REPLY_PREFIX = "Meiva agent to user: "
 
+# meiva:note
+# Appended once in `claim` when an agent enters a `non_human_wake=True` run so long
+# multi-step sessions retain a recency signal beside the inbound wake envelope without
+# repeating on mid-run tool loops or mid-run secondary arrivals.
+# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+NON_HUMAN_WAKE_REMINDER = (
+    "Non-human wake: unprefixed assistant text folds into the collapsed work log. "
+    "End the turn with no assistant text when nothing needs the human now, or begin "
+    f"user-intended text with `{USER_REPLY_PREFIX}`."
+)
+
 
 # meiva:note
 # Leading whitespace before the header is tolerated. Horizontal whitespace after the colon

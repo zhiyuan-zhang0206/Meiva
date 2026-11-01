@@ -180,6 +180,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
           makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "finished-thought" }),
           makeItem({ item_id: "1.1", kind: "agent_chat", payload: "finished-internal-note", user_facing: false }),
           makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "go" }),
+          makeItem({ item_id: "2.1", kind: "agent_chat", payload: "opening-reply", user_facing: true }),
           makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "live-thought" }),
           makeItem({ item_id: "3.1", kind: "agent_code", payload: "live_code = 1" }),
           makeItem({ item_id: "3.2", kind: "code_output", payload: "live-output" }),

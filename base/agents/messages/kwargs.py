@@ -36,6 +36,7 @@ class NoteTag(StrEnum):
     IMPERSONATION = "impersonation"
     SDK_HINT = "sdk_hint"
     AGENT_REPLY = "agent_reply"
+    NON_HUMAN_WAKE = "non_human_wake"
     TASK = "task"
     COMPACT_REMINDER = "compact_reminder"
     HISTORY_DUMP = "history_dump"

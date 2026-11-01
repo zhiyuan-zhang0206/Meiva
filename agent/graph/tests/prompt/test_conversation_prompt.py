@@ -150,7 +150,13 @@ def test_milestone_policy_preserves_results_and_questions(
 def test_background_wake_reply_prefix_guidance_in_native_and_harness_sections() -> None:
     inputs = _inputs(_slices())
     for section in (user_reply_section(inputs), harness_user_reply_section(inputs)):
+        assert "## Output visibility by wake source" in section
+        assert section.index("## Output visibility by wake source") < section.index(
+            "On a new question or request from the human"
+        )
         assert f"`{USER_REPLY_PREFIX}`" in section
         assert "woken solely by non-human inputs" in section
         assert "collapsed work log" in section
         assert f"omit `{USER_REPLY_PREFIX}` on human-triggered runs" in section
+        milestone_tail = section.split("## Meaningful progress", maxsplit=1)[1]
+        assert f"`{USER_REPLY_PREFIX}`" in milestone_tail

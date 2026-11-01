@@ -4,6 +4,7 @@ import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import {
   classifyItem,
+  isFallbackVisibleAgentChat,
   isSilentTimelineItem,
   summarizeTurn,
   type TurnSummary,
@@ -59,6 +60,14 @@ export function groupTimelineSegments(
         index,
       }));
 
+  let promotedChat: BackendTimelineItem | null = null;
+  for (let i = ranked.length - 1; i >= 0; i -= 1) {
+    if (isFallbackVisibleAgentChat(ranked[i].item)) {
+      promotedChat = ranked[i].item;
+      break;
+    }
+  }
+
   const groups: RankedTimelineGroup[] = [];
   let run: RankedTimelineItem[] = [];
 
@@ -74,7 +83,7 @@ export function groupTimelineSegments(
 
   for (const member of ranked) {
     if (isSilentTimelineItem(member.item)) continue;
-    if (classifyItem(member.item) === "secondary") {
+    if (member.item !== promotedChat && classifyItem(member.item) === "secondary") {
       run.push(member);
     } else {
       flush();

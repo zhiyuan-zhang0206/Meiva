@@ -215,6 +215,7 @@ class TestAiMessageItems:
             NoteTag.MEMORY_WRITE_CHECK,
             NoteTag.TO_USER_SOFT_LIMIT,
             NoteTag.AGENT_REPLY,
+            NoteTag.NON_HUMAN_WAKE,
             NoteTag.SILENT_IDLE_CONTINUE,
             NoteTag.SECURITY,
             NoteTag.CONTEXT,

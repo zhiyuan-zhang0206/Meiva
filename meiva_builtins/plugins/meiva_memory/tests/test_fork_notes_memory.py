@@ -131,7 +131,7 @@ async def test_fork_end_to_end_keeps_source_notes_and_grafts_own(
     assert [m.id for m in msgs[: len(inherited)]] == [m.id for m in inherited]
     assert [m.content for m in msgs[: len(inherited)]] == [m.content for m in inherited]
     tags = [m.additional_kwargs.get("meiva_note_tag") for m in msgs[len(inherited) :]]
-    assert tags == ["lifecycle_fork", "agent_id", "agent_memory"]
+    assert tags == ["lifecycle_fork", "agent_id", "agent_memory", "non_human_wake"]
 
 
 def _fake_note(tag: NoteTag, content: str, id: str) -> HumanMessage:
@@ -192,4 +192,5 @@ async def test_fork_keeps_the_whole_inherited_prefix(
     assert [m.content for m in msgs[: len(inherited)]] == [m.content for m in inherited]
     grafted_tags = [m.additional_kwargs.get("meiva_note_tag") for m in msgs[len(inherited) :]]
     assert grafted_tags[0] == "lifecycle_fork"
-    assert set(grafted_tags[1:]) == {"agent_id", "agent_memory"}
+    assert grafted_tags[-1] == "non_human_wake"
+    assert set(grafted_tags[1:-1]) == {"agent_id", "agent_memory"}

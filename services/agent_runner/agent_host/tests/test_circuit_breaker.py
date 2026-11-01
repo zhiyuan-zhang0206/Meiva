@@ -21,6 +21,7 @@ from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.state import AgentState, CircuitState
 from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -519,8 +520,10 @@ async def test_heartbeat_normal_when_breaker_closed(
 
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
     msgs = cmd.update["messages"]  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
     assert "Heartbeat." in msgs[0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    wake_note = cast(HumanMessage, msgs[1])
+    assert read_meiva_kwargs(wake_note).get("meiva_note_tag") == "non_human_wake"
     assert cmd.goto == "before_llm"
 
 
