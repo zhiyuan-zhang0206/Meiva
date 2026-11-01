@@ -491,3 +491,57 @@ describe("GFM footnotes", () => {
     expect(backref?.getAttribute("href")).toBe(`#${reference?.getAttribute("id")}`);
   });
 });
+
+describe("line breaks (remark-breaks)", () => {
+  it("renders single newline as <br> for plain text instead of collapsing", () => {
+    const { container } = renderMarkdown(<ChatMarkdown content={"line1\nline2"} />);
+    const paragraph = container.querySelector("p");
+    expect(paragraph).not.toBeNull();
+    expect(container.querySelectorAll("br")).toHaveLength(1);
+    expect(paragraph?.querySelector("br")).not.toBeNull();
+    expect(paragraph?.innerHTML).toContain("<br>");
+    expect(paragraph?.innerHTML).not.toBe("line1 line2");
+    expect(paragraph?.textContent).toContain("line1");
+    expect(paragraph?.textContent).toContain("line2");
+  });
+
+  it("renders single newline as <br> for Chinese text", () => {
+    const { container } = renderMarkdown(<ChatMarkdown content={"\u7b2c\u4e00\u884c\n\u7b2c\u4e8c\u884c"} />);
+    const paragraph = container.querySelector("p");
+    expect(paragraph).not.toBeNull();
+    expect(container.querySelectorAll("br")).toHaveLength(1);
+    expect(paragraph?.querySelector("br")).not.toBeNull();
+    expect(paragraph?.innerHTML).toContain("<br>");
+    expect(paragraph?.textContent).toContain("\u7b2c\u4e00\u884c");
+    expect(paragraph?.textContent).toContain("\u7b2c\u4e8c\u884c");
+  });
+
+  it("preserves <br> across multiple consecutive single newlines", () => {
+    const { container } = renderMarkdown(
+      <ChatMarkdown content={"\u7b2c\u4e00\u884c\n\u7b2c\u4e8c\u884c\n\u7b2c\u4e09\u884c"} />,
+    );
+    const paragraph = container.querySelector("p");
+    expect(paragraph).not.toBeNull();
+    expect(container.querySelectorAll("br")).toHaveLength(2);
+    expect(paragraph?.innerHTML).toContain("<br>");
+  });
+
+  it("preserves <br> in inline mode", () => {
+    const { container } = renderMarkdown(
+      <ChatMarkdown inline content={"\u7b2c\u4e00\u884c\n\u7b2c\u4e8c\u884c"} />,
+    );
+    expect(container.querySelectorAll("br")).toHaveLength(1);
+    expect(container.innerHTML).toContain("<br>");
+  });
+
+  it("handles newlines alongside bold and links across lines", () => {
+    const { container } = renderMarkdown(
+      <ChatMarkdown content={"\u7b2c\u4e00\u884c\n**\u7b2c\u4e8c\u884c\u52a0\u7c97**\n[\u7b2c\u4e09\u884c\u94fe\u63a5](https://example.com)"} />,
+    );
+    expect(container.querySelectorAll("br")).toHaveLength(2);
+    expect(container.querySelector("strong")?.textContent).toBe("\u7b2c\u4e8c\u884c\u52a0\u7c97");
+    const link = container.querySelector("a");
+    expect(link?.getAttribute("href")).toBe("https://example.com");
+    expect(link?.textContent).toBe("\u7b2c\u4e09\u884c\u94fe\u63a5");
+  });
+});
