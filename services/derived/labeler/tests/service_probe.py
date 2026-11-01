@@ -40,6 +40,21 @@ def our_backends(db_conn: psycopg.Connection, *, application_name: str) -> int:
     return int(row[0])
 
 
+# meiva:note
+# `daemon.run` publishes the pidfile, binds healthz, and only then builds the pool, so the health
+# port accepting connections says nothing yet about the daemon's database connection. A test that
+# reads the connection count right after `wait_serving` is racing the pool's first connection.
+async def wait_connected(
+    db_conn: psycopg.Connection, *, application_name: str, timeout_s: float = 15.0
+) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if our_backends(db_conn, application_name=application_name):
+            return
+        await asyncio.sleep(0.02)
+    pytest.fail("the service never opened a database connection")
+
+
 async def assert_released(
     db_conn: psycopg.Connection,
     pidfile: Path,
