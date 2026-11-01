@@ -238,7 +238,7 @@ def cmd_restart(
     )
     with operator_lifecycle_audit(
         database_factory=database_factory,
-        environ=command.config.process_environment(),
+        host=command.host_after_config(),
         home=command.home,
         pid=command.pid,
     ) as audit:
@@ -360,7 +360,7 @@ def cmd_restart_agent_host(
     # wait up to `start_timeout` for its readiness.
     with operator_lifecycle_audit(
         database_factory=database_factory,
-        environ=command.config.process_environment(),
+        host=command.host_after_config(),
         home=command.home,
         pid=command.pid,
     ) as audit:

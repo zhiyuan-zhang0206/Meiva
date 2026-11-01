@@ -21,6 +21,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.deploy.lifecycle import start_serving
+from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_providers import build_model_catalog
 from gateway.app import create_app
@@ -131,6 +132,7 @@ def gateway_test_process(
     config: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,
     process: GatewayProcess | None = None,
+    host: Host | None = None,
     observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
 ) -> Generator[GatewayProcess]:
     owned = process is None
@@ -144,7 +146,7 @@ def gateway_test_process(
             config=resolved_config,
             image=LOADED_IMAGE,
             machine=resolved_machine,
-            host=fake_host(),
+            host=fake_host() if host is None else host,
             observe=observe,
         )
     assert process is not None
@@ -160,6 +162,7 @@ def gateway_test_app(
     boot: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,
     machine: MachineIdentityReader | None = None,
+    host: Host | None = None,
     process_ownership: Literal["borrowed", "owned"] | None = None,
     cluster_secret: str | None = None,
     session_cookie_secure: bool | None = None,
@@ -173,7 +176,7 @@ def gateway_test_app(
             config=resolved_boot,
             image=LOADED_IMAGE,
             machine=resolved_machine,
-            host=fake_host(),
+            host=fake_host() if host is None else host,
         )
         ownership: Literal["borrowed", "owned"] = (
             "owned" if process_ownership is None else process_ownership
@@ -234,6 +237,7 @@ def gateway_test_client(
     boot: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,
     process: GatewayProcess | None = None,
+    host: Host | None = None,
     cluster_secret: str | None = None,
     session_cookie_secure: bool | None = None,
     catalog: Any = None,
@@ -262,7 +266,7 @@ def gateway_test_client(
             yield client
         return
     with gateway_test_process(
-        home=home, machine=machine, config=boot, fields=fields, process=process
+        home=home, machine=machine, config=boot, fields=fields, process=process, host=host
     ) as active_process:
         assembled = gateway_test_app(
             process=active_process,

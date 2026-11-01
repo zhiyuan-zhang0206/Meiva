@@ -24,7 +24,9 @@ import pytest
 
 from base.cluster.machine import MachineRoles
 from base.deploy.lifecycle import start_serving
+from base.host.proc import run_bounded
 from base.host.runtime_interpreter import LoadedRuntimeIdentity, source_digest
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.env_forwarding import managed_service_env
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.bringup import read_launch_delivery
@@ -280,7 +282,15 @@ def start_run(
     run = StartRun(
         # meiva:note
         # No helper: the platform of this run has none (Linux), so root custody is its own birth.
-        dataclasses.replace(command_runtime, home=short_tmp, helper=None),
+        # meiva:note
+        # The start reads the checkout's HEAD through the command's host, so this run carries a
+        # host that runs the real git; the platform and the environment are the ones named here.
+        dataclasses.replace(
+            command_runtime,
+            home=short_tmp,
+            helper=None,
+            host=fake_host(commands=run_bounded, environ={}),
+        ),
         operator_database,
         operator_pipeline,
         runtime,

@@ -18,11 +18,10 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Mapping
 from pathlib import Path
 
 from base.host.git.gitenv import git_env
-from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 
 # These reads are local-only (rev-parse / merge-base against an existing
 # checkout), so a low ceiling is right — a status render waits on them. Bounded
@@ -48,15 +47,15 @@ def prod_source_dir(home: Path) -> Path:
 # prod source on a prod install but a worktree elsewhere. Returns None when the
 # checkout is absent / not a git repo / git is unavailable / the command fails —
 # every caller treats "cannot read" as "nothing to report" rather than an error.
-def _git_ro(repo: Path, *args: str, environ: Mapping[str, str]) -> str | None:
+def _git_ro(repo: Path, *args: str, host: Host) -> str | None:
     if not (repo / ".git").exists():
         return None
     try:
-        result = run_bounded(  # git + fixed path + literal args, no user input
+        result = host.run(  # git + fixed path + literal args, no user input
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
-            env=git_env(environ),
+            env=git_env(host.environ),
             timeout=_GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError):
@@ -84,17 +83,17 @@ def running_from_prod_source(home: Path) -> bool:
         return False
 
 
-def prod_source_head_sha(home: Path, *, environ: Mapping[str, str]) -> str | None:
+def prod_source_head_sha(home: Path, *, host: Host) -> str | None:
     """The prod source's current HEAD commit sha, or None if it cannot be read."""
-    return _git_ro(prod_source_dir(home), "rev-parse", "HEAD", environ=environ)
+    return _git_ro(prod_source_dir(home), "rev-parse", "HEAD", host=host)
 
 
-def checkout_head_sha(repo: Path, *, environ: Mapping[str, str]) -> str | None:
+def checkout_head_sha(repo: Path, *, host: Host) -> str | None:
     """`repo`'s current HEAD commit sha, or None if it cannot be read."""
-    return _git_ro(repo, "rev-parse", "HEAD", environ=environ)
+    return _git_ro(repo, "rev-parse", "HEAD", host=host)
 
 
-def prod_source_branch_drift(home: Path, *, environ: Mapping[str, str]) -> str | None:
+def prod_source_branch_drift(home: Path, *, host: Host) -> str | None:
     """The prod source's current branch when it has drifted off `main`, else None.
 
     The prod source must sit on reviewed `main`. A non-`main` branch means an
@@ -104,5 +103,5 @@ def prod_source_branch_drift(home: Path, *, environ: Mapping[str, str]) -> str |
     checkout as `--detach NEW` — so consumers treat it as the designed steady
     state, not drift, and report it as the literal branch `"HEAD"`.
     """
-    branch = _git_ro(prod_source_dir(home), "rev-parse", "--abbrev-ref", "HEAD", environ=environ)
+    branch = _git_ro(prod_source_dir(home), "rev-parse", "--abbrev-ref", "HEAD", host=host)
     return branch if branch and branch != "main" else None

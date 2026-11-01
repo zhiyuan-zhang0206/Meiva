@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from cli.parsers import build_parser
 from cli.parsers import host as host_parsers
 
@@ -256,6 +259,13 @@ class _Runtime:
         # The caller block the stop hands the root names the invocation's own pid; the stand-in
         # states one so the handler never reaches for the process it happens to run in.
         self.pid = os.getpid()
+
+    # meiva:note
+    # The stop hands the lifecycle audit a host whose environment is the configuration's, which
+    # is what the real runtime answers; this stand-in states the same machine without reading
+    # the one the test runs on.
+    def host_after_config(self) -> Host:
+        return replace(fake_host(environ={}), environ=self.config.process_environment())
 
 
 @pytest.mark.parametrize(

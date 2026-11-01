@@ -20,6 +20,8 @@ from urllib.parse import urlsplit
 import pytest
 from pydantic import ValidationError
 
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import meiva_home, root_manifests_path
 from cli.commands import probe
@@ -69,7 +71,16 @@ def status(
     # throwaway Redis as its data plane; nothing else on this host is dialled for it.
     port = urlsplit(redis_url).port
     assert port is not None
-    return _Status(dataclasses.replace(command_runtime, home=short_tmp), operator_database, port)
+    # meiva:note
+    # The status render reads the checkout's branch through the command's host, so this command
+    # carries a host that runs the real git; the platform and the environment are named here.
+    return _Status(
+        dataclasses.replace(
+            command_runtime, home=short_tmp, host=fake_host(commands=run_bounded, environ={})
+        ),
+        operator_database,
+        port,
+    )
 
 
 def _row(out: str, service: str) -> str:

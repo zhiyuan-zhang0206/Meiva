@@ -204,7 +204,7 @@ def cmd_stop(
     # plane); every other choice is a required explicit answer.
     with operator_lifecycle_audit(
         database_factory=env.database_factory,
-        environ=env.command.config.process_environment(),
+        host=env.command.host_after_config(),
         home=env.command.home,
         pid=env.command.pid,
     ) as audit:

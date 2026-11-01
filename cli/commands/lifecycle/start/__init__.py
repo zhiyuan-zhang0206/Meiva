@@ -582,7 +582,7 @@ def cmd_start(
     # down: the health monitor keeps retrying that unit on its backoff ladder (task #5315).
     with operator_lifecycle_audit(
         database_factory=database_factory,
-        environ=command.config.process_environment(),
+        host=command.host_after_config(),
         home=command.home,
         pid=command.pid,
         enabled=not boot_attempt,

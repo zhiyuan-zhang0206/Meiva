@@ -162,7 +162,7 @@ def _execute(
             _emit(
                 source_drift_lines(
                     cluster_drift.prod_source_branch_drift(
-                        command.home, environ=command.config.process_environment()
+                        command.home, host=command.host_after_config()
                     )
                 )
             )
@@ -172,7 +172,7 @@ def _execute(
                     release_line(
                         repo,
                         cluster_drift.checkout_head_sha(
-                            Path(repo), environ=command.config.process_environment()
+                            Path(repo), host=command.host_after_config()
                         ),
                     ),
                 )

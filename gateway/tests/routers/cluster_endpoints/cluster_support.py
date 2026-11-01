@@ -22,6 +22,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.lifecycle.tests.serving_root import observe
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import RequestPayload, ResponsePayload, ok_response
@@ -57,6 +59,10 @@ def roster_env(
         # gateway process names it, and no case here marks a root.
         observe=start_serving.observe_root,
         environ=dict(os.environ),
+        # meiva:note
+        # The roster reads the checkout through this host: real git, and the environment the
+        # case names, so no case depends on the machine running the suite.
+        host=fake_host(commands=run_bounded, environ=dict(os.environ)),
     )
 
 
