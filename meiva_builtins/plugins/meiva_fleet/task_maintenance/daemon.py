@@ -644,7 +644,7 @@ def main() -> None:
     install_graceful_shutdown("task_maintenance")
     endpoint = task_maintenance_endpoint(boot, runtime=run_dir(process_home))
     try:
-        config = read_service_config("meiva_fleet", FleetConfig)
+        config = read_service_config("meiva_fleet", FleetConfig, environ=boot.process_environment())
         if config is None:
             config = read_config_image(
                 FleetConfig, disk_image_path("meiva_fleet", home=process_home)
