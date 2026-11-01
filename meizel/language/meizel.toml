@@ -19,8 +19,5 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 "no_script_sibling_imports.py" = { mode = "none", why = "the command-line entry of the PYTHONSAFEPATH sibling-import guard: it enumerates the files a run judges, reads them, states which modules sit beside each one, and prints what the rule found; meizel/language/script_siblings.py decides script mode, guard order, sibling resolution and the repair" }
 "path_imports.py" = "strict"
 "purity.py" = "strict"
-"scan.py" = "strict-to-be"
+"scan.py" = "strict"
 "script_siblings.py" = "strict"
-
-[debt.impure-call]
-"scan.py#Path.resolve" = 1

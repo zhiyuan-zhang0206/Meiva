@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from meizel import allowances
 from meizel.contracts.analysis import analyze, diagnose, load_policy, scan_all
 from meizel.contracts.cli import GitRepo
 from meizel.graph.model import AnyCollaboratorSite, Code, Sources
@@ -22,7 +23,13 @@ from meizel.tests.synthetic import (
 
 
 def scan(tmp_path: Path, source: str, path: str = "app.py") -> FileScan:
-    return scan_source(Universe(GitRepo(tmp_path), [path]), path, source.encode("utf-8"), Sources())
+    return scan_source(
+        Universe(GitRepo(tmp_path), [path]),
+        path,
+        source.encode("utf-8"),
+        Sources(),
+        policy=allowances.Policy(),
+    )
 
 
 def test_canonical_aliases_match_parameter_return_and_class_field(tmp_path: Path) -> None:

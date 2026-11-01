@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from meizel import roles
+from meizel import allowances, roles
 from meizel.graph.model import MeizelError
 from meizel.tests.synthetic import STANDALONE_PROJECT, RepoFactory, diagnostics, seat
 
@@ -133,7 +133,7 @@ def test_native_and_repo_import_names_resolve_to_the_same_files(make_repo: RepoF
         "from .config import Config\n",
         "from meiva_embedding_service.config import Config\n",
     ):
-        scan = scan_source(universe, caller, source.encode(), Sources())
+        scan = scan_source(universe, caller, source.encode(), Sources(), policy=allowances.Policy())
         assert [fact.dst for fact in scan.facts] == [physical]
 
 
@@ -232,10 +232,16 @@ def test_native_alias_is_scoped_to_its_project(make_repo: RepoFactory, name: str
     source = f'import {name}\nimport subprocess, sys\nsubprocess.run([sys.executable, "-m", "{name}.worker"])\n'
     assert universe.resolve_module(f"{name}.worker") is None
     assert not universe.is_first_party_name(name)
-    root_scan = scan_source(universe, "core/caller.py", source.encode(), Sources())
+    root_scan = scan_source(
+        universe, "core/caller.py", source.encode(), Sources(), policy=allowances.Policy()
+    )
     assert root_scan.facts == []
     own_scan = scan_source(
-        universe, f"runtimes/embedding/src/{name}/config.py", source.encode(), Sources()
+        universe,
+        f"runtimes/embedding/src/{name}/config.py",
+        source.encode(),
+        Sources(),
+        policy=allowances.Policy(),
     )
     assert {fact.dst for fact in own_scan.facts} == {
         f"runtimes/embedding/src/{name}/__init__.py",

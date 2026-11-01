@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from meizel import allowances
 from meizel.contracts.analysis import analyze, diagnose, load_policy
 from meizel.contracts.cli import GitRepo
 from meizel.graph.model import Code, FactKind, Sources
@@ -37,7 +38,11 @@ ROLES = '[roles]\napplication = ["pkg"]\nstandalone = ["runtimes"]\ntooling = ["
 )
 def test_import_identity_records_direct_guards(tmp_path: Path, source: str) -> None:
     scan = scan_source(
-        Universe(GitRepo(tmp_path), ["pkg/a.py"]), "pkg/a.py", source.encode(), Sources()
+        Universe(GitRepo(tmp_path), ["pkg/a.py"]),
+        "pkg/a.py",
+        source.encode(),
+        Sources(),
+        policy=allowances.Policy(),
     )
     assert len(scan.type_checking) == 1
 
@@ -61,7 +66,11 @@ def test_text_other_objects_and_shadowed_bindings_are_not_guards(
     tmp_path: Path, source: str
 ) -> None:
     scan = scan_source(
-        Universe(GitRepo(tmp_path), ["pkg/a.py"]), "pkg/a.py", source.encode(), Sources()
+        Universe(GitRepo(tmp_path), ["pkg/a.py"]),
+        "pkg/a.py",
+        source.encode(),
+        Sources(),
+        policy=allowances.Policy(),
     )
     assert scan.type_checking == ()
 
@@ -167,6 +176,7 @@ def test_guard_records_do_not_skip_body_or_else_facts(tmp_path: Path) -> None:
         "entry.py",
         source.encode(),
         Sources(),
+        policy=allowances.Policy(),
     )
     assert scan.type_checking == (2,)
     assert {f.dst for f in scan.facts if f.kind is FactKind.IMPORT} == {"pkg/a.py", "pkg/b.py"}

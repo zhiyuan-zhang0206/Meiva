@@ -117,7 +117,6 @@ def test_a_dunder_module_is_protocol_not_private(make_repo: RepoFactory) -> None
 @pytest.mark.parametrize(
     "call",
     [
-        'run_bounded(["python3", "-c", "pass"], timeout=5)',
         'subprocess.check_output(["python", "-c", "pass"])',
         'os.execv("/usr/bin/python3", ["python3", "-c", "pass"])',
         'os.execvp("python", ["python", "-c", "pass"])',
@@ -134,6 +133,28 @@ def test_the_calls_that_start_a_process_are_judged(make_repo: RepoFactory, call:
             "base/host/__init__.py": "",
             "base/host/proc.py": "def run_bounded(argv, *, timeout): ...\n",
             "app/x.py": HEAD + body,
+        }
+    )
+    assert restricted_of(root) == ["python -c is outside the restricted Python subset"]
+
+
+# meiva:note
+# A wrapper is a policy fact, not a built-in: the synthetic checkout names the one this test uses,
+# the way a real checkout names its own. A run that judged another repository by this one's list
+# would judge a call its own policy says nothing about.
+def test_a_wrapper_named_by_the_policy_is_judged_like_a_spawn(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            **LIB,
+            "meizel.policy.toml": (
+                '[python-commands]\nargv-wrappers = ["base.host.proc.run_bounded"]\n'
+            ),
+            "base/__init__.py": "",
+            "base/host/__init__.py": "",
+            "base/host/proc.py": "def run_bounded(argv, *, timeout): ...\n",
+            "app/x.py": HEAD
+            + "import os\nfrom base.host.proc import run_bounded\n\n"
+            + 'def go():\n    run_bounded(["python3", "-c", "pass"], timeout=5)\n',
         }
     )
     assert restricted_of(root) == ["python -c is outside the restricted Python subset"]
