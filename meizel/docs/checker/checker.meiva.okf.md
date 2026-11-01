@@ -46,6 +46,8 @@ python -m meizel roles list <role>... | projects | check | write
 - `impacted` prints tracked `.py` paths in the transitive reverse-import closure
   of `paths` (default: files changed since `origin/main`), exiting 2 (fail-closed)
   if any tracked `.py` file cannot be read or parsed.
+- `debt propagation` measures the world reads a call site inherits through a
+  function and records nothing for: [[meizel/docs/checker/debt/propagation.meiva.okf.md|world reads that travel through a function]].
 - `sync --prune` drops stale declarations; `sync --declare` writes the legal new
   dependencies of the changed files: [[meizel/docs/checker/sync.meiva.okf.md|keeping manifests current]].
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
