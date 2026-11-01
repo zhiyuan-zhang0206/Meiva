@@ -441,10 +441,11 @@ jobs:
   secret-scan:
     # Run independently of classify: a secret can be introduced by any file,
     # including a docs-only change that skips the backend and frontend suites.
-    # Scans only the commits this change adds (a PR, or a Trunk merge-queue
-    # branch, which is a PR too). Scanning every ref's whole history took 12-16
-    # minutes and re-proved history no PR can change; that full scan runs
-    # nightly in secret-scan-history.yml. The job name is a required check.
+    # Scans only the commits this change adds (a PR, a Trunk merge-queue branch,
+    # or a workflow_dispatch branch against origin/main; a direct manual dispatch
+    # on main scans a bounded recent window of 50 commits). Scanning full history
+    # on every dispatch took 12 minutes (720s) and is re-proved nightly in
+    # secret-scan-history.yml. The job name is a required check.
     name: secret scan (Gitleaks)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -467,22 +468,46 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "$EVENT" != "pull_request" ]; then
-            # Manual dispatch: nothing names a base, so scan every ref's history.
-            gitleaks git --config .gitleaks.toml --redact --no-banner .
+          if [ "$EVENT" = "pull_request" ]; then
+            # The checkout is the PR's merge commit: its first parent is the base
+            # this run was built against, so BASE..HEAD is exactly the PR's own
+            # commits (plus the merge). A checkout that is not a merge commit
+            # falls back to the merge-base with the event's base sha, as classify does.
+            if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+              base="$(git rev-parse --verify HEAD^1)"
+            else
+              base="$(git merge-base "$BASE_SHA" HEAD)"
+            fi
+            : "${base:?unable to resolve base commit for pull request}"
+            echo "scanning ${base}..HEAD"
+            gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${base}..HEAD" .
             exit 0
           fi
-          # The checkout is the PR's merge commit: its first parent is the base
-          # this run was built against, so BASE..HEAD is exactly the PR's own
-          # commits (plus the merge). A checkout that is not a merge commit
-          # falls back to the merge-base with the event's base sha, as classify does.
-          if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
-            base="$(git rev-parse --verify HEAD^1)"
+
+          # Manual dispatch (workflow_dispatch) or non-PR run:
+          # Fetch origin/main so the common ancestor can be determined.
+          # Note: actions/checkout uses fetch-depth: 0, so the clone is complete unless
+          # configured otherwise. Guard against shallow repositories just in case.
+          if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git fetch --unshallow origin +refs/heads/main:refs/remotes/origin/main
           else
-            base="$(git merge-base "$BASE_SHA" HEAD)"
+            git fetch origin +refs/heads/main:refs/remotes/origin/main
           fi
-          echo "scanning ${base}..HEAD"
-          gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${base}..HEAD" .
+
+          head_sha="$(git rev-parse --verify HEAD)"
+          merge_base="$(git merge-base -- HEAD refs/remotes/origin/main)"
+          : "${merge_base:?unable to resolve merge-base with origin/main}"
+
+          if [ "$merge_base" != "$head_sha" ]; then
+            # On a branch diverged from origin/main: scan only the branch's added commits.
+            echo "scanning ${merge_base}..HEAD"
+            gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${merge_base}..HEAD" .
+          else
+            # Direct run on main (or commit reachable from origin/main): scan a bounded recent
+            # window (-n 50). Full repository history is re-scanned nightly in secret-scan-history.yml.
+            echo "merge-base equals HEAD; scanning bounded recent window (-n 50)"
+            gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="-n 50" .
+          fi
 
   dependency-audit:
     # Informational first: dependency findings are visible in every CI run but
