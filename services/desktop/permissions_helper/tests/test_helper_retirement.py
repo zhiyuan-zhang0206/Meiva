@@ -34,6 +34,13 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
     stage_signing_identity,
 )
 
+# meiva:note
+# The subject of this module is the launchd helper's retirement: launchd, launchctl replies and
+# the helper's plist exist on the named host and nowhere else. Declaring it once at module level
+# keeps every case on the `host-marks` lane that runs it there, and turns the other hosts into a
+# skip with one reason instead of ten failures that look like regressions (#5908).
+pytestmark = pytest.mark.requires_host("darwin")
+
 
 def _absent_job(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
     return subprocess.CompletedProcess(list(cmd), 113, b"", b"Could not find service")
@@ -293,7 +300,7 @@ def test_replacement_guard_names_a_live_process_running_the_artifact(
 
 
 @pytest.mark.skipif(
-    sys.platform != "darwin" or shutil.which("swift") is None,
+    shutil.which("swift") is None,
     reason="native Swift filesystem intent contract",
 )
 def test_helper_stop_intent_survives_new_reader_and_refuses_corruption(tmp_path: Path) -> None:
@@ -624,7 +631,7 @@ _REGION_GRANT_GUARD = (
 
 
 @pytest.mark.skipif(
-    sys.platform != "darwin" or shutil.which("swiftc") is None,
+    shutil.which("swiftc") is None,
     reason="native serial helper request and Foundation child contract",
 )
 def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> None:
