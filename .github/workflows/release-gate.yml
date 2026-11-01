@@ -436,14 +436,6 @@ jobs:
           name: e2e-logs-matrix-${{ matrix.group }}
           path: tmp/e2e-logs/
 
-      - name: Upload e2e logs on failure
-        if: failure()
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: e2e-logs-matrix-${{ matrix.group }}
-          path: tmp/e2e-logs/
-
   platform-smoke:
     needs: precheck
     if: needs.precheck.outputs.skip_train != 'true'
