@@ -265,7 +265,7 @@ def _touches_rsc_boundary(change: ChangeSet) -> bool:
 _FRONTEND_RUNS = (
     Run(
         "next-build",
-        (shutil.which("npm") or "npm", "run", "build"),
+        (shutil.which("pnpm") or "pnpm", "run", "build"),
         "exit code; the production build refuses a client boundary in a server component",
         cwd="ui/web",
     ),

@@ -19,12 +19,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CN_PROFILE = _REPO_ROOT / "scripts" / "mirrors" / "cn.env"
 
 
+# meiva:note
+# The cn profile sets the index/registry env each package manager honors — PyPI (uv),
+# pnpm/npm, and Homebrew bottles + API.
 def test_cn_profile_carries_the_package_manager_vars() -> None:
-    """The cn profile sets exactly the index/registry env each package manager
-    honors — PyPI (uv), npm, and Homebrew bottles + API."""
     values = dotenv_values(_CN_PROFILE)
     assert values["UV_DEFAULT_INDEX"], "PyPI index for uv sync"
-    assert values["npm_config_registry"], "npm registry for npm ci"
+    assert values["pnpm_config_registry"], "pnpm registry for pnpm install --frozen-lockfile"
+    assert values["npm_config_registry"], "npm registry for provisioning pnpm"
     assert values["HOMEBREW_BOTTLE_DOMAIN"], "Homebrew bottle mirror (macOS)"
     assert values["HOMEBREW_API_DOMAIN"], "Homebrew formulae API mirror (macOS)"
     # Every value is a concrete https endpoint, not a placeholder.
@@ -51,14 +53,15 @@ def test_mirror_env_fills_unset_keys(tmp_path: Path) -> None:
     """When a mirror var is not otherwise set, mirror.env supplies it."""
     from base.host.env import dotenv_boot
 
-    (tmp_path / "mirror.env").write_text("npm_config_registry=https://registry.example\n")
+    (tmp_path / "mirror.env").write_text("pnpm_config_registry=https://registry.example\n")
     env: dict[str, str] = {}
 
     dotenv_boot.load_meiva_env(env, home=tmp_path)
 
-    # npm reads the lowercase `npm_config_<key>` env form; the uppercase spelling
-    # SIM112 prefers is not what npm honors, so the lowercase key is load-bearing.
-    assert env["npm_config_registry"] == "https://registry.example"
+    # meiva:note
+    # pnpm and npm read the lowercase `<pm>_config_<key>` env form; the uppercase
+    # spelling SIM112 prefers is not what they honor, so the lowercase key is load-bearing.
+    assert env["pnpm_config_registry"] == "https://registry.example"
 
 
 @pytest.mark.parametrize("source_layer", ["environment", "unit"])

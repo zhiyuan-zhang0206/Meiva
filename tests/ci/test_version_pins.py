@@ -1,6 +1,6 @@
 # meiva:note
-# Cargo and npm cannot read pyproject.toml, so the app crate and the frontend
-# package carry pinned copies; their lockfiles, the generated OpenAPI document
+# Cargo and pnpm cannot read pyproject.toml, so the app crate and the frontend
+# package carry pinned copies; the Cargo lockfile, the generated OpenAPI document
 # and the Tauri bundle config must stay equal to that one product version.
 # meiva:link docs/conventions/engineering/host-versioning.md
 from __future__ import annotations
@@ -58,9 +58,9 @@ def test_frontend_package_matches_the_product_version() -> None:
 
 
 def test_frontend_lock_root_matches_its_package() -> None:
-    lock = _json("ui/web/package-lock.json")
-    assert lock["version"] == _product_version()
-    assert lock["packages"][""]["version"] == _product_version()
+    lock = _text("ui/web/pnpm-lock.yaml")
+    assert lock.startswith("lockfileVersion: '9.0'\n")
+    assert "\nimporters:\n\n  .:\n" in lock
 
 
 def test_python_lock_matches_the_project_metadata() -> None:

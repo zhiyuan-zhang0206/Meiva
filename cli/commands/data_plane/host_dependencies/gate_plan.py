@@ -86,7 +86,7 @@ def _homebrew_install(component: Component) -> str:
         case Component.DATA_PLANE:
             return "brew install postgresql@17 redis@8.2 pgbouncer pgvector"
         case Component.NODE:
-            return "brew install node"
+            return "brew install node && npm install -g pnpm@11.9.0"
         case Component.HOST_UTILS:
             return "brew install curl"
         case Component.CLI_TOOLS:

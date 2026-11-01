@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # -*- shell-script -*-
 # The one way to get a development worktree: creates it, then bootstraps it —
-# its own real .venv, the locked install, `npm ci` for ui/web, and the shared
-# git-hook / editable-venv guards.
+# its own real .venv, the locked install, `pnpm install --frozen-lockfile` for
+# ui/web, and the shared git-hook / editable-venv guards.
 #
 #   bash scripts/setup-worktree.sh <task> [--branch NAME] [--base REF]
 #       Create <main clone>/.worktrees/<task> on branch meiva-<task> (or <task>
@@ -43,7 +43,7 @@ MAIN_ROOT="$(cd -P "$(dirname "$COMMON_DIR")" && pwd -P)"  # physical, as `git w
 # A shell that leaked another checkout's venv must never steer uv or the guard.
 unset VIRTUAL_ENV
 
-for tool in git uv npm python3; do
+for tool in git uv pnpm python3; do
   command -v "$tool" >/dev/null || die "$tool is not on PATH — install it (or use a login shell) before creating a worktree"
 done
 
@@ -125,16 +125,12 @@ bootstrap() {
       python "$REPO_ROOT/cli/python_install.py" --locked --inexact --no-compile-bytecode
   fi
 
-  # `npm ci`, as CI does: it installs exactly what package-lock.json pins and never
-  # rewrites it (`npm install` strips optional-dependency entries on a newer npm).
-  #
-  # Measured on this repository (npm 11.12.1, one dedicated cache directory): a cold cache
-  # costs 850 registry requests / 156 MB / 64 s; a warm one costs **0 requests** whether or not
-  # `--prefer-offline` is passed (27.9 s vs 28.4 s). The flag therefore buys nothing here, so it
-  # is not passed - a switch that cannot be measured is worse than none, because the next reader
-  # reads it as "the transfer spike is solved" and stops looking for the cold install that is.
-  echo "→ npm ci (frontend) …"
-  (cd "$REPO_ROOT/ui/web" && npm ci --no-audit --no-fund)
+  # `pnpm install --frozen-lockfile`, as CI does: it installs the exact graph
+  # `ui/web/pnpm-lock.yaml` pins into a hoisted `node_modules` cloned from the
+  # shared content-addressed store (`clonefile(2)` on macOS APFS, hardlinks on
+  # Linux) and never rewrites the lockfile.
+  echo "→ pnpm install --frozen-lockfile (frontend) …"
+  (cd "$REPO_ROOT/ui/web" && pnpm install --frozen-lockfile)
 
   echo "→ verifying …"
   { [ -d .venv ] && [ ! -L .venv ]; } || die ".venv must be a real directory inside $REPO_ROOT, never a symlink"
@@ -142,7 +138,7 @@ bootstrap() {
   python3 "$SCRIPT_DIR/host_ops/guard_editable_venv.py" "$REPO_ROOT"
   if [ "$(git status --porcelain)" != "$before" ]; then
     git status --short >&2
-    die "bootstrap changed tracked files (a rewritten uv.lock or package-lock.json?) — inspect the diff above and report it"
+    die "bootstrap changed tracked files (a rewritten uv.lock or pnpm-lock.yaml?) — inspect the diff above and report it"
   fi
 
   branch="$(git branch --show-current)"

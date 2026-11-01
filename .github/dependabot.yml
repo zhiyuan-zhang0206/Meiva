@@ -6,9 +6,10 @@
 # ages out of security fixes. Dependabot closes that loop: it opens a reviewable
 # PR that bumps the SHA and the trailing `# vX.Y.Z` comment together.
 #
-# Actions only. Python deps are resolved through uv.lock and npm's through
-# package-lock.json; adding those ecosystems here would open PRs that bypass
-# `uv sync --frozen`, so they stay a deliberate manual bump.
+# Actions only. Python deps are resolved through uv.lock and frontend deps
+# through ui/web/pnpm-lock.yaml; adding those ecosystems here would open PRs
+# that bypass `uv sync --frozen` and `pnpm install --frozen-lockfile`, so they
+# stay a deliberate manual bump.
 version: 2
 updates:
   - package-ecosystem: github-actions

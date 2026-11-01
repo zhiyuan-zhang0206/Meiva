@@ -195,7 +195,10 @@ def run_steps(evidence: Evidence, container: str, commit: str) -> None:
     prepare = PREPARE_SOURCE.format(objects=OBJECTS_MOUNT)
     evidence.step("prepare-source", _exec(container, ["bash", "-c", prepare, "_", commit]))
     evidence.step("python", _exec(container, ["bash", "-c", f"cd {source} && uv sync --locked"]))
-    evidence.step("frontend", _exec(container, ["bash", "-c", f"cd {source}/ui/web && npm ci"]))
+    evidence.step(
+        "frontend",
+        _exec(container, ["bash", "-c", f"cd {source}/ui/web && pnpm install --frozen-lockfile"]),
+    )
     for name, script, content in (
         ("profile-upload", f"install -d {WORK} && cat > {WORK}/profile.env", profile),
         ("observer-upload", f"cat > {WORK}/observe.py", observer),

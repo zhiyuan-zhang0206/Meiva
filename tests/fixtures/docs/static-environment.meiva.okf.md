@@ -50,7 +50,7 @@ process-lifetime native refusal and isolation guards. JUnit validation, executed
 and combined coverage include all workers. Unhandled test-thread exceptions are errors
 in the actual CI command; a refused background driver call cannot leave only a warning
 and green JUnit.
-The job installs Python and Node dependencies (with frontend npm dependencies for
+The job installs Python and Node dependencies (with frontend pnpm dependencies for
 TypeScript compiler contracts) without Postgres/Redis binaries, Grafana, or browser
 setup. It runs alongside `backend-static`, which retains ruff,
 types, migration and native Grafana smoke checks, and the existing structure job.

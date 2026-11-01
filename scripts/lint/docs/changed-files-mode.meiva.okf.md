@@ -27,7 +27,7 @@ The required CI `backend-structure` job runs the following compliance checks via
 | `lint-fixture-scope` | Every supported `tests/` directory, including e2e fixtures |
 | `lint-meiva-root-scope` | `services/supervision/meiva_root/` |
 | `lint-python-lock` | `uv.lock` |
-| `lint-package-lock` | `ui/web/package-lock.json` |
+| `lint-package-lock` | `ui/web/pnpm-lock.yaml` and `ui/web/pnpm-workspace.yaml` |
 
 The classify-independent `repo-language` job also directly runs the root-scope
 and both lock checks. Their unit tests exercise positive, negative and

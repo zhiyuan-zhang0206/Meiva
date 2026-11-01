@@ -1,11 +1,11 @@
-"""`scripts/setup-worktree.sh <task>` creates a worktree and bootstraps it.
+# meiva:note
+# `scripts/setup-worktree.sh <task>` creates a worktree and bootstraps it.
+#
+# Process-level checks on a throwaway repository with its own `origin`. The real
+# script and its two Python helpers are copied in; `uv` and `pnpm` are PATH stubs
+# that record their calls (and the directory they ran in), so nothing is installed.
 
-Process-level checks on a throwaway repository with its own `origin`. The real
-script and its two Python helpers are copied in; `uv` and `npm` are PATH stubs
-that record their calls (and the directory they ran in), so nothing is installed.
-"""
-
-# ruff: noqa: S603 — subprocess commands use only test-owned paths and fixture literals.
+# ruff: noqa: S603
 
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ if [ "$1" = run ]; then
   [ -z "${REWRITE_LOCK:-}" ] || echo rewritten >> uv.lock
 fi
 """
-_NPM = """\
+_PNPM = """\
 #!/bin/sh
-echo "npm $* @ $PWD" >> "$SETUP_CALLS"
+echo "pnpm $* @ $PWD" >> "$SETUP_CALLS"
 mkdir -p node_modules
 """
 
@@ -59,7 +59,7 @@ class _World:
     def __init__(self, root: Path, *, hooks: bool = True) -> None:
         self.root = root
         self.calls_file = root / "calls.log"
-        self.stubs = _stub_dir(root, "stubs", uv=_UV, npm=_NPM)
+        self.stubs = _stub_dir(root, "stubs", uv=_UV, pnpm=_PNPM)
         self.origin = root / "origin.git"
         self.main = root / "main-clone"
         self.git(root, "init", "-q", "--bare", "--initial-branch=main", str(self.origin))
@@ -72,7 +72,7 @@ class _World:
         (self.main / "cli").mkdir()
         (self.main / "cli/python_install.py").write_text("# stub: the python stub only logs\n")
         (self.main / "ui/web").mkdir(parents=True)
-        (self.main / "ui/web/package-lock.json").write_text("{}\n")
+        (self.main / "ui/web/pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n")
         (self.main / "uv.lock").write_text("version = 1\n")
         (self.main / ".gitignore").write_text(".venv/\nnode_modules/\n.worktrees/\n")
         self.git(self.main, "add", "-A")
@@ -212,7 +212,7 @@ def test_creates_the_worktree_off_fresh_origin_main_and_bootstraps_in_order(
             " --locked --inexact --no-compile-bytecode",
             path,
         ),
-        ("npm ci --no-audit --no-fund", path / "ui/web"),
+        ("pnpm install --frozen-lockfile", path / "ui/web"),
     ]
     assert (path / ".venv").is_dir() and not (path / ".venv").is_symlink()
     assert world.git(path, "status", "--porcelain") == ""
@@ -243,7 +243,7 @@ def test_rerunning_only_rebootstraps_the_existing_worktree(world: _World) -> Non
     assert world.git(path, "rev-parse", "HEAD") == head
     assert world.git(world.main, "worktree", "list").count("\n") == 1  # main + t1 only
     commands = [command.split()[0] for command, _ in world.calls()]
-    assert commands == ["uv", "npm", "python", "npm"]
+    assert commands == ["uv", "pnpm", "python", "pnpm"]
     assert world.calls()[2] == (
         f"python {path}/cli/python_install.py --locked --inexact --no-compile-bytecode",
         path,
@@ -397,7 +397,7 @@ def test_branch_naming_base_override_and_task_validation(world: _World) -> None:
 
 def test_a_missing_tool_is_reported_before_anything_is_created(tmp_path: Path) -> None:
     world = _World(tmp_path)
-    without_uv = _stub_dir(tmp_path, "no-uv", npm=_NPM)
+    without_uv = _stub_dir(tmp_path, "no-uv", pnpm=_PNPM)
     path = f"{without_uv}{os.pathsep}/usr/bin{os.pathsep}/bin"
     if shutil.which("uv", path=path):
         pytest.skip("a system uv is installed in /usr/bin")

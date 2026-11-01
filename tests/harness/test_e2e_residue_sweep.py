@@ -21,7 +21,7 @@ from tests.e2e import process_support as processes
             "uv run uvicorn gateway.app:create_app_from_environment --factory --port 60758",
             "MEIVA_HOME=/x/meiva_e2e_home_1_2 MEIVA_DB_URL=postgresql://u@h/db",
         ),
-        ("npm run start -p 60759", ""),
+        ("pnpm run start -p 60759", ""),
         ("next-server (v16.2.7)", "FOO=bar"),
     ],
 )
@@ -50,7 +50,7 @@ def test_process_table_observation_retains_command_and_environment(
             "/r/ui/web/.builds/build-43948_1788018418678623",
             (43948, 1788018418678623),
         ),
-        ("npm run start", "", "/r/ui/web/.builds/build-1_2", (1, 2)),
+        ("pnpm run start", "", "/r/ui/web/.builds/build-1_2", (1, 2)),
         ("python server", "", "/r/ui/web/.builds/build-1_2", None),
         ("next-server", "", "/opt/other/.builds/build-1_2", None),
         ("next-server", "", "/r/ui/web/.builds/build-x_y", None),
@@ -246,7 +246,7 @@ def _cmd_gateway(_pid: int) -> str:
 
 
 def _cmd_other(_pid: int) -> str:
-    return "npm run start -p 60759"
+    return "pnpm run start -p 60759"
 
 
 @pytest.mark.parametrize(

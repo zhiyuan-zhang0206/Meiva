@@ -48,80 +48,137 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-_FOREIGN_NODE_MODULES_MARKERS = (".modules.yaml", ".pnpm")
+_FOREIGN_NODE_MODULES_MARKERS = (".package-lock.json", ".yarn-integrity")
+_IMPORTER_DEP_GROUPS = frozenset({"dependencies", "devDependencies"})
 
 
+def _unquote_yaml_scalar(raw: str) -> str:
+    text = raw.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1]
+    return text
+
+
+def _lock_body_lines(lock_text: str) -> list[str] | None:
+    lines = [
+        line
+        for line in lock_text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not lines or not lines[0].startswith("lockfileVersion:"):
+        return None
+    if _unquote_yaml_scalar(lines[0].partition(":")[2]) != "9.0":
+        return None
+    return lines[1:]
+
+
+def _yaml_line_entry(line: str) -> tuple[int, str, str] | None:
+    indent = len(line) - len(line.lstrip(" "))
+    key, sep, rest = line.strip().partition(":")
+    if not sep or indent % 2:
+        return None
+    return indent // 2, _unquote_yaml_scalar(key), rest
+
+
+def _is_root_importer_version(scope: tuple[str, ...], level: int, key: str) -> bool:
+    return (
+        level == 4
+        and scope[:2] == ("importers", ".")
+        and scope[2] in _IMPORTER_DEP_GROUPS
+        and key == "version"
+    )
+
+
+def _locked_root_importer_versions(lock_text: str) -> dict[str, str] | None:
+    body = _lock_body_lines(lock_text)
+    if body is None:
+        return None
+    scope: tuple[str, ...] = ("", "", "", "")
+    saw_root = False
+    versions: dict[str, str] = {}
+    for line in body:
+        parsed = _yaml_line_entry(line)
+        if parsed is None:
+            continue
+        level, clean_key, rest = parsed
+        if level == 0 and scope[0] == "importers":
+            break
+        if level < 4:
+            scope = (*scope[:level], clean_key, *("",) * (3 - level))
+            saw_root = saw_root or scope[:2] == ("importers", ".")
+        elif _is_root_importer_version(scope, level, clean_key):
+            version = _unquote_yaml_scalar(rest).partition("(")[0].strip()
+            if not version:
+                return None
+            versions[scope[3]] = version
+    return versions if saw_root else None
+
+
+# meiva:note
+# Detect a node_modules that no longer matches the pnpm lockfile.
+#
+# Called only when the install stamp matches, i.e. `pnpm-lock.yaml` has not changed since the
+# last `pnpm install --frozen-lockfile` — the question is what happened to `node_modules`
+# afterwards. Two cheap layers:
+#
+# - Foreign package-manager markers (`.package-lock.json` / `.yarn-integrity`) and required pnpm
+#   metadata (`.modules.yaml`). A foreign install touches neither `pnpm-lock.yaml` nor the stamp,
+#   so the stamp path would otherwise trust it forever.
+# - Installed versions of direct dependencies vs `pnpm-lock.yaml` — catches drift that leaves
+#   `.modules.yaml` present.
 def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
-    """Detect a node_modules that no longer matches the npm lockfile.
-
-    Called only when the install stamp matches, i.e. the lockfile has not
-    changed since the last `npm ci` — the question is what happened to
-    node_modules afterwards. Two cheap layers:
-
-    - Foreign package-manager markers (pnpm's `.modules.yaml` / `.pnpm` store).
-      A pnpm install re-resolves ranges fresh (^1.2.10 -> 1.2.18) and touches
-      neither lockfile nor stamp, so the stamp path would trust it forever.
-    - Installed versions of direct dependencies vs the lockfile — catches drift
-      that leaves no marker, e.g. `npm install <pkg>@x --no-save`.
-    """
     for marker in _FOREIGN_NODE_MODULES_MARKERS:
         if (node_modules / marker).exists():
             return f"foreign package-manager marker {marker!r}"
+    if not (node_modules / ".modules.yaml").is_file():
+        return "missing pnpm .modules.yaml metadata"
     pkg_body = json.loads((fe / "package.json").read_text())
     direct = {**pkg_body.get("dependencies", {}), **pkg_body.get("devDependencies", {})}
-    lock_packages = json.loads((fe / "package-lock.json").read_text()).get("packages", {})
-    for name in direct:
-        lock_entry = lock_packages.get(f"node_modules/{name}")
-        if lock_entry is None:
-            continue  # no lockfile entry to compare (e.g. a workspace link)
+    locked_versions = _locked_root_importer_versions((fe / "pnpm-lock.yaml").read_text())
+    if locked_versions is None:
+        return "unparseable pnpm-lock.yaml"
+    for name, spec in direct.items():
+        if isinstance(spec, str) and spec.startswith(("workspace:", "file:", "link:")):
+            continue
+        locked_version = locked_versions.get(name)
+        if locked_version is None:
+            return f"{name}: missing from pnpm-lock.yaml"
+        if locked_version.startswith(("workspace:", "file:", "link:")):
+            continue
         installed_pkg = node_modules / name / "package.json"
         if not installed_pkg.is_file():
             return f"{name}: not installed"
         installed_version = json.loads(installed_pkg.read_text()).get("version")
-        if installed_version != lock_entry.get("version"):
-            return f"{name}: installed {installed_version}, lockfile {lock_entry.get('version')}"
+        if installed_version != locked_version:
+            return f"{name}: installed {installed_version}, lockfile {locked_version}"
     return None
 
 
 # meiva:note
-# `install_argv` is the install command (`npm ci`) and `environ` the environment it inherits,
-# with the Node search path injected; both come from the caller.
+# `install_argv` is the install command (`pnpm install --frozen-lockfile`) and `environ`
+# the environment it inherits, with the Node search path injected; both come from the caller.
+#
+# Installs frontend deps when node_modules is missing OR when pnpm-lock.yaml changed since the
+# last install — `pnpm run build` without the exact locked deps dies immediately and the session
+# exits. `node_modules/.meiva-lock-hash` stamps the sha256 of the `pnpm-lock.yaml` last installed
+# from (written after `pnpm install --frozen-lockfile`). When the stamp matches, `_node_modules_drift`
+# verifies `.modules.yaml`, rejects foreign markers, and checks direct dependency versions against
+# `pnpm-lock.yaml` (cf. docs/postmortems/0007).
 def ensure_frontend_deps(
     repo: Path, *, environ: Mapping[str, str], install_argv: tuple[str, ...]
 ) -> None:
-    """Install frontend deps when node_modules is missing OR when
-    package-lock.json changed since the last install — `npm run build` without
-    the exact locked deps dies immediately and the session exits (hit by
-    first-time install, fresh clone, AND by the fleet update pulling a lockfile that
-    adds a dependency: build fails, `npm run build && exec npm run start` short-
-    circuits, port 3000 goes dark).
-
-    `node_modules/.meiva-lock-hash` stamps the sha256 of the package-lock.json we
-    last installed from; a missing/mismatched stamp means node_modules is stale
-    against the current lockfile. Written *after* `npm ci` because `npm ci`
-    wipes node_modules first.
-
-    A matching stamp only proves the lockfile has not changed since the last
-    `npm ci` — it does not prove node_modules still matches it. A foreign
-    package manager (pnpm) install ignores package-lock.json entirely, resolves
-    ranges fresh, and leaves both the lockfile and the stamp untouched; that
-    exact drift shipped a minifier-emptied dependency to prod while every
-    converge check passed (task #2654, docs/postmortems/0007). So the stamp-matched
-    path additionally verifies node_modules against the lockfile and falls
-    through to `npm ci` on drift.
-    """
     fe = repo / "ui" / "web"
     node_modules = fe / "node_modules"
     stamp = node_modules / ".meiva-lock-hash"
-    want = hashlib.sha256((fe / "package-lock.json").read_bytes()).hexdigest()
+    want = hashlib.sha256((fe / "pnpm-lock.yaml").read_bytes()).hexdigest()
     if node_modules.is_dir() and stamp.is_file() and stamp.read_text().strip() == want:
         drift = _node_modules_drift(fe, node_modules)
         if drift is None:
             return
-        print(f"  · frontend deps drifted ({drift}), running npm ci (~30-60s)")
+        print(f"  · frontend deps drifted ({drift}), running pnpm install --frozen-lockfile")
     else:
-        reason = "missing" if not node_modules.is_dir() else "package-lock.json changed"
-        print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
+        reason = "missing" if not node_modules.is_dir() else "pnpm-lock.yaml changed"
+        print(f"  · frontend deps {reason}, running pnpm install --frozen-lockfile")
     subprocess.run(
         list(install_argv),
         cwd=str(fe),

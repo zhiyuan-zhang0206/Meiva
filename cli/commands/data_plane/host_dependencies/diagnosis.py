@@ -28,8 +28,8 @@ __all__ = [
 ]
 
 # meiva:note
-# The oldest Node the frontend runs on (above Ubuntu 24.04's packaged 18).
-_NODE_FLOOR = (20, 9)
+# The oldest Node the frontend toolchain runs on (pnpm 11 requires >= 22.13).
+_NODE_FLOOR = (22, 13)
 
 
 # meiva:note
@@ -109,7 +109,7 @@ def _node_problem(name: str, reading: Reading) -> DependencyProblem | None:
         case NodeVersion(raw):
             version = _version(raw)
             if version is None or version < _NODE_FLOOR:
-                return DependencyProblem(f"{raw or 'version unknown'} is older than 20.9")
+                return DependencyProblem(f"{raw or 'version unknown'} is older than 22.13")
             return None
         case _:
             raise ValueError(f"{name}: {reading!r} is not a Node toolchain reading")

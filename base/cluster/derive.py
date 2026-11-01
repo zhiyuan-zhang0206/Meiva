@@ -152,24 +152,21 @@ def session_name(service: str) -> str:
     return f"meiva-{service}"
 
 
+# meiva:note
+# The `NEXT_PUBLIC_*` assignment prefix the frontend's `pnpm run build` needs.
+#
+# NEXT_PUBLIC_* are inlined into the JS bundle at build time, not read at runtime, and the
+# session env only forwards MEIVA_* + bootstrap secrets — so a NEXT_PUBLIC_GATEWAY_PORT placed in
+# a unit's `.env` never reaches the build subprocess. Instead derive it from the single source of
+# truth (MEIVA_GATEWAY_PORT == the gateway's `gateway_port` setting) and inject it directly on
+# the build command line. The browser then dials `${hostname}:${gateway_port}`
+# (ui/web/src/lib/transport/api.ts), correct on any host whose gateway is not on the default 8000
+# (e.g. the prod VPS on 8800, co-located with another service holding 8000).
+#
+# Single source for both build paths — the canonical ServiceSpec (cli/commands/_repo.py) AND the
+# frontend healthcheck respawn (services/supervision/healthchecks/frontend.py) — so a watchdog
+# restart can never bake a different (stale) gateway port than `meiva start` did.
 def fe_build_env(*, gateway_port: int, browser_origin: str) -> str:
-    """The `NEXT_PUBLIC_*` assignment prefix the frontend's `npm run build` needs.
-
-    NEXT_PUBLIC_* are inlined into the JS bundle at build time, not read at
-    runtime, and the session env only forwards MEIVA_* + bootstrap secrets — so a
-    NEXT_PUBLIC_GATEWAY_PORT placed in a unit's `.env` never reaches the build
-    subprocess. Instead derive it from the single source of truth
-    (MEIVA_GATEWAY_PORT == the gateway's `gateway_port` setting) and inject it directly on the
-    build command line. The browser then dials `${hostname}:${gateway_port}`
-    (ui/web/src/lib/transport/api.ts), correct on any host whose gateway is not on the
-    default 8000 (e.g. the prod VPS on 8800, co-located with another service
-    holding 8000).
-
-    Single source for both build paths — the canonical ServiceSpec
-    (cli/commands/_repo.py) AND the frontend healthcheck respawn
-    (services/supervision/healthchecks/frontend.py) — so a watchdog restart can never bake a
-    different (stale) gateway port than `meiva start` did.
-    """
     gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={gateway_port}"
     if not browser_origin:
         return gateway_env
@@ -187,7 +184,7 @@ def frontend_service_cmd(
 ) -> str:
     # meiva:note
     # Two properties make this the one place the frontend command is authored.
-    # `exec` on the serve stage hands the pid to `npm run start`, so a graceful
+    # `exec` on the serve stage hands the pid to `pnpm run start`, so a graceful
     # stop's SIGTERM reaches it (`base.sessions.env_forwarding.exec_into` rejects a
     # compound command whose final stage does not exec — the shape that once made a
     # respawn unlaunchable). The build is a prelude owned by
@@ -202,7 +199,7 @@ def frontend_service_cmd(
         f"{build_env} .venv/bin/python -m base.cluster.frontend_build ensure"
         f" --dir {shlex.quote(frontend_dir)} --gateway-port {gateway_port}{origin}"
     )
-    return f"{build} && cd {frontend_dir} && exec npm run start -- -p {port}"
+    return f"{build} && cd {frontend_dir} && exec pnpm run start -p {port}"
 
 
 def redis_admin_url(redis_url: str, admin_password: str) -> str:

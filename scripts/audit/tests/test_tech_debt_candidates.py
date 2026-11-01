@@ -19,7 +19,7 @@ def _run(
     python_dir.mkdir(parents=True)
     if frontend:
         (tmp_path / "ui/web/node_modules").mkdir(parents=True)
-    for name in ("uv", "npm", "uvx", "rg", "git"):
+    for name in ("uv", "pnpm", "uvx", "rg", "git"):
         key = name.upper()
         (bin_dir / name).write_text(
             "#!/bin/bash\n"
@@ -47,7 +47,7 @@ def _run(
         os.environ,
         PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
         UV_OUT="[]",
-        NPM_OUT="{}",
+        PNPM_OUT="{}",
         UVX_OUT="",
         RG_OUT="",
         RG_CODE="1",
@@ -78,8 +78,8 @@ def test_known_tool_findings_are_successful_not_errors(tmp_path: Path) -> None:
         {
             "RG_CODE": "0",
             "RG_OUT": "base/demo.py:1:TODO",
-            "NPM_CODE": "1",
-            "NPM_OUT": '{"demo":{"wanted":"2","latest":"3"}}',
+            "PNPM_CODE": "1",
+            "PNPM_OUT": '{"demo":{"wanted":"2","latest":"3"}}',
             "UVX_CODE": "3",
             "UVX_OUT": "base/demo.py:1: unused demo (90% confidence)",
         },
@@ -96,9 +96,9 @@ def test_known_tool_findings_are_successful_not_errors(tmp_path: Path) -> None:
         {"UVX_CODE": "1", "UVX_ERR": "syntax error"},
         {"UVX_CODE": "2", "UVX_ERR": "invalid arguments"},
         {"UV_CODE": "2", "UV_ERR": "registry unavailable"},
-        {"NPM_CODE": "1", "NPM_OUT": '{"error":{"code":"EACCES"}}'},
-        {"NPM_CODE": "1", "NPM_OUT": "{}"},
-        {"NPM_OUT": "not JSON"},
+        {"PNPM_CODE": "1", "PNPM_OUT": '{"error":{"code":"EACCES"}}'},
+        {"PNPM_CODE": "1", "PNPM_OUT": "{}"},
+        {"PNPM_OUT": "not JSON"},
         {"UV_OUT": "{}"},
         {"COCHANGE_OUT": "{}"},
         {"DOC_CODE": "1", "DOC_OUT": "Traceback: syntax error"},
@@ -116,7 +116,7 @@ def test_tool_or_parser_failure_marks_report_incomplete(
         if key.endswith("_ERR"):
             assert evidence in result.stdout
     if (
-        overrides.get("NPM_OUT") == "not JSON"
+        overrides.get("PNPM_OUT") == "not JSON"
         or overrides.get("UV_OUT") == "{}"
         or overrides.get("COCHANGE_OUT") == "{}"
     ):

@@ -148,13 +148,13 @@ From `ui/web`, run the affected tests and eslint, then check generated Next.js
 routes and types after the last UI edit:
 
 ```bash
-npx vitest related --run <changed-source-files>
-npx eslint <changed-files>
-npx next typegen
-npx tsc --noEmit
+pnpm exec vitest related --run <changed-source-files>
+pnpm exec eslint <changed-files>
+pnpm exec next typegen
+pnpm exec tsc --noEmit
 ```
 
-Use `npx vitest run <selected-test-files>` when selecting test files directly.
+Use `pnpm exec vitest run <selected-test-files>` when selecting test files directly.
 Regenerate OpenAPI and frontend types with `bash scripts/codegen/codegen-types.sh` from
 the repository root; do not hand-edit generated output.
 

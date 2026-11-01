@@ -19,9 +19,9 @@ case "$tool" in
         [[ -x .venv/bin/basedpyright ]] || skip "missing .venv/bin/basedpyright; run env -u VIRTUAL_ENV uv sync"
         ;;
     tsc|eslint|vitest)
-        [[ -d ui/web/node_modules ]] || skip "missing ui/web/node_modules; run (cd ui/web && npm ci)"
+        [[ -d ui/web/node_modules ]] || skip "missing ui/web/node_modules; run (cd ui/web && pnpm install --frozen-lockfile)"
         command -v node >/dev/null || skip "node is not installed"
-        command -v npm >/dev/null || skip "npm is not installed"
+        command -v pnpm >/dev/null || skip "pnpm is not installed"
         if [[ "$tool" == tsc ]]; then
             required_bins=(next tsc)
         elif [[ "$tool" == eslint ]]; then
@@ -30,7 +30,7 @@ case "$tool" in
             required_bins=(vitest)
         fi
         for bin in "${required_bins[@]}"; do
-            [[ -x "ui/web/node_modules/.bin/$bin" ]] || skip "missing frontend executable $bin; run (cd ui/web && npm ci)"
+            [[ -x "ui/web/node_modules/.bin/$bin" ]] || skip "missing frontend executable $bin; run (cd ui/web && pnpm install --frozen-lockfile)"
         done
         ;;
 esac

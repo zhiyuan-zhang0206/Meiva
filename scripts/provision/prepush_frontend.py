@@ -13,7 +13,8 @@ _CODE = (".ts", ".tsx", ".js", ".mjs", ".mts")
 _TYPE_INPUTS = {"ui/web/openapi.json", "ui/web/src/lib/contracts/types-generated.ts"}
 _GLOBAL = {
     "ui/web/package.json",
-    "ui/web/package-lock.json",
+    "ui/web/pnpm-lock.yaml",
+    "ui/web/pnpm-workspace.yaml",
     "ui/web/tsconfig.json",
     "ui/web/tests/vitest.config.mts",
     "ui/web/tests/vitest.flaky.config.mts",
@@ -75,7 +76,7 @@ def _vitest(paths: list[str], *, related: bool = False) -> int:
         [
             "bash",
             "-c",
-            'cd ui/web && exec npx --no-install vitest "$@"',
+            'cd ui/web && exec pnpm exec vitest "$@"',
             "vitest",
             *(["related", "--run"] if related else ["run"]),
             "--config",
@@ -101,7 +102,7 @@ def _eslint(existing: list[str]) -> int:
             "-o",
             "pipefail",
             "-c",
-            'cd ui/web && npx --no-install eslint --no-warn-ignored --max-warnings 0 "$@"',
+            'cd ui/web && pnpm exec eslint --no-warn-ignored --max-warnings 0 "$@"',
             "eslint",
             *files,
         ],
@@ -167,7 +168,7 @@ def main(tool: str) -> int:
             [
                 "bash",
                 "-c",
-                "cd ui/web && npx --no-install next typegen && npx --no-install tsc --noEmit",
+                "cd ui/web && pnpm exec next typegen && pnpm exec tsc --noEmit",
             ],
         )
     existing = [p for p in web if Path(p).is_file()]

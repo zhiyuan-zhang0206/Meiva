@@ -31,7 +31,7 @@ MEIVA_REQUIRE_GITHUB_PR=0
 MEIVA_TELEMETRY_OTLP_ENABLED=0
 MEIVA_TIMEZONE=UTC
 """
-_TOOLS = ("redis-server", "pgbouncer", "node", "npm", "npx")
+_TOOLS = ("redis-server", "pgbouncer", "node", "pnpm", "npm", "npx")
 
 
 class CleanHostDepsError(RuntimeError):

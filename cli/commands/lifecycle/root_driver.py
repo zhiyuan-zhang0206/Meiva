@@ -643,7 +643,7 @@ def launch_service_tree(
     return _launch_outcome(roster, snapshot)
 
 
-_NPM_CI_ARGV = ("npm", "ci")
+_PNPM_FROZEN_ARGV = ("pnpm", "install", "--frozen-lockfile")
 
 
 # meiva:note
@@ -662,7 +662,7 @@ def _ensure_frontend_deps(
         return
     from cli.commands._repo import ensure_frontend_deps
 
-    ensure_frontend_deps(repo, environ=environment, install_argv=_NPM_CI_ARGV)
+    ensure_frontend_deps(repo, environ=environment, install_argv=_PNPM_FROZEN_ARGV)
 
 
 # meiva:note

@@ -22,8 +22,8 @@ the memory graph.
 ## Development
 
 ```bash
-npm install
-npm run dev        # http://localhost:3000 (gateway expected on :8000)
+pnpm install --frozen-lockfile
+pnpm run dev        # http://localhost:3000 (gateway expected on :8000)
 ```
 
 Repo rules (AGENTS.md, repo root) apply — layout-contract classes must go
@@ -33,13 +33,13 @@ Playwright layout-invariant layers share `LAYOUT_INVARIANTS`.
 ## Checks
 
 ```bash
-npx vitest run    # unit + component tests
-npm run lint      # errors and warnings fail; no warning exemptions
-npx tsc --noEmit  # type check
-npm run build:analyze  # optional local Webpack bundle report
+pnpm exec vitest run    # unit + component tests
+pnpm run lint           # errors and warnings fail; no warning exemptions
+pnpm exec tsc --noEmit  # type check
+pnpm run build:analyze  # optional local Webpack bundle report
 ```
 
-Locally, run eslint and vitest on the paths you changed (`npx eslint <files>`,
-`npx vitest related --run <files>`) and `tsc --noEmit` once after your last edit;
-the project-wide `vitest run` and `npm run lint` belong to CI (see
+Locally, run eslint and vitest on the paths you changed (`pnpm exec eslint <files>`,
+`pnpm exec vitest related --run <files>`) and `pnpm exec tsc --noEmit` once after your last edit;
+the project-wide `vitest run` and `pnpm run lint` belong to CI (see
 [the testing guide](../../docs/conventions/testing.md)).

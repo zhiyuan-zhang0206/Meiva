@@ -159,7 +159,7 @@ def test_exec_into_prefixes_a_simple_command():
 
 
 def test_exec_into_passes_through_a_command_that_execs_itself():
-    cmd = "cd ui/web && npm run build && exec npm run start -- -p 3001"
+    cmd = "cd ui/web && pnpm run build && exec pnpm run start -p 3001"
     assert exec_into(cmd) == cmd
 
 
@@ -167,7 +167,7 @@ def test_frontend_service_command_is_exec_safe():
     from base.cluster import frontend_service_cmd
 
     cmd = frontend_service_cmd(3001, gateway_port=8000, browser_origin="")
-    assert "exec npm run start -- -p 3001" in cmd
+    assert "exec pnpm run start -p 3001" in cmd
     assert exec_into(cmd) == cmd
 
 
@@ -195,12 +195,12 @@ def test_exec_into_does_not_mistake_a_stray_exec_word_for_a_handover(cmd: str):
 
 def test_exec_into_rejects_an_exec_that_is_not_the_final_stage():
     with pytest.raises(ValueError, match="compound but never execs"):
-        exec_into("exec npm run build && npm run start")
+        exec_into("exec pnpm run build && pnpm run start")
 
 
 def test_exec_into_rejects_a_compound_command_that_never_execs():
     with pytest.raises(ValueError, match="compound but never execs"):
-        exec_into("npm run build && npm run start")
+        exec_into("pnpm run build && pnpm run start")
 
 
 def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home: Path) -> None:

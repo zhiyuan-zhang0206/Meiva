@@ -1098,7 +1098,7 @@ checkout on that host must use the same local directory. Missing
 tools/dependencies, unavailable load probes, excessive load, or a lock
 timeout print **WARNING: PRE-PUSH SKIPPED** with the tool and reason, then
 exit 0. Hook verbosity makes these successful skips visible. Install frontend
-dependencies with `(cd ui/web && npm ci)`; Python dependencies use
+dependencies with `(cd ui/web && pnpm install --frozen-lockfile)`; Python dependencies use
 `env -u VIRTUAL_ENV uv sync` after the worktree venv preflight above.
 
 `MEIVA_PREPUSH_LOCK_WAIT_SECONDS` bounds how long a contended push waits for a
@@ -1112,8 +1112,8 @@ on some pushes and absent on others. The tool's actual failure status propagates
 unchanged; a local skip is never
 evidence that the check ran. CI bypasses the wrapper: `backend-static` runs
 `uv run pyright` (full repository — CI is where the complete strict pass
-lives); `frontend` runs `npx next typegen`, `npx tsc --noEmit`, `npm run lint`
-and `npx vitest run --coverage`. These independent runners retain
+lives); `frontend` runs `pnpm exec next typegen`, `pnpm exec tsc --noEmit`, `pnpm run lint`
+and `pnpm exec vitest run --config tests/vitest.config.mts --coverage`. These independent runners retain
 enforcement; the structural CI job already skips the four duplicate hooks.
 
 ## CI (Continuous Integration)

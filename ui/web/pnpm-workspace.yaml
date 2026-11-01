@@ -1,0 +1,14 @@
+# Materialize a real hoisted node_modules via CoW clones (clonefile on macOS APFS,
+# hardlinks/copies on Linux) with zero symlinks pointing outside ui/web, keeping
+# Next.js/Turbopack, TypeScript AST tooling, and meizel symlink-free across worktrees.
+nodeLinker: hoisted
+packageImportMethod: clone-or-copy
+
+# eslint-plugin-jsx-a11y has not yet published an ESLint 10 peer range.
+strictPeerDependencies: false
+
+# Both packages ship prebuilt platform binaries via optionalDependencies; deny
+# fallback postinstall/node-gyp scripts during locked installs.
+allowBuilds:
+  '@parcel/watcher': false
+  '@swc/core': false

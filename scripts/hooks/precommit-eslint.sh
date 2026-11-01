@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ESLint over the frontend files a commit changed, through the same warning gate as
-# `npm run lint` (errors and warnings fail).
+# `pnpm run lint` (errors and warnings fail).
 #
 # The lint setup itself -- the config, the local rules, tsconfig and the
 # dependencies -- can change the verdict of files that did not change, so an edit to any of
@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 if [[ ! -x ui/web/node_modules/.bin/eslint ]]; then
-    echo "WARNING: ESLINT SKIPPED: missing ui/web/node_modules; run (cd ui/web && npm ci). CI must pass before merge." >&2
+    echo "WARNING: ESLINT SKIPPED: missing ui/web/node_modules; run (cd ui/web && pnpm install --frozen-lockfile). CI must pass before merge." >&2
     exit 0
 fi
 
@@ -21,7 +21,7 @@ files=()
 for path in "$@"; do
     case "$path" in
         ui/web/eslint.config.mjs | ui/web/eslint-rules/* | ui/web/package.json \
-            | ui/web/package-lock.json | ui/web/tsconfig.json)
+            | ui/web/pnpm-lock.yaml | ui/web/pnpm-workspace.yaml | ui/web/tsconfig.json)
             full=1
             ;;
         *) files+=("${path#ui/web/}") ;;
@@ -30,8 +30,8 @@ done
 
 cd ui/web
 if [[ "$full" == 1 ]]; then
-    exec npm run lint
+    exec pnpm run lint
 fi
 [[ ${#files[@]} -gt 0 ]] || exit 0
 # --no-warn-ignored: a file the config ignores is a clean pass here, not a null-rule warning.
-npx --no-install eslint --no-warn-ignored --max-warnings 0 "${files[@]}"
+pnpm exec eslint --no-warn-ignored --max-warnings 0 "${files[@]}"

@@ -63,9 +63,10 @@ def _assert_dependency_audit_job_runs_both_audits(workflow: dict[object, Any]) -
     assert audit_steps[1]["with"]["version"] == brew_pin.UV_VERSION
     assert audit_steps[2]["run"] == "uv audit --frozen"
     assert audit_steps[2]["continue-on-error"] is True
-    assert audit_steps[4]["working-directory"] == "ui/web"
-    assert audit_steps[4]["run"] == "npm audit"
-    assert audit_steps[4]["continue-on-error"] is True
+    assert audit_steps[4]["with"]["version"] == brew_pin.PNPM_VERSION
+    assert audit_steps[5]["working-directory"] == "ui/web"
+    assert audit_steps[5]["run"] == "pnpm audit"
+    assert audit_steps[5]["continue-on-error"] is True
 
 
 def _assert_pre_commit_uses_the_gitleaks_policy() -> None:

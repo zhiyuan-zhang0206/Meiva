@@ -36,7 +36,7 @@ function main(args) {
     return content;
   };
   for (const name of fs.readdirSync(path.dirname(entry)).filter(n=>n.endsWith('.mjs')).sort()) record(path.join(path.dirname(entry),name));
-  for (const relative of ['meizel/language/typescript_compiler/compiler.mjs','ui/web/package-lock.json','ui/web/node_modules/typescript/package.json','ui/web/node_modules/typescript/lib/typescript.js']) record(path.join(tool,relative));
+  for (const relative of ['meizel/language/typescript_compiler/compiler.mjs','ui/web/pnpm-lock.yaml','ui/web/node_modules/typescript/package.json','ui/web/node_modules/typescript/lib/typescript.js']) record(path.join(tool,relative));
   host.getSourceFile = (file,version) => {
     const normalized = path.resolve(file);
     const supplied = files.get(normalized);

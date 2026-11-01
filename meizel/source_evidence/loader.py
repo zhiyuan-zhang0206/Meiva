@@ -19,7 +19,7 @@ from meizel.source_evidence.model import Index, TsReport
 
 _ADAPTER = "meizel/source_evidence/typescript/"
 _COMPILER = "ui/web/node_modules/typescript/lib/"
-_LOCK = "ui/web/package-lock.json"
+_LOCK = "ui/web/pnpm-lock.yaml"
 _PACKAGE = "ui/web/node_modules/typescript/package.json"
 
 
@@ -78,9 +78,9 @@ def _dependencies(index: Index, evidence: Evidence) -> dict[str, str]:
         contents[item.path] = content
     if not expected <= contents.keys():
         raise MeizelError("TS index omitted required tool dependencies")
-    locked = _version(contents[_LOCK], ("packages", "node_modules/typescript", "version"))
-    if index.compiler_version != locked or index.compiler_version != _version(
-        contents[_PACKAGE], ("version",)
+    locked = _locked_typescript_version(contents[_LOCK])
+    if index.compiler_version != locked or index.compiler_version != _package_version(
+        contents[_PACKAGE]
     ):
         raise MeizelError("TS compiler version does not match the locked installation")
     return contents
@@ -94,18 +94,70 @@ def _is_table(value: object) -> TypeGuard[dict[str, object]]:
     return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
 
 
-def _version(text: str, keys: tuple[str, ...]) -> str:
+def _package_version(text: str) -> str:
     try:
         value: object = json.loads(text)
     except ValueError as error:
         raise MeizelError("invalid TS compiler installation metadata") from error
-    for key in keys:
-        if not _is_table(value) or key not in value:
-            raise MeizelError("invalid TS compiler installation metadata")
-        value = value[key]
-    if not isinstance(value, str):
+    if not _is_table(value) or "version" not in value:
+        raise MeizelError("invalid TS compiler installation metadata")
+    version = value["version"]
+    if not isinstance(version, str):
         raise MeizelError("invalid TS compiler version")
-    return value
+    return version
+
+
+_TS_IMPORTER_SCOPES = frozenset(
+    {
+        ("importers", ".", "dependencies", "typescript"),
+        ("importers", ".", "devDependencies", "typescript"),
+    }
+)
+
+
+def _unquote(raw: str) -> str:
+    text = raw.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1]
+    return text
+
+
+def _lock_body_lines(text: str) -> list[str]:
+    lines = [
+        line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not lines or not lines[0].startswith("lockfileVersion:"):
+        raise MeizelError("invalid TS compiler installation metadata")
+    if _unquote(lines[0].partition(":")[2]) != "9.0":
+        raise MeizelError("invalid TS compiler installation metadata")
+    return lines[1:]
+
+
+def _yaml_line_entry(line: str) -> tuple[int, str, str] | None:
+    indent = len(line) - len(line.lstrip(" "))
+    key, sep, rest = line.strip().partition(":")
+    if not sep or indent % 2:
+        return None
+    return indent // 2, _unquote(key), rest
+
+
+def _locked_typescript_version(text: str) -> str:
+    scope: tuple[str, ...] = ("", "", "", "")
+    for line in _lock_body_lines(text):
+        parsed = _yaml_line_entry(line)
+        if parsed is None:
+            continue
+        level, clean_key, rest = parsed
+        if level == 0 and scope[0] == "importers":
+            break
+        if level < 4:
+            scope = (*scope[:level], clean_key, *("",) * (3 - level))
+        elif level == 4 and scope in _TS_IMPORTER_SCOPES and clean_key == "version":
+            version = _unquote(rest).partition("(")[0].strip()
+            if version:
+                return version
+            break
+    raise MeizelError("invalid TS compiler installation metadata")
 
 
 def _sources(

@@ -10,7 +10,7 @@ tags: [locality, tool]
 Python and TypeScript enter the same `check`, `bootstrap`, `sync`, `explain` and
 `debt` pipeline. Python uses the standard-library AST; TypeScript uses the locked
 TypeScript compiler installed in the **tool checkout's** `ui/web/node_modules`.
-Install Node and run `npm ci` in that directory before checking TypeScript. Meizel
+Install Node and run `pnpm install --frozen-lockfile` in that directory before checking TypeScript. Meizel
 never installs dependencies or executes the inspected code. Python-only checks do
 not launch Node. CLI checks and bootstrap reports identify source counts by backend.
 

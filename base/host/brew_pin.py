@@ -31,6 +31,9 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
 # meiva:link base/host/docs/brew_pin.meiva.okf.md
 UV_VERSION = "0.13.1"
 
+# meiva:link base/host/docs/brew_pin.meiva.okf.md
+PNPM_VERSION = "11.9.0"
+
 UV_ASSET_SHA256: dict[str, str] = {
     "aarch64-apple-darwin": "cfe454573412ff7380d15fc7dae5997ab53ffce72fce0a78e91ddbc84001acd2",
     "x86_64-apple-darwin": "bb7b805bdcf3d0bc8c74ceb94569e6b3e8aa35bd492acdbb9d46bf46d9d4ff6b",
