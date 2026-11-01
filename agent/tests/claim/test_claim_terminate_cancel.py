@@ -110,8 +110,10 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
         thread_config(tid),
     )
     assert cmd.goto == END
-    # Turn boundary only: no process exit, no other state touched.
-    assert cmd.update == {"turn_active": False}
+    # meiva:note
+    # Turn boundary only: no process exit. The wake polarity belongs to the boundary —
+    # it resets so the next invocation resolves its own.
+    assert cmd.update == {"turn_active": False, "non_human_wake": False}
 
 
 async def test_claim_hosted_ends_turn_instead_of_parking(
@@ -146,7 +148,7 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
     )
 
     assert cmd.goto == END
-    assert cmd.update == {"turn_active": False, "turn_idle": True}
+    assert cmd.update == {"turn_active": False, "turn_idle": True, "non_human_wake": False}
 
 
 async def test_claim_hosted_never_enters_idling_status(

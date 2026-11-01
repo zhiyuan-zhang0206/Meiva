@@ -251,10 +251,17 @@ def test_restart_overlay_is_validated_before_it_is_forwarded(
     assert valid.status_code == 200
     assert valid.json() == {"status": "enqueued"}
     assert invalid.status_code == 422
+    # meiva:note
+    # The forward carries the request model verbatim (`body.model_dump()`), so a field
+    # the caller left unset arrives as its default: `message` is None here.
     assert runner.payloads("lifecycle") == [
         {
             "path": f"/api/agents/{agent_id}/restart",
-            "body": {"source": "user", "config_overlay": {"completion_notice_policy": "hourly"}},
+            "body": {
+                "source": "user",
+                "message": None,
+                "config_overlay": {"completion_notice_policy": "hourly"},
+            },
         }
     ]
 
