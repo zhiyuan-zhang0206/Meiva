@@ -139,11 +139,30 @@ def read_schedule_rows(access: GatewayAccess) -> list[tuple[int, str, str]]:
     return rows
 
 
+def _builtin_templates() -> dict[str, str]:
+    from base.daemon.schedules.builtin_schedules import MANIFEST_PATH, load_manifest
+
+    schedules_dir = MANIFEST_PATH.parent
+    return {
+        entry.name: (schedules_dir / entry.script).read_text(encoding="utf-8")
+        for entry in load_manifest(MANIFEST_PATH)
+    }
+
+
 # meiva:note
 # The rows `read_schedule_rows` returned, dumped as a JSON list of `[id, name, script]`.
+# Built-in schedules (`schedules/manifest.json`) are resynced to this checkout's templates
+# at gateway startup (`provision_builtin_schedules`), so an offline pre-update sweep checks
+# the template that `up` will install rather than the previous release's stored snapshot;
+# non-manifest (agent-created) schedules keep their exact stored script.
 def _read_rows_file(path: str) -> list[tuple[int, str, str]]:
     data: Any = json.loads(Path(path).read_text(encoding="utf-8"))
-    return [(int(row[0]), str(row[1]), str(row[2])) for row in data]
+    builtins = _builtin_templates()
+    rows: list[tuple[int, str, str]] = []
+    for row in data:
+        row_id, name, script = int(row[0]), str(row[1]), str(row[2])
+        rows.append((row_id, name, builtins.get(name, script)))
+    return rows
 
 
 def _read_rows(source: RowsFromFile | RowsFromGateway) -> tuple[StoredSchedule, ...]:

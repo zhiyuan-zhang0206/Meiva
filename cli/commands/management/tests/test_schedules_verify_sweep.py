@@ -178,6 +178,26 @@ def test_a_rows_file_sweeps_the_dump_without_the_gateway_or_a_report(
     assert list(emitted_events) == []
 
 
+def test_a_rows_file_overlays_builtin_templates_while_keeping_custom_rows_verbatim(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], emitted_events: EmittedEvents
+) -> None:
+    rows = tmp_path / "rows.json"
+    rows.write_text(
+        json.dumps(
+            [
+                [1, "self-evolution-weekly", "import zz_meiva_old_builtin_snapshot\n"],
+                [9, "custom-agent-job", "import zz_meiva_custom_missing\n"],
+            ]
+        )
+    )
+    assert _sweep(RowsFromFile(str(rows)), emitted_events.producer) == 1
+    out = capsys.readouterr().out
+    assert "checked=2 green=1 red=1 rc=1" in out
+    assert "name=self-evolution-weekly" not in out
+    assert "RED id=9 name=custom-agent-job missing=zz_meiva_custom_missing" in out
+    assert list(emitted_events) == []
+
+
 @pytest.mark.parametrize(
     ("content", "error"),
     [("not json", "JSONDecodeError"), (None, "FileNotFoundError"), ('[[1, "x"]]', "IndexError")],
