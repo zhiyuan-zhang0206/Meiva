@@ -1,7 +1,6 @@
 """Standalone SDK creation preserves its original accepted result."""
 
 import json
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
@@ -19,6 +18,7 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.config.tests.configuration import data_plane_environment
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -378,7 +378,7 @@ def test_receipt_replays_before_new_default_and_timezone_resolution(
                 str(interval),
                 key,
             ],
-            env=dict(os.environ)
+            env=data_plane_environment()
             | {"MEIVA_AGENT_ID": str(actor), "MEIVA_TIMEZONE": zone, "MEIVA_CONFIG_FETCH": "skip"},
             capture_output=True,
             text=True,

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -16,9 +17,11 @@ import pytest
 import meiva
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
+from base.config.tests.configuration import data_plane_environment
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.proc import run_bounded
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -94,22 +97,37 @@ def test_schedule_closes_constructed_writer_and_preserves_loop_error(tmp_path: P
 
 # meiva:note
 # The gate counts first-parent commits up to the SHA the process loaded. The checkout gains a
-# commit after the capture, and the session still names the older count.
+# commit after the capture, and the session still names the older count. `fresh_schedule_entry`
+# calls `ConfigBoot().boot()`, which loads `.env` into `os.environ` once per process, so the
+# probe runs in its own child process with `data_plane_environment()`.
 def test_database_sessions_name_the_image_loaded_not_the_checkout_now(
     tmp_path: Path, db_url: str
 ) -> None:
+    _ = db_url
     image = _repo_with_commits(tmp_path, 3)
+    assert image.sha is not None
     _git(tmp_path, "commit", "--allow-empty", "-m", "the checkout moved on")
+    result = run_bounded(
+        [sys.executable, "-I", __file__, str(tmp_path), image.sha, str(tmp_path / "home")],
+        env=data_plane_environment(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == "meiva:schedule-probe:v3"
 
+
+def _probe_application_name(repo: Path, sha: str, home: Path) -> None:
     with (
         fresh_schedule_entry(
-            image=image, process="schedule-probe", home=tmp_path / "home"
+            image=LoadedCommit(repo, sha), process="schedule-probe", home=home
         ) as inputs,
         inputs.database().connect(autocommit=True) as conn,
     ):
         row = conn.execute("SHOW application_name").fetchone()
-
-    assert row == ("meiva:schedule-probe:v3",)
+    assert row is not None
+    print(row[0])
 
 
 def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
@@ -142,3 +160,7 @@ def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
 
 def test_cluster_timezone_is_the_cluster_setting() -> None:
     assert cluster_timezone() == settings.general.timezone
+
+
+if __name__ == "__main__":
+    _probe_application_name(Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]))

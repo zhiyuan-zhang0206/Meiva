@@ -14,6 +14,7 @@ from base.agents.context.clients import ClientSet
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.config.tests.configuration import data_plane_environment
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -24,6 +25,15 @@ from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine, runner
 from services.wake.schedule_manager.stall_policy import StallPolicy
+
+
+# meiva:note
+# `runner.run` defaults to a fresh `ConfigBoot()` over `os.environ`, which holds the
+# unreachable sentinel unless a test hands the runner the provisioned data plane.
+def _runner_boot() -> ConfigBoot:
+    config = ConfigBoot(environment=data_plane_environment())
+    config.read_process_environment()
+    return config
 
 
 def _schedule(conn: psycopg.Connection, script: str = "pass") -> int:
@@ -60,7 +70,7 @@ def test_the_script_runs_as_the_schedule_with_its_history_open_under_the_guard(
     )
     sid = _schedule(db_conn, script)
 
-    assert runner.run(sid) == 0
+    assert runner.run(sid, config=_runner_boot()) == 0
 
     # meiva:note
     # the test's own repr.
@@ -79,7 +89,7 @@ def test_a_script_crash_closes_its_history_and_stops_the_guard(
 ) -> None:
     sid = _schedule(db_conn, "raise RuntimeError('boom')\n")
 
-    assert runner.run(sid) == 1
+    assert runner.run(sid, config=_runner_boot()) == 1
 
     assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(False,)]
     assert not [t for t in threading.enumerate() if t.name.endswith("-stall-guard")]
@@ -112,7 +122,7 @@ def test_runpy_script_receives_the_same_entry_builders(
     db_conn.execute("UPDATE schedules SET script = %s WHERE id = %s", (script, sid))
     db_conn.commit()
 
-    assert runner.run(sid) == 0
+    assert runner.run(sid, config=_runner_boot()) == 0
     assert marker.read_text() == "borrowed"
 
 
@@ -122,8 +132,7 @@ def test_runpy_script_receives_the_same_entry_builders(
 # script must still run as `schedule:<id>`, under an environment the SDK's `git` can be handed —
 # before this, such a script listed no skill names at all and failed in `require_actor`.
 def _engine_root() -> tuple[engine.RunnerRoot, ClientSet]:
-    config = ConfigBoot()
-    config.read_process_environment()
+    config = _runner_boot()
     machine = ConfiguredMachineIdentity(config)
     image = process_context.loaded_code_image()
     gate = ProcessDbGate(process=process_name(), version=CodeVersion(image).get)
