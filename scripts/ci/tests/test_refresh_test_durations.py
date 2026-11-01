@@ -221,6 +221,7 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(tmp_path: Path) ->
             "not flaky",
             "-n",
             "4",
+            "--dist=loadfile",
             "--splits",
             "8",
             "--group",

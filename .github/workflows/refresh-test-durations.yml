@@ -79,21 +79,6 @@ jobs:
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime
 
-      # The measured backend population includes the TypeScript comment-parser tests,
-      # which shell out to node against `ui/web/node_modules/typescript`; without this
-      # install each shard that draws one of them fails and the timings never refresh
-      # (task #5479).
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ui/web/package-lock.json
-
-      - name: Install frontend deps (TypeScript comment parser)
-        working-directory: ui/web
-        run: npm ci
-
       # The junit comes from the first attempt only: a retry is a measurement device, and the
       # nightly verdict must not inherit a first-attempt failure washed green by it.
       - name: Measure backend shard

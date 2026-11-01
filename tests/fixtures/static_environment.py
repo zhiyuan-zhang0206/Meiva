@@ -26,18 +26,10 @@ STATIC_TEST_PATHS = (
 
 
 # meiva:note
-# These compiler contracts require the existing native job's locked Node/TypeScript installation.
-# Keep these exact files separate from the enclosing standard-library static tool contracts.
+# All meizel compiler contracts now run in the static lane (backend-static-tests)
+# since it installs Node and the locked TypeScript package. No native exceptions remain.
 # meiva:link tests/fixtures/docs/static-environment.meiva.okf.md
-NATIVE_TEST_PATHS = (
-    "meizel/language/tests/test_typescript.py",
-    "meizel/language/tests/test_typescript_ast.py",
-    "meizel/language/tests/test_typescript_environment.py",
-    "meizel/tests/explain/test_typescript.py",
-    "meizel/tests/languages/test_parity.py",
-    "meizel/tests/languages/test_test_code_accounting.py",
-    "meizel/tests/languages/test_typescript_scopes.py",
-)
+NATIVE_TEST_PATHS: tuple[str, ...] = ()
 
 
 class TestEnvironment(StrEnum):

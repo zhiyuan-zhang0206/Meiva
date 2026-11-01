@@ -17,14 +17,13 @@ tags:
 `base/sessions/pty/tests/test_pty_sessions_screen.py`, and the environment boundary
 and selection canaries.
 Directory ownership includes descendant tests and their existing local fixtures,
-except the exact `NATIVE_TEST_PATHS` compiler-contract files: the TypeScript
-scanner, AST, language parity, holder-evidence, `[roots]`-warning scope tests and the
-whole-tree test-code accounting table, which analyzes this repository and so needs the same
-Node producer. They use the real Node
-producer and locked TypeScript package and run in the existing native backend
-job with Node/npm dependencies. Static recursion excludes those files, explicit
-static requests refuse them, and native `--omit-static-tests` traverses the owned
-ancestor directories to retain them. The older Python explain contracts stay static.
+including all `meizel` compiler-contract files (the TypeScript scanner, AST,
+language parity, holder-evidence, `[roots]`-warning scope tests and the whole-tree
+test-code accounting table). These contracts run in the static lane because
+`backend-static-tests` installs Node and the locked TypeScript package, eliminating
+the prior `NATIVE_TEST_PATHS` exceptions that ran under native shards.
+Native `--omit-static-tests` omits the entire `meizel` tree along with the other
+owned static suites. The older Python explain contracts stay static.
 The tool contracts inspect ASTs, files, workflow definitions, synthetic reports
 and temporary Git repositories. Path contracts operate on their private home;
 the PTY screen model consumes byte/ANSI sequences through pyte without starting
@@ -45,12 +44,15 @@ Keep integration tests that require the data plane outside these owned paths;
 do not temporarily enable drivers inside a static process.
 
 Required CI runs this lane once inside `backend-static-tests` with four xdist
-workers, each retaining the process-lifetime native refusal and isolation
-guards. JUnit validation, executed counts and combined coverage include all
-workers. Unhandled test-thread exceptions are errors in the actual CI command;
-a refused background driver call cannot leave only a warning and green JUnit.
-The job installs Python dependencies without Postgres/Redis binaries, Grafana,
-Node or browser setup. It runs alongside `backend-static`, which retains ruff,
+workers, using `--dist=loadfile` to keep whole test files on a single worker and
+avoid duplicate module fixture calculations across workers, each retaining the
+process-lifetime native refusal and isolation guards. JUnit validation, executed counts
+and combined coverage include all workers. Unhandled test-thread exceptions are errors
+in the actual CI command; a refused background driver call cannot leave only a warning
+and green JUnit.
+The job installs Python and Node dependencies (with frontend npm dependencies for
+TypeScript compiler contracts) without Postgres/Redis binaries, Grafana, or browser
+setup. It runs alongside `backend-static`, which retains ruff,
 types, migration and native Grafana smoke checks, and the existing structure job.
 The required backend aggregator checks both jobs. Native full, selected and flaky commands use
 `--omit-static-tests` from the same owner; combined counts and coverage include
