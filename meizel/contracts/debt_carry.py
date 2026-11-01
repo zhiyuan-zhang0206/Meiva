@@ -19,15 +19,15 @@ from meizel.contracts.debt import (
     file_key,
     total,
 )
-from meizel.contracts.debt_edit import created_notice, record, resolve, write_baseline
-from meizel.contracts.debt_edit import prune as prune_debt
-from meizel.contracts.debt_report import (
-    by_target,
-    diff,
+from meizel.contracts.debt_edit import (
+    created_notice,
     read_baselines,
-    summarize,
-    totals_at,
+    record,
+    resolve,
+    write_baseline,
 )
+from meizel.contracts.debt_edit import prune as prune_debt
+from meizel.contracts.debt_report import by_target, diff, summarize, totals_at
 from meizel.contracts.debt_rules import measurement_lines, rule_change, rule_diff
 from meizel.contracts.debt_sites import approved, format_approved, format_sites, sites
 from meizel.contracts.debt_symbol import (

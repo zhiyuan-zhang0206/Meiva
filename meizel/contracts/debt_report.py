@@ -9,58 +9,31 @@ from __future__ import annotations
 import json
 import tomllib
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, TypeGuard
 
-from meizel.contracts.debt import (
-    PATCH_CODES,
-    TABLE_KEY,
-    DebtTable,
-    count_of,
-    parse_debt,
-    total,
-    unowned,
-)
+from meizel.contracts.debt import PATCH_CODES, TABLE_KEY, count_of, total, unowned
+from meizel.contracts.debt_edit import Baselines, read_baselines
 from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import MANIFEST, Checkout, Universe, parent_of
 
 __all__ = [
-    "Baselines",
+    "Recorded",
     "by_target",
     "diff",
     "manifest_texts_at",
-    "read_baselines",
+    "recorded_when_merged",
     "summarize",
     "totals_at",
 ]
 
-Baselines = dict[str, DebtTable]
-
-
-def _parse(text: str, where: str) -> DebtTable:
-    problems: list[str] = []
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
-        raise MeizelError(f"{where}: invalid TOML: {error}") from error
-    table = parse_debt(document[TABLE_KEY], problems.append) if TABLE_KEY in document else {}
-    if problems:
-        raise MeizelError(f"{where}: " + "; ".join(problems))
-    return table
-
-
-def read_baselines(universe: Universe, texts: Mapping[str, str] | None = None) -> Baselines:
-    """The recorded debt of every directory of the working tree that has any."""
-    found: Baselines = {}
-    for directory in sorted(universe.manifest_dirs):
-        path = manifest_path(directory)
-        raw = texts[path] if texts is not None and path in texts else universe.repo.load_text(path)
-        table = _parse(raw, path)
-        if table:
-            found[directory] = table
-    return found
+# meiva:note
+# What one tree records, entry by entry: owner directory -> code -> key -> count. `Baselines` carries
+# the owner and the reason each entry waits for; the views here compare counts, and a ref may record a
+# code the checker has since retired, which `Code` cannot spell.
+Recorded = dict[str, dict[str, dict[str, int]]]
 
 
 def _top(directory: str) -> str:
@@ -208,23 +181,31 @@ def _is_table(value: object) -> TypeGuard[dict[str, object]]:
     return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
 
 
+# meiva:note
+# Every entry one manifest text records, read leniently: a ref is history, and it may record debt
+# under a code the tool has since retired without stopping the comparison.
+def _cells_in(text: str) -> dict[str, dict[str, int]]:
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return {}
+    table = document.get(TABLE_KEY)
+    if not _is_table(table):
+        return {}
+    return {
+        code: {key: count_of(n) for key, n in rows.items()}
+        for code, rows in table.items()
+        if _is_table(rows)
+    }
+
+
 def _totals_in(text: str) -> Counter[str]:
     """Recorded counts per code in one manifest text, read leniently.
 
     A ref is history: it may record debt under a code the tool has since retired, and that must
     still count toward its total instead of stopping the comparison.
     """
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return Counter()
-    table = document.get(TABLE_KEY)
-    counts: Counter[str] = Counter()
-    if _is_table(table):
-        for code, rows in table.items():
-            if _is_table(rows):
-                counts[code] += sum(count_of(n) for n in rows.values())
-    return counts
+    return Counter({code: sum(rows.values()) for code, rows in _cells_in(text).items()})
 
 
 # meiva:note
@@ -258,6 +239,84 @@ def totals_at(repo: Checkout, ref: str) -> Counter[str]:
     return totals
 
 
+# meiva:note
+# What one tree's baselines record, entry by entry: the working tree keeps the owner and the reason
+# each entry waits for, and a merge decides counts, which is all these views compare.
+def _recorded(baselines: Baselines) -> Recorded:
+    return {
+        owner: {
+            code.value: {key: entry.count for key, entry in rows.items()}
+            for code, rows in table.items()
+        }
+        for owner, table in baselines.items()
+    }
+
+
+# meiva:note
+# What `ref` records, entry by entry. `manifest_texts_at` reads the blobs, so a ref costs no checkout.
+def _recorded_at(repo: Checkout, ref: str) -> Recorded:
+    recorded: Recorded = {}
+    for path, text in manifest_texts_at(repo, ref).items():
+        cells = _cells_in(text)
+        if cells:
+            recorded[parent_of(path)] = cells
+    return recorded
+
+
+def _recorded_totals(recorded: Recorded) -> Counter[str]:
+    totals: Counter[str] = Counter()
+    for table in recorded.values():
+        for code, rows in table.items():
+            totals[code] += sum(rows.values())
+    return totals
+
+
+# meiva:note
+# The commit this change and `ref` last shared: what the change itself is measured from.
+def _common_ancestor(repo: Checkout, ref: str) -> str:
+    if ref.startswith("-"):
+        raise MeizelError(f"{ref}: not a git ref")
+    return repo.run_text("merge-base", "HEAD", ref).strip()
+
+
+# meiva:note
+# What this change would leave recorded on `ref`: an entry the change moved, at the count the change
+# gives it; every other entry at the count `ref` records now.
+#
+# `debt diff` compared the tree with `ref` alone, so a branch that had fallen behind still recorded
+# every entry `ref` had paid since it forked, and the report named `ref`'s own files as the change's
+# growth. Three trees name the change instead: the commit it shares with `ref` is what it started
+# from, so an entry neither side moved is unchanged, and an entry only `ref` moved is `ref`'s payment.
+#
+# An entry both sides moved keeps the change's own count. Its merged count is settled when the author
+# resolves the merge, and until then the change's own number can accuse a change of debt it did not
+# add, but it can never hide debt the change did add.
+def recorded_when_merged(repo: Checkout, ref: str) -> Recorded:
+    started = _recorded_at(repo, _common_ancestor(repo, ref))
+    return _merged(started, _recorded_at(repo, ref), _recorded(read_baselines(repo.universe())))
+
+
+def _merged(started: Recorded, now: Recorded, change: Recorded) -> Recorded:
+    merged: Recorded = {}
+    for owner in sorted({*started, *now, *change}):
+        table: dict[str, dict[str, int]] = {}
+        for code in sorted({c for side in (started, now, change) for c in side.get(owner, {})}):
+            was, stood, mine = (
+                side.get(owner, {}).get(code, {}) for side in (started, now, change)
+            )
+            rows: dict[str, int] = {}
+            for key in sorted({*was, *stood, *mine}):
+                changed = mine.get(key, 0)
+                landed = changed if changed != was.get(key, 0) else stood.get(key, 0)
+                if landed:
+                    rows[key] = landed
+            if rows:
+                table[code] = rows
+        if table:
+            merged[owner] = table
+    return merged
+
+
 def diff(repo: Checkout, ref: str) -> tuple[list[str], bool]:
     """Per-code totals against `ref`, and whether any code grew.
 
@@ -265,9 +324,7 @@ def diff(repo: Checkout, ref: str) -> tuple[list[str], bool]:
     leaves them unchanged.
     """
     before = totals_at(repo, ref)
-    after = Counter(
-        {code.value: n for code, n in _by_code(read_baselines(repo.universe())).items()}
-    )
+    after = _recorded_totals(recorded_when_merged(repo, ref))
     codes = sorted(set(before) | set(after))
     lines = [f"{'code':<20}{ref[:12]:>14}{'tree':>8}{'change':>8}"]
     grew = False
@@ -291,7 +348,7 @@ def _target_of(key: str) -> str:
     return key.partition("#")[2].partition(" ")[2]
 
 
-def _targets(tables: list[dict[str, dict[str, object]]]) -> Targets:
+def _targets(tables: Iterable[Mapping[str, Mapping[str, object]]]) -> Targets:
     """Recorded patch counts per `(code, target)`, read leniently from `code -> key -> count`."""
     counts: Targets = Counter()
     patch_codes = {code.value for code in PATCH_CODES}
@@ -301,17 +358,6 @@ def _targets(tables: list[dict[str, dict[str, object]]]) -> Targets:
                 for key, value in rows.items():
                     counts[(code, _target_of(key))] += count_of(value)
     return counts
-
-
-def _tables_in(text: str) -> list[dict[str, dict[str, object]]]:
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return []
-    table = document.get(TABLE_KEY)
-    if not _is_table(table):
-        return []
-    return [{c: r for c, r in table.items() if _is_table(r)}]
 
 
 def _group(target: str, prefixes: list[str], depth: int) -> str:
@@ -344,13 +390,8 @@ def by_target(repo: Checkout, ref: str, prefixes: list[str], depth: int) -> list
     of a target; with them, a target counts under its longest prefix and the rest under `(other)`.
     Unchanged groups are left out, except the listed prefixes, which always show.
     """
-    before = _targets(
-        [t for text in manifest_texts_at(repo, ref).values() for t in _tables_in(text)]
-    )
-    tree = read_baselines(repo.universe())
-    after = _targets(
-        [{c.value: dict(rows) for c, rows in table.items()} for table in tree.values()]
-    )
+    before = _targets([_cells_in(text) for text in manifest_texts_at(repo, ref).values()])
+    after = _targets(recorded_when_merged(repo, ref).values())
     groups = _grouped(before, after, prefixes, depth)
     rows = sorted(
         (item for item in groups.items() if item[1][0] != item[1][1] or item[0][1] in prefixes),

@@ -22,6 +22,13 @@ not a repair and must not look like one.
   counts under the longest one, the rest under `(other)`; a listed prefix always
   shows). Totals, not directories, are compared, so moved debt is not growth.
   The caller chooses `fail` or `warn`; there is no default.
+- The comparison is a **merge**, not a subtraction: an entry the change itself moved is judged at the
+  count the change gives it, and every other entry at the count `ref` records now, so a branch that
+  has fallen behind is not charged for what `ref` paid in the meantime. An entry both sides moved
+  keeps the change's own count: its merged count is settled when the author resolves the merge, and
+  until then the change's own number can accuse a change of debt it did not add, but it can never
+  hide debt the change did add. The totals column reads the same three trees, so `--by-target`
+  groups them the same way.
 - A change that edits **what is measured** is judged in two parts
   (`meizel/contracts/debt_rules.py`): `debt diff` detects it by itself and prints `rules −N` and
   `content −M` on their own line, plus one line per declaration, policy entry or rule file it

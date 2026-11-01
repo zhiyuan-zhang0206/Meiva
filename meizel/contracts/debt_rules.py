@@ -32,9 +32,9 @@ from typing import TypeGuard
 
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import TABLE_KEY, set_debt, total
+from meizel.contracts.debt_edit import Baselines, read_baselines, record
 from meizel.contracts.debt_edit import prune as prune_debt
-from meizel.contracts.debt_edit import record
-from meizel.contracts.debt_report import Baselines, manifest_texts_at, read_baselines
+from meizel.contracts.debt_report import Recorded, manifest_texts_at, recorded_when_merged
 from meizel.contracts.debt_symbol import SymbolMove, defines, retarget_imports
 from meizel.contracts.declare import declare
 from meizel.contracts.policy import POLICY, load_policy, policy_at
@@ -89,7 +89,7 @@ class RuleDiff:
         self,
         base: Counter[str],
         regenerated: Baselines,
-        tree: Baselines,
+        tree: Recorded,
         ref: str,
         rewritten: Sequence[str] = (),
         ignored: Sequence[str] = (),
@@ -97,7 +97,7 @@ class RuleDiff:
         self.ref = ref
         self.base = base
         self.found = _totals(regenerated)
-        self.tree = _totals(tree)
+        self.tree = _count_totals(tree)
         self.excess = _excess(tree, regenerated)
         self.rewritten = tuple(rewritten)
         self.ignored = tuple(ignored)
@@ -160,19 +160,30 @@ def _totals(baselines: Baselines) -> Counter[str]:
     return counts
 
 
+def _count_totals(recorded: Recorded) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for table in recorded.values():
+        for code, rows in table.items():
+            counts[code] += sum(rows.values())
+    return counts
+
+
 # meiva:note
 # Every (directory, code, key) the tree records beyond what the regenerated base records. The base is
 # measured at the change's own paths (a moved file is moved before it is measured), so a rename is
 # neither a rule change nor growth, and no key needs translating.
-def _excess(tree: Baselines, found: Baselines) -> list[tuple[str, str, str, int, int]]:
+def _excess(tree: Recorded, found: Baselines) -> list[tuple[str, str, str, int, int]]:
     out: list[tuple[str, str, str, int, int]] = []
     for owner, table in sorted(tree.items()):
+        known = {
+            code.value: {key: entry.count for key, entry in rows.items()}
+            for code, rows in found.get(owner, {}).items()
+        }
         for code, rows in table.items():
             for key, have in sorted(rows.items()):
-                entry = found.get(owner, {}).get(code, {}).get(key)
-                want = entry.count if entry is not None else 0
-                if have.count > want:
-                    out.append((owner or ".", code.value, key, have.count, want))
+                want = known.get(code, {}).get(key, 0)
+                if have > want:
+                    out.append((owner or ".", code, key, have, want))
     return out
 
 
@@ -457,5 +468,4 @@ def rule_diff(
         invalidate_policy_caches()
         checkout.stage_all()
         found = regenerated(checkout, ref, jobs)
-    tree = repo.universe()
-    return RuleDiff(base, found, read_baselines(tree), ref, rewritten, ignored)
+    return RuleDiff(base, found, recorded_when_merged(repo, ref), ref, rewritten, ignored)
