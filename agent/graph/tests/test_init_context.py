@@ -6,6 +6,7 @@ claim's compact return, the auto-compact hook); the drift between those copies
 is what these tests pin down now that there is one owner.
 """
 
+import os
 import random
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -78,6 +79,7 @@ def _runtime(
     return Runtime(
         context=MeivaContext(
             meiva_home=resolve_meiva_home(),
+            environ=os.environ,
             user_home=Path.home(),
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             clients=snapshot_clients(),

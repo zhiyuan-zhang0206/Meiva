@@ -1,6 +1,7 @@
 """The claim-node test harness: a runtime around a fake LLM, a direct inbound INSERT of any kind, the thread config and the pool-visibility barrier."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -56,6 +57,7 @@ def make_runtime(
     retained = meiva.context
     ctx = MeivaContext(
         meiva_home=resolve_meiva_home(),
+        environ=os.environ,
         user_home=Path.home(),
         clients=retained.clients,
         machine=retained.machine,

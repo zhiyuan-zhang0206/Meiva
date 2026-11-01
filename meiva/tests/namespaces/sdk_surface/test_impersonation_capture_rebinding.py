@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -80,6 +81,7 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
     prior = getattr(meiva, "context", None)
     tally = SdkCallTally()
     context = MeivaContext(
+        environ=os.environ,
         identity=AgentIdentity(owner.agent_id, True),
         sdk_calls=tally,
         sdk_capture=_CaptureOwner(previous_gate),
@@ -143,6 +145,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     clients = ClientSet(database=lambda: database)
     process_context.bind_context(
         MeivaContext(
+            environ=os.environ,
             identity=AgentIdentity(None, True, lease=borrowed),
             sdk_capture=_CaptureOwner(gate),
             clients=clients,
