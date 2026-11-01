@@ -79,29 +79,37 @@ def tree_entries(root: Path, revision: str | None) -> dict[str, tuple[str, str]]
     return entries
 
 
-# meiva:note
-# Changed checks compare actual Git blobs from HEAD/index or a resolved base/HEAD range with a matching tracked checkout. They reject mismatched snapshots, invalid targets and either-side parse failure instead of silently checking an empty or unrelated scope. Rename heuristics cannot reuse another path's legacy notes.
-# meiva:link scripts/content_lint/code_comments/docs/incremental.meiva.okf.md
-def snapshot(
-    repo: Repository,
-    base: str | None = None,
-    *,
-    from_ref: str | None = None,
-    to_ref: str | None = None,
-) -> Snapshot:
-    revision, staged = comparison_base(repo.root, base, from_ref, to_ref)
-    require_snapshot(repo.root, staged=staged)
-    args = ("diff", "--cached", revision) if staged else ("diff", revision, "HEAD")
-    paths = [
+def _previous_blob(root: Path, old: dict[str, tuple[str, str]], path: str) -> str | None:
+    old_mode, old_blob = old.get(path, ("", ""))
+    if not old_mode and _brand_key(path) != path:
+        old_mode, old_blob = old.get(_brand_key(path), ("", ""))
+    if old_mode in {"100644", "100755"}:
+        return git(root, "cat-file", "blob", old_blob)
+    return None
+
+
+def _diff_source_paths(repo: Repository, diff_args: tuple[str, ...]) -> list[str]:
+    return [
         path
         for path in git(
-            repo.root, *args, "--no-renames", "--name-only", "-z", "--diff-filter=ACMRT", "--"
+            repo.root, *diff_args, "--no-renames", "--name-only", "-z", "--diff-filter=ACMRT", "--"
         ).split("\0")
         if path.endswith((".py", *SUFFIXES))
     ]
-    old = tree_entries(repo.root, revision)
+
+
+def _worktree_after(repo: Repository, paths: list[str]) -> dict[str, str]:
+    after: dict[str, str] = {}
+    for path in paths:
+        target = repo.root / path
+        if target.is_symlink() or not target.is_file():
+            raise ValueError(f"not a regular source file: {path}")
+        after[path] = repo.text(path)
+    return after
+
+
+def _blob_after(repo: Repository, paths: list[str], *, staged: bool) -> dict[str, str]:
     new = tree_entries(repo.root, None if staged else "HEAD")
-    before: dict[str, str] = {}
     after: dict[str, str] = {}
     for path in paths:
         repo.text(path)
@@ -109,11 +117,37 @@ def snapshot(
         if mode not in {"100644", "100755"}:
             raise ValueError(f"not a regular source blob: {path}")
         after[path] = git(repo.root, "cat-file", "blob", blob)
-        old_mode, old_blob = old.get(path, ("", ""))
-        if not old_mode and _brand_key(path) != path:
-            old_mode, old_blob = old.get(_brand_key(path), ("", ""))
-        if old_mode in {"100644", "100755"}:
-            before[path] = git(repo.root, "cat-file", "blob", old_blob)
+    return after
+
+
+# meiva:note
+# Changed checks compare actual Git blobs from HEAD/index or a resolved base/HEAD range with a matching tracked checkout, unless `--worktree` explicitly compares tracked working-tree files against a base revision or HEAD for pre-stage local verification. Non-worktree runs reject mismatched snapshots, invalid targets and either-side parse failure instead of silently checking an empty or unrelated scope. Rename heuristics cannot reuse another path's legacy notes.
+# meiva:link scripts/content_lint/code_comments/docs/incremental.meiva.okf.md
+def snapshot(
+    repo: Repository,
+    base: str | None = None,
+    *,
+    from_ref: str | None = None,
+    to_ref: str | None = None,
+    worktree: bool = False,
+) -> Snapshot:
+    if worktree and (from_ref or to_ref):
+        raise ValueError("Worktree comparison takes an optional base revision, not a from/to range")
+    revision, staged = comparison_base(repo.root, base, from_ref, to_ref)
+    if worktree:
+        paths = _diff_source_paths(repo, ("diff", revision))
+        after = _worktree_after(repo, paths)
+    else:
+        require_snapshot(repo.root, staged=staged)
+        diff_args = ("diff", "--cached", revision) if staged else ("diff", revision, "HEAD")
+        paths = _diff_source_paths(repo, diff_args)
+        after = _blob_after(repo, paths, staged=staged)
+    old = tree_entries(repo.root, revision)
+    before = {
+        path: previous
+        for path in paths
+        if (previous := _previous_blob(repo.root, old, path)) is not None
+    }
     return Snapshot(before, after)
 
 
@@ -175,8 +209,9 @@ def incremental_notes(
     *,
     from_ref: str | None = None,
     to_ref: str | None = None,
+    worktree: bool = False,
 ) -> dict[str, frozenset[int]]:
-    comparison = snapshot(repo, base, from_ref=from_ref, to_ref=to_ref)
+    comparison = snapshot(repo, base, from_ref=from_ref, to_ref=to_ref, worktree=worktree)
     before = parse_blobs(repo.root, comparison.before)
     after = parse_blobs(repo.root, comparison.after)
     repo.sources.update(after)

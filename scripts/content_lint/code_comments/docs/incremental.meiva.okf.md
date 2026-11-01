@@ -66,9 +66,12 @@ passes explicit CLI inputs. Python resolves commit identities and requires a
 committed range to end at HEAD. Staged comparisons use HEAD/index. Every
 parsed note link still uses the tracked checkout, so unstaged changes fail; committed comparisons also reject a staged
 index differing from HEAD. Normal pre-commit isolation is the supported way to
-check a partial commit. The tool never stashes, resets or constructs a second
-checkout. Symlink targets are not source files; a new regular file replacing one
-has no old note credit.
+check a partial commit. For pre-stage local verification, `changed --worktree`
+(optionally `changed <base> --worktree`) compares tracked working-tree regular
+files against `<base>` or `HEAD` without requiring a matching index, while
+commit, push and CI hooks continue enforcing exact Git blob snapshots. The tool
+never stashes, resets or constructs a second checkout. Symlink targets are not
+source files; a new regular file replacing one has no old note credit.
 
 `changed` reports new/rewritten note count separately from the selected file count.
 It scans only the sources the comparison selected — it parses their Git blobs before

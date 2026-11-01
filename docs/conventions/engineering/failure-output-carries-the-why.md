@@ -138,10 +138,12 @@ The body of this arm is `#7230`'s checklist (2026-10-31), rendered in English he
 no-CJK rule; the checklist's own text is the authority and its structure, numbers and decisions are
 reproduced, not summarised.
 
-**Status (2026-10-31 19:44)**: the runner and its receipt checker are in the tree —
-`scripts/hooks/diff_checks.py` and `scripts/hooks/diff_checks_receipt.py`, landed by `#7230`. This
-section is the specification they were built against; where the build moved a decision (the location,
-the refusal-loss red rule, the type-check attribution), the text says so in place. The manual gate
+**Status (2026-10-31 19:44, updated 2026-11-01)**: the change-scoped runner
+`scripts/hooks/diff_checks.py` landed in `#7230`; per §6, the temporary pull-request-body receipt
+checker and merge-receipt audit retired once CI returned, while `scripts/hooks/diff_checks.py`
+continues as the local `--mode incremental|full` check runner. This section preserves the
+specification they were built against; where the build moved a decision (the location, the
+refusal-loss red rule, the type-check attribution), the text says so in place. The manual gate
 under "The refusal-loss trigger" is superseded by the `debt-reduced` trigger and retires with it.
 
 #### 0. The finding: the mapper exists, what is missing is somebody running it
@@ -242,11 +244,12 @@ missing, every reader has to recompute. The columns are read by position, not by
 so a receipt pinned to a sha (a replay, or a pull request's base) reads the same numbers as one pinned
 to `origin/main`.
 
-**A checker beside it** (`scripts/hooks/diff_checks_receipt.py`, named for the receipt it reads)
-compares: the `sha` equals the PR head; every field of the vocabulary is present; no field is bare
+**A historical receipt checker** (landed beside the runner during the CI outage and retired per §6
+once CI returned)
+compared: the `sha` equals the PR head; every field of the vocabulary is present; no field is bare
 `none`; no field says `unreadable`; a skipped run reports no count and a run that executed tests
-reports both counts with their unit; a blind selection names the fallback it ran. **The checker does
-not judge whether a reason is good**, which would become subjective and teach people to pad reasons.
+reports both counts with their unit; a blind selection names the fallback it ran. **The checker did
+not judge whether a reason was good**, which would become subjective and teach people to pad reasons.
 
 **What it stops**: a stale receipt (sha mismatch), a missing field, an absence with no reason, a
 skipped run that still claims a count, a layer whose output could not be read, a blind selection

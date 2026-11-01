@@ -22,8 +22,17 @@ from scripts.hooks.diff_checks import (
     child_environment,
     plan,
     pytest_counts,
+    reverse_closure,
     run_child,
 )
+
+
+def _git_track(root: Path) -> None:
+    env = {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+    code_init, out_init, _ = run_child(("git", "init", "-q"), root, environment=env)
+    assert code_init == 0, out_init
+    code_add, out_add, _ = run_child(("git", "add", "-A"), root, environment=env)
+    assert code_add == 0, out_add
 
 
 # meiva:note
@@ -270,6 +279,7 @@ def test_errors_outside_the_closure_are_named_and_do_not_fail_the_change(tmp_pat
     (tmp_path / "changed.py").write_text("")
     (tmp_path / "caller.py").write_text("from changed import thing\n")
     (tmp_path / "unrelated.py").write_text("import json\n")
+    _git_track(tmp_path)
     output = f"{tmp_path}/unrelated.py:3:1 - error: something else\n1 error, 0 warnings, 0 notes"
 
     def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
@@ -290,6 +300,7 @@ def test_errors_outside_the_closure_are_named_and_do_not_fail_the_change(tmp_pat
 def test_an_error_in_a_file_that_imports_the_change_fails_it(tmp_path: Path) -> None:
     (tmp_path / "changed.py").write_text("")
     (tmp_path / "caller.py").write_text("from changed import thing\n")
+    _git_track(tmp_path)
     output = f"{tmp_path}/caller.py:3:1 - error: missing argument\n1 error, 0 warnings, 0 notes"
 
     def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
@@ -597,3 +608,55 @@ def test_a_session_killed_mid_run_reads_as_broken_not_failed(tmp_path: Path) -> 
         "real failure, and neither can the merge that trusts it"
     )
     assert counts.broken is True
+
+
+def test_transitive_two_hop_importers_join_the_closure_and_fail_the_change(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "changed.py").write_text("value = 1\n")
+    (tmp_path / "middle.py").write_text("from changed import value\n")
+    (tmp_path / "caller.py").write_text("import middle\n")
+    (tmp_path / "unrelated.py").write_text("import json\n")
+    _git_track(tmp_path)
+
+    reached = reverse_closure(tmp_path, ("changed.py",))
+    assert reached == {"changed.py", "middle.py", "caller.py"}
+    assert reverse_closure(tmp_path / "missing-root", ("changed.py",)) is None
+
+    output = f"{tmp_path}/caller.py:2:1 - error: incompatible type\n1 error, 0 warnings, 0 notes"
+
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        if "basedpyright" in str(argv[0]):
+            assert tuple(argv[-3:]) == ("caller.py", "changed.py", "middle.py")
+            return 1, output, 2.0
+        return 0, "ok", 1.0
+
+    values, failed = check(
+        ChangeSet(root=tmp_path, base="origin/main", files=("changed.py",)),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+    )
+    assert failed is True
+    assert "1in-closure" in values["pyright"]
+
+
+def test_relative_imports_and_package_inits_resolve_to_real_paths(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    sub = pkg / "sub"
+    sub.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("from .changed import value\n")
+    (pkg / "changed.py").write_text("value = 1\n")
+    (pkg / "caller.py").write_text("from .changed import value\n")
+    (sub / "deep.py").write_text("from .. import value\n")
+    (tmp_path / "consumer.py").write_text("from pkg import value\n")
+    _git_track(tmp_path)
+
+    reached = reverse_closure(tmp_path, ("pkg/changed.py",))
+    assert reached == {
+        "pkg/changed.py",
+        "pkg/__init__.py",
+        "pkg/caller.py",
+        "pkg/sub/deep.py",
+        "consumer.py",
+    }

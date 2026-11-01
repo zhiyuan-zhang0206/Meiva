@@ -46,7 +46,6 @@
 
 [loads]
 "schedules/jobs/dry_import_child.py" = ["schedules"]
-"scripts/hooks/audit_merge_receipts.py" = ["scripts/hooks"]
 "meiva/boot.py" = ["agent/extensions"]
 "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests/test_agent_usage.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests/test_minimal_dispatch.py" = ["meiva_builtins/skills"]

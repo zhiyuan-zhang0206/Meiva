@@ -387,7 +387,6 @@ check-typed-exception = true
 # take the changed paths as arguments, which are the diff's own file names, so S603 has
 # nothing to flag here.
 "scripts/hooks/diff_checks.py" = ["S603"]
-"scripts/hooks/diff_checks_receipt.py" = ["S603"]
 "meizel/**" = ["ANN", "T20"]
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
