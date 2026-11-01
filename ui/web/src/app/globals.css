@@ -364,12 +364,53 @@
   .chat-md .footnotes li:target,
   .chat-md :is(h1, h2, h3, h4, h5, h6):target { @apply rounded-sm bg-accent/60; }
   .chat-md :is(h1, h2, h3, h4, h5, h6) { @apply scroll-mt-2; }
+
+  /* Shared Context right-column Markdown: compact heading scale and anti-glare dark luminance */
+  [data-testid="document-content"] .chat-md {
+    --chat-md-p-my: 0.625rem;
+    --chat-md-li-my: 0.25rem;
+  }
+  [data-testid="document-content"] .chat-md :is(strong, b) {
+    @apply font-semibold text-foreground/95 dark:text-[#eae7e0];
+  }
+  [data-testid="document-content"] .chat-md h1 {
+    @apply text-[15px] leading-[1.35] font-semibold text-foreground/95 dark:text-[#ece9e2] mt-4 mb-1.5;
+  }
+  [data-testid="document-content"] .chat-md h2 {
+    @apply text-[14px] leading-[1.38] font-semibold text-foreground/95 dark:text-[#eae7e0] mt-3.5 mb-1;
+  }
+  [data-testid="document-content"] .chat-md h3 {
+    @apply text-[13px] leading-[1.4] font-semibold text-foreground/92 dark:text-[#e8e5de] mt-3 mb-1;
+  }
+  [data-testid="document-content"] .chat-md :is(h4, h5, h6) {
+    @apply text-[12.5px] leading-[1.42] font-semibold text-foreground/90 dark:text-[#e6e3dc] mt-2.5 mb-0.5;
+  }
+  [data-testid="document-content"] .chat-md code {
+    @apply text-[11.5px] dark:text-[#e2dfd8] px-1 py-[0.5px];
+  }
+  [data-testid="document-content"] .chat-md pre {
+    @apply text-[12px] leading-[1.55] px-3 py-2 my-2.5 dark:text-[#dcd9d2];
+  }
+  [data-testid="document-content"] .chat-md pre > code {
+    @apply text-inherit dark:text-inherit px-0 py-0;
+  }
+  [data-testid="document-content"] .chat-md table {
+    @apply text-[12px] leading-[1.45] my-2.5;
+  }
+  [data-testid="document-content"] .chat-md :is(th, td) {
+    @apply px-2.5 py-1;
+  }
 }
 
 [data-testid="agent-message-prose"] [data-testid="python-code"] {
   font-size: 13px;
   line-height: 1.6;
   margin-block: 0.75rem;
+}
+[data-testid="document-content"] [data-testid="python-code"] {
+  font-size: 12px;
+  line-height: 1.55;
+  margin-block: 0.625rem;
 }
 .chat-md > :first-child > [data-testid="python-code"]:first-of-type {
   margin-top: 0;

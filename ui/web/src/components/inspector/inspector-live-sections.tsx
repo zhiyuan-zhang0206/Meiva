@@ -48,11 +48,11 @@ export function PageSection({ pages }: { pages: PageRow[] }) {
           href={p.url}
           target="_blank"
           rel="noopener noreferrer"
-          className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
+          className={cn("items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11px] leading-[16px] hover:bg-sidebar-accent group", FLEX)}
         >
           <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
           <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
-            <span className="truncate text-foreground">{p.title ?? p.name}</span>
+            <span className="truncate text-foreground dark:text-[#f0ede7]">{p.title ?? p.name}</span>
             <span className="truncate text-[10px] text-muted-foreground">
               {p.url}
             </span>
@@ -112,7 +112,7 @@ export function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
       badge={inspect.shells_available === true ? String(shells.length) : "?"}
     >
       {inspect.shells_available !== true ? (
-        <p className="font-mono text-[11px] text-muted-foreground">Shell observation unavailable</p>
+        <p className="font-mono text-[10.5px] text-muted-foreground">Shell observation unavailable</p>
       ) : (
         <ul className="space-y-1">
           {shells.map((s) => (
@@ -142,11 +142,11 @@ function ShellRow({
       ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
       : shell.uptime_seconds;
   const rowClass =
-    "flex items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]";
+    "flex items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11px] leading-[16px]";
   const content = (
     <>
       <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
-      <span className="truncate text-foreground">{shell.name ?? t("unnamed")}</span>
+      <span className="truncate text-foreground dark:text-[#f0ede7]">{shell.name ?? t("unnamed")}</span>
       <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
         {formatUptime(runtimeSeconds)}
       </span>
@@ -199,10 +199,10 @@ export function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive })
         {entries.map(([k, v]) => (
           <div
             key={k}
-            className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]"
+            className="rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11px] leading-[16px]"
           >
-            <dt className="break-all text-muted-foreground">{k}</dt>
-            <dd className="mt-0.5 break-all text-foreground">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>
+            <dt className="break-all text-[10.5px] text-muted-foreground">{k}</dt>
+            <dd className="mt-0.5 break-all text-foreground dark:text-[#f0ede7]">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>
           </div>
         ))}
       </dl>

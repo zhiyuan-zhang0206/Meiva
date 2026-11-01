@@ -195,7 +195,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
           <>
             {failed && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
             {!content ? (
-              <div className={cn("items-center justify-center px-8 text-center text-sm text-muted-foreground", FLEX, FLEX_1)}>
+              <div className={cn("items-center justify-center px-8 text-center text-[13px] text-muted-foreground", FLEX, FLEX_1)}>
                 {loading ? t("loading") : refusal ? (
                   <div data-testid="document-failure" className="space-y-1">
                     <p>{t(refusal.text)}</p>
@@ -206,7 +206,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
                 ) : current?.legacy_html ? t("legacyHtml") : t("empty")}
               </div>
             ) : (
-              <div key={references.join("/")} data-testid="document-content" className="px-5 py-3 text-[13px] leading-relaxed [&>.chat-md>:first-child]:mt-0">
+              <div key={references.join("/")} data-testid="document-content" className="px-5 py-3.5 text-[13px] leading-[21px] text-foreground/90 dark:text-[#dfdcd6] [&>.chat-md>:first-child]:mt-0">
                 <ChatMarkdown content={content} resolveUrl={(href) => {
                   const resource = resources.get(href);
                   return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
