@@ -51,7 +51,10 @@ caller can currently cause.
   `load_installation` (host boot, before it serves), and `agent/extensions/catalog.py:289`
   `build_catalog` (reached only from `meiva plugins …`; `cli/commands/extensions/parsers/plugins.py:69`).
   No op handler, gateway request or turn path loads a plugin: the ops dispatcher's own
-  `config_read` / `config_write` reach `config_face`, not this loader.
+  `config_read` / `config_write` reach `config_face`, not this loader. Of two overlapping loads
+  that a new entry could cause, the second either binds a second module object (both passed the
+  in-place check before either registered) or re-executes the registered one from two threads;
+  serializing the new caller, not this loader, is the fix either way.
 - **`_load_one`** — reached from `base/packages/plugin_providers.py:77`
   `build_model_catalog`, called by `meiva/boot.py:484` (`_load_inputs`, the SDK load),
   `services/agent_runner/agent_host/lifecycle/configuration.py:113` (host boot) and
