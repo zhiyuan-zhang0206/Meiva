@@ -42,7 +42,7 @@ def test_a_failure_makes_the_shard_red(tmp_path: Path) -> None:
 def test_all_expected_shards_green_is_the_only_green(tmp_path: Path) -> None:
     results = [nightly.read_shard(_write(tmp_path, f"backend-{group}", CLEAN)) for group in (1, 2)]
 
-    verdict = nightly.judge(results, {"backend": 2})
+    verdict = nightly.judge(results, {"backend": ["backend-1", "backend-2"]})
 
     assert verdict.ok
     assert verdict.reason == "all-shards-green"
@@ -51,7 +51,7 @@ def test_all_expected_shards_green_is_the_only_green(tmp_path: Path) -> None:
 def test_a_missing_shard_is_red_even_when_every_reported_shard_passed(tmp_path: Path) -> None:
     results = [nightly.read_shard(_write(tmp_path, "backend-1", CLEAN))]
 
-    verdict = nightly.judge(results, {"backend": 2})
+    verdict = nightly.judge(results, {"backend": ["backend-1", "backend-2"]})
 
     assert not verdict.ok
     assert verdict.reason.startswith("missing-shards")
@@ -63,7 +63,7 @@ def test_one_red_shard_names_itself(tmp_path: Path) -> None:
         nightly.read_shard(_write(tmp_path, "backend-2", RED)),
     ]
 
-    verdict = nightly.judge(results, {"backend": 2})
+    verdict = nightly.judge(results, {"backend": ["backend-1", "backend-2"]})
 
     assert not verdict.ok
     assert verdict.reason == "failed-shards: backend-2"
@@ -165,7 +165,8 @@ def test_the_cli_requires_static_shards_by_default(tmp_path: Path) -> None:
         )
         == 1
     )
-    assert "static: expected 8 shards, got 0" in output.read_text(encoding="utf-8")
+    assert "missing-shards:" in output.read_text(encoding="utf-8")
+    assert "static-1" in output.read_text(encoding="utf-8")
 
     for group in range(1, 9):
         _write(junit, f"static-{group}", CLEAN)
@@ -182,3 +183,45 @@ def test_the_cli_requires_static_shards_by_default(tmp_path: Path) -> None:
         )
         == 0
     )
+
+
+def test_a_substituted_shard_is_red_not_green(tmp_path: Path) -> None:
+    # meiva:note
+    # The shape that a count cannot see: backend-7 never ran and backend-9 appeared, so the
+    # total still matches the expected eight. Counting shards per prefix judged this run green
+    # and certified the release gate with a shard that never produced evidence; the verdict now
+    # compares the names the layout expects.
+    results = [
+        nightly.read_shard(_write(tmp_path, f"backend-{group}", CLEAN))
+        for group in (1, 2, 3, 4, 5, 6, 8, 9)
+    ]
+
+    verdict = nightly.judge(results, {"backend": [f"backend-{group}" for group in range(1, 9)]})
+
+    assert not verdict.ok
+    assert verdict.reason == "missing-shards: backend-7"
+
+
+def test_the_expected_eight_backend_shards_stay_green(tmp_path: Path) -> None:
+    results = [
+        nightly.read_shard(_write(tmp_path, f"backend-{group}", CLEAN)) for group in range(1, 9)
+    ]
+
+    verdict = nightly.judge(results, {"backend": [f"backend-{group}" for group in range(1, 9)]})
+
+    assert verdict.ok
+    assert verdict.reason == "all-shards-green"
+
+
+def test_a_prefix_sharing_shard_does_not_stand_in_for_a_backend_shard(tmp_path: Path) -> None:
+    # meiva:note
+    # `backend-static-1` starts with `backend`, which is exactly how the old prefix grouping
+    # let a different lane's artifact occupy a backend slot.
+    results = [
+        nightly.read_shard(_write(tmp_path, f"backend-{group}", CLEAN)) for group in range(1, 8)
+    ] + [nightly.read_shard(_write(tmp_path, "backend-static-8", CLEAN))]
+
+    verdict = nightly.judge(results, {"backend": [f"backend-{group}" for group in range(1, 9)]})
+
+    assert not verdict.ok
+    assert verdict.reason.startswith("missing-shards: backend-8")
