@@ -111,7 +111,7 @@ def _gate_fact(
                 allowed=_collector_allowed(machine, home=home, environ=host.environ)
             )
         case "bridge":
-            return _bridge_fact(machine, home=home)
+            return _bridge_fact(machine, host=host, home=home)
         case "none":
             return None
         case _:
@@ -154,7 +154,7 @@ def _collector_allowed(
 # meiva:note
 # The relay exists only on a macOS gateway with a local data plane and a declared non-loopback
 # address; the same answer drives `meiva status` and the cluster health probe.
-def _bridge_fact(machine: MachineIdentityReader, *, home: Path) -> BridgeFact:
+def _bridge_fact(machine: MachineIdentityReader, *, host: Host, home: Path) -> BridgeFact:
     try:
         endpoint = redis_bridge_endpoint(
             home,
@@ -162,6 +162,7 @@ def _bridge_fact(machine: MachineIdentityReader, *, home: Path) -> BridgeFact:
             remote_data_plane=lambda: names_foreign_host(
                 str(get_field("db_url")), str(get_field("redis_url"))
             ),
+            platform=host.platform.system,
         )
     except RedisBridgeUnconfiguredError as exc:
         return BridgeFact(unconfigured=str(exc), has_endpoint=False)

@@ -13,7 +13,6 @@ from base.cluster.dataplane import runtime_binaries
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.net.ports import UrlOpener
 from base.host.system.backend import get_backend
-from base.native_process.os_platform import is_macos
 
 
 def installed_server(
@@ -46,13 +45,16 @@ def _require_pg17(binary: Path) -> None:
         raise RuntimeError(f"PostgreSQL 17 is required: {binary} reports {version!r}")
 
 
+# meiva:note
+# `system` is the artifact system the caller named ("Darwin"/"Linux"): the installed extension's
+# library suffix follows it, so this check never asks the process which platform it is on.
 def _verify_installed_runtime(
     server: Path,
     *,
     home: Path,
+    system: str,
     platform_bin_dir: Path | None = None,
     path_env: str | None = None,
-    platform_name: str | None = None,
 ) -> None:
     """Reject mixed toolchains and missing extensions before any data mutation."""
     bindir = server.resolve().parent
@@ -71,8 +73,7 @@ def _verify_installed_runtime(
         raise RuntimeError(f"PostgreSQL pg_config does not describe {bindir}")
     extension = Path(_output(config, "--sharedir")) / "extension"
     library = Path(_output(config, "--pkglibdir"))
-    on_macos = is_macos() if platform_name is None else platform_name == "darwin"
-    suffix = ".dylib" if on_macos else ".so"
+    suffix = runtime_binaries.extension_library_suffix(system)
     if not (library / f"vector{suffix}").is_file() or not _has_vector_install_script(extension):
         raise RuntimeError(f"Install pgvector for the PostgreSQL 17 runtime at {bindir}")
 
@@ -96,7 +97,6 @@ def ensure_pg_runtime(
     machine: str,
     platform_bin_dir: Path | None = None,
     path_env: str | None = None,
-    platform_name: str | None = None,
     pg_artifacts: Mapping[str, tuple[str, str]] | None = None,
     pgvector_artifacts: Mapping[str, tuple[str, str]] | None = None,
     open_url: UrlOpener | None = None,
@@ -112,9 +112,9 @@ def ensure_pg_runtime(
         _verify_installed_runtime(
             server,
             home=home,
+            system=system,
             platform_bin_dir=platform_bin_dir,
             path_env=path_env,
-            platform_name=platform_name,
         )
         return
     runtime_binaries.ensure_pg_binaries(

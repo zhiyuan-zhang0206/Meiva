@@ -99,9 +99,11 @@ def pg_tool(
     found = shutil.which(name) if path_env is None else shutil.which(name, path=path_env)
     if found:
         return Path(found)
-    host = "darwin" if is_macos() else "linux"
+    # meiva:note
+    # The message names the two resolutions to configure, not the platform: which layout this host
+    # expects is the fact the failed lookups above already encoded.
     raise RuntimeError(
-        f"Cannot locate pg tool {name!r} on {host} — "
+        f"Cannot locate pg tool {name!r} — "
         "install PostgreSQL 17 or set MEIVA_PG_* (MEIVA_PG_BIN etc.) for a custom pg install"
     )
 

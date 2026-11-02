@@ -37,6 +37,11 @@ def redis_bridge_endpoint(
     Raises:
         RedisBridgeUnconfiguredError: the relay is needed but `home` has no cluster record.
     """
+    # meiva:note
+    # Callers that hold the host hand `host.platform.system`: the roster gate and the converge probe
+    # do. The `None` arm serves the one caller that has no `Host` — the startup builder
+    # `services.supervision.roster.composition.build_services`, which is constructed from `home`
+    # alone — so giving it one is its own slice, not this one.
     on_macos = is_macos() if platform is None else platform == "darwin"
     if not on_macos or remote_data_plane():
         return None
