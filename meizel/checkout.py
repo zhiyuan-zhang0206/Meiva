@@ -24,7 +24,7 @@ from pathlib import Path
 
 from meizel.graph import project_metadata_paths, python_reverse_closure, standalone_projects
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, EditPlan, Universe
+from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Checkout, EditPlan, Universe
 from meizel.roles import parse_roles
 from meizel.test_graph import (
     build_test_checkout,
@@ -67,7 +67,7 @@ __all__ = [
 # meiva:note
 # The roles a checkout's root manifest declares: the parse is the model's (`meizel.roles`),
 # the read is this shell's, so a module that only decides over roles never runs git.
-def read_roles(repo: GitRepo) -> Mapping[str, tuple[str, ...]]:
+def read_roles(repo: Checkout) -> Mapping[str, tuple[str, ...]]:
     path = repo.root / MANIFEST
     try:
         text = repo.load_text(MANIFEST)

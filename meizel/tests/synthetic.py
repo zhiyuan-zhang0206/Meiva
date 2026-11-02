@@ -10,7 +10,7 @@ from textwrap import dedent
 from typing import TypeGuard
 
 from meizel.contracts.analysis import POLICY, Analysis, DebtEntry, analyze, render_policy
-from meizel.contracts.cli import GitRepo, main
+from meizel.entry import main, open_repository
 from meizel.graph.model import Diagnostic
 from meizel.graph.universe import Universe
 from meizel.state.ambient_state.tests.conftest import (
@@ -94,7 +94,7 @@ def build_repo(base: Path, files: Mapping[str, str]) -> Path:
 # meiva:note
 # The repository seat the checker reads a synthetic checkout through.
 def seat(root: Path) -> Universe:
-    return GitRepo(root).universe()
+    return open_repository(root).universe()
 
 
 def analysis_of(root: Path) -> Analysis:

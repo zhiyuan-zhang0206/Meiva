@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts.cli import GitRepo
+from meizel.entry import open_repository
 from meizel.graph import ReachabilityScope, reachability_analysis
 from meizel.graph import universe as model
 from meizel.graph.graphs import feedback_edges, strongly_connected, unneeded_back_edges
@@ -221,7 +221,7 @@ def test_derive_lanes_covers_fixtures_autouse_scopes_classes_markers_and_modules
             ),
         }
     )
-    lanes = GitRepo(root).test_lanes()
+    lanes = open_repository(root).test_lanes()
     assert lanes.static == frozenset(
         {
             "pkg/tests/test_pure.py",
@@ -251,7 +251,7 @@ def test_sqlite_cache_persists_lanes_and_invalidates_on_dirty_or_untracked_edits
             "pkg/tests/test_unit.py": "def test_unit() -> None: pass\n",
         }
     )
-    repo = GitRepo(root)
+    repo = open_repository(root)
     first = repo.test_lanes()
     assert first.static == frozenset({"pkg/tests/test_unit.py"})
     assert first.native == frozenset()
@@ -376,7 +376,7 @@ def test_reachability_pure_traversal_and_ancestor_inits(make_repo: RepoFactory) 
     )
     commit(root, "initial")
 
-    repo = GitRepo(root)
+    repo = open_repository(root)
     universe = repo.universe()
     from meizel.contracts.analysis import analyze
 
@@ -421,7 +421,7 @@ def test_reachability_detects_disconnected_islands_and_clusters(make_repo: RepoF
     )
     commit(root, "initial")
 
-    repo = GitRepo(root)
+    repo = open_repository(root)
     universe = repo.universe()
     from meizel.contracts.analysis import analyze
 
@@ -469,7 +469,7 @@ def test_reachability_distinguishes_fake_test_preserved_islands(make_repo: RepoF
     )
     commit(root, "initial")
 
-    repo = GitRepo(root)
+    repo = open_repository(root)
     universe = repo.universe()
     from meizel.contracts.analysis import analyze
 
