@@ -21,7 +21,7 @@ class GateFacts:
     app_port: int
     gateway_port: int
     gateway_host: str
-    browser_origin: str
+    browser_origins: tuple[str, ...]
     default_static_dir: Path
 
 
@@ -33,7 +33,7 @@ class GateLaunch:
     static_dir: Path
     app_base: str
     gateway_base: str
-    browser_origin: str
+    browser_origins: tuple[str, ...]
 
 
 # meiva:note
@@ -66,5 +66,5 @@ def plan_launch(*, port: int | None, static_dir: Path | None, facts: GateFacts) 
         static_dir=static_dir or facts.default_static_dir,
         app_base=f"http://127.0.0.1:{facts.app_port}",
         gateway_base=gateway_base(host=facts.gateway_host, port=facts.gateway_port),
-        browser_origin=facts.browser_origin,
+        browser_origins=facts.browser_origins,
     )

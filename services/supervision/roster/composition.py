@@ -120,7 +120,7 @@ def build_services(
     embedding_backend = str(get_field("embedding_backend"))
     embedding_revision = get_field("embeddinggemma_revision")
     gateway_port = int(get_field("gateway_port"))
-    browser_origin = str(get_field("browser_origin"))
+    browser_origins = tuple(str(origin) for origin in get_field("browser_origins"))
     browser_cdp_port = int(get_field("browser_cdp_port"))
     browser_profile = profile_dir(home)
     telemetry_otlp_port = int(get_field("telemetry_otlp_port"))
@@ -256,7 +256,7 @@ def build_services(
             cmd=frontend_service_cmd(
                 _fe_port,
                 gateway_port=gateway_port,
-                browser_origin=browser_origin,
+                browser_origins=browser_origins,
             ),
             capabilities=GATEWAY,
             requires_db=False,

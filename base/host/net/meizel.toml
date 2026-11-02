@@ -1,14 +1,15 @@
-exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "tests", "transport_errors.py", "url_secret.py"]
+exports = ["auth.py", "browser_origins.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "tests", "transport_errors.py", "url_secret.py"]
 
 [uses]
 "auth.py" = ["__init__.py"]
 "http_dial.py" = ["predicates.py"]
-"tests" = ["__init__.py", "auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "url_text.py"]
+"tests" = ["__init__.py", "auth.py", "browser_origins.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "url_text.py"]
 "url_secret.py" = ["url_text.py"]
 "url_text.py" = ["predicates.py"]
 
 [purity]
 "__init__.py" = "strict"
+"browser_origins.py" = "strict"
 "predicates.py" = "strict"
 "url_secret.py" = "strict"
 "url_text.py" = "strict"

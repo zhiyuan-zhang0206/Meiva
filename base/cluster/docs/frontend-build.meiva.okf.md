@@ -29,7 +29,7 @@ of a start that had no work to do.
   construction, so a build does not invalidate its own key.
 - `node --version`.
 - the `NEXT_PUBLIC_*` values baked into the bundle (`gateway_port`,
-  `browser_origin`).
+  `browser_origins`, the ordered list of same-origin browser entries).
 
 The key is recorded at `ui/web/.next/meiva-build-key` **after** a successful
 build. A start whose key matches the recorded one skips the build; every other

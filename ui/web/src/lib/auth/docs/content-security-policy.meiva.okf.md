@@ -15,6 +15,11 @@ back to Host when X-Forwarded-Host is absent.
 Assigning the forwarded hostname alone would retain the listener's port. The
 implementation also assigns the parsed port, including the empty default port.
 
+The connection directive names the gateway origin of the page being served: on a page whose
+origin is one of the configured same-origin browser entries (`MEIVA_BROWSER_ORIGINS`, baked as
+`NEXT_PUBLIC_BROWSER_ORIGINS`) that is the page's own origin, so each entry's page allows its own
+origin and no other entry; elsewhere it is the page's host on the gateway port.
+
 React's dynamic layouts use style attributes. The attribute directive does not
 relax the production directive for style elements. The sandboxed reader can
 display shared HTTP(S) links through frame-src. Development adds the allowances

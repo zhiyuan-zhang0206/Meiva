@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, HttpUrl, JsonValue, field_validator
+from pydantic import Field, JsonValue, field_validator
 from pydantic_settings import NoDecode
 
 from base.config.base import EnvSettings
+from base.host.net.browser_origins import parse_browser_origins, split_browser_origins
 
 _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
     "capability": "common",
@@ -379,13 +380,16 @@ class GatewaySettings(EnvSettings):
         },
     )
 
-    browser_origin: str = Field(
-        default="",
-        alias="MEIVA_BROWSER_ORIGIN",
+    browser_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="MEIVA_BROWSER_ORIGINS",
         description=(
-            "Optional HTTPS origin serving the frontend and gateway through one reverse proxy. "
-            "Only browsers visiting this exact origin use same-origin API/SSE; existing direct "
-            "frontend URLs retain their gateway-port routing. Requires a frontend rebuild."
+            "Comma-separated HTTPS origins (https://host[:port]) that each serve the frontend and "
+            "the gateway through one reverse proxy (`/api` to the gateway, the rest to Gate). "
+            "Only browsers visiting one of these exact origins use same-origin API/SSE; existing "
+            "direct frontend URLs retain their gateway-port routing. The first origin is the "
+            "primary entry, the one `meiva start` prints in its login link. Requires a frontend "
+            "rebuild."
         ),
         json_schema_extra={
             "restart_required": "gateway",
@@ -396,24 +400,15 @@ class GatewaySettings(EnvSettings):
         },
     )
 
-    @field_validator("browser_origin")
+    @field_validator("browser_origins", mode="before")
     @classmethod
-    def _browser_origin(cls, value: str) -> str:
-        if not value:
-            return ""
-        parsed = HttpUrl(value)
-        if (
-            parsed.scheme != "https"
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.path not in (None, "/")
-            or parsed.query is not None
-            or parsed.fragment is not None
-        ):
-            raise ValueError(
-                "MEIVA_BROWSER_ORIGIN must be an HTTPS origin without credentials or path"
-            )
-        return str(parsed).removesuffix("/")
+    def _split_browser_origins(cls, value: object) -> object:
+        return split_browser_origins(value) if isinstance(value, str) else value
+
+    @field_validator("browser_origins")
+    @classmethod
+    def _browser_origins(cls, value: list[str]) -> list[str]:
+        return list(parse_browser_origins(value))
 
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=list,

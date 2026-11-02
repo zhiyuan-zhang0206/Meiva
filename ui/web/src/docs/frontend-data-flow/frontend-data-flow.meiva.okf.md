@@ -78,10 +78,12 @@ callbacks. `withCredentials` carries the session cookie through gateway auth.
 ## Connection resilience (#648)
 
 `lib/gateway-origin.ts` resolves the same API origin for browser fetch/SSE and
-the server-rendered CSP. `MEIVA_BROWSER_ORIGIN` is an optional exact HTTPS entry,
-injected by the canonical frontend build: visits there use same-origin gateway
-routes behind an HTTP/2-capable proxy, while existing direct frontend URLs
-retain gateway-port routing. The gate login follows the same entry selection.
+the server-rendered CSP. `MEIVA_BROWSER_ORIGINS` is an optional comma-separated list of
+exact HTTPS entries, injected by the canonical frontend build as
+`NEXT_PUBLIC_BROWSER_ORIGINS`: a visit to any listed origin uses same-origin gateway
+routes behind an HTTP/2-capable proxy (the CSP `connect-src` then names that page's own
+origin), while existing direct frontend URLs retain gateway-port routing. The gate login
+follows the same entry selection.
 The proxy sends gateway routes directly to the gateway and frontend/navigation
 requests through the gate.
 

@@ -61,13 +61,15 @@ def test_an_unprovable_key_always_builds(tmp_path: Path) -> None:
 
 
 def test_the_key_binds_the_baked_env_and_node() -> None:
-    first = frontend_build.key_from_parts("source", "v22.0.0", gateway_port=8000, browser_origin="")
-    same = frontend_build.key_from_parts("source", "v22.0.0", gateway_port=8000, browser_origin="")
+    first = frontend_build.key_from_parts(
+        "source", "v22.0.0", gateway_port=8000, browser_origins=()
+    )
+    same = frontend_build.key_from_parts("source", "v22.0.0", gateway_port=8000, browser_origins=())
     other_port = frontend_build.key_from_parts(
-        "source", "v22.0.0", gateway_port=8001, browser_origin=""
+        "source", "v22.0.0", gateway_port=8001, browser_origins=()
     )
     other_source = frontend_build.key_from_parts(
-        "source2", "v22.0.0", gateway_port=8000, browser_origin=""
+        "source2", "v22.0.0", gateway_port=8000, browser_origins=()
     )
 
     assert first == same

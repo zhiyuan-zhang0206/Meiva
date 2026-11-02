@@ -28,7 +28,7 @@ def test_every_field_is_the_configurations_value(command_runtime: CommandRuntime
 
     assert config.service_path == view.general.service_path
     assert config.gateway_port == view.gateway.gateway_port
-    assert config.browser_origin == view.gateway.browser_origin
+    assert config.browser_origins == tuple(view.gateway.browser_origins)
     assert config.entry_url == view.services.frontend_healthcheck_url
     assert config.app_port == view.services.app_port
     assert config.browser_cdp_port == view.services.browser_cdp_port

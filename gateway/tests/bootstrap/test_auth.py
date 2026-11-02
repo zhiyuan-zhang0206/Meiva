@@ -114,7 +114,7 @@ def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host() -> None:
         explicit=(),
         frontend_healthcheck_url="http://localhost:3000",
         app_port=None,
-        browser_origin="",
+        browser_origins=(),
         gateway_url="https://gateway.example:8100",
     ) == [
         "http://localhost:3000",
@@ -132,7 +132,7 @@ def test_cors_allowed_origins_gateway_origin_matches_prod_url() -> None:
         explicit=(),
         frontend_healthcheck_url="http://localhost:3100",
         app_port=None,
-        browser_origin="",
+        browser_origins=(),
         gateway_url="http://10.0.0.72:8000",
     ) == [
         "http://localhost:3100",
@@ -151,7 +151,7 @@ def test_cors_allowed_origins_gateway_default_port_has_bare_and_explicit_forms()
         explicit=(),
         frontend_healthcheck_url="http://localhost:3000",
         app_port=None,
-        browser_origin="",
+        browser_origins=(),
         gateway_url="https://gateway.example",
     ) == [
         "http://localhost:3000",
@@ -169,7 +169,7 @@ def test_cors_allowed_origins_ipv6_gateway_host_bracketed() -> None:
         explicit=(),
         frontend_healthcheck_url="http://localhost:3000",
         app_port=None,
-        browser_origin="",
+        browser_origins=(),
         gateway_url="http://[2606:4700:4700::1111]:8000",
     ) == [
         "http://localhost:3000",
@@ -187,7 +187,7 @@ def test_cors_allowed_origins_frontend_default_port_has_bare_and_explicit_forms(
         explicit=(),
         frontend_healthcheck_url="http://localhost",
         app_port=None,
-        browser_origin="",
+        browser_origins=(),
         gateway_url="http://gateway.example:8000",
     ) == [
         "http://localhost:80",
@@ -205,7 +205,7 @@ def test_cors_allowed_origins_use_explicit_list_verbatim() -> None:
             explicit=explicit,
             frontend_healthcheck_url="http://localhost:4100",
             app_port=None,
-            browser_origin="",
+            browser_origins=(),
             gateway_url="https://gateway.example:8100",
         )
         == explicit
@@ -425,7 +425,7 @@ def test_https_browser_entry_login_preserves_authenticated_cookie() -> None:
     with anonymous_gateway_client(
         base_url="https://console.example",
         fields={
-            "browser_origin": "https://console.example",
+            "browser_origins": ["https://console.example"],
             "gateway_url": "http://192.0.2.2:20016",
             "session_cookie_secure": None,
             "cors_allowed_origins": [],

@@ -61,7 +61,7 @@ def print_login_link(sessions: Collection[str], *, config: StartConfig, at_termi
     step = plan_login_link(
         LinkFacts(
             sessions=frozenset(sessions),
-            browser_origin=config.browser_origin,
+            browser_origins=config.browser_origins,
             entry_url=config.entry_url,
             app_port=config.app_port,
             has_human_secret=bool(config.data_plane.cluster_secret),

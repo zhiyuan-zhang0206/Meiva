@@ -165,7 +165,7 @@ class GatewayConfig:
     session_ttl_seconds: int
     mcp_endpoint_enabled: bool
     allowed_origins: tuple[str, ...]
-    browser_origin: str
+    browser_origins: tuple[str, ...]
     session_cookie_secure: bool
     memory_root: Path
     # meiva:note
@@ -282,7 +282,7 @@ def gateway_config_from_boot(
             explicit=gateway.cors_allowed_origins,
             frontend_healthcheck_url=services.frontend_healthcheck_url,
             app_port=services.app_port,
-            browser_origin=gateway.browser_origin,
+            browser_origins=gateway.browser_origins,
             gateway_url=gateway_url,
         )
     )
@@ -300,7 +300,7 @@ def gateway_config_from_boot(
         session_ttl_seconds=gateway.session_ttl_seconds,
         mcp_endpoint_enabled=gateway.mcp_endpoint_enabled,
         allowed_origins=allowed_origins,
-        browser_origin=gateway.browser_origin,
+        browser_origins=tuple(gateway.browser_origins),
         session_cookie_secure=(
             explicit_secure
             if explicit_secure is not None
@@ -438,7 +438,7 @@ def placeholder_config() -> GatewayConfig:
         session_ttl_seconds=3600,
         mcp_endpoint_enabled=False,
         allowed_origins=(),
-        browser_origin="",
+        browser_origins=(),
         session_cookie_secure=False,
         human_auth="required",
         memory_root=Path("/nonexistent/memory"),

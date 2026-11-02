@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+
+from base.host.net.browser_origins import primary_browser_origin
 
 __all__ = [
     "LinkFacts",
@@ -29,7 +31,7 @@ __all__ = [
 @dataclass(frozen=True)
 class LinkFacts:
     sessions: frozenset[str]
-    browser_origin: str
+    browser_origins: tuple[str, ...]
     entry_url: str
     app_port: int | None
     has_human_secret: bool
@@ -62,13 +64,18 @@ LinkPlan = NoLink | SkipLink | MintLink
 # meiva:note
 # Where a browser reaches the UI among the launched `sessions`, or None if none.
 #
-# Gate owns the public entry (the HTTPS browser origin when one is configured, else the
-# entry URL); without Gate the Next.js app is reached directly on its reserved port.
+# Gate owns the public entry (the primary HTTPS browser origin — the first of
+# `MEIVA_BROWSER_ORIGINS` — when any is configured, else the entry URL); without Gate the Next.js
+# app is reached directly on its reserved port.
 def ui_base(
-    sessions: Collection[str], *, browser_origin: str, entry_url: str, app_port: int | None
+    sessions: Collection[str],
+    *,
+    browser_origins: Sequence[str],
+    entry_url: str,
+    app_port: int | None,
 ) -> str | None:
     if "gate" in sessions:
-        return (browser_origin or entry_url).rstrip("/")
+        return (primary_browser_origin(browser_origins) or entry_url).rstrip("/")
     if "frontend" in sessions and app_port is not None:
         return f"http://localhost:{app_port}"
     return None
@@ -79,7 +86,7 @@ def ui_base(
 def plan_login_link(facts: LinkFacts) -> LinkPlan:
     base = ui_base(
         facts.sessions,
-        browser_origin=facts.browser_origin,
+        browser_origins=facts.browser_origins,
         entry_url=facts.entry_url,
         app_port=facts.app_port,
     )

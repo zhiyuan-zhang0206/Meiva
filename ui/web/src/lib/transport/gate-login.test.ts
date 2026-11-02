@@ -6,15 +6,19 @@ import { describe, expect, it, vi } from "vitest";
 
 const template = readFileSync(resolve(process.cwd(), "../../services/entrypoints/gate/static/login.html"), "utf8");
 
-describe("gate login through the HTTPS browser entry", () => {
+describe("gate login through the HTTPS browser entries", () => {
   it.each([
     ["https://console.example", "/api/auth/login"],
+    ["https://private.example", "/api/auth/login"],
     ["http://192.0.2.2:20017", "http://192.0.2.2:20016/api/auth/login"],
     ["https://other.example", "http://192.0.2.2:20016/api/auth/login"],
   ])("submits credentials to the correct origin from %s", async (origin, expected) => {
     const html = template
       .replaceAll("__GATEWAY_BASE__", "http://192.0.2.2:20016")
-      .replaceAll("/*__BROWSER_ORIGIN__*/", JSON.stringify("https://console.example"));
+      .replaceAll(
+        "/*__BROWSER_ORIGINS__*/[]",
+        JSON.stringify(["https://console.example", "https://private.example"]),
+      );
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
     const loginScript = scripts.at(-1)![1];
     let submit: ((event: { preventDefault: () => void }) => Promise<void>) | undefined;

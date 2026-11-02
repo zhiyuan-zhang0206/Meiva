@@ -136,10 +136,10 @@ headers only when present. Use lowercase `http` or `https` for
 CSP origin. The gate also relays the frontend CSP and static browser-security
 headers to the public response.
 
-#### Optional HTTPS browser entry (HTTP/2)
+#### Optional HTTPS browser entries (HTTP/2)
 
 See [Gate entry operations](../../services/entrypoints/gate/docs/operations.md)
-for the optional private HTTPS/HTTP2 entry, rollback and browser acceptance.
+for the optional HTTPS/HTTP2 entries (`MEIVA_BROWSER_ORIGINS`, one or several), rollback and browser acceptance.
 
 ### Backup and recovery posture
 
@@ -726,7 +726,7 @@ ports). Gateway CORS accepts exact origins only. An empty
 `MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS` derives localhost, `127.0.0.1`, and the
 configured gateway host at the frontend entry port, plus localhost and
 `127.0.0.1` at the cluster's reserved app port (`MEIVA_APP_PORT`, loopback-only
-like the Next.js bind); set the variable to a comma-separated list to replace
+like the Next.js bind), plus every `MEIVA_BROWSER_ORIGINS` entry; set the variable to a comma-separated list to replace
 that derived allowlist. Cookie-authenticated
 state changes also reject a present, non-allowlisted `Origin`. On a host where
 another service holds the gateway port, set

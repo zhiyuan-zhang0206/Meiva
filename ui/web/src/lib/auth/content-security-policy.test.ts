@@ -16,11 +16,35 @@ describe("gatewayOriginForRequest", () => {
       headers: { "x-forwarded-host": "console.example", "x-forwarded-proto": "https" },
     }));
     const gatewayOrigin = gatewayOriginForRequest(requestUrl, {
-      browserOrigin: "https://console.example", gatewayPort: "20016",
+      browserOrigins: "https://console.example", gatewayPort: "20016",
     });
     const policy = buildContentSecurityPolicy({ nonce: "test", gatewayOrigin, isDevelopment: false });
     expect(directive(policy, "connect-src")).toBe("connect-src 'self' https://console.example wss://console.example");
     expect(policy).not.toContain(":20016");
+  });
+
+  it.each([
+    ["the first entry", "console.example", "connect-src 'self' https://console.example wss://console.example"],
+    [
+      "the second entry",
+      "private.example",
+      "connect-src 'self' https://private.example wss://private.example",
+    ],
+    [
+      "a host outside the list",
+      "other.example",
+      "connect-src 'self' https://other.example:20016 wss://other.example:20016",
+    ],
+  ])("scopes connect-src to the page itself on %s", (_name, forwardedHost, expected) => {
+    const requestUrl = browserFacingRequestUrl(new Request("http://127.0.0.1:20031/", {
+      headers: { "x-forwarded-host": forwardedHost, "x-forwarded-proto": "https" },
+    }));
+    const gatewayOrigin = gatewayOriginForRequest(requestUrl, {
+      browserOrigins: "https://console.example,https://private.example",
+      gatewayPort: "20016",
+    });
+    const policy = buildContentSecurityPolicy({ nonce: "test", gatewayOrigin, isDevelopment: false });
+    expect(directive(policy, "connect-src")).toBe(expected);
   });
   it("uses the configured API base origin without its path", () => {
     expect(
