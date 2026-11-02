@@ -71,10 +71,10 @@ def _write(baseline_path: Path, files: list[tuple[str, str]]) -> int:
     return 0
 
 
-def _arguments(argv: list[str] | None) -> tuple[list[str], bool, bool]:
+def _arguments(argv: list[str]) -> tuple[list[str], bool, bool]:
     # meiva:note
     # (targets and flags left for split_only, --write-baseline, --hints).
-    arguments = list(sys.argv[1:] if argv is None else argv)
+    arguments = list(argv)
     write_baseline = "--write-baseline" in arguments
     hints = "--hints" in arguments
     return [a for a in arguments if a not in ("--write-baseline", "--hints")], write_baseline, hints
@@ -103,7 +103,7 @@ def _judge(files: list[tuple[str, str]], root: Path, only: list[str] | None, *, 
     return 1
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
     arguments, write_baseline, hints = _arguments(argv)
     arguments, only = lint_common.split_only(arguments)
@@ -118,4 +118,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

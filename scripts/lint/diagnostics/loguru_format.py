@@ -434,9 +434,8 @@ def _default_files(root: Path = _REPO_ROOT) -> list[str]:
     return sorted(p.relative_to(root).as_posix() for p in lint_common.python_files(roots, root))
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
-    argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
         files, missing = lint_common.resolve_targets(argv, root)
@@ -468,4 +467,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

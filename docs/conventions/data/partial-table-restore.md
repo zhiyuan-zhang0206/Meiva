@@ -52,6 +52,7 @@ verb already works for the weekly drill:
 ```bash
 meiva backup walg restore \
   --dir /srv/restore/agent_tasks-2026-10-03 \
+  --user <OS user that ran initdb on the source> \
   --backup <backup name from section 2> \
   --time '2026-10-03 04:30:00+00'
 ```

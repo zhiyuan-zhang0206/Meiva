@@ -144,7 +144,7 @@ def cmd_walg_drill(
 #
 # The directory ends as a promoted database, its scratch Postgres shut down: it is
 # not started, and it is never this home's live data directory. `user` is the restored
-# cluster's superuser (the OS user that ran initdb on the source; default: this OS user).
+# cluster's superuser (the OS user that ran initdb on the source; the operator names it).
 def cmd_walg_restore(
     plane: DataPlaneConfig,
     *,
@@ -152,7 +152,7 @@ def cmd_walg_restore(
     backup: str,
     time: str | None,
     lsn: str | None,
-    user: str | None = None,
+    user: str,
     clock: Clock,
     home: Path,
     environ: Mapping[str, str],

@@ -194,8 +194,7 @@ def _explicit_targets(argv: list[str]) -> list[Path] | None:
     return [Path(a).resolve() for a in argv]
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def main(argv: list[str]) -> int:
     argv, only = lint_common.split_only(argv)
     explicit = _explicit_targets(argv)
     if explicit is None:
@@ -215,4 +214,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -90,7 +90,7 @@ def stale_entries(root: Path, lattice: clock_lattice.Lattice) -> list[str]:
 
 @lint_common.admission.scoped
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     scan_dirs: tuple[str, ...],
     repo_root: Path | None = None,
@@ -98,7 +98,6 @@ def main(
 ) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
     lattice = lattice_of(root) if lattice is None else lattice
-    argv = list(sys.argv[1:] if argv is None else argv)
     argv, only = lint_common.split_only(argv)
     if argv:
         resolved, missing = lint_common.resolve_targets(argv, root)
@@ -121,4 +120,4 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(scan_dirs=SCAN_DIRS))
+    raise SystemExit(main(sys.argv[1:], scan_dirs=SCAN_DIRS))

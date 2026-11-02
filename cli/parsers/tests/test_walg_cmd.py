@@ -63,7 +63,9 @@ def test_the_parser_reaches_every_verb() -> None:
     check = parser.parse_args(["backup", "walg", "check"])
     run = parser.parse_args(["backup", "walg", "run"])
     status = parser.parse_args(["backup", "walg", "status"])
-    restore = parser.parse_args(["backup", "walg", "restore", "--dir", "/srv/restored"])
+    restore = parser.parse_args(
+        ["backup", "walg", "restore", "--dir", "/srv/restored", "--user", "meiva"]
+    )
     drill = parser.parse_args(["backup", "walg", "drill"])
 
     assert drill.func.__name__ == "_h_backup_walg_drill"
@@ -74,7 +76,7 @@ def test_the_parser_reaches_every_verb() -> None:
         "LATEST",
         None,
         None,
-        None,
+        "meiva",
     )
     named = parser.parse_args(["backup", "walg", "restore", "--dir", "/d", "--user", "zyonzhang"])
     assert named.user == "zyonzhang"
@@ -460,6 +462,7 @@ def test_restore_rejects_a_bad_target_before_fetching(
         plane,
         directory=str(tmp_path / "out"),
         backup="LATEST",
+        user="meiva",
         clock=_clock(),
         home=sandbox.home,
         environ=sandbox.environ,
@@ -485,6 +488,7 @@ def test_restore_reports_a_failed_fetch_and_exits_non_zero(
         backup="LATEST",
         time=None,
         lsn=None,
+        user="meiva",
         clock=_clock(),
         home=sandbox.home,
         environ=sandbox.environ,
@@ -512,6 +516,7 @@ def test_restore_refuses_a_directory_that_holds_something(
         backup="LATEST",
         time=None,
         lsn=None,
+        user="meiva",
         clock=_clock(),
         home=sandbox.home,
         environ=sandbox.environ,
@@ -535,6 +540,7 @@ def test_restore_while_wal_g_is_off_says_so(
         backup="LATEST",
         time=None,
         lsn=None,
+        user="meiva",
         clock=_clock(),
         home=sandbox.home,
         environ=sandbox.environ,
@@ -634,6 +640,7 @@ def test_restore_refuses_a_key_other_than_the_one_the_handed_home_pinned(
         backup="LATEST",
         time=None,
         lsn=None,
+        user="meiva",
         clock=_clock(),
         home=sandbox.home,
         environ=sandbox.environ,

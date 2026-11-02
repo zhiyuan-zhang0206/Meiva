@@ -82,6 +82,7 @@ CHANNEL_MODULES = frozenset(
         "grp",
         "locale",
         "multiprocessing",
+        "netrc",
         "os",
         "os.path",
         "pathlib",
@@ -93,6 +94,7 @@ CHANNEL_MODULES = frozenset(
         "shutil",
         "site",
         "socket",
+        "ssl",
         "sys",
         "sysconfig",
         "tempfile",
@@ -475,8 +477,9 @@ _FED = (
         "email.utils",
         "formatdate",
         K.CLOCK,
-        "stamps the current time unless it is given the time",
-        unless=later(0, "timeval"),
+        "stamps the current time unless it is given the time, and with `localtime=True` renders any "
+        "time in the host's time zone; the `unless` clause cannot say \"given a time and not "
+        '`localtime`", so every call is recorded, which over-records the pure `formatdate(1.5)`',
     ),
     g(
         "email.utils",
@@ -488,7 +491,9 @@ _FED = (
         "email.utils",
         "make_msgid",
         K.RANDOM,
-        "draws a message id from the clock, the process id, a random number and the host name",
+        "draws a message id from the clock, the process id, a random number and, without a "
+        "`domain`, the host name: four kinds of read, of which the table records one per name, "
+        "`random` as it does for `uuid.uuid1`",
     ),
     g(
         "email.utils",
@@ -498,6 +503,87 @@ _FED = (
         "rfc2231_continuation specialsre supports_strict_parsing unquote",
         None,
         VALUES,
+    ),
+)
+
+# meiva:note
+# The credentials and certificates a process finds on its own: `~/.netrc`, and the platform's
+# default certificate locations that `SSL_CERT_FILE` and `SSL_CERT_DIR` override. The methods of an
+# `SSLContext` that load them (`load_default_certs`, `set_default_verify_paths`) are on an object
+# the analysis cannot resolve; the module-level functions that do the same are judged here.
+_FOUND = (
+    g(
+        "netrc",
+        "netrc",
+        K.HOME,
+        "reads `~/.netrc` unless it is given the file",
+        unless=later(0, "file"),
+    ),
+    g("netrc", "NetrcParseError", None, TYPE),
+    g(
+        "ssl",
+        "get_default_verify_paths",
+        K.ENVIRON,
+        "the default certificate file and directory, taken from SSL_CERT_FILE and SSL_CERT_DIR "
+        "before the OpenSSL build's own locations",
+    ),
+    g(
+        "ssl",
+        "create_default_context",
+        K.ENVIRON,
+        "loads the default certificate locations (SSL_CERT_FILE, SSL_CERT_DIR) unless it is given "
+        "a `cafile`; a call that names only a `capath` or `cadata` is recorded too, which "
+        "over-records",
+        unless=Unless("cafile", None),
+    ),
+    g(
+        "ssl",
+        "RAND_bytes RAND_pseudo_bytes RAND_status",
+        K.RANDOM,
+        "draws from, or asks the state of, the OpenSSL random generator",
+    ),
+    g(
+        "ssl",
+        "RAND_add",
+        None,
+        "mixes the caller's bytes into the generator: a write, and it acquires nothing",
+    ),
+    g("ssl", "create_connection get_server_certificate wrap_socket", None, NET),
+    g("ssl", "enum_certificates enum_crls", None, FILES),
+    g(
+        "ssl",
+        "DER_cert_to_PEM_cert PEM_cert_to_DER_cert cert_time_to_seconds get_protocol_name "
+        "match_hostname",
+        None,
+        VALUES,
+    ),
+    g(
+        "ssl",
+        "AlertDescription CertificateError DefaultVerifyPaths MemoryBIO Options Purpose "
+        "SSLCertVerificationError SSLContext SSLEOFError SSLError SSLErrorNumber SSLObject "
+        "SSLSession SSLSocket SSLSyscallError SSLWantReadError SSLWantWriteError "
+        "SSLZeroReturnError TLSVersion VerifyFlags VerifyMode",
+        None,
+        TYPE,
+    ),
+    g(
+        "ssl",
+        "ALERT_DESCRIPTION_* CERT_* CHANNEL_BINDING_TYPES HAS_* OP_* PEM_FOOTER PEM_HEADER "
+        "PROTOCOL_* SO_TYPE SOCK_STREAM SOL_SOCKET SSL_ERROR_* VERIFY_*",
+        None,
+        CONSTANT,
+    ),
+    g(
+        "ssl",
+        "OPENSSL_VERSION OPENSSL_VERSION_INFO OPENSSL_VERSION_NUMBER get_sigalgs",
+        None,
+        BUILD,
+    ),
+    g(
+        "ssl",
+        "namedtuple socket socket_error",
+        None,
+        "a name imported for the module's own use, or an alias of a built-in error type",
     ),
 )
 
@@ -516,6 +602,7 @@ def groups() -> tuple[Group, ...]:
         *_IDENTITY,
         *_ANCHORS,
         *_FED,
+        *_FOUND,
         *_THIRD_PARTY,
     )
 

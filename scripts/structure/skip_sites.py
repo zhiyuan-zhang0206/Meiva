@@ -277,8 +277,8 @@ def write_baseline(found: dict[str, list[tuple[int, str]]], root: Path = _REPO_R
     return total
 
 
-def main(argv: list[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
+def main(argv: list[str]) -> int:
+    arguments = list(argv)
     found = sites_by_file(tracked_test_modules())
     if "--write-baseline" in arguments:
         write_baseline(found)
@@ -291,4 +291,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

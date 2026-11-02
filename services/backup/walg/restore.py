@@ -30,7 +30,6 @@ postmaster shut down cleanly; a drill passes `keep_data=False` and removes the d
 
 from __future__ import annotations
 
-import getpass
 import re
 import shlex
 import shutil
@@ -272,7 +271,7 @@ def restored_instance(
     backup: str,
     target: RecoveryTarget,
     report: Report,
-    user: str | None = None,
+    user: str,
     keep_data: bool,
     path: Path | None,
     timeout_s: float = RESTORE_TIMEOUT_S,
@@ -310,7 +309,7 @@ def restored_instance(
     # Short and private: a socket path is capped at 103 bytes, which a deep scratch path exceeds.
     socket_dir = Path(tempfile.mkdtemp(prefix="meiva-walg-restore-", dir=socket_root))
     log = socket_dir / "postgres.log"
-    instance = RestoredInstance(directory, socket_dir, _free_port(), user or getpass.getuser())
+    instance = RestoredInstance(directory, socket_dir, _free_port(), user)
     process: subprocess.Popen[bytes] | None = None
     try:
         argv = recovery_argv(

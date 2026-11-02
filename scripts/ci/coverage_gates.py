@@ -211,12 +211,12 @@ def check(files: Mapping[str, object], threshold: float, *, floors: Mapping[str,
 
 
 def main(
-    argv: Sequence[str] | None = None,
+    argv: Sequence[str],
     *,
     floors: Mapping[str, float],
     env: Mapping[str, str],
 ) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
+    args = list(argv)
     json_path = args[0] if args else "coverage.json"
     threshold = float(env.get("BACKEND_COVERAGE_THRESHOLD", CORE_THRESHOLD_DEFAULT))
     with Path(json_path).open() as f:
@@ -230,4 +230,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main(floors=FLOORS, env=os.environ))
+    sys.exit(main(sys.argv[1:], floors=FLOORS, env=os.environ))

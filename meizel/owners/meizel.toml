@@ -5,13 +5,13 @@ exports = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_j
 "timing_judgement_cli.py" = ["timing_judgement.py"]
 "tests" = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_judgement.py", "timing_judgement_cli.py"]
 
+[roots]
+"clock_lattice_cli.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"timing_judgement_cli.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+
 [purity]
 "." = "strict"
 "clock_lattice.py" = "strict"
 "clock_lattice_cli.py" = { mode = "none", why = "the command-line entry of the clock-lattice rule: it reads the roles this repository declares, the policy, the family modules, the exempted files and the checkout's file set, and hands them to meizel/owners/clock_lattice.py, which decides everything else" }
 "timing_judgement_cli.py" = { mode = "none", why = "the command-line entry of the timing-judgement rule: it finds the test files and reads the baseline, and meizel/owners/timing_judgement.py decides everything else" }
 "decisions.py" = "strict"
-
-[debt.ambient-read]
-"clock_lattice_cli.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }
-"timing_judgement_cli.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }

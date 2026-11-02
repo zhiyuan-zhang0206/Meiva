@@ -433,8 +433,8 @@ def _advice() -> str:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
+def main(argv: list[str]) -> int:
+    arguments = list(argv)
     sites = all_sites()
     lane_list = lanes()
     job_table = jobs()
@@ -452,4 +452,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

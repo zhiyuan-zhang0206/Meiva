@@ -234,9 +234,8 @@ def _docstring_lines(text: str) -> set[int]:
     return lines
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
-    argv = argv if argv is not None else sys.argv[1:]
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
@@ -269,4 +268,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

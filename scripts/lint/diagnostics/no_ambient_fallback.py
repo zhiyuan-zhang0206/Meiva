@@ -300,10 +300,9 @@ def _resolve_targets(argv: list[str], root: Path) -> list[Path] | None:
     return [root / d for d in _SCAN_DIRS]
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root.resolve()
-    raw_argv = sys.argv[1:] if argv is None else argv
-    targets = _resolve_targets(raw_argv, root)
+    targets = _resolve_targets(argv, root)
     if targets == []:
         return 0
     files = lint_common.python_files(targets or [], root)
@@ -331,4 +330,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

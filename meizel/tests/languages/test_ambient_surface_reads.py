@@ -63,6 +63,26 @@ def acquired(
             [("random", "email.utils.make_msgid")],
         ),
         ("import time\n\nx = time.get_clock_info('time')\n", [("platform", "time.get_clock_info")]),
+        (
+            "import email.utils\n\nx = email.utils.formatdate(1.5, localtime=True)\n",
+            [("clock", "email.utils.formatdate")],
+        ),
+        # meiva:note
+        # Over-recorded on purpose: the table cannot say "given a time and not `localtime`".
+        (
+            "import email.utils\n\nx = email.utils.formatdate(1.5)\n",
+            [("clock", "email.utils.formatdate")],
+        ),
+        ("import netrc\n\nx = netrc.netrc()\n", [("home", "netrc.netrc()")]),
+        (
+            "import ssl\n\nx = ssl.get_default_verify_paths()\n",
+            [("environ", "ssl.get_default_verify_paths")],
+        ),
+        (
+            "import ssl\n\nx = ssl.create_default_context()\n",
+            [("environ", "ssl.create_default_context()")],
+        ),
+        ("import ssl\n\nx = ssl.RAND_bytes(8)\n", [("random", "ssl.RAND_bytes")]),
     ],
 )
 def test_the_channels_the_table_judges_are_acquisitions(
@@ -119,7 +139,7 @@ def test_a_name_that_reads_nothing_is_not_an_acquisition(
         ("import fileinput\n\nx = fileinput.input()\n", [("argv", "fileinput.input()")]),
         (
             "import email.utils\n\nx = email.utils.formatdate(localtime=True)\n",
-            [("clock", "email.utils.formatdate()")],
+            [("clock", "email.utils.formatdate")],
         ),
         ("def f(path):\n    return path.absolute()\n", []),
         ("def f():\n    return build().absolute()\n", [("cwd", "pathlib.Path.absolute")]),
@@ -147,10 +167,26 @@ def test_a_call_that_is_not_given_the_value_that_spares_its_read_acquires(
         "def f(parser, argv):\n    return parser.parse_args(args=argv)\n",
         "import fileinput\n\nx = fileinput.input(files=['/a'])\n",
         "import fileinput\n\nx = fileinput.FileInput(['/a'])\n",
-        "import email.utils\n\nx = email.utils.formatdate(1.5)\n",
+        "import netrc\n\nx = netrc.netrc('/a')\n",
+        "import ssl\n\nx = ssl.create_default_context(cafile='/a')\n",
     ],
 )
 def test_the_same_calls_given_the_value_read_nothing(make_repo: RepoFactory, source: str) -> None:
+    assert acquired(make_repo, source) == []
+
+
+# meiva:note
+# `input` is the builtin only when the file does not bind the name: a parameter, an assignment or
+# a comprehension variable called `input` is the file's own value and reads no stream.
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(input):\n    return input('x')\n",
+        "input = lambda prompt: prompt\n\nx = input('x')\n",
+        "x = [input for input in ['a']]\n",
+    ],
+)
+def test_an_input_the_file_binds_is_not_the_builtin(make_repo: RepoFactory, source: str) -> None:
     assert acquired(make_repo, source) == []
 
 

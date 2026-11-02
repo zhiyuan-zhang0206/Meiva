@@ -367,12 +367,11 @@ def _print_ddia_diagnostic(total_violations: int, files_with_violations: int) ->
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     repo_root: Path = _REPO_ROOT,
     scan_dirs: Sequence[str] | None = None,
 ) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
     raw_args, only = lint_common.split_only(argv)
     dirs = SCAN_DIRS if scan_dirs is None else scan_dirs
     parsed = _resolve_targets(raw_args, only, repo_root, dirs)
@@ -393,4 +392,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

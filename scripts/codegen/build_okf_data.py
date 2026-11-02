@@ -19,9 +19,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-# Re-exported: scripts/content_lint/lint_meiva_okf.py does `from build_okf_data import resolve_wikilink`.
 from base.packages.docs.okf_graph import build_graph_data
-from base.packages.docs.okf_graph import resolve_wikilink as resolve_wikilink
 from base.packages.okf_bundle import read_bundle
 
 

@@ -83,8 +83,7 @@ def _files_to_scan(
     ]
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
     argv, only = lint_common.split_only(argv)
     resolved: list[str] = []
     if argv:
@@ -120,4 +119,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

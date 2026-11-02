@@ -571,9 +571,9 @@ def _verdict(
     return 1
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
-    paths, only, write_baseline = _split_args(list(sys.argv[1:] if argv is None else argv))
+    paths, only, write_baseline = _split_args(list(argv))
     problem = _arguments_problem(paths, only, write_baseline=write_baseline)
     if problem is not None:
         print(problem, file=sys.stderr)
@@ -587,4 +587,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

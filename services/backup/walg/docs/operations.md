@@ -95,8 +95,8 @@ before trusting the schedule. Its download saturates the downlink for roughly th
 a base-backup fetch (an estimate, not measured on this bucket): schedule hand runs
 accordingly.
 
-**Restoring** (`meiva backup walg restore --dir <empty directory> [--backup NAME]
-[--user <superuser>] [--time 'YYYY-MM-DD HH:MM:SS+00' | --lsn X/X]`). It never touches this home's data
+**Restoring** (`meiva backup walg restore --dir <empty directory> --user <superuser>
+[--backup NAME] [--time 'YYYY-MM-DD HH:MM:SS+00' | --lsn X/X]`). It never touches this home's data
 directory (a `--dir` that is or contains `$MEIVA_HOME/pg` is refused) or its ports. Steps:
 
 1. Pick the backup. `LATEST` is the default; to recover to a time or LSN, name the newest
@@ -112,7 +112,8 @@ directory (a `--dir` that is or contains `$MEIVA_HOME/pg` is refused) or its por
    promoted, then shuts it down cleanly. The directory is left as a promoted database on a
    new timeline; it is not started.
    `--user` names the restored cluster's superuser, the OS user that ran initdb on the
-   source (default: the current OS user); a role Postgres refuses ends the restore at once.
+   source (required: it is a property of the database, not of the operator); a role Postgres
+   refuses ends the restore at once.
 3. A missing segment, a wrong key or an unreachable target ends in Postgres' FATAL, printed
    with the end of its log; the directory is left for inspection, and must be emptied
    before a retry.

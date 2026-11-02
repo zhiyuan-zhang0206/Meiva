@@ -5,13 +5,13 @@ exports = ["check_doc_references.py", "lint_meiva_okf.py", "lint_no_cjk.py", "li
 
 [roots]
 "check_cross_branch_migrations.py" = { kinds = ["environ", "platform"], why = "CLI entry of the single-branch premise check: its __main__ block builds the host of this process with Host.system(), handing it the process environment" }
-"lint_core_content_manifests.py" = { kinds = ["environ", "home", "argv"], why = "CLI entry of the core-content manifest gate (CI job and pre-commit hook): main() expands the `~` an operator writes in each --audit-dir before the parser checks that the path exists, and hands the process environment to the one `git log` that derives the host version the manifests are checked against — nothing below main() reads either again; it also reads its command line (argv) once, as the process entry" }
+"lint_audit_record.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"lint_core_content_manifests.py" = { kinds = ["environ", "home", "argv"], why = "CLI entry of the core-content manifest gate (CI job and pre-commit hook): main() expands the `~` an operator writes in each --audit-dir before the parser checks that the path exists, and hands the process environment to the one `git log` that derives the host version the manifests are checked against — nothing below main() reads either again; it also reads its command line (argv): the `__main__` guard reads argv[1:] once and hands it to main" }
 "lint_doc_roster.py" = { kinds = ["home"], why = "CLI entry of the roster lint: main() resolves the scratch home the entry just entered and builds the service roster the documents are compared against from it" }
 "lint_meiva_okf.py" = { kinds = ["cwd"], why = "CLI OKF linter defaults to the current checkout directory when invoked from the command line" }
 "lint_migrations.py" = { kinds = ["argv"], why = "Lint script entry: its __main__ block takes the process command line (sys.argv[1:])" }
+"lint_no_cjk.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"lint_no_tailnet.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 
 [debt.ambient-read]
 "check_doc_references.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#8237", until = "waits for `main` to require an absolute `repo` and absolute docs: `.absolute()` anchors a relative path at the working directory" }
-"lint_audit_record.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }
-"lint_no_cjk.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }
-"lint_no_tailnet.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }

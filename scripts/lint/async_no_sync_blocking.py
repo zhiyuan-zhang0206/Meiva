@@ -258,7 +258,7 @@ def _collect_errors(
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     repo_root: Path | None = None,
     definition_dirs: Sequence[str] | None = None,
@@ -266,7 +266,6 @@ def main(
     repo_blocking_helpers: AbstractSet[str] | None = None,
 ) -> int:
     root = _ROOT if repo_root is None else repo_root
-    argv = argv if argv is not None else sys.argv[1:]
     _, only = lint_common.split_only(argv)
     scope = lint_common.changed_scope(only, root)
     stale = stale_repo_helpers(
@@ -304,4 +303,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

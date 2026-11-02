@@ -541,8 +541,7 @@ def _window_description(*, branch: str, days: int | None, commits: int | None, t
     return f"last {days} days (since {since.isoformat()}) on {branch}, first-parent"
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=str(_REPO_ROOT), help="repo root (default: this repo)")
     # origin/main, not the local `main`: this repo works in worktrees off a fetched
@@ -597,4 +596,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -5,6 +5,3 @@ exports = ["index.py", "judgment.py", "sources.py"]
 "index.py" = ["sources.py"]
 "judgment.py" = ["index.py", "sources.py"]
 "__init__.py" = ["entry.py"]
-
-[debt.ambient-read]
-"entry.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }

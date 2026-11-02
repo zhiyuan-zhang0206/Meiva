@@ -87,4 +87,4 @@ from scripts.lint.diagnostics.time_bomb_rule import main  # noqa: E402 - standal
 __all__ = ["main"]
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

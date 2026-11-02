@@ -290,12 +290,11 @@ def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     repo_root: Path = _REPO_ROOT,
     legal_sources: frozenset[str] | None = None,
 ) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
@@ -336,4 +335,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

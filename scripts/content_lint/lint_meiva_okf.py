@@ -19,9 +19,8 @@ from base.host.env.boot_actions import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
-from base.packages.docs.okf_graph import logical_path
+from base.packages.docs.okf_graph import logical_path, resolve_wikilink
 from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
-from scripts.codegen.build_okf_data import resolve_wikilink
 
 # meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 ALLOWED_TYPES = {"doc", "memory"}

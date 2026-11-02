@@ -1,4 +1,7 @@
 exports = ["feed.py"]
 
+[roots]
+"feed.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+
 [purity]
 "feed.py" = "strict"

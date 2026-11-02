@@ -255,8 +255,7 @@ def is_test_file(rel: str) -> bool:
     return lint_common.is_test_path(rel) or name.startswith("test_") or name == "conftest.py"
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def main(argv: list[str]) -> int:
     argv, only = lint_common.split_only(argv)
     if argv:
         targets, missing = lint_common.resolve_targets(argv, _REPO_ROOT)
@@ -287,4 +286,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

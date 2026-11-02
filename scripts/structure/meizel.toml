@@ -11,9 +11,9 @@ exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "local
 "tests_location_suggest.py" = ["placement.py", "placement_evidence.py", "tests_location_allowed.py"]
 
 [roots]
-"cochange.py" = { kinds = ["clock", "argv"], why = "CLI sweeper entrypoint resolves the current UTC date to describe the rolling --days window; it also reads its command line (argv) once, as the process entry" }
+"cochange.py" = { kinds = ["clock", "argv"], why = "CLI sweeper entrypoint resolves the current UTC date to describe the rolling --days window; it also reads its command line (argv): the `__main__` guard reads argv[1:] once and hands it to main" }
+"platform_lane_coverage.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"skip_sites.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"tests_location.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 
 [debt.ambient-read]
-"platform_lane_coverage.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }
-"skip_sites.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }
-"tests_location.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }

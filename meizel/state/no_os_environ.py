@@ -94,13 +94,12 @@ def _scan_file(path: Path, managed_envs: frozenset[str]) -> list[tuple[int, str,
 # meiva:note
 # Run the lint; `managed_aliases` returns the env names the config registry owns.
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     managed_aliases: Callable[[], frozenset[str]],
     repo_root: Path | None = None,
 ) -> int:
     root = repo_root if repo_root is not None else _REPO_ROOT
-    argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     # meiva:note
     # argv non-empty = explicit paths; empty = the test files of all _SCAN_TARGETS, or the `--only`
