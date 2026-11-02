@@ -25,10 +25,10 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 # entry stays booked because the checker has no duration class to book it as — recorded here so the
 # next reader does not "repay" it by threading a clock through 57 lock call sites.
 [debt.ambient-read]
-"os_platform.py#clock _monotonic()" = 1
-"os_platform.py#pid os.getpid" = 1
-"os_platform.py#platform platform.machine" = 1
-"os_platform.py#platform sys.platform" = 1
+"os_platform.py#clock _monotonic()" = { count = 1, owner = "#5816", until = "waits for the checker to have a duration class: the value only answers now >= deadline inside the file-lock loop and is never recorded, and threading a clock through every lock call site would make each lock a caller decision" }
+"os_platform.py#pid os.getpid" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: the pid this module reports is the one the platform assigned to the running process, and a caller handing in its own pid restates the same syscall while being unable to answer for another process" }
+"os_platform.py#platform platform.machine" = { count = 1, owner = "#5816", until = "waits for the hardware: the machine this process runs on is not a value any caller inside it holds better, so carrying it in would repeat the same uname at every call site" }
+"os_platform.py#platform sys.platform" = { count = 1, owner = "#5816", until = "waits for the interpreter: the platform this process was started on is fixed before any caller runs, and a caller passing it would be naming a value it can only have read the same way" }
 
 [debt.fake-entropy]
 "os_platform.py#interval-wrapper _monotonic" = 1
