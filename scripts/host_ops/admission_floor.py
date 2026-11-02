@@ -20,10 +20,23 @@ from typing import Literal, TextIO
 MEM_INFO = "/proc/meminfo"
 
 # meiva:note
+# The step the signal moves by: a macOS swap pool grows one gigabyte at a time and every gigabyte
+# comes out of the same volume this gate measures. A threshold drawn inside one step gives the
+# same host two verdicts a minute apart, so every distance below is expressed in steps and pinned
+# by a test rather than by this comment.
+DISK_QUANTUM_GIB = 1.0
+
+# meiva:note
 # Two lines, not one: a warning and a refusal in the same second leaves an operator no room to
 # react. Both are flags of the gate so the line can move without a release.
+#
+# The refusal keeps the user's admission line from 2026-10-25 (23 GiB). The warning sits three
+# steps above it: at 24.0 the two verdicts were one step apart and a single swapfile birth was
+# enough to land on either side, so the same reading produced "refuse" and "warn" one minute
+# after the other. `test_admission_floor_thresholds.py` fails if either distance falls below two
+# steps.
 DEFAULT_DISK_REFUSE_GIB = 23.0
-DEFAULT_DISK_WARN_GIB = 24.0
+DEFAULT_DISK_WARN_GIB = 26.0
 
 # meiva:note
 # The refusal is a state, not a sample (user ruling relayed by 405, 2026-10-30, task #5872).
@@ -33,7 +46,8 @@ DEFAULT_DISK_WARN_GIB = 24.0
 # On 2026-10-30 the macmini crossed this line 127 times in one day of ten-second samples while
 # nothing about the machine changed; requiring three samples to cross it, and a reset margin
 # wider than one swapfile to come back, cut that to 7. The margin must stay larger than the
-# quantisation step or the reset fires inside the same wobble that caused the refusal.
+# quantisation step (`DISK_QUANTUM_GIB`) or the reset fires inside the same wobble that caused
+# the refusal; a test pins that inequality too.
 DEFAULT_DISK_RESET_MARGIN_GIB = 1.5
 DEFAULT_FLOOR_SAMPLES = 3
 DEFAULT_FLOOR_SAMPLE_INTERVAL_S = 10.0
