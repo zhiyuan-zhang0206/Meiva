@@ -22,13 +22,13 @@ other root kind.
 
 | kind | what it is | acquired by |
 |---|---|---|
-| `argv` | the command line the process was started with | `sys.argv`, `sys.orig_argv`, `sys.flags`, `sys.warnoptions`; `parser.parse_args()` (and `parse_known_args`, `parse_intermixed_args`) called with no `args` |
+| `argv` | the command line the process was started with | `sys.argv`, `sys.orig_argv`, `sys.flags`, `sys.warnoptions`; `parser.parse_args()` (and `parse_known_args`, `parse_intermixed_args`) called with no `args`; `fileinput.input()` and `FileInput()` with no `files` |
 | `environ` | the environment and what the operating system derives from it | `os.environ`, `os.getenv`, `os.putenv`, `os.path.expandvars`, `os.get_exec_path`, `shutil.which` without a `path`, `tempfile.gettempdir` and the temporary-file constructors without a `dir`, `locale.getlocale` and the other locale readers |
-| `clock` | the instant and the host's time zone | `time.time[_ns]`, `datetime.now/utcnow/today`, `date.today`, `time.localtime/ctime/mktime`, `time.tzname/timezone/altzone/daylight`, `datetime.fromtimestamp` without a zone, `.astimezone()` without a zone, `time.gmtime/asctime/strftime` without a time value; `time.monotonic`, `time.perf_counter`, `time.process_time`, `time.thread_time`, `os.times` (and `_ns`) and `loop.time()` only in a function that also waits |
-| `home`, `cwd` | where the user's files are, and where a relative path starts | `Path.home`, `os.path.expanduser`, `.expanduser()`; `os.getcwd`, `Path.cwd`, `os.path.abspath`, `os.path.relpath` without a `start`, `Path.absolute()`, `os.listdir()`/`os.scandir()` without a path |
-| `platform` | which machine and which platform this is | `sys.platform`, `os.name`, `os.uname`, `os.cpu_count`, `os.getloadavg`, `os.sysconf`, `socket.gethostname`, `uuid.getnode`, `multiprocessing.cpu_count`, `platform.*` |
-| `pid` | what the process says about itself: its ids, its interpreter, its terminal | `os.getpid` and the other id readers, `sys.executable`, `sys.prefix`, `sys.stdin`, `isatty`, `shutil.get_terminal_size`, `getpass.getuser`, `os.getlogin`, `pwd`/`grp` lookups, `threading.get_ident`, `psutil.Process()` without a pid |
-| `random` | entropy | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.uuid1`, `uuid.uuid4`, `os.urandom`, `os.getrandom` |
+| `clock` | the instant and the host's time zone | `time.time[_ns]`, `datetime.now/utcnow/today`, `date.today`, `time.localtime/ctime/mktime`, `time.tzname/timezone/altzone/daylight`, `datetime.fromtimestamp` without a zone, `.astimezone()` without a zone, `time.gmtime/asctime/strftime` without a time value, `email.utils.formatdate` without a time, `email.utils.localtime`; `time.monotonic`, `time.perf_counter`, `time.process_time`, `time.thread_time`, `os.times` (and `_ns`) and `loop.time()` only in a function that also waits |
+| `home`, `cwd` | where the user's files are, and where a relative path starts | `Path.home`, `os.path.expanduser`, `.expanduser()`, `site.getusersitepackages`; `os.getcwd`, `Path.cwd`, `os.path.abspath`, `os.path.relpath` without a `start`, `Path.absolute()`, `os.listdir()`/`os.scandir()` without a path |
+| `platform` | which machine and which platform this is | `sys.platform`, `os.name`, `os.uname`, `os.cpu_count`, `os.getloadavg`, `os.sysconf`, `socket.gethostname`, `uuid.getnode`, `multiprocessing.cpu_count`, `time.get_clock_info`, `platform.*` except the `python_*` functions, which describe the pinned build |
+| `pid` | what the process says about itself: its ids, its interpreter, its terminal | `os.getpid` and the other id readers, `sys.executable`, `sys.prefix`, `sys.stdin`, `input()`, `isatty`, `shutil.get_terminal_size`, `getpass.getuser`, `os.getlogin`, `pwd`/`grp` lookups, `threading.get_ident`, `psutil.Process()` without a pid |
+| `random` | entropy | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.uuid1`, `uuid.uuid4`, `email.utils.make_msgid`, `os.urandom`, `os.getrandom` |
 | a state kind of the policy's `[ambient]` | the state the repository keeps itself | the names that table lists for it, resolved against the modules whose `[state]` declares the kind ([[meizel/docs/checker/ambient.meiva.okf.md|the ambient reads node]]) |
 
 ## The channels
@@ -41,7 +41,7 @@ met. Each channel is either an ambient kind or the concern of another layer:
 |---|---|
 | arguments the process was started with | `argv` |
 | the environment variables, and what is derived from them (the search path, the temporary directory, the locale) | `environ` |
-| the process's own identity: ids, interpreter, login, standard streams, terminal | `pid` |
+| the process's own identity: ids, interpreter, login, which standard streams it is wired to (the stream, not its contents, which are an effect), terminal | `pid` |
 | the host's identity: platform, name, processor count, load, hardware address | `platform` |
 | the clock and the host's time zone | `clock` |
 | entropy | `random` |

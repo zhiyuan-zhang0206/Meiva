@@ -18,4 +18,4 @@ exports = ["admission.py", "cold_start.py", "cold_start_plan.py", "gateway_hint.
 "stand_down_gate.py" = "strict"
 
 [debt.ambient-read]
-"__init__.py#pid sys.stdout.isatty" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"__init__.py#pid sys.stdout.isatty" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }

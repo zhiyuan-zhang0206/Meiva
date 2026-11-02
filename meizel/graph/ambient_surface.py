@@ -26,7 +26,9 @@ from meizel.graph.ambient_judgments import (
     CONSTANT,
     FILES,
     NET,
+    STATE,
     TYPE,
+    VALUES,
     Group,
     Judgment,
     K,
@@ -74,6 +76,8 @@ class MethodReading:
 CHANNEL_MODULES = frozenset(
     {
         "datetime",
+        "email.utils",
+        "fileinput",
         "getpass",
         "grp",
         "locale",
@@ -87,6 +91,7 @@ CHANNEL_MODULES = frozenset(
         "resource",
         "secrets",
         "shutil",
+        "site",
         "socket",
         "sys",
         "sysconfig",
@@ -100,12 +105,30 @@ CHANNEL_MODULES = frozenset(
 
 # meiva:note
 # The host: `platform` and `socket.gethostname` are identity; everything else of `socket` is network.
+# No module is judged by a bare `*`: every name is listed, or belongs to a family named by a prefix
+# (`AF_*`, `SO_*`), so a function added to a module can never inherit a judgment unseen.
 _HOST = (
     g(
         "platform",
-        "*",
+        "architecture freedesktop_os_release android_ver ios_ver java_ver libc_ver mac_ver machine "
+        "node platform processor release system system_alias uname version win32_edition "
+        "win32_is_iot win32_ver",
         K.PLATFORM,
-        "every `platform` function asks the machine or the interpreter",
+        "asks the machine or the operating system what it is",
+    ),
+    g(
+        "platform",
+        "python_branch python_build python_compiler python_implementation python_revision "
+        "python_version python_version_tuple",
+        None,
+        BUILD,
+    ),
+    g("platform", "AndroidVer IOSVersionInfo uname_result", None, TYPE),
+    g(
+        "platform",
+        "invalidate_caches",
+        None,
+        "empties the module's own cache of what it asked the machine",
     ),
     g(
         "socket",
@@ -113,7 +136,27 @@ _HOST = (
         K.PLATFORM,
         "the host's name or its network interfaces",
     ),
-    g("socket", "*", None, NET),
+    g(
+        "socket",
+        "socket SocketType SocketIO socketpair fromfd fromshare dup close create_connection "
+        "create_server getaddrinfo getdefaulttimeout setdefaulttimeout gethostbyaddr gethostbyname "
+        "gethostbyname_ex getnameinfo getprotobyname getservbyname getservbyport sethostname "
+        "has_dualstack_ipv6 has_ipv6 herror gaierror error timeout errorTab CAPI AddressFamily "
+        "AddressInfo SocketKind MsgFlag IntEnum IntFlag EAGAIN EBADF EWOULDBLOCK SOMAXCONN htonl "
+        "htons ntohl ntohs inet_aton inet_ntoa inet_ntop inet_pton recv_fds send_fds",
+        None,
+        NET,
+    ),
+    g(
+        "socket",
+        "AF_* AI_* ALG_* BDADDR_* BT_* BTPROTO_* CAN_* CMSG_* EAI_* ETH_* ETHERTYPE_* HCI_* HV_* "
+        "HVSOCKET_* INADDR_* IOCTL_* IP_* IPPORT_* IPPROTO_* IPV6_* IPX_* J1939_* L2CAP_* LOCAL_* "
+        "MSG_* NETLINK_* NI_* PACKET_* PF_* RCVALL_* RDS_* SCM_* SHUT_* SIO_* SO_* SOCK_* SOL_* "
+        "SYSPROTO_* TCP_* TIPC_* UDPLITE_* VM_* VMADDR_*",
+        None,
+        "a constant of the network headers, one family per prefix: it selects an option of the "
+        "socket API and identifies nothing about the host",
+    ),
     g("multiprocessing", "cpu_count", K.PLATFORM, "the host's processor count"),
     g(
         "multiprocessing",
@@ -123,7 +166,11 @@ _HOST = (
     ),
     g(
         "multiprocessing",
-        "*",
+        "Array AuthenticationError Barrier BoundedSemaphore BufferTooShort Condition Event "
+        "JoinableQueue Lock Manager Pipe Pool Process ProcessError Queue RLock RawArray RawValue "
+        "SUBDEBUG SUBWARNING Semaphore SimpleQueue TimeoutError Value allow_connection_pickling "
+        "freeze_support get_all_start_methods get_context get_logger get_start_method "
+        "log_to_stderr set_executable set_forkserver_preload set_start_method",
         None,
         "a process, pool, queue, lock or start-method setting: an effect or a constructor",
     ),
@@ -210,7 +257,16 @@ _IDENTITY = (
         "the group database: the process's own groups are the common use",
     ),
     g("grp", "struct_group", None, TYPE),
-    g("random", "*", K.RANDOM, "every draw, seed and state of the shared generator"),
+    g(
+        "random",
+        "betavariate binomialvariate choice choices expovariate gammavariate gauss getrandbits "
+        "getstate lognormvariate normalvariate paretovariate randbytes randint random randrange "
+        "sample seed setstate shuffle triangular uniform vonmisesvariate weibullvariate "
+        "SystemRandom",
+        K.RANDOM,
+        "every draw, seed and state of the shared generator, and the class that draws from the "
+        "operating system",
+    ),
     g(
         "random",
         "Random",
@@ -218,7 +274,12 @@ _IDENTITY = (
         "the class alone reads nothing; a constructor call with no literal seed is judged at the call",
     ),
     g("random", "BPF LOG4 NV_MAGICCONST RECIP_BPF SG_MAGICCONST TWOPI", None, CONSTANT),
-    g("secrets", "*", K.RANDOM, "every `secrets` function draws from operating-system entropy"),
+    g(
+        "secrets",
+        "choice randbelow randbits token_bytes token_hex token_urlsafe SystemRandom",
+        K.RANDOM,
+        "every `secrets` function draws from operating-system entropy",
+    ),
     g(
         "secrets",
         "compare_digest DEFAULT_ENTROPY",
@@ -358,6 +419,89 @@ _ANCHORS = (
 )
 
 # meiva:note
+# What the process is fed besides its arguments and its environment: a line of standard input, the
+# files its command line names, the user's site directories, and the clock a mail header stamps.
+_FED = (
+    g(
+        "builtins",
+        "input",
+        K.PID,
+        "names standard input as the stream it reads and writes the prompt to standard output: how "
+        "the process is wired is its own statement, and the contents are an effect on a descriptor "
+        "(`sys.stdin` is judged the same way)",
+    ),
+    g(
+        "fileinput",
+        "input FileInput",
+        K.ARGV,
+        "reads the files named in sys.argv[1:], or standard input, unless it is given the files",
+        unless=later(0, "files"),
+    ),
+    g(
+        "fileinput",
+        "close nextfile filename lineno filelineno fileno isfirstline isstdin hook_compressed "
+        "hook_encoded GenericAlias",
+        None,
+        "the state of an iteration the caller started, a hook for it or a type: it reads nothing "
+        "the caller did not name",
+    ),
+    g(
+        "site",
+        "getuserbase getusersitepackages gethistoryfile USER_BASE USER_SITE",
+        K.HOME,
+        "the user's base directory, taken from the home directory and PYTHONUSERBASE",
+    ),
+    g(
+        "site",
+        "ENABLE_USER_SITE check_enableusersite",
+        K.ENVIRON,
+        "whether the user site is on: the interpreter's flags and PYTHONNOUSERSITE",
+    ),
+    g(
+        "site",
+        "getsitepackages PREFIXES",
+        K.PID,
+        "the interpreter's own site directories, derived from its prefix",
+    ),
+    g(
+        "site",
+        "StartupState abs_paths addpackage addsitedir addsitepackages addusersitepackages "
+        "enablerlcompleter execsitecustomize execusercustomize main makepath register_readline "
+        "removeduppaths setcopyright sethelper setquit venv",
+        None,
+        STATE,
+    ),
+    g(
+        "email.utils",
+        "formatdate",
+        K.CLOCK,
+        "stamps the current time unless it is given the time",
+        unless=later(0, "timeval"),
+    ),
+    g(
+        "email.utils",
+        "localtime mktime_tz",
+        K.CLOCK,
+        "converts into, or out of, the host's time zone, as `time.localtime` and `time.mktime` do",
+    ),
+    g(
+        "email.utils",
+        "make_msgid",
+        K.RANDOM,
+        "draws a message id from the clock, the process id, a random number and the host name",
+    ),
+    g(
+        "email.utils",
+        "COMMASPACE CRLF Charset EMPTYSTRING TICK UEMPTYSTRING collapse_rfc2231_value "
+        "decode_params decode_rfc2231 encode_rfc2231 escapesre format_datetime formataddr "
+        "getaddresses parseaddr parsedate parsedate_to_datetime parsedate_tz quote "
+        "rfc2231_continuation specialsre supports_strict_parsing unquote",
+        None,
+        VALUES,
+    ),
+)
+
+# meiva:note
 # The non-standard-library readers that are judged because the repository uses them as the standard
 # library's: they carry no closure.
 _THIRD_PARTY = (
@@ -371,6 +515,7 @@ def groups() -> tuple[Group, ...]:
         *_HOST,
         *_IDENTITY,
         *_ANCHORS,
+        *_FED,
         *_THIRD_PARTY,
     )
 

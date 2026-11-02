@@ -22,4 +22,4 @@ exports = ["agents", "auth.py", "cluster", "converge", "data_plane", "duration.p
 "probe_report.py" = "strict"
 
 [debt.ambient-read]
-"harness.py#pid sys.stdin" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"harness.py#pid sys.stdin" = { count = 1, owner = "#8237", until = "waits for `cmd_harness_exec` to require its `stdin` stream: it falls back to `sys.stdin` when `stdin` is None" }

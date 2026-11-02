@@ -12,5 +12,5 @@ exports = ["catalog.py", "checklist.py", "gate.py", "probe.py", "triggers.py"]
 "catalog.py" = "strict"
 
 [debt.ambient-read]
-"probe.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"triggers.py#pid sys.executable" = { count = 2, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"probe.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `run_preflight` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"triggers.py#pid sys.executable" = { count = 2, owner = "#8237", until = "waits for `child_argv` to take the interpreter path from its caller: it reads `sys.executable` itself" }

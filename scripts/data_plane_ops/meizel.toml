@@ -4,5 +4,8 @@ exports = ["rotate_cluster_secret.py", "tests"]
 "tests" = ["rotate_data_plane_secrets.py"]
 
 [roots]
-"rotate_cluster_secret.py" = { kinds = ["home", "random"], why = "emergency bearer rotation CLI resolves the home it operates once in main() and mints a replacement cryptographic cluster secret" }
+"rotate_cluster_secret.py" = { kinds = ["home", "random", "pid"], why = "emergency bearer rotation CLI resolves the home it operates once in main(), mints a replacement cryptographic cluster secret and reads the operator's typed confirmation from standard input (`input()` in main())" }
 "rotate_data_plane_secrets.py" = { kinds = ["clock", "home", "random", "settings"], why = "gateway Redis credential rotation CLI reads the active data-plane configuration, resolves the home it operates once in main(), timestamps the rotation journal, and mints replacement passwords" }
+
+[debt.ambient-read]
+"rotate_data_plane_secrets.py#pid builtins.input" = { count = 1, owner = "#8237", until = "waits for `run_rotation` to take the operator's confirmation as a value from `main`: it asks with `input()` itself" }

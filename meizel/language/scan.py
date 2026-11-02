@@ -331,6 +331,12 @@ class Scanner(AmbientAccess):
             )
             if self.records_value(node) and origin is not None:
                 self.ambient.used(origin, origin, node.lineno)
+            elif (
+                self.records_value(node)
+                and node.id == "input"
+                and (origin, shadowed) == (None, False)
+            ):
+                self.ambient.used("builtins.input", "builtins.input", node.lineno)
 
     # meiva:note
     # Whether a name or attribute read is a value the file acquires: not in a test file and not in a

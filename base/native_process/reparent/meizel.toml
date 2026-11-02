@@ -9,5 +9,5 @@ exports = ["__main__.py"]
 "__main__.py" = { mode = "none", why = "the double-fork helper itself: setsid, the fork, the pid handback write, the three dup2 calls and execv — every call an async-signal-safe os.* run after the fork; the command line, the usage verdict and the redirect table are decided in plan.py before it" }
 "plan.py" = "strict"
 
-[debt.ambient-read]
-"__main__.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+[roots]
+"__main__.py" = { kinds = ["argv"], why = "Module entry of the reparenting child: its __main__ block hands the process command line (sys.argv[1:]) to main()" }

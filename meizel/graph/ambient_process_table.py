@@ -158,11 +158,18 @@ _SYS = (
     ),
     g(
         "sys",
-        "executable prefix base_prefix exec_prefix base_exec_prefix stdin __stdin__ "
-        "stdout.isatty stderr.isatty",
+        "executable prefix base_prefix exec_prefix base_exec_prefix stdout.isatty stderr.isatty",
         K.PID,
         "what the process says about itself: the interpreter it runs on and what its standard "
         "streams are attached to",
+    ),
+    g(
+        "sys",
+        "stdin __stdin__",
+        K.PID,
+        "names the stream the parent attached as this process's input: how the process is wired is "
+        "its own statement, while reading the contents is an effect on a descriptor that the purity "
+        "layer judges (`impure-call`); the repair is to take the stream as a value from the entry",
     ),
     g(
         "sys",
@@ -259,10 +266,12 @@ _TIME = (
     ),
     g(
         "time",
-        "strptime struct_time get_clock_info clock_getres pthread_getcpuclockid",
-        None,
-        VALUES,
+        "get_clock_info clock_getres pthread_getcpuclockid",
+        K.PLATFORM,
+        "asks the host about its clocks: their resolution and implementation, or the CPU-time clock "
+        "of a thread",
     ),
+    g("time", "strptime struct_time", None, VALUES),
     g("time", "CLOCK_*", None, CONSTANT),
 )
 

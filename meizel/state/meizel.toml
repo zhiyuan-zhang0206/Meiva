@@ -13,4 +13,4 @@ exports = ["ambient_state", "machine_role.py", "no_os_environ.py", "turn_scoped_
 "turn_scoped_config.py" = { mode = "none", why = "the shell of the turn-scoped-config rule: it walks the scan directories, resolves and reads each file and prints the three reports; which files the rule skips, which reads are findings, how a path is labelled and the heading of each report are decided in turn_scoped_config_plan.py and lint_paths.py" }
 
 [debt.ambient-read]
-"no_os_environ.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"no_os_environ.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }

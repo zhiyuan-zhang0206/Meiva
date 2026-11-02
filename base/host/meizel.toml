@@ -18,6 +18,6 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 
 [debt.ambient-read]
 "proc.py#clock time.monotonic" = { count = 1, owner = "#5816", until = "permanently: wait_owned() takes a clock and defaults it to time.monotonic for a wait on a real process; a monotonic duration source has no better value to hand in" }
-"runtime_interpreter.py#argv sys.flags" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"runtime_interpreter.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"runtime_interpreter.py#pid sys.prefix" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"runtime_interpreter.py#argv sys.flags" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+"runtime_interpreter.py#pid sys.executable" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+"runtime_interpreter.py#pid sys.prefix" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }

@@ -10,4 +10,4 @@
 "signing_smoke.py" = { kinds = ["clock", "environ", "home", "platform", "random", "settings", "argv"], why = "process entry of the signing smoke run: reads the home it works in, the helper port and artifact directory from the process settings, and builds the one world the build and install share (the account home, the host's platform, process environment and command runner, the clock and the operating system's random generator the signing keychain password is drawn from); it also reads its command line (argv) once, as the process entry" }
 
 [debt.ambient-read]
-"f12.py#clock datetime.datetime.astimezone" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"f12.py#clock datetime.datetime.astimezone" = { count = 1, owner = "#8237", until = "waits for `f12_parse_window` to take the time zone as a value: `.astimezone()` with no argument converts to the host's zone" }

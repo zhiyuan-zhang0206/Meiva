@@ -15,8 +15,8 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 "provision_plan.py" = "strict"
 
 [debt.ambient-read]
-"pg_admin.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"pg_runtime.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"pg_throwaway_base.py#environ tempfile.gettempdir" = { count = 2, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"pg_tools.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"pooler.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"pg_admin.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for `pg_admin_url` to take the operator's user name from its caller: it asks getpass for it" }
+"pg_runtime.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for `installed_server` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }
+"pg_throwaway_base.py#environ tempfile.gettempdir" = { count = 2, owner = "#8237", until = "waits for `default_base` and `disk_fallback_base` to take the temporary directory from its caller: it asks the process environment (TMPDIR) for it" }
+"pg_tools.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for `pg_tool` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }
+"pooler.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for `pgbouncer_bin` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }
