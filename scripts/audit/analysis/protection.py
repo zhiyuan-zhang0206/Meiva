@@ -21,15 +21,29 @@ __all__ = [
 ]
 
 # meiva:note
-# The GitHub branch-protection admission gate on `main` is the three suite aggregators plus
-# `doc lints (pre-commit family)`; post-merge full-suite certification runs asynchronously via
-# `.github/workflows/release-gate.yml` (the Release Train).
+# The GitHub branch-protection admission gate on `main`: the backend suite aggregators, the
+# lint/scan family and the two content gates. These are the checks that reported on all 40
+# merged pull requests measured on 2026-11-02 and whose names carry no matrix index; the live
+# setting carries exactly this set. Post-merge full-suite certification still runs asynchronously
+# via `.github/workflows/release-gate.yml` (the Release Train).
+# meiva:note
+# `frontend (eslint + tsc + vitest)` and `e2e (Playwright happy path)` are absent on purpose, not
+# by omission: they reported SKIPPED on 37 and 31 of those 40 pull requests, and a required check
+# that never reports blocks every unrelated pull request. They can enter this set only after
+# their jobs report a real SUCCESS on pull requests that do not touch them (an in-job no-op
+# instead of a job-level `if`).
 _ADMISSION_CHECKS = frozenset(
     {
+        "GitGuardian Security Checks",
         "backend (pytest + pyright)",
-        "frontend (eslint + tsc + vitest)",
-        "e2e (Playwright happy path)",
+        "backend static (ruff + pyright + migration smoke)",
+        "backend structure (pre-commit lint + codegen freshness)",
+        "classify change",
+        "core-content manifests",
+        "diff hints",
         "doc lints (pre-commit family)",
+        "repo language (no raw CJK)",
+        "secret scan (Gitleaks)",
     }
 )
 _GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")

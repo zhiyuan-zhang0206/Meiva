@@ -19,10 +19,16 @@ from scripts.audit.analysis import (
 
 _ADMISSION_CHECKS = frozenset(
     {
+        "GitGuardian Security Checks",
         "backend (pytest + pyright)",
-        "frontend (eslint + tsc + vitest)",
-        "e2e (Playwright happy path)",
+        "backend static (ruff + pyright + migration smoke)",
+        "backend structure (pre-commit lint + codegen freshness)",
+        "classify change",
+        "core-content manifests",
+        "diff hints",
         "doc lints (pre-commit family)",
+        "repo language (no raw CJK)",
+        "secret scan (Gitleaks)",
     }
 )
 _EXPECTED_CHECKS = _ADMISSION_CHECKS
@@ -67,6 +73,13 @@ def _fake_gh(protection: dict[str, object], workflows: dict[str, object]):
 def test_expected_checks_is_the_branch_admission_gate() -> None:
     assert expected_checks() == _ADMISSION_CHECKS
     assert "doc lints (pre-commit family)" in _ADMISSION_CHECKS
+    # meiva:note
+    # These two reported SKIPPED on most measured pull requests, so a required check carrying
+    # their name would block every pull request that does not touch them. They stay out until
+    # their jobs report a real SUCCESS everywhere; adding one here without that fix would make
+    # the contract require a check that never arrives.
+    assert "frontend (eslint + tsc + vitest)" not in _ADMISSION_CHECKS
+    assert "e2e (Playwright happy path)" not in _ADMISSION_CHECKS
 
 
 def test_drift_report_accepts_the_exact_live_contract() -> None:
@@ -131,7 +144,7 @@ def test_cli_reports_ok_and_exits_zero(capsys: pytest.CaptureFixture[str]) -> No
 
 
 def test_cli_reports_drift_and_exits_one(capsys: pytest.CaptureFixture[str]) -> None:
-    protection = _protection(sorted(_EXPECTED_CHECKS - {"e2e (Playwright happy path)"}))
+    protection = _protection(sorted(_EXPECTED_CHECKS - {"doc lints (pre-commit family)"}))
 
     assert (
         audit.main(
