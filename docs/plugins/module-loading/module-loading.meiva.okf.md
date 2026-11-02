@@ -97,6 +97,13 @@ A repeat load re-executes the module object already registered for that file
 reload is not a lifecycle: the reset covers the framework registries only.
 In full: [[docs/plugins/module-loading/reload-semantics.meiva.okf.md]].
 
+## The four fixed-name registrations outside this contract
+A plugin under its real import name (`plugin_loader.load_plugin_module`), a provider
+(`plugin_providers._load_one`), the roster's `services.py`, and a shipped `metrics.py`
+register a module the same way in a different contract. Which of them can overlap in
+one process, and why none of them is locked:
+[[docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md]].
+
 ## Key Dependencies
 - [[docs/plugins/plugins.meiva.okf.md]] — the injection surfaces the import registers into
 - [[agent/graph/docs/graph.meiva.okf.md]] — `build_graph()` calls the loader (`load_extensions`) before wiring nodes

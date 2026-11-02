@@ -18,7 +18,16 @@ from base.lm.pricing.archive import load_archive
 from base.packages.plugins.extensions import PluginContributions
 
 
+# meiva:note
+# Not serialized, and the failure path deliberately does not restore a prior entry. Every caller
+# builds the catalog once per process (`meiva.boot._load_inputs` for the SDK, the gateway's app
+# construction, the agent host's `load_installation`), and request paths read the catalog the
+# process already built, so no second thread is inside this function. On failure the pop is the
+# clean-slate rule `safe_load_plugin_module` already follows: nothing resolves a provider module by
+# name after a load — each caller keeps the object it was handed — so restoring the entry an
+# earlier loader left would only keep a name alive that a retry re-executes.
 # meiva:link base/lm/docs/provider-plugins.meiva.okf.md
+# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md
 def _load_one(
     builder: CatalogBuilder, name: str, provider_py: Path, *, is_builtin: bool, home: Path
 ) -> None:
