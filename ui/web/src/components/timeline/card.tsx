@@ -270,7 +270,7 @@ export const CardHeader = memo(function CardHeader({
       onClick={onToggle}
       onPointerEnter={() => void highlighter.preload()}
       onFocus={() => void highlighter.preload()}
-      className={cn(HEADER_CLS, "flex-wrap rounded-md px-1.5 py-1")}
+      className={cn(HEADER_CLS, "flex-wrap rounded-md px-1 py-1")}
       aria-expanded={expanded}
       data-testid="card-toggle"
       data-expanded={expanded}

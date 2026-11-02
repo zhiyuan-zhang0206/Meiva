@@ -268,25 +268,46 @@ describe("block-level copy actions (hover band)", () => {
 });
 
 describe("splitEnvelope boundary", () => {
-  it("idx === 200 (\\n\\n exactly at char 200) → entire payload is body, no header", () => {
-    const header = "h".repeat(200);
-    const payload = `${header}\n\nbody-200-boundary`;
-    render(
-      <TimelineView items={[makeItem({ kind: "code_output", payload })]} />,
-    );
-    revealCollapsedCards();
-    const bodyEl = screen.getByText(/body-200-boundary/);
-    expect(bodyEl.textContent).toContain(header);
-  });
-  it("idx === 199 (\\n\\n exactly at char 199) → splits into header + body normally", () => {
+  it("code_output never splits the first line into a separate header even when \\n\\n is < 200 chars", () => {
     const header = "h".repeat(199);
     const payload = `${header}\n\nbody-199`;
     render(
       <TimelineView items={[makeItem({ kind: "code_output", payload })]} />,
     );
     revealCollapsedCards();
-    const bodyEl = screen.getByText("body-199");
-    expect(bodyEl.textContent).toBe("body-199");
+    const bodyEl = screen.getByText(/body-199/);
+    expect(bodyEl.textContent).toBe(payload);
+  });
+  it("human inbound_chat strips a single-line leading header when \\n\\n is < 200 chars and keeps it at >= 200 chars", () => {
+    const shortHeader = `[${"2026-05-15 ".padEnd(197, "0")}]`;
+    const longHeader = `[${"2026-05-15 ".padEnd(198, "0")}]`;
+    const { rerender } = render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "inbound_chat",
+            source: "user",
+            payload: `${shortHeader}\n\nbody-199`,
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("user-message-bubble").textContent).toBe("body-199");
+
+    rerender(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "inbound_chat",
+            source: "user",
+            payload: `${longHeader}\n\nbody-200`,
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("user-message-bubble").textContent).toBe(
+      `${longHeader}\n\nbody-200`,
+    );
   });
 });
 

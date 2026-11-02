@@ -227,7 +227,7 @@ export const TimelineRow = memo(function TimelineRow({
             onToggle={handleToggle}
           />
           {showExpandedBody ? (
-            <div className="relative pl-5 pr-1 pt-0.5 pb-1.5">
+            <div className="relative px-1 pt-0.5 pb-1.5">
               <ItemView item={item} streaming={streaming} />
               {secondaryCopy ? (
                 <div

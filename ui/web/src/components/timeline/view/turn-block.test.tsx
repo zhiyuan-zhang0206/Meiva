@@ -99,6 +99,10 @@ describe("TurnBlock component", () => {
 
     const viewport = screen.getByTestId("turn-scroll-viewport");
     expect(viewport.className).toContain("max-h-[var(--timeline-turn-max-h,50dvh)]");
+    const rail = screen.getByTestId("detail-content").parentElement;
+    expect(rail?.className).toContain("ml-1.5");
+    expect(rail?.className).toContain("pl-2");
+    expect(rail?.className).not.toContain("pl-3");
   });
 
   it("shares the identical unboxed chrome when liveWindow is true", () => {

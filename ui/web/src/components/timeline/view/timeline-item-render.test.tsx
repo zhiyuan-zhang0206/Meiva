@@ -353,7 +353,7 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
       />,
     );
     revealCollapsedCards();
-    expect(screen.getByTestId("chat-markdown").textContent).toBe("## Goal");
+    expect(screen.getByTestId("chat-markdown").textContent).toBe("Compact summary [ts]:\n\n## Goal");
   });
   it("inter-agent and human inbound_chat bodies go through ChatMarkdown", () => {
     render(
@@ -366,7 +366,7 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
     );
     revealCollapsedCards();
     expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual([
-      "see **this**",
+      "Agent 7:\n\nsee **this**",
       "render **markdown**",
     ]);
   });
@@ -397,15 +397,15 @@ describe("ItemView: inbound_chat envelope split", () => {
           makeItem({
             kind: "inbound_chat",
             source: "user",
-            payload: "User [2026-05-15]:\n\nhello world",
+            payload: "[2026-05-15 12:00:00]\n\nhello world",
           }),
         ]}
       />,
     );
-    expect(screen.queryByText(/User \[2026-05-15\]/)).toBeNull();
+    expect(screen.queryByText(/2026-05-15 12:00:00/)).toBeNull();
     expect(screen.getByText("hello world")).toBeTruthy();
   });
-  it("non-user inbound_chat with '<header>\\n\\n<body>' renders header and body separately", () => {
+  it("non-user inbound_chat renders full payload without splitting a separate header", () => {
     render(
       <TimelineView
         items={[
@@ -418,8 +418,9 @@ describe("ItemView: inbound_chat envelope split", () => {
       />,
     );
     revealCollapsedCards();
-    expect(screen.getByText(/Agent 5 \[2026-05-15\]/)).toBeTruthy();
-    expect(screen.getByText("hello world")).toBeTruthy();
+    expect(screen.getByTestId("chat-markdown").textContent).toBe(
+      "Agent 5 [2026-05-15]:\n\nhello world",
+    );
   });
   it("payload without '\\n\\n' → entire payload is body, no header", () => {
     render(
@@ -435,20 +436,26 @@ describe("ItemView: inbound_chat envelope split", () => {
 });
 
 describe("ItemView: code_output", () => {
-  it("envelope split — header + body", () => {
-    render(
+  it("renders full payload inside a single pre block without splitting the first line or indenting the child body", () => {
+    const payload = "Code execution output [2026-05-15]:\n\nstdout: hi";
+    const { container } = render(
       <TimelineView
         items={[
           makeItem({
             kind: "code_output",
-            payload: "Code execution output [2026-05-15]:\n\nstdout: hi",
+            payload,
           }),
         ]}
       />,
     );
     revealCollapsedCards();
-    expect(screen.getByText(/Code execution output/)).toBeTruthy();
-    expect(screen.getByText(/stdout: hi/)).toBeTruthy();
+    const cardToggle = screen.getByTestId("card-toggle");
+    expect(cardToggle.className).toContain("px-1");
+    expect(cardToggle.className).not.toContain("sm:px-3");
+    const pre = container.querySelector("pre");
+    expect(pre?.textContent).toBe(payload);
+    expect(pre?.parentElement?.className).toContain("px-1");
+    expect(pre?.parentElement?.className).not.toContain("pl-5");
   });
 });
 

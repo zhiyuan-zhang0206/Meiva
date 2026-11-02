@@ -80,13 +80,11 @@ export function copyPayloadFor(item: BackendTimelineItem): string {
 }
 
 // meiva:note
-// Envelope content — dim single-line header + monospace body + optional image thumbnails.
-// The card frame provides the colored border / background; this renders only the inner
-// text, unpadded. Attach items (attachMode) render through AttachContent: the backend
-// caption lines interleave with their thumbnails (label → image → label → image), the
-// leading notice line renders dimmed, and every thumbnail opens a lightbox on click
-// instead of navigating away. Multimodal inbound_chat keeps the envelope layout but
-// shares the same lightbox thumbnails.
+// Attach items (attachMode) render through AttachContent: the backend caption
+// lines interleave with their thumbnails (label → image → label → image), the
+// leading notice line renders dimmed, and every thumbnail opens a lightbox on
+// click instead of navigating away. Multimodal inbound_chat shares the same
+// lightbox thumbnails.
 // meiva:link agent/messages/docs/message-format.meiva.okf.md
 function Thumbnail({
   src,
@@ -308,8 +306,7 @@ function EnvelopeContent({
   files,
   source = null,
   attachMode = false,
-  plainMessage = false,
-  hideHeader = false,
+  stripHumanHeader = false,
   codeSurface = false,
   markdown = false,
   imageCaptions = null,
@@ -322,9 +319,7 @@ function EnvelopeContent({
   source?: string | null;
   /** Attach items render their caption lines interleaved with thumbnails. */
   attachMode?: boolean;
-  /** Impersonation messages store the original body without an envelope. */
-  plainMessage?: boolean;
-  hideHeader?: boolean;
+  stripHumanHeader?: boolean;
   codeSurface?: boolean;
   /** The body is model-authored Markdown (compact summary, inter-agent message): render it through ChatMarkdown. */
   markdown?: boolean;
@@ -332,7 +327,7 @@ function EnvelopeContent({
   imageCaptions?: string[] | null;
 }) {
   const t = useTranslations("timeline");
-  const { header, body } = plainMessage ? { header: "", body: payload } : splitEnvelope(payload);
+  const body = stripHumanHeader ? splitEnvelope(payload).body : payload;
   const isUploadBatchWithFiles = source === "system:upload" && Boolean(files?.length);
   const showBody =
     !isUploadBatchWithFiles &&
@@ -357,15 +352,8 @@ function EnvelopeContent({
   }
   return (
     <>
-      {header && !hideHeader && !isUploadBatchWithFiles ? (
-        <div className="mb-1">
-          <span className="font-mono text-[11px] leading-relaxed text-muted-foreground/75 [overflow-wrap:anywhere]">
-            {header}
-          </span>
-        </div>
-      ) : null}
       {showBody ? (
-        plainMessage || markdown ? (
+        markdown ? (
           <ChatMarkdown content={body} />
         ) : (
           <pre
@@ -449,10 +437,7 @@ export const ItemView = memo(function ItemView({
           images={item.images}
           files={item.files}
           source={item.source}
-          plainMessage={Boolean(item.impersonation)}
-          hideHeader={
-            (isHumanUser && item.source === "user") || item.source === "system:upload"
-          }
+          stripHumanHeader={isHumanUser && !item.impersonation}
           markdown
         />
       );
