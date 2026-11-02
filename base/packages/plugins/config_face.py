@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -28,6 +29,10 @@ from base.packages.plugins import config_from_image, load_report
 from base.packages.plugins.extensions import PluginContributions
 
 CONFIG_FACE = "default_config"
+
+# meiva:note
+# Re-entrant: a face that reads another declaration on its own thread must not deadlock itself.
+_READING = threading.RLock()
 
 
 def declared_config_class(name: str, plugin_dir: Path) -> type[BaseModel] | None:
@@ -58,20 +63,27 @@ def _read(name: str, face_py: Path) -> PluginContributions:
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {face_py}")
     module = importlib.util.module_from_spec(spec)
-    held = sys.modules.get(dotted)
-    # Registered while it executes: a Pydantic model resolves string annotations through sys.modules.
-    sys.modules[dotted] = module
-    try:
-        spec.loader.exec_module(module)
-        contribute = getattr(module, "contribute", None)
-        if contribute is None:
-            raise AttributeError(f"{face_py} has no contribute()")
-        contributions = contribute()
-    finally:
-        if held is None:
-            sys.modules.pop(dotted, None)
-        else:
-            sys.modules[dotted] = held
+    # meiva:note
+    # One execution of this face at a time. `sys.modules` is where a Pydantic model resolves its
+    # string annotations from, and it is process-wide: two readers that overlap make the later one
+    # replace the entry the earlier one registered, and the earlier model then resolves the other
+    # execution's half-built namespace and is never completed (`PydanticUserError: <Model> is not
+    # fully defined` on first instantiation). Readers do overlap in a live daemon: a config read and
+    # a config write build the panel metadata on their own dispatch threads.
+    with _READING:
+        held = sys.modules.get(dotted)
+        sys.modules[dotted] = module
+        try:
+            spec.loader.exec_module(module)
+            contribute = getattr(module, "contribute", None)
+            if contribute is None:
+                raise AttributeError(f"{face_py} has no contribute()")
+            contributions = contribute()
+        finally:
+            if held is None:
+                sys.modules.pop(dotted, None)
+            else:
+                sys.modules[dotted] = held
     if not isinstance(contributions, PluginContributions):
         raise TypeError(f"{face_py} contribute() returned {type(contributions).__name__}")
     cls = contributions.config

@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import sys
+import threading
 import types
 from pathlib import Path
 from typing import TypeGuard
@@ -16,6 +17,8 @@ from pydantic import BaseModel
 from base.packages.plugins import config_face, enable_config, load_report
 from base.packages.plugins.manifest import load_manifest
 from base.packages.plugins.surface.schedules import ScheduleSpec, StatCardSpec
+
+_LOADING = threading.RLock()
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
@@ -187,13 +190,19 @@ def _load_face_module(dotted: str, face_py: Path) -> types.ModuleType:
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load face module {face_py}")
     module = importlib.util.module_from_spec(spec)
-    held = sys.modules.get(dotted)
-    sys.modules[dotted] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        if held is None:
-            sys.modules.pop(dotted, None)
-        else:
-            sys.modules[dotted] = held
+    # meiva:note
+    # One execution at a time, for the reason recorded in `config_face._read`: the `sys.modules`
+    # entry the face's models resolve their annotations from is process-wide, so two readers of one
+    # face that overlap leave the earlier model resolving the later execution's half-built
+    # namespace. Re-entrant because a face may read another declaration on its own thread.
+    with _LOADING:
+        held = sys.modules.get(dotted)
+        sys.modules[dotted] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            if held is None:
+                sys.modules.pop(dotted, None)
+            else:
+                sys.modules[dotted] = held
     return module

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -194,3 +196,54 @@ def test_bootstrap_packet_preserves_authority_schema_admission(
     image.write_text(content)
     with pytest.raises((InvalidConfigData, SchemaDriftError)):
         plugin_bootstrap_config(home=meiva_home())
+
+
+# meiva:note
+# A face whose model names a sibling class. `from __future__ import annotations` is what makes the
+# reference a string that Pydantic resolves through `sys.modules[Config.__module__]` at class
+# creation, and the sleep is what holds an execution inside that resolution window long enough for a
+# second reader of the same file to register itself beside it.
+_RACED_FACE = (
+    "from __future__ import annotations\n"
+    "\n"
+    "import time\n"
+    "\n"
+    "from pydantic import BaseModel\n"
+    "\n"
+    "from base.packages.plugins.extensions import PluginContributions\n"
+    "\n"
+    "time.sleep(0.002)\n"
+    "\n"
+    "class Collector(BaseModel):\n"
+    "    label: str = 'x'\n"
+    "\n"
+    "class Config(BaseModel):\n"
+    "    collectors: tuple[Collector, ...] = ()\n"
+    "\n"
+    "def contribute():\n"
+    "    return PluginContributions(config=Config)\n"
+)
+
+_READERS = 4
+_ROUNDS = 10
+
+
+# meiva:note
+# A second reader of a face must not steer the first one's annotations: readers run on dispatch
+# threads (a config read and a config write both build the panel metadata), so two executions of one
+# file do overlap in a live daemon.
+def test_concurrent_readers_of_one_face_each_get_a_class_they_can_instantiate() -> None:
+    plugin_dir = _plugin("raced", _RACED_FACE)
+    barrier = threading.Barrier(_READERS, timeout=30)
+
+    def read_face() -> None:
+        barrier.wait()
+        for _ in range(_ROUNDS):
+            cls = config_face.declared_config_class("raced", plugin_dir)
+            assert cls is not None, "the raced face declares a config"
+            cls()
+
+    with ThreadPoolExecutor(max_workers=_READERS) as pool:
+        readers = [pool.submit(read_face) for _ in range(_READERS)]
+        for reader in readers:
+            reader.result()
