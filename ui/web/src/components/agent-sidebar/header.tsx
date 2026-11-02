@@ -1,6 +1,6 @@
 "use client";
 
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 
@@ -21,14 +21,14 @@ export function SidebarHeader({
   return (
     <header
       className={cn(
-        "relative items-center justify-between px-3 py-2",
+        "relative items-center justify-between gap-1.5 px-2.5 py-2",
         BAR_DIVIDER_CLASS,
         BAR_HEIGHT_CLASS,
         FLEX
       )}
     >
-      <h1 className="text-base font-semibold tracking-wide">Meiva</h1>
-      <div className={cn("items-center gap-1.5", FLEX)}>{trailing}</div>
+      <h1 className={cn("truncate text-base font-semibold tracking-wide", MIN_W_0)}>Meiva</h1>
+      <div className={cn("shrink-0 items-center gap-1", FLEX)}>{trailing}</div>
     </header>
   );
 }

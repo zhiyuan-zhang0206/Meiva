@@ -299,14 +299,16 @@ it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   expect(readingArea().scrollTop).toBe(180);
 });
 
-it("caps the notice viewport at 70dvh and scrolls inside the inner viewport instead of clipping on the root", () => {
+it("caps the notice viewport against the visual viewport and scrolls inside the inner viewport instead of clipping on the root", () => {
   // meiva:note
   // Regression (user report 2026-11-02): placing QUESTION_REGION_MAX_HEIGHT_CLASS
   // on ScrollArea's `className` put max-height on the `height: auto` root while
   // the inner viewport (`size-full` -> `height: 100%`) resolved to `auto`, so
   // tall notices were clipped by the root's `overflow-hidden` and could not scroll.
+  // Bounding against `--visual-viewport-height` keeps the 70% cap inside the
+  // remaining area above an open iOS/iPadOS on-screen keyboard.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
-  expect(QUESTION_REGION_MAX_HEIGHT_CLASS).toBe("max-h-[70dvh]");
+  expect(QUESTION_REGION_MAX_HEIGHT_CLASS).toBe("max-h-[calc(var(--visual-viewport-height,100dvh)*0.7)]");
   renderPanelView({
     notices: [
       {
@@ -341,4 +343,11 @@ it("caps the notice viewport at 70dvh and scrolls inside the inner viewport inst
   expect(scrollbar.getAttribute("data-visible")).toBe("true");
   expect(docBody.scrollTop).toBe(240);
   expect(docScrollbar.getAttribute("data-visible")).toBe("false");
+});
+
+it("sizes the mobile full-screen sheet to --visual-viewport-height so an open keyboard never hides its reply composer", () => {
+  renderPanelView({ mobile: true, onClose: vi.fn() });
+  const sheet = screen.getByRole("complementary", { name: "To user" });
+  expect(sheet.className).toContain("h-[var(--visual-viewport-height,100dvh)]");
+  expect(sheet.className).not.toContain("inset-0");
 });

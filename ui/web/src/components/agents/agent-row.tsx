@@ -28,12 +28,12 @@
 // (SIGKILL) sits behind a confirm so it can't be hit by accident.
 
 import * as Popover from "@radix-ui/react-popover";
-import { GitFork, PowerOff, RotateCw, Shrink, X } from "lucide-react";
+import { GitFork, Pencil, PowerOff, RotateCw, Shrink, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ContextMenu,
@@ -166,6 +166,9 @@ export function AgentRow({
   const browser = useBrowser();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingRenameRef = useRef(false);
+  const focusRenameOnCloseRef = useRef(false);
   // Prompt dialogs for the "... with prompt" menu items. Two independent
   // flags (not one "which") so a closing dialog never flips its title to
   // the other action mid-fade.
@@ -263,9 +266,24 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
     editing,
   );
 
+  const startRename = () => {
+    dismissHover();
+    setDraft(label ?? "");
+    setEditing(true);
+  };
+
   return (
     <Popover.Root open={hoverOpen}>
-    <ContextMenu onOpenChange={(open) => { if (open) dismissHover(); }}>
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) {
+          dismissHover();
+        } else if (pendingRenameRef.current) {
+          pendingRenameRef.current = false;
+          startRename();
+        }
+      }}
+    >
       <Popover.Anchor asChild>
       <ContextMenuTrigger asChild>
         <li className="group relative">
@@ -292,7 +310,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               // cursor-default: the global button cursor:pointer rule (#709)
               // gives this row a hand cursor; a switching row is a list item,
               // not a button — user ruling (#723) keeps the default arrow.
-              "w-full text-left py-2.5 pr-4 font-mono text-xs items-center gap-2 cursor-default",
+              "w-full text-left py-2.5 pr-4 font-mono text-xs items-center gap-2 cursor-default select-none [-webkit-touch-callout:none]",
               FLEX,
               active
                 ? "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -349,7 +367,16 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 <span className={cn("items-center gap-1", MIN_W_0, FLEX)}>
                   <span className="text-xs shrink-0 select-none">#{agent.agent_id} ·</span>
                   <input
+                    ref={renameInputRef}
                     autoFocus
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    enterKeyHint="done"
+                    data-form-type="other"
+                    data-1p-ignore=""
+                    data-lpignore="true"
                     value={draft}
                     aria-label={t("rename", { id: agent.agent_id })}
                     onChange={(e) => setDraft(e.target.value)}
@@ -364,7 +391,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                         setEditing(false);
                       }
                     }}
-                    className={cn("bg-background border border-primary rounded px-1 py-0 text-xs focus:outline-none h-5", MIN_W_0)}
+                    className={cn("bg-background border border-primary rounded px-1 py-0 text-xs pointer-coarse:text-base focus:outline-none h-5 pointer-coarse:h-6", MIN_W_0)}
                     placeholder={label ?? "Label"}
                   />
                 </span>
@@ -373,9 +400,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                   className={cn("items-center gap-1", MIN_W_0, FLEX)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
-                    dismissHover();
-                    setDraft(label ?? "");
-                    setEditing(true);
+                    startRename();
                   }}
                 >
                   <span className={cn("truncate", MIN_W_0)}>{displayLabel}</span>
@@ -405,9 +430,26 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
       {hoverOpen ? (
         <AgentHoverCard agent={agent} displayLabel={displayLabel} />
       ) : null}
-      <ContextMenuContent>
+      <ContextMenuContent
+        onCloseAutoFocus={(e) => {
+          if (focusRenameOnCloseRef.current) {
+            e.preventDefault();
+            focusRenameOnCloseRef.current = false;
+            renameInputRef.current?.focus();
+          }
+        }}
+      >
         {/* onSelect hands Radix's Event to the callback; wrap the
             prompt-taking actions so the Event is not passed as a prompt. */}
+        <ContextMenuItem
+          onSelect={() => {
+            pendingRenameRef.current = true;
+            focusRenameOnCloseRef.current = true;
+          }}
+        >
+          <Pencil /> {t("menuRename")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         {agent.status === "terminated" ? (
           <>
             <ContextMenuItem onSelect={() => onResurrect()}>

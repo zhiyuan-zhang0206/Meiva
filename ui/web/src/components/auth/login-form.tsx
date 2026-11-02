@@ -48,8 +48,12 @@ export function LoginForm() {
           onChange={(e) => setUsername(e.target.value)}
           placeholder="admin"
           autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="next"
           disabled={loading}
-          className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-input bg-background px-3 py-2 text-base md:pointer-fine:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
       </div>
       <div className={cn("gap-2", FLEX, FLEX_COL)}>
@@ -64,8 +68,9 @@ export function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
           placeholder={t("password")}
           autoComplete="current-password"
+          enterKeyHint="go"
           disabled={loading}
-          className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-input bg-background px-3 py-2 text-base md:pointer-fine:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
       </div>
       {error && (

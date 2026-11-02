@@ -154,6 +154,8 @@ function RunTimelineEntry() {
         <input
           aria-label={t("agentId")}
           type="number"
+          inputMode="numeric"
+          autoComplete="off"
           min="0"
           value={agentId}
           onChange={(event) => setAgentId(event.target.value)}

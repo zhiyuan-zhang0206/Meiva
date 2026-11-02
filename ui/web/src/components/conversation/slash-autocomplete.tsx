@@ -175,7 +175,7 @@ export const SlashAutocomplete = forwardRef<SlashAutocompleteHandle, Props>(
         role="listbox"
         aria-label="Commands"
         data-testid="slash-autocomplete"
-        className="absolute bottom-full left-0 right-0 mb-2 z-50 max-h-[40vh] overflow-y-auto rounded-md border border-border bg-popover shadow-md"
+        className="absolute bottom-full left-0 right-0 mb-2 z-50 max-h-[min(40vh,calc(var(--visual-viewport-height,100dvh)-7rem))] overflow-y-auto rounded-md border border-border bg-popover shadow-md"
       >
         {matches.map((cmd, i) => (
           <button

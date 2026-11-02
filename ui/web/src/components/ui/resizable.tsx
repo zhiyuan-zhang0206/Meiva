@@ -43,9 +43,9 @@ function ResizableHandle({
       data-slot="resizable-handle"
       className={cn(
         "relative z-10 w-px bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        "before:absolute before:inset-y-0 before:left-1/2 before:w-2 before:-translate-x-1/2",
+        "before:absolute before:inset-y-0 before:left-1/2 before:w-2 pointer-coarse:before:w-6 before:-translate-x-1/2",
         "after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border after:transition-colors hover:after:bg-primary/40 data-[separator=active]:after:bg-primary/60",
-        "aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:before:inset-x-0 aria-[orientation=horizontal]:before:left-0 aria-[orientation=horizontal]:before:h-2 aria-[orientation=horizontal]:before:w-full aria-[orientation=horizontal]:before:-translate-y-1/2 aria-[orientation=horizontal]:before:translate-x-0 aria-[orientation=horizontal]:after:inset-x-0 aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:h-px aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:-translate-y-1/2 aria-[orientation=horizontal]:after:translate-x-0",
+        "aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:before:inset-x-0 aria-[orientation=horizontal]:before:left-0 aria-[orientation=horizontal]:before:h-2 aria-[orientation=horizontal]:pointer-coarse:before:h-6 aria-[orientation=horizontal]:before:w-full aria-[orientation=horizontal]:before:-translate-y-1/2 aria-[orientation=horizontal]:before:translate-x-0 aria-[orientation=horizontal]:after:inset-x-0 aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:h-px aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:-translate-y-1/2 aria-[orientation=horizontal]:after:translate-x-0",
         className
       )}
       {...props}

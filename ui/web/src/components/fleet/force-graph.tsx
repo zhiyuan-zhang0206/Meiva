@@ -25,6 +25,7 @@ import {
 } from "@/lib/fleet/use-force-layout";
 import { useSvgZoomPan } from "@/lib/fleet/use-svg-zoom-pan";
 import { cn } from "@/lib/format/utils";
+import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
 import {
@@ -95,6 +96,7 @@ export const ForceGraph = memo(function ForceGraph({
   ariaLabel?: string;
 }) {
   const t = useTranslations("fleet.forceGraph");
+  const coarsePointer = useCoarsePointer();
   const graphAriaLabel = ariaLabel ?? t("defaultAriaLabel");
   // Max score across the graph — the radius normalizer. Must match the value
   // used for the sim collide radii so the rendered node matches its collision
@@ -183,7 +185,10 @@ export const ForceGraph = memo(function ForceGraph({
         role="img"
         aria-label={graphAriaLabel}
         onClick={(ev) => {
-          if (ev.target === ev.currentTarget) onSelect(null);
+          if (ev.target === ev.currentTarget) {
+            onSelect(null);
+            setHovered(null);
+          }
         }}
       >
         <g
@@ -262,15 +267,24 @@ export const ForceGraph = memo(function ForceGraph({
                   }}
                   onClick={(ev) => {
                     ev.stopPropagation();
-                    if (selectedId === n.id) return;
+                    if (selectedId === n.id) {
+                      if (coarsePointer) onOpen(n.id);
+                      return;
+                    }
                     onSelect(n.id);
                     focusNode(n.id);
+                    if (coarsePointer && hoverCard != null) {
+                      const shapeEl = ev.currentTarget.querySelector("[data-node-shape]") ?? ev.currentTarget;
+                      const box = shapeEl.getBoundingClientRect();
+                      setHovered({ id: n.id, x: box.right, y: box.top, flipX: box.left, h: box.height });
+                    }
                   }}
                   onDoubleClick={(ev) => {
                     ev.stopPropagation();
                     onOpen(n.id);
                   }}
                   onMouseEnter={(ev) => {
+                    if (coarsePointer) return;
                     clearHideTimer();
                     const shapeEl = ev.currentTarget.querySelector("[data-node-shape]") ?? ev.currentTarget;
                     const box = shapeEl.getBoundingClientRect();
@@ -286,6 +300,7 @@ export const ForceGraph = memo(function ForceGraph({
                     );
                   }}
                   onMouseLeave={(ev) => {
+                    if (coarsePointer) return;
                     const card = hoverCardRef.current;
                     const pointerOnPartner =
                       card !== null && ev.relatedTarget instanceof Node && card.contains(ev.relatedTarget);

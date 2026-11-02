@@ -13,6 +13,7 @@ import { useEffect, useRef } from "react";
 import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notifications/notices";
 import type { TaskGraphRow, TaskStatus } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
+import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { ChatMarkdown } from "@/components/content/markdown";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
@@ -149,11 +150,18 @@ function KanbanCard({
   navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet.task");
+  const coarsePointer = useCoarsePointer();
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={onSelect}
+      onClick={() => {
+        if (coarsePointer && selected && agentOwner != null) {
+          navigate(`/?agent_id=${agentOwner}`);
+          return;
+        }
+        onSelect();
+      }}
       onDoubleClick={(ev) => {
         ev.preventDefault();
         if (agentOwner != null) navigate(`/?agent_id=${agentOwner}`);

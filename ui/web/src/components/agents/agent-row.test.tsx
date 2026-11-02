@@ -12,6 +12,7 @@ import {
   AgentRow,
 } from "./agent-row";
 import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 import { renderWithBrowser as rtlRender } from "@/test-support/render";
@@ -537,5 +538,24 @@ describe("AgentRow single-line truncation and hover peek card", () => {
     expect(screen.queryByTestId("agent-hover-card")).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS));
     expect(screen.getByTestId("agent-hover-card").textContent).toContain("#10 · first-agent");
+  });
+
+  it("suppresses hover peek cards on coarse pointers so touch taps never stick a tooltip open", async () => {
+    vi.useFakeTimers();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const browser = fakeBrowser({ media: { "(pointer: coarse)": true } });
+    const { container } = rtlRender(
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={qc}>
+          <AgentRow {...baseProps} label="touch-agent" agent={ag(30)} depth={0} ancestorsIsLast={[]} />
+        </QueryClientProvider>
+      </WallClockProvider>,
+      { browser },
+    );
+
+    const row = container.querySelector("li > button")!;
+    fireEvent.mouseEnter(row);
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS + 100));
+    expect(screen.queryByTestId("agent-hover-card")).toBeNull();
   });
 });

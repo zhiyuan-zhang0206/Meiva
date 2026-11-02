@@ -23,6 +23,8 @@ const LAYOUT_HEIGHT = 800;
 afterEach(() => {
   cleanup();
   document.documentElement.style.height = "";
+  document.documentElement.style.removeProperty("--visual-viewport-height");
+  document.documentElement.style.removeProperty("--safe-area-bottom");
 });
 
 function page(visual: { height: number; scale?: number } | null): FakeBrowser {
@@ -39,12 +41,16 @@ it("pins the shell to the visual viewport and resets root scroll while the keybo
   renderWithBrowser(<VisualViewportHeightSync />, { browser });
 
   expect(document.documentElement.style.height).toBe("480px");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-height")).toBe("480px");
+  expect(document.documentElement.style.getPropertyValue("--safe-area-bottom")).toBe("0px");
   expect(browser.actions.viewportScrollResets).toBe(1);
   // meiva:note
   // The keyboard grows, or WebKit pans the focused field: one answer, one follow, and the root
   // scroll returns to (0, 0) so the composer is not double-shifted off the top edge.
   browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: 300, scale: 1 } });
   expect(document.documentElement.style.height).toBe("300px");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-height")).toBe("300px");
+  expect(document.documentElement.style.getPropertyValue("--safe-area-bottom")).toBe("0px");
   expect(browser.actions.viewportScrollResets).toBe(2);
 });
 
@@ -71,6 +77,8 @@ it("drops the pin while the user pinch-zooms", () => {
 
   browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: LAYOUT_HEIGHT - 320, scale: 2 } });
   expect(document.documentElement.style.height).toBe("");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-height")).toBe("");
+  expect(document.documentElement.style.getPropertyValue("--safe-area-bottom")).toBe("");
 });
 
 it("restores the layout height and resets root scroll when the keyboard closes", () => {
@@ -80,6 +88,8 @@ it("restores the layout height and resets root scroll when the keyboard closes",
 
   browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: LAYOUT_HEIGHT, scale: 1 } });
   expect(document.documentElement.style.height).toBe("");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-height")).toBe("");
+  expect(document.documentElement.style.getPropertyValue("--safe-area-bottom")).toBe("");
   expect(browser.actions.viewportScrollResets).toBe(2);
 });
 
@@ -89,6 +99,8 @@ it("clears the pin on unmount", () => {
 
   unmount();
   expect(document.documentElement.style.height).toBe("");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-height")).toBe("");
+  expect(document.documentElement.style.getPropertyValue("--safe-area-bottom")).toBe("");
 });
 
 it("does nothing when the browser has no visual viewport", () => {

@@ -24,6 +24,7 @@
   "terminateConfirm": "Terminate Agent #{id}? The agent will finish its current turn, then exit.",
   "restartConfirm": "Restart Agent #{id}? The agent will finish its current turn, then come back as a fresh process.",
   "resurrectConfirm": "Resurrect Agent #{id}",
+  "menuRename": "Rename",
   "rename": "Rename agent {id}",
   "promptTitle": "Prompt",
   "spawning": "Spawning",

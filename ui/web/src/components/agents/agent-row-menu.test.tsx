@@ -302,6 +302,27 @@ describe("AgentRow right-click context menu", () => {
     expect(onFork).toHaveBeenCalledOnce();
     expect(onFork).toHaveBeenCalledWith();
   });
+
+  it("Rename menu item opens the inline rename input without closing on menu teardown, so touch long-press can rename", () => {
+    const onRename = vi.fn();
+    const { container } = render(
+      <AgentRow
+        {...baseProps}
+        label="old-name"
+        onRename={onRename}
+        agent={ag(9)}
+        depth={0}
+        ancestorsIsLast={[]}
+      />,
+    );
+    openMenu(container.querySelector("li")!);
+    fireEvent.click(screen.getByText("Rename"));
+    const input = screen.getByLabelText<HTMLInputElement>("Rename agent 9");
+    expect(input.value).toBe("old-name");
+    fireEvent.change(input, { target: { value: "touch-renamed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRename).toHaveBeenCalledExactlyOnceWith("touch-renamed");
+  });
 });
 
 describe("AgentRow takeover control", () => {

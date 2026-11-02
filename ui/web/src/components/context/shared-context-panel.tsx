@@ -59,7 +59,18 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   // mode always has an exit.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   return (
-    <aside className={cn("relative w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("title")}>
+    <aside
+      className={cn(
+        "relative w-full bg-background",
+        FLEX,
+        MIN_H_0,
+        FLEX_COL,
+        mobile
+          ? "fixed inset-x-0 top-0 z-50 h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[var(--safe-area-bottom,env(safe-area-inset-bottom,0px))]"
+          : "h-full",
+      )}
+      aria-label={t("title")}
+    >
       {mobile && <header className={cn("h-11 shrink-0 items-center justify-between border-b px-3 text-xs", FLEX)}>
         <button onClick={onClose} className={cn("items-center gap-2 rounded px-1 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground", FLEX)}>
           <ArrowLeft className="size-3.5" />{t("backToMessages")}

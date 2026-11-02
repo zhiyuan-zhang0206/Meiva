@@ -281,6 +281,7 @@ export function useTimelineRowInteractions({
 
   const trackRect = () => chartRef.current?.querySelector("[data-track]")?.getBoundingClientRect();
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (drag.current !== null) return;
     const track = trackRect();
     if (event.button !== 0 || !track || event.clientX < track.left) return;
     drag.current = { x: event.clientX, view: store.get(), panning: false, id: event.pointerId };
@@ -289,6 +290,7 @@ export function useTimelineRowInteractions({
     const state = drag.current;
     if (
       state === null &&
+      event.pointerType !== "touch" &&
       !(event.target instanceof Element && event.target.closest("[data-testid=run-timeline-link-tick]"))
     ) {
       const hit = overItem.current ? null : hitRef.current(event.clientX, event.clientY);
@@ -296,7 +298,7 @@ export function useTimelineRowInteractions({
       event.currentTarget.style.cursor = hit === null ? "" : "pointer";
     }
     const track = trackRect();
-    if (!state || !track || track.width <= 0) return;
+    if (state?.id !== event.pointerId || !track || track.width <= 0) return;
     const dx = event.clientX - state.x;
     if (!state.panning) {
       if (Math.abs(dx) < DRAG_THRESHOLD_PX) return;
@@ -305,7 +307,8 @@ export function useTimelineRowInteractions({
     }
     show(panView(axis, state.view, base, -dx / track.width));
   };
-  const endDrag = () => {
+  const endDrag = (event?: React.PointerEvent<HTMLDivElement>) => {
+    if (event !== undefined && drag.current !== null && event.pointerId !== drag.current.id) return;
     if (drag.current?.panning) {
       suppressClick.current = true;
       setTimeout(() => {

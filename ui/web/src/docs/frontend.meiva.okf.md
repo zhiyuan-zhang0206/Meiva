@@ -45,26 +45,16 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 /control#skills               Installed skills read-only table: name/layer origin (core=repo|plugin|machine=user|untracked)/enabled/local drift (GET /api/skills, single-machine gateway local read)
 ```
 
-## Provider composition (`app/layout.tsx` → `components/providers.tsx`)
-
-`<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner] → AlertsProvider → ThemeProvider → `AppConnectionBanner` + `ToastHost` + `OpenTasksNoticeHost`) → `AuthGuard` → page.
-
-- **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
-- **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).
-- **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): one subscriber turns global-broadcast events into coalesced Query invalidations (`["agents", "live"]`, agent directory/detail, notices, `["agent-pages", id]`, `["all-pages"]`, tasks, fleet graph) and runs the central reconnect reconcile. Page events refetch existing list queries and trail a GET in flight; absent keys are never seeded. Hooks only read their keys.
-- **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).
-- **OpenTasksNoticeHost** (#3374): root-level renderer for the store's open-tasks notice slot — a terminate response carrying `open_tasks` (wire #2488) raises a dialog (count + up to five rows + "and N more"); dismissal is explicit; lazily imported.
-- **VisualViewportHeightSync** (#4779): with the on-screen keyboard up, pins `<html>` to `visualViewport.height` so the composer stays above it — the iOS half of the contract whose Android half is the `interactive-widget=resizes-content` viewport export.
-- **AppConnectionBanner** (#648): root-mounted and renders nothing; drives cluster health polling (`useClusterHealth`) and mirrors SSE status into store (`ConnectionNotice`); self-gated by `useAuth().status`. All Providers self-gate on auth state—no outer auth guard layer.
-
 ## Core principles
 
 - **SSE first**: timeline/token fold events locally; agent and page events trigger Query repair with no polling. Snapshot-only surfaces poll only while visible/enabled and share a page-level cadence where they have multiple consumers.
 - **No optimistic write**: state changes await SSE event confirmation; lifecycle actions only flip `isPending`.
 - **Single writer**: each cache/flag has exactly one writer.
 
-## Three deeper topics
+## Deeper topics
 
+- [[ui/web/src/docs/provider-composition.meiva.okf.md|Provider composition]] — root provider tree (`QueryClient`, `EventStreamProvider`, fold owner, root hosts, `VisualViewportHeightSync`)
+- [[ui/web/src/docs/mobile-and-tablet-ux.meiva.okf.md|Mobile, tablet and coarse-pointer UX]] — orthogonal geometry vs. input/viewport physics contract across phones, iPads, and WebKit
 - [[ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md|State management]] — three mechanisms division of labor + per-thread timeline cache + sticky controller
 - [[ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md|Data flow]] — dual SSE Provider architecture + hook directory
 - [[frontend-components.meiva.okf.md|Components]] — chat view / Fleet view / settings page components
@@ -77,9 +67,3 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 - `ui/web/src/lib/state/store.ts` — Zustand store (pure UI + cluster coordination, not persisted)
 - `ui/web/src/lib/timeline/timeline-store.ts` — Zustand store (SSE-driven timeline state, independent from `store.ts`)
 - `ui/web/src/lib/transport/useEventStream.tsx` — SSE Provider
-
-Root composition tests keep authentication pending and assert that alert reads,
-SSE subscriptions and cluster polling stay blocked. Settings and theme readers
-still run against explicit pending API boundaries. They mount the real alert
-provider, observe the root query client and unmount before clearing its cache;
-this is initial composition evidence, not live stream acceptance.

@@ -15,6 +15,7 @@ import type { AgentRow, BackendTimelineItem, ReplySuggestionResponse } from "@/l
 import type { ConnectionState } from "@/lib/timeline/use-timeline";
 import { HomePageView } from "./home-view";
 import type { HomePageProps } from "./home-view";
+export { HomePageView };
 import { realNetwork, startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
 import type { Api } from "@/lib/transport/api";
 import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";

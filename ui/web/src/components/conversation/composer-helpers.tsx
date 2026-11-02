@@ -159,7 +159,7 @@ export function ComposerAttachmentStrip({
               onClick={() => onRetry(att.key)}
               disabled={composerLocked}
               className={cn(
-                "absolute -bottom-1.5 -right-1.5 h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm hover:bg-accent",
+                "absolute -bottom-1.5 -right-1.5 h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm hover:bg-accent pointer-coarse:after:absolute pointer-coarse:after:-inset-2",
                 FLEX,
               )}
             >
@@ -172,7 +172,7 @@ export function ComposerAttachmentStrip({
             onClick={() => onRemove(att.key)}
             disabled={composerLocked}
             className={cn(
-              "absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none",
+              "absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none pointer-coarse:after:absolute pointer-coarse:after:-inset-2",
               FLEX,
             )}
           >

@@ -150,7 +150,11 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
     // its content's max-content — main is a row-flex landmark, so without
     // flex-1 a short Inbox selection collapses the whole surface to the
     // content width (observed as the UI shrinking to the left ~60%).
-    <div className={cn("h-dvh bg-background text-foreground font-mono", FLEX, FLEX_COL, FLEX_1, MIN_W_0)}>
+    // meiva:note
+    // Fill `<main>` with `h-full` rather than `h-dvh`: on iOS/iPadOS `dvh` ignores the on-screen
+    // keyboard, whereas `h-full` shrinks with `<html>` (`VisualViewportHeightSync`) so Inbox reply
+    // boxes stay above the keyboard.
+    <div className={cn("h-full bg-background text-foreground font-mono", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
       {isLarge ? (
         <DesktopLayout
           aliveCount={aliveCount}
@@ -353,9 +357,12 @@ const MobileLayout = memo(function MobileLayout({
         <span className="text-[11px] text-muted-foreground tabular-nums">
           {t("activeTotal", { active: aliveCount, total: agents.length })}
         </span>
+        <div className="ml-auto">
+          <PluginNavIcons location="fleet-toolbar" />
+        </div>
         <Link
           href="/"
-          className="ml-auto p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          className="p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
           aria-label={t("backToConversation")}
         >
           <MessageSquare className="size-4" aria-hidden />
@@ -400,7 +407,10 @@ const MobileLayout = memo(function MobileLayout({
 
       {/* Tab bar — fixed at the bottom */}
       <div
-        className={cn("shrink-0 items-center border-t border-border bg-background", FLEX)}
+        className={cn(
+          "shrink-0 items-center border-t border-border bg-background pb-[var(--safe-area-bottom,env(safe-area-inset-bottom,0px))]",
+          FLEX,
+        )}
         role="tablist"
         aria-label={t("sections")}
       >

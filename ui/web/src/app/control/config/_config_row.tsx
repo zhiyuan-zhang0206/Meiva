@@ -233,12 +233,15 @@ export function ConfigRow({
               <Input
                 ref={focusInputOnMount}
                 type="password"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
                 value={editValue}
                 aria-label={t("replace", { env: field.env_var })}
                 placeholder={t("newValue")}
                 onChange={(e) => onEditValueChange(e.target.value)}
                 onKeyDown={onEditKeyDown}
-                className="h-7 w-48 text-xs font-mono"
+                className="h-7 w-36 max-w-full text-xs font-mono sm:w-48"
                 data-testid={`input-${field.name}`}
               />
               <Button
@@ -326,10 +329,14 @@ export function ConfigRow({
             <Input
               ref={focusInputOnMount}
               type={field.field_type === "int" || field.field_type === "float" ? "number" : "text"}
+              inputMode={field.field_type === "int" ? "numeric" : field.field_type === "float" ? "decimal" : undefined}
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               value={editValue}
               onChange={(e) => onEditValueChange(e.target.value)}
               onKeyDown={onEditKeyDown}
-              className="h-7 w-48 text-xs font-mono"
+              className="h-7 w-36 max-w-full text-xs font-mono sm:w-48"
               data-testid={`input-${field.name}`}
             />
             <Button

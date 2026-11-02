@@ -214,7 +214,14 @@ function ScheduleDetail({
           <label className="block text-muted-foreground">
             Script
             <textarea
-              className="mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              data-form-type="other"
+              data-1p-ignore=""
+              data-lpignore="true"
+              className="mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs pointer-coarse:text-base"
               rows={12}
               value={editForm.script ?? ""}
               onChange={(e) => setEdit({ ...editForm, script: e.target.value })}
@@ -305,10 +312,13 @@ export function ScheduleForm({
   return (
     <div className="rounded-md border border-border p-4 space-y-3">
       <h4 className="text-xs font-medium text-muted-foreground">{title}</h4>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="text-xs">
           {t("nameRequired")}
           <Input
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             className="mt-1 h-8 text-xs font-mono"
             placeholder="memory-arbiter"
             value={value.name}
@@ -318,13 +328,16 @@ export function ScheduleForm({
         <label className="text-xs">
           {t("command")}
           <Input
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             className="mt-1 h-8 text-xs font-mono"
             placeholder="python schedule.py"
             value={value.command}
             onChange={(e) => onChange({ ...value, command: e.target.value })}
           />
         </label>
-        <label className="text-xs col-span-2">
+        <label className="text-xs sm:col-span-2">
           {t("description")}
           <Input
             className="mt-1 h-8 text-xs"
@@ -333,10 +346,17 @@ export function ScheduleForm({
             onChange={(e) => onChange({ ...value, description: e.target.value || null })}
           />
         </label>
-        <label className="text-xs col-span-2">
+        <label className="text-xs sm:col-span-2">
           {t("scriptRequired")}
           <textarea
-            className="mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            data-form-type="other"
+            data-1p-ignore=""
+            data-lpignore="true"
+            className="mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs pointer-coarse:text-base"
             rows={12}
             placeholder={"import time\nwhile True:\n    ...\n    time.sleep(60)"}
             value={value.script}
