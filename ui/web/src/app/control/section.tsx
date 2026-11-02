@@ -46,7 +46,9 @@ export function ControlSection({
       </header>
       {mounted ? (
         <SectionVisibilityProvider visible={inView}>{children}</SectionVisibilityProvider>
-      ) : null}
+      ) : (
+        <div data-settling="true" hidden />
+      )}
     </section>
   );
 }

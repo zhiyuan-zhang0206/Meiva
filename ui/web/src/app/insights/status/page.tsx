@@ -46,7 +46,7 @@ export default function StatusPage() {
 
   if (isLoading)
     return (
-      <div className={cn("justify-center py-12", FLEX)}>
+      <div data-settling="true" className={cn("justify-center py-12", FLEX)}>
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
       </div>
     );

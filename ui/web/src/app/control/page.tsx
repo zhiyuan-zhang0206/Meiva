@@ -129,8 +129,11 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
           scrollId={CONTROL_SCROLL_ID}
           ariaLabel="Control sections"
         />
-        <div id={CONTROL_SCROLL_ID} className={cn("overflow-y-auto overflow-x-hidden", FLEX_1)}>
-          <div className={cn("mx-auto max-w-6xl space-y-12 px-6 py-6 text-sm", MIN_W_0)}>
+        <div
+          id={CONTROL_SCROLL_ID}
+          className={cn("overflow-y-auto overflow-x-hidden [overflow-anchor:none]", FLEX_1)}
+        >
+          <div className={cn("mx-auto max-w-6xl space-y-12 px-6 pt-6 pb-[45vh] text-sm", MIN_W_0)}>
             <ControlSection
               id="guide"
               label={ts("guide")}

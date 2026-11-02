@@ -97,8 +97,11 @@ export function InsightsShell({ Status, Ops, Alerts }: InsightsShellProps) {
           scrollId={INSIGHTS_SCROLL_ID}
           ariaLabel={t("sections")}
         />
-        <div id={INSIGHTS_SCROLL_ID} className={cn("overflow-y-auto overflow-x-hidden", FLEX_1)}>
-          <div className={cn("mx-auto max-w-4xl space-y-12 px-6 py-6 font-mono text-sm", MIN_W_0)}>
+        <div
+          id={INSIGHTS_SCROLL_ID}
+          className={cn("overflow-y-auto overflow-x-hidden [overflow-anchor:none]", FLEX_1)}
+        >
+          <div className={cn("mx-auto max-w-4xl space-y-12 px-6 pt-6 pb-[45vh] font-mono text-sm", MIN_W_0)}>
             <ControlSection
               id="status"
               label={t("statusLabel")}

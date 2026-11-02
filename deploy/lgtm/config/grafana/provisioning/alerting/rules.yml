@@ -186,35 +186,6 @@ groups:
               type: reduce
               expression: A
               reducer: mean
-          - refId: E
-            datasourceUid: loki
-            queryType: ""
-            model:
-              refId: E
-              datasource:
-                type: loki
-                uid: loki
-              editorMode: code
-              expr: >-
-                max by (agent_id) (max_over_time({service_name="unknown_service",
-                event_name="delivery_stalled"} | json | cluster=".meiva" | category="telemetry"
-                | unwrap attributes_age_s [3m]))
-              instant: true
-              queryType: instant
-            relativeTimeRange:
-              from: 180
-              to: 0
-          - refId: F
-            datasourceUid: __expr__
-            queryType: ""
-            model:
-              refId: F
-              datasource:
-                type: __expr__
-                uid: __expr__
-              type: reduce
-              expression: E
-              reducer: max
           - refId: D
             datasourceUid: __expr__
             queryType: ""
@@ -2936,6 +2907,35 @@ groups:
               type: reduce
               expression: A
               reducer: mean
+          - refId: E
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: E
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                max by (agent_id) (max_over_time({service_name="unknown_service",
+                event_name="delivery_stalled"} | json | cluster=".meiva" | category="telemetry"
+                | unwrap attributes_age_s [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: F
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: F
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: E
+              reducer: max
           - refId: D
             datasourceUid: __expr__
             queryType: ""

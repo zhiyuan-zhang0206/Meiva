@@ -1,4 +1,7 @@
 {
   "unresolvedAlerts": "{count} 条未解决",
-  "rules": "告警规则"
+  "rules": "告警规则",
+  "pageOf": "第 {current} / {total} 页",
+  "previousPage": "上一页",
+  "nextPage": "下一页"
 }
