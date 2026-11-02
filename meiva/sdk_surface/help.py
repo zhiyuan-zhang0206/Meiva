@@ -181,9 +181,42 @@ class ModelHelpProfile:
 
 
 # meiva:note
+# True when `help()` has documentation to print for `obj`: a module, class or namespace, a
+# routine, or a documented constant — exactly the three kinds the target dispatch renders.
+# Everything else (an instance, a plain value) has none, and `help()` refuses it rather than
+# printing the object, whose repr carries every value it holds (a live context carries this
+# process's whole environment).
+def is_documentable_target(obj: object) -> bool:
+    return is_container(obj) or inspect.isroutine(obj) or is_documented_const(obj)
+
+
+# meiva:note
+# Why `meiva.help()` must raise, and must keep raising, on a target it cannot document: the
+# fallback is the convenient answer, and it was the code until 2026-11-02, when `repr(target)`
+# printed the live context whole and with it every provider key in this process. An object's repr
+# carries what the object holds, so a fallback turns every future mistyped target into a credential
+# leak; the error costs the caller one corrected call and names what does have documentation.
+class NotHelpTargetError(TypeError): ...
+
+
+# meiva:note
+# The refusal names the shapes that do have documentation (a namespace, a routine or class, a
+# documented constant), so the caller's next call is right instead of a retry of the same typo.
+def _not_a_target(target: object) -> NotHelpTargetError:
+    return NotHelpTargetError(
+        f"meiva.help() documents SDK targets and {type(target).__name__} is not one. Pass a "
+        "meiva module or namespace (meiva.shell), a routine or class it exposes "
+        "(meiva.shell.run, meiva.shell.SessionHandle), or a documented constant "
+        "(meiva.memory.PATH). An instance or a plain value has no documentation to print, and "
+        "printing it would show every value it holds."
+    )
+
+
+# meiva:note
 # The render entry every caller uses, `meiva.help` included. The profile is required: what a
 # process runs as is a fact its door reads (`help_entry.current_profile`), and an empty profile
-# renders the surface model-independently, which is what the static overview wants.
+# renders the surface model-independently, which is what the static overview wants. Every target
+# is checked before anything prints, so a refused call leaves no half-written output behind.
 def render(
     *targets: object,
     compact_classes: bool = False,
@@ -198,6 +231,9 @@ def render(
     )
     if not targets:
         targets = (_meiva,)
+    for target in targets:
+        if not is_documentable_target(target):
+            raise _not_a_target(target)
     for i, target in enumerate(targets):
         if i > 0:
             print()
@@ -293,7 +329,7 @@ def _target_body(target: object, fqn: str, render: _Render = _DEFAULT_RENDER) ->
         return _format_function_stub(terminal, target)
     if is_documented_const(target):
         return format_documented_const_stub(_resolve_const_name(target), target)
-    return f"<{type(target).__name__}> {target!r}"
+    raise _not_a_target(target)
 
 
 def _heading_depth(fqn: str) -> int:
@@ -323,7 +359,7 @@ def _resolve_fqn(target: object) -> str:
         return _element_fqn(target)
     if is_documented_const(target):
         return _resolve_const_name(target)
-    return repr(target)
+    raise _not_a_target(target)
 
 
 def _container_fqn(target: object) -> str:

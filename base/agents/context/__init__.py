@@ -39,10 +39,11 @@
 
 from __future__ import annotations
 
+import enum
 import random
 import threading
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sized
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
@@ -133,6 +134,25 @@ def agent_id_from_config(
     no fallback.
     """
     return int(config["configurable"]["thread_id"])  # type: ignore[typeddict-item]  # LangGraph mandates key name, value = agent_id
+
+
+# meiva:note
+# What `MeivaContext.__repr__` shows of one field: its kind, never what it holds. A context is
+# the object an agent reaches for when it wants "the context", and `environ` is this process's
+# whole environment — every provider key, bot token and database URL in it. A dataclass prints
+# its fields' values, so `repr(context)` printed all of them: 192,688 characters out of one
+# `meiva.help(meiva.context)` on 2026-11-02, this process's keys included. A collection shows
+# how many entries it holds, an object its type, and only a value that cannot carry a credential
+# (a number, an enum, a path) shows itself. A string never shows itself, whatever its length: a
+# credential is a string.
+def _printed_value(value: object) -> str:
+    if value is None:
+        return "None"
+    if isinstance(value, Sized) and not isinstance(value, str | bytes):
+        return f"<{len(value)} entries>"
+    if isinstance(value, (bool, int, float, enum.Enum, Path)):
+        return repr(value)
+    return f"<{type(value).__name__}>"
 
 
 @dataclass(frozen=True)
@@ -459,3 +479,11 @@ class MeivaContext:
         if self.catalog is None:
             raise RuntimeError("this MeivaContext carries no ModelCatalog (ctx.catalog is None)")
         return self.catalog
+
+    # meiva:note
+    # Every field appears once, printed by `_printed_value`: what this run holds, not what its
+    # handles contain. Printing the context is routine (a debug line, `meiva.help(context)`) and
+    # the generated dataclass repr put the whole process environment in every such line.
+    def __repr__(self) -> str:
+        held = ", ".join(f"{f.name}={_printed_value(getattr(self, f.name))}" for f in fields(self))
+        return f"MeivaContext({held})"

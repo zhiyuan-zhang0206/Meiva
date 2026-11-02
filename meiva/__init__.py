@@ -328,7 +328,13 @@ def help(*targets: object) -> None:
     """Print documentation for one or more SDK targets, e.g. `meiva.shell.run`.
 
     With no targets, show the SDK overview. Members unavailable to your model
-    are hidden automatically."""
+    are hidden automatically.
+
+    Raises:
+        NotHelpTargetError: a target is not an SDK member — an instance or a
+            plain value. Name a module or namespace (`meiva.shell`), a routine
+            or class (`meiva.shell.run`), or a documented constant
+            (`meiva.memory.PATH`) instead."""
     _render_help(*targets, profile=_current_help_profile())
 
 

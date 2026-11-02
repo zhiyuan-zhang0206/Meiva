@@ -23,6 +23,7 @@ from typing import cast
 import pytest
 
 import meiva
+from base.agents.context import MeivaContext
 from base.packages.plugins.loading.plugin_loader import load_plugin_module
 from meiva.sdk_surface.discovery import (
     Constant,
@@ -34,6 +35,7 @@ from meiva.sdk_surface.discovery import (
 )
 from meiva.sdk_surface.help import (
     ModelHelpProfile,
+    NotHelpTargetError,
     format_docstring,
     format_documented_const_stub,
     format_signature,
@@ -473,6 +475,41 @@ def test_documented_const_multiline_string_renders_triple_quoted_block() -> None
     c = meiva.const("line one\nline two\nline three", doc="A text block.")
     out = format_documented_const_stub("BODY", c)
     assert out == '"""A text block."""\nBODY: str = """\nline one\nline two\nline three\n"""'
+
+
+# meiva:note
+# A target `help` cannot document is refused, never repr'd: the object it would print carries
+# everything it holds, and a live context carries this process's whole environment. The refusal
+# names the shapes that do print, so the caller's next call is right.
+def test_help_refuses_a_live_object_instead_of_printing_it() -> None:
+    context = MeivaContext(environ={"ANTHROPIC_API_KEY": "sk-CANARY-DO-NOT-LEAK"})
+    buf = io.StringIO()
+
+    with (
+        contextlib.redirect_stdout(buf),
+        pytest.raises(NotHelpTargetError) as refused,
+    ):
+        render(context, profile=ModelHelpProfile())
+
+    assert buf.getvalue() == ""
+    assert "sk-CANARY-DO-NOT-LEAK" not in str(refused.value)
+    for shape in ("meiva.shell", "meiva.shell.run", "meiva.memory.PATH"):
+        assert shape in str(refused.value)
+
+
+# meiva:note
+# Every target is checked before anything prints, so `help(good, bad)` is all-or-nothing
+# instead of a partial render followed by a traceback.
+def test_a_refused_target_leaves_no_earlier_target_half_printed() -> None:
+    buf = io.StringIO()
+
+    with (
+        contextlib.redirect_stdout(buf),
+        pytest.raises(NotHelpTargetError),
+    ):
+        render(meiva.shell.run, 42, profile=ModelHelpProfile())
+
+    assert buf.getvalue() == ""
 
 
 # ── multi-target ────────────────────────────────────────────────────────────

@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 
 from base.agents.context import MeivaContext
 from base.clock.tests.seeded_rng import seeded_rng
+
+# meiva:note
+# A canary standing in for a real credential: the assertions below fail if any value the context
+# holds reaches its printed form. It is never a real key, so a failing run is safe to paste.
+_CANARY = "sk-CANARY-DO-NOT-LEAK"
 
 
 # meiva:note
@@ -85,3 +91,29 @@ def test_generators_with_different_seeds_mint_different_identifiers() -> None:
     second = MeivaContext(rng=_rng(2)).require_new_id()
 
     assert first != second
+
+
+# meiva:note
+# A context is printed routinely and it holds this process's whole environment: the repr names
+# each field and its kind, so no value a secret rides in reaches a log line. A handle prints its
+# own type, never its repr; a collection prints how many entries it holds.
+def test_the_repr_shows_what_a_field_is_and_never_what_it_holds() -> None:
+    class _Model:
+        def __repr__(self) -> str:
+            return _CANARY
+
+    context = MeivaContext(
+        llm=cast("Any", _Model()),
+        meiva_home=Path("/meiva-home"),
+        environ={
+            "ANTHROPIC_API_KEY": _CANARY,
+            "MEIVA_DB_URL": f"postgres://user:{_CANARY}@db/meiva_main",
+        },
+    )
+
+    printed = repr(context)
+
+    assert _CANARY not in printed
+    assert "llm=<_Model>" in printed
+    assert "environ=<2 entries>" in printed
+    assert "meiva_home=PosixPath('/meiva-home')" in printed
