@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, assert_never
 
+from base.host.net.browser_origins import parse_browser_origins, split_browser_origins
 from base.host.runtime_interpreter import source_digest
 
 _KEY_FILE = "meiva-build-key"
@@ -44,7 +45,9 @@ def plan_frontend_build(
     )
 
 
-def build_key(frontend_dir: Path, *, gateway_port: int, browser_origin: str) -> str | None:
+def build_key(
+    frontend_dir: Path, *, gateway_port: int, browser_origins: tuple[str, ...]
+) -> str | None:
     # meiva:note
     # None means "cannot prove the build is current", and the caller treats that as
     # "build". The source digest covers HEAD and every tracked or
@@ -57,16 +60,18 @@ def build_key(frontend_dir: Path, *, gateway_port: int, browser_origin: str) -> 
     node = _node_version()
     if node is None:
         return None
-    return key_from_parts(source, node, gateway_port=gateway_port, browser_origin=browser_origin)
+    return key_from_parts(source, node, gateway_port=gateway_port, browser_origins=browser_origins)
 
 
-def key_from_parts(source: str, node: str, *, gateway_port: int, browser_origin: str) -> str:
+def key_from_parts(
+    source: str, node: str, *, gateway_port: int, browser_origins: tuple[str, ...]
+) -> str:
     body = json.dumps(
         {
             "source": source,
             "node": node,
             "gateway_port": gateway_port,
-            "browser_origin": browser_origin,
+            "browser_origins": browser_origins,
         },
         sort_keys=True,
     )
@@ -136,9 +141,9 @@ def ensure_build(
     frontend_dir: Path,
     *,
     gateway_port: int,
-    browser_origin: str,
+    browser_origins: tuple[str, ...],
 ) -> int:
-    current = build_key(frontend_dir, gateway_port=gateway_port, browser_origin=browser_origin)
+    current = build_key(frontend_dir, gateway_port=gateway_port, browser_origins=browser_origins)
     decision = plan_frontend_build(
         frontend_dir,
         current_key=current,
@@ -161,11 +166,13 @@ def main(argv: list[str] | None = None) -> int:
     ensure = sub.add_parser("ensure", help="build the frontend unless its inputs are unchanged")
     ensure.add_argument("--dir", required=True, help="frontend directory, relative to the unit cwd")
     ensure.add_argument("--gateway-port", type=int, required=True)
-    ensure.add_argument("--browser-origin", default="")
+    ensure.add_argument("--browser-origins", default="")
     args = parser.parse_args(argv)
     if args.command == "ensure":
         return ensure_build(
-            Path(args.dir), gateway_port=args.gateway_port, browser_origin=args.browser_origin
+            Path(args.dir),
+            gateway_port=args.gateway_port,
+            browser_origins=parse_browser_origins(split_browser_origins(args.browser_origins)),
         )
     return 2
 

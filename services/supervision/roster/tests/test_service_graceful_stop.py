@@ -166,7 +166,7 @@ def test_exec_into_passes_through_a_command_that_execs_itself():
 def test_frontend_service_command_is_exec_safe():
     from base.cluster import frontend_service_cmd
 
-    cmd = frontend_service_cmd(3001, gateway_port=8000, browser_origin="")
+    cmd = frontend_service_cmd(3001, gateway_port=8000, browser_origins=())
     assert "exec pnpm run start -p 3001" in cmd
     assert exec_into(cmd) == cmd
 

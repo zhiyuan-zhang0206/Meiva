@@ -11,7 +11,7 @@ _FACTS = GateFacts(
     app_port=3001,
     gateway_port=8000,
     gateway_host="gateway-box",
-    browser_origin="",
+    browser_origins=(),
     default_static_dir=Path("/checkout/static"),
 )
 
@@ -22,7 +22,7 @@ def test_the_settings_decide_when_the_command_line_names_nothing() -> None:
     assert launch.static_dir == Path("/checkout/static")
     assert launch.app_base == "http://127.0.0.1:3001"
     assert launch.gateway_base == "http://gateway-box:8000"
-    assert launch.browser_origin == ""
+    assert launch.browser_origins == ()
 
 
 def test_the_command_line_wins_over_the_settings() -> None:
@@ -31,17 +31,18 @@ def test_the_command_line_wins_over_the_settings() -> None:
     assert launch.app_base == "http://127.0.0.1:3001"
 
 
-def test_the_browser_origin_is_carried_through() -> None:
+def test_every_browser_origin_is_carried_through_in_order() -> None:
     facts = GateFacts(
         entry_port=3000,
         app_port=3001,
         gateway_port=8000,
         gateway_host="gateway-box",
-        browser_origin="https://console.example",
+        browser_origins=("https://console.example", "https://other.example"),
         default_static_dir=Path("static"),
     )
-    assert plan_launch(port=None, static_dir=None, facts=facts).browser_origin == (
-        "https://console.example"
+    assert plan_launch(port=None, static_dir=None, facts=facts).browser_origins == (
+        "https://console.example",
+        "https://other.example",
     )
 
 

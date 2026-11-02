@@ -36,6 +36,7 @@ def _idle_server(server_class: type[GateServer] = GateServer) -> GateServer:
         app_base="http://127.0.0.1:2",
         static_dir=_STATIC,
         config=GateConfig(home=Path("/unused-gate-home")),
+        browser_origins=(),
     )
     return server_class(("127.0.0.1", 0), gate)
 

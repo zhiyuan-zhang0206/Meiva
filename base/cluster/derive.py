@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypeGuard
 from urllib.parse import urlsplit, urlunsplit
@@ -166,20 +166,21 @@ def session_name(service: str) -> str:
 # Single source for both build paths — the canonical ServiceSpec (cli/commands/_repo.py) AND the
 # frontend healthcheck respawn (services/supervision/healthchecks/frontend.py) — so a watchdog
 # restart can never bake a different (stale) gateway port than `meiva start` did.
-def fe_build_env(*, gateway_port: int, browser_origin: str) -> str:
+def fe_build_env(*, gateway_port: int, browser_origins: Sequence[str]) -> str:
     gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={gateway_port}"
-    if not browser_origin:
+    if not browser_origins:
         return gateway_env
-    # The normal build and watchdog rebuild must carry the same browser entry.
+    # meiva:note
+    # The normal build and watchdog rebuild must carry the same browser entries.
     # Keep this host setting separate from the runner/control-plane gateway URL.
-    return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGIN={shlex.quote(browser_origin)}"
+    return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGINS={shlex.quote(','.join(browser_origins))}"
 
 
 def frontend_service_cmd(
     port: int,
     *,
     gateway_port: int,
-    browser_origin: str,
+    browser_origins: Sequence[str],
     frontend_dir: str | Path = "ui/web",
 ) -> str:
     # meiva:note
@@ -193,11 +194,13 @@ def frontend_service_cmd(
     # from re-running a production Next.js build.
     # meiva:link base/cluster/docs/frontend-build.meiva.okf.md
     frontend_dir = Path(frontend_dir).as_posix()
-    build_env = fe_build_env(gateway_port=gateway_port, browser_origin=browser_origin)
-    origin = f" --browser-origin {shlex.quote(browser_origin)}" if browser_origin else ""
+    build_env = fe_build_env(gateway_port=gateway_port, browser_origins=browser_origins)
+    origins = (
+        f" --browser-origins {shlex.quote(','.join(browser_origins))}" if browser_origins else ""
+    )
     build = (
         f"{build_env} .venv/bin/python -m base.cluster.frontend_build ensure"
-        f" --dir {shlex.quote(frontend_dir)} --gateway-port {gateway_port}{origin}"
+        f" --dir {shlex.quote(frontend_dir)} --gateway-port {gateway_port}{origins}"
     )
     return f"{build} && cd {frontend_dir} && exec pnpm run start -p {port}"
 

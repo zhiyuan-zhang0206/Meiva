@@ -194,10 +194,12 @@ button:disabled {
       idle();
     }
 
-    // A configured HTTPS entry routes auth and SSE directly to the gateway.
-    // Keep the direct HTTP entry working during rollout and rollback.
+    // Every configured HTTPS entry (MEIVA_BROWSER_ORIGINS) routes auth and SSE
+    // directly to the gateway on its own origin. Keep the direct HTTP entry
+    // working during rollout and rollback.
+    var BROWSER_ORIGINS = /*__BROWSER_ORIGINS__*/[];
     function gatewayBase() {
-      return window.location.origin === /*__BROWSER_ORIGIN__*/
+      return BROWSER_ORIGINS.indexOf(window.location.origin) !== -1
         ? "" : "__GATEWAY_BASE__";
     }
 

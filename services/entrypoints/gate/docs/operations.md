@@ -1,24 +1,28 @@
-# Optional HTTPS browser entry (HTTP/2)
+# Optional HTTPS browser entries (HTTP/2)
 
 Use a browser-facing HTTPS reverse proxy when several visible console windows
 exhaust HTTP/1.1's six connections with SSE. Keep `MEIVA_GATEWAY_URL` and the
 existing listener ports as the runner/control-plane addresses. On the gateway
-unit, set `MEIVA_BROWSER_ORIGIN=https://<entry-host>` (an origin only, no path).
+unit, set `MEIVA_BROWSER_ORIGINS=https://<entry-host>[,https://<other-host>...]`
+(comma-separated origins only, no path; the first one is the primary entry, the one
+`meiva start` prints in its login link). Several entries serve one cluster at once,
+for example a private-network name and a public name, each its own reverse proxy
+with the same routes. An invalid or repeated entry refuses startup.
 The normal frontend build derives its browser setting from this field; do not
 write `NEXT_PUBLIC_*` overrides. Deploy the change through the normal update
 path so the gateway, gate login page and rebuilt frontend agree. If an explicit
-`MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS` list exists, add the exact new origin there;
+`MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS` list exists, add every exact new origin there;
 the explicit allowlist remains authoritative.
 
 This setting currently requires a source-built frontend. Retained standalone
 images do not record a browser origin in their build manifest; their launcher
 refuses a nonempty setting instead of silently serving a mismatched bundle.
 
-Only a browser visiting that exact origin uses same-origin API/SSE. Direct IP
+Only a browser visiting one of those exact origins uses same-origin API/SSE. Direct IP
 frontend URLs keep their existing gateway-port routing for staged verification
-and rollback. Login through the new HTTPS origin sets a Secure session cookie;
-direct HTTP login retains its existing policy. A hostname change requires a
-new browser login. Forward the original Host and overwrite X-Forwarded-Host /
+and rollback. Login through an HTTPS entry sets a Secure session cookie;
+direct HTTP login retains its existing policy. The cookie is host-only: a
+hostname change, or a visit to another entry, requires a new browser login. Forward the original Host and overwrite X-Forwarded-Host /
 X-Forwarded-Proto at the trusted entry; Uvicorn's trusted proxy boundary stays
 loopback, never `forwarded-allow-ips=*`.
 
@@ -38,7 +42,7 @@ entry's current configuration first and refuse to overwrite an occupied HTTPS
 port. For example, for gateway 20016 and gate 20017 on an otherwise unused
 HTTPS port 443, add exactly four handlers:
 
-| Path on `https://<entry-host>` | Upstream |
+| Path on each `https://<entry-host>` | Upstream |
 |---|---|
 | `/api` | `http://127.0.0.1:20016/api` |
 | `/pages` | `http://127.0.0.1:20016/pages` |

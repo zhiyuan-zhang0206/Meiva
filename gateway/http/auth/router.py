@@ -156,7 +156,7 @@ async def _open_session(request: Request, mint: str, ip: str) -> JSONResponse:
         session_id,
         secure=session_cookie_secure(
             str(request.url),
-            browser_origin=config.browser_origin,
+            browser_origins=config.browser_origins,
             default_secure=config.session_cookie_secure,
         ),
         ttl_seconds=ttl_seconds,

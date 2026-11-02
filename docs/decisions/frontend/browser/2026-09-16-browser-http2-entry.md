@@ -31,3 +31,5 @@ only the gateway port and API-base override. Its launcher rejects this new
 setting until the manifest can represent it; source builds carry the setting
 through the canonical build command. Silently accepting an unrepresented
 origin would break HTTPS clients despite successful release verification.
+
+_Extended by [a cluster serves several same-origin browser entries](../../data/security/2026-11-03-multiple-browser-origins.md): the single value became an ordered list._

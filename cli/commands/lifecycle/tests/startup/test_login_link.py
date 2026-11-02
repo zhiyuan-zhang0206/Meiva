@@ -75,7 +75,7 @@ def _config(command: CommandRuntime, gateway_url: str, *, secret: str = _SECRET)
     return dataclasses.replace(
         config,
         gateway_url=gateway_url,
-        browser_origin="",
+        browser_origins=(),
         entry_url="http://localhost:3000",
         app_port=None,
         data_plane=dataclasses.replace(config.data_plane, cluster_secret=secret),

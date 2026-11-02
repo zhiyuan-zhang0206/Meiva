@@ -34,17 +34,31 @@ STATIC = (
 _UNUSED_HOME = Path("/unused-gate-home")
 
 
-def test_login_template_carries_explicit_browser_entry() -> None:
+def test_login_template_carries_every_browser_entry() -> None:
     gate = Gate(
         gateway_base="http://192.0.2.2:20016",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
         config=GateConfig(home=_UNUSED_HOME),
-        browser_origin="https://console.example",
+        browser_origins=("https://console.example", "https://other.example"),
     )
-    assert "/*__BROWSER_ORIGIN__*/" not in gate.login_page
-    assert 'window.location.origin === "https://console.example"' in gate.login_page
+    assert "/*__BROWSER_ORIGINS__*/" not in gate.login_page
+    assert (
+        'var BROWSER_ORIGINS = ["https://console.example", "https://other.example"];'
+        in gate.login_page
+    )
     assert "http://192.0.2.2:20016" in gate.login_page
+
+
+def test_login_template_without_a_browser_entry_lists_none() -> None:
+    gate = Gate(
+        gateway_base="http://192.0.2.2:20016",
+        app_base="http://127.0.0.1:20031",
+        static_dir=STATIC,
+        config=GateConfig(home=_UNUSED_HOME),
+        browser_origins=(),
+    )
+    assert "var BROWSER_ORIGINS = [];" in gate.login_page
 
 
 class FakeGateway(BaseHTTPRequestHandler):
@@ -202,6 +216,7 @@ def servers(unit_home: Path, probe_timeout_s: float) -> Iterator[Servers]:
         app_base=f"http://127.0.0.1:{app.server_port}",
         static_dir=STATIC,
         config=GateConfig(home=unit_home, probe_timeout_s=probe_timeout_s),
+        browser_origins=(),
     )
     gate_server = GateServer(("127.0.0.1", 0), gate)
     for s in (gw, app, gate_server):
@@ -673,14 +688,14 @@ def test_pages_ship_self_contained(servers, page: str) -> None:
 _LOGIN_PAGE_HARNESS = r"""
 const vm = require("node:vm");
 const page = require("node:fs").readFileSync(0, "utf8");
-const [hash, status] = [process.argv[1], Number(process.argv[2])];
+const [hash, status, origin] = [process.argv[1], Number(process.argv[2]), process.argv[3]];
 const script = page.split("<script>").pop().split("</script>")[0];
 const log = [];
 const el = () => ({ addEventListener() {}, value: "", hidden: true, textContent: "", style: {} });
 const elements = { form: el(), submit: el(), error: el(), password: el(), username: el() };
 const window = {
   location: {
-    origin: "http://localhost:3000", pathname: "/", search: "", hash,
+    origin, pathname: "/", search: "", hash,
     replace: (to) => log.push(["replace", to]),
   },
 };
@@ -699,7 +714,10 @@ setTimeout(() => console.log(JSON.stringify({ log, error: elements.error.textCon
 """
 
 
-def _run_login_page(gate: Gate, hash_: str, status: int) -> dict[str, Any]:
+_DIRECT_ENTRY = "http://localhost:3000"
+
+
+def _run_login_page(gate: Gate, hash_: str, status: int, origin: str) -> dict[str, Any]:
     import shutil
     import subprocess
 
@@ -707,7 +725,7 @@ def _run_login_page(gate: Gate, hash_: str, status: int) -> dict[str, Any]:
     if node is None:
         pytest.skip("node is not installed")
     done = subprocess.run(  # noqa: S603 — fixed argv: node runs the checked-in login page under a stub DOM
-        [node, "-e", _LOGIN_PAGE_HARNESS, hash_, str(status)],
+        [node, "-e", _LOGIN_PAGE_HARNESS, hash_, str(status), origin],
         input=gate.login_page,
         capture_output=True,
         text=True,
@@ -718,17 +736,20 @@ def _run_login_page(gate: Gate, hash_: str, status: int) -> dict[str, Any]:
     return json.loads(done.stdout)
 
 
-def _ticket_gate() -> Gate:
+def _ticket_gate(browser_origins: tuple[str, ...]) -> Gate:
     return Gate(
         gateway_base="http://localhost:8000",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
         config=GateConfig(home=_UNUSED_HOME),
+        browser_origins=browser_origins,
     )
 
 
 def test_login_page_redeems_a_ticket_after_clearing_the_fragment() -> None:
-    out = _run_login_page(_ticket_gate(), "#ticket=ticket.human-ab.cd&keep=1", 200)
+    out = _run_login_page(
+        _ticket_gate(browser_origins=()), "#ticket=ticket.human-ab.cd&keep=1", 200, _DIRECT_ENTRY
+    )
     assert out["log"] == [
         ["replaceState", "/#keep=1"],
         [
@@ -741,10 +762,31 @@ def test_login_page_redeems_a_ticket_after_clearing_the_fragment() -> None:
 
 
 def test_login_page_reports_a_refused_ticket_and_stays_on_the_form() -> None:
-    out = _run_login_page(_ticket_gate(), "#ticket=spent", 401)
+    out = _run_login_page(_ticket_gate(browser_origins=()), "#ticket=spent", 401, _DIRECT_ENTRY)
     assert ["replace", "/"] not in out["log"]
     assert "expired or was already used" in out["error"]
 
 
 def test_login_page_without_a_ticket_makes_no_request() -> None:
-    assert _run_login_page(_ticket_gate(), "", 200)["log"] == []
+    assert _run_login_page(_ticket_gate(browser_origins=()), "", 200, _DIRECT_ENTRY)["log"] == []
+
+
+_ENTRIES = ("https://public.example", "https://private.example:8443")
+
+
+@pytest.mark.parametrize(
+    ("page_origin", "redeem_url"),
+    [
+        ("https://public.example", "/api/auth/login-ticket/redeem"),
+        ("https://private.example:8443", "/api/auth/login-ticket/redeem"),
+        ("https://other.example", "http://localhost:8000/api/auth/login-ticket/redeem"),
+        (_DIRECT_ENTRY, "http://localhost:8000/api/auth/login-ticket/redeem"),
+    ],
+    ids=["first-entry", "second-entry", "not-an-entry", "direct-entry"],
+)
+def test_login_page_posts_to_its_own_origin_only_on_a_configured_entry(
+    page_origin: str, redeem_url: str
+) -> None:
+    out = _run_login_page(_ticket_gate(_ENTRIES), "#ticket=t", 200, page_origin)
+
+    assert ["fetch", redeem_url, '{"ticket":"t"}'] in out["log"]

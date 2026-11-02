@@ -571,7 +571,7 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         session_ttl_seconds=120,
         mcp_endpoint_enabled=True,
         allowed_origins=("https://alpha.example",),
-        browser_origin="https://alpha.example",
+        browser_origins=("https://alpha.example",),
         memory_root=Path("/nonexistent/alpha-memory"),
         upload_staging_root=Path("/nonexistent/alpha-home"),
     )

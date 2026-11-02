@@ -22,12 +22,12 @@ def _facts(
     *,
     secret: bool = True,
     terminal: bool = True,
-    origin: str = "",
+    origins: tuple[str, ...] = (),
     app_port: int | None = None,
 ) -> LinkFacts:
     return LinkFacts(
         sessions=frozenset(sessions),
-        browser_origin=origin,
+        browser_origins=origins,
         entry_url="http://localhost:3000",
         app_port=app_port,
         has_human_secret=secret,
@@ -35,27 +35,40 @@ def _facts(
     )
 
 
-def test_ui_base_is_the_gate_entry_or_the_https_browser_origin() -> None:
+def test_ui_base_is_the_gate_entry_or_the_primary_https_browser_origin() -> None:
     entry = "http://localhost:3000"
-    assert ui_base({"gateway", "gate"}, browser_origin="", entry_url=entry, app_port=None) == entry
+    assert ui_base({"gateway", "gate"}, browser_origins=(), entry_url=entry, app_port=None) == entry
     assert (
-        ui_base({"gate"}, browser_origin="https://console.example/", entry_url=entry, app_port=None)
+        ui_base(
+            {"gate"}, browser_origins=("https://console.example",), entry_url=entry, app_port=None
+        )
         == "https://console.example"
     )
+
+
+def test_the_link_points_at_the_first_of_several_browser_origins() -> None:
+    plan = plan_login_link(
+        _facts(
+            {"gateway", "gate"},
+            origins=("https://public.example", "https://private.example"),
+        )
+    )
+
+    assert plan == MintLink("https://public.example")
 
 
 def test_ui_base_without_gate_is_the_apps_reserved_port() -> None:
     entry = "http://localhost:3000"
     assert (
-        ui_base({"gateway", "frontend"}, browser_origin="", entry_url=entry, app_port=None) is None
+        ui_base({"gateway", "frontend"}, browser_origins=(), entry_url=entry, app_port=None) is None
         # meiva:note
         # no reserved port to point at
     )
     assert (
-        ui_base({"gateway", "frontend"}, browser_origin="", entry_url=entry, app_port=3101)
+        ui_base({"gateway", "frontend"}, browser_origins=(), entry_url=entry, app_port=3101)
         == "http://localhost:3101"
     )
-    assert ui_base({"gateway"}, browser_origin="", entry_url=entry, app_port=3101) is None
+    assert ui_base({"gateway"}, browser_origins=(), entry_url=entry, app_port=3101) is None
 
 
 def test_a_terminal_with_a_ui_and_the_secret_mints_a_link() -> None:

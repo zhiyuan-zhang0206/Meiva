@@ -24,7 +24,7 @@ class StartConfig:
     data_plane: DataPlaneConfig
     gateway_url: str
     gateway_port: int
-    browser_origin: str
+    browser_origins: tuple[str, ...]
     entry_url: str
     app_port: int | None
     browser_cdp_port: int
@@ -39,7 +39,7 @@ def read_start_config(config: ConfigBoot) -> StartConfig:
         data_plane=data_plane_config_from_boot(config),
         gateway_url=view.gateway.gateway_url,
         gateway_port=view.gateway.gateway_port,
-        browser_origin=view.gateway.browser_origin,
+        browser_origins=tuple(view.gateway.browser_origins),
         entry_url=view.services.frontend_healthcheck_url,
         app_port=view.services.app_port,
         browser_cdp_port=view.services.browser_cdp_port,

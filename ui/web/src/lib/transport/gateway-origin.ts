@@ -1,10 +1,21 @@
-// Shared by browser requests and the server-rendered CSP. The configured
-// HTTPS entry routes gateway paths directly; legacy direct frontend URLs
-// still use the gateway's separate port, including during a staged rollout.
+// meiva:note
+// Shared by browser requests and the server-rendered CSP. Every configured HTTPS entry routes
+// gateway paths directly on its own origin; legacy direct frontend URLs still use the gateway's
+// separate port, including during a staged rollout. `browserOrigins` is the comma-separated entry
+// list as configured (NEXT_PUBLIC_BROWSER_ORIGINS, the gateway's MEIVA_BROWSER_ORIGINS); unset or
+// empty means no entry.
 export interface GatewayOriginOptions {
   apiBase?: string;
-  browserOrigin?: string;
+  browserOrigins?: string;
   gatewayPort?: string;
+}
+
+// meiva:note
+// The origins of a configured entry list. The gateway has already refused an invalid list at
+// startup, so an entry that is not an absolute URL throws here too rather than being skipped.
+function parseBrowserOrigins(configured: string | undefined): string[] {
+  if (configured === undefined || configured.trim() === "") return [];
+  return configured.split(",").map((entry) => new URL(entry.trim()).origin);
 }
 
 // meiva:note
@@ -24,7 +35,7 @@ export function gatewayOriginForRequest(requestUrl: URL, options: GatewayOriginO
     }
     return api.origin;
   }
-  if (options.browserOrigin && requestUrl.origin === new URL(options.browserOrigin).origin) {
+  if (parseBrowserOrigins(options.browserOrigins).includes(requestUrl.origin)) {
     return requestUrl.origin;
   }
   const gateway = new URL(requestUrl.origin);

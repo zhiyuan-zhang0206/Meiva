@@ -167,7 +167,7 @@ class Gate:
         app_base: str,
         static_dir: Path,
         config: GateConfig,
-        browser_origin: str = "",
+        browser_origins: Sequence[str],
     ) -> None:
         self.gateway_base = gateway_base.rstrip("/")
         self.app_base = app_base.rstrip("/")
@@ -190,12 +190,16 @@ class Gate:
                 body = body.replace(marker, asset)
             return body
 
+        # meiva:note
         # The login form posts to the gateway origin; substitute it at load so
-        # the static page needs no build step and works on any gateway port.
+        # the static page needs no build step and works on any gateway port. A page
+        # served from one of the configured browser origins posts to its own origin
+        # instead, so the page is given that list (canonical origins, which cannot
+        # carry markup) beside the gateway base.
         self.login_page = (
             page("login.html")
             .replace("__GATEWAY_BASE__", self.gateway_base)
-            .replace("/*__BROWSER_ORIGIN__*/", json.dumps(browser_origin))
+            .replace("/*__BROWSER_ORIGINS__*/[]", json.dumps(list(browser_origins)))
         )
         self.down_page = page("down.html")
 
@@ -472,7 +476,7 @@ def read_facts(config: ConfigBoot, machine: MachineIdentityReader) -> GateFacts:
         app_port=app_port_of(services.app_port, entry_port=entry),
         gateway_port=config.view.gateway.gateway_port,
         gateway_host=machine.host(),
-        browser_origin=config.view.gateway.browser_origin,
+        browser_origins=tuple(config.view.gateway.browser_origins),
         default_static_dir=Path(__file__).parent / "static",
     )
 
@@ -482,7 +486,7 @@ def read_facts(config: ConfigBoot, machine: MachineIdentityReader) -> GateFacts:
 def build_gate(launch: GateLaunch, *, home: Path) -> GateServer:
     gate = Gate(
         gateway_base=launch.gateway_base,
-        browser_origin=launch.browser_origin,
+        browser_origins=launch.browser_origins,
         app_base=launch.app_base,
         static_dir=launch.static_dir,
         config=GateConfig(home=home),
