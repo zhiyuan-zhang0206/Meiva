@@ -91,6 +91,7 @@ from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.upkeep.events_maintenance import (
     alert_reconciler,
+    escalation,
     health_components,
     loop_roster,
     passes,
@@ -128,6 +129,10 @@ def events_maintenance_config(config: ConfigBoot, *, mirror_dir: Path) -> Events
         events_resolution_interval_seconds=config.view.daemon.events_resolution_interval_seconds,
         events_auto_dismiss_enabled=config.view.daemon.events_auto_dismiss_enabled,
         events_auto_dismiss_days=config.view.daemon.events_auto_dismiss_days,
+        events_escalation_mode=config.view.daemon.events_escalation_mode,
+        events_escalation_interval_seconds=config.view.daemon.events_escalation_interval_seconds,
+        events_escalation_min_age_seconds=config.view.daemon.events_escalation_min_age_seconds,
+        events_escalation_cooldown_seconds=config.view.daemon.events_escalation_cooldown_seconds,
         timezone=config.view.general.timezone,
         grafana_host=config.view.gateway.grafana_host,
         grafana_port=config.view.gateway.grafana_port,
@@ -368,6 +373,54 @@ async def resolution_loop(
     )
 
 
+# meiva:note
+# `pass_loop` runs blocking work that reports success by returning; the pass's own count is a
+# fact for the caller, not for the loop, so it is logged rather than returned.
+def _run_escalation_pass(
+    pool: ConnectionPool, config: EventsMaintenanceConfig, mode: escalation.EscalationMode
+) -> None:
+    decided = escalation.run_escalation_pass(
+        pool,
+        mode=mode,
+        now=_clock(config).now(),
+        min_age_s=config.events_escalation_min_age_seconds,
+        cooldown_s=config.events_escalation_cooldown_seconds,
+    )
+    if decided:
+        events_maintenance_log.info(
+            "[events-maintenance] escalation decided on %d episode(s)", decided
+        )
+
+
+# meiva:note
+# The escalation loop asks the ledger question every minute: is there an open critical/error
+# episode nobody has answered for long enough to tell a person? It runs in this service because
+# the service already holds the alert rows and the clock, and because a loop that only lives
+# inside an agent would stop mattering the moment that agent terminates itself.
+async def escalation_loop(
+    pool: ConnectionPool,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    *,
+    tasks: asyncio.TaskGroup,
+) -> None:
+    mode = escalation.EscalationMode(config.events_escalation_mode)
+    interval = config.events_escalation_interval_seconds
+    events_maintenance_log.info(
+        "[events-maintenance] escalation loop started, mode=%s interval=%.0fs min_age=%.0fs",
+        mode.value,
+        interval,
+        config.events_escalation_min_age_seconds,
+    )
+    await passes.pass_loop(
+        progress,
+        label="escalation",
+        interval_s=interval,
+        work=lambda: _run_escalation_pass(pool, config, mode),
+        tasks=tasks,
+    )
+
+
 async def run(
     *,
     process_config: ConfigBoot,
@@ -431,6 +484,7 @@ async def run(
             group.create_task(dispatch_loop(pool, progress["dispatch"], config, db, tasks=group))
             group.create_task(resolution_loop(pool, progress["resolution"], config, tasks=group))
             group.create_task(registry_gauge.registry_gauge_loop(pool, progress["registry_gauge"]))
+            group.create_task(escalation_loop(pool, progress["escalation"], config, tasks=group))
             if "alert_reconciliation" in progress:
                 bus = EventBus(
                     event_bus_config_from_config(process_config),

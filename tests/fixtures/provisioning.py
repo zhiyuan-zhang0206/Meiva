@@ -226,6 +226,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "telemetry_events",
     "telemetry_owner_inference",
     "signal_state",
+    "alert_escalations",
     "weixin_ingress_receipts",
     "weixin_ingress_cursors",
     "weixin_ingress_bindings",

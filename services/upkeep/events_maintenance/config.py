@@ -38,6 +38,13 @@ class EventsMaintenanceConfig:
     events_resolution_interval_seconds: int
     events_auto_dismiss_enabled: bool
     events_auto_dismiss_days: int
+    # meiva:note
+    # The escalation pass decides from these three: how often it looks, how long an episode must
+    # stand before it counts as unanswered, and how long one episode waits between decisions.
+    events_escalation_mode: str
+    events_escalation_interval_seconds: float
+    events_escalation_min_age_seconds: float
+    events_escalation_cooldown_seconds: float
     timezone: str
     # The co-located Grafana the alert reconciliation reads; no admin password means
     # this unit does not reconcile alerts.

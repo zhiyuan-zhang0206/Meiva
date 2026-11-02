@@ -301,7 +301,7 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
         await asyncio.gather(service, return_exceptions=True)
 
     assert status == 200
-    expected = ["dispatch", "resolution", "registry_gauge"]
+    expected = ["dispatch", "resolution", "registry_gauge", "escalation"]
     assert component_names(body) == expected + (["alert_reconciliation"] if credential else [])
     await assert_released(db_conn, tmp_path / "run" / "events_maintenance.pid", port)
 

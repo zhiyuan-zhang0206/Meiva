@@ -116,7 +116,7 @@ def test_every_failure_has_a_verdict_that_ends_in_exactly_one_way(failure: Failu
     assert [plan.park, plan.reraise].count(True) <= 1
 
 
-def test_a_unit_without_the_grafana_credential_runs_three_loops() -> None:
+def test_a_unit_without_the_grafana_credential_runs_four_loops() -> None:
     loops = loop_roster.roster(
         dispatch_deadline_s=1500.0, resolution_deadline_s=600.0, reconcile_alerts=False
     )
@@ -125,6 +125,7 @@ def test_a_unit_without_the_grafana_credential_runs_three_loops() -> None:
         ("dispatch", 1500.0),
         ("resolution", 600.0),
         ("registry_gauge", loop_roster.REGISTRY_GAUGE_DEADLINE_S),
+        ("escalation", loop_roster.ESCALATION_DEADLINE_S),
     ]
 
 
@@ -137,6 +138,7 @@ def test_a_unit_with_the_credential_adds_the_alert_reconciliation() -> None:
         "dispatch",
         "resolution",
         "registry_gauge",
+        "escalation",
         "alert_reconciliation",
     ]
     assert loops[-1].deadline_s == loop_roster.ALERT_RECONCILIATION_DEADLINE_S
