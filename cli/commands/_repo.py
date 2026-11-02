@@ -179,11 +179,16 @@ def ensure_frontend_deps(
     else:
         reason = "missing" if not node_modules.is_dir() else "pnpm-lock.yaml changed"
         print(f"  · frontend deps {reason}, running pnpm install --frozen-lockfile")
+    # meiva:note
+    # A start runs without a terminal (launchd, ssh, a service session). When the lockfile changed,
+    # pnpm asks before it removes the old `node_modules` and aborts with
+    # ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY when nobody can answer; `CI=true` is its documented
+    # way to proceed without asking, and the install is already frozen to the lockfile.
     subprocess.run(
         list(install_argv),
         cwd=str(fe),
         check=True,
-        env=frontend_toolchain_env(environ),
+        env={**frontend_toolchain_env(environ), "CI": "true"},
     )
     stamp.write_text(want)
 
