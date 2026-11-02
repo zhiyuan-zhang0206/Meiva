@@ -1,10 +1,10 @@
 # meiva:note
 # AST detection behind the ambient-state rule (see meizel/state/ambient_state/__init__.py).
 #
-# `scan(tree, rel, index)` returns every `Hit` in one module: the state it
+# `scan(tree, rel, index, allow)` returns every `Hit` in one module: the state it
 # holds, the import-time effects it has, and the background work it starts. It
-# knows nothing about baselines or allowlists; the policy lives in
-# `allowlist.py`, the gate wiring in `__init__.py`.
+# knows nothing about baselines; the closed lists arrive as an
+# `allowlist.AmbientAllowlist` value, and the gate wiring lives in `__init__.py`.
 #
 # Module-level statements (descending into `if`/`try`/`with`/loops, never into an
 # `if __name__ == "__main__":` block) are classified by shape:
@@ -53,7 +53,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from meizel.state.ambient_state import allowlist as allow
+from meizel.state.ambient_state.allowlist import AmbientAllowlist
 from meizel.state.ambient_state.module import (
     MUTATORS,
     Module,
@@ -132,7 +132,7 @@ def _strip_cast(value: ast.expr) -> ast.expr:
     return value
 
 
-def _is_pure_method_chain(call: ast.Call, module: Module) -> bool:
+def _is_pure_method_chain(call: ast.Call, module: Module, allow: AmbientAllowlist) -> bool:
     """`"lit".join(...)`, `SQL.format(...)`, `Path(...).resolve()`: a method on a constant."""
     func = call.func
     if not isinstance(func, ast.Attribute):
@@ -143,21 +143,21 @@ def _is_pure_method_chain(call: ast.Call, module: Module) -> bool:
     if isinstance(base, ast.Call):
         callee = module.full_name(base.func)
         return (
-            callee in allow.PURE_CALLEES
-            or callee in allow.PURE_CHAIN_CALLEES
-            or _is_pure_method_chain(base, module)
+            callee in allow.pure_callees
+            or callee in allow.pure_chain_callees
+            or _is_pure_method_chain(base, module, allow)
         )
     return isinstance(base, ast.Name) and base.id in module.string_constants
 
 
-def _is_exempt_callee(call: ast.Call, module: Module, callee: str) -> bool:
+def _is_exempt_callee(call: ast.Call, module: Module, callee: str, allow: AmbientAllowlist) -> bool:
     return (
-        callee in allow.PURE_CALLEES
-        or callee in allow.WIRING_CALLEES
-        or callee in allow.PURE_REPO_CALLEES
-        or callee in allow.SINK_CALLEES
-        or callee.endswith(allow.SINK_CALLEE_SUFFIXES)
-        or _is_pure_method_chain(call, module)
+        callee in allow.pure_callees
+        or callee in allow.wiring_callees
+        or callee in allow.pure_repo_callees
+        or callee in allow.sink_callees
+        or callee.endswith(allow.sink_callee_suffixes)
+        or _is_pure_method_chain(call, module, allow)
         or module.is_value_class(callee)
     )
 
@@ -165,9 +165,9 @@ def _is_exempt_callee(call: ast.Call, module: Module, callee: str) -> bool:
 # ── what a value reads at import time ──────────────────────────────────────
 
 
-def _settings_read(node: ast.Name, module: Module) -> str | None:
+def _settings_read(node: ast.Name, module: Module, allow: AmbientAllowlist) -> str | None:
     origin = module.imports.get(node.id, ("", None))[0]
-    is_cfg = any(origin == cfg or origin.startswith(f"{cfg}.") for cfg in allow.CONFIG_MODULES)
+    is_cfg = any(origin == cfg or origin.startswith(f"{cfg}.") for cfg in allow.config_modules)
     return READ if is_cfg else None
 
 
@@ -188,16 +188,16 @@ def _call_read(node: ast.Call, module: Module) -> str | None:
     return READ if is_read_method else None
 
 
-def _read_of(node: ast.AST, module: Module) -> str | None:
+def _read_of(node: ast.AST, module: Module, allow: AmbientAllowlist) -> str | None:
     """The rule an expression node triggers by reading the environment, if any."""
-    if isinstance(node, ast.Name) and node.id in allow.SETTINGS_NAMES:
-        return _settings_read(node, module)
+    if isinstance(node, ast.Name) and node.id in allow.settings_names:
+        return _settings_read(node, module, allow)
     if isinstance(node, ast.Attribute | ast.Name):
         return _attribute_read(node, module)
     return _call_read(node, module) if isinstance(node, ast.Call) else None
 
 
-def import_time_read(value: ast.AST, module: Module) -> str | None:
+def import_time_read(value: ast.AST, module: Module, allow: AmbientAllowlist) -> str | None:
     """`host-fact`, `import-time-read` or None; a host read wins over another read."""
     found: str | None = None
     stack = [value]
@@ -205,7 +205,7 @@ def import_time_read(value: ast.AST, module: Module) -> str | None:
         node = stack.pop()
         if isinstance(node, ast.Lambda):
             continue
-        rule = _read_of(node, module)
+        rule = _read_of(node, module, allow)
         if rule == HOST:
             return HOST
         found = found or rule
@@ -216,11 +216,11 @@ def import_time_read(value: ast.AST, module: Module) -> str | None:
 # ── module-level statements ────────────────────────────────────────────────
 
 
-def _call_hit(value: ast.Call, module: Module) -> str | None:
+def _call_hit(value: ast.Call, module: Module, allow: AmbientAllowlist) -> str | None:
     callee = module.full_name(value.func)
     if callee in _CONTEXTVARS:
         return CONTEXTVAR
-    return None if _is_exempt_callee(value, module, callee) else INSTANCE
+    return None if _is_exempt_callee(value, module, callee, allow) else INSTANCE
 
 
 def _assigned_names(st: ast.Assign | ast.AnnAssign) -> list[str]:
@@ -229,8 +229,10 @@ def _assigned_names(st: ast.Assign | ast.AnnAssign) -> list[str]:
     return [name for name in names if not (name.startswith("__") and name.endswith("__"))]
 
 
-def _value_rule(value: ast.expr, names: list[str], module: Module, mutated: set[str]) -> str | None:
-    read = import_time_read(value, module)
+def _value_rule(
+    value: ast.expr, names: list[str], module: Module, mutated: set[str], allow: AmbientAllowlist
+) -> str | None:
+    read = import_time_read(value, module, allow)
     if read == HOST:
         return HOST
     is_container, empty = container_kind(value)
@@ -238,28 +240,28 @@ def _value_rule(value: ast.expr, names: list[str], module: Module, mutated: set[
     if is_container:
         rule = CONTAINER if empty or any(name in mutated for name in names) else None
     elif isinstance(value, ast.Call):
-        reads_itself = _call_read(value, module) or import_time_read(value.func, module)
-        rule = READ if reads_itself else _call_hit(value, module)
+        reads_itself = _call_read(value, module) or import_time_read(value.func, module, allow)
+        rule = READ if reads_itself else _call_hit(value, module, allow)
     return rule or read
 
 
 def _assignment_hits(
-    st: ast.Assign | ast.AnnAssign, module: Module, mutated: set[str]
+    st: ast.Assign | ast.AnnAssign, module: Module, mutated: set[str], allow: AmbientAllowlist
 ) -> list[Hit]:
     if st.value is None:
         return []
     names = _assigned_names(st)
-    rule = _value_rule(_strip_cast(st.value), names, module, mutated) if names else None
+    rule = _value_rule(_strip_cast(st.value), names, module, mutated, allow) if names else None
     return [Hit(rule, name, st.lineno) for name in names] if rule else []
 
 
-def _wiring_heads(module: Module) -> set[str]:
+def _wiring_heads(module: Module, allow: AmbientAllowlist) -> set[str]:
     heads: set[str] = set()
     for st in module.statements():
         if (
             isinstance(st, ast.Assign | ast.AnnAssign)
             and isinstance(st.value, ast.Call)
-            and module.full_name(st.value.func) in allow.WIRING_CALLEES
+            and module.full_name(st.value.func) in allow.wiring_callees
         ):
             targets = st.targets if isinstance(st, ast.Assign) else [st.target]
             heads.update(n for t in targets for n in target_names(t))
@@ -286,12 +288,12 @@ def _decorator_hit(st: ast.FunctionDef | ast.AsyncFunctionDef) -> list[Hit]:
     return []
 
 
-def _module_level_hits(module: Module, mutated: set[str]) -> list[Hit]:
+def _module_level_hits(module: Module, mutated: set[str], allow: AmbientAllowlist) -> list[Hit]:
     hits: list[Hit] = []
-    heads = _wiring_heads(module)
+    heads = _wiring_heads(module, allow)
     for st in module.statements():
         if isinstance(st, ast.Assign | ast.AnnAssign):
-            hits.extend(_assignment_hits(st, module, mutated))
+            hits.extend(_assignment_hits(st, module, mutated, allow))
         elif isinstance(st, ast.Expr):
             hits.extend(_call_statement_hit(st, module, heads))
         elif isinstance(st, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -584,9 +586,9 @@ def _is_globals_call(node: ast.expr) -> bool:
 # ── entry point ────────────────────────────────────────────────────────────
 
 
-def scan(tree: ast.Module, rel: str, index: Tree) -> list[Hit]:
+def scan(tree: ast.Module, rel: str, index: Tree, allow: AmbientAllowlist) -> list[Hit]:
     """Every ambient-state hit in one module, before any allowlist is applied."""
     module = Module(tree, rel, index)
     walker = _Walker(module)
     walker.run()
-    return [*_module_level_hits(module, walker.mutated), *walker.hits]
+    return [*_module_level_hits(module, walker.mutated, allow), *walker.hits]

@@ -152,6 +152,14 @@ def test_schedules_are_governed_by_this_rule_only(
 def test_tests_skill_scripts_and_main_blocks_are_not_scanned(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # meiva:note
+    # The rule reads the policy of the checkout it judges, so this fixture states the pattern that
+    # makes a skill's scripts the skill's own business — `meizel.policy.toml` owns it.
+    _write(
+        _repo,
+        "meizel.policy.toml",
+        '[ambient-state]\nskill-script-patterns = ["^meiva_builtins/skills/"]\n',
+    )
     _write(_repo, "base/tests/test_state.py", "_REGISTRY = {}\n")
     _write(_repo, "meiva_builtins/skills/web/scripts/run.py", "_REGISTRY = {}\nmain()\n")
     _write(_repo, "base/__main__.py", "_REGISTRY = {}\n")
@@ -327,7 +335,11 @@ def test_a_moved_file_carries_its_frozen_key_once_the_key_is_migrated(
 def test_a_list_entry_whose_site_is_gone_fails_the_gate(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    ambient_state.allow.ALLOWED["base/state.py::hidden-singleton:table"] = "static"
+    _write(
+        _repo,
+        "meizel.policy.toml",
+        '[ambient-state.sites]\n"base/state.py::hidden-singleton:table" = "static"\n',
+    )
     _write(_repo, "base/state.py", "from functools import cache\n\n@cache\ndef table(): ...\n")
     assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
@@ -342,7 +354,11 @@ def test_a_list_entry_whose_site_is_gone_fails_the_gate(
 def test_a_list_entry_for_a_deleted_file_fails_the_gate(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    ambient_state.allow.SINK_FACADES["base/log/sink.py"] = "the log sink's buffer"
+    _write(
+        _repo,
+        "meizel.policy.toml",
+        '[ambient-state.sink-facades]\n"base/log/sink.py" = "the log sink\'s buffer"\n',
+    )
 
     assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "base/log/sink.py:1: stale ambient_state list entry — the file no longer exists" in (

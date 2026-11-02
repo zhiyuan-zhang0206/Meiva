@@ -10,7 +10,7 @@ import pytest
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state.module import Tree
-from meizel.state.ambient_state.tests.conftest import SCOPE
+from meizel.state.ambient_state.tests.conftest import CONFIG
 
 SOURCE = """
 import threading
@@ -45,7 +45,7 @@ class Service:
 
 
 def _sites(source: str, root: pathlib.Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/service.py", _tree(root), SCOPE)
+    return ambient_state.measure(ast.parse(source), "base/service.py", _tree(root), CONFIG)
 
 
 def test_visible_lifecycle_is_accepted(tmp_path: pathlib.Path) -> None:

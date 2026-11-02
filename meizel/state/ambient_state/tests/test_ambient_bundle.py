@@ -7,7 +7,7 @@ import textwrap
 from meizel.state import ambient_state
 from meizel.state.ambient_state.bundle import bundles_defined_in
 from meizel.state.ambient_state.module import Tree
-from meizel.state.ambient_state.tests.conftest import SCOPE
+from meizel.state.ambient_state.tests.conftest import CONFIG
 
 _BUNDLE_SOURCE = """
     from base.config.wiring import root_bundle
@@ -25,7 +25,7 @@ def _sites(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(source), encoding="utf-8")
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, _tree(root), SCOPE)
+    measured = ambient_state.measure(tree, rel, _tree(root), CONFIG)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 
@@ -114,7 +114,7 @@ def test_every_importer_reads_the_defining_module_once(tmp_path: pathlib.Path) -
     tree, reads = _counting_tree(tmp_path)
     for rel in importers:
         source = (tmp_path / rel).read_text(encoding="utf-8")
-        assert ambient_state.measure(ast.parse(source), rel, tree, SCOPE) == {
+        assert ambient_state.measure(ast.parse(source), rel, tree, CONFIG) == {
             f"{rel}::bundle-leak:GatewayWiring": [4]
         }
     assert reads["gateway/wiring.py"] == 1

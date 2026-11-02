@@ -3,13 +3,14 @@ from __future__ import annotations
 import ast
 import pathlib
 import textwrap
+from dataclasses import replace
 
 import pytest
 
 from meizel.state import ambient_state
-from meizel.state.ambient_state import allowlist as allow
+from meizel.state.ambient_state import Config
 from meizel.state.ambient_state.module import Module, Tree
-from meizel.state.ambient_state.tests.conftest import SCOPE
+from meizel.state.ambient_state.tests.conftest import ALLOWLISTS, CONFIG
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -24,12 +25,13 @@ def _sites(
     source: str,
     rel: str = "base/mod.py",
     files: dict[str, str] | None = None,
+    config: Config = CONFIG,
 ) -> dict[str, int]:
     for name, content in (files or {}).items():
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, _tree(root), SCOPE)
+    measured = ambient_state.measure(tree, rel, _tree(root), config)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 
@@ -426,9 +428,13 @@ def test_a_memoized_pure_function_goes_through_the_closed_list(tmp_path: pathlib
     source = "from functools import cache\n\n@cache\ndef table():\n    return {}\n"
     assert _sites(tmp_path, source) == {"hidden-singleton:table": 1}
 
-    allow.ALLOWED.clear()
-    allow.ALLOWED["base/mod.py::hidden-singleton:table"] = "a static table"
-    assert _sites(tmp_path, source) == {}
+    listed = replace(
+        CONFIG,
+        allow=replace(
+            ALLOWLISTS, allowed={"base/mod.py::hidden-singleton:table": "a static table"}
+        ),
+    )
+    assert _sites(tmp_path, source, config=listed) == {}
 
 
 def test_a_function_that_rebinds_a_global_is_reported_once_per_function(

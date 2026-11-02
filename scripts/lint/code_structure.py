@@ -36,6 +36,7 @@ from meizel.language.scan import scan_tree  # noqa: E402
 from meizel.owners import decisions  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 from meizel.state import ambient_state, machine_role  # noqa: E402
+from meizel.state.ambient_state import allowlist as ambient_allowlist  # noqa: E402
 from scripts.lint.diagnostics import no_ambient_fallback  # noqa: E402
 from scripts.structure import baseline_shards, locality  # noqa: E402
 from scripts.structure.budgets import quality_budget  # noqa: E402
@@ -397,13 +398,17 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
 
 
 def _governed(
-    path: Path, rel: str, ast_files: set[Path], type_ctx: _TypeContext
+    path: Path,
+    rel: str,
+    ast_files: set[Path],
+    type_ctx: _TypeContext,
+    ambient_config: ambient_state.Config,
 ) -> tuple[bool, bool, bool]:
     """(Rules 1, 3-6; Rule 9) govern this file: Rule 9 also reaches schedules/."""
     in_ast = path in ast_files
     return (
         in_ast and _in_scan_scope(rel),
-        in_ast and ambient_state.in_scope(rel, _AST_DIRS),
+        in_ast and ambient_state.in_scope(rel, ambient_config),
         type_ctx.in_scope(path, rel),
     )
 
@@ -427,6 +432,7 @@ def _check_ast_and_quality(
     repo_root: Path,
     table: decisions.Table,
     renames: dict[str, str] | None = None,
+    ambient_config: ambient_state.Config,
     parse_ast: Callable[..., ast.Module],
     measure_quality: Callable[[ast.AST, str], dict[str, dict[str, int]]],
 ) -> list[str]:
@@ -450,7 +456,7 @@ def _check_ast_and_quality(
             rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             continue
-        ast_rules, ambient, type_rules = _governed(path, rel, ast_files, type_ctx)
+        ast_rules, ambient, type_rules = _governed(path, rel, ast_files, type_ctx, ambient_config)
         if not any((path in files, ast_rules, ambient, type_rules)):
             continue
         try:
@@ -466,7 +472,9 @@ def _check_ast_and_quality(
             )
             _collect_locality(tree, rel, sites, scanned, type_ctx.scopes, table)
         if ambient:
-            errors.extend(ambient_state.collect(tree, rel, ambient_tree, sites, scanned, _AST_DIRS))
+            errors.extend(
+                ambient_state.collect(tree, rel, ambient_tree, sites, scanned, ambient_config)
+            )
         if path in files:
             for kind, values in measure_quality(tree, rel).items():
                 measurements[kind].update(values)
@@ -477,7 +485,7 @@ def _check_ast_and_quality(
         )
     )
     errors.extend(decisions.missing_allowlist_errors(existing_files(repo_root, table), table))
-    errors.extend(ambient_state.missing_allowlist_errors(ambient_tree))
+    errors.extend(ambient_state.missing_allowlist_errors(ambient_tree, allow=ambient_config.allow))
     return errors
 
 
@@ -536,8 +544,16 @@ def main(
     # Rule 5's table, read once per run from the checkout being judged: the decisions a policy
     # declares and the exemptions it grants are values, so `meizel/owners/decisions.py` opens
     # nothing and a synthetic root is judged by its own policy.
+    # meiva:note
+    # Rule 9's closed lists, read once per run beside Rule 5's table and for the same reason: the
+    # lists are a value the rule takes, so `meizel/state/ambient_state` opens nothing and a
+    # synthetic root is judged by its own policy.
     try:
-        table = decisions.decision_table(allowances.load(repo_root))
+        policy = allowances.load(repo_root)
+        table = decisions.decision_table(policy)
+        ambient_config = ambient_state.Config(
+            scope=_AST_DIRS, allow=ambient_allowlist.from_policy(policy)
+        )
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(f"{allowances.POLICY}: invalid policy: {exc}", file=sys.stderr)
         return 1
@@ -571,6 +587,7 @@ def main(
             repo_root=repo_root,
             table=table,
             renames=renames,
+            ambient_config=ambient_config,
             parse_ast=parse_ast,
             measure_quality=measure_quality,
         )
