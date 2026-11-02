@@ -31,7 +31,6 @@ from scripts.ci.shard_counts import (  # noqa: E402
 )
 from scripts.ci.test_impact import (  # noqa: E402
     Impact,
-    apply_interface_cutoff,
     base_checkout,
     blocking_gaps,
     build_impact,
@@ -613,14 +612,6 @@ def _runtime_candidates(
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
                 return old_forced
-            pkg_paths = (
-                p
-                for p, k in classes.items()
-                if k is PathClass.PACKAGE and old_classes.get(p) is PathClass.PACKAGE
-            )
-            old_impact, impact = apply_interface_cutoff(
-                pkg_paths, base, checkout, old_impact, impact
-            )
             selected = _owner_tests(classes, checkout, impact) | _owner_tests(
                 old_classes, base, old_impact
             )
