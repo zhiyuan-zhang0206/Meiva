@@ -31,6 +31,13 @@ allowlisted. `base/deploy/git/source_tree_guard.py` owns the whitelist and the g
 - **Scope** — a home runs its source checkout, so the check always applies. A
   checkout the guard cannot evaluate reports **"guard skipped"**, never a clean
   pass.
+- **A sealed release** — when `source` is a pointer into its home's
+  `source-releases/`, the guard compares the release with its manifest by `lstat`
+  (no Git, no whitelist: a release has no runtime artifacts to allow) and reports
+  the first fifty differences. A release or manifest it cannot read, a dangling
+  pointer included, is **"guard skipped"**. The pointer decides the mode, so a
+  stray `.meiva-release.json` in a checkout does not switch the Git checks off.
+  See [[base/deploy/sealed_release/docs/sealed-release.meiva.okf.md]].
 - **HEAD moves are not tamper** — no current lifecycle records an installed
   commit for a source checkout, and an operator legitimately moves the checkout
   before an `meiva restart`. Running-versus-checkout drift is shown, not alerted,

@@ -1,0 +1,18 @@
+exports = ["sealed_plan.py", "sealed_tree.py", "stage.py", "stage_plan.py"]
+
+[uses]
+"sealed_tree.py" = ["sealed_plan.py"]
+"stage.py" = ["build_plan.py", "sealed_plan.py", "sealed_tree.py", "stage_plan.py"]
+"tests" = ["build_plan.py", "sealed_plan.py", "sealed_tree.py", "stage.py", "stage_plan.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"build_plan.py" = "strict"
+"sealed_plan.py" = "strict"
+"sealed_tree.py" = { mode = "none", why = "the disk side of a sealed release: it walks and lstats every path, hashes file bytes, runs chmod -R and chflags -R through the caller's Host, and writes and reads the manifest beside the tree; the entry model, the manifest form and every comparison are decided in sealed_plan.py" }
+"stage.py" = { mode = "none", why = "the host-side release steps: it runs git rev-parse, show and archive, extracts the archive, writes the release record, runs uv sync and compileall through the caller's Host, seals through sealed_tree.py and renames the source pointer; the release name and the stage and switch decisions are in stage_plan.py, the build commands and environment in build_plan.py" }
+"stage_plan.py" = "strict"
+
+[roots]
+"stage.py" = { kinds = ["environ", "platform"], why = "the `python -m base.deploy.sealed_release.stage` entry: it hands its own process environment to the Host it builds (whose constructor reads the platform and uid) and passes the Host down; everything below takes the Host and explicit paths" }

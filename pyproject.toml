@@ -946,6 +946,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/deploy/sealed_release/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/deploy/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
