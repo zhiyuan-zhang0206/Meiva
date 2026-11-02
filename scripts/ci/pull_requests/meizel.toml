@@ -5,7 +5,7 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "diagnose.py" = ["job_rerun.py", "trunk_api.py"]
 "monitor.py" = ["status.py"]
 "owner_operations.py" = ["job_rerun.py"]
-"pr_flow_export.py" = ["export_process.py", "gh_process.py", "trunk_api.py"]
+"pr_flow_export.py" = ["export_process.py", "gh_process.py"]
 "runs_api.py" = ["gh_process.py"]
 "runs_export.py" = ["export_process.py", "gh_process.py", "runs_api.py"]
 "tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "monitor.py", "runs_api.py", "runs_export.py", "status.py", "trunk_api.py"]
@@ -16,6 +16,6 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "classify_paths.py" = { kinds = ["cwd"], why = "CI classify entrypoint resolves the checked-out repository root from cwd" }
 "commands.py" = { kinds = ["environ"], why = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration" }
 "export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
-"pr_flow_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block and reads ~/.trunk/api-token" }
+"pr_flow_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block" }
 "runs_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling, builds the process clock from the settings and resolves the home it operates once in its __main__ block, for its state directory and the event writer" }
 "watch_pr.py" = { kinds = ["environ", "home", "platform", "settings"], why = "watcher template resolves the home once to place the verdict file in the launching agent's workspace; builds the process clock from the settings; builds the host of this process with Host.system(), handing it the process environment" }

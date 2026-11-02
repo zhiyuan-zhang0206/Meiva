@@ -87,7 +87,7 @@ def test_body_error_preserves_the_original_writer_error_during_close() -> None:
         cluster="test",
         process="exporter",
         category="telemetry",
-        event_name="pr_flow_run",
+        event_name="pr_flow_daily",
         level="info",
         source="test",
         target_agent_id=None,

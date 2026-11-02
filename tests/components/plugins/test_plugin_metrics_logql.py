@@ -224,17 +224,11 @@ def _assert_pr_flow_payload_fields_are_gauges() -> None:
     for field in (
         "ready_to_merge_median_seconds",
         "ready_to_merge_p90_seconds",
-        "flake_new_quarantines",
     ):
         assert METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
-    assert METRIC_DISPOSITION[("pr_flow_run", "queue_depth")] == "gauge"
 
 
-def _assert_pr_flow_specs_match_the_export_job(
-    specs: dict[str, MetricSpec],
-) -> tuple[MetricSpec, MetricSpec, MetricSpec]:
-    from base.telemetry.otlp.telemetry_otlp import strip_unit_suffix
-
+def _assert_pr_flow_specs_match_the_export_job(specs: dict[str, MetricSpec]) -> MetricSpec:
     latency = specs["core_pr_flow_ready_to_merge"]
     assert latency.query_type == "promql"
     assert latency.panel == "table"
@@ -244,22 +238,13 @@ def _assert_pr_flow_specs_match_the_export_job(
         _pr_flow_daily_query("ready_to_merge_p90_seconds", "seconds")
     ]
     assert latency.target_names == ["median", "p90"]
-
-    queue = specs["core_pr_flow_queue_depth"]
-    assert queue.query_type == "promql"
-    assert queue.panel == "timeseries"
-    assert queue.query == f"meiva_pr_flow_run_{strip_unit_suffix('queue_depth')}_ratio"
-
-    flakes = specs["core_pr_flow_flakes"]
-    assert flakes.query == _pr_flow_daily_query("flake_new_quarantines", "ratio")
-    assert flakes.target_names == ["new quarantines"]
-    return latency, queue, flakes
+    return latency
 
 
 def _assert_pr_flow_tiles_mirror_specs(
     by_title: dict[Any, dict[str, Any]],
-    all_specs: tuple[MetricSpec, MetricSpec, MetricSpec],
-    joined_specs: tuple[MetricSpec, MetricSpec],
+    all_specs: tuple[MetricSpec, ...],
+    joined_specs: tuple[MetricSpec, ...],
 ) -> None:
     for spec in all_specs:
         assert by_title[render_title(spec)]["description"] == spec.description
@@ -279,8 +264,8 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
     by_title = {panel.get("title"): panel for panel in json.loads(path.read_text())["panels"]}
 
     _assert_pr_flow_payload_fields_are_gauges()
-    latency, queue, flakes = _assert_pr_flow_specs_match_the_export_job(specs)
-    _assert_pr_flow_tiles_mirror_specs(by_title, (latency, queue, flakes), (latency, flakes))
+    latency = _assert_pr_flow_specs_match_the_export_job(specs)
+    _assert_pr_flow_tiles_mirror_specs(by_title, (latency,), (latency,))
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:

@@ -24,8 +24,6 @@ BASE_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("pr_flow_daily", "merged_count"): "gauge",
     ("pr_flow_daily", "ready_to_merge_median_seconds"): "gauge",
     ("pr_flow_daily", "ready_to_merge_p90_seconds"): "gauge",
-    ("pr_flow_daily", "flake_new_quarantines"): "gauge",
-    ("pr_flow_run", "queue_depth"): "gauge",
     ("agent_registry", "max_id"): "gauge",
     ("memory_search_stats", "rows"): "gauge",
     ("memory_search_stats", "last_save_seconds"): "gauge",

@@ -12,7 +12,6 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.paths import meiva_home
 from base.telemetry import Event, EventPipeline
 from scripts.ci.pull_requests import pr_flow_export as pr_flow
@@ -100,20 +99,15 @@ def test_compute_days_groups_by_merge_day_and_omits_empty_samples() -> None:
         _record(3, merged="2026-09-13T03:00:00Z", ready="2026-09-13T02:30:00Z"),  # 1800s
     ]
     days = [date(2026, 9, 11), date(2026, 9, 12), date(2026, 9, 13)]
-    payload = pr_flow.compute_days(records, days, _TZ, flake_counts=None)
+    payload = pr_flow.compute_days(records, days, _TZ)
     d12 = payload["2026-09-12"]
     assert d12["merged_count"] == 2
     assert d12["ready_to_merge_median_seconds"] == pytest.approx(5400.0)
     assert d12["ready_to_merge_p90_seconds"] == pytest.approx(6840.0)
     assert "qa_rounds_mean" not in d12
     assert "qa_rereview_share" not in d12
-    assert "flake_new_quarantines" not in d12  # unreachable flake source is not zero
     d11 = payload["2026-09-11"]
     assert d11 == {"merged_count": 0}
-    assert "flake_new_quarantines" not in payload["2026-09-13"]
-    with_flakes = pr_flow.compute_days(records, days, _TZ, flake_counts={date(2026, 9, 13): 3})
-    assert with_flakes["2026-09-13"]["flake_new_quarantines"] == 3
-    assert with_flakes["2026-09-12"]["flake_new_quarantines"] == 0
 
 
 def test_duration_skips_non_positive_spans() -> None:
@@ -240,50 +234,6 @@ def test_fetch_timeline_bounds_pagination() -> None:
     assert replies.payloads == []
 
 
-def test_fetch_queue_depth_returns_none_on_trunk_error() -> None:
-    opener = FakeUrlOpener()
-    opener.on("https://api.trunk.io/v1/getQueue", Answer(status=503))
-    stats = pr_flow.RunStats()
-    assert pr_flow.fetch_queue_depth("r/x", "tok", stats, open_url=opener) is None
-    assert stats.trunk_error == "HTTP 503"
-
-
-def test_fetch_quarantined_walks_next_page_token() -> None:
-    opener = FakeUrlOpener()
-    opener.on(
-        "https://api.trunk.io/v1/flaky-tests/list-quarantined-tests",
-        Answer(
-            json.dumps(
-                {
-                    "quarantined_tests": [
-                        {"test_case_id": "a", "quarantined_at": "2026-09-12T01:00:00Z"}
-                    ],
-                    "page": {"next_page_token": "tok-2"},
-                }
-            )
-        ),
-        Answer(json.dumps({"quarantined_tests": [{"test_case_id": "b"}], "page": {}})),
-    )
-    stats = pr_flow.RunStats()
-    result = pr_flow.fetch_quarantined("r/x", "tok", stats, open_url=opener)
-    assert result is not None and len(result) == 2
-    calls = [json.loads(call.data or b"{}") for call in opener.calls]
-    assert calls[1]["page_query"] == {"page_size": 100, "page_token": "tok-2"}
-
-
-def test_count_quarantined_by_day_converts_to_cluster_timezone() -> None:
-    # 2026-09-09T18:00:00Z is 2026-09-10 02:00 in Asia/Shanghai.
-    quarantined = [
-        {"quarantined_at": "2026-09-09T18:00:00Z"},
-        {"quarantined_at": "2026-09-10T01:00:00Z"},  # 09:00 CST, still 09-10
-        {"quarantined_at": "bogus"},
-        {"no_stamp": True},
-    ]
-    days = [date(2026, 9, 10)]
-    counts = pr_flow.count_quarantined_by_day(quarantined, days, _TZ)
-    assert counts == {date(2026, 9, 10): 2}
-
-
 # ── snapshot persistence ────────────────────────────────────────────────────
 
 
@@ -313,12 +263,12 @@ def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(tmp_path: Path
 def test_emit_snapshot_skips_the_pipeline_in_dry_run() -> None:
     emitted: list[Event] = []
     writer = EventPipeline(writer=emitted.extend)
-    snapshot: dict[str, Any] = {"days": {}, "run": {}}
+    snapshot: dict[str, Any] = {"days": {"2026-09-12": {"merged_count": 2}}}
     try:
         pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer, home=meiva_home())
         assert emitted == []
         pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer, home=meiva_home())
-        assert [event.event_name for event in emitted] == ["pr_flow_run"]
+        assert [event.event_name for event in emitted] == ["pr_flow_daily"]
         assert all(event.process == pr_flow.PROCESS_NAME for event in emitted)
     finally:
         writer.stop(timeout=2)
