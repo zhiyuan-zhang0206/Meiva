@@ -55,10 +55,12 @@ doubled runner spend without adding coverage. What replaced it: `ci.yml` runs
 impact-selected checks on the pull request, `release-gate.yml` re-runs the full suite on
 `main` every six hours and mints the release certificate, and
 `scripts/host_ops/release/bisect_train.py` localizes a cross-PR break to its first bad
-commit. Branch protection currently requires review but no status checks, so the pull
-request's checks are a convention rather than a gate: the evidence you put in its
-description is the only record that the change was verified, and skipping the checks
-skips the only pre-merge verification there is.
+commit. `main`'s branch protection requires twelve status checks and no approving
+review (measured 2026-11-03; the contract is `scripts/audit/analysis/protection.py` and
+the weekly `Audit Branch Protection` workflow reports drift from the live setting), so
+the checks are the gate rather than a convention and a merge waits for them. The evidence
+in the description is still the record of *why* the change is right; passing checks do not
+replace it.
 
 When a pull request is merged by hand, do not pass `--subject` to `gh pr merge`: it
 replaces the title outright and GitHub then appends no ` (#<n>)`, so `git log` stops
@@ -66,6 +68,11 @@ naming the pull request the commit came from (2026-10-31: `2308d918a` and
 `a6a219318b` landed that way). Read a landed subject with no ` (#<n>)` as "find the
 pull request" rather than as "pushed directly": `gh pr view <n> --json mergeCommit`,
 or `gh api repos/<owner>/<repo>/commits/<sha>/pulls`, answers it.
+
+To land a pull request without watching it, ask GitHub to merge it when its required
+checks pass: `gh pr merge <n> --auto --squash`. Auto-merge waits for the same twelve
+checks and bypasses none of them (the repository allows it since 2026-11-03). Do not add
+`--subject` here either, for the reason above.
 
 **Scoped local checks.** Run `.venv/bin/python scripts/hooks/diff_checks.py` for an
 optional change-scoped local check summary before pushing (`--mode incremental` by
