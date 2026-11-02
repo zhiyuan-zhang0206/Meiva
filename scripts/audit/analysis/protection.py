@@ -23,16 +23,17 @@ __all__ = [
 
 # meiva:note
 # The GitHub branch-protection admission gate on `main`: the backend suite aggregators, the
-# lint/scan family and the two content gates. These are the checks that reported on all 40
-# merged pull requests measured on 2026-11-02 and whose names carry no matrix index; the live
-# setting carries exactly this set. Post-merge full-suite certification still runs asynchronously
-# via `.github/workflows/release-gate.yml` (the Release Train).
+# lint/scan family, the two content gates and the always-reporting frontend/e2e gates. These are
+# the checks that reported on all 40 merged pull requests measured on 2026-11-02 and whose names
+# carry no matrix index; the live setting carries exactly this set. Post-merge full-suite
+# certification still runs asynchronously via `.github/workflows/release-gate.yml`.
 # meiva:note
-# `frontend (eslint + tsc + vitest)` and `e2e (Playwright happy path)` are absent on purpose, not
-# by omission: they reported SKIPPED on 37 and 31 of those 40 pull requests, and a required check
-# that never reports blocks every unrelated pull request. They can enter this set only after
-# their jobs report a real SUCCESS on pull requests that do not touch them (an in-job no-op
-# instead of a job-level `if`).
+# `frontend (eslint + tsc + vitest)` and `e2e (Playwright happy path)` stay out on purpose, not by
+# omission: they reported SKIPPED on 37 and 31 of those 40 pull requests, and a required check
+# that never reports blocks every unrelated pull request. What is required instead is their
+# always-reporting face, `frontend gate` and `e2e gate`: each runs on every pull request, passes
+# when its suite passed or was skipped, and fails when it failed or classification did not
+# succeed. Measured on #8167, which touches neither suite: both SKIPPED, both gates SUCCESS.
 _ADMISSION_CHECKS = frozenset(
     {
         "GitGuardian Security Checks",
@@ -43,6 +44,8 @@ _ADMISSION_CHECKS = frozenset(
         "core-content manifests",
         "diff hints",
         "doc lints (pre-commit family)",
+        "e2e gate",
+        "frontend gate",
         "repo language (no raw CJK)",
         "secret scan (Gitleaks)",
     }

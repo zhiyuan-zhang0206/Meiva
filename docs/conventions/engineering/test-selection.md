@@ -528,11 +528,12 @@ the first is a check on a merged tree.
 `ci.yml` is triggered by `pull_request`, so `github.sha` is `refs/pull/N/merge`: the pull request
 head merged into the base of that moment. The suite does see the combination, not the head alone.
 
-**The base can move afterwards.** Branch protection sets `strict = false` (verified 2026-11-02:
-ten required checks, no strict mode), so a pull request whose base advanced after its run is not
-re-tested against the new base. Two pull requests that are each green against their own base can
-be red together. This is a known and accepted trade, not an oversight: the merge rule does not
-force a rebase onto the latest base, so the recorded verification is the one that actually ran.
+**The base can move afterwards.** Branch protection sets `strict = false` — what is required is
+declared in `scripts/audit/analysis/protection.py`, and the weekly audit compares that declaration
+with the live setting — so a pull request whose base advanced after its run is not re-tested
+against the new base. Two pull requests that are each green against their own base can be red
+together. This is a known and accepted trade, not an oversight: the merge rule does not force a
+rebase onto the latest base, so the recorded verification is the one that actually ran.
 
 **Nothing verifies the merge order.** There is no queue, no serialized integration branch and no
 combined-tree job; the Trunk merge queue that provided one was retired on 2026-11-01. A
