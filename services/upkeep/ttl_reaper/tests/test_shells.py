@@ -25,6 +25,7 @@ from psycopg_pool import ConnectionPool
 
 from base.api_contracts.agent_contract import ShellKillMode
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
@@ -57,7 +58,7 @@ from services.upkeep.ttl_reaper.tests.slices import reaper_config
 
 
 def _progress() -> LoopProgress:
-    return LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
+    return LoopProgress("test", 60.0, clock=system_clock())
 
 
 async def _reap(

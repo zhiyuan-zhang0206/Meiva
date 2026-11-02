@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -24,6 +25,10 @@ from base.paths import run_dir
 from gateway.schedules import router
 from scripts.host_ops import update_schedule_script as repair
 
+# meiva:note
+# The instant the test says each lock was taken; the sidecar records it unchanged.
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 # meiva:note
 # Hold the agent host's instance lock the way a running host does.
@@ -36,7 +41,7 @@ def test_a_running_agent_host_refuses_the_repair_before_the_database(tmp_path: P
     try:
         with (
             pytest.raises(RuntimeError, match="requires the agent host to be stopped"),
-            repair.repair_guard(tmp_path, pid=os.getpid()),
+            repair.repair_guard(tmp_path, pid=os.getpid(), now=_NOW),
         ):
             pass
     finally:
@@ -68,10 +73,10 @@ def test_wrong_home_is_refused(tmp_path: Path) -> None:
 def test_lifecycle_lock_prevents_a_competing_edit(tmp_path: Path) -> None:
     with (
         home_lifecycle_locks.resource_lock(
-            home=tmp_path, pid=os.getpid(), purpose="test:other-lifecycle"
+            home=tmp_path, pid=os.getpid(), purpose="test:other-lifecycle", now=_NOW
         ),
         pytest.raises(LockTimeoutError, match="last holder"),
-        repair.repair_guard(tmp_path, pid=os.getpid(), lock_timeout_s=0.01),
+        repair.repair_guard(tmp_path, pid=os.getpid(), now=_NOW, lock_timeout_s=0.01),
     ):
         pass
 

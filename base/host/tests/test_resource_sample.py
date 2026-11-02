@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+from functools import partial
+
 import psutil
 import pytest
 
 from base.host.resource.reading import CPU_INTERVAL_S, ResourceSample, parse_battery
 from base.host.resource.sample import battery_sample, resource_sample
 
+# meiva:note
+# The instant the test says the reading was taken; the sample carries it back unchanged.
+_INSTANT = 1_760_000_000.0
+
 
 class TestResourceSample:
     def test_returns_a_self_consistent_reading(self) -> None:
-        s = resource_sample()
+        s = resource_sample(now=_INSTANT)
+        assert s.ts == _INSTANT
         assert isinstance(s, ResourceSample)
         assert s.cpu_pct >= 0.0
         assert 0.0 <= s.mem_pct <= 100.0
@@ -25,13 +32,13 @@ class TestResourceSample:
             intervals.append(interval)
             return psutil.cpu_percent(interval=interval)
 
-        first = resource_sample(cpu_percent=spy)
-        second = resource_sample(cpu_percent=spy)
+        first = resource_sample(now=_INSTANT, cpu_percent=spy)
+        second = resource_sample(now=_INSTANT + 1.0, cpu_percent=spy)
         assert intervals == [CPU_INTERVAL_S, CPU_INTERVAL_S]
-        assert second.ts >= first.ts
+        assert (first.ts, second.ts) == (_INSTANT, _INSTANT + 1.0)
 
     def test_is_frozen(self) -> None:
-        s = resource_sample()
+        s = resource_sample(now=_INSTANT)
         with pytest.raises(Exception, match="frozen"):
             s.cpu_pct = 1.0
 
@@ -40,7 +47,7 @@ class TestResourceSample:
             raise RuntimeError("no psutil")
 
         with pytest.raises(RuntimeError, match="no psutil"):
-            resource_sample(cpu_percent=_fail)
+            resource_sample(now=_INSTANT, cpu_percent=_fail)
 
 
 class TestBatterySample:
@@ -108,7 +115,7 @@ class TestBatterySample:
         assert battery_sample(platform="darwin", run=_raise_timeout) == {}
 
     def test_sample_carries_battery_fields(self) -> None:
-        s = resource_sample(battery_fn=lambda: parse_battery(self.PMSET_CHARGING))
+        s = resource_sample(now=_INSTANT, battery_fn=partial(parse_battery, self.PMSET_CHARGING))
         assert s.battery_percent == 80
         assert s.battery_power == "ac"
         assert s.battery_charging is True

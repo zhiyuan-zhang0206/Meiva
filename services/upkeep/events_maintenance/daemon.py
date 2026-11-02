@@ -403,7 +403,7 @@ async def run(
         resolution_deadline_s=config.events_maintenance_resolution_deadline_s,
         reconcile_alerts=alert_reconciler.grafana_reconciliation_configured(config),
     )
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(clock=clock)
     progress = {spec.name: liveness.register(spec.name, spec.deadline_s) for spec in loops}
     timeouts = {spec.name: spec.deadline_s for spec in loops}
     endpoint = events_maintenance_endpoint(process_config, runtime=runtime)

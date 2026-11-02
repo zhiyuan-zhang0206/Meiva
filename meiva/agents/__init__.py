@@ -393,6 +393,7 @@ def harness_availability() -> list[HarnessAvailability]:
     bounded timeout; it starts no session, spends no quota and reads this machine only.
     """
     from base.agents.birth.harness import probe_local_harnesses
+    from meiva.sdk_surface import settings as sdk_settings
 
     return [
         HarnessAvailability(
@@ -402,7 +403,7 @@ def harness_availability() -> list[HarnessAvailability]:
             binary=row.binary,
             on_path=row.on_path,
         )
-        for row in probe_local_harnesses()
+        for row in probe_local_harnesses(now=sdk_settings.clock().now())
     ]
 
 

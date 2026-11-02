@@ -28,6 +28,7 @@ PROBE_SOURCE = """\
 import json
 
 from base.agents.birth.harness import probe_local_harnesses
+from base.clock import Clock
 
 rows = [
     {
@@ -37,7 +38,7 @@ rows = [
         "binary": probe.binary,
         "on_path": probe.on_path,
     }
-    for probe in probe_local_harnesses()
+    for probe in probe_local_harnesses(now=Clock.from_settings().now())
 ]
 print("__PROBE__" + json.dumps(rows))
 """

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock.tests.fakes import clock_over, system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -129,7 +130,7 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     crashing: str,
 ) -> None:
     timers = ManualTimers()
-    liveness = LivenessGroup(timers=timers)
+    liveness = LivenessGroup(clock=clock_over(timers))
     before = asyncio.all_tasks()
 
     def maybe_crash(name: str) -> None:
@@ -173,7 +174,7 @@ async def test_the_digest_loop_flushes_at_once_then_paces() -> None:
 
     task = asyncio.create_task(
         completion_digest.completion_digest_loop(
-            Flush(), LoopProgress("digest", 300.0, timers=SYSTEM_TIMERS)
+            Flush(), LoopProgress("digest", 300.0, clock=system_clock())
         )
     )
     try:
@@ -195,5 +196,5 @@ async def test_a_failing_flush_ends_the_digest_loop() -> None:
 
     with pytest.raises(RuntimeError, match="digest table unreadable"):
         await completion_digest.completion_digest_loop(
-            Flush(), LoopProgress("digest", 300.0, timers=SYSTEM_TIMERS)
+            Flush(), LoopProgress("digest", 300.0, clock=system_clock())
         )

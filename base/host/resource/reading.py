@@ -1,7 +1,8 @@
 # meiva:note
 # One live CPU / memory / disk / battery reading for this machine, as values: the model of the
 # reading, how `pmset -g batt` text becomes battery fields and how the figures psutil returns
-# become the displayed sample. `sample.py` reads psutil, the clock and `pmset`.
+# become the displayed sample. `sample.py` reads psutil and `pmset`, and its caller names the
+# instant the reading is stamped with.
 #
 # The host metrics live in Prometheus, scraped by the per-machine OTel Collector sidecar's
 # `host_metrics` receiver, and Prometheus is the ONE time-series store: a second retained history

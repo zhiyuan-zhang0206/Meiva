@@ -19,7 +19,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 import gateway.app
-from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
@@ -80,7 +80,7 @@ async def test_both_loops_run_their_rounds(
     # meiva:note
     # a deleted schedule: the request loop reaps its (absent) session
     _queue(db_conn, 4242)
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(clock=system_clock())
     manager = schedule_manager(
         pool, get_shell_backend(home=unit_home), launch_env=forward_env_dict(process_environment())
     )
@@ -114,7 +114,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
         pytest.raises(ExceptionGroup) as raised,
     ):
         await asyncio.wait_for(
-            daemon.run_loops(pool, manager, LivenessGroup(timers=SYSTEM_TIMERS)), timeout=30
+            daemon.run_loops(pool, manager, LivenessGroup(clock=system_clock())), timeout=30
         )
 
     assert [type(exc) for exc in raised.value.exceptions] == [psycopg.errors.RaiseException]

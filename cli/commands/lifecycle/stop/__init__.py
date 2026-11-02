@@ -103,7 +103,12 @@ def do_stop(
     choices: StopChoices = request.choices
     require_consistent(choices, pty_unit=SERVICE_UNIT)
     require_valid_timeout(request.timeout)
-    with resource_lock(home=env.command.home, pid=env.command.pid, purpose="cli.do_stop"):
+    with resource_lock(
+        home=env.command.home,
+        pid=env.command.pid,
+        purpose="cli.do_stop",
+        now=env.command.clock.now(),
+    ):
         if not choices.force:
             refuse_hosted_stop(env.command.home)
         host = _host(env, force=choices.force)

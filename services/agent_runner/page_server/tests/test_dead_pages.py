@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -87,7 +88,7 @@ def _notices(conn: psycopg.Connection, agent_id: int) -> list[str]:
 
 
 def _progress() -> LoopProgress:
-    return LoopProgress("dead_show_pages", 600.0, timers=SYSTEM_TIMERS)
+    return LoopProgress("dead_show_pages", 600.0, clock=system_clock())
 
 
 async def _round(pool: ConnectionPool, *, bus: EventBus | None = None) -> None:

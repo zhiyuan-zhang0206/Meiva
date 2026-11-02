@@ -2,38 +2,41 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC
 
-from base.clock import Timers
+from base.clock import Clock
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+# meiva:note
+# The recorded form stays UTC: the payload is a health record another process may parse, so the
+# zone of whatever `Clock` the daemon handed in must not reach the wire.
+def _stamp(clock: Clock) -> str:
+    return clock.now().astimezone(UTC).isoformat()
 
 
 class LoopProgress:
     """Progress for one loop, closing shared-heartbeat masking by moving only
     for completed work and making ``fail()`` irreversible until respawn."""
 
-    def __init__(self, name: str, timeout_s: float, *, timers: Timers) -> None:
-        self._timers = timers
+    def __init__(self, name: str, timeout_s: float, *, clock: Clock) -> None:
+        self._clock = clock
         self.name = name
         self.timeout_s = timeout_s
-        self._last = self._timers.monotonic()
+        self._last = self._clock.monotonic()
         self._last_success_at: str | None = None
         self._last_error: dict[str, str] | None = None
         self._wedged = False
         self.consecutive_failures = 0
 
     def beat(self) -> None:
-        self._last = self._timers.monotonic()
+        self._last = self._clock.monotonic()
 
     def mark_success(self) -> None:
-        self._last_success_at = _now_iso()
+        self._last_success_at = _stamp(self._clock)
         self.consecutive_failures = 0
 
     def mark_error(self, message: str) -> None:
-        self._last_error = {"message": message, "at": _now_iso()}
+        self._last_error = {"message": message, "at": _stamp(self._clock)}
         self.consecutive_failures += 1
 
     def fail(self, message: str) -> None:
@@ -41,7 +44,7 @@ class LoopProgress:
         self.mark_error(message)
 
     def stale_for(self) -> float:
-        return self._timers.monotonic() - self._last
+        return self._clock.monotonic() - self._last
 
     def last_error_message(self) -> str | None:
         return None if self._last_error is None else self._last_error["message"]
@@ -67,12 +70,12 @@ class LivenessGroup:
     """Worst-case liveness across loops, closing the failure where a scheduling
     sibling keeps one shared stamp fresh while another loop is dead."""
 
-    def __init__(self, *, timers: Timers) -> None:
-        self._timers = timers
+    def __init__(self, *, clock: Clock) -> None:
+        self._clock = clock
         self._loops: dict[str, LoopProgress] = {}
 
     def register(self, name: str, timeout_s: float) -> LoopProgress:
-        self._loops[name] = LoopProgress(name, timeout_s, timers=self._timers)
+        self._loops[name] = LoopProgress(name, timeout_s, clock=self._clock)
         return self._loops[name]
 
     def stale_for(self) -> float:

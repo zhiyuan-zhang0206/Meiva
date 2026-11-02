@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import clock_over, system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.config import get_field
 from base.daemon import health
@@ -52,7 +52,7 @@ async def test_liveness_flips_stale_then_fresh_on_beat() -> None:
 
 def test_loop_progress_flips_stale_then_fresh_on_completed_unit() -> None:
     timers = ManualTimers(100.0)
-    progress = health.LoopProgress("dispatch", timeout_s=5.0, timers=timers)
+    progress = health.LoopProgress("dispatch", timeout_s=5.0, clock=clock_over(timers))
 
     assert progress.name == "dispatch"
     assert progress.timeout_s == 5.0
@@ -68,7 +68,7 @@ def test_loop_progress_flips_stale_then_fresh_on_completed_unit() -> None:
 
 
 def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> None:
-    progress = health.LoopProgress("resolution", timeout_s=60.0, timers=SYSTEM_TIMERS)
+    progress = health.LoopProgress("resolution", timeout_s=60.0, clock=system_clock())
     progress.mark_success()
     progress.mark_error("loki unavailable")
 
@@ -91,7 +91,7 @@ def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> N
 
 def test_liveness_group_reports_the_worst_loop() -> None:
     timers = ManualTimers(10.0)
-    group = health.LivenessGroup(timers=timers)
+    group = health.LivenessGroup(clock=clock_over(timers))
     dispatch = group.register("dispatch", timeout_s=5.0)
 
     timers.advance(3.0)
@@ -117,7 +117,7 @@ def test_liveness_group_reports_the_worst_loop() -> None:
 @pytest.mark.asyncio
 async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> None:
     port = find_free_port()
-    group = health.LivenessGroup(timers=SYSTEM_TIMERS)
+    group = health.LivenessGroup(clock=system_clock())
     dispatch = group.register("dispatch", timeout_s=60.0)
     trim = group.register("trim", timeout_s=60.0)
     dispatch.fail("dispatch exceeded hard deadline")

@@ -8,5 +8,4 @@ exports = ["home_lifecycle_locks.py", "host_exit_message.py", "launch_failures.p
 "service_selection.py" = "strict"
 
 [debt.ambient-read]
-"home_lifecycle_locks.py#clock datetime.datetime.now" = 1
 "start_serving.py#random uuid.uuid4" = 1

@@ -21,6 +21,7 @@ import redis
 from psycopg_pool import ConnectionPool
 
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.config import settings
@@ -409,7 +410,7 @@ async def test_the_fire_log_prune_runs_once_per_cadence_not_once_per_round(
             reaper_pool,
             database,
             event_bus,
-            LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+            LoopProgress("test", 60.0, clock=system_clock()),
             reaper_config(fire_log_cleanup_interval_s=86400.0),
         )
 
@@ -440,7 +441,7 @@ async def test_the_prune_keeps_what_the_configured_retention_keeps(
         reaper_pool,
         database,
         event_bus,
-        LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+        LoopProgress("test", 60.0, clock=system_clock()),
         reaper_config(fire_log_retention_days=7),
     )
 
@@ -472,7 +473,7 @@ async def test_expired_notice_publishes_observation_facts(
             reaper_pool,
             database,
             event_bus,
-            LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+            LoopProgress("test", 60.0, clock=system_clock()),
             reaper_config(),
         )
 
@@ -500,7 +501,7 @@ async def test_expired_notice_wakes_an_idle_owner(
             reaper_pool,
             database,
             event_bus,
-            LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+            LoopProgress("test", 60.0, clock=system_clock()),
             reaper_config(),
         )
         queued = _notice_expiry_inbounds(db_conn, aid)
@@ -522,7 +523,7 @@ async def test_expired_notice_is_queued_for_a_terminated_owner_without_waking_it
             reaper_pool,
             database,
             event_bus,
-            LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+            LoopProgress("test", 60.0, clock=system_clock()),
             reaper_config(),
         )
         assert _next_wake(wake, timeout=1.0) is None
@@ -544,7 +545,7 @@ async def test_expired_notice_text_names_the_notice_and_never_reads_as_a_reply(
         reaper_pool,
         database,
         event_bus,
-        LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+        LoopProgress("test", 60.0, clock=system_clock()),
         reaper_config(),
     )
 
@@ -571,7 +572,7 @@ async def test_expired_notice_stays_silent_for_the_user(
             reaper_pool,
             database,
             event_bus,
-            LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+            LoopProgress("test", 60.0, clock=system_clock()),
             reaper_config(),
         )
 

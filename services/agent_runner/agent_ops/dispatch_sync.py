@@ -117,9 +117,9 @@ def dispatch_sync(
                     iw.plugins, iw.mcp_servers, local_machine=local_machine, host=host, home=home
                 ).model_dump(mode="json")
         case "harness_probe":
-            return OpStatus.COMPLETED, cluster.harness_probe_op(local_machine.name()).model_dump(
-                mode="json"
-            )
+            return OpStatus.COMPLETED, cluster.harness_probe_op(
+                local_machine.name(), now=now
+            ).model_dump(mode="json")
         case (
             "shell_probe" | "shell_kill" | "shell_capture" | "schedule_capture" | "agent_skill_view"
         ):

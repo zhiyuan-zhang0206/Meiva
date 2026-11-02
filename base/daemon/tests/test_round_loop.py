@@ -5,7 +5,7 @@ import asyncio
 import psycopg
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 
@@ -16,7 +16,7 @@ _ROUND_PROGRESS_TIMEOUT_S = 5.0
 
 
 def _progress() -> LoopProgress:
-    return LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
+    return LoopProgress("test", 60.0, clock=system_clock())
 
 
 async def test_a_round_that_raises_ends_the_loop() -> None:

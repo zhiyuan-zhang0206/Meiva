@@ -23,7 +23,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
 import base.db
-from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.config.domains.daemon.settings import DaemonSettings
 from base.config.tests.configuration import snapshot_process_config
@@ -126,7 +126,7 @@ def test_the_pass_replays_the_mirror_rolls_the_closed_days_and_marks_success(
 ) -> None:
     agent = _agent(db_conn)
     (tmp_path / "events-20261002.jsonl").write_bytes(_mirror_line(agent, "mirrored"))
-    progress = LoopProgress("dispatch", timeout_s=60.0, timers=SYSTEM_TIMERS)
+    progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
 
     _pass(pool, database, process_config, tmp_path, progress)
 
@@ -155,7 +155,7 @@ def test_a_failing_replay_does_not_stop_the_rest_of_the_pass(
         (_MIRRORED_AT, agent, json.dumps({"in_total": 7, "out_total": 1, "model": "m"})),
     )
     db_conn.commit()
-    progress = LoopProgress("dispatch", timeout_s=60.0, timers=SYSTEM_TIMERS)
+    progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
 
     _pass(pool, database, process_config, tmp_path, progress)
 
@@ -189,14 +189,14 @@ def test_the_pass_does_not_rebuild_observations_the_live_projection_missed(
             database,
             process_config,
             tmp_path,
-            LoopProgress("dispatch", timeout_s=60.0, timers=SYSTEM_TIMERS),
+            LoopProgress("dispatch", timeout_s=60.0, clock=system_clock()),
         )
 
     assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
 
 
 def test_loop_components_report_fresh_loops_as_ok() -> None:
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(clock=system_clock())
     liveness.register("dispatch", timeout_s=15.0)
     liveness.register("resolution", timeout_s=20.0)
 
@@ -209,7 +209,7 @@ def test_loop_components_report_fresh_loops_as_ok() -> None:
 
 
 def test_loop_components_report_a_wedged_loop_and_why() -> None:
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(clock=system_clock())
     dispatch = liveness.register("dispatch", timeout_s=15.0)
     dispatch.fail("dispatch pass exceeded hard deadline")
 
@@ -225,7 +225,7 @@ def test_loop_components_report_a_wedged_loop_and_why() -> None:
 
 
 def test_loop_components_carry_the_age_of_the_last_success() -> None:
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(clock=system_clock())
     dispatch = liveness.register("dispatch", timeout_s=15.0)
     dispatch.mark_success()
     stamped = dispatch.snapshot()["last_success_at"]

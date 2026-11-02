@@ -16,6 +16,7 @@ import re
 import sys
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from psycopg import Connection
@@ -125,11 +126,17 @@ def source_version(source: Path) -> Callable[[], int]:
 
 
 @contextmanager
-def repair_guard(home: Path, *, pid: int, lock_timeout_s: float = 30.0) -> Generator[None]:
+def repair_guard(
+    home: Path, *, pid: int, now: datetime, lock_timeout_s: float = 30.0
+) -> Generator[None]:
     from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
 
     with resource_lock(
-        home=home, pid=pid, purpose="operator.update_schedule_script", timeout_s=lock_timeout_s
+        home=home,
+        pid=pid,
+        purpose="operator.update_schedule_script",
+        now=now,
+        timeout_s=lock_timeout_s,
     ):
         require_agent_host_stopped(home)
         yield
@@ -145,13 +152,14 @@ def repair_script(
     script: str,
     expected_sha256: str,
     pid: int,
+    now: datetime,
 ) -> str:
     load_installed_runtime(home, source)
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
     from base.telemetry import process_name
 
-    with repair_guard(home, pid=pid):
+    with repair_guard(home, pid=pid, now=now):
         gate = ProcessDbGate(version=source_version(source), process=process_name())
         with Database.from_settings(gate=gate).pool() as pool:
             return replace_script(pool, schedule_id, script, expected_sha256)
@@ -190,6 +198,10 @@ def main(argv: list[str] | None = None) -> int:
         script=script,
         expected_sha256=args.expected_sha256,
         pid=os.getpid(),
+        # meiva:note
+        # This adapter runs outside the installed checkout, so the host clock it stamps the
+        # lifecycle lock with is its own: the installed runtime's clock is admitted below.
+        now=datetime.now(UTC),
     )
     print(f"schedule {args.schedule_id}: {result} script_sha256={script_sha256(script)}")
     return 0

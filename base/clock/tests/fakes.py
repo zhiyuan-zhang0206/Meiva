@@ -34,6 +34,13 @@ def clock_rejecting_now() -> Clock:
 
 
 # meiva:note
+# A real Clock over the timers a test steers, so its wall time moves with them: what a test that
+# advances time stamps with.
+def clock_over(timers: ManualTimers) -> Clock:
+    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+
+
+# meiva:note
 # A real Clock over manual timers whose wall time starts at `instant`, for a test that pins what an
 # injected clock stamps. Time moves only when the test advances the timers or something sleeps on
 # the clock, so `now()` is the given instant until then.
