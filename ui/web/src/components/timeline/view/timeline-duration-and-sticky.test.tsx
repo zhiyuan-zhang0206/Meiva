@@ -5,7 +5,7 @@ vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 import { streamingParseIntervalMs } from "../item";
-import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "../model/marker-classify";
+import { NOTE_TAGS } from "@/lib/contracts/constants-generated";
 afterEach(cleanupTimelineTest);
 describe("detail-block duration display", () => {
   const runToggle = () => screen.getByTestId("turn-toggle");
@@ -251,13 +251,8 @@ describe("detail-block duration display", () => {
   });
 });
 
-describe("Marker contract: every dispatch-set source renders without the red alarm", () => {
-  const knownSources = [
-    ...LIFECYCLE_TAGS,
-    ...Array.from(MEMORY_SOURCES),
-    ...Array.from(NOTE_SOURCES),
-  ];
-  it.each(knownSources)("source=%s renders its chip, never the alarm", (source) => {
+describe("Marker contract: every NoteTag renders without the red alarm", () => {
+  it.each(NOTE_TAGS)("source=%s renders its chip, never the alarm", (source) => {
     render(
       <TimelineView
         items={[

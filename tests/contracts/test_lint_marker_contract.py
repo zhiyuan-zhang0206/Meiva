@@ -2,66 +2,15 @@ from __future__ import annotations
 
 import ast
 import inspect
-import re
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
+from base.agents.messages.kwargs import NoteTag
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_MESSAGE_KWARGS = _REPO_ROOT / "base" / "agents" / "messages" / "kwargs.py"
-_MARKER_CLASSIFY_TS = (
-    _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "model" / "marker-classify.ts"
-)
 _SYSTEM_NOTE_WRITER_DIRS = ("agent", "meiva_builtins", "demos")
-
-
-def _note_tag_members() -> set[str]:
-    tree = ast.parse(_MESSAGE_KWARGS.read_text())
-    for node in tree.body:
-        if (
-            isinstance(node, ast.ClassDef)
-            and node.name == "NoteTag"
-            and any(isinstance(b, ast.Name) and b.id == "StrEnum" for b in node.bases)
-        ):
-            return {
-                stmt.value.value
-                for stmt in node.body
-                if isinstance(stmt, ast.Assign)
-                and len(stmt.targets) == 1
-                and isinstance(stmt.targets[0], ast.Name)
-                and isinstance(stmt.value, ast.Constant)
-                and isinstance(stmt.value.value, str)
-            }
-    raise AssertionError("NoteTag StrEnum not found in base/agents/messages/kwargs.py")
-
-
-def _frontend_dispatch_members() -> set[str]:
-    text = _MARKER_CLASSIFY_TS.read_text()
-    members: set[str] = set()
-    for name in ("LIFECYCLE_TAGS", "MEMORY_SOURCES", "NOTE_SOURCES"):
-        m = re.search(rf"export const {name} = (?:new Set\()?\[(.*?)\]", text, re.S)
-        assert m, f"exported const {name} not found in model/marker-classify.ts"
-        members.update(re.findall(r'"([^"]+)"', m.group(1)))
-    return members
-
-
-def test_note_tag_and_frontend_dispatch_sets_agree() -> None:
-    backend = _note_tag_members()
-    frontend = _frontend_dispatch_members()
-    assert backend, "NoteTag enum is empty — did the enum move or get renamed?"
-    assert frontend, "frontend dispatch sets are empty — did model/marker-classify.ts change shape?"
-    missing = sorted(backend - frontend)
-    assert not missing, (
-        "NoteTag member(s) with no frontend branch in model/marker-classify.ts — the UI will "
-        f"render the red 'unrecognized system_marker' alarm for them (#1017 class): {missing}. "
-        "Add a branch in model/marker-classify.ts (LIFECYCLE_TAGS / MEMORY_SOURCES / NOTE_SOURCES)."
-    )
-    stale = sorted(frontend - backend)
-    assert not stale, (
-        "Stale frontend dispatch member(s) not present in NoteTag — remove or rename them in "
-        f"model/marker-classify.ts: {stale}."
-    )
 
 
 def _note_writer_sources() -> list[Path]:
@@ -116,7 +65,7 @@ def test_send_system_note_default_tag_is_live_notetag_value() -> None:
 
     default = inspect.signature(send_system_note).parameters["tag"].default
     assert isinstance(default, str)
-    assert default in _note_tag_members()
+    assert default in {tag.value for tag in NoteTag}
 
 
 def test_send_system_note_rejects_unknown_notetag_before_gateway() -> None:

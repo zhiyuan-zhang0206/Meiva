@@ -5,6 +5,7 @@
   "forked": "Forked",
   "memory": "Memory",
   "note": "Note",
-  "unrecognized": "Unrecognized system_marker (frontend not adapted)",
+  "unrecognized": "Unrecognized system_marker",
+  "unrecognizedReload": "This page is older than the server. Reload to show this note.",
   "errorPrefix": "[error] {content}"
 }

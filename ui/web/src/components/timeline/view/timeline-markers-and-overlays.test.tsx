@@ -28,20 +28,22 @@ describe("ItemView: system_marker → LifecycleChip", () => {
     revealCollapsedCards();
     expect(screen.getByText("Forked")).toBeTruthy();
   });
-  it("source='lifecycle_unknown' → UnknownMarkerChip red alarm", () => {
+  it("source='lifecycle_unknown' → UnknownMarkerChip red alarm asking for a reload", () => {
     render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_future", payload: "x" })]} />);
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
+    expect(screen.getByTestId("marker-unrecognized-reload").textContent).toMatch(/Reload/);
   });
 });
 
 describe("ItemView: system_marker → ephemeral by payload", () => {
-  it("payload='exec_start' → unrecognized (no longer a handled marker; falls to alarm)", () => {
+  it("payload='exec_start' → unrecognized alarm without the reload hint (untagged, not a stale page)", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "system_marker", payload: "exec_start" })]}
       />,
     );
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
+    expect(screen.queryByTestId("marker-unrecognized-reload")).toBeNull();
   });
   it("payload='compact_done' → no visible marker (internal event)", () => {
     render(

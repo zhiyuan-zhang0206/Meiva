@@ -327,7 +327,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/contracts/test_lint_marker_contract.py": (
         "contract",
-        "keeps the backend NoteTag enum in step with ui/web/src/components/timeline/model/marker-classify.ts",
+        "scans every system-note writer in agent/, meiva_builtins/ and demos/ for a NoteTag value",
     ),
     "tests/contracts/test_skill_tools_group.py": (
         "contract",

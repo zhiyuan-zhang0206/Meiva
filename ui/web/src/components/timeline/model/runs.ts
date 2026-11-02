@@ -12,7 +12,7 @@ import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import enMessages from "../../../../messages/en";
 
-import { classifyMarker, isSilentEphemeralPayload } from "./marker-classify";
+import { classifyMarker, isSilentMarker } from "./marker-classify";
 import { isLiveCode, isLiveExecution, isLiveReasoning } from "./reasoning-clock";
 
 export type TurnTranslator = (
@@ -60,20 +60,13 @@ export function splitEnvelope(payload: string): { header: string; body: string }
 }
 
 // meiva:note
-// Items that intentionally render no visible DOM (silent ephemeral markers and
-// the companion `[files]` placeholder after `system:upload`). Skipping them during
+// Items that intentionally render no visible DOM (silent markers, see `isSilentMarker`,
+// and the companion `[files]` placeholder after `system:upload`). Skipping them during
 // turn grouping prevents invisible items from splitting adjacent TurnBlocks or
 // mounting empty vertical padding gaps.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
 export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
-  if (item.kind === "system_marker" && item.source === "non_human_wake") {
-    return true;
-  }
-  if (
-    item.kind === "system_marker" &&
-    classifyMarker(item.source).kind === "ephemeral" &&
-    isSilentEphemeralPayload(item.payload)
-  ) {
+  if (item.kind === "system_marker" && isSilentMarker(item.source, item.payload)) {
     return true;
   }
   if (

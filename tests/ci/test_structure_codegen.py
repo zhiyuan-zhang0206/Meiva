@@ -560,6 +560,8 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "ui/web/src/lib/contracts/types-generated.ts",
         "ui/web/openapi.json",
         "base/events/live/projection.py",
+        "base/agents/messages/kwargs.py",
+        "base/agents/messages/reply_intent.py",
         "scripts/codegen/dump_frontend_constants.py",
         "ui/web/src/lib/contracts/constants-generated.ts",
         "base/events/contract.py",

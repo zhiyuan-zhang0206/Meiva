@@ -257,9 +257,10 @@ Evidence: [`docs/postmortems/0003`](../postmortems/0003-touched-areas-is-not-the
 ### Prefer a mechanical guard where the boundary is nameable
 
 A rule someone has to remember loses to a hook that fails with a clear message.
-`scripts/lint/note_tags.py` turns one arm of the enum blast-radius class into a
-pre-commit failure; derived sets (`agent/state.py:_BASE_STATE_FIELDS`, from
-`model_fields`) need no guard at all because they cannot go stale. Reach for the
+Better still is a boundary that needs no guard: derived sets
+(`agent/state.py:_BASE_STATE_FIELDS`, from `model_fields`; the frontend `NOTE_TAGS`,
+generated from the backend `NoteTag` enum and kept fresh by a codegen hook in place
+of the regex lint that once compared two hand-kept copies) cannot go stale. Reach for the
 written rule only where the boundary genuinely resists naming.
 Evidence: [`docs/postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blast-radius.md).
 

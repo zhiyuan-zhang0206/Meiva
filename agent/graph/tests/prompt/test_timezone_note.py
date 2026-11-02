@@ -73,8 +73,6 @@ def test_text_states_name_and_the_offset_of_the_given_instant() -> None:
 
 
 def test_carries_the_timezone_note_tag() -> None:
-    """The tag drives the UI chip; an unmapped one renders as a loud alarm
-    (`scripts/lint/note_tags.py` enforces the frontend half)."""
     note = timezone_note(_context(_clock("Asia/Shanghai")))
     assert note is not None
     assert note.additional_kwargs["meiva_note_tag"] == NoteTag.TIMEZONE  # pyright: ignore[reportUnknownMemberType]
