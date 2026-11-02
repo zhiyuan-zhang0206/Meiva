@@ -456,6 +456,10 @@ export function Composer({
               data-testid="composer-input"
               aria-label={t("composerInput")}
               aria-description={offeredSuggestion !== null ? t("replySuggestionKeys") : undefined}
+              autoComplete="off"
+              data-form-type="other"
+              data-1p-ignore
+              data-lpignore="true"
               placeholder={
                 suggestionPlaceholder ??
                 (agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder"))
@@ -472,7 +476,7 @@ export function Composer({
               disabled={mode === "disabled"}
               focusVisible={false}
               className={cn(
-                "font-mono text-base resize-none max-h-[50vh] overflow-y-auto min-h-9 py-1.5 leading-5",
+                "font-mono text-base md:text-base resize-none max-h-[50vh] overflow-y-auto min-h-9 py-1.5 leading-5",
                 FLEX_1,
               )}
               suppressHydrationWarning
