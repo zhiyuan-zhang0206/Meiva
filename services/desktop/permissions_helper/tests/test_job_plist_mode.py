@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.system.cron.mechanics import LAUNCHD_PLIST_MODE, write_launchd_plist
 from services.desktop.permissions_helper import launchd_job as jobs
 
 
@@ -53,10 +54,10 @@ def test_the_written_definition_carries_the_installation_mode_whatever_the_umask
     path = tmp_path / f"job-{umask:o}.plist"
 
     with _umask(umask):
-        jobs.write_job_plist(path, b"<plist/>")
+        write_launchd_plist(path, b"<plist/>")
 
-    assert stat.S_IMODE(path.stat().st_mode) == jobs.JOB_PLIST_MODE
-    assert jobs.JOB_PLIST_MODE & 0o022 == 0
+    assert stat.S_IMODE(path.stat().st_mode) == LAUNCHD_PLIST_MODE
+    assert LAUNCHD_PLIST_MODE & 0o022 == 0
 
 
 @pytest.mark.parametrize("umask", [0o022, 0o002])
@@ -70,7 +71,7 @@ def test_a_written_definition_satisfies_the_retirement_ownership_check(
     path = home / "job.plist"
 
     with _umask(umask):
-        jobs.write_job_plist(path, _body(home))
+        write_launchd_plist(path, _body(home))
         original, executable = jobs.retirement_plist(
             path, home, home / "run" / "permissions-helper.9223.sock", uid=os.getuid()
         )
@@ -85,10 +86,58 @@ def test_a_written_definition_satisfies_the_retirement_ownership_check(
 def test_a_definition_writable_by_another_principal_is_refused(tmp_path: Path) -> None:
     home = tmp_path.resolve()
     path = home / "job.plist"
-    jobs.write_job_plist(path, _body(home))
+    write_launchd_plist(path, _body(home))
     path.chmod(0o664)
 
     with pytest.raises(RuntimeError, match="owned immutable input"):
         jobs.retirement_plist(
             path, home, home / "run" / "permissions-helper.9223.sock", uid=os.getuid()
         )
+
+
+# meiva:note
+# An installation that predates the explicit mode left 0664 behind. Retirement repairs the mode of a
+# definition this user owns and reads it; it never touches contents, and it leaves a definition it
+# does not own alone so the refusal still decides that case.
+def test_a_definition_installed_before_the_explicit_mode_is_repaired(tmp_path: Path) -> None:
+    home = tmp_path.resolve()
+    path = home / "job.plist"
+    write_launchd_plist(path, _body(home))
+    path.chmod(0o664)
+
+    repair = jobs.repair_job_plist_mode(path, uid=os.getuid())
+
+    assert repair is not None and "0664" in repair and "0644" in repair
+    assert stat.S_IMODE(path.stat().st_mode) == LAUNCHD_PLIST_MODE
+    assert path.read_bytes() == _body(home)
+    jobs.retirement_plist(
+        path, home, home / "run" / "permissions-helper.9223.sock", uid=os.getuid()
+    )
+
+
+def test_the_repair_never_touches_a_definition_this_user_does_not_own(tmp_path: Path) -> None:
+    home = tmp_path.resolve()
+    path = home / "job.plist"
+    write_launchd_plist(path, _body(home))
+    path.chmod(0o664)
+
+    assert jobs.repair_job_plist_mode(path, uid=os.getuid() + 1) is None
+    assert stat.S_IMODE(path.stat().st_mode) == 0o664
+    with pytest.raises(RuntimeError, match="owned immutable input"):
+        jobs.retirement_plist(
+            path, home, home / "run" / "permissions-helper.9223.sock", uid=os.getuid() + 1
+        )
+
+
+# meiva:note
+# A symlink is not a definition this repair rewrites: it is left for the check, which refuses it.
+def test_a_definition_that_is_not_ours_to_repair_is_left_for_the_check(tmp_path: Path) -> None:
+    home = tmp_path.resolve()
+    real = home / "real.plist"
+    write_launchd_plist(real, _body(home))
+    real.chmod(0o664)
+    link = home / "job.plist"
+    link.symlink_to(real)
+
+    assert jobs.repair_job_plist_mode(link, uid=os.getuid()) is None
+    assert stat.S_IMODE(real.stat().st_mode) == 0o664

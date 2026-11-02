@@ -32,6 +32,7 @@ def gui_oneshot(alias: str, stamp: str, timeout_s: int, start_flags: str) -> str
 cat > "$D/job.plist" <<'MEIVA_FLEET_PLIST'
 {plistlib.dumps(job).decode().rstrip()}
 MEIVA_FLEET_PLIST
+chmod 600 "$D/job.plist"
 launchctl bootstrap "gui/$(id -u)" "$D/job.plist" || {{ echo "not logged in to the GUI?"; exit 71; }}
 n=0; until grep -q '^ONESHOT_RC=' "{log}"; do
   [ "$n" -ge {timeout_s // 5} ] && {{ echo "still running: gui/$(id -u)/{label}, {log}"; exit 72; }}

@@ -12,7 +12,10 @@ from pathlib import Path
 
 import base.paths
 from base.clock import Clock, Timers
+from base.host.atomic_io import write_bytes_atomic
 from base.host.permissions_helper.client import HelperFactory
+from base.host.system.cron.mechanics import LAUNCHD_PLIST_MODE, write_launchd_plist
+from base.log import logger
 from base.paths import logs_dir, permissions_helper_socket
 from services.desktop.permissions_helper import activation_plan, hardened_runtime, signing_identity
 from services.desktop.permissions_helper.build_state import (
@@ -30,8 +33,8 @@ from services.desktop.permissions_helper.launchd_job import (
     helper_job_loaded,
     helper_job_plist_path,
     helper_stop_intent,
+    repair_job_plist_mode,
     require_retired_helper,
-    write_job_plist,
 )
 
 _SERVICE_DIR = Path(__file__).resolve().parent
@@ -289,7 +292,11 @@ def build_and_sign(*, destination: Path | None, env: BuildEnv) -> tuple[Path, bo
         _require_retired(exe, env)  # proved again right before the old artifact goes
     remove_app(app)
     exe.parent.mkdir(parents=True, exist_ok=True)
-    (app / "Contents" / "Info.plist").write_bytes(env.sources.info_plist.read_bytes())
+    write_bytes_atomic(
+        app / "Contents" / "Info.plist",
+        env.sources.info_plist.read_bytes(),
+        mode=LAUNCHD_PLIST_MODE,
+    )
     exe.write_bytes(binary.read_bytes())
     exe.chmod(0o755)
     for lproj in sorted(env.sources.locales.glob("*.lproj")):
@@ -394,7 +401,8 @@ def install_and_load(
         root_seed=str(base.paths.root_run_dir(home) / "seed.json"),
     )
     path = helper_job_plist_path(home, facts=facts)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if repair := repair_job_plist_mode(path, uid=facts.uid):
+        logger.info(repair)
     new_bytes = plistlib.dumps(plist)
     loaded = helper_job_loaded(home, facts=facts, run=build.run, timers=build.timers)
     plan = activation_plan.activation_plan(
@@ -408,7 +416,7 @@ def install_and_load(
     if plan.bootstrap:
         base.paths.root_run_dir(home).mkdir(mode=0o700, parents=True, exist_ok=True)
         clear_helper_stop_intent(home, uid=facts.uid)
-        write_job_plist(path, new_bytes)
+        write_launchd_plist(path, new_bytes)
         run_tool(["launchctl", "bootstrap", facts.domain, str(path)], run=build.run)
     if not helper_answers_ping(helper, timers=build.timers, settle_seconds=settle_seconds):
         raise PermissionsHelperBuildError(

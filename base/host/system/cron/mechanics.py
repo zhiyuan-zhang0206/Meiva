@@ -9,6 +9,7 @@ from typing import TextIO
 
 from loguru import logger
 
+from base.host.atomic_io import write_bytes_atomic, write_text_atomic
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.native_process.os_platform import crontab_lock
@@ -17,6 +18,26 @@ from base.paths.home import is_default_home_of
 # meiva:note
 # The bound only keeps a wedged scheduler command from stalling its caller.
 TOOL_TIMEOUT_S = 30.0
+
+# meiva:note
+# The mode an installed LaunchAgent definition carries. launchd reads it as this user and nothing
+# else may rewrite it: `services.desktop.permissions_helper` refuses to act on a definition whose
+# group/other write bits are set, because another principal could have replaced its contents. It is
+# set explicitly because the process umask must not decide it — under a 002 umask a plain write
+# installs a 0664 definition that the same home's `meiva stop` then refuses to retire.
+LAUNCHD_PLIST_MODE = 0o644
+
+
+# meiva:note
+# Publish one definition, creating its directory: bytes for a job already rendered, text for a
+# caller that renders the property list itself. The one writer for every LaunchAgent this tree
+# installs, so the mode an installation produces and the mode a check demands stay one fact.
+def write_launchd_plist(path: Path, body: bytes | str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(body, bytes):
+        write_bytes_atomic(path, body, mode=LAUNCHD_PLIST_MODE)
+    else:
+        write_text_atomic(path, body, encoding="utf-8", mode=LAUNCHD_PLIST_MODE)
 
 
 # meiva:note

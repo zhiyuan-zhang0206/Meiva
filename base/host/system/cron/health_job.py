@@ -9,6 +9,7 @@ from pathlib import Path
 from loguru import logger
 
 from base.host.system.cron import health_content, mechanics
+from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobRoots, cron_environment, plist_path
@@ -89,10 +90,6 @@ def register_macos(
         return 0
 
     # meiva:note
-    # Ensure the LaunchAgents directory exists.
-    plist.parent.mkdir(parents=True, exist_ok=True)
-
-    # meiva:note
     # Write the plist.
     meiva_path = read_meiva_binary(roots.repo, host=host)
     content = health_content.launchd_plist_content(
@@ -102,7 +99,7 @@ def register_macos(
         environment_home=roots.home,
         path_env=read_launchd_path(meiva_path, user_home=roots.user_home, host=host),
     )
-    plist.write_text(content)
+    write_launchd_plist(plist, content)
     logger.info("Wrote plist to {}", plist)
 
     # meiva:note

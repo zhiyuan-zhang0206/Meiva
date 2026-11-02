@@ -22,6 +22,7 @@ import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.pg_admin import pg_socket_path
+from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
@@ -410,7 +411,7 @@ def test_destroy_refuses_to_retire_the_helper_it_runs_under(
         plist = jobs.helper_job_plist_path(
             home, facts=jobs.LaunchdFacts.of(host, user_home=user_home)
         )
-        jobs.write_job_plist(
+        write_launchd_plist(
             plist,
             plistlib.dumps(
                 {
