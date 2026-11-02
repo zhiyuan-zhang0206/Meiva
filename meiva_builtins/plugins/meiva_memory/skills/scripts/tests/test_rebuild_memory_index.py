@@ -49,7 +49,7 @@ def test_the_rebuild_writes_one_pointer_line_per_note_and_directory(tmp_path: Pa
         "## Pointers\n\n\n"
         "- [Alpha](alpha.md) \u2014 first note\n"
         "- [beta](beta.md) \u2014 \n"
-        "- [people/](people/index.md) \u2014 3 notes: roles(1)\n"
+        "- [people/](people/index.md) \u2014 3 notes\n"
     )
 
 

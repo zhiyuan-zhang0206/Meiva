@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from meiva_builtins.plugins.meiva_memory.pool_ops import generate_directory_indexes
+from meiva_builtins.plugins.meiva_memory.pool_ops import (
+    generate_directory_indexes,
+    rebuild_root_memory_index,
+)
 
 # meiva:note
 # Git cannot store an empty directory, so the only note-free directory a pool can hold is a
@@ -44,3 +47,29 @@ def test_a_subdirectory_whose_notes_are_only_deeper_is_still_listed(tmp_path: Pa
     area = (pool / "area" / "index.md").read_text(encoding="utf-8")
     assert "* [area/](area/) - 1 notes" in root
     assert "* [inner/](inner/) - 1 notes" in area
+
+
+# meiva:note
+# `MEMORY.md` is injected into every agent's context on every call, and it is capped at
+# 16,000 characters (the pool's pre-commit hook). Its per-directory lines used to append a
+# count for every grandchild directory: ~4,800 of the 15,900 characters were a listing that
+# every `index.md` already carries, and the total grew with every new directory until the cap
+# was minutes away from blocking the daily rebuild. The root index now states a top-level
+# directory's size and leaves the listing to that directory's own index.
+# meiva:link meiva_builtins/plugins/meiva_memory/pool_ops.py
+def test_root_index_states_a_directory_total_without_listing_its_children(
+    tmp_path: Path,
+) -> None:
+    pool = tmp_path / "pool"
+    _note(pool / "MEMORY.md", "unused")
+    (pool / "MEMORY.md").write_text("# Memory\n\n## Pointers\n\n", encoding="utf-8")
+    _note(pool / "area" / "note.md", "Area note")
+    _note(pool / "area" / "inner" / "deep.md", "Deep note")
+    _note(pool / "area" / "inner2" / "deeper.md", "Deeper note")
+
+    rebuild_root_memory_index(pool)
+
+    root = (pool / "MEMORY.md").read_text(encoding="utf-8")
+    assert "- [area/](area/index.md) \u2014 3 notes" in root
+    assert "inner(" not in root
+    assert "inner2(" not in root
