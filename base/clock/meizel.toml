@@ -17,9 +17,9 @@ exports = ["configuration.py", "ids.py", "tests"]
 "__init__.py#settings base.config.settings" = 1
 
 [debt.impure-call]
-"__init__.py#datetime.now" = 1
-"__init__.py#time.monotonic" = 1
-"__init__.py#time.sleep" = 1
+"__init__.py#datetime.now" = { count = 1, owner = "#7240", until = "permanently: the clock door owns the host clock — [roots] kinds=[clock] grants the read here and SYSTEM_TIMERS is the one place the process sleeps or reads monotonic time; a caller can still pass its own Clock, and every other module asks this door instead of re-deriving the read" }
+"__init__.py#time.monotonic" = { count = 1, owner = "#7240", until = "permanently: same boundary as the wall clock above — this is the real interval clock behind SYSTEM_TIMERS, which exists so no other module reads the host time" }
+"__init__.py#time.sleep" = { count = 1, owner = "#7240", until = "permanently: same boundary — the wait belongs to the same SYSTEM_TIMERS value; a module that sleeps takes a Timers it was handed" }
 
 [debt.impure-edge]
-"__init__.py#base/config/__init__.py" = 1
+"__init__.py#base/config/__init__.py" = { count = 1, owner = "#7240", until = "waits for the clock config as a value: clock_config_from_settings() imports base.config inside the function so importing base.clock never builds the settings singleton (base.config does not import base.clock back; the deferral is startup cost alone), and Clock.from_settings would take a ClockConfig its caller built" }

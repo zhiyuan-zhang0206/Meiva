@@ -25,4 +25,4 @@ exports = ["auth.py", "frames.py", "session.py", "tests"]
 "turns.py" = "strict"
 
 [debt.impure-edge]
-"types.py#base/lm/harness/base_session.py" = 1
+"types.py#base/lm/harness/base_session.py" = { count = 1, owner = "#7240", until = "waits for the session types at a light owner: types.py re-exports BaseHarnessSession, the session errors and SessionClock from base_session, which owns the running session (asyncio tasks, the child probe) and is none for that reason; the repair is that half moving to a strict module. Repair unverified: that those types are separable from the session's own state" }

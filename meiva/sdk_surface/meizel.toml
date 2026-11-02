@@ -47,7 +47,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "wraps.py" = { mode = "none", why = "the registration primitive behind meiva.extend.wrap: it resolves the target in the live meiva module, writes the chained function over it and reports a firing; the target rule, how the chained function presents itself, the async test and the counting rule are decided by the pure pure/plans/installation/wrap_plan.py" }
 
 [debt.impure-call]
-"discovery.py#inspect.getsource" = 1
+"discovery.py#inspect.getsource" = { count = 1, owner = "#7240", until = "waits for the module source as a value: a plugin reload keeps the module object while its file has to be read again, and the discovery caller holds the module, not its text — the loader that knows the path does not hand the source down today" }
 
 [debt.wide-exports]
 "meizel.toml#exports" = { count = 1, owner = "#7302", until = "waits for the SDK surface to be split into subpackages grouped by the namespace each installs (settings, install, plugins, skill_sources, ...): this package IS the public meiva.<name> surface, so the width is the surface itself and not a fan-out of dependencies" }

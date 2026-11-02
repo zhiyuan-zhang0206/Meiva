@@ -34,4 +34,4 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "port_lease.py#random secrets.randbelow" = { count = 1, owner = "#5816", until = "waits for nothing (the 2026-10-31 ruling): the starting port must not be predictable, or concurrent processes pick the same band; a caller's shared rng is exactly what makes them collide" }
 
 [debt.impure-call]
-"config_lite_table.py#pkgutil.get_data" = 1
+"config_lite_table.py#pkgutil.get_data" = { count = 1, owner = "#7240", until = "waits for the table as a value: _read_index() loads the packaged config_lite_table.json that scripts/codegen/gen_config_lite_table.py writes, once at import of base.host.env, and no caller holds those bytes — moving it means the generator ships a Python table instead of a JSON the module has to find" }

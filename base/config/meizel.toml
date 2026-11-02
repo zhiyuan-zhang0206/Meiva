@@ -40,4 +40,4 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "_lite.py#any get_field.return" = { count = 1, owner = "#7302", until = "the same function as ConfigBoot.get_field (this is the module-level door onto it), so it exits with that entry, on a typed reflective accessor" }
 
 [debt.impure-edge]
-"base.py#base/paths/home.py" = 1
+"base.py#base/paths/home.py" = { count = 1, owner = "#7240", until = "permanently: unit_home() is a pydantic default_factory that runs while a sub-model is constructed, before any settings object exists to carry the home — the home is the input that locates the .env the settings are built from, which is the same boundary base/paths declares with [roots] kinds=[environ, home]" }

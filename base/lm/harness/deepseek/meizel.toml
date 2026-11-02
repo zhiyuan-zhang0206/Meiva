@@ -25,4 +25,4 @@
 "usage_files.py" = { mode = "none", why = "the shell that finds and decodes one session's usage log: it globs and stats the candidates expected_log_paths orders and missing_log words, decompresses the bytes (zstd, or the CLI when the wheel is absent), and hands them to usage.parse_usage" }
 
 [debt.impure-edge]
-"types.py#base/lm/harness/base_session.py" = 1
+"types.py#base/lm/harness/base_session.py" = { count = 1, owner = "#7240", until = "waits for the session types at a light owner: types.py re-exports BaseHarnessSession, the session errors and SessionClock from base_session, which owns the running session (asyncio tasks, the child probe) and is none for that reason; the repair is that half moving to a strict module. Repair unverified: that those types are separable from the session's own state" }

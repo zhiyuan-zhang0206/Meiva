@@ -14,4 +14,4 @@ exports = ["__init__.py", "metering.py", "reporting.py"]
 "__init__.py#clock time.time_ns" = 1
 
 [debt.impure-edge]
-"__init__.py#base/telemetry/__init__.py" = 1
+"__init__.py#base/telemetry/__init__.py" = { count = 1, owner = "#7240", until = "waits for the agent id as a value: every usage row carries ambient_agent_id(), the process-state snapshot base.telemetry takes at startup, and report_sink_failure() is the telemetry door's hook. Repair unverified: the emitter would take the id from its caller — not checked that the callers hold it" }
