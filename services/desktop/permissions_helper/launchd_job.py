@@ -35,7 +35,9 @@ import psutil
 
 from base.clock import Timers
 from base.host.permissions_helper.client import HelperAtSocket
+from base.host.system.cron.mechanics import LAUNCHD_PLIST_MODE
 from base.host.system.hostport import Host
+from base.log import logger
 from base.native_process.ownership import OwnedProcess, capture_tree, leader_owns_pids
 
 HELPER_BUNDLE_ID = "com.meiva.permissions-helper"
@@ -123,6 +125,37 @@ def helper_job_agents_dir(user_home: Path) -> Path:
 
 def helper_job_plist_path(home: Path, *, facts: LaunchdFacts) -> Path:
     return facts.agents_dir / f"{helper_job_label(home)}.plist"
+
+
+# meiva:note
+# One home's job definition is published by `base.host.system.job_values.write_launchd_plist`, the
+# same writer every other LaunchAgent in this tree uses: the mode retirement demands and the mode an
+# installation produces are one fact. Retirement repairs a definition an older installation left
+# group-writable before it reads one.
+
+
+# meiva:note
+# Repair mode bits, never contents: a definition this user owns that still carries a group/other
+# write bit was installed before the writer set the mode explicitly (a 002 umask made it 0664), and
+# retirement refuses to act on it. A definition owned by anyone else, or not a regular file, stays a
+# refusal — the repair never widens who may have written it.
+def repair_job_plist_mode(path: Path, *, uid: int) -> str | None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != uid or not info.st_mode & 0o022:
+        return None
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fchmod(fd, LAUNCHD_PLIST_MODE)
+    finally:
+        os.close(fd)
+    return (
+        f"repaired the installed helper definition {path}: mode "
+        f"{stat.S_IMODE(info.st_mode):04o} -> {LAUNCHD_PLIST_MODE:04o} "
+        "(installed under a looser umask; contents untouched)"
+    )
 
 
 def helper_stop_intent(home: Path, *, uid: int) -> bool:
@@ -311,6 +344,8 @@ def unregister_helper(
         return
     if not home.is_absolute() or home.resolve() != home or not 0 < helper_port < 65536:
         raise ValueError("helper retirement requires a canonical home and registered port")
+    if repair := repair_job_plist_mode(helper_job_plist_path(home, facts=facts), uid=facts.uid):
+        logger.info(repair)
     from base.native_process.root_control.instance_lock import (
         acquire_instance_lock,
         release_instance_lock,

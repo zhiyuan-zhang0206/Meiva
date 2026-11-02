@@ -21,6 +21,7 @@ import psycopg
 import pytest
 
 from base.daemon.health import DaemonProbe
+from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.root_control.client import RootClientError
@@ -360,8 +361,13 @@ def test_the_command_without_a_live_root_says_so_and_exits_nonzero(
 # stopping command itself is not unloaded from under it. The command's process is a real child
 # here, the helper's job points at that child, and launchd's answer comes from the host the test
 # hands in.
+#
+# The second parameter is an installation that predates the explicit plist mode: a 0664 definition,
+# which retirement repairs by mode (contents untouched) before reading it. Without the repair the
+# stop never reaches the ancestor branch — it refuses the definition itself.
+@pytest.mark.parametrize("installed_mode", [None, 0o664])
 def test_the_stop_refuses_to_retire_the_helper_it_runs_under(
-    command_runtime: CommandRuntime, tmp_path: Path
+    command_runtime: CommandRuntime, tmp_path: Path, installed_mode: int | None
 ) -> None:
     home, user_home = tmp_path.resolve() / "home", tmp_path.resolve() / "user"
     sleeper = str(Path("/bin/sleep").resolve())
@@ -381,8 +387,8 @@ def test_the_stop_refuses_to_retire_the_helper_it_runs_under(
         plist = jobs.helper_job_plist_path(
             home, facts=jobs.LaunchdFacts.of(host, user_home=user_home)
         )
-        plist.parent.mkdir(parents=True)
-        plist.write_bytes(
+        write_launchd_plist(
+            plist,
             plistlib.dumps(
                 {
                     "Label": jobs.helper_job_label(home),
@@ -397,12 +403,16 @@ def test_the_stop_refuses_to_retire_the_helper_it_runs_under(
                         ),
                     },
                 }
-            )
+            ),
         )
+
+        if installed_mode is not None:
+            plist.chmod(installed_mode)
 
         with pytest.raises(RuntimeError, match="ancestor"):
             stop_permissions_helper(runtime, timeout_s=10.0)
         assert plist.exists()
+        assert plist.stat().st_mode & 0o022 == 0
     finally:
         child.kill()
         child.wait(timeout=5)

@@ -13,6 +13,7 @@ from loguru import logger
 
 from base.host.system import logs_content as content
 from base.host.system.cron import mechanics
+from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
@@ -23,10 +24,7 @@ def register_macos(*, roots: JobRoots, host: Host) -> int:
     path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
     label = content.LABEL
     destination = plist_path(content.LABEL, user_home=roots.user_home)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        content.launchd_plist_content(paths=paths, path_env=path_env), encoding="utf-8"
-    )
+    write_launchd_plist(destination, content.launchd_plist_content(paths=paths, path_env=path_env))
 
     if mechanics.reload_launchd_job(label, destination, host=host) != 0:
         return 1
