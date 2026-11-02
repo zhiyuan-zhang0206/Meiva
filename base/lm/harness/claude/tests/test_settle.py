@@ -9,7 +9,7 @@ from base.lm.harness.claude.settle import (
     settle_result,
 )
 from base.lm.harness.events import UnsolicitedOutput, Usage
-from base.lm.harness.turn import SessionTotals
+from base.lm.harness.session import SessionTotals
 
 USAGE = Usage(
     input_tokens=4,

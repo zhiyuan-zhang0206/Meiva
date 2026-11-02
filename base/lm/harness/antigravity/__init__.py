@@ -11,7 +11,7 @@ from base.lm.harness.antigravity.session import (
 )
 from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
 from base.lm.harness.cancel import CancelReport
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 
 __all__ = [
     "DEFAULT_MODEL",

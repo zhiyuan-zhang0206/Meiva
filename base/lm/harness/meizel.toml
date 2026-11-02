@@ -2,21 +2,21 @@ exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "code
 
 [uses]
 "__init__.py" = ["bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
-"antigravity" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
-"base_session.py" = ["events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
+"antigravity" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
+"base_session.py" = ["events.py", "handoff.py", "process.py", "registry.py", "session"]
 "bridge.py" = ["base_session.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
-"claude" = ["__init__.py", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
-"codex" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
-"deepseek" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "turn.py"]
+"claude" = ["__init__.py", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
+"codex" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
+"deepseek" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "cancel.py" = []
 "engine.py" = ["events.py", "handoff.py"]
 "events.py" = []
 "handoff.py" = []
-"kimi" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "turn.py"]
+"kimi" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "session"]
 "process.py" = []
 "registration.py" = []
 "registry.py" = []
-"turn.py" = ["events.py"]
+"session" = ["events.py"]
 "wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "events.py", "handoff.py", "kimi", "registration.py", "registry.py"]
 "tests" = ["__init__.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py", "wiring.py"]
 
@@ -25,7 +25,6 @@ exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "code
 "engine.py" = "strict"
 "events.py" = "strict"
 "handoff.py" = "strict"
-"turn.py" = "strict"
 
 [roots]
 "wiring.py" = { kinds = ["environ"], why = "builds one harness session (a bridge, a handoff, a session object) from the values the caller hands down; a Claude session's child environment is every key of the live environment blanked and then the explicit slice on top, which needs the live key list the way base/host/git/gitenv.py does for a git child" }

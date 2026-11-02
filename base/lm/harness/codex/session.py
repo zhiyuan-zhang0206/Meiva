@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from base.host.env.harness_binaries import resolve_harness_binary
+from base.lm.harness.base_session import BaseHarnessSession, SessionBinding, TurnTicket
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
@@ -45,17 +46,6 @@ from base.lm.harness.codex.turns import (
     settle,
     unclaimed_text,
 )
-from base.lm.harness.codex.types import (
-    EVENT_STREAM_END,
-    BaseHarnessSession,
-    InboundQueueFullError,
-    SessionBinding,
-    SessionClock,
-    SessionClosedError,
-    SessionTotals,
-    TurnOutcome,
-    TurnTicket,
-)
 from base.lm.harness.events import (
     AssistantText,
     SessionFailed,
@@ -70,6 +60,14 @@ from base.lm.harness.process import (
     snapshot,
     wait_gone,
     watch_tree,
+)
+from base.lm.harness.session import (
+    EVENT_STREAM_END,
+    InboundQueueFullError,
+    SessionClock,
+    SessionClosedError,
+    SessionTotals,
+    TurnOutcome,
 )
 
 # meiva:note

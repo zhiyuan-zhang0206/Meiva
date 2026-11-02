@@ -14,6 +14,7 @@ from base.lm.harness.acp import (
 )
 from base.lm.harness.acp.permission import PermissionRequest
 from base.lm.harness.acp.transport import AcpConnection
+from base.lm.harness.base_session import BaseHarnessSession, SessionBinding, TurnTicket
 from base.lm.harness.cancel import (
     CancelReport,
     ProcessObservation,
@@ -47,17 +48,6 @@ from base.lm.harness.deepseek.settle import (
     settle_turn,
     survivor_fault,
 )
-from base.lm.harness.deepseek.types import (
-    EVENT_STREAM_END,
-    BaseHarnessSession,
-    InboundQueueFullError,
-    SessionBinding,
-    SessionClock,
-    SessionClosedError,
-    SessionTotals,
-    TurnOutcome,
-    TurnTicket,
-)
 from base.lm.harness.deepseek.usage import UsageSnapshot
 from base.lm.harness.deepseek.usage_files import read_usage
 from base.lm.harness.events import SessionFaulted, SessionStarted, TextDelta
@@ -69,6 +59,14 @@ from base.lm.harness.process import (
     PsutilChildProbe,
     snapshot,
     wait_gone,
+)
+from base.lm.harness.session import (
+    EVENT_STREAM_END,
+    InboundQueueFullError,
+    SessionClock,
+    SessionClosedError,
+    SessionTotals,
+    TurnOutcome,
 )
 from base.lm.pricing import PriceBook
 

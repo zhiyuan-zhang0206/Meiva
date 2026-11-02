@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from base.lm.harness.claude.mapping import ResultFields
 from base.lm.harness.events import TurnCompleted, UnsolicitedOutput
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 
 # meiva:note
 # How one result message settles a turn: what the outcome is, what the stream is told, and what

@@ -3,5 +3,5 @@
   "is_linux()": 1,
   "pytest.importorskip(...)": 1,
   "shutil.which(...)": 32,
-  "sys.platform": 28
+  "sys.platform": 27
 }

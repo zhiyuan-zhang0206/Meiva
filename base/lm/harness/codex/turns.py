@@ -6,7 +6,7 @@ from enum import StrEnum
 from base.lm.harness.codex.frames import JsonObject, JsonValue, RequestParams, as_object, as_text
 from base.lm.harness.codex.mapping import TurnFields, assistant_text
 from base.lm.harness.events import TurnCompleted, Usage
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 
 
 class NotificationKind(StrEnum):

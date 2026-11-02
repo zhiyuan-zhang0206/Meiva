@@ -4,10 +4,8 @@ import asyncio
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass, replace
-from datetime import datetime
-from pathlib import Path
 from types import TracebackType
-from typing import Protocol, Self
+from typing import Self
 
 from base.lm.harness.events import (
     BridgeEvent,
@@ -23,7 +21,15 @@ from base.lm.harness.events import (
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import ChildProbe, ExitStatus, PsutilChildProbe
 from base.lm.harness.registry import SessionRecord, SessionRegistry
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import (
+    EVENT_STREAM_END,
+    InboundQueueFullError,
+    SessionClock,
+    SessionClosedError,
+    SessionConfig,
+    SessionTotals,
+    TurnOutcome,
+)
 
 # meiva:note
 # Shared turn-engine state machine for every external harness session adapter:
@@ -31,46 +37,6 @@ from base.lm.harness.turn import SessionTotals, TurnOutcome
 # delta dropping, per-turn timeout watchdogs, background task-group lifecycle,
 # and `SessionRegistry` binding/resumption.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-EVENT_STREAM_END = object()
-
-
-class InboundQueueFullError(RuntimeError):
-    pass
-
-
-class SessionClosedError(RuntimeError):
-    pass
-
-
-class SessionClock(Protocol):
-    def now(self) -> datetime: ...
-
-    def monotonic(self) -> float: ...
-
-    def asleep(self, seconds: float) -> Coroutine[object, object, None]: ...
-
-
-class SessionConfig(Protocol):
-    @property
-    def cwd(self) -> Path: ...
-
-    @property
-    def model(self) -> str | None: ...
-
-    @property
-    def turn_timeout_seconds(self) -> float: ...
-
-    @property
-    def cancel_settle_seconds(self) -> float: ...
-
-    @property
-    def max_pending_turns(self) -> int: ...
-
-    @property
-    def max_buffered_events(self) -> int: ...
-
-    @property
-    def dedupe_window(self) -> int: ...
 
 
 class TurnTicket:
