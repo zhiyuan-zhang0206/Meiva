@@ -269,7 +269,7 @@ describe("ItemView: inbound_compact_*", () => {
     revealCollapsedCards();
     const matches = screen.getAllByText(/Compact summary/);
     expect(matches.length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("body text")).toBeTruthy();
+    expect(screen.getByText(/body text/)).toBeTruthy();
     expectNoUnrecognizedAlarm();
   });
   it("inbound_compact_request renders envelope", () => {
@@ -284,7 +284,7 @@ describe("ItemView: inbound_compact_*", () => {
       />,
     );
     revealCollapsedCards();
-    expect(screen.getByText("please compact")).toBeTruthy();
+    expect(screen.getByText(/please compact/)).toBeTruthy();
     expectNoUnrecognizedAlarm();
   });
 });

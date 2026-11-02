@@ -48,12 +48,13 @@ export function inboundKind(source: string | null): "human" | "agent" | "externa
 export type ItemClass = "primary" | "secondary" | "bare";
 
 // meiva:note
-// Backend envelopes wrap as "<header>:\n\n<body>" (bounded below 200 chars so a
-// multi-paragraph stdout block is never mistaken for an envelope header).
+// Human inbound messages wrap as "<header>\n\n<body>" on a single leading line
+// (bounded below 200 chars) so the frontend can hide the leading timestamp line
+// on human messages while still sending it to the agent.
 // meiva:link agent/messages/docs/message-format.meiva.okf.md
 export function splitEnvelope(payload: string): { header: string; body: string } {
   const idx = payload.indexOf("\n\n");
-  if (idx > 0 && idx < 200) {
+  if (idx > 0 && idx < 200 && !payload.slice(0, idx).includes("\n")) {
     return { header: payload.slice(0, idx), body: payload.slice(idx + 2) };
   }
   return { header: "", body: payload };

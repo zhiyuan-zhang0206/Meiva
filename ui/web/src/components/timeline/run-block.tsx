@@ -418,7 +418,7 @@ export const TurnBlock = memo(function TurnBlock({
               className="mt-1.5"
               viewportClassName="[overflow-anchor:none] max-h-[var(--timeline-turn-max-h,50dvh)]"
             >
-              <div ref={activityContentRef} className="ml-1.5 pl-3 pr-2 border-l border-border/60 space-y-1">
+              <div ref={activityContentRef} className="ml-1.5 pl-2 pr-2 border-l border-border/60 space-y-1">
                 {renderedBody}
               </div>
             </ScrollArea>
