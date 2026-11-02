@@ -67,7 +67,7 @@ def command_from(argv: Sequence[str]) -> list[str]:
 # must reach exec as that exact list, because a shell would re-split and re-expand an argument
 # the caller already quoted (S606 suppression above the exec). The final `return 0` is
 # unreachable - execvpe replaces this process - and exists only to satisfy the return type.
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="run-with-token",
         description="Run a command with this home's machine API token in its environment.",
@@ -95,7 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("TOKEN_PRESENT True")
         return 0
 
-    command = command_from(sys.argv[1:] if argv is None else argv)
+    command = command_from(argv)
     if not command:
         print(
             "run-with-token: usage: run_with_token.py [--home PATH] [--check] -- <command...>",
@@ -114,4 +114,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

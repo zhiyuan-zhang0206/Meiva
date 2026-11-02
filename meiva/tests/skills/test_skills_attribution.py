@@ -110,6 +110,20 @@ def test_files_read_skill_md_records_consumption(
     assert audited_agent.invoked() == [("alpha", "loaded")]
 
 
+def test_a_relative_skill_path_is_refused_not_anchored_at_the_working_directory(
+    fake_skills_dir: Path, audited_agent: AuditedAgent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    monkeypatch.chdir(fake_skills_dir)
+
+    with pytest.raises(ValueError, match="must be absolute"):
+        skills_mod.record_skill_invoked_by_path("alpha/SKILL.md")
+    assert audited_agent.invoked() == []
+
+    assert skills_mod.record_skill_invoked_by_path(fake_skills_dir / "alpha" / "SKILL.md")
+    assert audited_agent.invoked() == [("alpha", "loaded")]
+
+
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_files_read_other_files_do_not_record(
     fake_skills_dir: Path, audited_agent: AuditedAgent

@@ -5,4 +5,4 @@ import sys
 from services.supervision.meiva_root.daemon import main
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

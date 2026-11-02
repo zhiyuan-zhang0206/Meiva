@@ -681,7 +681,7 @@ def changed_python(only: list[str] | None, *, repo_root: Path | None = None) -> 
 
 
 def main(
-    argv: Sequence[str] | None = None,
+    argv: Sequence[str],
     *,
     repo_root: Path | None = None,
     errors_fn: Callable[[Path], frozenset[tuple[int, str]]] = pyright_errors,
@@ -689,7 +689,7 @@ def main(
     root = _REPO_ROOT if repo_root is None else repo_root
     # `--only FILE...` (the commit hook) checks just the changed files, unless the tier
     # configuration they are judged against changed too.
-    arguments, only = lint_common.split_only(list(sys.argv[1:] if argv is None else argv))
+    arguments, only = lint_common.split_only(list(argv))
     args = build_parser().parse_args(arguments)
     if args.all_tier and args.strip is None:
         build_parser().error("--all-tier requires --strip")
@@ -736,4 +736,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -26,4 +26,3 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 
 [debt.ambient-read]
 "check.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_storage_round_trip` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
-"restore.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for the restore command entry to pass the operator's user name: `restored_instance` falls back to `getpass.getuser()` when `user` is None, and `--user` of `meiva backup walg restore` is optional" }

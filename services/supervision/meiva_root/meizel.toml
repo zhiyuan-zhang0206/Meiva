@@ -25,4 +25,5 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 "helper_chain_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "environ", "pid", "argv"], why = "process entry of the root supervisor: reads its own pid and, once, the environment the supervisor hands to every child it launches; the helper-chain watch is given the same process environment to read the marker of the process that spawned it (it re-reads it each round, since its question is whether that parent is still there); builds the process clock from SYSTEM_TIMERS; it also reads its command line (argv) once, as the process entry" }
+"__main__.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"daemon.py" = { kinds = ["clock", "environ", "pid"], why = "process entry of the root supervisor: reads its own pid and, once, the environment the supervisor hands to every child it launches; the helper-chain watch is given the same process environment to read the marker of the process that spawned it (it re-reads it each round, since its question is whether that parent is still there); builds the process clock from SYSTEM_TIMERS" }

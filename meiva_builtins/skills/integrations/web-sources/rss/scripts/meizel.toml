@@ -5,4 +5,4 @@ exports = ["feed.py"]
 "rss_post.py" = "strict"
 
 [roots]
-"feed.py" = { kinds = ["clock", "environ", "home", "argv"], why = "The command entry builds its scrape configuration from the process environment, resolves the Meiva home for the default mirror directory and stamps fetched posts with UTC time; it also reads its command line (argv) once, as the process entry" }
+"feed.py" = { kinds = ["clock", "environ", "home", "argv"], why = "The command entry builds its scrape configuration from the process environment, resolves the Meiva home for the default mirror directory and stamps fetched posts with UTC time; it also reads its command line (argv): the `__main__` guard reads argv[1:] once and hands it to main" }

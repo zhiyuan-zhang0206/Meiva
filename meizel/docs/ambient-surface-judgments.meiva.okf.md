@@ -44,7 +44,20 @@ tags:
   answer) and passes it down as a value.
 - `fileinput.input()` and `FileInput()` are `argv` unless they are given `files`: they read the
   files named in `sys.argv[1:]`. `site.getuserbase`, `getusersitepackages` and `USER_SITE` are
-  `home`; `email.utils.formatdate` without a time is `clock`; `email.utils.make_msgid` is `random`.
+  `home`.
+- `email.utils.formatdate` is `clock` on every call. Without a time it stamps now; with
+  `localtime=True` it renders any time in the host's zone. The `unless` clause names one parameter
+  and cannot say "given a time and not `localtime`", so the pure `formatdate(1.5)` is over-recorded
+  (a test pins that). `email.utils.make_msgid` reads the clock, the process id, a random number and
+  (without a `domain`) the host name, which is four kinds; the table records one kind per name and
+  chooses `random`, as it does for `uuid.uuid1`, so a caller that repays the random read still has
+  the others unrecorded.
+- `netrc.netrc()` is `home` unless it is given the file. `ssl.get_default_verify_paths()` and
+  `ssl.create_default_context()` are `environ` (`SSL_CERT_FILE`, `SSL_CERT_DIR`); the second is
+  spared only by a `cafile`, so a call that names a `capath` or `cadata` alone is over-recorded.
+  `ssl.RAND_bytes` is `random`. The methods that load the same locations on a context object
+  (`SSLContext.load_default_certs`, `set_default_verify_paths`) have no resolvable receiver and are
+  not seen.
 - `sys.path` and `sys.modules` are the interpreter's own mutable state: they are written far more
   often than they inform a decision.
 - `pwd` and `grp` lookups are `pid`: they answer who a uid is on this host, and the lookup of the
@@ -66,7 +79,9 @@ not an oversight; a module nobody has looked at is not on it.
 | `argparse`, `optparse` | `parse_args()` without an argument list is judged by the method name (`METHOD_READS`), since the receiver has no type; `getopt` takes its list as a parameter |
 | `warnings`, `logging`, `atexit`, `gc` | process-wide hooks and sinks: writes, not reads |
 | `inspect`, `traceback`, `faulthandler` | introspection of the program's own call stack |
-| `ctypes`, `mmap`, `fcntl`, `select` | descriptor and foreign-call effects |
+| `ctypes`, `ctypes.util`, `mmap`, `fcntl`, `select` | descriptor and foreign-call effects; `ctypes.util.find_library` searches the library paths and may run `ldconfig` or the compiler, an effect on files and processes whose environment lookup (`LD_LIBRARY_PATH`) it hides |
+| `mimetypes` | `guess_type` and `init` read the fixed system files named in `knownfiles` (`/etc/mime.types` and others), an effect on files; nothing in it reads the environment or the home |
+| `webbrowser` | `open` starts a viewer process, an effect; which browser is a function of the `BROWSER` variable and `PATH`, a lookup the effect hides (the same hidden lookup `subprocess` has) |
 | `termios`, `tty`, `pty`, `readline`, `curses` | change the terminal; which terminal it is, is `isatty`, which is judged |
 | `builtins` (other than `input`) | `open` is the purity layer's; the rest convert or build values |
 

@@ -12,7 +12,7 @@ tags:
 `ambient_surface.py` holds, for the modules that carry the channels (`CHANNEL_MODULES`: `os`,
 `os.path`, `sys`, `time`, `datetime`, `platform`, `socket`, `getpass`, `pwd`, `grp`, `tempfile`,
 `shutil`, `locale`, `uuid`, `random`, `secrets`, `threading`, `multiprocessing`, `resource`,
-`sysconfig`, `pathlib`, `zoneinfo`, `fileinput`, `site`, `email.utils`), one judgment for every
+`sysconfig`, `pathlib`, `zoneinfo`, `fileinput`, `site`, `email.utils`, `netrc`, `ssl`), one judgment for every
 public name, in groups of names that share a reason. The builtin `input` is judged as the name
 `builtins.input` (the scanner spells an unshadowed `input` that way); `builtins` is not a channel
 module, because its other names read nothing. A judgment is a kind, or `None` with the reason the name is not a read of the
@@ -55,9 +55,12 @@ never looked at:
   prefix pattern (`os.O_*`, `socket.AF_*`), because its members differ in nothing that matters,
   but a function a module gains later must be listed by hand, so that it cannot inherit a kind
   nobody chose.
-- A second test pins a representative name of every group that carries a kind (`_PINNED`): moving
-  `socket.gethostname` into the network group, or dropping it from the host group, turns it red,
-  which the completeness test alone would not do when the name stays judged by some entry.
+- A second test pins every name that carries a kind (`_READS`, 249 names written out by
+  hand, not derived from the table): moving `socket.if_nametoindex` into the network group, or
+  dropping it from the host group, turns it red, which the completeness test alone would not do
+  when the name stays judged by some entry. The names each module defines are read from a child
+  that runs `channel_module_names.py`, a script that imports the standard library only, in a
+  `python -I` interpreter, so that a library another test imported cannot add names.
 
 ### Judging a new name
 

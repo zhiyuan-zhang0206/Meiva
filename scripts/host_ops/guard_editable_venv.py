@@ -120,10 +120,10 @@ def check_checkout(checkout: Path, env: Mapping[str, str]) -> list[str]:
     return violations
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     """Print structured violations and return 1, or 0 when a sync is safe."""
 
-    args = tuple(sys.argv[1:] if argv is None else argv)
+    args = tuple(argv)
     if len(args) > 1:
         print("usage: guard_editable_venv.py [checkout-root]", file=sys.stderr)
         return 2
@@ -144,4 +144,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

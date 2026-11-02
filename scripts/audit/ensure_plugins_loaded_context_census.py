@@ -152,9 +152,8 @@ def census(root: Path) -> list[CallSite]:
     return sites
 
 
-def main(argv: list[str] | None = None) -> int:
-    arguments = sys.argv[1:] if argv is None else argv
-    root = Path(arguments[0] if arguments else ".").resolve()
+def main(argv: list[str]) -> int:
+    root = Path(argv[0] if argv else ".").resolve()
     sites = census(root)
     for state in ("EXPLICIT", "BOUND", "UNBOUND"):
         group = [site for site in sites if site.state == state]
@@ -167,4 +166,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

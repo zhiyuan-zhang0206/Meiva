@@ -153,11 +153,19 @@ def record_skill_invoked_by_path(path: str | Path) -> bool:
     a `help()` render, but never touches the lazy proxy hook that carries the
     attribution — so it used to record nothing and under-counted `loaded`
     (facility-wide scan: 68 agents / 3 days used the pattern, 13 with zero
-    rows). `meiva.files.read` routes here. Only a loaded skill's own SKILL.md
+    rows). `meiva.files.read` routes here, after it has resolved the path
+    against the agent's workspace. Only a loaded skill's own SKILL.md
     qualifies (a SKILL.md outside the mount roots is not a skill the agent
-    loaded); best-effort end to end, so this never raises. Returns whether a
-    matching skill was found and attributed."""
-    p = Path(path).expanduser().absolute()
+    loaded). Returns whether a matching skill was found and attributed.
+
+    Raises:
+        ValueError: `path` is not absolute; the caller resolves it first (`~` and
+            the workspace), so a relative path is not anchored at whatever the
+            working directory is.
+    """
+    p = Path(path)
+    if not p.is_absolute():
+        raise ValueError(f"a skill file path must be absolute, got {str(path)!r}")
     if p.name != "SKILL.md":
         return False
     for skill in names():

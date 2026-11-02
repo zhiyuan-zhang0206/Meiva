@@ -8,10 +8,10 @@ import fileinput
 import fnmatch
 import getpass
 import grp
-import inspect
 import json
 import locale
 import multiprocessing
+import netrc
 import os
 import os.path as os_path
 import pathlib
@@ -23,6 +23,7 @@ import secrets
 import shutil
 import site
 import socket
+import ssl
 import subprocess
 import sys
 import sysconfig
@@ -59,6 +60,7 @@ _MODULES: dict[str, types.ModuleType] = {
     "grp": grp,
     "locale": locale,
     "multiprocessing": multiprocessing,
+    "netrc": netrc,
     "os": os,
     "os.path": os_path,
     "pathlib": pathlib,
@@ -70,6 +72,7 @@ _MODULES: dict[str, types.ModuleType] = {
     "shutil": shutil,
     "site": site,
     "socket": socket,
+    "ssl": ssl,
     "sys": sys,
     "sysconfig": sysconfig,
     "tempfile": tempfile,
@@ -115,14 +118,19 @@ def _stub_names(module: str) -> set[str]:
 
 
 # meiva:note
-# What each channel module defines in a fresh interpreter, which runs this file as a script (see the
-# end of it). The test process is not asked: a library imported by any other test in the same
-# process can add names to a stdlib module (`oss2` sets `sys.maxint`), and the table must not be
-# judged against that.
+# What each channel module defines in a fresh interpreter that runs `channel_module_names.py`, a
+# script that imports the standard library only: no test file, no site-package import. The test
+# process is not asked: a library imported by any other test in the same process can add names to a
+# stdlib module (`oss2` sets `sys.maxint`), and the table must not be judged against that. `-I`
+# drops the working directory and the environment, and the script needs nothing installed, so the
+# child runs the same on any install of the package.
+_CHILD = Path(__file__).resolve().with_name("channel_module_names.py")
+
+
 @cache
 def _live_names() -> dict[str, frozenset[str]]:
     done = subprocess.run(  # noqa: S603
-        [sys.executable, "-I", str(Path(__file__).resolve())],
+        [sys.executable, "-I", str(_CHILD)],
         capture_output=True,
         text=True,
         check=True,
@@ -142,8 +150,9 @@ def _public_names(module: str) -> set[str]:
     }
 
 
-def test_every_channel_module_is_spelled_in_this_file() -> None:
+def test_every_channel_module_is_spelled_in_this_file_and_in_the_child() -> None:
     assert set(_MODULES) == CHANNEL_MODULES
+    assert set(_live_names()) == CHANNEL_MODULES
 
 
 def test_the_interpreter_the_table_was_judged_on_is_the_supported_runtime() -> None:
@@ -216,117 +225,346 @@ def test_no_channel_module_is_judged_by_a_bare_wildcard() -> None:
 
 
 # meiva:note
-# One representative name for each kind of judgment, pinned against the table: moving a name to
-# another group, or dropping it from the group that carries its kind, fails here. Every group that
-# carries a kind must have a name here (the next test).
-_PINNED: dict[str, AmbientKind | None] = {
-    "os.environ": AmbientKind.ENVIRON,
-    "os.getpid": AmbientKind.PID,
-    "os.cpu_count": AmbientKind.PLATFORM,
-    "os.getcwd": AmbientKind.CWD,
-    "os.listdir": AmbientKind.CWD,
-    "os.urandom": AmbientKind.RANDOM,
-    "os.times": AmbientKind.CLOCK,
-    "os.path.expanduser": AmbientKind.HOME,
-    "os.path.expandvars": AmbientKind.ENVIRON,
-    "os.path.abspath": AmbientKind.CWD,
-    "os.path.relpath": AmbientKind.CWD,
-    "sys.argv": AmbientKind.ARGV,
-    "sys.executable": AmbientKind.PID,
-    "sys.stdin": AmbientKind.PID,
-    "sys.platform": AmbientKind.PLATFORM,
-    "sys.getfilesystemencoding": AmbientKind.ENVIRON,
-    "sys.version_info": None,
-    "time.time": AmbientKind.CLOCK,
-    "time.localtime": AmbientKind.CLOCK,
-    "time.gmtime": AmbientKind.CLOCK,
-    "time.asctime": AmbientKind.CLOCK,
-    "time.strftime": AmbientKind.CLOCK,
-    "time.monotonic": AmbientKind.CLOCK,
-    "time.get_clock_info": AmbientKind.PLATFORM,
-    "time.clock_getres": AmbientKind.PLATFORM,
-    "time.sleep": None,
-    "datetime.datetime.now": AmbientKind.CLOCK,
-    "datetime.datetime.fromtimestamp": AmbientKind.CLOCK,
-    "datetime.date.today": AmbientKind.CLOCK,
-    "datetime.date.fromtimestamp": AmbientKind.CLOCK,
-    "platform.machine": AmbientKind.PLATFORM,
-    "platform.uname": AmbientKind.PLATFORM,
-    "platform.python_version": None,
-    "platform.uname_result": None,
-    "socket.gethostname": AmbientKind.PLATFORM,
-    "socket.getfqdn": AmbientKind.PLATFORM,
-    "socket.if_nameindex": AmbientKind.PLATFORM,
-    "socket.gethostbyname": None,
-    "socket.getaddrinfo": None,
-    "socket.AF_INET": None,
-    "socket.SO_REUSEADDR": None,
-    "multiprocessing.cpu_count": AmbientKind.PLATFORM,
-    "multiprocessing.current_process": AmbientKind.PID,
-    "multiprocessing.Pool": None,
-    "uuid.getnode": AmbientKind.PLATFORM,
-    "uuid.uuid4": AmbientKind.RANDOM,
-    "uuid.uuid5": None,
-    "resource.getrlimit": AmbientKind.PID,
-    "resource.getpagesize": AmbientKind.PLATFORM,
-    "sysconfig.get_platform": AmbientKind.PLATFORM,
-    "sysconfig.get_path": AmbientKind.PID,
-    "threading.current_thread": AmbientKind.PID,
-    "getpass.getuser": AmbientKind.PID,
-    "pwd.getpwuid": AmbientKind.PID,
-    "grp.getgrgid": AmbientKind.PID,
-    "random.random": AmbientKind.RANDOM,
-    "random.seed": AmbientKind.RANDOM,
-    "random.Random": None,
-    "secrets.token_hex": AmbientKind.RANDOM,
-    "secrets.compare_digest": None,
-    "tempfile.gettempdir": AmbientKind.ENVIRON,
-    "tempfile.mkdtemp": AmbientKind.ENVIRON,
-    "tempfile.NamedTemporaryFile": AmbientKind.ENVIRON,
-    "tempfile.SpooledTemporaryFile": AmbientKind.ENVIRON,
-    "tempfile.gettempprefix": None,
-    "shutil.which": AmbientKind.ENVIRON,
-    "shutil.get_terminal_size": AmbientKind.PID,
-    "locale.getlocale": AmbientKind.ENVIRON,
-    "zoneinfo.TZPATH": AmbientKind.ENVIRON,
-    "pathlib.Path.home": AmbientKind.HOME,
-    "pathlib.Path.cwd": AmbientKind.CWD,
-    "psutil.Process": AmbientKind.PID,
-    "builtins.input": AmbientKind.PID,
-    "fileinput.input": AmbientKind.ARGV,
-    "fileinput.lineno": None,
-    "site.getusersitepackages": AmbientKind.HOME,
-    "site.ENABLE_USER_SITE": AmbientKind.ENVIRON,
-    "site.getsitepackages": AmbientKind.PID,
-    "site.main": None,
-    "email.utils.formatdate": AmbientKind.CLOCK,
-    "email.utils.localtime": AmbientKind.CLOCK,
-    "email.utils.make_msgid": AmbientKind.RANDOM,
-    "email.utils.parseaddr": None,
+# Every name the table judges a read, with the kind that was chosen for it, written out here by
+# hand and not derived from the table: moving a name to another group, dropping it from the group
+# that carries its kind, or adding a read the table's author did not mean fails here. The
+# completeness test alone would stay green when a name only changed groups.
+_READS: dict[AmbientKind, list[str]] = {
+    AmbientKind.ARGV: (
+        [
+            "fileinput.FileInput",
+            "fileinput.input",
+            "sys._xoptions",
+            "sys.argv",
+            "sys.flags",
+            "sys.orig_argv",
+            "sys.warnoptions",
+        ]
+    ),
+    AmbientKind.ENVIRON: (
+        [
+            "locale.getdefaultlocale",
+            "locale.getencoding",
+            "locale.getlocale",
+            "locale.getpreferredencoding",
+            "locale.localeconv",
+            "locale.nl_langinfo",
+            "locale.resetlocale",
+            "locale.setlocale",
+            "os.environ",
+            "os.environb",
+            "os.get_exec_path",
+            "os.getenv",
+            "os.getenvb",
+            "os.path.expandvars",
+            "os.putenv",
+            "os.reload_environ",
+            "os.unsetenv",
+            "shutil.which",
+            "site.ENABLE_USER_SITE",
+            "site.check_enableusersite",
+            "ssl.create_default_context",
+            "ssl.get_default_verify_paths",
+            "sys.getfilesystemencodeerrors",
+            "sys.getfilesystemencoding",
+            "tempfile.NamedTemporaryFile",
+            "tempfile.SpooledTemporaryFile",
+            "tempfile.TemporaryDirectory",
+            "tempfile.TemporaryFile",
+            "tempfile.gettempdir",
+            "tempfile.gettempdirb",
+            "tempfile.mkdtemp",
+            "tempfile.mkstemp",
+            "tempfile.mktemp",
+            "zoneinfo.TZPATH",
+        ]
+    ),
+    AmbientKind.CLOCK: (
+        [
+            "datetime.date.fromtimestamp",
+            "datetime.date.today",
+            "datetime.datetime.fromtimestamp",
+            "datetime.datetime.now",
+            "datetime.datetime.today",
+            "datetime.datetime.utcnow",
+            "email.utils.formatdate",
+            "email.utils.localtime",
+            "email.utils.mktime_tz",
+            "os.times",
+            "time.altzone",
+            "time.asctime",
+            "time.clock_gettime",
+            "time.clock_gettime_ns",
+            "time.ctime",
+            "time.daylight",
+            "time.gmtime",
+            "time.localtime",
+            "time.mktime",
+            "time.monotonic",
+            "time.monotonic_ns",
+            "time.perf_counter",
+            "time.perf_counter_ns",
+            "time.process_time",
+            "time.process_time_ns",
+            "time.strftime",
+            "time.thread_time",
+            "time.thread_time_ns",
+            "time.time",
+            "time.time_ns",
+            "time.timezone",
+            "time.tzname",
+        ]
+    ),
+    AmbientKind.HOME: (
+        [
+            "netrc.netrc",
+            "os.path.expanduser",
+            "pathlib.Path.expanduser",
+            "pathlib.Path.home",
+            "pathlib.PosixPath.home",
+            "pathlib.WindowsPath.home",
+            "site.USER_BASE",
+            "site.USER_SITE",
+            "site.gethistoryfile",
+            "site.getuserbase",
+            "site.getusersitepackages",
+        ]
+    ),
+    AmbientKind.CWD: (
+        [
+            "os.getcwd",
+            "os.getcwdb",
+            "os.listdir",
+            "os.path.abspath",
+            "os.path.relpath",
+            "os.scandir",
+            "pathlib.Path.absolute",
+            "pathlib.Path.cwd",
+            "pathlib.PosixPath.cwd",
+            "pathlib.WindowsPath.cwd",
+        ]
+    ),
+    AmbientKind.PLATFORM: (
+        [
+            "multiprocessing.cpu_count",
+            "os.confstr",
+            "os.cpu_count",
+            "os.getloadavg",
+            "os.name",
+            "os.process_cpu_count",
+            "os.sched_getaffinity",
+            "os.supports_bytes_environ",
+            "os.supports_dir_fd",
+            "os.supports_effective_ids",
+            "os.supports_fd",
+            "os.supports_follow_symlinks",
+            "os.sysconf",
+            "os.uname",
+            "platform.android_ver",
+            "platform.architecture",
+            "platform.freedesktop_os_release",
+            "platform.ios_ver",
+            "platform.java_ver",
+            "platform.libc_ver",
+            "platform.mac_ver",
+            "platform.machine",
+            "platform.node",
+            "platform.platform",
+            "platform.processor",
+            "platform.release",
+            "platform.system",
+            "platform.system_alias",
+            "platform.uname",
+            "platform.version",
+            "platform.win32_edition",
+            "platform.win32_is_iot",
+            "platform.win32_ver",
+            "resource.getpagesize",
+            "socket.getfqdn",
+            "socket.gethostname",
+            "socket.if_indextoname",
+            "socket.if_nameindex",
+            "socket.if_nametoindex",
+            "sys.dllhandle",
+            "sys.getandroidapilevel",
+            "sys.getwindowsversion",
+            "sys.platform",
+            "sys.winver",
+            "sysconfig.get_platform",
+            "time.clock_getres",
+            "time.get_clock_info",
+            "time.pthread_getcpuclockid",
+            "uuid.getnode",
+        ]
+    ),
+    AmbientKind.PID: (
+        [
+            "builtins.input",
+            "getpass.fallback_getpass",
+            "getpass.getpass",
+            "getpass.getuser",
+            "getpass.unix_getpass",
+            "getpass.win_getpass",
+            "grp.getgrall",
+            "grp.getgrgid",
+            "grp.getgrnam",
+            "multiprocessing.active_children",
+            "multiprocessing.current_process",
+            "multiprocessing.parent_process",
+            "os.ctermid",
+            "os.device_encoding",
+            "os.get_terminal_size",
+            "os.getegid",
+            "os.geteuid",
+            "os.getgid",
+            "os.getgrouplist",
+            "os.getgroups",
+            "os.getlogin",
+            "os.getpgrp",
+            "os.getpid",
+            "os.getppid",
+            "os.getpriority",
+            "os.getresgid",
+            "os.getresuid",
+            "os.getuid",
+            "os.isatty",
+            "os.sched_getparam",
+            "os.sched_getscheduler",
+            "os.sched_rr_get_interval",
+            "os.ttyname",
+            "os.umask",
+            "psutil.Process",
+            "pwd.getpwall",
+            "pwd.getpwnam",
+            "pwd.getpwuid",
+            "resource.getrlimit",
+            "resource.getrusage",
+            "resource.prlimit",
+            "shutil.get_terminal_size",
+            "site.PREFIXES",
+            "site.getsitepackages",
+            "sys.__stdin__",
+            "sys.base_exec_prefix",
+            "sys.base_prefix",
+            "sys.exec_prefix",
+            "sys.executable",
+            "sys.prefix",
+            "sys.stderr.isatty",
+            "sys.stdin",
+            "sys.stdout.isatty",
+            "sysconfig.get_path",
+            "sysconfig.get_paths",
+            "threading.activeCount",
+            "threading.active_count",
+            "threading.currentThread",
+            "threading.current_thread",
+            "threading.enumerate",
+            "threading.get_ident",
+            "threading.get_native_id",
+            "threading.main_thread",
+        ]
+    ),
+    AmbientKind.RANDOM: (
+        [
+            "email.utils.make_msgid",
+            "os.getrandom",
+            "os.urandom",
+            "random.SystemRandom",
+            "random.betavariate",
+            "random.binomialvariate",
+            "random.choice",
+            "random.choices",
+            "random.expovariate",
+            "random.gammavariate",
+            "random.gauss",
+            "random.getrandbits",
+            "random.getstate",
+            "random.lognormvariate",
+            "random.normalvariate",
+            "random.paretovariate",
+            "random.randbytes",
+            "random.randint",
+            "random.random",
+            "random.randrange",
+            "random.sample",
+            "random.seed",
+            "random.setstate",
+            "random.shuffle",
+            "random.triangular",
+            "random.uniform",
+            "random.vonmisesvariate",
+            "random.weibullvariate",
+            "secrets.SystemRandom",
+            "secrets.choice",
+            "secrets.randbelow",
+            "secrets.randbits",
+            "secrets.token_bytes",
+            "secrets.token_hex",
+            "secrets.token_urlsafe",
+            "ssl.RAND_bytes",
+            "ssl.RAND_pseudo_bytes",
+            "ssl.RAND_status",
+            "uuid.uuid1",
+            "uuid.uuid4",
+            "uuid.uuid6",
+            "uuid.uuid7",
+            "uuid.uuid8",
+        ]
+    ),
 }
 
 
-@pytest.mark.parametrize(("dotted", "kind"), sorted(_PINNED.items(), key=lambda item: item[0]))
-def test_a_pinned_name_is_judged_the_kind_that_was_chosen_for_it(
-    dotted: str, kind: AmbientKind | None
-) -> None:
+# meiva:note
+# A representative of each way a name reads nothing, so that a name does not drift into a kind
+# from the other side.
+_NOT_READS: list[str] = [
+    "sys.version_info",
+    "time.sleep",
+    "platform.python_version",
+    "platform.uname_result",
+    "socket.gethostbyname",
+    "socket.getaddrinfo",
+    "socket.AF_INET",
+    "socket.SO_REUSEADDR",
+    "multiprocessing.Pool",
+    "uuid.uuid5",
+    "random.Random",
+    "secrets.compare_digest",
+    "tempfile.gettempprefix",
+    "fileinput.lineno",
+    "site.main",
+    "email.utils.parseaddr",
+]
+
+
+@pytest.mark.parametrize(
+    ("dotted", "kind"),
+    sorted((name, kind) for kind, names in _READS.items() for name in names),
+)
+def test_a_name_is_judged_the_kind_that_was_chosen_for_it(dotted: str, kind: AmbientKind) -> None:
     reading = judged(dotted)
     assert reading is not None and reading.name == dotted
     assert reading.judgment.kind is kind
 
 
-def test_every_group_that_carries_a_kind_has_a_pinned_name() -> None:
-    unpinned = [
-        f"{group.module}: {' '.join(group.names)}"
+def test_the_pinned_reads_are_exactly_the_reads_of_the_table() -> None:
+    judged_as_reads = {
+        f"{group.module}.{name}"
         for group in groups()
         if group.judgment.kind is not None
-        and not any(
-            fnmatch.fnmatchcase(pinned, f"{group.module}.{name}")
-            for name in group.names
-            for pinned in _PINNED
-        )
-    ]
-    assert unpinned == [], "pin one name of each of these groups in `_PINNED`"
+        for name in group.names
+    }
+    pinned = {name for names in _READS.values() for name in names}
+    assert sorted(judged_as_reads - pinned) == [], "pin these names in `_READS`"
+    assert sorted(pinned - judged_as_reads) == [], "these pinned names are no longer reads"
+    assert sum(len(names) for names in _READS.values()) == len(pinned), "a name is pinned twice"
+
+
+@pytest.mark.parametrize("dotted", _NOT_READS)
+def test_a_representative_name_that_reads_nothing_is_judged_so(dotted: str) -> None:
+    reading = judged(dotted)
+    assert reading is not None and reading.name == dotted
+    assert reading.judgment.kind is None
 
 
 @pytest.mark.parametrize(
@@ -399,22 +637,3 @@ def test_a_method_read_names_a_kind_and_a_target() -> None:
         AmbientKind.CLOCK,
         AmbientKind.ARGV,
     }
-
-
-# meiva:note
-# The child of `_live_names`: the names each channel module defines, in an interpreter that imported
-# nothing but this file's own imports.
-if __name__ == "__main__":
-    print(
-        json.dumps(
-            {
-                name: [
-                    member
-                    for member in dir(module)
-                    if not inspect.ismodule(getattr(module, member))
-                    and getattr(module, member) is not None
-                ]
-                for name, module in _MODULES.items()
-            }
-        )
-    )

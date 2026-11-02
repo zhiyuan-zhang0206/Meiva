@@ -1,0 +1,2 @@
+[uses]
+"test_ambient_surface.py" = ["channel_module_names.py"]

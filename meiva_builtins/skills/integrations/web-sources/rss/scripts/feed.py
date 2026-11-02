@@ -301,10 +301,10 @@ def run(argv: list[str], scrape: ScrapeConfig, now: float) -> object:
 # meiva:note
 # The command line: build the scrape config from the process environment and read the clock
 # once, run the command and print its JSON.
-def main(argv: list[str] | None = None) -> None:
-    result = run(sys.argv[1:] if argv is None else argv, config_from_env(os.environ), time.time())
+def main(argv: list[str]) -> None:
+    result = run(argv, config_from_env(os.environ), time.time())
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

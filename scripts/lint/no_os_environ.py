@@ -30,7 +30,7 @@ def settings_managed_aliases() -> frozenset[str]:
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     repo_root: Path | None = None,
     managed_aliases: Callable[[], frozenset[str]] = settings_managed_aliases,
@@ -39,4 +39,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

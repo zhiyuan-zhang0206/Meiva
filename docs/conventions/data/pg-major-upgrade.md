@@ -90,7 +90,7 @@ needed.
 1. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300 --no-message` and let the archiver's queue drain (see the planned-stop note).
 2. Scratch restore on 17 (same verb as the weekly drill, newest backup that
    started before the freeze; recovering to the end of the archive):
-   `meiva backup walg restore --dir <scratch> --backup <name>`. Then start the
+   `meiva backup walg restore --dir <scratch> --user <initdb user> --backup <name>`. Then start the
    copy per the "Start the copy for inspection" section of
    [`partial-table-restore.md`](partial-table-restore.md) and dump:
    `pg_dump --format=custom --file=<scratch>/meiva_main.dump -h "$sock" -p 55444

@@ -14,4 +14,4 @@ exports = ["no_meiva_in_hooks_cli.py", "no_plugin_wrap.py"]
 "no_meiva_in_hooks.py" = "strict"
 "no_meiva_in_hooks_cli.py" = { mode = "none", why = "the command-line entry of the plugin-hook rule: it reads the roles the root manifest declares once and hands the scan directories to the rule, which decides what counts as a hook module and what the finding says" }
 "no_plugin_wrap.py" = "strict"
-"no_plugin_wrap_cli.py" = { mode = "none", why = "the command-line entry of the plugin-wrap rule: it reads the argument vector once and hands it to the rule, which decides what counts as a bare wrap and what the finding says" }
+"no_plugin_wrap_cli.py" = { mode = "none", why = "the command-line entry of the plugin-wrap rule: it reads the argument vector once and hands it to the rule, which decides what counts as a bare wrap and what the finding says; reviewed: review-8239 and review-8245 read the shell" }

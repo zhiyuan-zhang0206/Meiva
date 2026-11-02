@@ -510,8 +510,13 @@ def _budget_scopes(argv: list[str], repo_root: Path) -> tuple[list[Path], list[P
     return [repo_root / directory for directory in _STRUCTURE_DIRS], [repo_root]
 
 
+# meiva:note
+# Run the gate for CLI arguments against an explicit checkout and comparison commit. The entry
+# passes `sys.argv[1:]`; target paths retain cwd-relative CLI semantics. The comparison defaults to
+# LINT_STRUCTURE_BASELINE_BASE, then the merge base of HEAD and origin/main. Diagnostics use
+# stdout/stderr and the return value is the CLI exit status.
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     repo_root: Path | None = None,
     baseline_base: str | None = None,
@@ -520,19 +525,12 @@ def main(
     parse_ast: Callable[..., ast.Module],
     measure_quality: Callable[[ast.AST, str], dict[str, dict[str, int]]] | None = None,
 ) -> int:
-    """Run the gate for CLI arguments against an explicit checkout and comparison commit.
-
-    Omitted arguments use sys.argv; target paths retain cwd-relative CLI semantics.
-    The comparison defaults to LINT_STRUCTURE_BASELINE_BASE, then the merge base
-    of HEAD and origin/main.
-    Diagnostics use stdout/stderr and the return value is the CLI exit status.
-    """
     repo_root = repo_root.resolve() if repo_root is not None else _REPO_ROOT
     if measure_quality is None:
         measure_quality = partial(
             quality_budget.measure_quality, visitor_from_ast=ComplexityVisitor.from_ast
         )
-    argv, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:], repo_root)
+    argv, nothing_changed = _parse_args(argv, repo_root)
     if nothing_changed:
         return 0
     missing = [arg for arg in argv if not os.path.lexists(arg)]
@@ -609,4 +607,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main(parse_ast=ast.parse))
+    sys.exit(main(sys.argv[1:], parse_ast=ast.parse))

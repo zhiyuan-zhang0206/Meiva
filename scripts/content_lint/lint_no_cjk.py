@@ -113,9 +113,8 @@ def _scan_file(rel_path: str, repo_root: Path) -> list[tuple[int, str, str]]:
     return violations
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
+def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
     """Scan content under repo_root; standalone invocation uses this checkout."""
-    argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     scope = lint_common.changed_scope(only, repo_root)
     if argv:
@@ -154,4 +153,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

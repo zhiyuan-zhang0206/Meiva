@@ -13,7 +13,6 @@ import asyncio
 import logging
 import os
 import signal
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -113,7 +112,7 @@ class DaemonOptions:
     helper_chain: HelperChainConfig = field(default_factory=HelperChainConfig)
 
 
-def parse_args(argv: Sequence[str] | None = None) -> DaemonOptions:
+def parse_args(argv: Sequence[str]) -> DaemonOptions:
     """Parse the daemon command line."""
     parser = argparse.ArgumentParser(
         prog="meiva-root",
@@ -319,20 +318,16 @@ async def finish(
         raise BaseExceptionGroup("root teardown failed", failures)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     """Daemon entry point; returns the process exit code."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    tokens = list(sys.argv[1:] if argv is None else argv)
+    tokens = list(argv)
     options = parse_args(tokens)
     try:
         return asyncio.run(run(options))
     except (ManifestError, AlreadyRunningError, WiringError) as exc:
         _log.error("%s", exc)
         return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

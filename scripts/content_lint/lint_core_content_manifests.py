@@ -175,17 +175,13 @@ def _core_errors(derived: str, *, environ: Mapping[str, str], repo_root: Path = 
     return errors
 
 
-def main(
-    argv: list[str] | None = None, *, repo_root: Path | None = None, home: Path | None = None
-) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None, home: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
     # meiva:note
     # The entry reads the operator's home once and hands it to the one `~` expansion, so
     # `_parse_audit_dirs` takes each `--audit-dir` as written and no helper below reads it.
     operator_home = Path.home() if home is None else home
-    argv = [
-        str(_expand_home(word, operator_home)) for word in (sys.argv[1:] if argv is None else argv)
-    ]
+    argv = [str(_expand_home(word, operator_home)) for word in argv]
     audit_dirs, failure = _parse_audit_dirs(argv)
     if failure is not None:
         return failure
@@ -226,4 +222,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

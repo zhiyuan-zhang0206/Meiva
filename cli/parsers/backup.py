@@ -128,8 +128,8 @@ def add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     )
     walg_restore.add_argument(
         "--user",
-        help="the restored cluster's superuser: the OS user that ran initdb on the source "
-        "(default: the current OS user)",
+        required=True,
+        help="the restored cluster's superuser: the OS user that ran initdb on the source",
     )
     target = walg_restore.add_mutually_exclusive_group()
     target.add_argument("--time", help="recover to this time (UTC), e.g. '2026-10-01 12:04:57+00'")

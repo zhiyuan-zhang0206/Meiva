@@ -181,12 +181,11 @@ def _suggest(argv: list[str], repo_root: Path) -> int:
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     repo_root: Path = _REPO_ROOT,
     allowed: Mapping[str, tuple[str, str]] | None = None,
 ) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
     repo_root = repo_root.resolve()
     if argv[:1] == [_SUGGEST]:
         return _suggest(argv[1:], repo_root)
@@ -207,4 +206,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

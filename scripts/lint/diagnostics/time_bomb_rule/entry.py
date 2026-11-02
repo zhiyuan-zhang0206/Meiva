@@ -18,9 +18,8 @@ _SCAN_DIRS = roles.select_packages(_ROLES, "application", "standalone", "tooling
 
 
 @lint_common.admission.scoped
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root.resolve()
-    argv = list(sys.argv[1:] if argv is None else argv)
     argv, only = lint_common.split_only(argv)
     scope = lint_common.changed_scope(only, root)
     if argv:
