@@ -44,10 +44,16 @@ def _make_repo(tmp_path: Path, lock_body: str = _EMPTY_LOCK, pkg_body: str = "{}
 
 # meiva:note
 # A stand-in `pnpm` that behaves like `pnpm install --frozen-lockfile`'s observable effects:
-# it records the directory and PATH it ran with, and populates `node_modules/.modules.yaml`.
+# it records the directory and PATH it ran with, and populates `node_modules/.modules.yaml`. Like
+# the real one it refuses to replace an existing `node_modules` without a terminal unless `CI` is
+# true.
 _FAKE_PNPM = """#!/bin/sh
 printf '%s\\n' "$PWD" >> "$FAKE_PNPM_LOG"
 printf '%s\\n' "$PATH" > "$FAKE_PNPM_LOG.path"
+if [ -d node_modules ] && [ "$CI" != true ]; then
+  echo "ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY" >&2
+  exit 1
+fi
 mkdir -p node_modules
 printf 'hoistPattern:\\n  - \"*\"\\n' > node_modules/.modules.yaml
 test "$1" = install && test "$2" = --frozen-lockfile
@@ -112,6 +118,23 @@ def test_pnpm_install_injects_toolchain_path_from_a_minimal_non_login_shell(
         "/usr/bin",
         "/bin",
     ]
+
+
+# meiva:note
+# A start has no terminal: replacing an existing `node_modules` after a lockfile change must not
+# depend on pnpm being able to ask first, whatever `CI` the caller's environment carries.
+@pytest.mark.parametrize("environ", [_ENVIRONMENT, {**_ENVIRONMENT, "CI": "false"}])
+def test_reinstalls_over_an_existing_node_modules_without_a_terminal(
+    tmp_path: Path, fake_pnpm_install: FakePnpm, environ: Mapping[str, str]
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    fake_pnpm_install.ensure(repo, environ)
+    fake_pnpm_install.forget()
+    (repo / "ui" / "web" / "pnpm-lock.yaml").write_text(_DEP_LOCK)
+
+    fake_pnpm_install.ensure(repo, environ)
+
+    assert fake_pnpm_install.installs() == [(repo / "ui" / "web").resolve()]
 
 
 def test_skips_when_stamp_matches_lockfile(tmp_path: Path, fake_pnpm_install: FakePnpm) -> None:
