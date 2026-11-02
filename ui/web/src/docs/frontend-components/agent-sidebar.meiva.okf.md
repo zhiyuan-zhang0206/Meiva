@@ -82,6 +82,13 @@ it. The list is stably sorted by agent ID descending and status or activity
 changes never re-sort it. Status dot and awaiting badge are opt-in
 (`display.show_agent_status` / `notification.awaiting_reply`, default off;
 single-line agent rows carry no secondary activity line, user ruling 2026-11-01).
+Labels truncate with a single-line ellipsis (`truncate`) so long names and deep
+tree indents never wrap or vary row height. Hovering a row for 400 ms opens a
+read-only peek card (`agent-hover-card.tsx`) to the right of the sidebar with
+the full untruncated `#ID · label`, lifecycle status, harness, machine, relative
+`Active` and `Spawned` timestamps, and any active lineage or anomaly signals;
+moving to another row within a 300 ms warm-up window switches the card
+immediately (0 ms), and leaving closes it at once.
 Status arrives over SSE. Every home entry expands the rail once: the one-time
 reset lives in `HomeShell` (which survives layout-frame switches while the
 sidebar remounts) and waits for the persisted settings, so a cold load with

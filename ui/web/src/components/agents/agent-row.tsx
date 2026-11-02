@@ -27,6 +27,7 @@
 // plain items fire immediately with no prompt. The destructive Kill
 // (SIGKILL) sits behind a confirm so it can't be hit by accident.
 
+import * as Popover from "@radix-ui/react-popover";
 import { GitFork, PowerOff, RotateCw, Shrink, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
@@ -47,11 +48,26 @@ import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
-import type { AgentRow, PublicAgentStatus } from "@/lib/contracts/types";
+import type { AgentRow } from "@/lib/contracts/types";
 import type { PendingAction } from "@/lib/agents/use-agents";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import {
+  AGENT_HOVER_OPEN_DELAY_MS,
+  AGENT_HOVER_WARMUP_MS,
+  AgentHoverCard,
+  AgentHoverGroup,
+  STATUS_DOT,
+  useAgentRowHover,
+} from "./agent-hover-card";
 import { RowActions } from "./row-actions";
+
+export {
+  AGENT_HOVER_OPEN_DELAY_MS,
+  AGENT_HOVER_WARMUP_MS,
+  AgentHoverGroup,
+  STATUS_DOT,
+};
 
 // Radix Dialog is needed only after an advanced prompt-taking menu action;
 // closed rows keep no modal payload in the initial graph.
@@ -59,18 +75,6 @@ const LazyPromptDialog = dynamic(() =>
   import("@/components/agents/agent-prompt-dialog").then((module) => module.PromptDialog),
   { loading: () => null },
 );
-
-// Public status semantics: sky = actively running, emerald = idling/waiting,
-// indigo = impersonated (an external tool has taken the agent over — calm
-// and distinct from both the idling and terminated tones), red = terminated.
-// Internal launch/restart states are projected to idling before a row
-// reaches this component; offline remains a separate liveness badge.
-export const STATUS_DOT: Record<PublicAgentStatus, string> = {
-  running: "bg-sky-500",
-  idling: "bg-emerald-500",
-  impersonated: "bg-indigo-400",
-  terminated: "bg-destructive",
-};
 
 export interface AgentRowProps {
   agent: AgentRow;
@@ -254,8 +258,15 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
     setRestartOpen(true);
   };
 
+  const { hoverOpen, onMouseEnter, onMouseLeave, dismissHover } = useAgentRowHover(
+    agent.agent_id,
+    editing,
+  );
+
   return (
-    <ContextMenu>
+    <Popover.Root open={hoverOpen}>
+    <ContextMenu onOpenChange={(open) => { if (open) dismissHover(); }}>
+      <Popover.Anchor asChild>
       <ContextMenuTrigger asChild>
         <li className="group relative">
           {/* Adjacent rows' bars at the same x naturally stack into a
@@ -266,7 +277,13 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           <TreeGuides depth={depth} ancestorsIsLast={ancestorsIsLast} />
           <button
             type="button"
-            onClick={onSelect}
+            onClick={() => {
+              dismissHover();
+              onSelect();
+            }}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+            onContextMenu={dismissHover}
             className={cn(
               // No transition-colors — active switch must be instant,
               // otherwise the old-focused row's bg fades over 150ms while
@@ -356,11 +373,12 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                   className={cn("items-center gap-1", MIN_W_0, FLEX)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
+                    dismissHover();
                     setDraft(label ?? "");
                     setEditing(true);
                   }}
                 >
-                  <span className={cn("break-words", MIN_W_0)}>{displayLabel}</span>
+                  <span className={cn("truncate", MIN_W_0)}>{displayLabel}</span>
                 </span>
               )}
             </span>
@@ -383,6 +401,10 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           ) : null}
         </li>
       </ContextMenuTrigger>
+      </Popover.Anchor>
+      {hoverOpen ? (
+        <AgentHoverCard agent={agent} displayLabel={displayLabel} />
+      ) : null}
       <ContextMenuContent>
         {/* onSelect hands Radix's Event to the callback; wrap the
             prompt-taking actions so the Event is not passed as a prompt. */}
@@ -477,6 +499,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           }}
         />
       ) : null}
-    </ContextMenu>
+      </ContextMenu>
+    </Popover.Root>
   );
 }

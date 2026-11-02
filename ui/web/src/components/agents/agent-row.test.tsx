@@ -5,7 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { beforeEach, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { AgentRow } from "./agent-row";
+import {
+  AGENT_HOVER_OPEN_DELAY_MS,
+  AGENT_HOVER_WARMUP_MS,
+  AgentHoverGroup,
+  AgentRow,
+} from "./agent-row";
 import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
@@ -421,5 +426,116 @@ describe("AgentRow status dot gating (display.show_agent_status)", () => {
     const d = statusDot(container);
     expect(d).toBeTruthy();
     expect(d!.className).toContain("bg-indigo-400");
+  });
+});
+
+describe("AgentRow single-line truncation and hover peek card", () => {
+  it("truncates long labels on a single line instead of wrapping", () => {
+    const longLabel = "investigate-distributed-postgres-connection-pool-saturation-on-worker-node";
+    render(
+      <AgentRow
+        {...baseProps}
+        agent={ag(180)}
+        label={longLabel}
+        depth={2}
+        ancestorsIsLast={[false, true]}
+      />,
+    );
+    const labelSpan = screen.getByText(`#180 · ${longLabel}`);
+    expect(labelSpan.className).toContain("truncate");
+    expect(labelSpan.className).toContain("min-w-0");
+    expect(labelSpan.className).not.toContain("break-words");
+  });
+
+  it("opens the peek card after 400ms with full label, status, harness, machine, timing, and anomalies", async () => {
+    vi.useFakeTimers();
+    const nowMs = Date.parse("2026-05-07T03:00:00Z");
+    const longLabel = "very-long-agent-label-that-gets-truncated-in-the-sidebar-tree";
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = rtlRender(
+      <WallClockProvider wallNow={() => nowMs}>
+        <QueryClientProvider client={qc}>
+          <AgentRow
+            {...baseProps}
+            label={longLabel}
+            agent={ag(180, {
+              status: "running",
+              harness: "claude_code",
+              machine: "mac-studio",
+              spawner: "agent:42",
+              spawned_at: "2026-05-07T00:00:00Z",
+              last_active_at: "2026-05-07T02:55:00Z",
+              awaiting_response_count: 2,
+              highest_notice_priority: "P1",
+              heartbeat_paused_until: "2026-05-07T05:30:00Z",
+            })}
+            depth={0}
+            ancestorsIsLast={[]}
+          />
+        </QueryClientProvider>
+      </WallClockProvider>,
+    );
+
+    const row = container.querySelector("li > button")!;
+    fireEvent.mouseEnter(row);
+
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS - 50));
+    expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const card = screen.getByTestId("agent-hover-card");
+    expect(card.className).toContain("pointer-events-none");
+    expect(card.textContent).toContain(`#180 · ${longLabel}`);
+    expect(card.textContent).toContain("Running");
+    expect(card.textContent).toContain("Claude Code");
+    expect(card.textContent).toContain("mac-studio");
+    expect(card.textContent).toContain("Active 5m ago");
+    expect(card.textContent).toContain("Spawned 3h ago");
+    expect(card.textContent).toContain("Spawned by #42");
+    expect(card.textContent).toContain("2 awaiting reply");
+    expect(card.textContent).toContain("Heartbeat paused until");
+
+    fireEvent.mouseLeave(row);
+    expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+  });
+
+  it("ignores brief pointer sweeps shorter than 400ms and switches in 0ms within the 300ms warm-up window", async () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <AgentHoverGroup>
+        <ul>
+          <AgentRow {...baseProps} label="first-agent" agent={ag(10)} depth={0} ancestorsIsLast={[]} />
+          <AgentRow {...baseProps} label="second-agent" agent={ag(20)} depth={0} ancestorsIsLast={[]} />
+        </ul>
+      </AgentHoverGroup>,
+    );
+
+    const buttons = container.querySelectorAll("li > button");
+    const first = buttons[0];
+    const second = buttons[1];
+
+    fireEvent.mouseEnter(first);
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    fireEvent.mouseLeave(first);
+    expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+
+    fireEvent.mouseEnter(first);
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS));
+    expect(screen.getByTestId("agent-hover-card").textContent).toContain("#10 · first-agent");
+
+    fireEvent.mouseLeave(first);
+    expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_WARMUP_MS - 100));
+    fireEvent.mouseEnter(second);
+    expect(screen.getByTestId("agent-hover-card").textContent).toContain("#20 · second-agent");
+
+    fireEvent.mouseLeave(second);
+    expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_WARMUP_MS + 10));
+
+    fireEvent.mouseEnter(first);
+    expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS));
+    expect(screen.getByTestId("agent-hover-card").textContent).toContain("#10 · first-agent");
   });
 });

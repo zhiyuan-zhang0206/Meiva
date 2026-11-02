@@ -35,5 +35,11 @@
   "statusTerminated": "已终止",
   "statusOffline": "离线 — 机器不可达或进程失联",
   "launchFailed": "启动失败",
-  "launchFailedCreated": "Agent #{id} 已创建，但启动失败。请选择它并重试。"
+  "launchFailedCreated": "Agent #{id} 已创建，但启动失败。请选择它并重试。",
+  "hoverActive": "活跃于 {time}",
+  "hoverSpawned": "创建于 {time}",
+  "hoverSpawnedBy": "由 #{id} 创建",
+  "hoverForkedFrom": "分叉自 #{id}",
+  "hoverAwaitingReply": "{count} 条待回复通知",
+  "hoverHeartbeatPaused": "心跳暂停至 {time}"
 }
