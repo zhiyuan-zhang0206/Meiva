@@ -13,4 +13,4 @@ exports = ["admission.py", "attachment.py"]
 "attachment.py" = { kinds = ["pid", "random", "settings"], why = "External controller attachment owns process bootstrap, its own pid and session UUID generation when no SDK context is bound" }
 
 [debt.any-collaborator]
-"__init__.py#any _Attachment.native_snapshot.return" = { count = 1, owner = "#7302", until = "waits for BaseAgentState to be nameable without langchain (its message fields behind a Protocol): measured 2026-10-31, naming base.agents.context.external_attachment.state_schema here pulled 345 langchain/langgraph/langsmith modules into a bare import meiva and turned nine lazy-import guards red, and import meiva reaches this package" }
+"__init__.py#any _Attachment.native_snapshot.return" = { count = 1, owner = "#6018", until = "waits for BaseAgentState to be nameable without langchain (its message fields behind a Protocol): measured 2026-10-31, naming base.agents.context.external_attachment.state_schema here pulled 345 langchain/langgraph/langsmith modules into a bare import meiva and turned nine lazy-import guards red, and import meiva reaches this package" }

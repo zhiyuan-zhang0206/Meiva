@@ -23,7 +23,7 @@ the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.ok
 `approved-budget` ([[meizel/docs/checker/policy/policy.meiva.okf.md|the approved list's ceiling]]),
 `fake-entropy` ([[meizel/docs/checker/fake-entropy.meiva.okf.md|fake entropy]]),
 `unresolved-import`, `unlisted-allowance`,
-`stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
+`stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, `bare-debt`, and the manifest codes
 (`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,
 stale-edge, debt, roles). An edge that closes a cycle says so; the way out is a public door or injection.
 

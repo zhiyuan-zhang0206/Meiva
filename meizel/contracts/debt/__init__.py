@@ -22,13 +22,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from meizel.contracts.debt.entry import (
+    SHAPES,
+    UNREVIEWED,
     DebtEntry,
     count_of,
     entry_value,
+    has_shape,
     is_table,
     read_entry,
-    unowned,
 )
+from meizel.contracts.debt.states import unowned, unreviewed, without_until
 from meizel.graph.model import Code
 
 __all__ = [
@@ -42,12 +45,15 @@ __all__ = [
     "PATCH_REASONING",
     "PATCH_WHAT",
     "PURITY_CODES",
+    "SHAPES",
     "TABLE_KEY",
+    "UNREVIEWED",
     "DebtEntry",
     "DebtTable",
     "count_of",
     "entry_value",
     "file_key",
+    "has_shape",
     "is_table",
     "local_edge",
     "parse_debt",
@@ -56,6 +62,8 @@ __all__ = [
     "source_of",
     "total",
     "unowned",
+    "unreviewed",
+    "without_until",
 ]
 
 CYCLE_EDGE = Code.CYCLE_EDGE

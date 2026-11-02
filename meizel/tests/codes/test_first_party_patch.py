@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, git, run
+from meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    diagnostics,
+    entry_text,
+    git,
+    record,
+)
 
 LIB = {
     "lib/__init__.py": "",
@@ -116,10 +123,13 @@ def test_a_patch_can_be_recorded_and_the_directory_becomes_strict_to_be(
         "    monkeypatch.setattr(mod, 'helper', None)\n"
     )
     root = make_repo({**LIB, "app/__init__.py": "", "app/test_x.py": source})
-    assert run(root, "debt", "record", "app") == 0
+    assert record(root, "app") == 0
     git(root, "add", "-A")
     text = (root / "app/meizel.toml").read_text()
-    assert text == '[debt.first-party-patch]\n"test_x.py#monkeypatch.setattr lib.mod.helper" = 2\n'
+    assert text == (
+        '[debt.first-party-patch]\n"test_x.py#monkeypatch.setattr lib.mod.helper" = '
+        f"{entry_text(2)}\n"
+    )
     assert [d for d in analysis_of(root).verdict if d.code.value == "first-party-patch"] == []
 
 

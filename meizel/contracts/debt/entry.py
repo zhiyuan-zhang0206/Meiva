@@ -6,15 +6,44 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeGuard
 
-from meizel.graph.model import Code
+__all__ = [
+    "SHAPES",
+    "UNREVIEWED",
+    "DebtEntry",
+    "count_of",
+    "entry_value",
+    "has_shape",
+    "is_table",
+    "read_entry",
+]
 
-__all__ = ["DebtEntry", "count_of", "entry_value", "is_table", "read_entry", "unowned"]
+# meiva:note
+# The prefix an `until` carries while nobody has read it: what `debt record` writes when its caller
+# stated no condition, so an entry can land without claiming a reason it does not have. It is one of
+# the three states an entry can be in -- no `until`, an unreviewed one, no `owner` -- and the summary
+# counts them apart, so a mechanically recorded entry stays visible until a person replaces the
+# sentence.
+UNREVIEWED = "unreviewed:"
+
+# meiva:note
+# The two shapes a stated `until` takes. They are different words on purpose: one says something will
+# arrive, the other that nothing will, and two answers to different questions must not read alike --
+# a reader who cannot tell which one a sentence is stops checking it.
+SHAPES = ("waits for ", "permanently:")
 
 _FIELDS = ("count", "owner", "until")
+
+
+# meiva:note
+# Whether an `until` is a sentence this tool can read: one of the two stated shapes, or the marker that
+# says nobody has read it yet. The marker passes so `record` can write an entry that is visibly
+# unreviewed rather than inventing a reason; the summary counts those apart.
+def has_shape(until: str) -> bool:
+    return until.startswith((*SHAPES, UNREVIEWED))
 
 
 # meiva:note
@@ -104,10 +133,3 @@ def entry_value(entry: DebtEntry) -> int | dict[str, object]:
     if entry.until:
         value["until"] = entry.until
     return value
-
-
-# meiva:note
-# How much recorded debt names no owner: the entries to backfill, and the occurrences they carry.
-def unowned(table: Mapping[Code, Mapping[str, DebtEntry]]) -> tuple[int, int]:
-    missing = [entry for rows in table.values() for entry in rows.values() if not entry.owner]
-    return len(missing), sum(entry.count for entry in missing)

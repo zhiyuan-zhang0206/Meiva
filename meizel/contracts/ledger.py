@@ -17,17 +17,27 @@ from dataclasses import dataclass, replace
 from meizel.contracts.debt import (
     DebtEntry,
     entry_value,
+    has_shape,
     parse_debt,
     read_entry,
     set_debt,
     source_of,
     total,
     unowned,
+    unreviewed,
+    without_until,
 )
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic
 
-__all__ = ["Tally", "account_line", "reconcile", "resolve_debt_conflicts", "tally"]
+__all__ = [
+    "Tally",
+    "account_line",
+    "bare_entries",
+    "reconcile",
+    "resolve_debt_conflicts",
+    "tally",
+]
 
 type Tally = dict[tuple[str, Code, str], list[Diagnostic]]
 
@@ -113,6 +123,167 @@ def legal_read_recorded(manifests: Mapping[str, Manifest]) -> list[Diagnostic]:
     return found
 
 
+# meiva:note
+# What an `until` answers and the two shapes it takes, printed once per run on the first entry
+# that lacks one: the reader who fixes the first entry reads the whole rule, and every later
+# entry says in one line what it is missing. Full text on one entry is what keeps twenty of
+# them readable instead of a wall of repeated prose.
+_UNTIL_EXPLANATION = (
+    "`until` answers one question: what has to change before this entry can be deleted.\n"
+    "Write one of two shapes, and check it against the code or the installed dependency\n"
+    "-- a sentence copied from a neighbour is worth nothing, because the next reader will\n"
+    "trust it and stop looking.\n"
+    "\n"
+    '  until = "waits for <the condition that ends it>: <why it cannot happen yet>"\n'
+    "      Something that could arrive. A symbol that becomes an injectable parameter, an\n"
+    "      upstream release that adds the seam, another component's conversion that turns\n"
+    "      this read into a value, a package move that makes the edge declarable. Name\n"
+    "      what you checked today -- the file and function, the installed version's\n"
+    "      source, the checker's own rule -- so the next reader re-checks it in one step\n"
+    "      instead of redoing the work.\n"
+    "\n"
+    '  until = "permanently: <the design boundary it is tied to>"\n'
+    "      For an entry no reachable change ends: a value only the running process can\n"
+    "      answer (its pid, its platform), a name a runtime installs, a shape the\n"
+    "      language fixes. Say which boundary, and why no caller inside the process holds\n"
+    '      that value better. "Permanently" is a claim the next reader can falsify; make\n'
+    "      it specific enough to falsify.\n"
+    "\n"
+    "Do not invent an `until` to get past this line. An invented one reads like\n"
+    "knowledge, and is worse than the bare count it replaces. If you cannot say what\n"
+    "would end the entry, that is a finding, not a failure: it usually means the entry is\n"
+    "not debt in this sense. Fix it in the same change when the fix is small; otherwise\n"
+    "send the evidence -- manifest path, the code it points at, what you checked, what\n"
+    "you ruled out -- to the lane that owns the entry, and let it decide. One message\n"
+    "beats a wrong sentence that outlives us both."
+)
+
+# meiva:note
+# What `owner` names and why it is a task rather than the agent working it, printed once per
+# run on the first entry that lacks one: the same one-full-text rule as `until`.
+_OWNER_EXPLANATION = (
+    "`owner` is who re-reads the entry, not who owes it. It names the task that will come\n"
+    "back to the `until` and say whether it still holds -- a task lives longer than the\n"
+    "agent that works it, and it can be handed over, so the id here is a task id\n"
+    "(`#6018`), never an agent id, even though both look like `#1234`.\n"
+    "\n"
+    "If the entry is leaving in this change, delete it instead of naming an owner for it."
+)
+
+# meiva:note
+# Why an `until` has two shapes and no third, printed once per run on the first entry whose
+# sentence begins with neither: the two answer different questions, and a phrasing that answers
+# neither is one a reader skims as if it answered one of them.
+_SHAPE_EXPLANATION = (
+    "`until` has two shapes because it answers one of two different questions.\\n"
+    "\\n"
+    '  until = "waits for <the condition that ends it>: <why it cannot happen yet>"\\n'
+    "      Something will arrive, and the next reader can check whether it has.\\n"
+    "\\n"
+    '  until = "permanently: <the design boundary it is tied to>"\\n'
+    "      Nothing will arrive, and the next reader can try to falsify that.\\n"
+    "\\n"
+    "A sentence that begins with neither reads as a reason without saying which of the two it is, and a\\n"
+    "reader who cannot tell whether to wait or to argue stops looking. Rewrite it into one of the two.\\n"
+    "`unreviewed:` is the marker `debt record` writes and is not a third shape."
+)
+
+# meiva:note
+# The footer the first bare entry of a run carries: that these are errors, and that an entry
+# owned by another task is a message rather than an edit.
+_BARE_FOOTER = (
+    "These are errors, not warnings: the check fails and CI reports it, so the fix is not\n"
+    "optional. If an entry is not in your lane -- `owner` names another task -- do not\n"
+    "edit it and do not widen the rule: send one message to that task and leave the entry\n"
+    "alone. Two lanes editing one manifest is how edits get lost."
+)
+
+
+# meiva:note
+# What is wrong with an entry's metadata, in a fixed order: `owner` first, then `until`, then the shape
+# of an `until` that is present but unreadable. One entry can be wrong in more than one way, and the
+# message it gets names each; the explanations are handed out per kind, not per entry.
+def _missing(entry: DebtEntry) -> tuple[str, ...]:
+    faults: list[str] = []
+    if not entry.owner:
+        faults.append("owner")
+    if not entry.until:
+        faults.append("until")
+    elif not has_shape(entry.until):
+        faults.append("shape")
+    return tuple(faults)
+
+
+# meiva:note
+# One hint that renders as a block: every line after the first carries the four spaces `render` puts in
+# front of a hint, so the explanation reads as one indented passage instead of a paragraph whose tail
+# hangs off the left margin.
+def _block(text: str) -> str:
+    head, *rest = text.splitlines()
+    return "\n".join([head, *(f"    {line}" if line else "" for line in rest)])
+
+
+# meiva:note
+# One sentence per entry, saying which of the two fields is missing. A reader who meets twenty of
+# them reads twenty facts about twenty entries rather than one fact about the field repeated.
+def _bare_message(code: Code, key: str, missing: tuple[str, ...]) -> str:
+    if missing == ("shape",):
+        return (
+            f"{code} {key!r} states an exit condition in no shape this tool reads: `until` must "
+            "begin with `waits for ...:` or `permanently:`."
+        )
+    if set(missing) == {"owner", "until"}:
+        return (
+            f"{code} {key!r} records debt with no owner and no exit condition: "
+            "`owner` and `until` are missing."
+        )
+    if missing == ("until",):
+        return f"{code} {key!r} records debt with no exit condition: `until` is missing."
+    if missing == ("owner",):
+        return f"{code} {key!r} records debt with no owner."
+    return f"{code} {key!r} records debt with no owner and no readable exit condition."
+
+
+# meiva:note
+# Recorded debt that names no owner, states no exit condition, or both: read from the manifest text
+# alone, so `check --changed` reports it too -- a run that analysed no source still reads every
+# `[debt]` table. The full text goes on the first entry of each missing kind in this run and the
+# footer on the first entry overall, so the output grows with the number of entries that are wrong
+# and not with the length of the rule.
+def bare_entries(manifests: Mapping[str, Manifest]) -> list[Diagnostic]:
+    rows: list[tuple[Diagnostic, tuple[str, ...]]] = []
+    for _, manifest in sorted(manifests.items()):
+        for code, table in sorted(manifest.debt.items(), key=lambda item: str(item[0])):
+            for key, entry in sorted(table.items()):
+                missing = _missing(entry)
+                if missing:
+                    diagnostic = Diagnostic(
+                        manifest.path,
+                        manifest.debt_line(code, key),
+                        Code.BARE_DEBT,
+                        _bare_message(code, key, missing),
+                    )
+                    rows.append((diagnostic, missing))
+    rows.sort(key=lambda row: (row[0].path, row[0].line, row[0].code, row[0].message))
+    found: list[Diagnostic] = []
+    until_shown = owner_shown = shape_shown = False
+    for index, (diagnostic, missing) in enumerate(rows):
+        hints: list[str] = []
+        if "until" in missing and not until_shown:
+            hints.append(_block(_UNTIL_EXPLANATION))
+            until_shown = True
+        if "owner" in missing and not owner_shown:
+            hints.append(_block(_OWNER_EXPLANATION))
+            owner_shown = True
+        if "shape" in missing and not shape_shown:
+            hints.append(_block(_SHAPE_EXPLANATION))
+            shape_shown = True
+        if index == 0:
+            hints.append(_block(_BARE_FOOTER))
+        found.append(replace(diagnostic, hints=tuple(hints)))
+    return found
+
+
 def reconcile(
     diagnostics: list[Diagnostic],
     manifests: dict[str, Manifest],
@@ -125,6 +296,7 @@ def reconcile(
     """
     groups = tally(diagnostics)
     failing = [d for d in diagnostics if d.debt is None]
+    failing.extend(bare_entries(manifests))
     for (owner, code, key), found in groups.items():
         manifest = manifests.get(owner)
         entry = manifest.debt.get(code, {}).get(key) if manifest is not None else None
@@ -152,10 +324,18 @@ def account_line(manifests: dict[str, Manifest]) -> str:
     debts = sum(total(m.debt) for m in manifests.values())
     recorded = sum(1 for m in manifests.values() if m.debt)
     entries = occurrences = 0
+    unstated = unstated_occurrences = 0
+    unread = unread_occurrences = 0
     for manifest in manifests.values():
         missing, counts = unowned(manifest.debt)
         entries += missing
         occurrences += counts
+        missing, counts = without_until(manifest.debt)
+        unstated += missing
+        unstated_occurrences += counts
+        missing, counts = unreviewed(manifest.debt)
+        unread += missing
+        unread_occurrences += counts
     carried = (
         ""
         if not debts
@@ -170,7 +350,21 @@ def account_line(manifests: dict[str, Manifest]) -> str:
         f"({_counted(occurrences, 'occurrence', 'occurrences')}) "
         f"{'names' if entries == 1 else 'name'} no owner"
     )
-    return carried + ownerless
+    unstated_line = (
+        ""
+        if not unstated
+        else f"; {_counted(unstated, 'entry', 'entries')} "
+        f"({_counted(unstated_occurrences, 'occurrence', 'occurrences')}) "
+        f"{'states' if unstated == 1 else 'state'} no exit condition"
+    )
+    unread_line = (
+        ""
+        if not unread
+        else f"; {_counted(unread, 'entry', 'entries')} "
+        f"({_counted(unread_occurrences, 'occurrence', 'occurrences')}) "
+        f"{'carries' if unread == 1 else 'carry'} an unreviewed exit condition"
+    )
+    return carried + ownerless + unstated_line + unread_line
 
 
 _DEBT_TABLE = re.compile(r"^\[\s*debt\.([^\]\s]+)\s*\]\s*(?:#.*)?$")

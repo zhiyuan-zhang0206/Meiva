@@ -47,13 +47,16 @@ class Repository(Checkout, Protocol):
 
 
 # meiva:note
-# What only the process entry can build, handed down: where this installation sits, and the two
-# readers the command layer is not allowed to own — the roles manifest and a file the argv names.
+# What only the process entry can build, handed down: where this installation sits, the two readers
+# the command layer is not allowed to own — the roles manifest and a file the argv names — and the
+# day, because `debt record` stamps the placeholder it writes into an entry nobody has reviewed and a
+# strict module may not read the clock.
 @dataclass(frozen=True, slots=True)
 class CommandDeps:
     tool_root: Path
     read_roles: Callable[[Checkout], Mapping[str, tuple[str, ...]]]
     read_text: Callable[[Path, str], str]
+    today: str
 
 
 # meiva:note
@@ -304,6 +307,18 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
         "record", help="write the current violations under paths into baselines"
     )
     recording.add_argument("paths", nargs="+")
+    recording.add_argument(
+        "--owner",
+        default="",
+        metavar="TASK",
+        help="the task that re-reads the entries this run writes, when they name no owner yet",
+    )
+    recording.add_argument(
+        "--until",
+        default="",
+        metavar="TEXT",
+        help="the exit condition of the entries this run writes, when they state none yet",
+    )
     modes.add_parser("prune", help="remove recorded debt that no longer occurs")
     resolving = modes.add_parser(
         "resolve", help="resolve merge conflicts inside the [debt] tables of manifests"
@@ -416,7 +431,9 @@ def _run_impacted(
 # meiva:note
 # `meizel debt ...`: the commands that read or write recorded debt, and the one that measures the
 # world reads a baseline cannot hold. Kept out of `_dispatch` so the dispatch stays a list of commands.
-def _run_debt(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_debt(
+    repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
+) -> int:
     if args.debt_mode == "propagation":
         analysis = analyze(repo.universe(), jobs=args.jobs)
         print(
@@ -424,7 +441,7 @@ def _run_debt(repo: Repository, root: Path, base: Path, args: argparse.Namespace
         )
         return 0
     targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
-    return run_debt(repo, targets, args, args.jobs)
+    return run_debt(repo, targets, args, args.jobs, deps.today)
 
 
 def _run_sync(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
@@ -618,7 +635,7 @@ def dispatch(
     if cmd == "check":
         return _run_check(repo, root, base, args)
     if cmd == "debt":
-        return _run_debt(repo, root, base, args)
+        return _run_debt(repo, root, base, args, deps)
     if cmd == "policy":
         return _run_policy(repo, args)
     if cmd == "explain":

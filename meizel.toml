@@ -39,4 +39,4 @@ frontend = ["ui"]
 # base), not a declaration. Kept as recorded debt.
 
 [debt.undeclared-edge]
-"base/sessions/pty/tests/pty_service.py -> services/agent_runner/pty_sessions/daemon.py" = { count = 1, owner = "#7302", until = "waits for a package move — the pty client's integration tests above both packages, or the daemon below base: the only [uses] key that may name another package's file is this root table, and base -> services closes a cycle services already opens, so no declaration is legal while both sides sit where they do; tried [loads] on 2026-11-02 and the checker still reports the subprocess launch" }
+"base/sessions/pty/tests/pty_service.py -> services/agent_runner/pty_sessions/daemon.py" = { count = 1, owner = "#6018", until = "waits for a package move — the pty client's integration tests above both packages, or the daemon below base: the only [uses] key that may name another package's file is this root table, and base -> services closes a cycle services already opens, so no declaration is legal while both sides sit where they do; tried [loads] on 2026-11-02 and the checker still reports the subprocess launch" }

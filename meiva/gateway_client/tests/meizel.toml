@@ -1,2 +1,2 @@
 [debt.restricted-python]
-"test_watcher.py#exec of source text" = { count = 1, owner = "#7302", until = "waits for the watcher script to become a thin launcher over a repository module: build_cron_script and build_at_script emit the fire loop as source text (that text is what runs on a host), and the test executes it with fake datetime/time/os substituted because the generated text is the artifact" }
+"test_watcher.py#exec of source text" = { count = 1, owner = "#6018", until = "waits for the watcher script to become a thin launcher over a repository module: build_cron_script and build_at_script emit the fire loop as source text (that text is what runs on a host), and the test executes it with fake datetime/time/os substituted because the generated text is the artifact" }

@@ -8,7 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, commit, run, write
+from meizel.tests.synthetic import (
+    FIXTURE_OWNER,
+    FIXTURE_UNTIL,
+    RepoFactory,
+    commit,
+    entry_text,
+    run,
+    write,
+)
 
 BASE = {
     "lib/__init__.py": "",
@@ -27,7 +35,17 @@ def conflict(ours: str, theirs: str, base: str | None = None) -> str:
     return f"<<<<<<< ours\n{ours}{middle}=======\n{theirs}>>>>>>> theirs\n"
 
 
+# meiva:note
+# One entry as a conflict side writes it: the count with the metadata every recorded entry carries, so
+# a resolved table is a table `check` accepts.
 def entry(key: str, count: int) -> str:
+    return f'"{key}" = {entry_text(count)}\n'
+
+
+# meiva:note
+# The older spelling a merge can still meet: a count with no metadata at all. One side of the
+# owner test writes it, because a side that names nobody leaves the other side's answer standing.
+def bare_entry(key: str, count: int) -> str:
     return f'"{key}" = {count}\n'
 
 
@@ -44,14 +62,20 @@ def recorded_repo(make_repo: RepoFactory) -> Path:
     root = make_repo(BASE)
     assert run(root, "sync", "--declare", ".") in {0, 1}
     write(root, {})
-    assert run(root, "debt", "record", ".") == 0
+    assert run(root, "debt", "record", ".", "--owner", FIXTURE_OWNER, "--until", FIXTURE_UNTIL) == 0
     write(root, {})
     commit(root)
     return root
 
 
 def debts(root: Path) -> dict[str, dict[str, int]]:
-    return tomllib.loads((root / "meizel.toml").read_text()).get("debt", {})
+    table = tomllib.loads((root / "meizel.toml").read_text()).get("debt", {})
+    return {
+        code: {
+            key: value["count"] if isinstance(value, dict) else value for key, value in rows.items()
+        }
+        for code, rows in table.items()
+    }
 
 
 # meiva:note
@@ -190,14 +214,14 @@ def test_a_resolved_conflict_keeps_the_owner_and_the_condition(make_repo: RepoFa
     conflicted(
         root,
         conflict(
-            named(X, 3, "#7139", "waits for the door") + entry(Y, 1), entry(X, 3) + entry(Y, 1)
+            named(X, 3, "#7139", "waits for the door") + entry(Y, 1),
+            bare_entry(X, 3) + entry(Y, 1),
         ),
     )
     assert run(root, "debt", "resolve", "meizel.toml") == 0
-    assert debts(root)["private-module"] == {
-        X: {"count": 3, "owner": "#7139", "until": "waits for the door"},
-        Y: 1,
-    }
+    assert debts(root)["private-module"] == {X: 3, Y: 1}
+    written = tomllib.loads((root / "meizel.toml").read_text())["debt"]["private-module"]
+    assert written[X] == {"count": 3, "owner": "#7139", "until": "waits for the door"}
     assert run(root, "check") == 0
 
 

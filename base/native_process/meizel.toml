@@ -31,4 +31,4 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "os_platform.py#platform sys.platform" = { count = 1, owner = "#5816", until = "waits for the interpreter: the platform this process was started on is fixed before any caller runs, and a caller passing it would be naming a value it can only have read the same way" }
 
 [debt.fake-entropy]
-"os_platform.py#interval-wrapper _monotonic" = { count = 1, owner = "#7302", until = "waits for the checker to have a duration class: the wrapper only answers now >= deadline inside the file-lock poll loop and the same call is already booked as ambient-read; inlining time.monotonic() would re-record that read under a new key, which is a rename rather than a repayment" }
+"os_platform.py#interval-wrapper _monotonic" = { count = 1, owner = "#6018", until = "waits for the checker to have a duration class: the wrapper only answers now >= deadline inside the file-lock poll loop and the same call is already booked as ambient-read; inlining time.monotonic() would re-record that read under a new key, which is a rename rather than a repayment" }

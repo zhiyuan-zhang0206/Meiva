@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from meizel.checkout import GitRepo, read_roles, read_text, toplevel
@@ -38,7 +39,12 @@ def main(argv: list[str] | None = None) -> int:
         # commands are handed instead of a path they would build their own from. A command that
         # judges reads a snapshot of it (`repo.universe()`).
         repo = open_repository(args.repo if args.repo is not None else toplevel(base))
-        deps = cli.CommandDeps(tool_root=_TOOL_ROOT, read_roles=read_roles, read_text=read_text)
+        deps = cli.CommandDeps(
+            tool_root=_TOOL_ROOT,
+            read_roles=read_roles,
+            read_text=read_text,
+            today=datetime.now(UTC).date().isoformat(),
+        )
         return cli.dispatch(repo, repo.root.resolve(), base, args, deps)
     except MeizelError as error:
         print(f"meizel: {error}", file=sys.stderr)

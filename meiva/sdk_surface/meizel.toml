@@ -50,4 +50,4 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "discovery.py#inspect.getsource" = { count = 1, owner = "#7240", until = "waits for the module source as a value: a plugin reload keeps the module object while its file has to be read again, and the discovery caller holds the module, not its text — the loader that knows the path does not hand the source down today" }
 
 [debt.wide-exports]
-"meizel.toml#exports" = { count = 1, owner = "#7302", until = "waits for the SDK surface to be split into subpackages grouped by the namespace each installs (settings, install, plugins, skill_sources, ...): this package IS the public meiva.<name> surface, so the width is the surface itself and not a fan-out of dependencies" }
+"meizel.toml#exports" = { count = 1, owner = "#6018", until = "waits for the SDK surface to be split into subpackages grouped by the namespace each installs (settings, install, plugins, skill_sources, ...): this package IS the public meiva.<name> surface, so the width is the surface itself and not a fan-out of dependencies" }

@@ -12,7 +12,15 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any, TypeGuard
 
-from meizel.contracts.debt import PATCH_CODES, TABLE_KEY, count_of, total, unowned
+from meizel.contracts.debt import (
+    PATCH_CODES,
+    TABLE_KEY,
+    count_of,
+    total,
+    unowned,
+    unreviewed,
+    without_until,
+)
 from meizel.contracts.debt_edit import Baselines, read_baselines
 from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
@@ -84,12 +92,16 @@ def _report(universe: Universe, *, unowned_list: bool = False) -> dict[str, Any]
             top["by_code"][code.value] += sum(entry.count for entry in rows.values())
     judged = _judged_directories(universe)
     missing, occurrences = _unowned(baselines)
+    unstated, unstated_occurrences = _without_until(baselines)
+    unread, unread_occurrences = _unreviewed(baselines)
     listed = {"unowned_list": _unowned_lines(baselines)} if unowned_list else {}
     return {
         **listed,
         "basis": "recorded manifest debt only; no source, semantic purity, or test-resource analysis",
         "total": sum(total(t) for t in baselines.values()),
         "unowned": {"entries": missing, "occurrences": occurrences},
+        "unstated": {"entries": unstated, "occurrences": unstated_occurrences},
+        "unreviewed": {"entries": unread, "occurrences": unread_occurrences},
         "by_code": {c.value: n for c, n in sorted(_by_code(baselines).items(), key=str)},
         "by_top_level": {
             name: {**top, "by_code": dict(sorted(top["by_code"].items()))}
@@ -125,6 +137,22 @@ def _text(data: dict[str, Any]) -> str:
             f"({_counted(data['unowned']['occurrences'], 'occurrence', 'occurrences')}); "
             "`meizel debt --unowned` lists them"
         ),
+        (
+            "every recorded debt states an exit condition"
+            if not data["unstated"]["entries"]
+            else f"{_counted(data['unstated']['entries'], 'recorded debt', 'recorded debts')} "
+            f"{'states' if data['unstated']['entries'] == 1 else 'state'} no exit condition "
+            f"(no `until`) "
+            f"({_counted(data['unstated']['occurrences'], 'occurrence', 'occurrences')})"
+        ),
+        (
+            "every stated exit condition has been read"
+            if not data["unreviewed"]["entries"]
+            else f"{_counted(data['unreviewed']['entries'], 'recorded debt', 'recorded debts')} "
+            f"{'carries' if data['unreviewed']['entries'] == 1 else 'carry'} an unreviewed exit "
+            f"condition "
+            f"({_counted(data['unreviewed']['occurrences'], 'occurrence', 'occurrences')})"
+        ),
         "",
         "by code:",
         *(f"  {code:<20}{count:>8}" for code, count in data["by_code"].items()),
@@ -158,6 +186,32 @@ def _unowned(baselines: Baselines) -> tuple[int, int]:
 # meiva:note
 # Every recorded debt that names no owner, one line each: what a backfill pass reads instead of
 # grepping the entries by hand.
+# meiva:note
+# How many recorded debts state no exit condition, and the occurrences they carry: read the same way
+# `_unowned` reads its number, straight from the `[debt]` tables. Two questions, two counts -- an
+# entry that names an owner and no `until` shows up here and not there, and the other way round.
+def _without_until(baselines: Baselines) -> tuple[int, int]:
+    entries = occurrences = 0
+    for table in baselines.values():
+        missing, counts = without_until(table)
+        entries += missing
+        occurrences += counts
+    return entries, occurrences
+
+
+# meiva:note
+# How many recorded debts carry an exit condition `record` wrote and nobody has read: the third state,
+# counted apart from a missing `until` so a placeholder can never pass for a reason. Both numbers this
+# module shows come from the `[debt]` tables, never from a diagnostic.
+def _unreviewed(baselines: Baselines) -> tuple[int, int]:
+    entries = occurrences = 0
+    for table in baselines.values():
+        marked, counts = unreviewed(table)
+        entries += marked
+        occurrences += counts
+    return entries, occurrences
+
+
 def _unowned_lines(baselines: Baselines) -> list[str]:
     lines: list[str] = []
     for directory, table in sorted(baselines.items()):
