@@ -1,5 +1,5 @@
 # meiva:note
-# The trunk-red watch's decisions, replayed against the two real failures of 2026-11-01: one that
+# The main-red watch's decisions, replayed against the two real failures of 2026-11-01: one that
 # the nightly passed on the same commit an hour later, and one that no run explained.
 # meiva:link schedules/README.md
 
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from schedules.plans.watch.trunk_red import (
+from schedules.plans.watch.main_red import (
     FAILURE_INFRA,
     FAILURE_TEST,
     NIGHTLY_STALE_AFTER,
@@ -166,7 +166,7 @@ def test_the_card_carries_the_nine_fields() -> None:
         candidate_commits=("abc123 landed the change",),
     )
 
-    assert title.startswith("trunk-red: ")
+    assert title.startswith("main-red: ")
     for field in (
         "Fingerprint",
         "Evidence",

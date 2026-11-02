@@ -1,7 +1,7 @@
-exports = ["agent_watch_rule.py", "keepalive_rule.py", "stall_rule.py", "trunk_red.py"]
+exports = ["agent_watch_rule.py", "keepalive_rule.py", "stall_rule.py", "main_red.py"]
 
 [purity]
 "agent_watch_rule.py" = "strict"
 "keepalive_rule.py" = "strict"
 "stall_rule.py" = "strict"
-"trunk_red.py" = "strict"
+"main_red.py" = "strict"

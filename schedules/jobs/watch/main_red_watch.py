@@ -1,6 +1,6 @@
 # meiva:note
-# The effect shell of the trunk-red watch: read the newest post-merge runs, hand their failures to
-# `schedules/plans/trunk_red.py`, then do what the plan says -- open one card per confirmed red,
+# The effect shell of the main-red watch: read the newest post-merge runs, hand their failures to
+# `schedules/plans/main_red.py`, then do what the plan says -- open one card per confirmed red,
 # close the cards whose red ended, and leave a heartbeat every round.
 #
 # Nothing here decides whether a red is real; that is the plan's judgement. This file owns the two
@@ -17,7 +17,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from schedules.plans.watch.trunk_red import (
+from schedules.plans.watch.main_red import (
     Card,
     Entry,
     RunFacts,
@@ -31,7 +31,7 @@ from schedules.plans.watch.trunk_red import (
 
 __all__ = ["STATE_FILE", "load_state", "round_line", "save_state", "watch_once"]
 
-STATE_FILE = "trunk-red-watch.json"
+STATE_FILE = "main-red-watch.json"
 
 
 def load_state(path: Path) -> tuple[dict[str, Entry], dict[str, str]]:
