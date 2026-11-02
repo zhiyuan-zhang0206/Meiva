@@ -50,6 +50,8 @@ export interface LiveResizeObserver {
   disconnect(): void;
 }
 
+export type LivePageEventType = "popstate" | "resize" | "scroll";
+
 export interface LivePage {
   readonly location: { readonly href: string; assign(url: string): void };
   readonly history: {
@@ -58,8 +60,8 @@ export interface LivePage {
     replaceState(state: unknown, unused: string, url: string): void;
     back(): void;
   };
-  addEventListener(type: "popstate", listener: () => void): void;
-  removeEventListener(type: "popstate", listener: () => void): void;
+  addEventListener(type: LivePageEventType, listener: () => void): void;
+  removeEventListener(type: LivePageEventType, listener: () => void): void;
   localStorage(): Storage | null;
   createObjectUrl(file: Blob): string;
   revokeObjectUrl(url: string): void;
@@ -67,6 +69,7 @@ export interface LivePage {
   matchMedia(query: string): MediaQueryList;
   readonly innerHeight: number;
   readonly visualViewport: LiveViewport | null;
+  scrollTo(x: number, y: number): void;
   readonly navigator: LiveNavigator;
   readonly document: LiveDocument;
   confirm(message: string): boolean;
@@ -253,8 +256,10 @@ export function viewOver(page: LivePage | null): Browser["view"] {
 
 // meiva:note
 // The page's viewport. Every read is a fresh measurement — a height is not a stored fact — and the
-// subscription follows only the visual viewport: the one a keyboard, a toolbar or a pinch moves.
-// A frame with no page (a server render) has neither, and says so with a zero reading.
+// subscription follows both the visual viewport (which a keyboard, a toolbar or a pinch moves) and
+// the page's own resize and scroll (which orientation changes and `WKWebView` keyboard insets move).
+// `resetScroll` returns the root page scroll to `(0, 0)`. A frame with no page (a server render)
+// has neither, and says so with a zero reading.
 export function viewportOver(page: LivePage | null): BrowserViewport {
   return {
     read: () =>
@@ -267,14 +272,21 @@ export function viewportOver(page: LivePage | null): BrowserViewport {
                 ? null
                 : { height: page.visualViewport.height, scale: page.visualViewport.scale },
           },
+    resetScroll() {
+      page?.scrollTo(0, 0);
+    },
     subscribe(onChange) {
       const visual = page?.visualViewport ?? null;
-      if (visual === null) return () => undefined;
+      if (page === null || visual === null) return () => undefined;
       visual.addEventListener("resize", onChange);
       visual.addEventListener("scroll", onChange);
+      page.addEventListener("resize", onChange);
+      page.addEventListener("scroll", onChange);
       return () => {
         visual.removeEventListener("resize", onChange);
         visual.removeEventListener("scroll", onChange);
+        page.removeEventListener("resize", onChange);
+        page.removeEventListener("scroll", onChange);
       };
     },
   };
@@ -375,8 +387,13 @@ export const browser: Browser =
         localStorage: () => window.localStorage,
         sessionStorage: () => window.sessionStorage,
         matchMedia: (query) => window.matchMedia(query),
-        innerHeight: window.innerHeight,
-        visualViewport: window.visualViewport,
+        get innerHeight() {
+          return window.innerHeight;
+        },
+        get visualViewport() {
+          return window.visualViewport;
+        },
+        scrollTo: (x, y) => window.scrollTo(x, y),
 
         newResizeObserver:
           typeof ResizeObserver === "undefined"

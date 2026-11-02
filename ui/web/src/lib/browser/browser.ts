@@ -77,8 +77,11 @@ export interface BrowserView {
 
 // meiva:note
 // The viewport the page is drawn into. `layoutHeight` is what the shell's `100%` resolves against;
-// `visual` is the band the reader actually sees — a phone keyboard shrinks only that one, and a
-// pinch zoom reports a scale other than 1. A frame with no page has no visual viewport at all.
+// `visual` is the band the reader actually sees — a phone or tablet keyboard shrinks only that one,
+// and a pinch zoom reports a scale other than 1. `resetScroll` returns the root page scroll to
+// `(0, 0)` so WebKit's focus pan and `WKWebView` keyboard insets cannot push the pinned shell off
+// the top edge or leave a scrollable blank tail after the keyboard closes. A frame with no page has
+// no visual viewport at all.
 export interface ViewportReading {
   readonly layoutHeight: number;
   readonly visual: { readonly height: number; readonly scale: number } | null;
@@ -86,6 +89,7 @@ export interface ViewportReading {
 
 export interface BrowserViewport {
   read(): ViewportReading;
+  resetScroll(): void;
   subscribe(onChange: () => void): () => void;
 }
 

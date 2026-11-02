@@ -37,6 +37,7 @@ export interface FakeActions {
   readonly confirmed: string[];
   traversals: number;
   backs: number;
+  viewportScrollResets: number;
 }
 
 export interface FakeStore {
@@ -202,6 +203,7 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     confirmed: [],
     traversals: 0,
     backs: 0,
+    viewportScrollResets: 0,
   };
 
   const failures = { local: { write: false, remove: false }, session: { write: false, remove: false } };
@@ -320,6 +322,9 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     },
     viewport: {
       read: () => viewportReading,
+      resetScroll() {
+        actions.viewportScrollResets += 1;
+      },
       subscribe(onChange) {
         viewportListeners.add(onChange);
         return () => {

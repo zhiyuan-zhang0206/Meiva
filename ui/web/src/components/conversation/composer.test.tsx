@@ -285,6 +285,17 @@ describe("Composer button mode dispatch", () => {
     expect(root.className.split(" ")).not.toContain("pt-1");
     expect(screen.getByTestId("composer-input").className).toContain("min-h-9");
   });
+  it("suppresses browser credential/payment/address autofill and keeps 16px text at tablet widths", () => {
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
+    const input = screen.getByTestId("composer-input");
+    expect(input.getAttribute("autocomplete")).toBe("off");
+    expect(input.getAttribute("data-form-type")).toBe("other");
+    expect(input.hasAttribute("data-1p-ignore")).toBe(true);
+    expect(input.getAttribute("data-lpignore")).toBe("true");
+    expect(input.className.split(" ")).toContain("text-base");
+    expect(input.className.split(" ")).toContain("md:text-base");
+    expect(input.className.split(" ")).not.toContain("md:text-sm");
+  });
   // meiva:note
   // The band grows upward with the draft, and that is the whole story: the
   // composer publishes nothing another column could follow (user report

@@ -34,15 +34,18 @@ function page(visual: { height: number; scale?: number } | null): FakeBrowser {
   });
 }
 
-it("pins the shell to the visual viewport while the keyboard is up", () => {
+it("pins the shell to the visual viewport and resets root scroll while the keyboard is up", () => {
   const browser = page({ height: LAYOUT_HEIGHT - 320 });
   renderWithBrowser(<VisualViewportHeightSync />, { browser });
 
   expect(document.documentElement.style.height).toBe("480px");
+  expect(browser.actions.viewportScrollResets).toBe(1);
   // meiva:note
-  // The keyboard grows, or the user resizes: one answer, one follow.
+  // The keyboard grows, or WebKit pans the focused field: one answer, one follow, and the root
+  // scroll returns to (0, 0) so the composer is not double-shifted off the top edge.
   browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: 300, scale: 1 } });
   expect(document.documentElement.style.height).toBe("300px");
+  expect(browser.actions.viewportScrollResets).toBe(2);
 });
 
 it("rounds a fractional visual viewport height", () => {
@@ -70,12 +73,14 @@ it("drops the pin while the user pinch-zooms", () => {
   expect(document.documentElement.style.height).toBe("");
 });
 
-it("restores the layout height when the keyboard closes", () => {
+it("restores the layout height and resets root scroll when the keyboard closes", () => {
   const browser = page({ height: LAYOUT_HEIGHT - 320 });
   renderWithBrowser(<VisualViewportHeightSync />, { browser });
+  expect(browser.actions.viewportScrollResets).toBe(1);
 
   browser.answerViewport({ layoutHeight: LAYOUT_HEIGHT, visual: { height: LAYOUT_HEIGHT, scale: 1 } });
   expect(document.documentElement.style.height).toBe("");
+  expect(browser.actions.viewportScrollResets).toBe(2);
 });
 
 it("clears the pin on unmount", () => {
@@ -91,10 +96,12 @@ it("does nothing when the browser has no visual viewport", () => {
   renderWithBrowser(<VisualViewportHeightSync />, { browser });
 
   expect(document.documentElement.style.height).toBe("");
+  expect(browser.actions.viewportScrollResets).toBe(0);
   // meiva:note
   // A page with no visual viewport has nothing to follow, and the shell says so by staying put.
   browser.answerViewport({ layoutHeight: 200, visual: null });
   expect(document.documentElement.style.height).toBe("");
+  expect(browser.actions.viewportScrollResets).toBe(0);
 });
 
 it("decides the pin from the reading alone", () => {

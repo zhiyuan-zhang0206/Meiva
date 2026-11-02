@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { LiveDocument, LiveNavigator, LivePage, LiveViewport } from "./system-browser";
+import type { LiveDocument, LiveNavigator, LivePage, LivePageEventType, LiveViewport } from "./system-browser";
 import {
   beaconOver,
   browserOver,
@@ -111,6 +111,7 @@ function pageOf(overrides: Partial<LivePage> = {}): LivePage {
     }) as unknown as MediaQueryList,
     innerHeight: 900,
     visualViewport: viewportOf(900),
+    scrollTo: () => undefined,
     navigator: navigatorOf(),
     document: documentOf(),
     confirm: () => true,
@@ -345,10 +346,27 @@ describe("viewOver", () => {
 describe("viewportOver", () => {
   it("reads the layout height and the visual band each time it is asked", () => {
     const visual = viewportOf(640, 1);
-    const viewport = viewportOver(pageOf({ innerHeight: 900, visualViewport: visual }));
+    let innerHeight = 900;
+    const page = pageOf({ visualViewport: visual });
+    Object.defineProperty(page, "innerHeight", { get: () => innerHeight });
+    const viewport = viewportOver(page);
     expect(viewport.read()).toEqual({ layoutHeight: 900, visual: { height: 640, scale: 1 } });
+    innerHeight = 1080;
     visual.height = 900;
-    expect(viewport.read().visual).toEqual({ height: 900, scale: 1 });
+    expect(viewport.read()).toEqual({ layoutHeight: 1080, visual: { height: 900, scale: 1 } });
+  });
+
+  it("resets the root page scroll to (0, 0)", () => {
+    const scrolled: [number, number][] = [];
+    const viewport = viewportOver(
+      pageOf({
+        scrollTo: (x, y) => {
+          scrolled.push([x, y]);
+        },
+      }),
+    );
+    viewport.resetScroll();
+    expect(scrolled).toEqual([[0, 0]]);
   });
 
   it("tells a page without a visual viewport from one the keyboard moved", () => {
@@ -356,26 +374,44 @@ describe("viewportOver", () => {
     expect(viewport.read()).toEqual({ layoutHeight: 900, visual: null });
   });
 
-  it("follows the visual viewport's resize and scroll, and stops on unsubscribe", () => {
+  it("follows the visual viewport's and page's resize and scroll, and stops on unsubscribe", () => {
     const visual = viewportOf(640);
-    const viewport = viewportOver(pageOf({ visualViewport: visual }));
+    const pageEvents: Record<LivePageEventType, Set<() => void>> = {
+      popstate: new Set(),
+      resize: new Set(),
+      scroll: new Set(),
+    };
+    const viewport = viewportOver(
+      pageOf({
+        visualViewport: visual,
+        addEventListener: (type, listener) => void pageEvents[type].add(listener),
+        removeEventListener: (type, listener) => void pageEvents[type].delete(listener),
+      }),
+    );
     let heard = 0;
     const unsubscribe = viewport.subscribe(() => {
       heard += 1;
     });
     expect(visual.listening()).toBe(2);
+    expect(pageEvents.resize.size).toBe(1);
+    expect(pageEvents.scroll.size).toBe(1);
     visual.fire();
     expect(heard).toBe(2);
+    for (const listener of [...pageEvents.resize, ...pageEvents.scroll]) listener();
+    expect(heard).toBe(4);
 
     unsubscribe();
     expect(visual.listening()).toBe(0);
+    expect(pageEvents.resize.size).toBe(0);
+    expect(pageEvents.scroll.size).toBe(0);
     visual.fire();
-    expect(heard).toBe(2);
+    expect(heard).toBe(4);
   });
 
   it("has nothing to follow in a frame with no page", () => {
     const viewport = viewportOver(null);
     expect(viewport.read()).toEqual({ layoutHeight: 0, visual: null });
+    viewport.resetScroll();
     const unsubscribe = viewport.subscribe(() => undefined);
     expect(unsubscribe()).toBeUndefined();
   });
