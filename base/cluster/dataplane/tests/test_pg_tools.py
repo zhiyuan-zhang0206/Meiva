@@ -36,6 +36,7 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane import pg_plan, pg_tools
 from base.cluster.dataplane import pg_stall_watchdog as guard
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig
@@ -242,7 +243,12 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
     )
     wrapper.chmod(0o755)
     config = ThrowawayConfig(
-        None, default_root=scratch_pg_root, bin_dir=bin_dir, home=meiva_home(), environ=os.environ
+        None,
+        default_root=scratch_pg_root,
+        bin_dir=bin_dir,
+        home=meiva_home(),
+        environ=os.environ,
+        timers=SYSTEM_TIMERS,
     )
 
     with (

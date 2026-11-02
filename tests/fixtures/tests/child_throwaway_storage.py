@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import psycopg
 
 import tests.fixtures.env_bootstrap  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import refresh_data_plane_settings, settings
@@ -31,6 +32,7 @@ throwaway_config = ThrowawayConfig(
     configured_base(process_config.view.data_plane.pg_throwaway_base),
     home=meiva_home(),
     environ=os.environ,
+    timers=SYSTEM_TIMERS,
 )
 
 

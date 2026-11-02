@@ -66,6 +66,7 @@ def throwaway_config(process_config) -> ThrowawayConfig:
         configured_base(process_config.view.data_plane.pg_throwaway_base),
         home=meiva_home(),
         environ=os.environ,
+        timers=SYSTEM_TIMERS,
     )
 
 

@@ -27,7 +27,7 @@ def _h_backup_walg_run(args: argparse.Namespace) -> int:
     system, machine = artifact_system(args.runtime.host.platform)
     return cmd_walg_run(
         walg_plane(config),
-        throwaway=walg_throwaway(config, home=args.runtime.home),
+        throwaway=walg_throwaway(config, home=args.runtime.home, timers=args.runtime.timers),
         database_for_url=args.database_factory.for_url,
         clock=args.runtime.clock,
         home=args.runtime.home,
@@ -45,7 +45,7 @@ def _h_backup_walg_drill(args: argparse.Namespace) -> int:
     system, machine = artifact_system(args.runtime.host.platform)
     return cmd_walg_drill(
         walg_plane(config),
-        throwaway=walg_throwaway(config, home=args.runtime.home),
+        throwaway=walg_throwaway(config, home=args.runtime.home, timers=args.runtime.timers),
         database_for_url=args.database_factory.for_url,
         clock=args.runtime.clock,
         home=args.runtime.home,

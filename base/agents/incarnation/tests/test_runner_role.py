@@ -26,6 +26,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import (
     drop_database,
     ensure_checkpoint_schema,
@@ -60,6 +61,7 @@ def runner_db(postgres_access: None, process_config: ConfigBoot) -> Generator[st
         configured_base(process_config.view.data_plane.pg_throwaway_base),
         home=meiva_home(),
         environ=os.environ,
+        timers=SYSTEM_TIMERS,
     )
     with throwaway_postgres(schema_sql=_schema_sql(), config=throwaway) as url:
         yield url

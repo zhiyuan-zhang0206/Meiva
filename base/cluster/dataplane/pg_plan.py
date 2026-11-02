@@ -5,6 +5,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from base.clock import Timers
+
 PG_SHM_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 PG_SHM_MMAP_OK_ON_MACOS = True
 PG_TZ_ARGS = "-c timezone=UTC"
@@ -60,6 +62,11 @@ class ThrowawayConfig:
     # config (a boot's `process_environment()`, or a test naming its own). The postmaster's
     # daemon environment is carved from it; nothing downstream reads the process again.
     environ: Mapping[str, str] = field(kw_only=True)
+    # meiva:note
+    # The clock the throwaway cluster's bounded waits run on (readiness, shutdown). The caller
+    # that opens the cluster names how time is measured, so a readiness timeout is steerable in a
+    # test and a daemon's waits share the clock it already runs on.
+    timers: Timers = field(kw_only=True)
 
 
 def _format_bytes(n: int) -> str:

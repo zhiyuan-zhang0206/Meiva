@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -134,7 +135,9 @@ def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, 
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None, home=sandbox.home, environ=os.environ),
+        throwaway=ThrowawayConfig(
+            None, home=sandbox.home, environ=os.environ, timers=SYSTEM_TIMERS
+        ),
         home=sandbox.home,
         environ=sandbox.environ,
     )
@@ -568,7 +571,9 @@ def _drill_now(sandbox: Sandbox, lines: list[str], platform: tick.Platform | Non
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None, home=sandbox.home, environ=os.environ),
+        throwaway=ThrowawayConfig(
+            None, home=sandbox.home, environ=os.environ, timers=SYSTEM_TIMERS
+        ),
         home=sandbox.home,
         environ=sandbox.environ,
     )

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import psycopg
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Timers
 from base.cluster.dataplane.pg_plan import (
     POSTMASTER_SHUTDOWN_S,
     foreground_stop_argv,
@@ -40,7 +40,7 @@ def wait_foreground_postgres(
     port: int,
     data: Path,
     timeout_s: float = 60,
-    timers: Timers = SYSTEM_TIMERS,
+    timers: Timers,
 ) -> None:
     """Accept only a live owned postmaster answering for the expected PGDATA."""
     deadline: float | None = None

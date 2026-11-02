@@ -628,7 +628,12 @@ def throwaway_postgres(
                         env=pg_start_env(config.environ),
                     )
                     wait_foreground_postgres(
-                        process, log=log, port=port, data=data, timeout_s=readiness_timeout_s
+                        process,
+                        log=log,
+                        port=port,
+                        data=data,
+                        timeout_s=readiness_timeout_s,
+                        timers=config.timers,
                     )
                 else:
                     subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags

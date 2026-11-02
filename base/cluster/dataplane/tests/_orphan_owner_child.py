@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.paths import meiva_home
@@ -18,7 +19,9 @@ if sys.argv[1] == "--hold-lock":
     time.sleep(600)
 else:
     cm = pg_tools.throwaway_postgres(
-        config=ThrowawayConfig(Path(sys.argv[1]), home=meiva_home(), environ=os.environ)
+        config=ThrowawayConfig(
+            Path(sys.argv[1]), home=meiva_home(), environ=os.environ, timers=SYSTEM_TIMERS
+        )
     )
     url = cm.__enter__()
     target = Path(sys.argv[2])
