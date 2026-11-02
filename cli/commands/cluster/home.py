@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import assert_never
 
@@ -19,6 +20,7 @@ from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.private_storage import write_private_bytes
 from base.host.system.boot_autostart.registration import unregister_autostart
+from base.host.system.boot_unit import SYSTEM_UNIT_DIR, SYSTEMD_RUNTIME_DIR
 from base.host.system.cron.health_job import unregister_os_cron
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
@@ -208,10 +210,23 @@ def _execute(
 # home, so a scratch home's destroy never touches the host's jobs. Every job must be retired before the
 # home is marked detached. An unavailable scheduler is ambiguous custody, so failures are
 # raised.
-def unregister_scheduled_jobs(*, host: Host, roots: JobRoots) -> None:
+def unregister_scheduled_jobs(
+    *,
+    host: Host,
+    roots: JobRoots,
+    unit_dir: Path = SYSTEM_UNIT_DIR,
+    runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
+) -> None:
+    # meiva:note
+    # `unit_dir` / `runtime_dir` are the boot job's system unit locations, passed through to the
+    # autostart retirement: a caller that must not read the machine it decommissions (a destroy of
+    # a home other than the one this process would consult, a test of one) names its own.
     jobs = (
         ("health probe", unregister_os_cron),
-        ("autostart", unregister_autostart),
+        (
+            "autostart",
+            partial(unregister_autostart, unit_dir=unit_dir, runtime_dir=runtime_dir),
+        ),
         ("logs maintenance", unregister_logs_job),
         ("packages refresh", unregister_packages_job),
         ("PR flow", unregister_pr_flow_job),

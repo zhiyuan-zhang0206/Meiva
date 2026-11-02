@@ -379,15 +379,25 @@ def test_every_scheduled_job_is_tried_even_when_the_first_fails(default_home: Pa
 
 
 def test_the_crontab_is_read_once_per_cron_based_job_on_a_default_home(
-    default_home: Path,
+    default_home: Path, tmp_path: Path
 ) -> None:
     # meiva:note
     # On Linux without systemd the health probe, logs maintenance, packages refresh, PR flow and
     # WAL-G tick are crontab entries; the boot job has nothing to ask the host.
+    #
+    # The boot unit's locations are this test's own, because the host's are not the test's to read:
+    # a machine that really has `/etc/systemd/system/meiva-boot.service` installed (this one does)
+    # otherwise contributes its three retirement commands, and the answer stops being about the
+    # crontab entries at all.
     working = FakeCommands()
     working.on(_anything, Reply(), repeat=True)
 
-    unregister_scheduled_jobs(host=fake_host(working), roots=_default_roots(default_home))
+    unregister_scheduled_jobs(
+        host=fake_host(working),
+        roots=_default_roots(default_home),
+        unit_dir=tmp_path / "system-units",
+        runtime_dir=tmp_path / "systemd-runtime",
+    )
 
     assert working.argvs == [("crontab", "-l")] * 5
 
