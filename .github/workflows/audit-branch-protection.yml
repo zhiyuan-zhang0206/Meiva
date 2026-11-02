@@ -41,22 +41,31 @@ jobs:
         id: audit
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.MEIVA_AUDIT_PAT }}
+          # The secret is still named `AVA_AUDIT_PAT`: GitHub cannot rename a secret
+          # without discarding its value, and this one predates the product rename. The
+          # name is the only remnant — nothing else here reads the old brand.
+          GH_TOKEN: ${{ secrets.AVA_AUDIT_PAT }}
         shell: bash
         run: |
           set -o pipefail
           uv run python scripts/audit/branch_protection.py --json 2>&1 | tee /tmp/audit.out
 
-      - name: Alert on verified drift
+      # An audit that could not measure is as urgent as one that measured drift. Until
+      # this step covered `AUDIT_RESULT=error`, an unset token made the audit report
+      # "error" every week while the only signal was a red scheduled run nobody reads
+      # (2026-10-19 through 2026-11-02, three consecutive Mondays).
+      - name: Alert on drift or on an audit that could not measure
         if: steps.audit.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           result="$(grep '^AUDIT_RESULT=' /tmp/audit.out | tail -n 1)"
-          if [ "$result" != "AUDIT_RESULT=drift" ]; then
-            exit 1
-          fi
+          case "$result" in
+            AUDIT_RESULT=drift) headline='Branch-protection drift is still present:' ;;
+            AUDIT_RESULT=error) headline='The branch-protection audit could not measure the live state:' ;;
+            *) exit 1 ;;
+          esac
 
           marker='<!-- branch-protection-audit-drift -->'
           report="$(cat /tmp/audit.out)"
@@ -67,7 +76,7 @@ jobs:
           issue_number="$(sed -n '1p' /tmp/branch-protection-issues)"
           body="$marker
 
-          Branch-protection drift is still present:
+          $headline
 
           \`\`\`json
           $report
@@ -77,7 +86,7 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" \
               -f body="$body"
           else
-            gh issue create --title "Branch protection drift detected" --body "$body"
+            gh issue create --title "Branch-protection audit needs attention" --body "$body"
           fi
           exit 1
 
