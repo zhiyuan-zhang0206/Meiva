@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any, cast
@@ -363,3 +364,75 @@ def test_application_module_skips_e2e_on_incremental_pr_and_runs_on_dispatch() -
         event="workflow_dispatch",
         changed=["base/lm/retry.py"],
     )
+
+
+# meiva:note
+# Write one file of the temporary repository these cases build.
+def _write(root: Path, name: str, text: str) -> None:
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+# meiva:note
+# Run one fixed Git command against that test-owned checkout.
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(  # noqa: S603
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+# meiva:note
+# The surface names come from the policy of the tree being judged: swapping an import behind an
+# `__exports__` list reaches the consumer outside the package only where that policy declares
+# `__exports__` a public-surface name (`__all__` is always one).
+@pytest.mark.parametrize(
+    ("policy", "interface_unchanged"),
+    [
+        ('[public-surface]\nnames = ["__exports__"]\n', False),
+        ("", True),
+        ('[public-surface]\nnames = ["__other__"]\n', True),
+    ],
+)
+def test_interface_cutoff_follows_the_surface_names_the_policy_declares(
+    tmp_path: Path, policy: str, interface_unchanged: bool
+) -> None:
+    _write(
+        tmp_path,
+        "pyproject.toml",
+        '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests"]\n',
+    )
+    _write(tmp_path, "meizel.policy.toml", policy)
+    _write(tmp_path, "base/lm/meizel.toml", 'purity = "strict"\n')
+    _write(tmp_path, "base/lm/a.py", "def foo() -> int:\n    return 1\n")
+    _write(tmp_path, "base/lm/b.py", "def foo() -> int:\n    return 1\n")
+    _write(tmp_path, "base/lm/m.py", 'from base.lm.a import foo\n__exports__ = ["foo"]\n')
+    _write(
+        tmp_path,
+        "base/lm/tests/test_lm.py",
+        "from base.lm.m import foo\n\ndef test_lm():\n    assert foo() == 1\n",
+    )
+    _write(
+        tmp_path,
+        "tests/consumer/test_cli.py",
+        "from base.lm.m import foo\n\ndef test_cli():\n    assert foo() == 1\n",
+    )
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", ".")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "base",
+    )
+    base = _git(tmp_path, "rev-parse", "HEAD")
+
+    _write(tmp_path, "base/lm/m.py", 'from base.lm.b import foo\n__exports__ = ["foo"]\n')
+    unchanged = e2e_scope.interface_unchanged_paths(
+        ["base/lm/m.py"], repo_root=tmp_path, base_ref=base
+    )
+    assert (unchanged == frozenset({"base/lm/m.py"})) is interface_unchanged

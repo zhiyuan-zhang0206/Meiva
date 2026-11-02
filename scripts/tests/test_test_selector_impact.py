@@ -283,7 +283,10 @@ def test_base_policy_uses_the_owner_snapshot_decoder(tmp_path: Path, legacy: str
     assert (root / "meizel.policy.toml").read_text() == ""
 
 
-def test_interface_early_cutoff_isolates_strict_module_internal_edits(tmp_path: Path) -> None:
+# meiva:note
+# An edit inside a strict module that keeps its signature still runs the test that asserts it: the
+# selector has no interface shortcut, because a test asserts behavior, not a signature.
+def test_an_internal_edit_still_runs_the_test_that_asserts_the_module(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _write(root, "base/lm/meizel.toml", 'purity = "strict"\n')
     _write(
@@ -297,10 +300,11 @@ def test_interface_early_cutoff_isolates_strict_module_internal_edits(tmp_path: 
         "base/lm/tests/test_lm.py",
         "from base.lm.retry import compute_backoff\n\ndef test_lm():\n    assert compute_backoff(2) == 200\n",
     )
+    _write(root, "base/lm/__init__.py", "from base.lm.retry import compute_backoff\n")
     _write(
         root,
         "tests/consumer/test_cli.py",
-        "from base.lm.retry import compute_backoff\n\ndef test_cli():\n    assert compute_backoff(1) == 100\n",
+        "from base.lm import compute_backoff\n\ndef test_cli():\n    assert compute_backoff(1) == 100\n",
     )
     _git(root, "init", "-q")
     _git(root, "add", ".")
@@ -317,7 +321,7 @@ def test_interface_early_cutoff_isolates_strict_module_internal_edits(tmp_path: 
     )
     internal = test_selector.select_tests(["base/lm/retry.py"], repo_root=root, base_ref=base)
     assert internal.decision == "SELECTED"
-    assert internal.tests == ("base/lm/tests/test_lm.py",)
+    assert internal.tests == ("base/lm/tests/test_lm.py", "tests/consumer/test_cli.py")
 
     _write(
         root,
@@ -330,49 +334,6 @@ def test_interface_early_cutoff_isolates_strict_module_internal_edits(tmp_path: 
     )
     assert signature_changed.decision == "SELECTED"
     assert signature_changed.tests == ("base/lm/tests/test_lm.py", "tests/consumer/test_cli.py")
-
-
-# meiva:note
-# The surface names come from the policy of the tree the selector judges: swapping an import behind
-# an `__exports__` list reaches the consumer outside the package only where that policy declares
-# `__exports__` a public-surface name (`__all__` is always one).
-@pytest.mark.parametrize(
-    ("policy", "consumer_selected"),
-    [
-        ('[public-surface]\nnames = ["__exports__"]\n', True),
-        ("", False),
-        ('[public-surface]\nnames = ["__other__"]\n', False),
-    ],
-)
-def test_interface_early_cutoff_follows_the_surface_names_the_policy_declares(
-    tmp_path: Path, policy: str, consumer_selected: bool
-) -> None:
-    root = _repo(tmp_path)
-    _write(root, "meizel.policy.toml", policy)
-    _write(root, "base/lm/meizel.toml", 'purity = "strict"\n')
-    _write(root, "base/lm/a.py", "def foo() -> int:\n    return 1\n")
-    _write(root, "base/lm/b.py", "def foo() -> int:\n    return 1\n")
-    _write(root, "base/lm/m.py", 'from base.lm.a import foo\n__exports__ = ["foo"]\n')
-    _write(
-        root,
-        "base/lm/tests/test_lm.py",
-        "from base.lm.m import foo\n\ndef test_lm():\n    assert foo() == 1\n",
-    )
-    _write(
-        root,
-        "tests/consumer/test_cli.py",
-        "from base.lm.m import foo\n\ndef test_cli():\n    assert foo() == 1\n",
-    )
-    _git(root, "init", "-q")
-    _git(root, "add", ".")
-    _git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base")
-    base = _git(root, "rev-parse", "HEAD")
-
-    _write(root, "base/lm/m.py", 'from base.lm.b import foo\n__exports__ = ["foo"]\n')
-    result = test_selector.select_tests(["base/lm/m.py"], repo_root=root, base_ref=base)
-    assert result.decision == "SELECTED", result.as_json()
-    assert ("tests/consumer/test_cli.py" in result.tests) is consumer_selected
-    assert "base/lm/tests/test_lm.py" in result.tests
 
 
 _BATCH_BODY = """This pull request is based on the [main branch](https://github.com/o/r/tree/main) at [SHA 02af8a4dc690](https://github.com/o/r/commit/02af8a4dc690).

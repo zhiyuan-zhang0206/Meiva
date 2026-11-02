@@ -13,7 +13,7 @@ import tempfile
 import tomllib
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, TypeGuard
 
@@ -54,12 +54,9 @@ class Impact:
     tests_by_input: dict[str, set[str]]
     unknown: tuple[Unknown, ...]
     members: dict[Fact, set[str]] = field(default_factory=dict)
-    cutoff: frozenset[str] = frozenset()
 
     def runtime_tests(self, path: str) -> set[str]:
         # meiva:link docs/conventions/engineering/test-selection.md
-        if path in self.cutoff:
-            return set()
         tests = {
             test
             for parent in (Path(path), *Path(path).parents)
@@ -444,23 +441,6 @@ def qualifies_for_interface_cutoff(
         head.test_dirs,
         head.collectable,
     )
-
-
-def apply_interface_cutoff(
-    package_paths: Iterable[str],
-    base: _CheckoutScope,
-    head: _CheckoutScope,
-    base_impact: Impact,
-    head_impact: Impact,
-) -> tuple[Impact, Impact]:
-    cutoff = frozenset(
-        path
-        for path in package_paths
-        if qualifies_for_interface_cutoff(
-            path, base=base, head=head, base_impact=base_impact, head_impact=head_impact
-        )
-    )
-    return replace(base_impact, cutoff=cutoff), replace(head_impact, cutoff=cutoff)
 
 
 # meiva:note
