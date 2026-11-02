@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
-
 import psutil
-import pytest
 
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 
@@ -32,31 +28,6 @@ def assert_clean(argv: list[str], *, label: str) -> None:
     for element in argv:
         for secret in SECRET_VALUES:
             assert secret not in element, f"{label} leaked a secret on argv: {argv!r}"
-
-
-@pytest.fixture
-def secret_env() -> Iterator[None]:
-    """The live env a daemon launcher forwards. Replaced wholesale — the
-    forwarders read `os.environ` by nature (see no_os_environ's allowlist)."""
-    saved = dict(os.environ)
-    os.environ.clear()
-    os.environ.update(SECRET_ENV)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)
-
-
-@pytest.fixture
-def secrets_in_creator_env(pty_service: PtyServiceProcess, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The creating process holds the secrets (as an agent or gateway does); the
-    already-running service does not, so a secret reaching a shell could only have
-    come through the request."""
-    del pty_service
-    for key, value in SECRET_ENV.items():
-        if key not in ("MEIVA_HOME", "PATH"):
-            monkeypatch.setenv(key, value)
 
 
 def service_tree_argvs(service: PtyServiceProcess) -> list[list[str]]:

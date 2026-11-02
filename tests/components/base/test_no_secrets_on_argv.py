@@ -35,18 +35,16 @@ from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socke
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import output_until, type_line
 from base.sessions.pty.tests.secret_argv import (
+    SECRET_ENV,
     SECRET_VALUES,
     assert_clean,
     assert_service_tree_clean,
 )
-from base.sessions.pty.tests.secret_argv import secret_env as secret_env
-from base.sessions.pty.tests.secret_argv import secrets_in_creator_env as secrets_in_creator_env
 from base.sessions.tests.poll_until import poll_until
 
 
-def test_session_backend_new_session(unit_home: Path, secrets_in_creator_env: None) -> None:
+def test_session_backend_new_session(unit_home: Path) -> None:
     """`meiva start` / `meiva restart` bring every daemon up through here."""
-    from base.host.env.registry import process_environment
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
     from base.sessions.record import SessionRecord
@@ -56,7 +54,7 @@ def test_session_backend_new_session(unit_home: Path, secrets_in_creator_env: No
         "meiva-gateway",
         "sleep 60",
         unit_home,
-        env=forward_env_dict(process_environment()),
+        env=forward_env_dict(SECRET_ENV),
     )
     try:
         record = SessionRecord.read(unit_home / "run" / "sessions" / "meiva-gateway.json")
@@ -67,10 +65,7 @@ def test_session_backend_new_session(unit_home: Path, secrets_in_creator_env: No
         backend.kill_session("meiva-gateway")
 
 
-def test_launch_record_cannot_reach_a_live_process(
-    unit_home: Path, secrets_in_creator_env: None
-) -> None:
-    from base.host.env.registry import process_environment
+def test_launch_record_cannot_reach_a_live_process(unit_home: Path) -> None:
     from base.sessions import posixproc
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
@@ -80,7 +75,7 @@ def test_launch_record_cannot_reach_a_live_process(
         "meiva-gateway",
         "true",
         unit_home,
-        env=forward_env_dict(process_environment()),
+        env=forward_env_dict(SECRET_ENV),
     )
     try:
         poll_until(
@@ -106,7 +101,6 @@ def test_agent_shell_session(
     pty_service: PtyServiceProcess,
     database: Database,
     unit_home: Path,
-    secrets_in_creator_env: None,
 ) -> None:
     """An agent's own persistent shell. The create is a `new` request to the
     pty-sessions service carrying the host-scope session forward view in its body
@@ -114,7 +108,6 @@ def test_agent_shell_session(
     children re-source them at their own boot), so the secret values appear
     NOWHERE in this launch path: not on an argv of the service or the shell, not in
     the shell's environment."""
-    from base.host.env.registry import process_environment
     from base.paths import workspace_dir
     from base.sessions.backend import PtySessionBackend, get_shell_backend
     from base.sessions.pty.client import PtyClientConfig
@@ -130,7 +123,7 @@ def test_agent_shell_session(
         "probe",
         cwd=workspace_dir(1, home=unit_home),
         ttl=120,
-        host=session_host(process_environment()),
+        host=session_host(SECRET_ENV),
     )
     name = "meiva-agent-1-shell-3-probe"
     assert get_shell_backend(home=unit_home).has_session(name)

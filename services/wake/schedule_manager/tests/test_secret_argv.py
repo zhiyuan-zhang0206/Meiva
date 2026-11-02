@@ -5,26 +5,22 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.host.env.registry import process_environment
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
 from base.sessions.pty.tests.secret_argv import (
+    SECRET_ENV,
     SECRET_VALUES,
     assert_service_tree_clean,
     service_tree_argvs,
-)
-from base.sessions.pty.tests.secret_argv import (
-    secrets_in_creator_env as secrets_in_creator_env,
 )
 from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
 
 
 def test_schedule_launch(
     pty_service: PtyServiceProcess,
-    secrets_in_creator_env: None,
     db_conn: psycopg.Connection,
     unit_home: Path,
 ) -> None:
@@ -49,7 +45,7 @@ def test_schedule_launch(
             pool,
             get_shell_backend(home=unit_home),
             repo_root=unit_home,
-            launch_env=forward_env_dict(process_environment()),
+            launch_env=forward_env_dict(SECRET_ENV),
         )._launch(schedule_id, NOW)
     finally:
         pool.close()
