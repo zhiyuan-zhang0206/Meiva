@@ -42,6 +42,7 @@ from base.db.config import db_config_from_boot
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.env.agent_slices import ModelOverrides
 from base.host.env.process_profile import profile_unknown_error
+from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -310,7 +311,7 @@ def main() -> None:
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="labeler")
+    gate = ProcessDbGate(version=version.get, process="labeler", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

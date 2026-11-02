@@ -25,6 +25,7 @@ from base.deploy.tests.pgbouncer import (
     pgbouncer_in_front,
 )
 from base.events.live.bus import EventBus
+from base.host.exit_codes import hard_exit
 from cli.database import OperatorDatabaseFactory
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -519,7 +520,7 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
     ):
-        owner = ProcessDbGate(version=lambda: 4321, process=process_name())
+        owner = ProcessDbGate(version=lambda: 4321, process=process_name(), end_process=hard_exit)
         owner.observe_minimum(0)
         assert owner.min_read_due() is False
 

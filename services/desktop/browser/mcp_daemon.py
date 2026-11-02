@@ -42,6 +42,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_boot
+from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -738,7 +739,7 @@ def build_entry_wiring(
     machine = ConfiguredMachineIdentity(config)
     process_home = home.resolve()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="browser-mcp")
+    gate = ProcessDbGate(version=version.get, process="browser-mcp", end_process=hard_exit)
     return BrowserMcpEntryWiring(
         process_name="browser-mcp",
         config=config,

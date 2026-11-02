@@ -8,6 +8,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -32,7 +33,9 @@ def events_maintenance_db(
     process_config: ConfigBoot, *, local_machine: MachineIdentityReader
 ) -> Database:
     version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process="events_maintenance_test")
+    gate = ProcessDbGate(
+        version=version.get, process="events_maintenance_test", end_process=hard_exit
+    )
     return maintenance_config.events_maintenance_db(
         process_config, gate=gate, local_host=local_machine.host, home=meiva_home()
     )

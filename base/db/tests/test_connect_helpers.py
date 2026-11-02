@@ -15,11 +15,9 @@ Postgres for what the SQL actually does.
 
 from __future__ import annotations
 
-import logging
-import os
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -32,7 +30,7 @@ from base import db
 from base.config import settings
 from base.db import Database, connections, pooled_session
 from base.db import code_version_gate as gate
-from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
+from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE, hard_exit
 
 
 def _session_direct_url(_config: object = None, **_kwargs: object) -> connections.DirectResolution:
@@ -92,45 +90,40 @@ _PROCESS = "db-test"
 
 
 class _Exited(BaseException):
-    """What the patched `os._exit` raises: the process would have ended here."""
-
+    # meiva:note
+    # What the test's exit raises: the process would have ended here, and the code it
+    # asked for is on the exception.
     def __init__(self, code: int) -> None:
         super().__init__(code)
         self.code = code
 
 
 @pytest.fixture
-def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """A gated process at a fixed version whose `os._exit` is observable.
+def _gated_process() -> list[int]:
+    # meiva:note
+    # The exit codes this process was asked to leave with. The gate takes the exit it
+    # ends through, so the test hands it a recorder and no global is rewritten: the
+    # loguru sinks and the stdlib handlers `hard_exit` closes stay the session's.
+    return []
 
-    The public process posture/version answers and the owned read timestamp are replaced for
-    the test and restored after; `hard_exit` also closes loguru's sinks and the
-    stdlib handlers, so both are neutralized to keep the session's. Returns the
-    exit codes attempted.
-    """
-    exits: list[int] = []
 
-    def fake_exit(code: int) -> NoReturn:
+def _exit_raised(exits: list[int]) -> Callable[[int], NoReturn]:
+    # meiva:note
+    # An `end_process` that records the code and raises `_Exited` where a live process
+    # would call `os._exit`.
+    def end_process(code: int) -> NoReturn:
         exits.append(code)
         raise _Exited(code)
 
-    def keep(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(os, "_exit", fake_exit)
-    monkeypatch.setattr(loguru_logger, "remove", keep)
-    monkeypatch.setattr(logging, "shutdown", keep)
-    return exits
+    return end_process
 
 
 @pytest.fixture
 def process_gate(_gated_process: list[int]) -> gate.ProcessDbGate:
     """The test process's explicit budget, with the original fixed version and identity."""
-    return gate.ProcessDbGate(version=lambda: _VERSION, process=_PROCESS)
-
-
-# Every test retains the original observable hard-exit instrumentation.
-pytestmark = pytest.mark.usefixtures("_gated_process")
+    return gate.ProcessDbGate(
+        version=lambda: _VERSION, process=_PROCESS, end_process=_exit_raised(_gated_process)
+    )
 
 
 # ── the read schedule ────────────────────────────────────────────────────────
@@ -150,7 +143,10 @@ def test_the_first_borrow_reads_and_the_next_thirty_seconds_do_not(
 
 def test_an_exempt_process_never_reads_the_minimum(monkeypatch: pytest.MonkeyPatch) -> None:
     process_gate = gate.ProcessDbGate(
-        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+        process="cli",
+        version=lambda: pytest.fail("the CLI needs no version"),
+        exempt=True,
+        end_process=hard_exit,
     )
     assert process_gate.min_read_due() is False
 
@@ -180,7 +176,7 @@ def test_a_process_below_the_minimum_logs_critical_and_exits(
         with pytest.raises(_Exited) as exited:
             process_gate.observe_minimum(_VERSION + 1)
     finally:
-        type(loguru_logger).remove(loguru_logger, sink_id)  # the fixture stubbed the instance's
+        loguru_logger.remove(sink_id)
 
     assert exited.value.code == CODE_BEHIND_MINIMUM_EXIT_CODE
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
@@ -347,7 +343,10 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
 
 def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPatch) -> None:
     process_gate = gate.ProcessDbGate(
-        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+        process="cli",
+        version=lambda: pytest.fail("the CLI needs no version"),
+        exempt=True,
+        end_process=hard_exit,
     )
     conn = _FakeConn(minimum=10**9)
     restore: Any = pooled_session.restore_pooled_session
@@ -418,10 +417,15 @@ def test_the_raise_is_greatest_and_never_lowers_the_minimum(
     skips the read, carrying an older version."""
     _set_minimum(_VERSION + 25)
     process_gate = gate.ProcessDbGate(
-        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+        process="cli",
+        version=lambda: pytest.fail("the CLI needs no version"),
+        exempt=True,
+        end_process=hard_exit,
     )
 
-    process_gate = gate.ProcessDbGate(process="cli", version=lambda: _VERSION, exempt=True)
+    process_gate = gate.ProcessDbGate(
+        process="cli", version=lambda: _VERSION, exempt=True, end_process=hard_exit
+    )
     assert (
         process_gate.raise_min_code_version(Database.from_settings(gate=process_gate))
         == _VERSION + 25
@@ -526,7 +530,10 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
 ) -> None:
     _set_minimum(_VERSION + 1)
     process_gate = gate.ProcessDbGate(
-        process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
+        process="cli",
+        version=lambda: pytest.fail("the CLI needs no version"),
+        exempt=True,
+        end_process=hard_exit,
     )
 
     with db.connect(gate=process_gate) as conn:
@@ -539,7 +546,11 @@ def test_independent_handles_and_async_restore_share_one_process_budget(
     stored_minimum: int,
     _gated_process: list[int],
 ) -> None:
-    owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
+    owner = gate.ProcessDbGate(
+        version=lambda: _VERSION,
+        process="test-process",
+        end_process=_exit_raised(_gated_process),
+    )
     _set_minimum(_VERSION)
     first = Database.from_settings(gate=owner)
     second = Database.from_settings(gate=owner)
@@ -568,7 +579,11 @@ async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
 ) -> None:
     from psycopg_pool import AsyncConnectionPool
 
-    owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
+    owner = gate.ProcessDbGate(
+        version=lambda: _VERSION,
+        process="test-process",
+        end_process=_exit_raised(_gated_process),
+    )
     _set_minimum(_VERSION)
     first = Database.from_settings(gate=owner).pool(min_size=1, max_size=1)
     second = Database.from_settings(gate=owner).async_pool(
@@ -597,7 +612,9 @@ async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
         await second.close()
         first.close()
     # A different process starts with an independent budget.
-    other = gate.ProcessDbGate(version=lambda: _VERSION, process="other-process")
+    other = gate.ProcessDbGate(
+        version=lambda: _VERSION, process="other-process", end_process=hard_exit
+    )
     assert other.min_read_due() is True
 
 
@@ -605,7 +622,9 @@ def test_exempt_process_owner_never_needs_a_loaded_code_version() -> None:
     def no_version() -> int:
         raise AssertionError("an exempt CLI must not resolve Git")
 
-    owner = gate.ProcessDbGate(version=no_version, process="cli", exempt=True)
+    owner = gate.ProcessDbGate(
+        version=no_version, process="cli", exempt=True, end_process=hard_exit
+    )
     assert owner.application_name() == "meiva:cli"
     assert owner.min_read_due() is False
 

@@ -11,6 +11,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
+from base.host.exit_codes import hard_exit
 from base.telemetry import EventPipeline
 from cli.database import (
     OperatorDatabaseFactory,
@@ -50,7 +51,7 @@ def test_operator_handles_share_the_command_gate_without_git(
     factory()
     assert len(seen) == 2
     assert seen[0] is seen[1]
-    service = ProcessDbGate(version=lambda: 12, process="service")
+    service = ProcessDbGate(version=lambda: 12, process="service", end_process=hard_exit)
     assert service.min_read_due()
     assert service.application_name() == "meiva:service:v12"
 

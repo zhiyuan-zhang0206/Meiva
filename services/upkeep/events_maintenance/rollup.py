@@ -39,6 +39,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -218,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     machine = ConfiguredMachineIdentity(config)
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process=process_name())
+    gate = ProcessDbGate(version=version.get, process=process_name(), end_process=hard_exit)
     clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     with events_maintenance_db(
         config, gate=gate, local_host=machine.host, home=meiva_home()

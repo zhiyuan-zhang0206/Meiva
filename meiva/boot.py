@@ -43,6 +43,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.env.agent_env import AGENT_ID_ENV
+from base.host.exit_codes import hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -144,7 +145,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentityReader) -> D
             )
         with lock:
             if gate is None:
-                gate = ProcessDbGate(version=version.get, process="unknown")
+                gate = ProcessDbGate(version=version.get, process="unknown", end_process=hard_exit)
         return Database(
             db_config_from_boot(config),
             gate=gate,

@@ -38,7 +38,7 @@ from typing import NoReturn, Protocol
 
 import psycopg
 
-from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE, hard_exit
+from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.log import logger
 
 # How stale the process-local copy of `min_code_version` may be. It bounds how
@@ -60,7 +60,9 @@ def has_log_sink() -> bool:
     return bool(getattr(core, "handlers", None))
 
 
-def _refuse(version: int, minimum: int, *, process: str) -> NoReturn:
+def _refuse(
+    version: int, minimum: int, *, process: str, end_process: Callable[[int], NoReturn]
+) -> NoReturn:
     fields = {
         "service": process,
         "version": version,
@@ -72,7 +74,7 @@ def _refuse(version: int, minimum: int, *, process: str) -> NoReturn:
         # A process that dials before it opens its sinks would otherwise exit
         # without a word: loguru discards a record no handler receives.
         sys.stderr.write(_REFUSAL.format(**fields) + "\n")
-    hard_exit(CODE_BEHIND_MINIMUM_EXIT_CODE)
+    end_process(CODE_BEHIND_MINIMUM_EXIT_CODE)
 
 
 class _Dialer(Protocol):
@@ -108,10 +110,23 @@ def _raise_minimum(db: _Dialer, version: int) -> int:
 # refreshes, connection rebuilds and independent pools retain this same owner.
 # Due/read observation intentionally remains two-phase: concurrent first
 # restores may both read the minimum, as they did with the process timestamp.
+#
+# The gate decides, so it takes both effects it spends: `version` answers what code
+# this process runs, and `end_process` is how a refusal leaves the process —
+# `base.host.exit_codes.hard_exit` in every live process, a recorder in a test that
+# must observe the exit code without dying.
 class ProcessDbGate:
-    def __init__(self, *, version: Callable[[], int], process: str, exempt: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        version: Callable[[], int],
+        process: str,
+        end_process: Callable[[int], NoReturn],
+        exempt: bool = False,
+    ) -> None:
         self._version = version
         self._process = process
+        self._end_process = end_process
         self._exempt = exempt
         self._last_read_at: float | None = None
 
@@ -129,7 +144,7 @@ class ProcessDbGate:
         self._last_read_at = time.monotonic()
         version = self._version()
         if version < minimum:
-            _refuse(version, minimum, process=self._process)
+            _refuse(version, minimum, process=self._process, end_process=self._end_process)
 
     # meiva:note
     # Shift the recorded read timestamp backward so tests can advance the refresh window without patching `time`.

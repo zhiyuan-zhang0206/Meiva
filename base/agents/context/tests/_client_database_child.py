@@ -9,6 +9,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 
@@ -16,7 +17,9 @@ from base.native_process.loaded_commit import LoadedCommit
 def main() -> None:
     image = LoadedCommit.capture(Path(__file__).resolve().parents[4])
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="context-database-test")
+    gate = ProcessDbGate(
+        version=version.get, process="context-database-test", end_process=hard_exit
+    )
     database = Database(
         DbConfig(
             db_url=Path(sys.argv[1]).read_text(),

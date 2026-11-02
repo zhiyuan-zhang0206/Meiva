@@ -12,6 +12,7 @@ from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -28,7 +29,9 @@ from services.derived.labeler.tests.service_probe import (
 @pytest.fixture
 def database_gate() -> ProcessDbGate:
     version = CodeVersion(LoadedCommit.capture())
-    return ProcessDbGate(version=version.get, process=f"lr-{uuid.uuid4().hex}")
+    return ProcessDbGate(
+        version=version.get, process=f"lr-{uuid.uuid4().hex}", end_process=hard_exit
+    )
 
 
 @pytest.fixture

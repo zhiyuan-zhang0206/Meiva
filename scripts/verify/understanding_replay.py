@@ -38,6 +38,7 @@ from base.clock.configuration import clock_config_from_boot  # noqa: E402
 from base.config import ConfigBoot  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.db.code_version_gate import ProcessDbGate  # noqa: E402
+from base.host.exit_codes import hard_exit  # noqa: E402
 from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
 from base.lm.factory import process_provider_keys  # noqa: E402
@@ -123,7 +124,7 @@ def require_preview(dockerenv: Path = DOCKERENV) -> None:
 
 def build_replay_gate(image: LoadedCommit, *, process: str) -> ProcessDbGate:
     version = CodeVersion(image)
-    return ProcessDbGate(version=version.get, process=process)
+    return ProcessDbGate(version=version.get, process=process, end_process=hard_exit)
 
 
 def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:

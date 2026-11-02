@@ -6,11 +6,14 @@ import base.config as c
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.connections import NoDatabaseAuthorityError
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 
 image = LoadedCommit.capture()
-gate = ProcessDbGate(process="boot-authority-test", version=CodeVersion(image).get)
+gate = ProcessDbGate(
+    process="boot-authority-test", version=CodeVersion(image).get, end_process=hard_exit
+)
 db = Database.from_settings(gate=gate)
 assert c.settings.env_boot.db_authority_refusal is not None
 assert "env_boot" not in c.settings.model_dump()

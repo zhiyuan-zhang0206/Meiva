@@ -7,6 +7,7 @@ import pytest
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
@@ -63,7 +64,7 @@ def test_gate_keeps_a_fresh_budget_for_each_test(
 
 def test_gate_preserves_an_unknown_nonexempt_session_image(tmp_path: Path) -> None:
     version = code_version.CodeVersion(LoadedCommit(tmp_path, None))
-    owner = ProcessDbGate(version=version.get, process=process_name())
+    owner = ProcessDbGate(version=version.get, process=process_name(), end_process=hard_exit)
     assert owner.min_read_due()
     with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
         owner.application_name()

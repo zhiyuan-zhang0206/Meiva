@@ -137,7 +137,7 @@ def main() -> None:
     process_home = meiva_home().resolve()
     assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="insights")
+    gate = ProcessDbGate(version=version.get, process="insights", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

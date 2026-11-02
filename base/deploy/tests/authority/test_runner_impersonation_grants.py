@@ -18,6 +18,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.deploy.tests.db_authority_tests import AuthorityCluster
 from base.events.live.bus import EventBus
+from base.host.exit_codes import hard_exit
 from base.host.net.url_secret import url_with_userinfo
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths.tests.homes import unit_home as unit_home
@@ -198,7 +199,9 @@ def _runner_database(cluster: AuthorityCluster) -> Database:
             db_pool_max_size=2,
             pgbouncer_enabled=False,
         ),
-        gate=ProcessDbGate(version=lambda: 0, process="runner-grants", exempt=True),
+        gate=ProcessDbGate(
+            version=lambda: 0, process="runner-grants", exempt=True, end_process=hard_exit
+        ),
     )
 
 

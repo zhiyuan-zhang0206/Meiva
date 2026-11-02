@@ -25,6 +25,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -37,7 +38,7 @@ from services.backup.tests.support import minted_tree
 def _database_factory() -> Callable[[str], Database]:
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="backup-test")
+    gate = ProcessDbGate(version=version.get, process="backup-test", end_process=hard_exit)
 
     def for_url(url: str) -> Database:
         return Database(replace(db_config_from_settings(), db_url=url), gate=gate)

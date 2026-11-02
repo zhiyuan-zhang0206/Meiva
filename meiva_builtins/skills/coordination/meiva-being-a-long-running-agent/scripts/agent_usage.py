@@ -32,6 +32,7 @@ from usage_budget import (
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
@@ -131,7 +132,7 @@ def main(argv: Sequence[str], *, database: Database) -> None:
 def process_database() -> Database:
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process=process_name())
+    gate = ProcessDbGate(version=version.get, process=process_name(), end_process=hard_exit)
     return Database.from_settings(gate=gate)
 
 

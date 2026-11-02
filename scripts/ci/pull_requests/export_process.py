@@ -9,6 +9,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -21,7 +22,7 @@ def process_gate(process: str, *, image: LoadedCommit | None) -> ProcessDbGate:
     if image is None:
         raise ValueError("a standalone exporter requires its entry's loaded image")
     version = CodeVersion(image)
-    return ProcessDbGate(process=process, version=version.get)
+    return ProcessDbGate(process=process, version=version.get, end_process=hard_exit)
 
 
 @contextmanager

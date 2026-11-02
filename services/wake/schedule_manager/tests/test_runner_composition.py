@@ -18,6 +18,7 @@ from base.config.tests.configuration import data_plane_environment
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.paths import meiva_home
 from base.telemetry import process_name
@@ -135,7 +136,9 @@ def _engine_root() -> tuple[engine.RunnerRoot, ClientSet]:
     config = _runner_boot()
     machine = ConfiguredMachineIdentity(config)
     image = process_context.loaded_code_image()
-    gate = ProcessDbGate(process=process_name(), version=CodeVersion(image).get)
+    gate = ProcessDbGate(
+        process=process_name(), version=CodeVersion(image).get, end_process=hard_exit
+    )
     home = meiva_home()
 
     def database() -> Database:

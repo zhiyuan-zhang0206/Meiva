@@ -14,6 +14,7 @@ import pytest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
+from base.host.exit_codes import hard_exit
 from base.telemetry import event_store
 from base.telemetry.emitter import Event, category_for_kind
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -180,7 +181,7 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
             db_pool_max_size=1,
             pgbouncer_enabled=False,
         ),
-        gate=ProcessDbGate(process="test-unreachable", version=lambda: 1),
+        gate=ProcessDbGate(process="test-unreachable", version=lambda: 1, end_process=hard_exit),
     )
     event_store.store_events(unreachable_db, [_event("llm_usage", marker)], now=100.0)
     # meiva:note
@@ -215,7 +216,7 @@ def test_a_process_without_database_authority_turns_the_sink_off(
             pgbouncer_enabled=False,
             db_authority_refusal="no login for this home",
         ),
-        gate=ProcessDbGate(process="test-unadmitted", version=lambda: 1),
+        gate=ProcessDbGate(process="test-unadmitted", version=lambda: 1, end_process=hard_exit),
     )
     event_store.store_events(unadmitted_db, [_event("llm_usage", marker)])
     assert event_store.set_enabled(enabled=False) is False

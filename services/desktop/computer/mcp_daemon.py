@@ -70,6 +70,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.host.permissions_helper.client import PermissionsHelperError
 from base.log import logger
 from base.native_process.code_version import CodeVersion
@@ -696,7 +697,7 @@ class DaemonEntry:
 def prepare_entry(image: LoadedCommit, machine_config: ConfigBoot, *, home: Path) -> DaemonEntry:
     machine = ConfiguredMachineIdentity(machine_config)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="computer-mcp")
+    gate = ProcessDbGate(version=version.get, process="computer-mcp", end_process=hard_exit)
     return DaemonEntry(
         image=image,
         machine=machine,

@@ -15,6 +15,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -99,7 +100,7 @@ def main() -> None:
         sys.exit(1)
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="memory_search")
+    gate = ProcessDbGate(version=version.get, process="memory_search", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

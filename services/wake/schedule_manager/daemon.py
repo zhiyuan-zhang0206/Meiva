@@ -57,6 +57,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.env.dotenv_file import read_env_aliases
+from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.host.net.auth import bearer_header
 from base.host.net.http_dial import get as dial_get
@@ -283,7 +284,7 @@ def main() -> None:
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="schedule_manager")
+    gate = ProcessDbGate(version=version.get, process="schedule_manager", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

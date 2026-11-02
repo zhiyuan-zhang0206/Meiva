@@ -13,6 +13,7 @@ from base.config import get_field, set_field
 from base.db import DbConfig, connections, pooled_session
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+from base.host.exit_codes import hard_exit
 
 _PROCESS = "db-test"
 
@@ -79,7 +80,7 @@ def test_async_pool_fixes_the_transport_posture(
     # meiva:note
     # Read psycopg_pool internal fields via getattr to verify pool constructor wiring without opening sockets.
     cfg = _cfg("postgresql://u@127.0.0.1:1/x", db_sslmode="require")
-    database_gate = ProcessDbGate(version=lambda: 7, process=_PROCESS)
+    database_gate = ProcessDbGate(version=lambda: 7, process=_PROCESS, end_process=hard_exit)
     pool = db.async_pool(
         AsyncConnectionPool,
         name="probe",
