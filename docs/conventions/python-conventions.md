@@ -641,6 +641,14 @@ review catches that. A function in a root that returns what it read (`process_en
 `meiva_home()`) does not move the read into the root: the policy lists it
 as a reader, and a call to it from a file that is not a root is an `ambient-read` of its kind.
 
+The command line is read once, at the process entry, and handed down like any other value. A
+script's `main` takes `argv` as a required parameter (`def main(argv: Sequence[str]) -> int`), not
+`argv=None` with a fallback to `sys.argv`; the `__main__` guard reads `sys.argv[1:]` once and passes it
+in, and the file that holds the guard declares the `argv` root. A `main` that other code imports is
+called with the caller's list: the caller owns the read (a test builds its own list), and the
+callee declares nothing. A console-script `entry()` is the guard of its module and reads the same
+way.
+
 A dependency is a required parameter. A default (`client: Client = Client()`), a
 module-level instance, or a function that builds its own client when none is passed puts
 the dependency back out of sight, and a module entry that calls a factory itself has

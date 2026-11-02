@@ -22,3 +22,4 @@ exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_v
 [debt.ambient-read]
 "choices.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_service_problems` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
 "choices.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `_service_problems` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"choices.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_service_problems` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }

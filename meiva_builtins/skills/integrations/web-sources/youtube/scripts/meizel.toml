@@ -8,3 +8,6 @@ exports = ["feed.py"]
 [roots]
 "feed.py" = { kinds = ["home", "pid"], why = "the entry an agent imports (`import feed`, then `sync`/`fetch`/`resolve_source`): no in-repo caller hands it a home, and it is the only place that knows where this machine keeps a channel's mirror ($MEIVA_HOME/state/mirrors/youtube), which no caller of an agent's code cell can supply; it also names its own interpreter (sys.executable) for the command it builds" }
 "yt_run.py" = { kinds = ["clock", "environ"], why = "YouTube sync runner stamps fetched items with current UTC time; it also finds a program on PATH, and creates scratch space under the temporary directory (TMPDIR)" }
+
+[debt.ambient-read]
+"yt_run.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `fetch_transcript` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }

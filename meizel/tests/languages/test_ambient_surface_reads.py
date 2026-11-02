@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from meizel.contracts.analysis import render_policy
-from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, failures
+from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, failures, record, run
 
 ROOT = '[roles]\napplication = ["app"]\ntests = ["tests"]\n'
 
@@ -39,7 +40,7 @@ def acquired(
         ("from sys import orig_argv\n\nx = orig_argv\n", [("argv", "sys.orig_argv")]),
         ("import sys\n\nx = sys.executable\n", [("pid", "sys.executable")]),
         ("import sys\n\nx = sys.stdout.isatty()\n", [("pid", "sys.stdout.isatty")]),
-        ("import getpass\n\nx = getpass.getuser()\n", [("pid", "getpass.getuser")]),
+        ("import getpass\n\nx = getpass.getpass()\n", [("pid", "getpass.getpass")]),
         ("import pwd\nimport os\n\nx = pwd.getpwnam('a')\n", [("pid", "pwd.getpwnam")]),
         ("import os\n\nx = os.getlogin()\n", [("pid", "os.getlogin")]),
         ("import tempfile\n\nx = tempfile.gettempdir()\n", [("environ", "tempfile.gettempdir")]),
@@ -48,19 +49,30 @@ def acquired(
         ("import os\n\nx = os.path.abspath('a')\n", [("cwd", "os.path.abspath")]),
         ("import os\n\nx = os.cpu_count()\n", [("platform", "os.cpu_count")]),
         ("import os\n\nx = os.getloadavg()\n", [("platform", "os.getloadavg")]),
-        ("import uuid\n\nx = uuid.getnode()\n", [("platform", "uuid.getnode")]),
+        (
+            "import uuid\n\nx = uuid.getnode()\n",
+            [("platform", "uuid.getnode"), ("random", "uuid.getnode")],
+        ),
         ("import time\n\nx = time.tzname\n", [("clock", "time.tzname")]),
         ("import time\n\nx = time.mktime(parts)\n", [("clock", "time.mktime")]),
         ("import time\n\nx = time.localtime(0)\n", [("clock", "time.localtime")]),
         ("answer = input('go? ')\n", [("pid", "builtins.input")]),
-        ("import site\n\nx = site.getusersitepackages()\n", [("home", "site.getusersitepackages")]),
+        (
+            "import site\n\nx = site.getusersitepackages()\n",
+            [("environ", "site.getusersitepackages"), ("home", "site.getusersitepackages")],
+        ),
         (
             "import email.utils\n\nx = email.utils.localtime()\n",
             [("clock", "email.utils.localtime")],
         ),
         (
             "import email.utils\n\nx = email.utils.make_msgid()\n",
-            [("random", "email.utils.make_msgid")],
+            [
+                ("clock", "email.utils.make_msgid"),
+                ("pid", "email.utils.make_msgid"),
+                ("platform", "email.utils.make_msgid"),
+                ("random", "email.utils.make_msgid"),
+            ],
         ),
         ("import time\n\nx = time.get_clock_info('time')\n", [("platform", "time.get_clock_info")]),
         (
@@ -73,7 +85,10 @@ def acquired(
             "import email.utils\n\nx = email.utils.formatdate(1.5)\n",
             [("clock", "email.utils.formatdate")],
         ),
-        ("import netrc\n\nx = netrc.netrc()\n", [("home", "netrc.netrc()")]),
+        (
+            "import netrc\n\nx = netrc.netrc()\n",
+            [("home", "netrc.netrc()"), ("pid", "netrc.netrc()")],
+        ),
         (
             "import ssl\n\nx = ssl.get_default_verify_paths()\n",
             [("environ", "ssl.get_default_verify_paths")],
@@ -86,6 +101,87 @@ def acquired(
     ],
 )
 def test_the_channels_the_table_judges_are_acquisitions(
+    make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
+) -> None:
+    assert acquired(make_repo, source) == expected
+
+
+# meiva:note
+# A call that reads several channels is one acquisition for each of them, at the same line and under
+# the same target, so that the debt of a file lists every channel its call reads and a root that
+# declares one of them does not hide the others.
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "import getpass\n\nx = getpass.getuser()\n",
+            [("environ", "getpass.getuser"), ("pid", "getpass.getuser")],
+        ),
+        (
+            "import shutil\n\nx = shutil.get_terminal_size()\n",
+            [("environ", "shutil.get_terminal_size"), ("pid", "shutil.get_terminal_size")],
+        ),
+        (
+            "import uuid\n\nx = uuid.uuid1()\n",
+            [("clock", "uuid.uuid1"), ("platform", "uuid.uuid1"), ("random", "uuid.uuid1")],
+        ),
+        ("import uuid\n\nx = uuid.uuid4()\n", [("random", "uuid.uuid4")]),
+        (
+            "import sysconfig\n\nx = sysconfig.get_paths()\n",
+            [
+                ("environ", "sysconfig.get_paths"),
+                ("home", "sysconfig.get_paths"),
+                ("pid", "sysconfig.get_paths"),
+            ],
+        ),
+        (
+            "import site\n\nx = site.check_enableusersite()\n",
+            [
+                ("argv", "site.check_enableusersite"),
+                ("environ", "site.check_enableusersite"),
+                ("pid", "site.check_enableusersite"),
+            ],
+        ),
+        (
+            "from tempfile import mkstemp\n\nx = mkstemp()\n",
+            [("environ", "tempfile.mkstemp()"), ("random", "tempfile.mkstemp()")],
+        ),
+        (
+            "import ctypes.util\n\nx = ctypes.util.find_library('c')\n",
+            [("environ", "ctypes.util.find_library")],
+        ),
+        ("import webbrowser\n\nwebbrowser.open('x')\n", [("environ", "webbrowser.open")]),
+    ],
+)
+def test_a_call_that_reads_several_channels_acquires_each_of_them(
+    make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
+) -> None:
+    assert acquired(make_repo, source) == expected
+
+
+# meiva:note
+# A clause spares the call as a whole: `mkdtemp(dir=...)` still draws a random name and records
+# nothing, and `make_msgid(domain=...)` has no clause because it would spare the clock, the process
+# id and the random number with the host name. These are pinned so that the documentation of the
+# first stays true.
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("import tempfile\n\nx = tempfile.mkdtemp(dir='/a')\n", []),
+        ("import fileinput\n\nx = fileinput.input(files=['/a'])\n", []),
+        (
+            "import email.utils\n\nx = email.utils.make_msgid(domain='a')\n",
+            [
+                ("clock", "email.utils.make_msgid"),
+                ("pid", "email.utils.make_msgid"),
+                ("platform", "email.utils.make_msgid"),
+                ("random", "email.utils.make_msgid"),
+            ],
+        ),
+        ("import tempfile\n\nx = tempfile.mkdtemp\n", []),
+    ],
+)
+def test_a_clause_spares_the_whole_call_and_a_bare_reference_acquires_nothing(
     make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
 ) -> None:
     assert acquired(make_repo, source) == expected
@@ -112,10 +208,16 @@ def test_a_name_that_reads_nothing_is_not_an_acquisition(
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        ("import tempfile\n\nx = tempfile.mkdtemp()\n", [("environ", "tempfile.mkdtemp()")]),
+        (
+            "import tempfile\n\nx = tempfile.mkdtemp()\n",
+            [("environ", "tempfile.mkdtemp()"), ("random", "tempfile.mkdtemp()")],
+        ),
         (
             "import tempfile\n\nx = tempfile.NamedTemporaryFile('w')\n",
-            [("environ", "tempfile.NamedTemporaryFile()")],
+            [
+                ("environ", "tempfile.NamedTemporaryFile()"),
+                ("random", "tempfile.NamedTemporaryFile()"),
+            ],
         ),
         ("import shutil\n\nx = shutil.which('git')\n", [("environ", "shutil.which()")]),
         ("import os\n\nx = os.listdir()\n", [("cwd", "os.listdir()")]),
@@ -136,7 +238,10 @@ def test_a_name_that_reads_nothing_is_not_an_acquisition(
             "def f(parser):\n    return parser.parse_known_args(namespace=None)\n",
             [("argv", "argparse.ArgumentParser.parse_known_args")],
         ),
-        ("import fileinput\n\nx = fileinput.input()\n", [("argv", "fileinput.input()")]),
+        (
+            "import fileinput\n\nx = fileinput.input()\n",
+            [("argv", "fileinput.input()"), ("pid", "fileinput.input()")],
+        ),
         (
             "import email.utils\n\nx = email.utils.formatdate(localtime=True)\n",
             [("clock", "email.utils.formatdate")],
@@ -311,3 +416,48 @@ def test_resolving_a_relative_path_reads_the_working_directory_unrecorded(
     make_repo: RepoFactory, source: str
 ) -> None:
     assert acquired(make_repo, source) == []
+
+
+# meiva:note
+# One call that reads four channels (the clock, the process id, entropy, the host name) is four
+# reads at the same line, so what a root does not declare is still told, kind by kind.
+_MSGID = "import email.utils\n\nx = email.utils.make_msgid()\n"
+_ALL_FOUR = {
+    f"mod.py#{kind} email.utils.make_msgid" for kind in ("clock", "pid", "platform", "random")
+}
+_RANDOM_ROOT = '\n[roots]\n"mod.py" = { kinds = ["random"], why = "draws the message id" }\n'
+
+
+def _recorded_keys(root: Path) -> dict[str, int]:
+    table = tomllib.loads((root / "app/meizel.toml").read_text(encoding="utf-8"))
+    return {key: entry["count"] for key, entry in table["debt"]["ambient-read"].items()}
+
+
+def test_a_root_that_declares_part_of_a_multiple_kind_call_is_told_of_the_rest(
+    make_repo: RepoFactory,
+) -> None:
+    root = repo(make_repo, {"app/mod.py": _MSGID, "app/meizel.toml": _RANDOM_ROOT.lstrip()})
+    sites = diagnostics(root, "ambient-read")
+    assert {d.debt.key for d in sites if d.debt} == _ALL_FOUR - {
+        "mod.py#random email.utils.make_msgid"
+    }
+    assert {d.line for d in sites} == {3}
+
+
+def test_a_multiple_kind_call_is_recorded_as_one_debt_key_per_kind(make_repo: RepoFactory) -> None:
+    root = repo(make_repo, {"app/mod.py": _MSGID})
+    assert record(root, ".") == 0
+    assert _recorded_keys(root) == dict.fromkeys(_ALL_FOUR, 1)
+    assert not [pair for pair in failures(root) if pair[0] == "ambient-read"]
+
+
+def test_pruning_drops_only_the_kind_of_a_multiple_kind_call_that_was_paid(
+    make_repo: RepoFactory,
+) -> None:
+    root = repo(make_repo, {"app/mod.py": _MSGID})
+    assert record(root, ".") == 0
+    manifest = root / "app/meizel.toml"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + _RANDOM_ROOT, encoding="utf-8")
+    assert ("debt-paid", "app/meizel.toml") in failures(root)
+    assert run(root, "debt", "prune") == 0
+    assert set(_recorded_keys(root)) == _ALL_FOUR - {"mod.py#random email.utils.make_msgid"}

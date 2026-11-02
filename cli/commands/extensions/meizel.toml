@@ -22,3 +22,4 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 
 [debt.ambient-read]
 "_pkg_source.py#environ tempfile.mkdtemp()" = { count = 1, owner = "#8237", until = "waits for `clone_git` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
+"_pkg_source.py#random tempfile.mkdtemp()" = { count = 1, owner = "#8237", until = "waits for `clone_git` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }

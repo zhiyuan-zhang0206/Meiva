@@ -22,13 +22,13 @@ other root kind.
 
 | kind | what it is | acquired by |
 |---|---|---|
-| `argv` | the command line the process was started with | `sys.argv`, `sys.orig_argv`, `sys.flags`, `sys.warnoptions`; `parser.parse_args()` (and `parse_known_args`, `parse_intermixed_args`) called with no `args`, or with a parameter of the same function that defaults to `None` and is not rebound (`def main(argv=None): parser.parse_args(argv)`: argparse reads `sys.argv[1:]` itself when handed `None`); `fileinput.input()` and `FileInput()` with no `files` |
-| `environ` | the environment and what the operating system derives from it | `os.environ`, `os.getenv`, `os.putenv`, `os.path.expandvars`, `os.get_exec_path`, `shutil.which` without a `path`, `tempfile.gettempdir` and the temporary-file constructors without a `dir`, `locale.getlocale` and the other locale readers, `ssl.get_default_verify_paths`, `ssl.create_default_context` without a `cafile` |
-| `clock` | the instant and the host's time zone | `time.time[_ns]`, `datetime.now/utcnow/today`, `date.today`, `time.localtime/ctime/mktime`, `time.tzname/timezone/altzone/daylight`, `datetime.fromtimestamp` without a zone, `.astimezone()` without a zone, `time.gmtime/asctime/strftime` without a time value, `email.utils.formatdate` (every call), `email.utils.localtime`; `time.monotonic`, `time.perf_counter`, `time.process_time`, `time.thread_time`, `os.times` (and `_ns`) and `loop.time()` only in a function that also waits |
-| `home`, `cwd` | where the user's files are, and where a relative path starts | `Path.home`, `os.path.expanduser`, `.expanduser()`, `site.getusersitepackages`, `netrc.netrc()` without a file; `os.getcwd`, `Path.cwd`, `os.path.abspath`, `os.path.relpath` without a `start`, `Path.absolute()`, `os.listdir()`/`os.scandir()` without a path |
-| `platform` | which machine and which platform this is | `sys.platform`, `os.name`, `os.uname`, `os.cpu_count`, `os.getloadavg`, `os.sysconf`, `socket.gethostname`, `uuid.getnode`, `multiprocessing.cpu_count`, `time.get_clock_info`, `platform.*` except the `python_*` functions, which describe the pinned build |
-| `pid` | what the process says about itself: its ids, its interpreter, its terminal | `os.getpid` and the other id readers, `sys.executable`, `sys.prefix`, `sys.stdin`, `input()`, `isatty`, `shutil.get_terminal_size`, `getpass.getuser`, `os.getlogin`, `pwd`/`grp` lookups, `threading.get_ident`, `psutil.Process()` without a pid |
-| `random` | entropy | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.uuid1`, `uuid.uuid4`, `email.utils.make_msgid`, `ssl.RAND_bytes`, `os.urandom`, `os.getrandom` |
+| `argv` | the command line the process was started with (a process reads it once, in its `__main__` guard, and hands it to `main(argv)`: see [composition roots](../../docs/conventions/python-conventions.md#composition-roots-and-required-dependencies)) | `sys.argv`, `sys.orig_argv`, `sys.flags`, `sys.warnoptions`; `parser.parse_args()` (and `parse_known_args`, `parse_intermixed_args`) called with no `args`, or with a parameter of the same function that defaults to `None` and is not rebound (`def main(argv=None): parser.parse_args(argv)`: argparse reads `sys.argv[1:]` itself when handed `None`); `fileinput.input()` and `FileInput()` with no `files`; `site.check_enableusersite` and `locale.getpreferredencoding`, which read the interpreter's flags |
+| `environ` | the environment and what the operating system derives from it | `os.environ`, `os.getenv`, `os.putenv`, `os.path.expandvars`, `os.get_exec_path`, `shutil.which` without a `path`, `tempfile.gettempdir` and the temporary-file constructors without a `dir`, `locale.getlocale` and the other locale readers, `ssl.get_default_verify_paths`, `ssl.create_default_context` without a `cafile`, `getpass.getuser`, `shutil.get_terminal_size`, `site.getuserbase` and `sysconfig.get_path`, `ctypes.util.find_library`, `webbrowser.open` |
+| `clock` | the instant and the host's time zone | `time.time[_ns]`, `datetime.now/utcnow/today`, `date.today`, `time.localtime/ctime/mktime`, `time.tzname/timezone/altzone/daylight`, `datetime.fromtimestamp` without a zone, `.astimezone()` without a zone, `time.gmtime/asctime/strftime` without a time value, `email.utils.formatdate` (every call), `email.utils.localtime`, `email.utils.make_msgid`, `uuid.uuid1/uuid6/uuid7`; `time.monotonic`, `time.perf_counter`, `time.process_time`, `time.thread_time`, `os.times` (and `_ns`) and `loop.time()` only in a function that also waits |
+| `home`, `cwd` | where the user's files are, and where a relative path starts | `Path.home`, `os.path.expanduser`, `.expanduser()`, `site.getusersitepackages` and `site.getuserbase`, `sysconfig.get_path`, `netrc.netrc()` without a file; `os.getcwd`, `Path.cwd`, `os.path.abspath`, `os.path.relpath` without a `start`, `Path.absolute()`, `os.listdir()`/`os.scandir()` without a path |
+| `platform` | which machine and which platform this is | `sys.platform`, `os.name`, `os.uname`, `os.cpu_count`, `os.getloadavg`, `os.sysconf`, `socket.gethostname`, `uuid.getnode`, `uuid.uuid1`, `email.utils.make_msgid`, `multiprocessing.cpu_count`, `time.get_clock_info`, `platform.*` except the `python_*` functions, which describe the pinned build |
+| `pid` | what the process says about itself: its ids, its interpreter, its terminal | `os.getpid` and the other id readers, `sys.executable`, `sys.prefix`, `sys.stdin`, `input()`, `isatty`, `shutil.get_terminal_size`, `getpass.getuser`, `email.utils.make_msgid`, `netrc.netrc()` without a file, `site.check_enableusersite`, `fileinput.input()` without files (standard input), `os.getlogin`, `pwd`/`grp` lookups, `threading.get_ident`, `psutil.Process()` without a pid |
+| `random` | entropy | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.*` except the name-derived ones, `email.utils.make_msgid`, `tempfile.mkdtemp` and the other temporary-file constructors without a `dir` (the name is random), `ssl.RAND_bytes`, `os.urandom`, `os.getrandom` |
 | a state kind of the policy's `[ambient]` | the state the repository keeps itself | the names that table lists for it, resolved against the modules whose `[state]` declares the kind ([[meizel/docs/checker/ambient.meiva.okf.md|the ambient reads node]]) |
 
 ## The channels
@@ -54,25 +54,11 @@ A name that only converts, compares or formats the values it is given reads none
 
 ## What a call that reads the world depends on
 
-An interval clock read for a deadline, a duration or a TTL is the plain use of `time`; it is a
-window onto the world only where the same function waits, because then how long to wait next is
-decided in a loop. A function waits when it calls a name that contains `sleep` (`time.sleep`,
-`asyncio.sleep`, `timers.asleep`, `retry_sleep`) or a function of its module that does, however
-the helper is named (`_pause()` that sleeps). A function without parameters that is only
-`return time.monotonic()` is a clock under another name: a call of it in a function that waits is
-the reading, recorded as `_monotonic()`. `loop.time()` on `get_running_loop()` or a `loop`,
-`_loop` or `event_loop` is an interval clock. The wall clock is always one.
-
-A call that reads the world only when it is given nothing (`time.gmtime()`, `time.strftime(fmt)`,
-`psutil.Process()`, `tempfile.mkdtemp()` without a `dir`) is an acquisition then, and describes a
-value it was handed otherwise.
-
-A `random.Random` constructor has an independent seed only when its positional seed or `x=`
-argument is a non-None literal, including zero or an empty string/bytes value. Missing seeds,
-literal `None`, dynamic seeds and unbounded argument expansion conservatively acquire `random`:
-a dynamic value can be `None`, and the checker does not infer its runtime value or type.
-This is static evidence of a possible ambient
-seed, not proof that every execution reads the machine. A class reference alone acquires nothing.
+Whether a call is an acquisition can depend on what it is given, on whether its function waits, and on
+a seed: [[meizel/docs/ambient-kinds-calls.meiva.okf.md|what a call depends on]]. One call can also read
+several channels and then acquires each of them: `getpass.getuser()` is `environ` and `pid`,
+`tempfile.mkdtemp()` is `environ` and `random`. Each kind is a debt of its own, and a root declares all
+of them.
 
 The names that acquire each kind are judged one by one, and the table is kept closed:
 [[meizel/docs/ambient-surface.meiva.okf.md|the ambient surface node]].

@@ -8,3 +8,4 @@ exports = ["memory.py", "memory_plan.py"]
 
 [debt.ambient-read]
 "memory.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_build_pool_bundle` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
+"memory.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_build_pool_bundle` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }

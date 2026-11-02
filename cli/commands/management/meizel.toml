@@ -24,5 +24,6 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "sweep_outcome.py" = "strict"
 
 [debt.ambient-read]
+"config.py#environ getpass.getuser" = { count = 1, owner = "#8237", until = "waits for `_edit_local_config` to take the operator's user name from its caller: it asks getpass for it" }
 "config.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for `_edit_local_config` to take the operator's user name from its caller: it asks getpass for it" }
 "schedules_verify.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `check_script` to take the interpreter path from its caller: it reads `sys.executable` itself" }

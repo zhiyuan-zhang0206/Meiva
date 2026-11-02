@@ -23,3 +23,4 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 [debt.ambient-read]
 "refresh_test_durations.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_refresh_all` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
 "refresh_test_durations.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `run_suite` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"refresh_test_durations.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_refresh_all` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }
