@@ -8,29 +8,16 @@
 from __future__ import annotations
 
 import argparse
-import getpass
-import sys
 
 
+# meiva:note
+# `args.password` is bound by `cli.main` before dispatch: the process entry owns the terminal, so
+# it prompts or reads standard input and hands the handler the string.
 def _h_auth_set_password(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.auth import (
-        PasswordInputError,
-        cmd_auth_set_password,
-        read_password_from_prompt,
-        read_password_from_stdin,
-    )
+    from cli.commands.auth import cmd_auth_set_password
 
-    try:
-        password = (
-            read_password_from_prompt(getpass.getpass)
-            if args.prompt
-            else read_password_from_stdin(sys.stdin)
-        )
-    except PasswordInputError as exc:
-        print(f"meiva auth set-password: {exc}; nothing was changed", file=sys.stderr)
-        return 1
-    return cmd_auth_set_password(gateway_access_from_boot(args.runtime.config), password)
+    return cmd_auth_set_password(gateway_access_from_boot(args.runtime.config), args.password)
 
 
 def add_auth_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

@@ -25,7 +25,7 @@ import sys
 from collections.abc import Callable, MutableMapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TextIO
 
 from pydantic import ValidationError
 
@@ -213,6 +213,18 @@ def bind_entry_facts(
 
 
 # meiva:note
+# The new web login password, read where the operator's terminal is: typed twice at a no-echo
+# prompt, or the first line of `stdin`. The process entry owns both, so `meiva auth set-password`
+# receives the string as `args.password`; it never travels in argv.
+def read_new_password(*, prompt: bool, stdin: TextIO) -> str:
+    import getpass
+
+    from cli.startup.password_input import read_password_from_prompt, read_password_from_stdin
+
+    return read_password_from_prompt(getpass.getpass) if prompt else read_password_from_stdin(stdin)
+
+
+# meiva:note
 # Give an operator's lite CLI the runner token from its installed capability.
 #
 # Full runner boot consumes the same capability before fetching gateway config.
@@ -279,6 +291,14 @@ def dispatch_parsed(
 ) -> int:
     home = declared.resolve()
     bind_entry_facts(args, args_in, home=home, checkout=checkout)
+    if tuple(args_in[:2]) == ("auth", "set-password"):
+        from cli.startup.password_input import PasswordInputError
+
+        try:
+            args.password = read_new_password(prompt=args.prompt, stdin=sys.stdin)
+        except PasswordInputError as exc:
+            print(f"meiva auth set-password: {exc}; nothing was changed", file=sys.stderr)
+            return 1
     if tuple(args_in[:1]) == ("init",):
         bind_init_inputs(args)
         return args.func(args)

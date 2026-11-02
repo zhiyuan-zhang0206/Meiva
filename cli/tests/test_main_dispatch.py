@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import io
 import json
 import os
 import re
@@ -778,3 +779,8 @@ def test_start_parser_rejects_retired_updater_telemetry() -> None:
     with pytest.raises(SystemExit) as error:
         build_parser().parse_args(["start", "--all-services", "--updater-telemetry"])
     assert error.value.code == 2
+
+
+def test_the_entry_reads_the_new_web_login_password_from_the_stream_it_is_given() -> None:
+    stream = io.StringIO("a long enough password\nsecond line\n")
+    assert _main.read_new_password(prompt=False, stdin=stream) == "a long enough password"
