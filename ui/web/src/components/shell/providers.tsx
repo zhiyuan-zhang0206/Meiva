@@ -1,7 +1,6 @@
 "use client";
 
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider, useTheme } from "next-themes";
 import { useCallback, useState } from "react";
 
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
@@ -18,6 +17,7 @@ import type { AppNavigation } from "@/lib/browser/navigation/navigation";
 import { NavigationProvider } from "@/lib/browser/navigation/navigation-provider";
 import { SystemNavigationProvider } from "@/lib/browser/navigation/system-navigation";
 import { API_BASE, ApiError, api } from "@/lib/transport/api";
+import type { ThemeRuntime } from "@/lib/layout/theme-runtime";
 import type { Api } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
@@ -36,15 +36,6 @@ import { AlertsProvider } from "@/lib/notifications/use-alerts";
 // <BrowserProvider> below.
 initTelemetry(systemBrowser);
 
-// The inline script next-themes injects toggles .dark on <html> before
-// hydrate, no FOUC; a matchMedia listener follows system settings.
-//
-// attribute="class"      → use class, not data-attribute (matches shadcn)
-// defaultTheme="system"  → follow system by default
-// enableSystem           → allow "system" as a valid theme value
-// disableTransitionOnChange → briefly suspend CSS transitions during a
-//   theme swap to avoid color-transition flicker mid-swap
-//
 // QueryClientProvider: TanStack Query's global cache container; provides
 // the data layer for hooks like useAgents (replaces the manual useState
 // + setInterval polling pattern). useState holds the client instance —
@@ -161,6 +152,7 @@ function NavigationRoot({
 export function Providers({
   children,
   nonce,
+  theme,
   client = api,
   hub,
   browser = systemBrowser,
@@ -168,6 +160,7 @@ export function Providers({
 }: {
   children: React.ReactNode;
   nonce?: string;
+  theme: ThemeRuntime;
   client?: Api;
   hub?: StreamHub;
   browser?: Browser;
@@ -196,22 +189,16 @@ export function Providers({
           <AuthProvider>
             <EventStreamProvider>
               <AlertsProvider>
-                <ThemeProvider
-                  attribute="class"
-                  defaultTheme="system"
-                  enableSystem
-                  disableTransitionOnChange
-                  nonce={nonce}
-                >
+                <theme.Provider nonce={nonce}>
                   <LanguageProvider>
-                    <ThemedSlots />
+                    <ThemedSlots theme={theme} />
                     <NavTimingReporter />
                     <AppConnectionBanner />
                     {children}
                     <ToastHost />
                     <OpenTasksNoticeHost />
                   </LanguageProvider>
-                </ThemeProvider>
+                </theme.Provider>
               </AlertsProvider>
             </EventStreamProvider>
           </AuthProvider>
@@ -224,8 +211,8 @@ export function Providers({
 // meiva:note
 // The two surfaces that paint from the current scheme take it as a value: this is the one place that
 // reads the theme provider, so both components are driven by a prop a test can set.
-function ThemedSlots() {
-  const { resolvedTheme } = useTheme();
+function ThemedSlots({ theme }: { theme: ThemeRuntime }) {
+  const resolvedTheme = theme.useResolvedTheme();
   return (
     <>
       <ThemePackTokens resolvedTheme={resolvedTheme} />

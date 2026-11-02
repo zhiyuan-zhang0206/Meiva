@@ -1,4 +1,4 @@
-exports = ["breakpoint.ts", "compact-transition.ts", "layout.ts", "panel-layout-storage.ts", "scroll-memory.ts", "sticky.ts", "switch-budget.ts", "use-client-ready.ts", "use-document-visible.ts", "use-media-query.ts"]
+exports = ["breakpoint.ts", "compact-transition.ts", "layout.ts", "panel-layout-storage.ts", "scroll-memory.ts", "sticky.ts", "switch-budget.ts", "system-theme.tsx", "theme-runtime.ts", "use-client-ready.ts", "use-document-visible.ts", "use-media-query.ts"]
 
 [uses]
 "breakpoint.test.ts" = ["breakpoint.ts"]
@@ -7,6 +7,7 @@ exports = ["breakpoint.ts", "compact-transition.ts", "layout.ts", "panel-layout-
 "panel-layout-storage.test.ts" = ["panel-layout-storage.ts"]
 "sticky-switch-race.test.ts" = ["sticky.ts"]
 "sticky.test.ts" = ["sticky.ts"]
+"system-theme.tsx" = ["theme-runtime.ts"]
 "tests" = ["layout.ts", "scroll-memory.ts"]
 "use-client-ready.test.tsx" = ["use-client-ready.ts"]
 "use-media-query.test.tsx" = ["use-media-query.ts"]
