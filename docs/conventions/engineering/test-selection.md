@@ -173,7 +173,7 @@ base and head:
 - the file has effective `purity = "strict"` in `meizel.toml`, carries no recorded
   `[debt.*]` entry in any ancestor `meizel.toml`, and its directory's manifest boundary
   declarations (`exports`, `loads`, `external`, `state`, `roots`) are unchanged;
-- its public AST interface fingerprint (`scripts.ci.test_impact.public_interface_unchanged`)
+- its public AST interface fingerprint (`meizel.test_graph.cutoff.module_interface_unchanged`)
   is unchanged: every public function, class, public or dunder method, public field,
   module-level public constant or type alias, `__all__` / `__all_for_meiva__`, and
   imported symbol referenced by a public signature or re-export is identical, with no

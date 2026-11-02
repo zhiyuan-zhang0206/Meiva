@@ -326,7 +326,8 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   `$MEIVA_HOME/run`) from the fixed port table, the unit's `MEIVA_<NAME>_HEALTH_PORT` override and
   `MEIVA_HOME`. A daemon root takes its own row (`.of("labeler")`) and hands the port to
   `start_health_server`, whose port is a required argument. The old lookup functions
-  (`health_port`, `pid_path`) are gone. The `ambient-endpoint` rule fails `ServiceEndpoints.
+  (`health_port`, `pid_path`) are gone. The structure rule of the time (since replaced by the
+  manifests' `[state]`/`[roots]` and the `ambient-read` rule) failed `ServiceEndpoints.
   from_settings()` outside the modules named in `ENDPOINT_PACKAGES`: every daemon root, and the
   entry points of the commands and probes that read a daemon's row (agent pause, cluster pause,
   lifecycle, cluster status, roster, IM alert delivery, machine registration). Those entry points
