@@ -32,6 +32,7 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.host.system.tests.fake_commands import real_commands_host
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.posixproc import process_group_has_live_members
@@ -78,7 +79,18 @@ def stop_runtime(command_runtime: CommandRuntime, home: Path) -> CommandRuntime:
 
     command_runtime.machine.set(role="agent-runner")
     command_runtime.config.set_field("browser_cdp_port", free_port())
-    return replace(command_runtime, home=home, helper=None)
+    # meiva:note
+    # A stop runs real programs on this host: the cluster's own `redis-cli` against its real
+    # `redis-server` (`cluster_redis`), and whatever `bringup.stop_cluster_instance` drives. The
+    # runtime's inert host cannot do that — it answers only what a test scripts — so this
+    # invocation gets the real runner and finds no program by name, which is what a stop of a
+    # home that installed its own tools needs.
+    return replace(
+        command_runtime,
+        home=home,
+        helper=None,
+        host=real_commands_host(environ=command_runtime.config.process_environment()),
+    )
 
 
 REDIS_ADMIN_AUTH = "stop-test-redis-admin"

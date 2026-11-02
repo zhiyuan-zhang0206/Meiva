@@ -43,7 +43,6 @@ from base.host.db_authority.unit import unit_api_delivery, unit_delivery
 from base.host.env.bootstrap import config_source_is_local
 from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.url_secret import url_host
-from base.host.proc import run_bounded
 from base.host.system.hostport import Host
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
@@ -558,7 +557,7 @@ def stop_cluster_instance(
                     report_postgres_stop_escalation(escalation, producer=producer)
                 print("  ✓ postgres stopped")
             case stop_plan.StopRedis(port=redis_port):
-                if not _stop_redis(config, redis_port, redis_env, home=home, macos=macos):
+                if not stop_redis(config, redis_port, redis_env, home=home, host=host, macos=macos):
                     return 1
             case _:
                 assert_never(step)
@@ -593,18 +592,19 @@ def _home_redis_servers(data_dir: Path) -> tuple[OwnedProcess, ...]:
 # servers are identified before the shutdown; a listener that outlives it while one of them is
 # still alive is that Redis, and a listener with none of them alive is another process on the
 # cluster's Redis port. The stop fails either way.
-def _stop_redis(
+def stop_redis(
     config: DataPlaneConfig,
     port: int,
     env: dict[str, str] | None,
     *,
     home: Path,
+    host: Host,
     macos: bool,
 ) -> bool:
     servers = _home_redis_servers(redis_instance.redis_data_dir(home).resolve())
     returncode, detail = 0, ""
     try:
-        shutdown = run_bounded(
+        shutdown = host.run(
             [
                 redis_instance.redis_cli_bin(config.redis_bin_dir, macos=macos),
                 "-p",

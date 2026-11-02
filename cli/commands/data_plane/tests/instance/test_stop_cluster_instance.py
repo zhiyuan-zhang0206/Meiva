@@ -12,6 +12,7 @@ import contextlib
 import dataclasses
 import os
 import socket
+import subprocess
 import threading
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -22,7 +23,7 @@ from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.machine import MachineIdentityReader
-from base.host.system.tests.fake_commands import real_commands_host
+from base.host.system.tests.fake_commands import fake_host, real_commands_host
 from base.paths import meiva_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup, cluster_instance
@@ -211,6 +212,64 @@ def test_a_stranger_on_the_redis_port_fails_the_stop_as_another_process(
         "held by a process other than this home's redis"
     ) in err
     assert "redis still answers" not in err
+
+
+# meiva:note
+# A port nothing listens on yet: the test binds it to prove the failure, so it must start free.
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+# meiva:note
+# What the two ways `redis-cli shutdown` can fail say, with the listener still up: the exit status
+# and its stderr on one side, a run that never returned on the other. Both are the same stop
+# failure (the port answers), and neither may be reported as the other.
+def test_a_shutdown_that_never_returns_is_reported_as_the_timeout_it_was(
+    remote_data_plane_config: DataPlaneConfig,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    port = _free_port()
+
+    def never_returns(*_: object, **__: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=["redis-cli"], timeout=5.0)
+
+    host = dataclasses.replace(fake_host(), run=never_returns)
+    with _stranger_listening(port):
+        stopped = bringup.stop_redis(
+            remote_data_plane_config, port, None, home=tmp_path, host=host, macos=NATIVE_TEST_MACOS
+        )
+
+    assert stopped is False
+    err = capsys.readouterr().err
+    assert "rc=-1" in err
+    assert "redis-cli shutdown timed out" in err
+
+
+def test_a_shutdown_that_exits_nonzero_carries_its_status_and_stderr(
+    remote_data_plane_config: DataPlaneConfig,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    port = _free_port()
+
+    def exits_three(*_: object, **__: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=["redis-cli"], returncode=3, stdout="", stderr="NOAUTH"
+        )
+
+    host = dataclasses.replace(fake_host(), run=exits_three)
+    with _stranger_listening(port):
+        stopped = bringup.stop_redis(
+            remote_data_plane_config, port, None, home=tmp_path, host=host, macos=NATIVE_TEST_MACOS
+        )
+
+    assert stopped is False
+    err = capsys.readouterr().err
+    assert "rc=3" in err and "NOAUTH" in err
+    assert "redis-cli shutdown timed out" not in err
 
 
 # meiva:note
