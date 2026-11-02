@@ -325,4 +325,72 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
     expect(screen.getByTestId("python-code").textContent).toBe("code-mid");
     expect(screen.getByText("think-last")).toBeTruthy();
   });
+
+  it("preserves the mounted TurnBlock DOM instance and manual override across front trimming and older-page prepends", () => {
+    const { container, rerender } = render(
+      <TimelineView
+        turnActive
+        threadKey="1"
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "step-1" }),
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "x = 1" }),
+          makeItem({ item_id: "1.2", kind: "code_output", payload: "out-1" }),
+        ]}
+      />,
+    );
+
+    const initialTurn = container.querySelector('[data-live-activity-window="true"]');
+    const initialViewport = screen.getByTestId("activity-scroll-viewport");
+    expect(initialTurn).not.toBeNull();
+    expect(initialTurn?.getAttribute("data-item-id")).toBe("1.0");
+
+    rerender(
+      <TimelineView
+        turnActive
+        threadKey="1"
+        items={[
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "x = 1" }),
+          makeItem({ item_id: "1.2", kind: "code_output", payload: "out-1" }),
+          makeItem({ item_id: "1.3", kind: "agent_reasoning", payload: "step-2" }),
+        ]}
+      />,
+    );
+    expect(container.querySelector('[data-live-activity-window="true"]')).toBe(initialTurn);
+    expect(screen.getByTestId("activity-scroll-viewport")).toBe(initialViewport);
+    expect(initialTurn?.getAttribute("data-item-id")).toBe("1.1");
+    expect(initialTurn?.getAttribute("data-turn-id")).toBe("1.1");
+
+    fireEvent.click(runToggle());
+    expect(runToggle().getAttribute("aria-expanded")).toBe("false");
+
+    rerender(
+      <TimelineView
+        turnActive
+        threadKey="1"
+        items={[
+          makeItem({ item_id: "1.2", kind: "code_output", payload: "out-1" }),
+          makeItem({ item_id: "1.3", kind: "agent_reasoning", payload: "step-2" }),
+          makeItem({ item_id: "1.4", kind: "agent_code", payload: "x = 2" }),
+        ]}
+      />,
+    );
+    expect(container.querySelector('[data-live-activity-window="true"]')).toBe(initialTurn);
+    expect(runToggle().getAttribute("aria-expanded")).toBe("false");
+
+    rerender(
+      <TimelineView
+        turnActive
+        threadKey="1"
+        items={[
+          makeItem({ item_id: "0.5", kind: "agent_reasoning", payload: "older-step" }),
+          makeItem({ item_id: "1.2", kind: "code_output", payload: "out-1" }),
+          makeItem({ item_id: "1.3", kind: "agent_reasoning", payload: "step-2" }),
+          makeItem({ item_id: "1.4", kind: "agent_code", payload: "x = 2" }),
+        ]}
+      />,
+    );
+    expect(container.querySelector('[data-live-activity-window="true"]')).toBe(initialTurn);
+    expect(initialTurn?.getAttribute("data-item-id")).toBe("0.5");
+    expect(runToggle().getAttribute("aria-expanded")).toBe("false");
+  });
 });

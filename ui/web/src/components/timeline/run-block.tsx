@@ -44,6 +44,7 @@ const INNER_ROW_GAP_PX = 4;
 
 interface TurnBlockProps {
   id: string;
+  toggleKey?: string;
   memberIds: readonly string[];
   memberRanks?: readonly string[];
   memberSources?: readonly string[];
@@ -75,6 +76,7 @@ function sameOptionalIds(a?: readonly string[], b?: readonly string[]): boolean 
 function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolean {
   return (
     prev.id === next.id &&
+    prev.toggleKey === next.toggleKey &&
     prev.expanded === next.expanded &&
     prev.onToggle === next.onToggle &&
     prev.turnActive === next.turnActive &&
@@ -96,6 +98,7 @@ function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolea
 
 export const TurnBlock = memo(function TurnBlock({
   id,
+  toggleKey,
   memberIds,
   memberRanks,
   memberSources,
@@ -171,7 +174,7 @@ export const TurnBlock = memo(function TurnBlock({
       }
 
       if (isWindowed) {
-        const follow = liveWindow && innerStickyRef.current && dist <= 16;
+        const follow = liveWindow && innerStickyRef.current;
         setInnerView((prev) =>
           prev.follow !== follow || prev.height !== el.clientHeight ||
           (!follow && Math.abs(prev.top - el.scrollTop) >= 1)
@@ -268,25 +271,34 @@ export const TurnBlock = memo(function TurnBlock({
     if (!el) return;
     innerStickyRef.current = true;
     onActivityAtBottomChange?.(true);
+    if (isWindowed) {
+      setInnerView((prev) =>
+        prev.follow ? prev : { top: el.scrollTop, height: el.clientHeight, follow: true },
+      );
+    }
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [scrollToBottomSeq, liveWindow, expanded, onActivityAtBottomChange]);
+  }, [scrollToBottomSeq, liveWindow, expanded, isWindowed, onActivityAtBottomChange]);
+
+  const syncInnerToBottom = useCallback(() => {
+    const scroller = activityScrollRef.current;
+    if (!scroller || !innerStickyRef.current) return;
+    scroller.scrollTop = scroller.scrollHeight;
+    lastInnerScrollTopRef.current = scroller.scrollTop;
+  }, []);
 
   useLayoutEffect(() => {
     if (!liveWindow || !expanded) return;
-    const scroller = activityScrollRef.current;
+    syncInnerToBottom();
+  }, [liveWindow, expanded, children, windowedCount, syncInnerToBottom]);
+
+  useLayoutEffect(() => {
+    if (!liveWindow || !expanded) return;
     const content = activityContentRef.current;
-    if (!scroller) return;
-    const syncToBottom = () => {
-      if (!innerStickyRef.current) return;
-      scroller.scrollTop = scroller.scrollHeight;
-      lastInnerScrollTopRef.current = scroller.scrollTop;
-    };
-    syncToBottom();
     if (!content || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(syncToBottom);
+    const ro = new ResizeObserver(syncInnerToBottom);
     ro.observe(content);
     return () => ro.disconnect();
-  }, [liveWindow, expanded, children, windowedCount]);
+  }, [liveWindow, expanded, syncInnerToBottom]);
 
   const liveDelta = liveBlockStartedAt > 0 ? Math.max(liveNow - liveBlockStartedAt, 0) : 0;
   const totalWorkedMs = summary.workedMs + liveDelta;
@@ -375,7 +387,7 @@ export const TurnBlock = memo(function TurnBlock({
     >
       <button
         type="button"
-        onClick={() => onToggle(id, expanded)}
+        onClick={() => onToggle(toggleKey ?? id, expanded)}
         className={cn(
           "items-start gap-1.5 text-left select-none transition-colors",
           expanded
