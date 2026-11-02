@@ -111,13 +111,6 @@ def test_a_retired_state_kind_is_not_built_into_the_checker() -> None:
     assert allowances.parse('[ambient-readers.endpoints]\n"a.b()" = "reads"\n')[1]
 
 
-def test_the_public_surface_names_come_from_the_policy() -> None:
-    policy, problems = allowances.parse('[public-surface]\nnames = ["__exports__"]\n')
-    assert problems == []
-    assert policy.names("public-surface", "names") == ("__exports__",)
-    assert allowances.parse("")[0].names("public-surface", "names") == ()
-
-
 # meiva:note
 # `Clock.from_settings()` builds the process clock from the process settings: the read the root
 # declares is `settings`, and the clock it returns runs on the system timers, so it is not a second

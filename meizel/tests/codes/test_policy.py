@@ -397,32 +397,6 @@ def test_policy_surface_reads_each_side_with_the_kinds_its_own_policy_declares(
     assert "1 narrower, 1 wider" in out
 
 
-@pytest.mark.parametrize(
-    ("before", "after", "direction", "verb"),
-    [
-        ("", '\n[public-surface]\nnames = ["__api__"]\n', "wider", "added"),
-        ('\n[public-surface]\nnames = ["__api__"]\n', "", "narrower", "removed"),
-    ],
-)
-def test_policy_surface_reads_a_public_surface_name_by_its_direction(
-    make_repo: RepoFactory,
-    capsys: pytest.CaptureFixture[str],
-    before: str,
-    after: str,
-    direction: str,
-    verb: str,
-) -> None:
-    files = {**LOADER, "app/meizel.toml": MANIFEST, "meizel.toml": ROOT}
-    root = make_repo({**files, "meizel.policy.toml": POLICY + before})
-    commit(root)
-    write(root, {"meizel.policy.toml": POLICY + after})
-    assert run(root, "policy", "surface", "--against", "HEAD") == 0
-    out = capsys.readouterr().out
-    assert f"1 {direction}" in out
-    assert "unknown" not in out
-    assert f"**{verb}** `meizel.policy.toml [public-surface.names]` `__api__`" in out
-
-
 def test_policy_surface_pairs_a_declaration_with_git_rename(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:

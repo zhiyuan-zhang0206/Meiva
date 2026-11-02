@@ -3,10 +3,9 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable, Mapping
 
-from meizel.test_graph.cutoff import package_local_tests, strict_cutoff_eligible
+from meizel.test_graph.cutoff import package_local_tests
 from meizel.test_graph.model import (
     FACT_SYNTAX_ERROR,
-    CutoffContext,
     FileTestFacts,
     ModuleTable,
     TestCheckout,
@@ -227,7 +226,6 @@ def _select_for_one_path(
     path: str,
     checkout: TestCheckout,
     reverse: Mapping[str, set[str]],
-    cutoff: CutoffContext | None,
 ) -> set[str]:
     runtime_hits = _runtime_consumers_for_path(path, reverse)
     if path.endswith("/conftest.py"):
@@ -236,15 +234,6 @@ def _select_for_one_path(
     if path in checkout.collectable:
         return {path} | runtime_hits
     local_hits = package_local_tests(path, checkout.test_dirs, checkout.collectable)
-    if cutoff is not None and strict_cutoff_eligible(
-        path,
-        cutoff,
-        runtime_hits,
-        runtime_hits,
-        checkout.test_dirs,
-        checkout.collectable,
-    ):
-        return local_hits
     owner_hits = local_hits or package_local_tests(
         path, checkout.test_dirs, checkout.collectable, include_root_tests=True
     )
@@ -265,14 +254,15 @@ def _accumulate_selected_tests(
     cleaned: tuple[str, ...],
     checkout: TestCheckout,
     reverse: Mapping[str, set[str]],
-    cutoff: CutoffContext | None,
+    *,
+    base_available: bool,
     diagnostics: list[str],
 ) -> set[str] | TestSelection:
     selected: set[str] = set()
     for path in cleaned:
         if path.startswith("tests/e2e/") or _is_frontend_only_path(path):
             continue
-        if path not in checkout.all_files and cutoff is None:
+        if path not in checkout.all_files and not base_available:
             return TestSelection(
                 "FULL",
                 "incomplete-impact",
@@ -282,7 +272,7 @@ def _accumulate_selected_tests(
                     f"head:{path}: deleted path requires --base-ref to recover runtime impact",
                 ),
             )
-        selected.update(_select_for_one_path(path, checkout, reverse, cutoff))
+        selected.update(_select_for_one_path(path, checkout, reverse))
     return selected
 
 
@@ -293,7 +283,8 @@ def select_impacted_tests(
     changed_paths: tuple[str, ...],
     checkout: TestCheckout,
     facts_by_file: Mapping[str, FileTestFacts],
-    cutoff: CutoffContext | None = None,
+    *,
+    base_available: bool = False,
 ) -> TestSelection:
     cleaned = tuple(dict.fromkeys(p.strip("/") for p in changed_paths if p.strip("/")))
     if not cleaned:
@@ -315,7 +306,9 @@ def select_impacted_tests(
     if all(_is_doc_only_path(p) and not _runtime_consumers_for_path(p, reverse) for p in cleaned):
         return TestSelection("SKIP", "docs-only", (), ())
 
-    accumulated = _accumulate_selected_tests(cleaned, checkout, reverse, cutoff, diagnostics)
+    accumulated = _accumulate_selected_tests(
+        cleaned, checkout, reverse, base_available=base_available, diagnostics=diagnostics
+    )
     if isinstance(accumulated, TestSelection):
         return accumulated
 

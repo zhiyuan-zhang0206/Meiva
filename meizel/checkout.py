@@ -38,8 +38,6 @@ from meizel.test_graph import (
 from meizel.test_graph.impact import select_impacted_tests
 from meizel.test_graph.lanes import derive_test_lanes
 from meizel.test_graph.model import (
-    CutoffBase,
-    CutoffContext,
     FileTestFacts,
     ModuleTable,
     RawFileTestFacts,
@@ -360,7 +358,7 @@ class GitRepo:
         return lanes_at(self.root, repo=self)
 
     def select_tests(
-        self, changed_paths: Sequence[str], *, base: CutoffBase | None = None
+        self, changed_paths: Sequence[str], *, base: str | None = None
     ) -> TestSelection:
         return select_tests_at(self.root, changed_paths, base=base, repo=self)
 
@@ -738,56 +736,29 @@ def lanes_at(root: Path, *, repo: GitRepo | None = None) -> TestLanes:
     return lanes
 
 
-def _load_cutoff_context(
-    seat: GitRepo, checkout: TestCheckout, changed_paths: Sequence[str], base: CutoffBase
-) -> CutoffContext | None:
-    base_ref = base.ref
-    # meiva:note
-    # Lists tracked files at `base_ref` via fixed git ls-tree argv without invoking a shell.
+# meiva:note
+# Whether `ref` names a commit this seat can list: the one fact deleted-path recovery needs. A
+# deleted path has no head tree to read, so its runtime impact comes from the base listing; without
+# it the selection widens rather than guesses (`incomplete-impact`). The listing is a fixed git
+# ls-tree argv, no shell.
+def _base_facts_available(seat: GitRepo, ref: str) -> bool:
     listing = subprocess.run(  # noqa: S603
-        ["git", "-C", str(seat.root), "ls-tree", "-r", "--name-only", "-z", base_ref],
+        ["git", "-C", str(seat.root), "ls-tree", "-r", "--name-only", "-z", ref],
         capture_output=True,
         check=False,
         timeout=30,
     )
-    if listing.returncode != 0:
-        return None
-    base_files = [raw.decode(errors="replace") for raw in listing.stdout.split(b"\0") if raw]
-    base_configs = {
-        rel: txt
-        for rel in base_files
-        if is_test_config_file(rel) and (txt := seat.show_optional_text(base_ref, rel)) is not None
-    }
-    base_checkout = build_test_checkout(base_files, base_configs, {})
-    base_sources = {
-        rel: txt
-        for rel in changed_paths
-        if rel.endswith(".py") and (txt := seat.show_optional_text(base_ref, rel)) is not None
-    }
-    head_sources = {
-        rel: read_text(seat.root, rel)
-        for rel in changed_paths
-        if rel.endswith(".py") and has_file(seat.root, rel)
-    }
-    return CutoffContext(
-        base_sources=base_sources,
-        head_sources=head_sources,
-        base_manifests=base_checkout.manifests,
-        head_manifests=checkout.manifests,
-        base_test_dirs=base_checkout.test_dirs,
-        base_collectable=base_checkout.collectable,
-        public_surface=base.public_surface,
-    )
+    return listing.returncode == 0
 
 
 def select_tests_at(
     root: Path,
     changed_paths: Sequence[str],
     *,
-    base: CutoffBase | None = None,
+    base: str | None = None,
     repo: GitRepo | None = None,
 ) -> TestSelection:
     seat = repo if repo is not None else GitRepo(root)
     checkout, facts = _load_test_graph_state(root, seat)
-    cutoff = _load_cutoff_context(seat, checkout, changed_paths, base) if base is not None else None
-    return select_impacted_tests(tuple(changed_paths), checkout, facts, cutoff=cutoff)
+    available = base is not None and _base_facts_available(seat, base)
+    return select_impacted_tests(tuple(changed_paths), checkout, facts, base_available=available)

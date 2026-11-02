@@ -16,15 +16,14 @@ application code: it depends on the standard library only and never imports an
 application package. `scripts/` may import `meizel`; `meizel` never imports
 `scripts`.
 
-The checker's vocabulary of ambient kinds and its public-surface names belong to the repository's
-policy, not to the code. What a repository alone can say is declared in its `meizel.policy.toml`:
-the kinds of state it keeps itself (the keys of `[ambient]`), the functions that read the world
-for their caller (`[ambient-readers.<kind>]`), the module-level names besides `__all__` that list a
-module's exports (`[public-surface]`), and every exemption. The checker's own vocabulary is the
-standard library's (`argv`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`), so a
-repository with a cache or a queue declares it in its policy and a manifest may name it from then
-on ([[meizel/docs/ambient-kinds.meiva.okf.md|ambient kinds]]). Some tables still name this
-repository; they are listed in [[meizel/docs/host-coupling.meiva.okf.md|the host-coupling node]].
+The checker's vocabulary of ambient kinds belongs to the repository's policy, not to the code. What
+a repository alone can say is declared in its `meizel.policy.toml`: the kinds of state it keeps
+itself (the keys of `[ambient]`), the functions that read the world for their caller
+(`[ambient-readers.<kind>]`), and every exemption. The checker's own vocabulary is the standard
+library's (`argv`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`), so a repository
+with a cache or a queue declares it in its policy and a manifest may name it from then on
+([[meizel/docs/ambient-kinds.meiva.okf.md|ambient kinds]]). Some tables still name this repository;
+they are listed in [[meizel/docs/host-coupling.meiva.okf.md|the host-coupling node]].
 
 ## Top-level packages and their roles
 
