@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from base.host.env import port_lease
+from cli.commands.observability.plans.lgtm.render import NativeRenderValues, render_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NATIVE_DIR = REPO_ROOT / "deploy/lgtm/native"
@@ -32,6 +33,10 @@ DASHBOARD_DIR = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards"
 PROVISIONING_DIR = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning"
 ALERT_RULES_PATH = PROVISIONING_DIR / "alerting/rules.yml"
 TRACE_ID = "70d53b9c44efa6d116f9b26a950e3309"
+# meiva:note
+# The webhook credential this disposable Grafana sends: a literal so the contact point is
+# configured, not a real secret, which is what the secrets rule is flagging.
+WEBHOOK_TOKEN = "test-webhook-token"  # noqa: S105
 
 
 def _grafana_distribution() -> tuple[Path, Path]:
@@ -62,26 +67,46 @@ _NATIVE_ENVIRONMENT = {
     "MEIVA_ALERTS_TELEGRAM_CHAT_ID": "0",
     "GRAFANA_PG_PASSWORD": "",
 }
-_RUNTIME_ENV_PLACEHOLDERS = {
-    "GRAFANA_PROVISIONING_PATH": "/etc/grafana/provisioning/dashboards",
-    "MEIVA_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
-    "LOKI_URL": "http://127.0.0.1:3100",
-    "PROMETHEUS_URL": "http://127.0.0.1:9090",
-    "PG_URL": "127.0.0.1:5433",
-    "ALERTS_WEBHOOK_URL": "http://127.0.0.1:8000/api/alerts",
-    "ALERTS_WEBHOOK_TOKEN": "test-webhook-token",
-}
+# meiva:note
+# The values the disposable Grafana runs on: one box, loopback services, the gateway's alert
+# endpoint. They are values, not a placeholder table -- `render_config` decides which placeholders
+# exist, so a template that gains one fails here instead of being silently left as `{{NAME}}` in a
+# service's environment.
+_RENDER_VALUES = NativeRenderValues(
+    meiva_home="/h",
+    storage_dir="/h/lgtm/native/data",
+    provisioning_path="/etc/grafana/provisioning",
+    repo=str(REPO_ROOT),
+    tempo_query_url="http://127.0.0.1:3200",
+    loki_url="http://127.0.0.1:3100",
+    prometheus_url="http://127.0.0.1:9090",
+    pg_url="127.0.0.1:5433",
+    alerts_webhook_url="http://127.0.0.1:8000/api/alerts",
+    alerts_webhook_token=WEBHOOK_TOKEN,
+    telemetry_loki_url="http://127.0.0.1:3100",
+    telemetry_prometheus_url="http://127.0.0.1:9090",
+    telemetry_grafana_url="http://127.0.0.1:3003",
+    listen_host="127.0.0.1",
+    grafana_listen_host="127.0.0.1",
+    loki_port=3100,
+    loki_grpc_port=9095,
+    grafana_port=3003,
+)
 
 
+# meiva:note
+# The `runtime.env` run.sh sources, rendered the way converge renders it.
 def _native_runtime_environment() -> dict[str, str]:
-    """The `runtime.env` run.sh sources, with the converge placeholders filled in."""
+    rendered = render_config(
+        "runtime.env",
+        RUNTIME_ENV_PATH.read_text(encoding="utf-8"),
+        _RENDER_VALUES,
+    )
+    assert "{{" not in rendered, f"unfilled runtime.env placeholder:\n{rendered}"
     environment: dict[str, str] = {}
-    for line in RUNTIME_ENV_PATH.read_text(encoding="utf-8").splitlines():
+    for line in rendered.splitlines():
         if line and not line.startswith("#"):
             key, value = line.split("=", 1)
-            for name, replacement in _RUNTIME_ENV_PLACEHOLDERS.items():
-                value = value.replace(f"{{{{{name}}}}}", replacement)
-            assert "{{" not in value, f"unfilled runtime.env placeholder in {line!r}"
             environment[key] = value
     return environment
 
