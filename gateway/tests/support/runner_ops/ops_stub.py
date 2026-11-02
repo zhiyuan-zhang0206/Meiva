@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import json
+import socket
+import sys
 import threading
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
@@ -29,12 +31,14 @@ import psycopg
 __all__ = [
     "OpsCall",
     "OpsReply",
+    "OpsServer",
     "Responder",
     "RunnerOps",
     "completed",
     "expecting",
     "failed",
     "launched",
+    "listener",
     "refused",
     "register_machine",
     "runner_ops",
@@ -147,6 +151,22 @@ def register_machine(
     conn.commit()
 
 
+# meiva:note
+# The listener this stub runs on. A caller can be gone before its answer is written -- a dispatch
+# that timed out, a request a test cancelled, a probe it abandoned -- so the late write raises in
+# the request thread. That is the expected end of that call, not a failure of the test, and
+# `socketserver` would otherwise print its traceback to whatever `sys.stderr` is at that moment:
+# another test's captured output, since a request thread outlives `server_close()` (these threads
+# are daemons and are never joined). Every other failure still reaches stderr.
+class OpsServer(ThreadingHTTPServer):
+    def handle_error(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object
+    ) -> None:
+        if isinstance(sys.exception(), (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def _handler(runner: RunnerOps, replies: Mapping[str, Responder]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
@@ -188,6 +208,14 @@ def _handler(runner: RunnerOps, replies: Mapping[str, Responder]) -> type[BaseHT
 
 
 # meiva:note
+# The listener that answers `replies` on a port of its own, for a test whose subject is what the
+# endpoint itself does; registering the `machines` row it belongs to needs a database and is
+# `runner_ops`'s job.
+def listener(runner: RunnerOps, replies: Mapping[str, Responder]) -> OpsServer:
+    return OpsServer(("127.0.0.1", 0), _handler(runner, replies))
+
+
+# meiva:note
 # Serve `replies` (op kind -> answer) as machine `name` and register it.
 #
 # A kind that `replies` does not name is answered 404.
@@ -204,7 +232,7 @@ def runner_ops(
     paused: bool = False,
 ) -> Generator[RunnerOps]:
     runner = RunnerOps(name=name, url="")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(runner, replies or {}))
+    server = listener(runner, replies or {})
     server.daemon_threads = True
     runner.url = f"http://127.0.0.1:{server.server_port}"
     serving = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
