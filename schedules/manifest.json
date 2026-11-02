@@ -59,12 +59,12 @@
       "command": "python model-update-tracker-schedule.py"
     },
     {
-      "name": "trunk-red-watch",
+      "name": "main-red-watch",
       "class": "product",
       "default_enabled": true,
-      "description": "Every thirty minutes, read the newest post-merge runs of main (release-gate every six hours, the nightly verdict once a day) and open one task for the P0 lead per red that no green run of the same commit explains; infrastructure failures are recorded and never become a card. Emits trunk_red_watch_round as its heartbeat.",
-      "script": "jobs/watch/trunk-red-watch-schedule.py",
-      "command": "python jobs/watch/trunk-red-watch-schedule.py"
+      "description": "Every thirty minutes, read the newest post-merge runs of main (release-gate every six hours, the nightly verdict once a day) and open one task for the P0 lead per red that no green run of the same commit explains; infrastructure failures are recorded and never become a card. Emits main_red_watch_round as its heartbeat.",
+      "script": "jobs/watch/main-red-watch-schedule.py",
+      "command": "python jobs/watch/main-red-watch-schedule.py"
     },
     {
       "name": "dev-ci-metrics",

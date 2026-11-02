@@ -30,7 +30,7 @@ directory. The manifest is the single expression of the built-in policy
 | `c9-daily-report` | `c9-daily-report-schedule.py` | product | **enabled** |
 | `debt-sweep-daily` | `debt-sweep-daily-schedule.py` | product | **enabled** |
 | `dev-ci-metrics` | `dev-ci-metrics-schedule.py` | product | **enabled** |
-| `trunk-red-watch` | `trunk-red-watch-schedule.py` | product | **enabled** |
+| `main-red-watch` | `main-red-watch-schedule.py` | product | **enabled** |
 | `adversarial-eval-weekly` | `adversarial-eval-weekly-schedule.py` | product | **enabled** |
 | `memory-arbiter` | `memory-steward-schedule.py` | product | **enabled** |
 | `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |
@@ -45,7 +45,7 @@ directory. The manifest is the single expression of the built-in policy
 `dev-ci-metrics` also watches the timed workflows a pull request never blocks: it
 messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKFLOWS`), because a red nightly is otherwise silent.
 
-`trunk-red-watch` answers the other half of that question — whether `main` is
+`main-red-watch` answers the other half of that question — whether `main` is
 green — now that nothing verifies a merged tree. `ci.yml` runs on `pull_request`
 alone, so a merge starts no test; the six-hourly `release-gate` and the nightly
 verdict are the only evidence, and on 2026-11-01 two scheduled gate runs went red
@@ -56,7 +56,7 @@ usually a flake, and that same commit passed the nightly an hour later), a red
 that survives onto a second commit becomes a card, and a green run closes it.
 Failures that happen around the suite rather than in it — a container that never
 pulled, a disk that filled — are counted and never become a card. Each round
-emits `trunk_red_watch_round`, so a watch that stops running is a missing event
+emits `main_red_watch_round`, so a watch that stops running is a missing event
 rather than silence.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model

@@ -39,11 +39,11 @@ _SCRIPTS = sorted(_SCHEDULES.glob("**/*-schedule.py"))
 # the day someone names one `...-schedule.py` by accident.
 def test_a_subpackage_module_that_is_not_an_entry_is_not_collected() -> None:
     collected = {path.name for path in _SCRIPTS}
-    helper = _SCHEDULES / "jobs" / "watch" / "trunk_red_watch.py"
+    helper = _SCHEDULES / "jobs" / "watch" / "main_red_watch.py"
 
     assert helper.is_file()
     assert helper.name not in collected
-    assert "trunk-red-watch-schedule.py" in collected
+    assert "main-red-watch-schedule.py" in collected
 
 
 def test_every_builtin_script_imports_from_a_materialized_copy(tmp_path: Path) -> None:

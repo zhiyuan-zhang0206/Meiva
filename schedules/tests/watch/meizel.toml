@@ -1,1 +1,1 @@
-exports = ["test_agent_watch.py", "test_db_write_stall_watch.py", "test_dev_ci_metrics.py", "test_qa_keepalive.py", "test_trunk_red.py", "test_trunk_red_watch.py"]
+exports = ["test_agent_watch.py", "test_db_write_stall_watch.py", "test_dev_ci_metrics.py", "test_qa_keepalive.py", "test_main_red.py", "test_main_red_watch.py"]

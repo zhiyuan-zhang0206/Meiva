@@ -1,5 +1,5 @@
 # meiva:note
-# What the trunk-red watch decides: which failures a post-merge run reports, whether a red is a
+# What the main-red watch decides: which failures a post-merge run reports, whether a red is a
 # real test failure or infrastructure noise, and when a red becomes a card somebody has to take.
 #
 # The post-merge runs are the only evidence that `main` is green: `ci.yml` triggers on
@@ -236,7 +236,7 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
 
 def card_title(entry: Entry) -> str:
     workflow, _, test_id = entry.fingerprint.partition(_SEPARATOR)
-    return f"trunk-red: {test_id} failed {entry.red_count} post-merge runs on main ({workflow})"
+    return f"main-red: {test_id} failed {entry.red_count} post-merge runs on main ({workflow})"
 
 
 def card_body(

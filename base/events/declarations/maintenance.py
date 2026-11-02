@@ -208,7 +208,7 @@ class AgentWatchRound(TypedDict):
 
 
 # meiva:note
-# One trunk-red-watch round: the fingerprints still open on `main`, how many cards this round
+# One main-red-watch round: the fingerprints still open on `main`, how many cards this round
 # opened, how many failures were classified as infrastructure, and how many post-merge workflows
 # were past their staleness threshold. The heartbeat is the point: a schedule that stops taking its
 # rounds looks exactly like a schedule with nothing to report, so a missing round has to be visible
@@ -234,11 +234,11 @@ EVENTS: dict[str, EventSpec] = {
         payload=CiUsageDaily,
         site="schedules/jobs/c9_report.py:report_day (positional emit)",
     ),
-    "trunk_red_watch_round": telemetry_event(
-        "trunk_red_watch_round",
-        "one trunk-red-watch round — open fingerprints, cards opened, infra failures, stale schedules",
+    "main_red_watch_round": telemetry_event(
+        "main_red_watch_round",
+        "one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules",
         payload=TrunkRedWatchRound,
-        site="schedules/trunk-red-watch-schedule.py:watch_round (via emit_system_event)",
+        site="schedules/main-red-watch-schedule.py:watch_round (via emit_system_event)",
     ),
     "debt_sweep_daily": telemetry_event(
         "debt_sweep_daily",

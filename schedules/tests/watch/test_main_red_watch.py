@@ -1,5 +1,5 @@
 # meiva:note
-# The trunk-red watch's effect shell, driven by a stand-in for `gh` and a recording stand-in for
+# The main-red watch's effect shell, driven by a stand-in for `gh` and a recording stand-in for
 # the task API: what must hold is that one confirmed red opens exactly one card, a later green run
 # closes it, and a round always leaves a heartbeat.
 # meiva:link schedules/README.md
@@ -10,14 +10,14 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from schedules.jobs.watch.trunk_red_watch import STATE_FILE, load_state, watch_once
-from schedules.plans.watch.trunk_red import FAILURE_TEST, Card, RunFacts
+from schedules.jobs.watch.main_red_watch import STATE_FILE, load_state, watch_once
+from schedules.plans.watch.main_red import FAILURE_TEST, Card, RunFacts
 
 
 def _red(
     workflow: str, sha: str, when: datetime, test_id: str = "pkg/tests/test_a.py::test_x"
 ) -> RunFacts:
-    from schedules.plans.watch.trunk_red import Failure
+    from schedules.plans.watch.main_red import Failure
 
     return RunFacts(workflow, sha, when, "failure", (Failure(test_id, FAILURE_TEST),))
 

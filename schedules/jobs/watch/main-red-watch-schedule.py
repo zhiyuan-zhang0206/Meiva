@@ -1,5 +1,5 @@
 # meiva:note
-# The trunk-red watch: every thirty minutes, read the newest post-merge runs of `main` and turn a
+# The main-red watch: every thirty minutes, read the newest post-merge runs of `main` and turn a
 # red that no green run explains into one card for the P0 lead.
 #
 # It exists because the queue that used to verify a merged tree is gone (retired 2026-11-01) and
@@ -8,8 +8,8 @@
 # went red without anyone seeing them. A red page is not a signal nobody is watching for; it is
 # no signal at all.
 #
-# The decision lives in `schedules/plans/trunk_red.py` and the effects in
-# `schedules/jobs/trunk_red_watch.py`; this entry only supplies the cluster's own values.
+# The decision lives in `schedules/plans/main_red.py` and the effects in
+# `schedules/jobs/main_red_watch.py`; this entry only supplies the cluster's own values.
 # meiva:link schedules/README.md
 
 import os
@@ -22,17 +22,17 @@ import meiva
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.jobs.watch.trunk_red_watch import STATE_FILE, watch_once
+from schedules.jobs.watch.main_red_watch import STATE_FILE, watch_once
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
 
 CRON = "*/30 * * * *"
-_PROCESS_NAME = "trunk-red-watch"
-_EVENT_NAME = "trunk_red_watch_round"
+_PROCESS_NAME = "main-red-watch"
+_EVENT_NAME = "main_red_watch_round"
 _RELEASE_GATE = "release-gate.yml"
 _NIGHTLY = "refresh-test-durations.yml"
 _REPORT_AGENT = 405
-_ENV_REPORT_AGENT = "MEIVA_TRUNK_RED_REPORT_AGENT"
+_ENV_REPORT_AGENT = "MEIVA_MAIN_RED_REPORT_AGENT"
 _REPO = "zhiyuan-zhang0206/Meiva"
 
 
@@ -74,7 +74,7 @@ def _job_log(job_id, run_process):
 def fetch_runs(workflow, run_process):
     import json
 
-    from schedules.plans.watch.trunk_red import RunFacts, parse_failures
+    from schedules.plans.watch.main_red import RunFacts, parse_failures
 
     listing = json.loads(
         _api(f"repos/{_REPO}/actions/workflows/{workflow}/runs?per_page=10", run_process)
@@ -137,7 +137,7 @@ def _open_card(card, report_agent):
             parent=1,
             owner=report_agent,
             priority="P1",
-            operation_key=f"trunk-red-{card.fingerprint}",
+            operation_key=f"main-red-{card.fingerprint}",
         ).id
     )
 
@@ -147,7 +147,7 @@ def _close_card(task_id, reason):
         task_id,
         status="done",
         results=f"red ended: {reason}",
-        operation_key=f"trunk-red-close-{task_id}",
+        operation_key=f"main-red-close-{task_id}",
     )
 
 
