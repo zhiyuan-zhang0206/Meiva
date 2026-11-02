@@ -6,7 +6,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 
-import { AgentRow as AgentRowItem } from "@/components/agents/agent-row";
+import { AgentHoverGroup, AgentRow as AgentRowItem } from "@/components/agents/agent-row";
 import { SpawnPopover } from "./spawn-popover";
 import { AgentArchive } from "./archive";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -91,7 +91,7 @@ export function SidebarBody(props: InnerProps) {
 
 
   return (
-    <>
+    <AgentHoverGroup>
       {/* ── Agent list ── */}
       <ScrollArea className={cn(FLEX_1, MIN_H_0)}>
         {rosterPending ? (
@@ -158,7 +158,7 @@ export function SidebarBody(props: InnerProps) {
         )}
         {showTerminated && <AgentArchive props={treeProps} />}
       </ScrollArea>
-    </>
+    </AgentHoverGroup>
   );
 }
 
