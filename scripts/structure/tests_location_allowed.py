@@ -25,6 +25,24 @@ from typing import Literal
 
 Category = Literal["contract", "integration"]
 
+# meiva:note
+# Why the placement rule exists and what a top-level test owes: a test beside its subject moves with
+# it and may reach that package's internals, while a root test whose whole subject is one module
+# reads as repository-wide coverage while proving one directory's worth. The gate asks for the
+# proof, not a move for its own sake, and a moved test carries its autouse fixtures itself.
+WHY = (
+    "a test belongs beside the subject it proves: it moves when the subject moves, and it may reach "
+    "that package's internals, while a root test whose whole subject is one module reads as "
+    "repository-wide coverage and proves one directory's — so a top-level test owes evidence that "
+    "no directory smaller than the repository holds its subject, and whoever moves one carries its "
+    "autouse fixtures, which a `git mv` leaves behind"
+)
+
+# meiva:note
+# The document that states where a test belongs; the gate and `--suggest` both print it, so the
+# reason is written once for both.
+DOC = "tests/README.md (where to put tests)"
+
 BY_DESIGN: dict[str, str] = {
     "tests/e2e/": "end-to-end tests drive the whole stack from outside every package",
     "tests/factories/": "shared test-data factories",

@@ -54,7 +54,8 @@ _GUIDE = (
     "Attach before/after runtime fixture closure evidence to the migration review. "
     "Unknown inputs must be resolved; "
     "replacement-only and sample evidence cannot certify placement. "
-    "Rule: scripts/structure/tests_location.py."
+    "Rule: scripts/structure/tests_location.py. "
+    f"Why: {tests_location_allowed.WHY}. See {tests_location_allowed.DOC}."
 )
 
 
@@ -128,7 +129,8 @@ def unregistered_errors(
             detail = f"subject LCA is {result.directory}; move into {result.directory}/tests/"
         errors.append(
             f"{rel}:1: a top-level test that is not registered has no root proof: {detail} "
-            f"(`.venv/bin/python scripts/structure/tests_location.py --suggest {rel}`)"
+            f"(`.venv/bin/python scripts/structure/tests_location.py --suggest {rel}`). "
+            f"Why: {tests_location_allowed.WHY}. See {tests_location_allowed.DOC}."
         )
     return errors
 

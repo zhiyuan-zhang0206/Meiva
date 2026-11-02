@@ -43,6 +43,7 @@ from meizel.language import scan_all
 from meizel.language.fixtures import FixtureIndex, fixture_facts, is_test_file
 from meizel.language.scan import (
     EXTERNAL_FORMS,
+    TYPE_CHECKING_MESSAGE,
     FileScan,
     mount_facts,
     typescript_files,
@@ -604,15 +605,7 @@ def type_checking_violations(
 ) -> list[tuple[int, str]]:
     if rel_path in allowed or not type_checking_in_scope(rel_path, packages):
         return []
-    return [
-        (
-            line,
-            "`if TYPE_CHECKING:` is banned — import the real type at its light owner. "
-            "Runtime type-hint introspection cannot resolve a type-only import; "
-            "keep heavy construction in its factory rather than hiding its type.",
-        )
-        for line in lines
-    ]
+    return [(line, TYPE_CHECKING_MESSAGE) for line in lines]
 
 
 def _type_checking_diagnostics(

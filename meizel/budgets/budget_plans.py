@@ -48,6 +48,30 @@ _DIRECTORY_CEILING_GUIDANCE = (
     "meizel.toml exports doors"
 )
 
+# meiva:note
+# The document that states both ceilings; every message of this module points here.
+_DOC = "docs/conventions/python-conventions.md (per-file line budget, directory budget)"
+
+# meiva:note
+# Why the file ceiling exists and what the author of a file over it owns: length decides how much of
+# a module one reader, one diff and one test run have to hold at once, and the boundary that fixes
+# it is a decision the number cannot make for them.
+_FILE_CEILING_WHY = (
+    "a file's length is how much of it one reader, one diff and one test run have to hold at "
+    "once, so past the ceiling every change to this file reopens the whole of it and nobody can "
+    "say what its interface leaves out — whoever crosses the line owns finding that boundary, and "
+    "a split that only shortens the file leaves the same boundary in two places"
+)
+
+# meiva:note
+# What a directory over the cap owes, kept to what the guidance does not already say — the guidance
+# states the purpose and the repair, so the reason carries only the consequence and the ownership.
+_DIRECTORY_CEILING_WHY = (
+    "past the cap each addition buries another name a reader needs to find anything here, so "
+    "whoever stays over it owns regrouping the behavior into a subpackage rather than adding one "
+    "more sibling"
+)
+
 
 # meiva:note
 # Every directory's direct children from Git's NUL-delimited tracked paths. A `meizel.toml`
@@ -148,13 +172,13 @@ def ceiling_violations(
     return [
         *(
             f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling"
-            f" — {_FILE_CEILING_GUIDANCE}"
+            f" — {_FILE_CEILING_GUIDANCE}; {_FILE_CEILING_WHY}. See {_DOC}."
             for name, count in files
             if count > HARD_CEILING
         ),
         *(
             f"{name}: directory has {count} direct entries, over the {DIRECTORY_CEILING}-entry cap"
-            f" — {_DIRECTORY_CEILING_GUIDANCE}"
+            f" — {_DIRECTORY_CEILING_GUIDANCE}; {_DIRECTORY_CEILING_WHY}. See {_DOC}."
             for name, count in sorted(judged.items())
             if count > DIRECTORY_CEILING
         ),

@@ -47,6 +47,9 @@ from meizel.lint_common import is_test_path
 
 __all__ = [
     "EXTERNAL_FORMS",
+    "TYPE_CHECKING_DOC",
+    "TYPE_CHECKING_MESSAGE",
+    "TYPE_CHECKING_WHY",
     "FileScan",
     "invalidate_policy_caches",
     "is_imported_binding",
@@ -59,6 +62,33 @@ __all__ = [
     "typescript_files",
     "typescript_scopes",
 ]
+
+# meiva:note
+# The document that states the rule against type-only guards; the diagnostic of every face that
+# reports one points here.
+TYPE_CHECKING_DOC = "docs/conventions/python-conventions.md (no `if TYPE_CHECKING:`)"
+
+# meiva:note
+# Why a direct `typing.TYPE_CHECKING` guard is a violation here, written beside the scanner that
+# records one so the guard and its cost share an owner: an application loads every dependency on the
+# runtime path anyway, so the guard saves no work and costs the annotations.
+TYPE_CHECKING_WHY = (
+    "this is an application, not a library: every dependency loads on the runtime path anyway, so "
+    "the guard saves no work here and costs the annotations — the checker reads a type the running "
+    "process never imported, and whoever guards here owns a type nothing outside the checker can "
+    "produce"
+)
+
+# meiva:note
+# The one sentence a direct guard owes its reader: the fact, the repair, why the rule exists, what
+# the guarded file now owns, and the document that states it. `meizel check` and the standalone
+# adapter both print it, so the reason is written once.
+TYPE_CHECKING_MESSAGE = (
+    "`if TYPE_CHECKING:` is banned — import the real type at its light owner. "
+    "Runtime type-hint introspection cannot resolve a type-only import; "
+    "keep heavy construction in its factory rather than hiding its type. "
+    f"Why: {TYPE_CHECKING_WHY}. See {TYPE_CHECKING_DOC}."
+)
 
 # The calls that start a process, with where the argument list is: the index of the list argument,
 # or the index where an unpacked list starts. A bare `python` counts as a command in these only.

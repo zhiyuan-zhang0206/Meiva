@@ -126,9 +126,11 @@ written once in `scripts/structure/baseline_shards.py` and printed by every guar
 Every structure violation carries the same four parts: the rule and the repair, why the
 rule exists, what the author of the site now owns, and the document that states it. The
 reason is written once in the rule's own module — `meizel/owners/decisions.py`,
-`meizel/language/path_imports.py`, `meizel/state/ambient_state/`,
-`scripts/structure/budgets/quality_budget.py`, `scripts/structure/baseline_shards.py` —
-and every site that breaks that rule prints it. A new rule brings its reason with it.
+`meizel/language/path_imports.py`, `meizel/language/scan.py`,
+`meizel/state/ambient_state/`, `meizel/budgets/budget_plans.py`,
+`scripts/structure/budgets/quality_budget.py`, `scripts/structure/baseline_shards.py`,
+`scripts/structure/tests_location.py` — and every site that breaks that rule prints it. A new
+rule brings its reason with it.
 
 A test in the top-level `tests/` has no baseline section to be frozen in. Complete
 subject evidence with a repository-root LCA needs no filename registration;
