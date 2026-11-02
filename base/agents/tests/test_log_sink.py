@@ -42,7 +42,11 @@ def sink_logger(database: Database, machine_identity: MachineIdentityReader):
     process perspective is needed, logger.bind() overrides it.
     """
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=meiva_home()
+        database=lambda: database,
+        machine=machine_identity,
+        home=meiva_home(),
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
 
     def producer() -> telemetry.EventPipeline:

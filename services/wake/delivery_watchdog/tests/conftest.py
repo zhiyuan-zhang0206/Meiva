@@ -25,7 +25,11 @@ def event_pipeline(
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer a delivered inbound and a service operation share."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=unit_home
+        database=lambda: database,
+        machine=machine_identity,
+        home=unit_home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         telemetry.init_telemetry(

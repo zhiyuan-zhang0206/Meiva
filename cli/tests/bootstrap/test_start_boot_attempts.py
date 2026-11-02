@@ -83,7 +83,11 @@ def _run_start(
     *flags: str,
 ) -> int:
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=site.home
+        operator_database,
+        machine=command_runtime.machine,
+        home=site.home,
+        otlp_enabled=command_runtime.otlp_enabled,
+        otlp_endpoint=command_runtime.otlp_endpoint,
     )
     return start_intent.run_start(
         _start_args(command_runtime, *flags),

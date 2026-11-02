@@ -156,7 +156,13 @@ def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
 
     factory = _factory(command_runtime, open_database)
     command_home = tmp_path / "command-home"
-    producer = operator_event_pipeline(factory, machine=command_runtime.machine, home=command_home)
+    producer = operator_event_pipeline(
+        factory,
+        machine=command_runtime.machine,
+        home=command_home,
+        otlp_enabled=command_runtime.otlp_enabled,
+        otlp_endpoint=command_runtime.otlp_endpoint,
+    )
     try:
         assert not opened
         pipeline = producer()

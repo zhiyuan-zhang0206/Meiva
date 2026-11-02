@@ -136,10 +136,14 @@ class OperatorEventPipeline:
         *,
         machine: MachineIdentityReader,
         home: Path,
+        otlp_enabled: Callable[[], bool],
+        otlp_endpoint: Callable[[], str],
         flush_interval_s: float = 0.5,
     ) -> None:
         self._machine = machine
         self._home = home
+        self._otlp_enabled = otlp_enabled
+        self._otlp_endpoint = otlp_endpoint
         self._flush_interval_s = flush_interval_s
         self._database_factory = database_factory
         self._pipeline: EventPipeline | None = None
@@ -156,8 +160,16 @@ class OperatorEventPipeline:
         database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
+        otlp_enabled: Callable[[], bool],
+        otlp_endpoint: Callable[[], str],
     ) -> OperatorEventPipeline:
-        owner = cls(database_factory, machine=machine, home=home)
+        owner = cls(
+            database_factory,
+            machine=machine,
+            home=home,
+            otlp_enabled=otlp_enabled,
+            otlp_endpoint=otlp_endpoint,
+        )
         owner._pipeline = pipeline
         owner._attach_process_logging = False
         return owner
@@ -172,8 +184,16 @@ class OperatorEventPipeline:
         machine: MachineIdentityReader,
         home: Path,
         log_sinks: list[str],
+        otlp_enabled: Callable[[], bool],
+        otlp_endpoint: Callable[[], str],
     ) -> OperatorEventPipeline:
-        owner = cls(database_factory, machine=machine, home=home)
+        owner = cls(
+            database_factory,
+            machine=machine,
+            home=home,
+            otlp_enabled=otlp_enabled,
+            otlp_endpoint=otlp_endpoint,
+        )
         owner._attach_process_logging = False
         owner.log_sinks = log_sinks
         return owner
@@ -186,6 +206,8 @@ class OperatorEventPipeline:
                 database=self._database_factory,
                 machine=self._machine,
                 home=self._home,
+                otlp_enabled=self._otlp_enabled,
+                otlp_endpoint=self._otlp_endpoint,
                 flush_interval_s=self._flush_interval_s,
             )
         return self._pipeline
@@ -226,7 +248,18 @@ class OperatorEventPipeline:
 
 
 def operator_event_pipeline(
-    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
+    database_factory: OperatorDatabaseFactory,
+    machine: MachineIdentityReader,
+    home: Path,
+    *,
+    otlp_enabled: Callable[[], bool],
+    otlp_endpoint: Callable[[], str],
 ) -> OperatorEventPipeline:
     """Construct a lazy command owner without opening a writer or database."""
-    return OperatorEventPipeline(database_factory, machine=machine, home=home)
+    return OperatorEventPipeline(
+        database_factory,
+        machine=machine,
+        home=home,
+        otlp_enabled=otlp_enabled,
+        otlp_endpoint=otlp_endpoint,
+    )

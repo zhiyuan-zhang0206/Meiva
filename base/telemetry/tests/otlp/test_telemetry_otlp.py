@@ -79,6 +79,7 @@ def otlp_backend(
         providers=(logger_provider, metric_provider),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
 
     telemetry.process_state["pipeline"]._exporter = backend
@@ -590,7 +591,11 @@ def test_export_batch_builds_backend_once(
 
 def test_flush_without_init_is_noop(tmp_path: Path) -> None:
     backend = telemetry_otlp.OtlpBackend(
-        export_allowed=lambda: True, mirror_dir=tmp_path, home=tmp_path
+        export_allowed=lambda: True,
+        mirror_dir=tmp_path,
+        home=tmp_path,
+        enabled=lambda: True,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     backend.flush()
     assert backend._thread is None
@@ -613,6 +618,7 @@ def test_flag_off_disables_export(emitted_events: EmittedEvents, tmp_path: Path)
         providers=(logger_provider, metric_provider),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
 
     backend.export_batch([otlp_test_event()])
@@ -634,7 +640,11 @@ def bind_telemetry(
     db_conn: psycopg.Connection, database: Database, tmp_path: Path
 ) -> Iterator[None]:
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity(), home=tmp_path
+        database=lambda: database,
+        machine=machine_identity(),
+        home=tmp_path,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -669,9 +679,10 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
     old_filters = list(sdk_logger.filters)
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
-        endpoint="file:///collector",
+        endpoint=lambda: "file:///collector",
         mirror_dir=mirror,
         home=home,
+        enabled=lambda: True,
     )
     worker = SimpleNamespace(logs=None, metrics=None, metric_reader=None)
 

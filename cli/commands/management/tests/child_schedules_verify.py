@@ -18,7 +18,13 @@ def _check_rows(rows_file: str) -> None:
         home=command.home,
         open_database=open_operator_database,
     )
-    producer = operator_event_pipeline(database, machine=command.machine, home=meiva_home())
+    producer = operator_event_pipeline(
+        database,
+        machine=command.machine,
+        home=meiva_home(),
+        otlp_enabled=command.otlp_enabled,
+        otlp_endpoint=command.otlp_endpoint,
+    )
     try:
         sys.exit(
             cmd_schedules_verify(

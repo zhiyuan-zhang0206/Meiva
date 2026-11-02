@@ -125,8 +125,13 @@ def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
             argv,
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=lambda db, machine, home: OperatorEventPipeline.recording(
-                db, machine=machine, home=home, log_sinks=cli_log_sinks
+            producer_factory=lambda db, machine, home, command: OperatorEventPipeline.recording(
+                db,
+                machine=machine,
+                home=home,
+                log_sinks=cli_log_sinks,
+                otlp_enabled=command.otlp_enabled,
+                otlp_endpoint=command.otlp_endpoint,
             ),
             open_database=open_operator_database,
         )
@@ -154,8 +159,13 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
             ["restart"],
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=lambda db, machine, home: OperatorEventPipeline.recording(
-                db, machine=machine, home=home, log_sinks=cli_log_sinks
+            producer_factory=lambda db, machine, home, command: OperatorEventPipeline.recording(
+                db,
+                machine=machine,
+                home=home,
+                log_sinks=cli_log_sinks,
+                otlp_enabled=command.otlp_enabled,
+                otlp_endpoint=command.otlp_endpoint,
             ),
             open_database=open_operator_database,
         )
@@ -189,7 +199,7 @@ def test_main_hands_start_the_explicit_caller_child_owner_or_a_fresh_one(
                 ["start", "--all-services"],
                 declared=unit_home,
                 checkout=_REPO_ROOT,
-                producer_factory=operator_producer,
+                producer_factory=_main.operator_producer,
                 open_database=open_operator_database,
             )
             == 0
@@ -221,7 +231,7 @@ def test_main_hands_stop_the_explicit_caller_child_owner(tmp_path: Path) -> None
             argv,
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=operator_producer,
+            producer_factory=_main.operator_producer,
             open_database=open_operator_database,
         )
         == 0
@@ -249,6 +259,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
         database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
+        command: CommandRuntime,
     ) -> OperatorEventPipeline:
         factories.append(database_factory)
         machines.append(machine)
@@ -260,6 +271,8 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
             database_factory=database_factory,
             machine=machine,
             home=home,
+            otlp_enabled=command.otlp_enabled,
+            otlp_endpoint=command.otlp_endpoint,
         )
         owner.log_sinks = cli_log_sinks
         return owner
@@ -355,13 +368,6 @@ def _cold_report(
     return 0
 
 
-def operator_producer(
-    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
-) -> OperatorEventPipeline:
-    """The producer the entry builds for a command: the operator pipeline over its factory."""
-    return operator_event_pipeline(database_factory, machine=machine, home=home)
-
-
 @pytest.mark.parametrize(
     ("name", "event", "result"),
     [
@@ -392,6 +398,7 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
         database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
+        command: CommandRuntime,
     ) -> OperatorEventPipeline:
         factories.append(database_factory)
 
@@ -406,6 +413,8 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
             database_factory=database_factory,
             machine=machine,
             home=home,
+            otlp_enabled=command.otlp_enabled,
+            otlp_endpoint=command.otlp_endpoint,
         )
 
     def dispatch(args: argparse.Namespace) -> int:
@@ -450,6 +459,8 @@ def test_quiet_command_does_not_construct_pipeline(
         ),
         machine=command_runtime.machine,
         home=tmp_path,
+        otlp_enabled=command_runtime.otlp_enabled,
+        otlp_endpoint=command_runtime.otlp_endpoint,
     )
     assert owner.close() is None
 
@@ -467,7 +478,7 @@ def test_quiet_command_does_not_construct_pipeline(
             ["status"],
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=operator_producer,
+            producer_factory=_main.operator_producer,
             open_database=open_operator_database,
         )
         == 0
@@ -497,6 +508,8 @@ def test_unfinished_command_writer_remains_owned_until_join(
         ),
         machine=command_runtime.machine,
         home=tmp_path,
+        otlp_enabled=command_runtime.otlp_enabled,
+        otlp_endpoint=command_runtime.otlp_endpoint,
     )
     try:
         telemetry.emit("telemetry", "schedule_verify_failed", producer=owner)
@@ -529,12 +542,15 @@ def test_command_close_preserves_original_writer_error_and_primary(
         database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
+        command: CommandRuntime,
     ) -> OperatorEventPipeline:
         return OperatorEventPipeline.wrapping(
             pipeline,
             database_factory=database_factory,
             machine=machine,
             home=home,
+            otlp_enabled=command.otlp_enabled,
+            otlp_endpoint=command.otlp_endpoint,
         )
 
     def dispatch(args: argparse.Namespace) -> int:
@@ -577,7 +593,7 @@ def test_status_handler_body_forwards_the_parsed_namespace(
             ["status"],
             declared=home,
             checkout=_REPO_ROOT,
-            producer_factory=operator_producer,
+            producer_factory=_main.operator_producer,
             open_database=open_operator_database,
         )
         == 0

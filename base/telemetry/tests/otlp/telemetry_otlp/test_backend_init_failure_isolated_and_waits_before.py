@@ -87,7 +87,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(tmp_path: Path) ->
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
         enabled=lambda: True,
-        endpoint="http://127.0.0.1:4318",
+        endpoint=lambda: "http://127.0.0.1:4318",
         providers=(logs, metrics),
         mirror_dir=tmp_path,
         home=tmp_path,
@@ -114,7 +114,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
         enabled=lambda: True,
-        endpoint="http://127.0.0.1:4318",
+        endpoint=lambda: "http://127.0.0.1:4318",
         retry_interval_s=0.05,
         providers=(logs, metrics),
         mirror_dir=tmp_path,
@@ -155,7 +155,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
         enabled=lambda: True,
-        endpoint=endpoint,
+        endpoint=lambda: endpoint,
         mirror_dir=tmp_path,
         home=tmp_path,
     )
@@ -187,6 +187,7 @@ def test_queue_full_sheds_counted_not_blocking(tmp_path: Path) -> None:
         queue_maxsize=1,
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         backend.export_batch([otlp_test_event()])
@@ -242,6 +243,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
         ),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     existing = telemetry.process_state["pipeline"]
     if existing is not None:
@@ -251,6 +253,8 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
             database=lambda: database,
             machine=machine_identity(),
             home=tmp_path,
+            otlp_enabled=lambda: False,
+            otlp_endpoint=lambda: "http://127.0.0.1:4318",
         )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -273,7 +277,11 @@ def test_handshake_env_no_longer_gates_export(tmp_path: Path) -> None:
     must no longer disable OTLP — the export flag is the only authority."""
     assert (
         telemetry_otlp.OtlpBackend(
-            export_allowed=lambda: True, enabled=lambda: True, mirror_dir=tmp_path, home=tmp_path
+            export_allowed=lambda: True,
+            enabled=lambda: True,
+            mirror_dir=tmp_path,
+            home=tmp_path,
+            endpoint=lambda: "http://127.0.0.1:4318",
         )._enabled()
         is True
     )
@@ -293,6 +301,7 @@ def test_flush_force_flushes_sdk_batch_records(tmp_path: Path) -> None:
         providers=(logger_provider, metric_provider),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
 
     try:
@@ -320,6 +329,7 @@ def test_warmup_builds_backend_when_enabled(tmp_path: Path) -> None:
         ),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
 
     try:
@@ -344,6 +354,7 @@ def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
         queue_maxsize=1,
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         backend.export_batch([otlp_test_event()])

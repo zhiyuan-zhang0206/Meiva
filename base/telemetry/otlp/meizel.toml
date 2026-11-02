@@ -15,5 +15,4 @@ exports = ["telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_expor
 "trace_readiness.py" = "strict"
 
 [debt.ambient-read]
-"telemetry_otlp.py#settings base.config.settings" = 1
 "telemetry_otlp_metrics.py#random uuid.uuid4" = 1

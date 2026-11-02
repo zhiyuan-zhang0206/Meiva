@@ -765,7 +765,11 @@ def main() -> None:
     config.boot()
     wiring = build_entry_wiring(config=config, image=image, home=meiva_home())
     pipeline = build_pipeline(
-        database=wiring.database, machine=wiring.machine, home=wiring.process_home
+        otlp_enabled=lambda: wiring.config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: wiring.config.view.observability.telemetry_otlp_endpoint,
+        database=wiring.database,
+        machine=wiring.machine,
+        home=wiring.process_home,
     )
     init_gateway_process(
         name=wiring.process_name,

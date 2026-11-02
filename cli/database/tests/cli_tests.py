@@ -42,7 +42,11 @@ def operator_pipeline(
 ) -> Generator[OperatorEventPipeline]:
     """Borrow one lazy writer for the same command's work and reporter inputs."""
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=meiva_home()
+        operator_database,
+        machine=command_runtime.machine,
+        home=meiva_home(),
+        otlp_enabled=command_runtime.otlp_enabled,
+        otlp_endpoint=command_runtime.otlp_endpoint,
     )
     try:
         yield producer

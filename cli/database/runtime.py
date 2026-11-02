@@ -159,6 +159,22 @@ class CommandRuntime:
         return replace(self.host, environ=self.config.process_environment())
 
     # meiva:note
+    # The OTLP export posture this invocation's event writer exports under. Read when an export is
+    # attempted, not when the command is dispatched: a verb that emits nothing never asks, and a
+    # lite verb keeps its promise not to read the configuration. This owner is the root for that
+    # read (the process `settings`), so the command's writer takes the two answers as callables
+    # instead of reaching for the process singleton itself.
+    def otlp_enabled(self) -> bool:
+        from base.config import settings
+
+        return bool(settings.observability.telemetry_otlp_enabled)
+
+    def otlp_endpoint(self) -> str:
+        from base.config import settings
+
+        return settings.observability.telemetry_otlp_endpoint
+
+    # meiva:note
     # The zone a report for a person is formatted in: the timezone the configuration names when the
     # invocation names one (`MEIVA_TIMEZONE`), and None when it does not. It is the answer a command
     # used to get by building its own `Clock` from this same configuration, asked here so no command

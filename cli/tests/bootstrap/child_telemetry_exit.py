@@ -23,6 +23,7 @@ from base.paths.home import resolve_meiva_home
 from base.telemetry import event_store
 from cli import main
 from cli.database import OperatorDatabaseFactory, OperatorEventPipeline, open_operator_database
+from cli.database.runtime import CommandRuntime
 
 FLUSH_INTERVAL_S = 60
 HOLD_S = 1.5
@@ -59,7 +60,10 @@ def dispatch(args: argparse.Namespace) -> int:
 
 
 def _producer(
-    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
+    database_factory: OperatorDatabaseFactory,
+    machine: MachineIdentityReader,
+    home: Path,
+    command: CommandRuntime,
 ) -> OperatorEventPipeline:
     del database_factory
     return OperatorEventPipeline(
@@ -70,6 +74,8 @@ def _producer(
         ),
         machine=machine,
         home=home,
+        otlp_enabled=command.otlp_enabled,
+        otlp_endpoint=command.otlp_endpoint,
         flush_interval_s=FLUSH_INTERVAL_S,
     )
 

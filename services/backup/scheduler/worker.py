@@ -324,7 +324,13 @@ def main() -> None:
     def database_for_url(url: str) -> Database:
         return worker_database(config, machine, gate, home=process_home, url=url)
 
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    pipeline = build_pipeline(
+        database=database,
+        machine=machine,
+        home=process_home,
+        otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+    )
     init_gateway_process(
         name="pg-backup-worker",
         producer=lambda: pipeline,

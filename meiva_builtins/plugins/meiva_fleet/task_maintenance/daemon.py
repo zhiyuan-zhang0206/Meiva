@@ -636,7 +636,13 @@ def main() -> None:
             direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
-    pipeline = telemetry.build_pipeline(database=database, machine=machine, home=process_home)
+    pipeline = telemetry.build_pipeline(
+        database=database,
+        machine=machine,
+        home=process_home,
+        otlp_enabled=lambda: boot.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: boot.view.observability.telemetry_otlp_endpoint,
+    )
     init_gateway_process(
         name="task_maintenance",
         producer=lambda: pipeline,

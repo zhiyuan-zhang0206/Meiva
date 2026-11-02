@@ -49,7 +49,11 @@ def tail_pipeline(database, process_config):
     from base.cluster.machine.configured import ConfiguredMachineIdentity
     machine = ConfiguredMachineIdentity(process_config)
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine, home=Path(os.environ["MEIVA_HOME"])
+        database=lambda: database,
+        machine=machine,
+        home=Path(os.environ["MEIVA_HOME"]),
+        otlp_enabled=lambda: False,
+        otlp_endpoint="http://127.0.0.1:4318",
     )
     try:
         yield pipeline

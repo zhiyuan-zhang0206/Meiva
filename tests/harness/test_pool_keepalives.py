@@ -177,7 +177,11 @@ def test_log_sink_pipeline_drain_thread_stays_alive(
     remains live until this entry removes the adapter and performs bounded close.
     """
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=unit_home
+        database=lambda: database,
+        machine=machine_identity,
+        home=unit_home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     sink_id = base.telemetry.process_logging.add_event_sink(
         home=meiva_home(), producer=lambda: pipeline, machine_reader=machine_identity.name

@@ -99,7 +99,13 @@ def test_memory_entries_share_gate_with_pipeline_and_read_config_owner_when_buil
             direct_url=ClusterDirectUrl(machine_identity.host, home=meiva_home()),
         )
 
-    pipeline = build_pipeline(database=database, machine=machine_identity, home=tmp_path)
+    pipeline = build_pipeline(
+        database=database,
+        machine=machine_identity,
+        home=tmp_path,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
+    )
     try:
         assert _application_name(database()) == database_gate.application_name()
     finally:

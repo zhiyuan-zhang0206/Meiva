@@ -59,6 +59,12 @@ def owned_event_pipeline(
 
     config = ConfigBoot()
     machine = ConfiguredMachineIdentity(config)
-    pipeline = build_pipeline(database=database, machine=machine, home=home)
+    pipeline = build_pipeline(
+        database=database,
+        machine=machine,
+        home=home,
+        otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+    )
     with drain_event_pipeline(process, pipeline):
         yield pipeline

@@ -34,7 +34,7 @@ from cli.commands.agents import parsers as _agents
 from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.extensions.parsers import mcp as _mcp
 from cli.commands.extensions.parsers import plugins as _plugins
-from cli.database import OperatorEventPipeline, open_operator_database, operator_event_pipeline
+from cli.database import OperatorEventPipeline, open_operator_database
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
@@ -184,8 +184,13 @@ def test_dispatch_invokes_per_subcommand_handler(
         argv,
         declared=tmp_path,
         checkout=Path(_main.__file__).resolve().parents[1],
-        producer_factory=lambda db, machine, home: OperatorEventPipeline.recording(
-            db, machine=machine, home=home, log_sinks=[]
+        producer_factory=lambda db, machine, home, command: OperatorEventPipeline.recording(
+            db,
+            machine=machine,
+            home=home,
+            log_sinks=[],
+            otlp_enabled=command.otlp_enabled,
+            otlp_endpoint=command.otlp_endpoint,
         ),
         open_database=open_operator_database,
     )
@@ -369,7 +374,7 @@ def test_start_subcommand_forwards_argparse_flags(unit_home: Path) -> None:
         argv,
         declared=home,
         checkout=checkout,
-        producer_factory=operator_event_pipeline,
+        producer_factory=_main.operator_producer,
         open_database=open_operator_database,
     )
     assert rc == 7
@@ -400,7 +405,7 @@ def test_init_receives_its_site_and_the_hosts_facts(unit_home: Path) -> None:
             argv,
             declared=unit_home,
             checkout=checkout,
-            producer_factory=operator_event_pipeline,
+            producer_factory=_main.operator_producer,
             open_database=open_operator_database,
         )
         == 7
@@ -477,7 +482,7 @@ def test_the_entry_resolves_a_symlinked_home_once_for_the_runtime_and_the_produc
             ["status"],
             declared=declared,
             checkout=Path(_main.__file__).resolve().parents[1],
-            producer_factory=operator_event_pipeline,
+            producer_factory=_main.operator_producer,
             open_database=open_operator_database,
         )
         == 0
@@ -577,7 +582,7 @@ def test_settings_load_failure_prints_env_template(
         ["status"],
         declared=tmp_path,
         checkout=Path(_main.__file__).resolve().parents[1],
-        producer_factory=operator_event_pipeline,
+        producer_factory=_main.operator_producer,
         open_database=open_operator_database,
     )
     captured = capsys.readouterr()

@@ -39,6 +39,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         providers=(logs, metric_provider),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     event = telemetry.Event(
         ts=datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
@@ -61,6 +62,8 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
             database=lambda: database,
             machine=machine_identity(),
             home=tmp_path,
+            otlp_enabled=lambda: False,
+            otlp_endpoint=lambda: "http://127.0.0.1:4318",
         )
     try:
         telemetry.emit_prepared(event, producer=lambda: pipeline)
@@ -82,7 +85,11 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
 def test_a_relative_home_is_refused_before_any_sink_is_built() -> None:
     with pytest.raises(ValueError, match="absolute home"):
         telemetry.build_pipeline(
-            database=lambda: None, machine=machine_identity(), home=Path(".meiva")
+            database=lambda: None,
+            machine=machine_identity(),
+            home=Path(".meiva"),
+            otlp_enabled=lambda: False,
+            otlp_endpoint=lambda: "http://127.0.0.1:4318",
         )
 
 
@@ -93,7 +100,11 @@ def test_the_pipeline_builds_its_exporter_over_its_own_home(tmp_path: Path) -> N
     home = tmp_path / "pipeline-home"
     home.mkdir()
     pipeline = telemetry.build_pipeline(
-        database=lambda: None, machine=machine_identity(), home=home
+        database=lambda: None,
+        machine=machine_identity(),
+        home=home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         exporter = pipeline._exporter  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
