@@ -13,4 +13,4 @@ exports = ["boot.py", "configured.py", "tests"]
 "identity.py" = "strict"
 
 [debt.impure-edge]
-"boot.py#base/config/__init__.py" = 1
+"boot.py#base/config/__init__.py" = { count = 1, owner = "#7240", until = "waits for ConfigBoot to sit at a light owner: boot.py names it only as gateway_access_from_boot's parameter type, `if TYPE_CHECKING` is banned (a type the running process never imported is not a type), so the file loads the settings singleton to name a type — the class or a Protocol has to move to a strict module first" }

@@ -2,6 +2,6 @@ purity = "strict-to-be"
 exports = ["retry.py"]
 
 [debt.impure-call]
-"retry.py#import httpx" = 1
-"retry.py#import psycopg" = 1
-"retry.py#import psycopg_pool" = 1
+"retry.py#import httpx" = { count = 1, owner = "#7240", until = "waits for the transport failures as a value: network_errors() returns the httpx tuple and both callers already import httpx (the gateway transport, the agents control CLI); the deferral keeps `import meiva` from loading the HTTP stack, so the repair is the caller handing the tuple down, not a module-level import" }
+"retry.py#import psycopg" = { count = 1, owner = "#7240", until = "waits for the database error types as a value: retryable_database_error() has five callers across meiva, cli and agent, and three of them never import psycopg — handing the two types down would give those callers a database dependency they do not have" }
+"retry.py#import psycopg_pool" = { count = 1, owner = "#7240", until = "waits for the pool timeout type with the database errors above: PoolTimeout arrives from psycopg_pool, which the same five callers would have to name if the type were a parameter" }

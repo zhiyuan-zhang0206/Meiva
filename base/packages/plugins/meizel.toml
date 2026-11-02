@@ -44,6 +44,6 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "extensions.py#any GraphHook.__call__.state" = { count = 1, owner = "#7302", until = "waits for the hook argument types to live below base/packages/plugins: this one is agent.state.AgentState, a pydantic model in agent/, and a plugin hook that declares it would stop satisfying the Protocol if the Protocol said object" }
 
 [debt.impure-edge]
-"config_registration.py#base/packages/plugin_config_images.py" = 1
-"config_registration.py#base/packages/plugins/config_face.py" = 1
-"config_registration.py#base/packages/plugins/config_view.py" = 1
+"config_registration.py#base/packages/plugin_config_images.py" = { count = 1, owner = "#7240", until = "waits for the image writer as a value: plugin_config_images writes the plugin's config image under file_lock and a temp file, and the registration path decides the revision and calls the write . Repair unverified: that the registration path can be handed that writer" }
+"config_registration.py#base/packages/plugins/config_face.py" = { count = 1, owner = "#7240", until = "permanently: config_face loads discovered plugins (built-in or user-installed) and core does not depend on them, so the registration path necessarily meets that door — the plugin boundary is the design, not a missing value" }
+"config_registration.py#base/packages/plugins/config_view.py" = { count = 1, owner = "#7240", until = "waits for the pure view helpers to live apart from the plugin door: config_view resolves pins, overlays the cluster policy and builds the config classes, but it imports config_face for its types, which is why the file is not strict itself. Repair unverified: that the pure view helpers can move to a module that does not import that door" }
