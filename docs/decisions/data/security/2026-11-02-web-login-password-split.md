@@ -40,8 +40,9 @@ longer accepted as a login password.
   one-time link `meiva start` prints opens a session on a gateway whose password was never set, and
   a password set again does not end a ticket's session. The secret remains a bearer and the root of
   that link; it is no longer a thing a person types.
-- **Callers that logged in with the secret** (`scripts/verify/observe.py`, the e2e browser contexts)
-  trade the secret for a ticket and redeem it, as the printed link does.
+- **Callers that logged in with the secret** (`scripts/verify/observe.py`, the e2e browser contexts,
+  the desktop and Android app's native auto-login in `ui/app/src-tauri/src/autologin.rs`) trade the
+  secret for a ticket and redeem it, as the printed link does.
 
 ## Alternatives rejected
 
@@ -78,7 +79,7 @@ longer accepted as a login password.
 - **Cost.** One scrypt derivation (about 50 ms and 32 MiB) per password login and per set, run off the
   event loop. A managed browser's runner-token login does not pay it: the runner token is tried first.
 - **Clients that posted the secret to `/api/auth/login` stop working.** The repository's own callers
-  were migrated to tickets; a local plugin or script that did the same has to do likewise, or use the
-  password. The desktop app's native auto-login (`ui/app`) posts the secret and is a follow-up.
+  were migrated to tickets, the app's native auto-login included; a local plugin or script that did
+  the same has to do likewise, or use the password.
 - A rotated cluster secret ends the ticket-opened sessions and leaves password sessions alone, so the
   two credentials now rotate independently.
