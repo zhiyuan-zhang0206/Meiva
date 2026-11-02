@@ -8,6 +8,8 @@ from meiva_builtins.plugins.meiva_memory.pool_ops import (
 )
 
 # meiva:note
+# Line-format owner #2: `skills/scripts/tests/test_rebuild_memory_index.py` pins the whole
+# generated file, so a change here must be mirrored there before it reaches CI (2026-11-02).
 # Git cannot store an empty directory, so the only note-free directory a pool can hold is a
 # working-tree artifact: `__pycache__` left by importing the module under test, an editor scratch
 # dir. Such a directory used to appear as "0 notes" in `index.md` -- the one place where this

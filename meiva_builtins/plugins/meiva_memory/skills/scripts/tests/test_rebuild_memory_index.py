@@ -3,6 +3,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# meiva:note
+# This test pins the whole MEMORY.md file for a tiny pool. The line format has a second owner,
+# `tests/test_meiva_memory_pool_index.py`; a format change must update both (2026-11-02: the
+# other test went green while this one went red, one CI round trip later).
+# meiva:link meiva_builtins/plugins/meiva_memory/pool_ops.py
 SCRIPT = Path(__file__).parent.parent / "rebuild_memory_index.py"
 
 
