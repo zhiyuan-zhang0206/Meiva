@@ -28,7 +28,7 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.gateway_client import use_client
 from schedules.jobs.entry import cluster_timezone
-from schedules.jobs.ci_metrics import CiMetrics, alert_broken_workflows, collect_ci_metrics
+from schedules.jobs.watch.ci_metrics import CiMetrics, alert_broken_workflows, collect_ci_metrics
 from schedules.plans.ci_workflows import (
     Alert,
     WatchedWorkflow,
@@ -50,8 +50,8 @@ from schedules.tests.support.gateway_directory import (
 )
 from schedules.tests.support.schedule_support import borrowed_inputs
 
-_ROOT = Path(__file__).resolve().parents[2]
-_FAKE_GH = Path(__file__).parent / "children" / "fake_gh.py"
+_ROOT = Path(__file__).resolve().parents[3]
+_FAKE_GH = Path(__file__).resolve().parents[1] / "children" / "fake_gh.py"
 _LEAD = ReportRecipient("dev-ci-metrics", "MEIVA_CI_METRICS_REPORT_AGENT", "lead", None)
 _DURATIONS = WatchedWorkflow("refresh-test-durations.yml", "CI keeps splitting shards badly")
 _PRICING = WatchedWorkflow("update-model-pricing.yml", "the price catalog drifts")

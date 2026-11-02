@@ -1,6 +1,6 @@
 # meiva:note
 # The effects of the agent watch: read each watched duty's signals from the database, ask the rule
-# in `schedules/plans/agent_watch_rule.py`, carry the states in one JSON file under the running
+# in `schedules/plans/watch/agent_watch_rule.py`, carry the states in one JSON file under the running
 # host's MEIVA_HOME, send the messages the rule asks for, and record the round as one telemetry
 # event. Every message is written to the host's alarm record before it is sent, and the round
 # begins by reporting the alarms an earlier send could not deliver.
@@ -25,7 +25,7 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from base.native_process.root_control.client import RootClientError, root_process
 from base.sessions.backend import get_shell_backend
 from schedules.jobs.telemetry_event import emit_system_event
-from schedules.plans.agent_watch_rule import (
+from schedules.plans.watch.agent_watch_rule import (
     SEAT_COOLDOWN_SECONDS,
     SEAT_SETTLE_SECONDS,
     Observation,
@@ -89,11 +89,13 @@ _FIRES = (
 )
 
 # meiva:note
-# The record of every message this job sends names this file as its source, and an alarm waits
-# this long before a round reports it: the sender is still inside its request before that, and a
-# ten-minute round that reported its own fresh alarm would tell the lead twice.
+# The record of every message this job sends names this file as its source, derived from the file
+# itself so a later move cannot leave the record pointing at a path that no longer exists. An alarm
+# waits this long before a round reports it: the sender is still inside its request before that, and
+# a ten-minute round that reported its own fresh alarm would tell the lead twice.
 # meiva:link base/events/alarms/docs/alarms.meiva.okf.md
-_SOURCE = "schedules/jobs/agent_watch.py"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+_SOURCE = Path(__file__).resolve().relative_to(_REPOSITORY_ROOT).as_posix()
 _ALARM_NOT_BEFORE = timedelta(minutes=15)
 
 

@@ -1,7 +1,7 @@
 # meiva:note
 # The agent watch: every ten minutes, ask whether each agent with a watching duty is still taking
 # its rounds, and wake it, tell the lead, or escalate along the rule in
-# `schedules/plans/agent_watch_rule.py`.
+# `schedules/plans/watch/agent_watch_rule.py`.
 #
 # It exists because a duty that goes quiet looks exactly like a duty that has nothing to report:
 # on 2026-10-23 seventeen of one monitor's watchers were killed with the runtime, nothing rebuilt
@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 import meiva
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.agent_watch import EmitTally, run_round
+from schedules.jobs.watch.agent_watch import EmitTally, run_round
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.schedule_identity import parse_schedule_id

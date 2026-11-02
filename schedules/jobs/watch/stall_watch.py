@@ -19,7 +19,7 @@ from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 import meiva
-from schedules.plans.stall_rule import StallSample, WatchState, parse_stats, plan_poll
+from schedules.plans.watch.stall_rule import StallSample, WatchState, parse_stats, plan_poll
 
 __all__ = ["StallWatch", "initial_state", "poll_once", "run_watch"]
 

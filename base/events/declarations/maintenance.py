@@ -217,7 +217,7 @@ EVENTS: dict[str, EventSpec] = {
         "agent_watch_round",
         "one agent-watch round — duties judged, silent, woken, and unreadable",
         payload=AgentWatchRound,
-        site="schedules/jobs/agent_watch.py:run_round (via emit_system_event)",
+        site="schedules/jobs/watch/agent_watch.py:run_round (via emit_system_event)",
     ),
     "ci_usage_daily": telemetry_event(
         "ci_usage_daily",

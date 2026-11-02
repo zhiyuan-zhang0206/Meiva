@@ -7,7 +7,7 @@ from functools import partial
 
 from base.clock import SYSTEM_TIMERS
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.ci_metrics import CiMetrics, collect_ci_metrics
+from schedules.jobs.watch.ci_metrics import CiMetrics, collect_ci_metrics
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.ci_workflows import WatchedWorkflow
