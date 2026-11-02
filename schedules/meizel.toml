@@ -50,5 +50,5 @@
 # the maintainer first and does not take this route again. There is no spare slot to absorb one.
 
 [debt.restricted-python]
-"log-cred-mask-monthly-schedule.py#python subprocess that runs something other than a literal repository file" = 1
-"self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = 1
+"log-cred-mask-monthly-schedule.py#python subprocess that runs something other than a literal repository file" = { count = 1, owner = "#7302", until = "waits for meizel to have a declarative surface for running an external command (the way [roots] declares clock and environ reads): [external] and [loads] do not exempt this shape (checked 2026-10-26, and the python-commands rule names no allowance), and the scanner at $MEIVA_HOME/log-cred-mask/monthly_sweep.py is an operator tool that by design never ships in this repository, so no repository path exists to name" }
+"self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = { count = 1, owner = "#7302", until = "the same exit as the credential sweep: meizel would need a declarative external-command surface before this can be declared instead of recorded. The target is the installed copy of the self-evolution skill script under $MEIVA_HOME/skills/meiva-self-evolution/reference/daily_scan.py, because the host that fires the schedule has the installed skill, not this checkout" }

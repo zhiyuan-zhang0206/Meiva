@@ -39,9 +39,9 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "flags.py#settings base.config.settings" = 1
 
 [debt.any-collaborator]
-"extensions.py#any GraphHook.__call__.config" = 1
-"extensions.py#any GraphHook.__call__.runtime" = 1
-"extensions.py#any GraphHook.__call__.state" = 1
+"extensions.py#any GraphHook.__call__.config" = { count = 1, owner = "#7302", until = "waits for the hook argument types to live below base/packages/plugins: the runner passes langchain_core.runnables.RunnableConfig here (with agent.state.AgentState and langgraph.runtime.Runtime[MeivaContext] for the other two), and base imports none of the three; declaring object in the Protocol would make every framework hook's concrete parameter a contravariance error instead of typing it" }
+"extensions.py#any GraphHook.__call__.runtime" = { count = 1, owner = "#7302", until = "waits for the hook argument types to live below base/packages/plugins: this one is langgraph.runtime.Runtime[MeivaContext], a langgraph type base may not import, and the same contravariance blocks object here" }
+"extensions.py#any GraphHook.__call__.state" = { count = 1, owner = "#7302", until = "waits for the hook argument types to live below base/packages/plugins: this one is agent.state.AgentState, a pydantic model in agent/, and a plugin hook that declares it would stop satisfying the Protocol if the Protocol said object" }
 
 [debt.impure-edge]
 "config_registration.py#base/packages/plugin_config_images.py" = 1
