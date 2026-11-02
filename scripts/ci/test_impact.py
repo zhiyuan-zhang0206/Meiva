@@ -433,7 +433,9 @@ def public_interface_unchanged(base_root: Path, head_root: Path, path: str) -> b
         head_source = head_file.read_text(encoding="utf-8")
     except OSError:
         return False
-    return module_interface_unchanged(path, base_source, head_source)
+    return module_interface_unchanged(
+        path, base_source, head_source, _policy(head_root).public_surface
+    )
 
 
 class _CheckoutScope(Protocol):
@@ -468,6 +470,7 @@ def qualifies_for_interface_cutoff(
         head_manifests=_ancestor_manifests(head.repo_root, path),
         base_test_dirs=base.test_dirs,
         base_collectable=base.collectable,
+        public_surface=_policy(head.repo_root).public_surface,
     )
     return strict_cutoff_eligible(
         path,

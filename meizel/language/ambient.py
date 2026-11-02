@@ -4,10 +4,10 @@
 # An acquisition is the point at which code takes something from the process or the machine it
 # runs in instead of being handed it: the command line, the clock, the environment, the home
 # directory, the working directory, the platform, the process ids, randomness, and the process
-# state a repository keeps itself (its configuration, its database, event bus and service
-# endpoints). Only the point of acquisition is recorded. What the code does with the object
-# afterwards is not followed: the analysis has no types, so `settings.x.y` after a
-# `from ... import settings` is a plain attribute read of a name that was already acquired.
+# state a repository keeps itself (the kinds its policy declares under `[ambient]`). Only the point
+# of acquisition is recorded. What the code does with the object afterwards is not followed: the
+# analysis has no types, so `settings.x.y` after a `from ... import settings` is a plain attribute
+# read of a name that was already acquired.
 #
 # The standard-library names come from the judged table of the graph package
 # (`ambient_surface`). The names of the state a repository keeps are the repository's own: a file
@@ -34,6 +34,7 @@ from meizel.graph.model import (
     AmbientKind,
     Code,
     EntropySite,
+    KindName,
     Problem,
     Sources,
     Unless,
@@ -131,9 +132,7 @@ def _module_of(path: str) -> str:
 # meiva:note
 # The kind of read a call is: None when it names no reader, and None when the call hands the reader
 # the value that spares the read, so that `called` stays a list of the acquisitions it adds.
-def _reader_of(
-    call: ast.Call, callee: str | None, sources: Sources
-) -> tuple[AmbientKind, str] | None:
+def _reader_of(call: ast.Call, callee: str | None, sources: Sources) -> tuple[KindName, str] | None:
     if callee is None:
         return None
     kind = sources.calls.get(callee)
@@ -266,7 +265,7 @@ class AmbientRecorder:
         frame = replace(self._open.pop(), wrapper=wrapper, reads=tuple(self._reads.pop()))
         self._done.append(frame)
 
-    def _add(self, line: int, kind: AmbientKind, target: str) -> None:
+    def _add(self, line: int, kind: KindName, target: str) -> None:
         self.items.append(Acquisition(line, kind, target))
 
     def _interval(self, line: int, target: str) -> None:
@@ -383,7 +382,7 @@ class AmbientRecorder:
                     for name, line in frame.calls.items()
                     if name in clocks
                 )
-        self.items.sort(key=lambda found: (found.line, found.kind.value, found.target))
+        self.items.sort(key=lambda found: (found.line, found.kind, found.target))
         return self.items
 
 

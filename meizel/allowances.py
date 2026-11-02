@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import cache
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import TypeGuard, assert_never
 
 from meizel.checkout import GitRepo
-from meizel.graph.model import AmbientKind
+from meizel.graph.model import OS_KINDS
 
 __all__ = [
     "POLICY",
@@ -37,6 +38,7 @@ __all__ = [
 
 POLICY = "meizel.policy.toml"
 CHECKER_TABLES = ("external", "loads", "default-arguments")
+_KIND_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 # meiva:note
 # The shapes a section takes: `reasons` is a table of `name = reason`; `readers` is that table too,
@@ -45,10 +47,14 @@ REASONS = "reasons"
 READERS = "readers"
 NAMES = "names"
 
+# meiva:note
 # rule -> section -> shape. A rule listed in `PER_NAME` has one reasons table per name it governs.
+# `ambient` has no fixed sections: each key of that table declares one kind of state the repository
+# keeps itself (`Policy.state_kinds`), so its entry here is empty. `ambient-readers` has a table for
+# every kind of the standard library listed below and one more for each declared state kind.
 RULES: dict[str, dict[str, str]] = {
-    "ambient": {"settings": NAMES, "db": NAMES, "endpoints": NAMES, "bus": NAMES},
-    "ambient-readers": dict.fromkeys((kind.value for kind in AmbientKind), READERS),
+    "ambient": {},
+    "ambient-readers": dict.fromkeys(OS_KINDS, READERS),
     "ambient-state": {
         "sink-callees": NAMES,
         "sink-callee-suffixes": NAMES,
@@ -93,6 +99,7 @@ RULES: dict[str, dict[str, str]] = {
         "max-params": NAMES,
         "max-attr-hops": NAMES,
     },
+    "public-surface": {"names": NAMES},
     "typescript": {
         "scopes": NAMES,
         "import-sources": NAMES,
@@ -120,7 +127,11 @@ class _PolicySource(StrEnum):
     SNAPSHOT = "snapshot"
 
 
-def _sections(rule: str, source: _PolicySource) -> dict[str, str]:
+def _sections(rule: str, source: _PolicySource, state: Sequence[str]) -> dict[str, str]:
+    if rule == "ambient":
+        return dict.fromkeys(state, NAMES)
+    if rule == "ambient-readers":
+        return RULES[rule] | dict.fromkeys(state, READERS)
     if source is _PolicySource.CURRENT:
         return RULES[rule]
     if source is _PolicySource.SNAPSHOT:
@@ -150,6 +161,25 @@ class Policy:
         default_factory=dict[tuple[str, str], dict[str, str]]
     )
     lines: list[str] = field(default_factory=list[str])
+    # meiva:note
+    # The kinds of state this repository keeps itself, in the order `[ambient]` declares them: the
+    # keys of that table. Each is a kind a manifest's `[state]` and `[roots]` may name besides the
+    # standard library's own, and each may have an `[ambient-readers.<kind>]` table.
+    state_kinds: tuple[str, ...] = ()
+
+    # meiva:note
+    # The module-level names whose list value names what a module exports: the language's `__all__`
+    # and the names `[public-surface]` declares. The strict interface cutoff follows what such a
+    # list exports.
+    @property
+    def public_surface(self) -> frozenset[str]:
+        return frozenset({"__all__", *self.names("public-surface", "names")})
+
+    # meiva:note
+    # Every kind a reader may be listed under: the standard library's and the declared ones.
+    @property
+    def reader_kinds(self) -> tuple[str, ...]:
+        return (*RULES["ambient-readers"], *self.state_kinds)
 
     def reasons(self, rule: str, section: str) -> dict[str, str]:
         """The `name -> reason` entries of one section; empty when the file has none."""
@@ -186,12 +216,13 @@ class Policy:
         self._known(rule, section, READERS)
         return dict(self.unless.get((rule, section), {}))
 
-    @staticmethod
-    def _known(rule: str, section: str, *shapes: str) -> None:
+    def _known(self, rule: str, section: str, *shapes: str) -> None:
         wanted = (
             RULES[rule].get(section, REASONS)
             if rule in PER_NAME
-            else RULES.get(rule, {}).get(section)
+            else _sections(rule, _PolicySource.CURRENT, self.state_kinds).get(section)
+            if rule in RULES
+            else None
         )
         if wanted not in shapes:
             raise KeyError(f"{POLICY} has no {' or '.join(shapes)} section [{rule}] {section}")
@@ -302,12 +333,52 @@ class _Sections:
     problems: list[str] = field(default_factory=list[str])
 
 
-def _rule(rule: str, table: object, into: _Sections, source: _PolicySource) -> None:
+# meiva:note
+# The kinds of state a document declares: the keys of its `[ambient]` table. A key that spells a
+# kind of the standard library, or is not a lowercase name, is reported and declares nothing.
+def _state_kinds(document: dict[str, object], problems: list[str]) -> tuple[str, ...]:
+    table = document.get("ambient")
+    if not _is_table(table):
+        return ()
+    found: list[str] = []
+    for name in table:
+        if name in OS_KINDS:
+            problems.append(
+                f"[ambient] {name!r} is a kind of the standard library ({', '.join(OS_KINDS)}): "
+                "declare only the state this repository keeps itself"
+            )
+        elif _KIND_NAME.fullmatch(name) is None:
+            problems.append(f"[ambient] {name!r} must be a lowercase kind name such as `settings`")
+        else:
+            found.append(name)
+    return tuple(found)
+
+
+# meiva:note
+# A list section. `purity`'s `max-*` limits are written as one integer and kept as its text.
+def _names_section(rule: str, section: str, value: object, where: str, into: _Sections) -> None:
+    if (
+        rule == "purity"
+        and section.startswith("max-")
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 1
+    ):
+        into.named[(rule, section)] = (str(value),)
+    else:
+        into.named[(rule, section)] = _names(value, where, into.problems)
+
+
+def _rule(
+    rule: str, table: object, into: _Sections, source: _PolicySource, state: Sequence[str]
+) -> None:
     if not _is_table(table):
         into.problems.append(f"[{rule}] must be a table")
         return
-    sections = _sections(rule, source)
+    sections = _sections(rule, source, state)
     for section, value in table.items():
+        if rule == "ambient" and section not in state:
+            continue
         shape = sections.get(section, REASONS) if rule in PER_NAME else sections.get(section)
         where = f"[{rule}] {section}" if shape == NAMES else f"[{rule}.{section}]"
         if shape == REASONS:
@@ -317,16 +388,7 @@ def _rule(rule: str, table: object, into: _Sections, source: _PolicySource) -> N
             if found:
                 into.unless[(rule, section)] = found
         elif shape == NAMES:
-            if (
-                rule == "purity"
-                and section.startswith("max-")
-                and isinstance(value, int)
-                and not isinstance(value, bool)
-                and value >= 1
-            ):
-                into.named[(rule, section)] = (str(value),)
-            else:
-                into.named[(rule, section)] = _names(value, where, into.problems)
+            _names_section(rule, section, value, where, into)
         else:
             known = ", ".join(sorted(sections))
             into.problems.append(f"[{rule}] has no section {section!r}; the sections are {known}")
@@ -366,9 +428,10 @@ def _parse(text: str, source: _PolicySource) -> tuple[Policy, list[str]]:
             tables = ", ".join((*CHECKER_TABLES, *RULES))
             found.problems.append(f"unknown table {name!r}; the tables are {tables}")
     external, loads, default_arguments = _checker(document, found.problems)
+    state = _state_kinds(document, found.problems)
     for rule in RULES:
         if rule in document:
-            _rule(rule, document[rule], found, source)
+            _rule(rule, document[rule], found, source, state)
     return (
         Policy(
             external=external,
@@ -378,6 +441,7 @@ def _parse(text: str, source: _PolicySource) -> tuple[Policy, list[str]]:
             named=found.named,
             unless=found.unless,
             lines=lines,
+            state_kinds=state,
         ),
         found.problems,
     )

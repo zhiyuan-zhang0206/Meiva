@@ -226,7 +226,7 @@ def acquired() -> Acquired:
         Universe(GitRepo(Path("/repo")), list(contents)), contents, _POLICY, Sources()
     )
     results = {
-        case: [(item.kind.value, item.target) for item in scans[synthetic].ambient]
+        case: [(item.kind, item.target) for item in scans[synthetic].ambient]
         for case, synthetic in synthetic_by_case.items()
     }
 

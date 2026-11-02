@@ -50,7 +50,7 @@ def acquired(
     make_repo: RepoFactory, source: str, path: str = "app/mod.py"
 ) -> list[tuple[str, str]]:
     root = repo(make_repo, {path: source})
-    return [(a.kind.value, a.target) for a in analysis_of(root).scans[path].ambient]
+    return [(a.kind, a.target) for a in analysis_of(root).scans[path].ambient]
 
 
 @pytest.mark.parametrize(
@@ -691,7 +691,7 @@ def test_a_call_that_passes_the_parameter_does_not_acquire(
         {"app/mod.py": f"import os\n\nfrom cfg.identity import ensure\n\nx = {call}\n"},
         "cfg.identity.ensure()",
     )
-    found = {(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient}
+    found = {(a.kind, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient}
     assert ("pid", "cfg.identity.ensure") not in found
 
 
@@ -701,7 +701,7 @@ def test_a_call_that_does_not_pass_the_parameter_acquires(make_repo: RepoFactory
         {"app/mod.py": "from cfg.identity import ensure\n\nx = ensure('a')\n"},
         "cfg.identity.ensure()",
     )
-    assert [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
+    assert [(a.kind, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
         ("pid", "cfg.identity.ensure")
     ]
 
@@ -712,14 +712,14 @@ def test_an_explicit_none_is_still_a_read(make_repo: RepoFactory) -> None:
         {"app/mod.py": "from cfg.identity import ensure\n\nx = ensure('a', euid=None)\n"},
         "cfg.identity.ensure()",
     )
-    assert [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
+    assert [(a.kind, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
         ("pid", "cfg.identity.ensure")
     ]
 
 
 def test_a_wrapper_beside_its_caller_acquires_where_it_is_called(make_repo: RepoFactory) -> None:
     root = sparing_repo(make_repo, {"app/mod.py": WRAPPER}, "app.mod.ensure()")
-    assert [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
+    assert [(a.kind, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
         ("pid", "app.mod.ensure")
     ]
 

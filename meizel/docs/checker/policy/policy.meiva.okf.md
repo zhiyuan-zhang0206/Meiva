@@ -50,8 +50,8 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 
 | Table | Rule | Sections |
 |---|---|---|
-| `ambient` | the names through which the repository's own state is reached (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) | `settings`, `db`, `endpoints`, `bus` (lists; `name()` acquires only when called) |
-| `ambient-readers.<kind>` | functions that read the world on their caller's behalf (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient-readers.meiva.okf.md|readers]]) | one table per kind of `AmbientKind`: `pkg.module.name()` or `pkg.module.Class.method()`, or `pkg.module.NAME` for an object read at every use, and what it reads |
+| `ambient` | the state kinds the repository keeps itself and the names through which each is reached (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) | no fixed sections: each key declares one kind (a lowercase name that is not a standard-library kind) and lists its names (`name()` acquires only when called) |
+| `ambient-readers.<kind>` | functions that read the world on their caller's behalf (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient-readers.meiva.okf.md|readers]]) | one table per kind of `AmbientKind` and one per kind `[ambient]` declares: `pkg.module.name()` or `pkg.module.Class.method()`, or `pkg.module.NAME` for an object read at every use, and what it reads |
 | `ambient-state` | module-level state (`meizel/state/ambient_state`) | `sink-callees`, `sink-callee-suffixes`, `wiring-callees`, `pure-callees`, `pure-chain-callees`, `skill-script-patterns`, `config-modules`, `config-readers` (lists); `sink-facades`, `pure-repo-callees`, `sites` |
 | `clock-lattice` | lattice-vocabulary constants | `family-modules` (list); `independent-clocks` (`path::NAME`) |
 | `single-owner.<decision>` | one owner per decision | one table of module paths per decision, e.g. `postgres-dial`, plus `<decision>-owners` lists |
@@ -61,6 +61,7 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 | `python-commands` | bare Python subprocess invocations | `argv-wrappers` (list) |
 | `approved-patches` | test-support files that patch on purpose (`meizel/contracts/analysis.py`, [[meizel/docs/checker/patching/patching.meiva.okf.md|patching]]) | `files`; `max-files` (the list's budget: past it a run fails as `approved-budget`) |
 | `purity` | mechanical purity rules (`strict` / `strict-to-be`) | `pure-third-party`, `impure-imports`, `impure-calls`, `impure-fixtures`, `max-uses`, `max-exports`, `max-public-symbols`, `max-params`, `max-attr-hops` (lists) |
+| `public-surface` | module-level names, besides `__all__`, whose list value names what a module exports (`meizel/test_graph/cutoff.py`, the strict interface cutoff of test selection) | `names` (list) |
 | `type-checking` | `if TYPE_CHECKING:` | `files` |
 | `typescript` | TypeScript/TSX scanning (`meizel/language/typescript.py`) | `scopes`, `import-sources`, `aliases`, `extensions`, `impure-calls`, `impure-hooks`, `inlined-env-roots`, `package-dir` (lists) |
 

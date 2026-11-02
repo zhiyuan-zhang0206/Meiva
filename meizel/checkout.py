@@ -38,6 +38,7 @@ from meizel.test_graph import (
 from meizel.test_graph.impact import select_impacted_tests
 from meizel.test_graph.lanes import derive_test_lanes
 from meizel.test_graph.model import (
+    CutoffBase,
     CutoffContext,
     FileTestFacts,
     ModuleTable,
@@ -359,9 +360,9 @@ class GitRepo:
         return lanes_at(self.root, repo=self)
 
     def select_tests(
-        self, changed_paths: Sequence[str], *, base_ref: str | None = None
+        self, changed_paths: Sequence[str], *, base: CutoffBase | None = None
     ) -> TestSelection:
-        return select_tests_at(self.root, changed_paths, base_ref=base_ref, repo=self)
+        return select_tests_at(self.root, changed_paths, base=base, repo=self)
 
     @contextmanager
     def checkout(self, ref: str) -> Generator[GitRepo]:
@@ -738,8 +739,9 @@ def lanes_at(root: Path, *, repo: GitRepo | None = None) -> TestLanes:
 
 
 def _load_cutoff_context(
-    seat: GitRepo, checkout: TestCheckout, changed_paths: Sequence[str], base_ref: str
+    seat: GitRepo, checkout: TestCheckout, changed_paths: Sequence[str], base: CutoffBase
 ) -> CutoffContext | None:
+    base_ref = base.ref
     # meiva:note
     # Lists tracked files at `base_ref` via fixed git ls-tree argv without invoking a shell.
     listing = subprocess.run(  # noqa: S603
@@ -774,6 +776,7 @@ def _load_cutoff_context(
         head_manifests=checkout.manifests,
         base_test_dirs=base_checkout.test_dirs,
         base_collectable=base_checkout.collectable,
+        public_surface=base.public_surface,
     )
 
 
@@ -781,14 +784,10 @@ def select_tests_at(
     root: Path,
     changed_paths: Sequence[str],
     *,
-    base_ref: str | None = None,
+    base: CutoffBase | None = None,
     repo: GitRepo | None = None,
 ) -> TestSelection:
     seat = repo if repo is not None else GitRepo(root)
     checkout, facts = _load_test_graph_state(root, seat)
-    cutoff = (
-        _load_cutoff_context(seat, checkout, changed_paths, base_ref)
-        if base_ref is not None
-        else None
-    )
+    cutoff = _load_cutoff_context(seat, checkout, changed_paths, base) if base is not None else None
     return select_impacted_tests(tuple(changed_paths), checkout, facts, cutoff=cutoff)

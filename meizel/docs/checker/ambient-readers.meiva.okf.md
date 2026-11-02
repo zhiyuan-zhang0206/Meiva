@@ -13,7 +13,7 @@ A function that reads the world and hands it on is an acquisition point of its o
 that, a root could expose `os.environ` or `Path.home()` through a one-line function, and every
 non-root caller would read the world through it unrecorded, with the read booked in the one
 file that is allowed to make it. The policy table `[ambient-readers.<kind>]` lists such
-functions, one table per kind of the vocabulary above:
+functions, one table per kind, whether of the standard library or declared by the policy under `[ambient]`:
 
 ```toml
 [ambient-readers.environ]
@@ -50,7 +50,7 @@ of its own, not a side effect of this one.
 A key is the fully qualified call (`pkg.module.name()` or `pkg.module.Class.method()`) of the
 module that defines the function, so a function of the same name elsewhere is not the reader. A
 class is listed the same way (`"base.clock.Clock()"` is every place that builds one). A key without
-the parentheses names an object (`"base.clock.SYSTEM_TIMERS"`): like `settings` under `[ambient]`
+the parentheses names an object (`"base.clock.SYSTEM_TIMERS"`): like a bare name under `[ambient]`
 it acquires at every use: each read of the imported name (a default argument, a use under
 `__main__`) and each read of the attribute (`m.NAME`); an import that nothing uses acquires nothing. The value says what it
 reads. A call is an acquisition of the listed kind at the call site and is judged like any other: it

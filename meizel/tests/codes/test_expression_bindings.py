@@ -78,7 +78,7 @@ def test_lambda_defaults_use_the_enclosing_scope(tmp_path: Path, parameters: str
         tmp_path,
         "import os\nlookup = lambda " + parameters + "os.getenv('DEFAULT'): os.getenv('LOCAL')\n",
     )
-    assert [(item.kind.value, item.target) for item in result.ambient] == [("environ", "os.getenv")]
+    assert [(item.kind, item.target) for item in result.ambient] == [("environ", "os.getenv")]
 
 
 @pytest.mark.parametrize(

@@ -16,7 +16,7 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "source_text.py" = []
 "state" = ["allowances.py", "checkout.py", "lint_common.py", "roles.py"]
 "test_graph" = ["roles.py"]
-"tests" = ["allowances.py", "contracts", "entry.py", "graph", "language", "lint_common.py", "roles.py"]
+"tests" = ["allowances.py", "contracts", "entry.py", "graph", "language", "lint_common.py", "roles.py", "test_graph"]
 
 [roots]
 "entry.py" = { kinds = ["cwd", "clock", "platform"], why = "the process entry: when argv names no --repo it reads the working directory once and hands the resolved repository root down to the commands, it reads the day once for the placeholder `debt record` writes into an entry nobody has reviewed, and when argv names no --jobs it reads the processor count once and hands the worker count down, so that no command below decides how parallel it is" }

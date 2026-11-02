@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
-from meizel.graph.model import AmbientKind
+from meizel.graph.model import KindName
 from scripts.lint.diagnostics.diff_hints.ambient import (
     new_root_sites,
     root_middle_layer,
@@ -60,7 +60,7 @@ def analyze(
     changes: tuple[FileChange, ...],
     texts: Mapping[str, str],
     roles: Roles,
-    roots: Mapping[str, frozenset[AmbientKind]],
+    roots: Mapping[str, frozenset[KindName]],
     importers: Mapping[str, Importers],
     new_roots: Sequence[NewRoot],
 ) -> list[Site]:

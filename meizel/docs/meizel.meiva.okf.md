@@ -16,6 +16,14 @@ application code: it depends on the standard library only and never imports an
 application package. `scripts/` may import `meizel`; `meizel` never imports
 `scripts`.
 
+The code also knows nothing of the repository it judges. What a repository alone can say is
+declared in its `meizel.policy.toml`: the kinds of state it keeps itself (the keys of `[ambient]`),
+the functions that read the world for their caller (`[ambient-readers.<kind>]`), the module-level
+names besides `__all__` that list a module's exports (`[public-surface]`), and every exemption. The
+checker's own vocabulary is the standard library's (`environ`, `clock`, `home`, `cwd`, `platform`,
+`pid`, `random`), so a repository with a cache or a queue declares it in its policy and a manifest
+may name it from then on ([[meizel/docs/ambient-kinds.meiva.okf.md|ambient kinds]]).
+
 ## Top-level packages and their roles
 
 The root `meizel.toml` declares which top-level directories exist and what each is,

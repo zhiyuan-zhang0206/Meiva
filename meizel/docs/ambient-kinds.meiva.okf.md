@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Ambient Kinds"
-description: "The closed vocabulary of ambient kinds — `argv`, `environ`, `clock`, `home`/`cwd`, `platform`, `pid`, `random` and the repository's own state — the operating-system channels they cover, the table that judges every name of those channels, and the guard that keeps the table closed."
+description: "The closed vocabulary of the standard library's ambient kinds — `argv`, `environ`, `clock`, `home`/`cwd`, `platform`, `pid`, `random` — the state kinds a repository's policy adds, the operating-system channels the standard-library kinds cover, the table that judges every name of those channels, and the guard that keeps the table closed."
 tags:
   - locality
   - tool
@@ -9,12 +9,16 @@ tags:
 
 # meizel/ — Ambient Kinds
 
-A closed vocabulary (`AmbientKind` in `meizel/graph/model.py`); an unknown kind in a manifest is
-`manifest-syntax`. The standard-library names that acquire each kind are judged in one table,
+The standard library's kinds are a closed vocabulary (`AmbientKind` in `meizel/graph/model.py`). The
+standard-library names that acquire each kind are judged in one table,
 `meizel/graph/ambient_surface.py` (the groups of the process channels `os`, `sys`, `time` and
 `datetime` are in `ambient_process_table.py`, the shape of a judgment in `ambient_judgments.py`).
-Diff hints share the closed kind vocabulary when reading
-settings roots for `service-locator`.
+The state a repository keeps itself is not in the vocabulary: each repository declares its own kinds
+as the keys of the policy table `[ambient]` (`Policy.state_kinds`), and a kind of either family
+travels as a plain name (`KindName`). A manifest's `[state]` accepts the declared kinds and `[roots]`
+accepts those and the standard library's; any other kind is `manifest-syntax`. Diff hints read the
+same two sets (the standard library's and the policy's at the revision they judge) and reject any
+other root kind.
 
 | kind | what it is | acquired by |
 |---|---|---|
@@ -25,7 +29,7 @@ settings roots for `service-locator`.
 | `platform` | which machine and which platform this is | `sys.platform`, `os.name`, `os.uname`, `os.cpu_count`, `os.getloadavg`, `os.sysconf`, `socket.gethostname`, `uuid.getnode`, `multiprocessing.cpu_count`, `platform.*` |
 | `pid` | what the process says about itself: its ids, its interpreter, its terminal | `os.getpid` and the other id readers, `sys.executable`, `sys.prefix`, `sys.stdin`, `isatty`, `shutil.get_terminal_size`, `getpass.getuser`, `os.getlogin`, `pwd`/`grp` lookups, `threading.get_ident`, `psutil.Process()` without a pid |
 | `random` | entropy | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.uuid1`, `uuid.uuid4`, `os.urandom`, `os.getrandom` |
-| `settings`, `db`, `endpoints`, `bus` | the state the repository keeps itself | described in the ambient reads node |
+| a state kind of the policy's `[ambient]` | the state the repository keeps itself | the names that table lists for it, resolved against the modules whose `[state]` declares the kind ([[meizel/docs/checker/ambient.meiva.okf.md|the ambient reads node]]) |
 
 ## The channels
 
@@ -44,7 +48,7 @@ met. Each channel is either an ambient kind or the concern of another layer:
 | the anchors a relative path hangs from: the home directory, the working directory | `home`, `cwd` |
 | the contents and metadata of files | not a kind: an effect, `impure-call` in the purity layer |
 | the network, including name resolution | not a kind: an effect, `impure-call` |
-| the repository's own state | `settings`, `db`, `endpoints`, `bus` |
+| the repository's own state | a state kind the repository's policy declares |
 
 A name that only converts, compares or formats the values it is given reads none of these.
 

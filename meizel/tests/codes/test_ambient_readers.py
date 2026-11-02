@@ -67,7 +67,7 @@ def repo(
 # The (kind, target) pairs a file acquires, whatever the rule judges.
 def acquired(make_repo: RepoFactory, source: str) -> list[tuple[str, str]]:
     root = repo(make_repo, {"app/mod.py": source})
-    return [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient]
+    return [(a.kind, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient]
 
 
 @pytest.mark.parametrize(
@@ -141,9 +141,7 @@ def test_a_re_export_is_the_same_reader(make_repo: RepoFactory) -> None:
     }
     root = repo(make_repo, {**files, "app/mod.py": "import lib\n\nx = lib.process_environment()\n"})
     scan = analysis_of(root).scans["app/mod.py"]
-    assert [(a.kind.value, a.target) for a in scan.ambient] == [
-        ("environ", "lib.process_environment")
-    ]
+    assert [(a.kind, a.target) for a in scan.ambient] == [("environ", "lib.process_environment")]
 
 
 def test_a_rename_in_a_re_export_is_followed(
@@ -156,7 +154,7 @@ def test_a_rename_in_a_re_export_is_followed(
     }
     root = repo(make_repo, files)
     scan = analysis_of(root).scans["app/mod.py"]
-    assert [(a.kind.value, a.target) for a in scan.ambient] == [("environ", "lib.live")]
+    assert [(a.kind, a.target) for a in scan.ambient] == [("environ", "lib.live")]
 
 
 def sites(make_repo: RepoFactory, source: str, manifest: str = "") -> list[tuple[str, str]]:
@@ -267,7 +265,7 @@ NAMES = {"clock": ["lib.clocks.SYSTEM", "lib.clocks.Clock()", "lib.clocks.Clock.
 
 def clock_acquired(make_repo: RepoFactory, source: str, extra: dict[str, str] | None = None):
     root = repo(make_repo, {**CLOCKS, "app/mod.py": source, **(extra or {})}, NAMES)
-    return [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient]
+    return [(a.kind, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient]
 
 
 @pytest.mark.parametrize(
@@ -395,13 +393,13 @@ def test_a_call_imported_through_several_re_exports_is_still_the_reader(
 ) -> None:
     root = repo(make_repo, chain(5), {"environ": ["lib.z00.read()"]})
     scan = analysis_of(root).scans["app/mod.py"]
-    assert [a.kind.value for a in scan.ambient] == ["environ"]
+    assert [a.kind for a in scan.ambient] == ["environ"]
 
 
 def test_a_chain_of_twelve_modules_is_followed(make_repo: RepoFactory) -> None:
     root = repo(make_repo, chain(12), {"environ": ["lib.z00.read()"]})
     scan = analysis_of(root).scans["app/mod.py"]
-    assert [a.kind.value for a in scan.ambient] == ["environ"]
+    assert [a.kind for a in scan.ambient] == ["environ"]
 
 
 def test_the_first_chain_too_long_to_follow_fails_instead_of_going_unseen(
@@ -427,4 +425,4 @@ def test_a_class_re_exported_by_a_relative_import_is_followed(make_repo: RepoFac
     }
     root = repo(make_repo, files)
     scan = analysis_of(root).scans["app/mod.py"]
-    assert [(a.kind.value, a.target) for a in scan.ambient] == [("home", "lib.Home.current")]
+    assert [(a.kind, a.target) for a in scan.ambient] == [("home", "lib.Home.current")]

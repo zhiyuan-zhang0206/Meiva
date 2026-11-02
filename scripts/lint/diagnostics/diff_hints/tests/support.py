@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from meizel.graph.model import AmbientKind
+from meizel.graph.model import KindName
 from scripts.lint.diagnostics.diff_hints.engine import analyze
 from scripts.lint.diagnostics.diff_hints.model import (
     FileChange,
@@ -26,7 +26,7 @@ def sites(
     path: str = "cli/x.py",
     *,
     added: frozenset[int] | None = None,
-    roots: frozenset[AmbientKind] = frozenset(),
+    roots: frozenset[KindName] = frozenset(),
     importers: int = 0,
     onward: int = 0,
     new_roots: tuple[NewRoot, ...] = (),

@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from typing import Literal
 
-from meizel.graph.model import AmbientKind
+from meizel.graph.model import KindName
 
 __all__ = [
     "ENTRY",
@@ -152,9 +152,9 @@ _RESTORED_WHY = "restored from a historical registry that recorded no reason"
 # One declaration as the manifest spells it: a roots entry carries its kinds and why, a purity `none`
 # its mode and why (a placeholder when the base recorded none), everything else the bare value.
 def _declaration(
-    table: str, name: str, declared: str | tuple[AmbientKind, ...], reasons: Mapping[str, str]
+    table: str, name: str, declared: str | tuple[KindName, ...], reasons: Mapping[str, str]
 ) -> str:
-    values = json.dumps(declared if isinstance(declared, str) else [k.value for k in declared])
+    values = json.dumps(declared if isinstance(declared, str) else list(declared))
     why = json.dumps(reasons.get(name) or _RESTORED_WHY)
     if table == "roots":
         return f"{{ kinds = {values}, why = {why} }}"
@@ -170,7 +170,7 @@ def _declaration(
 def set_scope(
     text: str,
     table: Literal["purity", "state", "roots"],
-    declarations: Mapping[str, str | tuple[AmbientKind, ...]],
+    declarations: Mapping[str, str | tuple[KindName, ...]],
     reasons: Mapping[str, str],
 ) -> str:
     lines = text.splitlines()

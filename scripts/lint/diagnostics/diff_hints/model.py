@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from meizel.graph.model import AmbientKind
+from meizel.graph.model import KindName
 
 
 # meiva:note
@@ -133,7 +133,7 @@ class StatSite:
 class NewRoot:
     path: str
     manifest: str
-    kinds: frozenset[AmbientKind]
+    kinds: frozenset[KindName]
     importers: Importers | None
 
 
@@ -152,7 +152,7 @@ class Unit:
     added: frozenset[int]
     kind: FileKind
     roles: Roles
-    roots: frozenset[AmbientKind]
+    roots: frozenset[KindName]
     importers: Importers
     names: Mapping[str, str]
     touched: tuple[ast.AST, ...]

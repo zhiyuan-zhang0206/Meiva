@@ -8,7 +8,6 @@ from __future__ import annotations
 import ast
 from collections.abc import Sequence
 
-from meizel.graph.model import AmbientKind
 from scripts.lint.diagnostics.diff_hints.model import (
     MIN_IMPORTERS,
     MIN_ONWARD,
@@ -21,6 +20,9 @@ from scripts.lint.diagnostics.diff_hints.model import (
 from scripts.lint.diagnostics.diff_hints.scope import is_root_file
 
 _LOCATOR_CALLS = frozenset({"runtime_view", "settings_view"})
+# meiva:note
+# The kind this repository's policy declares for the process configuration (`[ambient] settings`).
+_SETTINGS_KIND = "settings"
 
 
 def _locator_detail(node: ast.AST) -> str | None:
@@ -41,7 +43,7 @@ def service_locator(unit: Unit) -> list[Site]:
     if (
         unit.kind is not FileKind.PRODUCTION
         or is_root_file(unit.path)
-        or AmbientKind.SETTINGS in unit.roots
+        or _SETTINGS_KIND in unit.roots
     ):
         return []
     sites: list[Site] = []
@@ -71,7 +73,7 @@ def _named(paths: tuple[str, ...]) -> str:
 def root_middle_layer(unit: Unit) -> list[Site]:
     if unit.kind is not FileKind.PRODUCTION or not unit.roots or is_root_file(unit.path):
         return []
-    kinds = ", ".join(sorted(kind.value for kind in unit.roots))
+    kinds = ", ".join(sorted(unit.roots))
     direct = unit.importers.direct
     detail = None
     if len(direct) >= MIN_IMPORTERS:
@@ -100,7 +102,7 @@ def root_middle_layer(unit: Unit) -> list[Site]:
 def new_root_sites(new_roots: Sequence[NewRoot]) -> list[Site]:
     sites: list[Site] = []
     for new in new_roots:
-        kinds = ", ".join(sorted(kind.value for kind in new.kinds))
+        kinds = ", ".join(sorted(new.kinds))
         if new.importers is None:
             seen = "its importers are not read for this language"
         elif new.importers.direct:

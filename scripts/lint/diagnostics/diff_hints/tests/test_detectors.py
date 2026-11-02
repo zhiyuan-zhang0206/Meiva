@@ -441,7 +441,7 @@ def test_a_non_settings_root_still_reports_service_locator_reads() -> None:
 
 def test_a_settings_root_can_assemble_inputs_from_the_application() -> None:
     source = "def inputs(request):\n    return request.app.state.thing\n"
-    assert sites(source, "cli/worker.py", roots=frozenset({AmbientKind.SETTINGS})) == []
+    assert sites(source, "cli/worker.py", roots=frozenset({"settings"})) == []
 
 
 HOME_ROOT = frozenset({AmbientKind.HOME})
@@ -457,7 +457,7 @@ HOME_ROOT = frozenset({AmbientKind.HOME})
         ("base/paths/home.py", HOME_ROOT, 1, 2, False),
         ("base/paths/home.py", HOME_ROOT, 1, 3, True),
         ("base/paths/home.py", HOME_ROOT, 0, 0, False),
-        ("base/paths/home.py", frozenset[AmbientKind](), 9, 0, False),
+        ("base/paths/home.py", frozenset[str](), 9, 0, False),
         ("cli/database/runtime.py", HOME_ROOT, 18, 0, False),
         ("gateway/app.py", HOME_ROOT, 6, 0, False),
         ("cli/main.py", HOME_ROOT, 6, 0, False),
@@ -466,7 +466,7 @@ HOME_ROOT = frozenset({AmbientKind.HOME})
     ],
 )
 def test_a_root_that_other_modules_outside_the_roots_import_is_a_middle_layer(
-    path: str, roots: frozenset[AmbientKind], importers: int, onward: int, fires: bool
+    path: str, roots: frozenset[str], importers: int, onward: int, fires: bool
 ) -> None:
     found = sites("VALUE = 1\n", path, roots=roots, importers=importers, onward=onward)
     assert [site.hint for site in found] == ([HintId.ROOT_MIDDLE_LAYER] if fires else [])

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from meizel.contracts.analysis import render_policy
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, verdict
 
 BASE = {
@@ -10,10 +11,20 @@ BASE = {
     "pkg/b.py": "",
 }
 GOOD = '[uses]\n"a.py" = ["b.py"]\n'
+# meiva:note
+# The state kinds this fixture repository declares: the checker has none of its own.
+KINDS = render_policy({}, {}) + '\n[ambient]\nsettings = ["settings"]\ndb = ["connect()"]\n'
 
 
-def code_for(make_repo: RepoFactory, manifest: str, code: str, extra: dict[str, str] | None = None):
-    root = make_repo({**BASE, **(extra or {}), "pkg/meizel.toml": manifest})
+def code_for(
+    make_repo: RepoFactory,
+    manifest: str,
+    code: str,
+    extra: dict[str, str] | None = None,
+    policy: str | None = None,
+):
+    files = {**BASE, **(extra or {}), "pkg/meizel.toml": manifest}
+    root = make_repo(files if policy is None else {**files, "meizel.policy.toml": policy})
     return diagnostics(root, code)
 
 
@@ -110,15 +121,57 @@ def test_state_and_roots_are_read_into_the_manifest(make_repo: RepoFactory) -> N
         '[state]\n"a.py" = ["settings", "db"]\n\n'
         '[roots]\n"a.py" = { kinds = ["environ"], why = "reads it" }\n"b.py" = { kinds = ["clock", "pid"], why = "stamps rows" }\n'
     )
-    root = make_repo({**BASE, "pkg/meizel.toml": manifest})
+    root = make_repo({**BASE, "pkg/meizel.toml": manifest, "meizel.policy.toml": KINDS})
     read = analysis_of(root).manifests["pkg"]
-    assert {name: [kind.value for kind in kinds] for name, kinds in read.state.items()} == {
-        "a.py": ["settings", "db"]
-    }
-    assert {name: ([k.value for k in r.kinds], r.why) for name, r in read.roots.items()} == {
+    assert {name: list(kinds) for name, kinds in read.state.items()} == {"a.py": ["settings", "db"]}
+    assert {name: (list(r.kinds), r.why) for name, r in read.roots.items()} == {
         "a.py": (["environ"], "reads it"),
         "b.py": (["clock", "pid"], "stamps rows"),
     }
+
+
+NONE = render_policy({}, {})
+
+
+@pytest.mark.parametrize(
+    ("manifest", "policy", "undeclared"),
+    [
+        ('[state]\n"a.py" = ["settings"]\n', NONE, "settings"),
+        (
+            '[roots]\n"a.py" = { kinds = ["settings"], why = "reads the configuration" }\n',
+            NONE,
+            "settings",
+        ),
+        ('[state]\n"a.py" = ["endpoints"]\n', KINDS, "endpoints"),
+        (
+            '[roots]\n"a.py" = { kinds = ["endpoints"], why = "serves the table" }\n',
+            KINDS,
+            "endpoints",
+        ),
+        ('[state]\n"a.py" = ["clock"]\n', KINDS, "clock"),
+    ],
+)
+def test_a_state_kind_the_policy_does_not_declare_is_a_manifest_syntax_error(
+    make_repo: RepoFactory, manifest: str, policy: str, undeclared: str
+) -> None:
+    [found] = code_for(make_repo, manifest, "manifest-syntax", policy=policy)
+    assert f"unknown: {undeclared}" in found.message
+    assert found.path == "pkg/meizel.toml"
+
+
+def test_a_kind_the_policy_declares_is_accepted_whatever_it_is_called(
+    make_repo: RepoFactory,
+) -> None:
+    queue = NONE + '\n[ambient]\nqueue = ["Queue.open()"]\n'
+    manifest = (
+        '[state]\n"a.py" = ["queue"]\n'
+        '[roots]\n"b.py" = { kinds = ["queue", "clock"], why = "opens the queue" }\n'
+    )
+    root = make_repo({**BASE, "pkg/meizel.toml": manifest, "meizel.policy.toml": queue})
+    assert diagnostics(root, "manifest-syntax") == []
+    read = analysis_of(root).manifests["pkg"]
+    assert read.state == {"a.py": ("queue",)}
+    assert read.roots["b.py"].kinds == ("queue", "clock")
 
 
 def test_a_file_that_is_not_judged_says_why(make_repo: RepoFactory) -> None:
