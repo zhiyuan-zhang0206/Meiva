@@ -1,4 +1,4 @@
-exports = ["tests"]
+exports = ["allowlist.py"]
 
 [uses]
 "__init__.py" = ["allowlist.py", "bundle.py", "scan.py", "tree.py"]
@@ -15,9 +15,6 @@ exports = ["tests"]
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
-"allowlist.py" = "strict-to-be"
+"allowlist.py" = "strict"
 "bundle.py" = "strict"
 "module.py" = "strict"
-
-[debt.impure-call]
-"allowlist.py#Path.resolve" = { count = 1, owner = "#7240", until = "waits for the policy as a value: _POLICY = allowances.load(_REPO_ROOT) runs at import and every constant in the module derives from it, so the lists would have to become a value the rule modules take instead of module-level names" }

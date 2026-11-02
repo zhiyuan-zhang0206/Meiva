@@ -5,8 +5,8 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from meizel import allowances, lint_common
-from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state import bundle, scan
+from meizel.state.ambient_state.allowlist import AmbientAllowlist
 from meizel.state.ambient_state.tree import Tree
 
 SECTION = "ambient_state"
@@ -125,61 +125,72 @@ _RULES: dict[str, _Rule] = {
 }
 
 
-def in_scope(rel: str, scope: Collection[str]) -> bool:
+# meiva:note
+# What one run of the rule judges: the directories it governs (the composition root's package
+# selection) and the closed lists it lets through (the policy). Both are values the caller holds,
+# which is what lets this package open nothing and a synthetic root be judged by its own policy.
+@dataclass(frozen=True, slots=True)
+class Config:
+    scope: Collection[str]
+    allow: AmbientAllowlist
+
+
+def in_scope(rel: str, config: Config) -> bool:
     """Whether the rule governs this repo-relative path."""
     return (
-        rel.split("/", 1)[0] in scope
+        rel.split("/", 1)[0] in config.scope
         and not lint_common.is_test_path(rel)
         and not rel.endswith("__main__.py")
-        and not any(rx.match(rel) for rx in allow.SKILL_SCRIPT_PATTERNS)
+        and not any(rx.match(rel) for rx in config.allow.skill_script_patterns)
     )
 
 
 _BACKGROUND_WORK = frozenset({scan.TASK, scan.THREAD})
 
 
-def _is_facade_state(rel: str, hit: scan.Hit) -> bool:
+def _is_facade_state(rel: str, hit: scan.Hit, allow: AmbientAllowlist) -> bool:
     """State inside a sink facade is let through; background work started there is not."""
-    return rel in allow.SINK_FACADES and hit.rule not in _BACKGROUND_WORK
+    return rel in allow.sink_facades and hit.rule not in _BACKGROUND_WORK
 
 
 def _site_key(rel: str, hit: scan.Hit) -> str:
     return f"{rel}::{hit.rule}:{hit.name}"
 
 
-def _hits(tree: ast.Module, rel: str, index: Tree, scope: Collection[str]) -> list[scan.Hit]:
-    if not in_scope(rel, scope):
+def _hits(tree: ast.Module, rel: str, index: Tree, config: Config) -> list[scan.Hit]:
+    if not in_scope(rel, config):
         return []
     return [
-        *scan.scan(tree, rel, index),
+        *scan.scan(tree, rel, index, config.allow),
         *bundle.hits(tree, index),
     ]
 
 
-def measure(tree: ast.Module, rel: str, index: Tree, scope: Collection[str]) -> Sites:
+def measure(tree: ast.Module, rel: str, index: Tree, config: Config) -> Sites:
     """The site keys of one module with the closed lists applied, `path::rule:name -> [line]`."""
     sites: Sites = {}
-    for hit in _hits(tree, rel, index, scope):
+    for hit in _hits(tree, rel, index, config):
         key = _site_key(rel, hit)
-        if key not in allow.ALLOWED and not _is_facade_state(rel, hit):
+        if key not in config.allow.allowed and not _is_facade_state(rel, hit, config.allow):
             sites.setdefault(key, []).append(hit.line)
     return sites
 
 
-def _listed_in(rel: str) -> dict[str, str]:
-    """The ALLOWED entries that name sites of this file."""
+# meiva:note
+# The `allowed` entries that name sites of this file.
+def _listed_in(rel: str, allow: AmbientAllowlist) -> dict[str, str]:
     prefix = f"{rel}::"
-    return {key: why for key, why in allow.ALLOWED.items() if key.startswith(prefix)}
+    return {key: why for key, why in allow.allowed.items() if key.startswith(prefix)}
 
 
 def allowlist_errors(
-    tree: ast.Module, rel: str, index: Tree, scope: Collection[str]
+    tree: ast.Module, rel: str, index: Tree, config: Config
 ) -> list[tuple[int, str]]:
     """A listed exemption whose site is no longer reported is stale."""
-    listed = _listed_in(rel)
-    if not listed and rel not in allow.SINK_FACADES:
+    listed = _listed_in(rel, config.allow)
+    if not listed and rel not in config.allow.sink_facades:
         return []
-    hits = _hits(tree, rel, index, scope)
+    hits = _hits(tree, rel, index, config)
     present = {_site_key(rel, hit) for hit in hits}
     errors = [
         (
@@ -189,7 +200,9 @@ def allowlist_errors(
         for key in sorted(listed)
         if key not in present
     ]
-    if rel in allow.SINK_FACADES and not any(_is_facade_state(rel, hit) for hit in hits):
+    if rel in config.allow.sink_facades and not any(
+        _is_facade_state(rel, hit, config.allow) for hit in hits
+    ):
         errors.append(
             (
                 1,
@@ -206,18 +219,18 @@ _LIST_FILE = allowances.POLICY
 _STALE_WHY = "an exemption that outlives its site is a permission nobody re-checks"
 
 
-def missing_allowlist_errors(index: Tree) -> list[str]:
+def missing_allowlist_errors(index: Tree, *, allow: AmbientAllowlist) -> list[str]:
     """A listed file or function that no longer exists is stale too."""
     listed_paths = {
-        *allow.SINK_FACADES,
-        *(key.partition("::")[0] for key in allow.ALLOWED),
+        *allow.sink_facades,
+        *(key.partition("::")[0] for key in allow.allowed),
     }
     errors = [
         f"{path}:1: stale ambient_state list entry — the file no longer exists; remove it from {_LIST_FILE}. {_STALE_WHY}"
         for path in sorted(listed_paths)
         if not index.has_file(path)
     ]
-    for callee in sorted(allow.PURE_REPO_CALLEES):
+    for callee in sorted(allow.pure_repo_callees):
         owner, _, name = callee.rpartition(".")
         rel = index.module_path(owner)
         source = None if rel is None else index.read(rel)
@@ -245,12 +258,12 @@ def collect(
     index: Tree,
     sites: dict[str, Sites],
     scanned: set[str],
-    scope: Collection[str],
+    config: Config,
 ) -> list[str]:
     """Add one module's measured sites to `sites` and mark it scanned; return its stale-list
     errors. The one call the gate makes per governed file."""
-    sites[SECTION].update(measure(tree, rel, index, scope))
+    sites[SECTION].update(measure(tree, rel, index, config))
     scanned.add(rel)
     return [
-        f"{rel}:{line}: {message}" for line, message in allowlist_errors(tree, rel, index, scope)
+        f"{rel}:{line}: {message}" for line, message in allowlist_errors(tree, rel, index, config)
     ]

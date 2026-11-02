@@ -7,7 +7,7 @@ import pytest
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state.module import Tree
-from meizel.state.ambient_state.tests.conftest import SCOPE
+from meizel.state.ambient_state.tests.conftest import CONFIG
 
 SCHEDULER = """
 import asyncio
@@ -48,7 +48,7 @@ class Owner:
 
 
 def _sites(source: str, root: Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/operations.py", _tree(root), SCOPE)
+    return ambient_state.measure(ast.parse(source), "base/operations.py", _tree(root), CONFIG)
 
 
 def test_original_snapshot_and_local_join_are_supported(tmp_path: Path) -> None:
@@ -167,7 +167,10 @@ def test_current_dispatcher_uses_the_same_general_map_evidence() -> None:
     root = Path(__file__).resolve().parents[4]
     relative = "services/agent_runner/agent_host/dispatcher.py"
     findings = ambient_state.measure(
-        ast.parse((root / relative).read_text()), relative, _tree(root), SCOPE
+        ast.parse((root / relative).read_text()),
+        relative,
+        _tree(root),
+        CONFIG,
     )
     assert f"{relative}::asyncio-task:TurnScheduler._start" not in findings
 

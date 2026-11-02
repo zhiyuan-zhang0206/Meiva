@@ -7,9 +7,6 @@ import pathlib
 import pytest
 
 from base.host.proc import run_bounded
-from meizel.tests.synthetic import (
-    synthetic_ambient_allowlists as synthetic_ambient_allowlists,
-)
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 

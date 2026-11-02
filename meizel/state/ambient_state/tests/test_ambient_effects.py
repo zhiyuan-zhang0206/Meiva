@@ -3,13 +3,14 @@ from __future__ import annotations
 import ast
 import pathlib
 import textwrap
+from dataclasses import replace
 
 import pytest
 
 from meizel.state import ambient_state
-from meizel.state.ambient_state import allowlist as allow
+from meizel.state.ambient_state import Config
 from meizel.state.ambient_state.module import Tree
-from meizel.state.ambient_state.tests.conftest import SCOPE
+from meizel.state.ambient_state.tests.conftest import ALLOWLISTS, CONFIG, REAL_ALLOWLISTS
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -24,12 +25,13 @@ def _sites(
     source: str,
     rel: str = "base/mod.py",
     files: dict[str, str] | None = None,
+    config: Config = CONFIG,
 ) -> dict[str, int]:
     for name, content in (files or {}).items():
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, _tree(root), SCOPE)
+    measured = ambient_state.measure(tree, rel, _tree(root), config)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 
@@ -247,7 +249,7 @@ def test_a_thread_is_reported_by_function(tmp_path: pathlib.Path, call: str) -> 
 def test_the_rule_governs_the_packages_and_schedules_not_tests_or_skill_scripts(
     rel: str, governed: bool
 ) -> None:
-    assert ambient_state.in_scope(rel, SCOPE) is governed
+    assert ambient_state.in_scope(rel, CONFIG) is governed
 
 
 def test_an_out_of_scope_module_measures_nothing(tmp_path: pathlib.Path) -> None:
@@ -277,27 +279,33 @@ def test_a_sink_facade_file_lets_its_state_through_but_not_its_threads(
         "thread:start": 1,
     }
 
-    allow.SINK_FACADES.clear()
-    allow.SINK_FACADES["base/log/sink.py"] = "the log sink's buffer"
-    assert _sites(tmp_path, source, rel="base/log/sink.py") == {"thread:start": 1}
+    facade = replace(
+        CONFIG,
+        allow=replace(ALLOWLISTS, sink_facades={"base/log/sink.py": "the log sink's buffer"}),
+    )
+    assert _sites(tmp_path, source, rel="base/log/sink.py", config=facade) == {"thread:start": 1}
 
 
-def _stale(root: pathlib.Path, rel: str, source: str) -> list[str]:
+def _stale(root: pathlib.Path, rel: str, source: str, config: Config = CONFIG) -> list[str]:
     path = _write(root, rel, source)
-    errors = ambient_state.allowlist_errors(ast.parse(path.read_text()), rel, _tree(root), SCOPE)
+    errors = ambient_state.allowlist_errors(ast.parse(path.read_text()), rel, _tree(root), config)
     return [message for _, message in errors]
 
 
 def test_a_list_entry_whose_site_is_gone_is_stale(tmp_path: pathlib.Path) -> None:
-    allow.ALLOWED.clear()
-    allow.ALLOWED["base/mod.py::hidden-singleton:table"] = "static"
-    allow.SINK_FACADES.clear()
-    allow.SINK_FACADES["base/mod.py"] = "buffer"
+    listed = replace(
+        CONFIG,
+        allow=replace(
+            ALLOWLISTS,
+            allowed={"base/mod.py::hidden-singleton:table": "static"},
+            sink_facades={"base/mod.py": "buffer"},
+        ),
+    )
     live = "from functools import cache\n\n_warned = set()\n\n@cache\ndef table(): ...\n"
 
-    assert _stale(tmp_path, "base/mod.py", live) == []
+    assert _stale(tmp_path, "base/mod.py", live, listed) == []
 
-    problems = _stale(tmp_path, "base/mod.py", "VALUE = 1\n")
+    problems = _stale(tmp_path, "base/mod.py", "VALUE = 1\n", listed)
     assert any(
         "hidden-singleton:table" in message and "site is gone" in message for message in problems
     )
@@ -312,15 +320,15 @@ def test_a_list_entry_whose_site_is_gone_is_stale(tmp_path: pathlib.Path) -> Non
 
 
 def test_a_list_entry_for_a_missing_file_or_function_is_stale(tmp_path: pathlib.Path) -> None:
-    allow.ALLOWED.clear()
-    allow.ALLOWED["base/gone.py::hidden-singleton:table"] = "static"
-    allow.SINK_FACADES.clear()
-    allow.SINK_FACADES["base/also_gone.py"] = "buffer"
-    allow.PURE_REPO_CALLEES.clear()
-    allow.PURE_REPO_CALLEES.update({"base.keys.derive": "constant", "base.keys.vanished": "x"})
+    listed = replace(
+        ALLOWLISTS,
+        allowed={"base/gone.py::hidden-singleton:table": "static"},
+        sink_facades={"base/also_gone.py": "buffer"},
+        pure_repo_callees={"base.keys.derive": "constant", "base.keys.vanished": "x"},
+    )
     _write(tmp_path, "base/keys.py", "def derive():\n    return 1\n")
 
-    errors = ambient_state.missing_allowlist_errors(_tree(tmp_path))
+    errors = ambient_state.missing_allowlist_errors(_tree(tmp_path), allow=listed)
 
     assert any(error.startswith("base/gone.py:1:") for error in errors)
     assert any(error.startswith("base/also_gone.py:1:") for error in errors)
@@ -334,15 +342,19 @@ def test_a_pure_repo_callee_is_exempt_where_it_is_assigned(tmp_path: pathlib.Pat
     source = "from base.keys import derive\n\nDEFAULT = derive('x')\n"
     assert _sites(tmp_path, source) == {"ambient-instance:DEFAULT": 1}
 
-    allow.PURE_REPO_CALLEES.clear()
-    allow.PURE_REPO_CALLEES["base.keys.derive"] = "a fixed value"
-    assert _sites(tmp_path, source) == {}
+    derive = replace(
+        CONFIG, allow=replace(ALLOWLISTS, pure_repo_callees={"base.keys.derive": "a fixed value"})
+    )
+    assert _sites(tmp_path, source, config=derive) == {}
 
 
 def test_the_closed_lists_carry_a_reason_for_every_entry() -> None:
-    for name in ("SINK_FACADES", "ALLOWED", "PURE_REPO_CALLEES"):
-        entries: dict[str, str] = getattr(allow, name)
-        assert all(reason.strip() for reason in entries.values()), name
+    for table in (
+        REAL_ALLOWLISTS.sink_facades,
+        REAL_ALLOWLISTS.allowed,
+        REAL_ALLOWLISTS.pure_repo_callees,
+    ):
+        assert all(reason.strip() for reason in table.values()), table
 
 
 @pytest.mark.parametrize(
