@@ -1,0 +1,126 @@
+# `main` carries one shared commit account, so which agent made a change survives only in the
+# pull request description: a squash commit's message is the pull request's title and
+# description, the branch's own commits are dropped, and a `Co-authored-by: Meiva #<id>`
+# trailer carries no email for GitHub to synthesize from a branch commit.
+#
+# This workflow comments when a `meiva-*` pull request reaches `main` without that line. It
+# never fails and never blocks: the account is shared, so a branch name cannot prove an agent
+# wrote it, and the owner develops on `meiva-*` branches too. A standalone `Meiva: none` line in
+# the description is the explicit human exit.
+#
+# One comment per pull request: created while the line is missing, deleted once the line (or the
+# exit) appears. `types: [edited]` is what closes that loop.
+
+name: Attribution gate
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+  # A pull request comment is an issue comment; either scope can write it.
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: attribution-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  attribution:
+    name: agent trailer in the description
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Reconcile the attribution comment
+        # The whole point of this workflow is that it cannot refuse a shared-account pull
+        # request, so a failed step (a fork's read-only token, an API hiccup) stays a note in
+        # the log instead of a red check.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          marker='<!-- meiva-attribution-gate -->'
+          # The comment this run owns: the marker alone would also match a person quoting it.
+          author='github-actions[bot]'
+          # The id is digits: the template's `<id>` placeholder is not attribution.
+          trailer='co-authored-by:[[:space:]]*meiva[[:space:]]*#[0-9]+'
+          # A standalone line, so a description that merely mentions the exit does not use it.
+          human_exit='^[[:space:]]*meiva:[[:space:]]*none[[:space:]]*$'
+
+          message="$(cat <<'MESSAGE'
+          <!-- meiva-attribution-gate -->
+          This pull request reaches `main` from a `meiva-*` branch, and its description names no
+          Meiva agent.
+
+          A squash commit's message is this pull request's title and description; the branch's own
+          commits are dropped. A `Co-authored-by: Meiva #<id>` trailer written in a commit is
+          therefore gone at merge, and the description is the only place the agent id survives.
+
+          Add this line to the description, with the id of the agent that did the work:
+
+          ```text
+          Co-authored-by: Meiva #<id>
+          ```
+
+          A change made by a person without an agent — `meiva-*` is also the owner's own branch
+          prefix — writes `Meiva: none` on a line of its own instead.
+
+          This comment is deleted when either line appears. Nothing here fails or blocks a merge:
+          the check only comments.
+          MESSAGE
+          )"
+
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""')"
+
+          if printf '%s\n' "$body" | grep -Eiq "$trailer"; then
+            wanted=0
+            echo 'the description names an agent id'
+          elif printf '%s\n' "$body" | grep -Eiq "$human_exit"; then
+            wanted=0
+            echo 'the description carries the human exit'
+          elif [[ "$HEAD_REF" == meiva-* ]]; then
+            wanted=1
+            echo 'a meiva-* pull request reaches main without an agent id'
+          else
+            wanted=0
+            echo "the head branch '${HEAD_REF}' is outside the meiva-* convention"
+          fi
+
+          existing="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+            --jq ".[] | select(.user.login == \"${author}\") | select((.body // \"\") | contains(\"${marker}\")) | .id")"
+
+          ids=()
+          while IFS= read -r id; do
+            if [ -n "$id" ]; then ids+=("$id"); fi
+          done <<< "$existing"
+
+          # Keep the first while it is wanted; every other comment this workflow posted goes, so
+          # a pull request never carries two.
+          keep=''
+          if [ "$wanted" -eq 1 ] && [ "${#ids[@]}" -gt 0 ]; then
+            keep="${ids[0]}"
+          fi
+          for id in ${ids[@]+"${ids[@]}"}; do
+            if [ "$id" = "$keep" ]; then
+              echo "keeping comment ${id}"
+              continue
+            fi
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" >/dev/null
+            echo "deleted comment ${id}"
+          done
+
+          if [ "$wanted" -eq 1 ] && [ -z "$keep" ]; then
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -f body="$message" >/dev/null
+            echo "commented on pull request ${PR_NUMBER}"
+          fi

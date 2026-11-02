@@ -289,6 +289,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the CI stall probe, tests/asyncio_stall_probe.py",
     ),
+    "tests/harness/test_attribution_gate_workflow.py": (
+        "contract",
+        "runs the shell of .github/workflows/attribution-gate.yml against a mock GitHub API, including the committed .github/PULL_REQUEST_TEMPLATE.md as a pull request body",
+    ),
     "tests/harness/test_ci_rerun_workflow.py": (
         "contract",
         "runs the shell of .github/workflows/ci-rerun.yml against a mock GitHub API",
