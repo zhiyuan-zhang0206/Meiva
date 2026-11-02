@@ -226,6 +226,7 @@ class TestAiMessageItems:
             NoteTag.INHERITED_MEMORY,
             NoteTag.EXEC_TIMEOUT,
             NoteTag.TIMEZONE,
+            NoteTag.SDK_EXPAND,
         }
         assert shown | hidden == set(NoteTag)
 

@@ -17,10 +17,15 @@ from typing import Any, cast
 
 import pytest
 
-from agent.graph.prompt.live import LiveSdk, SectionInputs, discover_all_namespaces
+from agent.graph.prompt.live import (
+    LiveSdk,
+    SectionInputs,
+    discover_all_namespaces,
+    effective_sdk_expand,
+)
 from agent.graph.prompt.sdk_scope import CAPABILITY_SURFACES
 from agent.graph.prompt.skill_selection import SkillView
-from agent.graph.prompt.system_prompt import effective_sdk_expand, sdk_expand_section
+from agent.graph.prompt.system_prompt import sdk_expand_section
 from agent.graph.tests.prompt.skill_support import write_skill
 from base.config import FIELD_INFOS, AgentSettings
 from base.config.tests.configuration import defaults

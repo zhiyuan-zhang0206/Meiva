@@ -45,6 +45,7 @@ def test_note_tag_value_set() -> None:
         "skill_recall",
         "exec_timeout",
         "timezone",
+        "sdk_expand",
     }
 
 

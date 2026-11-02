@@ -18,7 +18,14 @@ from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.packages.skills.tree import Skill, identifier, target
 from base.paths import workspace_dir
 
-from .live import effective_sdk_disable, read_skills, read_view, warn_unresolved
+from .live import (
+    effective_sdk_disable,
+    read_plugin_expansions,
+    read_skills,
+    read_view,
+    skipped_expand_entries,
+    warn_unresolved,
+)
 from .note_text import (
     Workspace,
     agent_id_text,
@@ -28,10 +35,12 @@ from .note_text import (
     timezone_text,
     workspace_display,
 )
+from .sdk_scope import ExpandSkip, SkippedExpand
 from .skill_selection import SkillView, resolve_prompt_skills
 
 RANK_EXEC_TIMEOUT = 10
 RANK_TIMEZONE = 15
+RANK_SDK_EXPAND = 16
 RANK_CLUSTER_MEMORY = 20
 RANK_AGENT_ID = 30
 RANK_PER_AGENT_MEMORY = 40
@@ -104,6 +113,55 @@ def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
     return system_note_message(
         content=timezone_text(clock.timezone, now.astimezone(clock.explicit_zone())),
         tag=NoteTag.TIMEZONE,
+        picked_up_at=now,
+        created_at=now,
+    )
+
+
+# meiva:note
+# What the agent reads when its own expand configuration named entries this window's SDK reference
+# could not carry: the entries by name and why, then the two ways out (open it now, or fix the
+# entry). A generic "some entries were skipped" would leave the agent unable to correct anything,
+# which is the gap #6027 closed. The clauses are here rather than in `note_text.py` for the same
+# reason the skill framings are: the note composes them with facts it already holds.
+_SDK_EXPAND_SKIP_CLAUSE = {
+    ExpandSkip.MISSING_MEMBER: "no member of that namespace has this name (a typo?)",
+    ExpandSkip.NOT_A_TARGET: "not a member meiva.help documents (a live object or a plain value)",
+}
+
+_SDK_EXPAND_FRAMING = (
+    "Your SDK reference above is missing {count} {noun} your configuration asked to expand:\n\n"
+    "{listed}\n\n"
+    "The rest of the reference is complete. Call meiva.help(...) on what you wanted in this turn, "
+    "or correct the sdk_expand_in_system_prompt entry (the agent setting behind MEIVA_SDK_EXPAND) "
+    "so the next window carries it."
+)
+
+
+def sdk_expand_skipped_text(entries: Sequence[SkippedExpand]) -> str:
+    listed = "\n".join(
+        f"- meiva.{entry.path}: {_SDK_EXPAND_SKIP_CLAUSE[entry.kind]}" for entry in entries
+    )
+    noun = "entry" if len(entries) == 1 else "entries"
+    return _SDK_EXPAND_FRAMING.format(count=len(entries), noun=noun, listed=listed)
+
+
+# meiva:note
+# The note itself: it rides the head like every framework note, so a second turn does not repeat it,
+# and a compaction establishes a new window and states it again — that window's problem, not noise.
+def sdk_expand_note(ctx: MeivaContext) -> HumanMessage | None:
+    slices = ctx.require_agent()
+    skipped = skipped_expand_entries(
+        slices.read("agent", "sdk_expand_in_system_prompt"),
+        disabled=effective_sdk_disable(slices.prompt.sdk_disable),
+        plugin_expansions=read_plugin_expansions(),
+    )
+    if not skipped:
+        return None
+    now = ctx.require_clock().now()
+    return system_note_message(
+        content=sdk_expand_skipped_text(skipped),
+        tag=NoteTag.SDK_EXPAND,
         picked_up_at=now,
         created_at=now,
     )
@@ -293,6 +351,7 @@ def fork_tail_skills_note(
 FRAMEWORK_NOTES: tuple[ContextNote, ...] = (
     ContextNote(build=exec_timeout_note, rank=RANK_EXEC_TIMEOUT),
     ContextNote(build=timezone_note, rank=RANK_TIMEZONE),
+    ContextNote(build=sdk_expand_note, on_fork=True, rank=RANK_SDK_EXPAND),
     ContextNote(build=agent_id_note, on_fork=True, rank=RANK_AGENT_ID),
     ContextNote(build=preloaded_skills_note, on_fork=True, rank=RANK_PRELOADED_SKILLS),
 )

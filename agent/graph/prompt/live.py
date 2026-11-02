@@ -21,7 +21,13 @@ from base.lm.catalog import ModelCatalog
 from base.packages.skills.tree import Skill
 
 from .capabilities import McpServer
-from .sdk_scope import CAPABILITY_SURFACES, disabled_by_sdk_config
+from .sdk_scope import (
+    CAPABILITY_SURFACES,
+    ExpandSkip,
+    SkippedExpand,
+    disabled_by_sdk_config,
+    expand_plan,
+)
 from .skill_selection import SkillView, resolve_prompt_skills
 
 
@@ -129,6 +135,83 @@ def read_live_sdk(prompt: Prompt, *, home: Path, environ: Mapping[str, str]) -> 
     return LiveSdk(view, read_mcp_servers(view.disabled, home=home), read_plugin_expansions())
 
 
+# meiva:note
+# What a configured expand path resolves to, in the two facts its callers need: the object to
+# render, or the reason there is nothing to render. The renderer and the context note that names
+# the path back to the agent both ask here, so the reference cannot drop an entry the note calls
+# fine (or call one fine that never rendered). A first segment missing from this process is
+# `UNRESOLVED` rather than a typo: the same read fails for a plugin whose namespace this process
+# does not serve.
+def read_expand_entry(path: str) -> tuple[object | None, ExpandSkip | None]:
+    import meiva
+    from meiva.sdk_surface.help import is_documentable_target
+
+    head, _, rest = path.partition(".")
+    try:
+        target: object = getattr(meiva, head)
+    except AttributeError:
+        return None, ExpandSkip.UNRESOLVED
+    for segment in rest.split(".") if rest else ():
+        try:
+            target = getattr(target, segment)
+        except AttributeError:
+            return None, ExpandSkip.MISSING_MEMBER
+    if not is_documentable_target(target):
+        return None, ExpandSkip.NOT_A_TARGET
+    return target, None
+
+
+# meiva:note
+# The concrete expansion list one section renders: plugin declarations first, `*` replaced by the
+# namespaces this process serves, then the configured entries, deduplicated, minus the ones
+# MEIVA_SDK_DISABLE removes. It lives here rather than in `system_prompt.py` because the list is a
+# read of the live SDK, and the context note that reports a dropped entry asks the same question —
+# one owner answers both, so the note cannot name an entry the reference rendered.
+def effective_sdk_expand(
+    configured: Sequence[str], *, disabled: Sequence[str], plugin_expansions: Sequence[str]
+) -> list[str]:
+    plan = expand_plan(
+        configured,
+        plugin_expansions=plugin_expansions,
+        discovered=discover_all_namespaces(disabled) if "*" in configured else (),
+    )
+    for path in plan.refused:
+        logging.getLogger(__name__).warning(
+            "sdk_expand_in_system_prompt: refusing %r — expanding one member of a "
+            "capability surface would render that skill's whole body (or that "
+            "server's tool schemas) into every prompt and record a bogus 'loaded' "
+            "attribution. Preload a skill with skills_to_expand_at_start; leave a "
+            "server's tools to meiva.help(meiva.mcps.<server>)",
+            path,
+        )
+    return list(plan.paths)
+
+
+# meiva:note
+# The configured entries this window's SDK reference will not carry, asked of the same plan the
+# reference itself is rendered from (`effective_sdk_expand`), so the answer cannot disagree with
+# what rendered. It leaves out `UNRESOLVED` on purpose: an entry this process does not serve looks
+# exactly like a plugin that is not enabled here, and a note that fired for every such plugin would
+# be noise in every window. Silent either way: the renderer owns the warning, this answers the agent.
+def skipped_expand_entries(
+    configured: Sequence[str],
+    *,
+    disabled: Sequence[str],
+    plugin_expansions: Sequence[str],
+) -> tuple[SkippedExpand, ...]:
+    wanted = effective_sdk_expand(
+        configured, disabled=disabled, plugin_expansions=plugin_expansions
+    )
+    skipped: list[SkippedExpand] = []
+    for path in wanted:
+        if disabled_by_sdk_config(path, disabled):
+            continue
+        _target, kind = read_expand_entry(path)
+        if kind is not None and kind is not ExpandSkip.UNRESOLVED:
+            skipped.append(SkippedExpand(path, kind))
+    return tuple(skipped)
+
+
 def discover_all_namespaces(disabled: Sequence[str]) -> list[str]:
     import meiva
 
@@ -159,8 +242,7 @@ def render_expanded_reference(
     report: bool,
     extra_hidden_members: frozenset[str] = frozenset(),
 ) -> str:
-    import meiva
-    from meiva.sdk_surface.help import ModelHelpProfile, is_documentable_target
+    from meiva.sdk_surface.help import ModelHelpProfile
     from meiva.sdk_surface.help import render as render_help
 
     base_profile = ModelHelpProfile.for_model(model, catalog=catalog)
@@ -179,16 +261,29 @@ def render_expanded_reference(
     for path in paths:
         if disabled_by_sdk_config(path, disabled):
             continue
-        target: object = meiva
-        try:
-            for segment in path.split("."):
-                target = getattr(target, segment)
-        except AttributeError:
+        target, skipped = read_expand_entry(path)
+        if skipped is ExpandSkip.UNRESOLVED:
             if report:
                 logger.warning(
                     "sdk_expand_in_system_prompt: meiva.%s does not resolve and is not covered "
                     "by MEIVA_SDK_DISABLE (typo, or a plugin namespace whose plugin is not "
                     "loaded?), skipping",
+                    path,
+                )
+            continue
+        if skipped is ExpandSkip.MISSING_MEMBER:
+            if report:
+                logger.warning(
+                    "sdk_expand_in_system_prompt: meiva.%s names no member of that namespace "
+                    "(typo?), skipping",
+                    path,
+                )
+            continue
+        if skipped is ExpandSkip.NOT_A_TARGET:
+            if report:
+                logger.warning(
+                    "sdk_expand_in_system_prompt: meiva.%s is not an SDK target (a module or "
+                    "namespace, a routine, a class, or a documented constant), skipping",
                     path,
                 )
             continue
@@ -201,14 +296,6 @@ def render_expanded_reference(
                     "cross-test global-state leak). effective list was %r",
                     path,
                     list(paths),
-                )
-            continue
-        if not is_documentable_target(target):
-            if report:
-                logger.warning(
-                    "sdk_expand_in_system_prompt: meiva.%s is not an SDK target (a module or "
-                    "namespace, a routine, a class, or a documented constant), skipping",
-                    path,
                 )
             continue
         seen_targets.add(id(target))
