@@ -271,3 +271,7 @@ Only a check that reports on every pull request can be required: one that never 
 every unrelated pull request. Matrix jobs are out — their instance names (`backend shard
 (1/8)`) change with the shard count, and the literal `(${{ matrix.group }}/8)` name appears
 only when the whole matrix is skipped.
+
+When the change cannot live in Git — a repository setting, a workflow disabled by hand — write
+one line to the memory pool in the same minute: time, setting, old value → new value, and why.
+The audit can see the state; only that line carries the intent.
