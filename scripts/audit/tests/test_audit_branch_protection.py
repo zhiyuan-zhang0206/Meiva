@@ -27,6 +27,8 @@ _ADMISSION_CHECKS = frozenset(
         "core-content manifests",
         "diff hints",
         "doc lints (pre-commit family)",
+        "e2e gate",
+        "frontend gate",
         "repo language (no raw CJK)",
         "secret scan (Gitleaks)",
     }
@@ -75,9 +77,8 @@ def test_expected_checks_is_the_branch_admission_gate() -> None:
     assert "doc lints (pre-commit family)" in _ADMISSION_CHECKS
     # meiva:note
     # These two reported SKIPPED on most measured pull requests, so a required check carrying
-    # their name would block every pull request that does not touch them. They stay out until
-    # their jobs report a real SUCCESS everywhere; adding one here without that fix would make
-    # the contract require a check that never arrives.
+    # their own name would block every pull request that does not touch them. The always-reporting
+    # gates above are required in their place: each one reports a conclusion on every pull request.
     assert "frontend (eslint + tsc + vitest)" not in _ADMISSION_CHECKS
     assert "e2e (Playwright happy path)" not in _ADMISSION_CHECKS
 
