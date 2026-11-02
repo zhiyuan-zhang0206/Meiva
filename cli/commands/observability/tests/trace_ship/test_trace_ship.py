@@ -24,7 +24,6 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
-from base.host.db_authority.api import telemetry_token
 from cli.commands.observability import trace
 from cli.commands.observability.plans.trace_ship.files import ship_window
 from cli.commands.observability.plans.trace_ship.target import ShipTarget, TraceShipError
@@ -403,7 +402,6 @@ def test_runner_ship_presents_the_telemetry_token_of_its_capability(
 
     target = trace.resolve_ship_target(
         observability(gateway_otlp_endpoint="http://10.0.0.10:4318"),
-        cluster_secret="",
         machine=command_runtime.machine,
         home=home,
     )
@@ -427,28 +425,16 @@ def test_runner_ship_presents_the_telemetry_token_of_its_capability(
     assert _span_names(received.body) == ["remote"]
 
 
-def test_runner_without_a_capability_derives_the_relay_token_from_the_secret_it_holds(
-    command_runtime: CommandRuntime, home: Path
-) -> None:
-    command_runtime.machine.set(role="agent-runner")
-    held = "cluster-credential"
-
-    target = trace.resolve_ship_target(
-        observability(gateway_otlp_endpoint="http://10.0.0.10:4318"),
-        cluster_secret=held,
-        machine=command_runtime.machine,
-        home=home,
-    )
-
-    assert target.headers == {"Authorization": f"Bearer {telemetry_token(held)}"}
-
-
-def test_runner_holding_neither_a_capability_nor_a_secret_cannot_ship(
-    command_runtime: CommandRuntime, traces: Path, home: Path
+# meiva:note
+# A secret the unit's configuration happens to hold is not a relay token: nothing derives the token
+# from it, so a runner without a capability cannot ship whether or not it holds one.
+@pytest.mark.parametrize("held_secret", ["", "cluster-credential"])
+def test_runner_without_a_capability_cannot_ship_whatever_secret_it_holds(
+    command_runtime: CommandRuntime, traces: Path, home: Path, held_secret: str
 ) -> None:
     command_runtime.config.set_field("telemetry_otlp_enabled", True)
     command_runtime.config.set_field("gateway_otlp_endpoint", "http://10.0.0.10:4318")
-    command_runtime.config.set_field("cluster_secret", "")
+    command_runtime.config.set_field("cluster_secret", held_secret)
     command_runtime.machine.set(role="agent-runner")
     (traces / "spans.jsonl").write_text(_lines("remote"), encoding="utf-8")
 

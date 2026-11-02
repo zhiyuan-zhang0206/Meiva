@@ -5,8 +5,8 @@
 # Every machine verb takes the `GatewayAccess` its composition root built from the command's
 # own configuration; the wording of each reply lives in `plans.gateway_replies` and the roster
 # table in `plans.roster_table`, so this shell only dials, decodes and prints. The
-# `db-authority` verbs take the invocation's `CommandRuntime` (the gateway home, the
-# configuration and the cluster secret) or the home and transport key their root read, and
+# `db-authority` verbs take the invocation's `CommandRuntime` (the gateway home and the
+# configuration) or the home and transport key their root read, and
 # their wording lives in `plans.db_authority_replies`.
 
 from __future__ import annotations
@@ -249,9 +249,9 @@ def _issuing_home(command: CommandRuntime) -> Path | None:
 # overwritten) and sealed under a transport key printed once here; the unit installs it with
 # `meiva cluster db-authority install-unit <bundle>` (a first join passes it to
 # `meiva init --db-capability`) and that key in MEIVA_DB_CAPABILITY_KEY. Refused on a pure
-# agent-runner, a remote-managed plane and a home without an active generation. `home` is the
-# unit's home on its own machine; the gateway home, the configuration and the cluster secret
-# are the invocation's (`command`).
+# agent-runner, a remote-managed plane and a home without an active generation or a published
+# telemetry token. `home` is the unit's home on its own machine; the gateway home and the
+# configuration are the invocation's (`command`).
 def cmd_db_authority_issue_unit(
     *, machine: str, home: str, out: str, ttl_hours: float, command: CommandRuntime
 ) -> int:
@@ -277,7 +277,6 @@ def cmd_db_authority_issue_unit(
                 build_all_domains=config.complete_read_model,
                 env_path=gateway_home / ".env",
             ).served_db_endpoint(),
-            cluster_secret=config.view.data_plane.cluster_secret,
             ttl_s=ttl_hours * 3600,
             now=command.clock.now().timestamp(),
         )

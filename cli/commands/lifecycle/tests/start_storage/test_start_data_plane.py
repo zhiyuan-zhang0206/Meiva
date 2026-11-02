@@ -17,7 +17,7 @@ import psycopg
 import pytest
 
 from base import cluster
-from base.host.db_authority.api import read_telemetry_token, telemetry_token, telemetry_token_path
+from base.host.db_authority.api import telemetry_token_path
 from base.host.system.tests.fake_commands import real_commands_host
 from cli import start_identity
 from cli.commands.data_plane import bringup
@@ -25,7 +25,6 @@ from cli.commands.data_plane.cluster_instance import pg_socket_dir
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.data_plane.tests.native_cluster import (
-    BEARER,
     NATIVE_TEST_SYSTEM,
     NativeCluster,
     redis_from_url,
@@ -60,8 +59,8 @@ def _born(home: Path) -> cluster.ClusterRecord:
 
 # meiva:note
 # A born cluster: the per-cluster instance comes up for real on the record's exact pg/redis ports,
-# each data-plane identity read from its own URL, and the root that holds the secret publishes the
-# telemetry token the station probe reads.
+# each data-plane identity read from its own URL. The telemetry token is not this step's: the
+# converge step before it publishes it.
 def test_gateway_data_plane_brings_up_own_instance(
     seed_write_generation: Callable[[Path], Any],
     operator_database: Callable[[], Any],
@@ -87,7 +86,7 @@ def test_gateway_data_plane_brings_up_own_instance(
         == 0
     )
 
-    assert read_telemetry_token(native_cluster.home.resolve()) == telemetry_token(BEARER)
+    assert not telemetry_token_path(native_cluster.home.resolve()).exists()
     with redis_from_url(native_cluster.plane.redis_url) as client:
         assert redis_ping(client), "redis answers on the record's port as the URL's identity"
     with psycopg.connect(

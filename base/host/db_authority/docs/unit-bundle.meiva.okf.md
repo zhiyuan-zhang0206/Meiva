@@ -15,7 +15,7 @@ unit's own:
 | runner login (role and password) | every runner unit |
 | runner API token | every runner unit |
 | gateway API token digest | nobody: a digest admits nothing |
-| telemetry token | every unit, until the human secret rotates |
+| telemetry token | every unit, until the gateway home's token file is replaced |
 
 A stolen bundle with its transport key, like a compromised unit, therefore
 holds the write generation's runner admission: the `meiva_runner` database privileges;
@@ -32,9 +32,11 @@ about itself, and the credentials work without any installation.
 
 The write generation is the home's only one and nothing replaces it, so a bundle
 and its key stay inside the operator's channel; the secrets the bundle reached
-beyond the generation rotate on their own: the telemetry token with the human
-secret (`scripts/data_plane_ops/rotate_cluster_secret.py`), the Redis runtime
+beyond the generation are rotated separately: the Redis runtime
 password bootstrap served with
-`scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner`, and the
-provider keys at each provider. Why nothing rotates the generation:
+`scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner`, the
+provider keys at each provider, and the telemetry token by deleting the gateway
+home's `db-authority/telemetry-token`, stopping and starting the gateway (its converge mints a new one)
+and issuing every remote unit a new bundle (no script rotates it, and a human-secret rotation
+leaves it). Why nothing rotates the generation:
 [decision](../../../../docs/decisions/runtime/updates/execution/converge/2026-10-03-retire-write-generation-rotation.md).

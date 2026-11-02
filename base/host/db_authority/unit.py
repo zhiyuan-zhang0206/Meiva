@@ -1,38 +1,39 @@
-"""A remote agent-runner's database capability: manual delivery, one bundle per unit.
-
-The bootstrap endpoint serves no database credential. A remote agent-runner
-unit receives the cluster's runner login only through an explicit operator
-step, used for a new runner's join and emergencies; no automated exchange
-exists.
-
-- The gateway operator issues a **bundle** (`issue_bundle`): the ACTIVE write
-  generation's runner login, the endpoint bootstrap serves, and a binding to one
-  unit (machine name + unit home), one generation (number + credential digest),
-  a nonce and an expiry. The bundle is sealed with AES-256-GCM under a fresh
-  32-byte transport key that is shown to the operator once and never written
-  anywhere: the file alone discloses nothing, and any change to it fails
-  authentication.
-- The unit opens it with that key (`open_bundle`) and installs it
-  (`install_bundle`) only when it names this unit, this gateway's served
-  endpoint, a generation not older than the installed one, has not expired,
-  and the cluster accepts its login. Installation writes
-  `$MEIVA_HOME/db-authority/unit.json` (0600); nothing else on the unit holds the
-  login.
-- The unit's root launcher delivers that login per service
-  (`unit_delivery`), an admitted operator process consumes it
-  (`consume_unit`), and the launch digest binds its non-secret reference.
-- When the issuing gateway's API is authenticated (a non-empty human secret)
-  the capability also carries the unit's API admission (`UnitApi`): the
-  generation's runner API token its services present, the digest of the
-  gateway token its ops server accepts, and the telemetry relay token. The
-  unit never holds the human cluster secret.
-
-A bundle is bound to one unit, but nothing in it is that unit's own: the runner
-login and API token are the write generation's, shared by every runner unit, and
-the telemetry token is the cluster's. The binding guards against installing on
-the wrong unit by mistake, not against theft; what a lost bundle exposes and how
-to contain it: `base/host/db_authority/docs/unit-bundle.meiva.okf.md`.
-"""
+# meiva:note
+# A remote agent-runner's database capability: manual delivery, one bundle per unit.
+#
+# The bootstrap endpoint serves no database credential. A remote agent-runner
+# unit receives the cluster's runner login only through an explicit operator
+# step, used for a new runner's join and emergencies; no automated exchange
+# exists.
+#
+# - The gateway operator issues a **bundle** (`issue_bundle`): the ACTIVE write
+#   generation's runner login, the endpoint bootstrap serves, and a binding to one
+#   unit (machine name + unit home), one generation (number + credential digest),
+#   a nonce and an expiry. The bundle is sealed with AES-256-GCM under a fresh
+#   32-byte transport key that is shown to the operator once and never written
+#   anywhere: the file alone discloses nothing, and any change to it fails
+#   authentication.
+# - The unit opens it with that key (`open_bundle`) and installs it
+#   (`install_bundle`) only when it names this unit, this gateway's served
+#   endpoint, a generation not older than the installed one, has not expired,
+#   and the cluster accepts its login. Installation writes
+#   `$MEIVA_HOME/db-authority/unit.json` (0600); nothing else on the unit holds the
+#   login.
+# - The unit's root launcher delivers that login per service
+#   (`unit_delivery`), an admitted operator process consumes it
+#   (`consume_unit`), and the launch digest binds its non-secret reference.
+# - The capability also carries the unit's API admission (`UnitApi`): the
+#   generation's runner API token its services present, the digest of the
+#   gateway token its ops server accepts, and the telemetry relay token (the
+#   one the gateway home keeps, `ensure_telemetry_token`). The unit never holds
+#   the human cluster secret.
+#
+# A bundle is bound to one unit, but nothing in it is that unit's own: the runner
+# login and API token are the write generation's, shared by every runner unit, and
+# the telemetry token is the cluster's (it outlives both). The binding guards
+# against installing on the wrong unit by mistake, not against theft; what a lost
+# bundle exposes and how to contain it:
+# `base/host/db_authority/docs/unit-bundle.meiva.okf.md`.
 
 from __future__ import annotations
 
@@ -55,7 +56,7 @@ from pydantic import (
     model_validator,
 )
 
-from base.host.db_authority.api import API_TOKEN_ENV, telemetry_token, token_digest
+from base.host.db_authority.api import API_TOKEN_ENV, read_telemetry_token, token_digest
 from base.host.db_authority.delivery import (
     GENERATION_ENV,
     active_generation,
@@ -139,12 +140,15 @@ class GenerationRef(_Record):
     credential_digest: Digest
 
 
+# meiva:note
+# `telemetry` is the OTLP relay ingress bearer the gateway home published
+# (`ensure_telemetry_token`): the cluster's, the same for every unit.
 class UnitApi(_Record):
     """The unit's HTTP admission for one generation."""
 
     token: Secret  # the generation's runner API token, presented by the unit
     gateway: Digest  # digest of the gateway API token, accepted by its ops server
-    telemetry: Secret  # the OTLP relay ingress bearer (derived from the human secret)
+    telemetry: Secret
 
 
 class UnitCapability(_Record):
@@ -262,23 +266,19 @@ class IssuedBundle:
 # and the unit that opens the file spends the instant its own entry read (the command's clock,
 # the birth facts). One clock decides whether a bundle is still installable, and a test can
 # place both ends of that window without waiting.
+#
+# `home` is the gateway home keeping the ledger and the telemetry token; `endpoint` is the
+# credential-free database URL bootstrap serves to runners. A home without an active generation
+# raises (a pending one is never issued), and so does one that has not published its telemetry
+# token (its gateway never started).
 def issue_bundle(
     home: Path,
     *,
     unit: UnitIdentity,
     endpoint: str,
-    cluster_secret: str,
     ttl_s: float,
     now: float,
 ) -> IssuedBundle:
-    """Seal the ACTIVE generation's runner login (and API admission) for `unit`.
-
-    `home` is the gateway home keeping the ledger; `endpoint` is the
-    credential-free database URL bootstrap serves to runners;
-    `cluster_secret` is the gateway's human secret, from which only the
-    telemetry token is derived (`telemetry_token` refuses an empty one). A home
-    without an active generation raises (a pending one is never issued).
-    """
     if urlsplit(endpoint).password is not None:
         raise UnitCapabilityError("a capability names the credential-free endpoint")
     if not 0 < ttl_s <= UNIT_BUNDLE_MAX_TTL_S:  # also refuses NaN
@@ -288,10 +288,16 @@ def issue_bundle(
         )
     generation = active_generation(home)
     secret = read_secret(home, generation)
+    telemetry = read_telemetry_token(home)
+    if telemetry is None:
+        raise UnitCapabilityError(
+            f"the gateway home ({home}) has no telemetry token to put in a capability: "
+            "start the gateway on this home first"
+        )
     api = UnitApi(
         token=secret.api.runner,
         gateway=token_digest(secret.api.gateway),
-        telemetry=telemetry_token(cluster_secret),
+        telemetry=telemetry,
     )
     issued_at = now
     capability = UnitCapability(
@@ -504,15 +510,15 @@ def consume_unit(home: Path) -> UnitCapability:
     return require_unit_capability(home)
 
 
-def telemetry_bearer(home: Path, cluster_secret: str) -> str | None:
-    """The OTLP relay ingress bearer `home` presents and accepts, or None when the
-    unit holds neither a capability nor the human secret.
-
-    A remote unit (an installed capability) uses the telemetry token its
-    capability carries; it holds no human secret. The gateway derives the same
-    token from its human secret.
-    """
+# meiva:note
+# The OTLP relay ingress bearer `home` presents and accepts, or None when the unit holds neither
+# a capability nor a published telemetry token.
+#
+# A remote unit (an installed capability) uses the telemetry token its capability carries; it
+# holds no human secret. A gateway home reads the token its own start published, the same one
+# its units' capabilities carry.
+def telemetry_bearer(home: Path) -> str | None:
     capability = load_unit_capability(home)
     if capability is not None:
         return capability.api.telemetry
-    return telemetry_token(cluster_secret) if cluster_secret else None
+    return read_telemetry_token(home)

@@ -54,12 +54,11 @@ _SPAN_ID_LENGTHS = (("trace_id", 16), ("span_id", 8), ("parent_span_id", 8))
 # The role-correct replay target.
 #
 # A pure runner presents the telemetry token of its capability; every other role replays straight
-# to its loopback Tempo. The token is read only for a runner: a gateway derives it from the
-# secret, so the capability file is not consulted for a role that does not need it.
+# to its loopback Tempo. The token is read only for a runner: no other role presents one, so its
+# files are not consulted.
 def resolve_ship_target(
     observability: ObservabilityConfig,
     *,
-    cluster_secret: str,
     machine: MachineIdentityReader,
     home: Path,
 ) -> ShipTarget:
@@ -72,7 +71,7 @@ def resolve_ship_target(
         tempo_endpoint=observability.telemetry_tempo_endpoint,
         gateway_endpoint=gateway,
         gateway=split_url(gateway),
-        token=telemetry_bearer(home.resolve(), cluster_secret) if runner else None,
+        token=telemetry_bearer(home.resolve()) if runner else None,
     )
 
 
@@ -245,12 +244,8 @@ def cmd_trace_ship(
 ) -> int:
     target = None
     if not dry_run:
-        view = config.view
         target = resolve_ship_target(
-            observability_config_from_boot(config),
-            cluster_secret=view.data_plane.cluster_secret,
-            machine=machine,
-            home=home,
+            observability_config_from_boot(config), machine=machine, home=home
         )
     window = ship_window(since, until)
     files = sorted(traces_dir.glob("spans*.jsonl*"), key=mirror_sort_key)

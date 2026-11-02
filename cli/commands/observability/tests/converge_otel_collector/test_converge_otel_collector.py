@@ -39,6 +39,7 @@ from cli.commands.observability.tests.converge_otel_collector.collector_harness 
     collector_unit as collector_unit,
 )
 from cli.commands.observability.tests.observability_inputs import (
+    TELEMETRY_TOKEN,
     data_plane,
     observability,
     write_cluster_record,
@@ -124,12 +125,11 @@ def test_a_version_matching_binary_is_kept_and_the_config_is_written_owner_only(
         in capsys.readouterr().out
     )
     config = otel_collector_config(collector_unit.home)
-    bearer = telemetry_bearer(collector_unit.home.resolve(), "cluster-token")
-    assert bearer is not None
+    bearer = telemetry_bearer(collector_unit.home.resolve())
+    assert bearer == TELEMETRY_TOKEN
     assert config.stat().st_mode & 0o777 == 0o600
     text = config.read_text(encoding="utf-8")
     assert f"Bearer {bearer}" in text
-    assert "cluster-token" not in text
 
 
 def test_changed_settings_reach_the_config_on_the_next_converge_but_a_hand_edit_does_not(
@@ -374,7 +374,6 @@ def test_a_gateway_scrapes_its_own_data_plane_without_the_write_generations_logi
     }
     assert receivers["redis"]["endpoint"] == "127.0.0.1:6380"
     assert receivers["redis"]["password"] == data_plane().redis_admin_password
-    assert receivers["redis"]["password"] != data_plane().cluster_secret
     assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol", "postgresql", "redis"]
 
 
@@ -400,7 +399,6 @@ def test_a_remote_managed_plane_is_scraped_for_redis_only_and_leaks_no_provider_
             db_url="postgresql://meiva:provider-password@10.0.0.2:5433/meiva",
             redis_url="redis://10.0.0.2:6380/0",
             is_remote=True,
-            cluster_secret="",
         ),
     )
     config = yaml.safe_load(text)

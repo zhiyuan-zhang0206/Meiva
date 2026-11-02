@@ -25,9 +25,8 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority.api import (
-    publish_telemetry_token,
+    ensure_telemetry_token,
     read_telemetry_token,
-    telemetry_token,
     telemetry_token_path,
 )
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
@@ -62,7 +61,7 @@ def _clean_state(*, db_url: str, database_gate: ProcessDbGate) -> None:
 @pytest.fixture
 def probe_token(unit_home: Path) -> str:
     home = unit_home
-    publish_telemetry_token(home, "cluster-token")
+    ensure_telemetry_token(home, "cluster-token")
     token = read_telemetry_token(home)
     assert token is not None
     return token
@@ -177,7 +176,7 @@ def test_station_answers_bearer_otlp_roundtrip(probe_token: str, status: int) ->
     assert request.data == b'{"resourceSpans":[]}'
     assert request.timeout == 5.0
     assert request.headers["Content-type"] == "application/json"
-    assert request.headers["Authorization"] == f"Bearer {telemetry_token('cluster-token')}"
+    assert request.headers["Authorization"] == f"Bearer {probe_token}"
 
 
 @pytest.mark.parametrize("status", [401, 415, 503])

@@ -103,7 +103,7 @@ def _collector_download_limits(boot: ConfigBoot) -> collector_plan.DownloadLimit
 
 
 # meiva:note
-# The cluster's data-plane URLs, admin password, locality and secret.
+# The cluster's data-plane URLs, admin password and locality.
 def _data_plane_inputs(boot: ConfigBoot) -> DataPlaneInputs:
     domain = boot.view.data_plane
     return DataPlaneInputs(
@@ -111,7 +111,6 @@ def _data_plane_inputs(boot: ConfigBoot) -> DataPlaneInputs:
         redis_url=domain.redis_url,
         redis_admin_password=domain.redis_admin_password,
         is_remote=domain.is_remote,
-        cluster_secret=domain.cluster_secret,
     )
 
 

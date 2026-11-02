@@ -18,6 +18,7 @@ from dotenv import dotenv_values
 
 from base import cluster
 from base.deploy.lifecycle import start_serving
+from base.host.db_authority.api import ensure_telemetry_token
 from base.host.net.tests.local_http import closed_port_url
 from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 from cli import init_intent, start_intent
@@ -427,12 +428,12 @@ def test_runner_without_a_capability_refuses_before_persisting(
         gateway = tmp_path / "gateway"
         gateway.mkdir(mode=0o700)
         seed_write_generation(gateway)
+        ensure_telemetry_token(gateway.resolve(), "gateway-telemetry-" + "t" * 32)
         home = inputs.home.resolve()
         issued = unit.issue_bundle(
             gateway.resolve(),
             unit=unit.UnitIdentity(machine="runner", home=str(home)),
             endpoint=_RUNNER_ENDPOINT,
-            cluster_secret="gateway-human-secret-" + "g" * 32,
             ttl_s=60,
             now=time.time(),
         )

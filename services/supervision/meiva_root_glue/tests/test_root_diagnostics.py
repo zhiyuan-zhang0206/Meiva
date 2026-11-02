@@ -16,7 +16,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.db import Database
-from base.host.db_authority.api import publish_telemetry_token, telemetry_token
+from base.host.db_authority.api import ensure_telemetry_token
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -541,7 +541,7 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(unit_home: Path) -> None:
-    publish_telemetry_token(unit_home, "other-home-token")
+    ensure_telemetry_token(unit_home, "other-home-token")
     opener = FakeUrlOpener()
     create = Mock(side_effect=AssertionError("missing credentials must not open a database"))
     probe = probes.StationProbe(
@@ -566,7 +566,7 @@ def test_station_no_credential_is_unknown_and_does_not_send(unit_home: Path) -> 
 def test_station_observes_the_authenticated_ingress(
     unit_home: Path, database: Database, answer: Answer | OSError, expected: ProbeVerdict
 ) -> None:
-    publish_telemetry_token(unit_home, "station-test-token")
+    ensure_telemetry_token(unit_home, "station-test-token")
     opener = FakeUrlOpener()
     opener.on("http://station.invalid:4325/v1/traces", answer)
     probe = probes.StationProbe(
@@ -577,14 +577,11 @@ def test_station_observes_the_authenticated_ingress(
     )
     assert probe.probe().verdict is expected
     assert len(opener.calls) == 1
-    assert (
-        opener.calls[0].headers["Authorization"]
-        == f"Bearer {telemetry_token('station-test-token')}"
-    )
+    assert opener.calls[0].headers["Authorization"] == "Bearer station-test-token"
 
 
 def test_station_resolution_failure_is_unavailable_and_does_not_send(unit_home: Path) -> None:
-    publish_telemetry_token(unit_home, "station-test-token")
+    ensure_telemetry_token(unit_home, "station-test-token")
     create = Mock(side_effect=RuntimeError("station registry unavailable"))
     opener = FakeUrlOpener()
     probe = probes.StationProbe(

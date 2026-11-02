@@ -72,7 +72,7 @@ guard correct.
 | Gateway HTTP API, bootstrap, webhooks | `MEIVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`MEIVA_API_TOKEN`) | `gateway.http.auth.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
 | Gateway HTTP API, human callers, `MEIVA_GATEWAY_HUMAN_AUTH=trusted_network` | none — a request with no cookie or bearer is the cluster administrator; browser `Origin` and `Host` are still checked | `gateway.app.cluster_auth_middleware`; decision `docs/decisions/data/security/2026-10-20-human-auth-trusted-network-switch.md` (machine tokens, `/ops`, telemetry, data plane and `/mcp` are unchanged) |
 | A unit's `/ops` | its write generation's gateway or runner API token | `base/host/net/auth.py` `verify_bearer_digest` over digests only |
-| Gateway and station OTLP ingress (remote receiver) | the telemetry token (`HMAC(MEIVA_CLUSTER_SECRET)`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
+| Gateway and station OTLP ingress (remote receiver) | the telemetry token (a random value the gateway home keeps in `db-authority/telemetry-token`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `docs/conventions/data/data-plane-secret-split.md` |
 | Loki/Prometheus backend APIs | none — loopback-only (`MEIVA_LGTM_LISTEN_HOST`) | n/a |
 | Grafana UI | gateway session auth through `/grafana/*` proxy | gateway middleware; Grafana runs anonymous read-only |
@@ -82,16 +82,19 @@ the cluster API does too, except for human callers when `MEIVA_GATEWAY_HUMAN_AUT
 declares no reachable address (`MEIVA_MACHINE_HOST` unset, `localhost`), so every
 listener, the data plane included, binds loopback only, and a unit that would
 have to expose a remote ingress without a telemetry token **fails closed**
-(converge raises). The telemetry token (derived from the secret on the gateway,
+(converge raises). The telemetry token (published by the gateway home's converge,
 carried by the capability on a remote unit) on a unit with a non-loopback
 reachable host is what turns remote ingress on.
 
-The telemetry token is derived from the human secret, so there is
-deliberately no second station secret to distribute, yet a unit holding it
-learns nothing about the secret. It is scoped to the telemetry surface (the
-collector's `bearertokenauth` extension) and carries no API semantics; it
-is not part of the write generation (telemetry is not a write path) and
-changes only when the human secret rotates.
+The telemetry token is minted at random once, independent of the human secret, so a
+unit holding it learns nothing about the secret and a secret rotation leaves it
+(and every remote unit's capability) valid
+([decision](../../decisions/data/security/2026-11-02-telemetry-token-independent-of-cluster-secret.md)).
+It is scoped to the telemetry surface (the collector's `bearertokenauth`
+extension) and carries no API semantics; it is not part of the write generation
+(telemetry is not a write path). It changes only when the operator deletes the
+gateway home's `db-authority/telemetry-token` and restarts the gateway, and
+every remote unit then needs a new bundle.
 
 ## Verification
 

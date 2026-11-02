@@ -29,7 +29,6 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 # Fixture values, not credentials: each one is searched for in a repr.
 PASSWORD = "grafana-admin-pw"  # noqa: S105
 BOT_TOKEN = "123456:bot-token-value"  # noqa: S105
-CLUSTER_SECRET = "cluster-secret-value"  # noqa: S105
 REDIS_PASSWORD = "redis-admin-pw"  # noqa: S105
 LOGIN = "login-in-the-url"
 
@@ -84,13 +83,12 @@ def test_no_secret_of_the_settings_reaches_a_repr() -> None:
         redis_url=f"redis://{LOGIN}@127.0.0.1:6380/0",
         redis_admin_password=REDIS_PASSWORD,
         is_remote=False,
-        cluster_secret=CLUSTER_SECRET,
     )
     url = split_url(f"redis://{LOGIN}:{REDIS_PASSWORD}@127.0.0.1:6380/0")
 
     rendered = repr(credentials) + repr(plane) + repr(url)
 
-    for secret in (PASSWORD, BOT_TOKEN, CLUSTER_SECRET, REDIS_PASSWORD, LOGIN):
+    for secret in (PASSWORD, BOT_TOKEN, REDIS_PASSWORD, LOGIN):
         assert secret not in rendered
 
 

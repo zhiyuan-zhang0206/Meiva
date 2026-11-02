@@ -37,8 +37,8 @@ login. `unit` is the only path that carries a login to another home:
 - **Issue** (gateway, `meiva cluster db-authority issue-unit --machine M --home H
   --out FILE`): `issue_bundle` seals the ACTIVE generation's runner login, the
   unit's API admission (`UnitApi`: the runner API token, the gateway token's
-  digest and the telemetry token; none when the gateway's API is open), the
-  endpoint bootstrap serves (`service_read.served_db_endpoint`) and a binding
+  digest and the telemetry token the gateway home published: a home that has not published
+  one is refused), the endpoint bootstrap serves (`service_read.served_db_endpoint`) and a binding
   (machine, home, generation number and credential digest, nonce, expiry) with
   AES-256-GCM under a fresh 32-byte transport key.
   The key is printed once and stored nowhere; the header (machine, home,

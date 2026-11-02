@@ -761,7 +761,7 @@ loopback.
 remote unit holds it, and machine API tokens rotate with every write
 generation. Run
 [`scripts/data_plane_ops/rotate_cluster_secret.py`](../../scripts/data_plane_ops/rotate_cluster_secret.py)
-(`--execute`) only after a bearer leak. Rotating the secret never touches the
+(`--execute`) to rotate it; a rotation leaves every remote unit as it is. Rotating the secret never touches the
 logical-backup passphrase `$MEIVA_HOME/backups/logical-backup.passphrase`: a gateway
 home's birth mints and pins it, independent of the secret; a home born earlier carries
 `sha256(secret)`, pinned once, so every earlier logical backup keeps decrypting (an
@@ -771,8 +771,9 @@ writes the new secret, and journals each step with fingerprints, never secrets.
 makes every logical backup of the home unreadable; escrow a copy with the gateway's
 backup keys ([decision](../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md),
 [passphrase](../../services/backup/artifact/docs/passphrase.meiva.okf.md)). Restart the
-gateway, then issue every remote unit a new capability bundle (its telemetry token
-derives from the secret). It does not change Postgres, Redis, ACLs, or PgBouncer.
+gateway. No remote unit is affected: its machine API token and telemetry token do not
+derive from the secret, so no new capability bundle is needed. It does not change
+Postgres, Redis, ACLs, or PgBouncer.
 
 Routine data-plane rotation is independent and uses
 [`scripts/data_plane_ops/rotate_data_plane_secrets.py`](../../scripts/data_plane_ops/rotate_data_plane_secrets.py):

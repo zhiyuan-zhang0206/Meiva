@@ -86,6 +86,11 @@ Remote-managed data planes skip local server and extension preparation entirely.
   checks apply only to a runner split from its gateway), `walg_plan.py` (the WAL-G steps, in
   order, or a refusal), `ownership_plan.py` and `firewall_report.py` (what the ownership
   preflight and the firewall step and verbs tell the operator).
+- `telemetry_token.ensure_telemetry_token_step` gives a gateway home its OTLP relay bearer: a
+  random token in `db-authority/telemetry-token` (0600), kept ever after and independent of the
+  human secret (`base/host/db_authority/api.py`, [[base/host/db_authority/docs/api-tokens.meiva.okf.md]]).
+  It runs before the collector step because that step renders the token into the sidecar's
+  config; a first start that published it later would render a collector with no remote ingress.
 - `redis_bridge.py` retires the standalone launchd job and installed relay copy an
   earlier layout left (the relay now runs as the root-supervised `redis-bridge` unit)
   and exposes the authenticated Redis PING used by `meiva status` and the alert-only
