@@ -14,7 +14,7 @@ tags:
 The CI workflow selects an owner-rule backend test subset (direct importers
 plus the owning package's tests) for real pull requests. In `enforce` mode (the default) a SELECTED pull request runs that
 subset as its backend pytest gate whenever its impact is computable; every other
-selector decision (impact unknown) and every Trunk merge-tree branch keeps the full suite. In `shadow` mode no PR gates on
+selector decision (impact unknown) keeps the full suite. In `shadow` mode no PR gates on
 the subset: the full fan-out gates and the subset plus its comparison report
 run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 [ci.yml](workflows/ci.yml) is the single revert switch.
@@ -35,8 +35,7 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
    validator reject failed, missing, malformed or unexecuted reports, just
    like the shards. No external quarantine service determines the verdict.
    `backend-shard` is skipped exactly when enforce + SELECTED; it runs the
-   full suite in every other combination, including every Trunk merge-tree
-   branch.
+   full suite in every other combination.
 3. The backend aggregator — the branch-protection check — requires the subset
    result on the enforced path and the fan-out result otherwise. The 85%
    coverage gate runs on the full fan-out only (a subset run has no shard

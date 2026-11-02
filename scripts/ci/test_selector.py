@@ -102,6 +102,11 @@ _TREE_SCAN_ONLY_PREFIXES = (
 _REFERENCED_ROOTS = (".github", ".agents", ".meiva")
 # Top-level directories whose files belong to a package with an owning `tests/`.
 _PACKAGE_ROOTS = frozenset(all_packages(roles_at(_SCRIPT_REPOSITORY_ROOT)))
+# meiva:note
+# The head-branch prefixes the retired Trunk queue used. Nothing produces them since 2026-11-01, and
+# the batch rules they gate keep the full suite; they stay so that a reappearing batch branch cannot
+# be selected for silently.
+# meiva:link docs/conventions/engineering/test-selection.md
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
@@ -476,9 +481,9 @@ def _batch_full_reason(members: tuple[int, ...] | None, changed: tuple[str, ...]
 
 
 # meiva:note
-# Only an impact that cannot be computed returns FULL: a queue branch or non-PR event, a global,
-# unmapped or deleted-without-base path. A large impact is still SELECTED, because the merge
-# queue runs the full suite before anything reaches main; the estimates only report and size.
+# Only an impact that cannot be computed returns FULL: a queue-shaped batch branch or a non-PR
+# event, a global, unmapped or deleted-without-base path. A large impact is still SELECTED; the
+# estimates only report and size, and the post-merge full runs are what catch a missed test.
 # meiva:link docs/conventions/engineering/test-selection.md
 def select_tests(
     changed_files: list[str],
