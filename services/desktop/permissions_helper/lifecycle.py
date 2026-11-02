@@ -31,6 +31,7 @@ from services.desktop.permissions_helper.launchd_job import (
     helper_job_plist_path,
     helper_stop_intent,
     require_retired_helper,
+    write_job_plist,
 )
 
 _SERVICE_DIR = Path(__file__).resolve().parent
@@ -407,7 +408,7 @@ def install_and_load(
     if plan.bootstrap:
         base.paths.root_run_dir(home).mkdir(mode=0o700, parents=True, exist_ok=True)
         clear_helper_stop_intent(home, uid=facts.uid)
-        path.write_bytes(new_bytes)
+        write_job_plist(path, new_bytes)
         run_tool(["launchctl", "bootstrap", facts.domain, str(path)], run=build.run)
     if not helper_answers_ping(helper, timers=build.timers, settle_seconds=settle_seconds):
         raise PermissionsHelperBuildError(

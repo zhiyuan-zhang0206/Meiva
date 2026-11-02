@@ -34,6 +34,7 @@ from typing import Protocol, TypeGuard
 import psutil
 
 from base.clock import Timers
+from base.host.atomic_io import write_bytes_atomic
 from base.host.permissions_helper.client import HelperAtSocket
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess, capture_tree, leader_owns_pids
@@ -123,6 +124,22 @@ def helper_job_agents_dir(user_home: Path) -> Path:
 
 def helper_job_plist_path(home: Path, *, facts: LaunchdFacts) -> Path:
     return facts.agents_dir / f"{helper_job_label(home)}.plist"
+
+
+# meiva:note
+# The mode an installed job definition carries: launchd reads it as this user, and retirement
+# refuses to act on a definition another principal could rewrite (the group/other write bits). It
+# is set explicitly because the process umask must not decide it — under a 002 umask a plain write
+# installs a definition this home's own `meiva stop` then refuses to retire.
+JOB_PLIST_MODE = 0o644
+
+
+# meiva:note
+# Publish one home's job definition: the one writer, so the mode a check demands and the mode an
+# installation produces are one fact instead of two.
+def write_job_plist(path: Path, body: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_bytes_atomic(path, body, mode=JOB_PLIST_MODE)
 
 
 def helper_stop_intent(home: Path, *, uid: int) -> bool:

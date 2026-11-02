@@ -381,8 +381,8 @@ def test_the_stop_refuses_to_retire_the_helper_it_runs_under(
         plist = jobs.helper_job_plist_path(
             home, facts=jobs.LaunchdFacts.of(host, user_home=user_home)
         )
-        plist.parent.mkdir(parents=True)
-        plist.write_bytes(
+        jobs.write_job_plist(
+            plist,
             plistlib.dumps(
                 {
                     "Label": jobs.helper_job_label(home),
@@ -397,7 +397,7 @@ def test_the_stop_refuses_to_retire_the_helper_it_runs_under(
                         ),
                     },
                 }
-            )
+            ),
         )
 
         with pytest.raises(RuntimeError, match="ancestor"):
