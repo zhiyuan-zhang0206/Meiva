@@ -192,6 +192,15 @@ def generate_directory_indexes(pool: Path) -> list[str]:
     return written
 
 
+# meiva:note
+# The root index's line format has two test owners on purpose -- an end-to-end one that pins
+# the whole file for a tiny pool, and a unit one that pins individual lines:
+# `skills/scripts/tests/test_rebuild_memory_index.py` and
+# `tests/test_meiva_memory_pool_index.py`. Changing the format means changing both; the
+# 2026-11-02 change (dropping the per-subdirectory listing) was green on the second and red
+# on the first, which cost a round trip through CI. Neither test is redundant: the end-to-end
+# one is the only place the file-level contract (heading, ordering, trailing newline) lives.
+# meiva:link meiva_builtins/plugins/meiva_memory/skills/scripts/rebuild_memory_index.py
 def rebuild_root_memory_index(pool: Path) -> None:
     files = collect(pool)
     root_files = [f for f in files if "/" not in f]
