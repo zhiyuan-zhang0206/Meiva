@@ -59,6 +59,7 @@ class GrafanaCredentials:
     admin_password: str | None = field(repr=False)
     telegram_bot_token: str = field(repr=False)
     telegram_owner_id: int
+    webhook_token: str = field(default="", repr=False)
 
 
 # meiva:note

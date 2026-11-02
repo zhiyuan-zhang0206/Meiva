@@ -51,6 +51,7 @@ class NativeRenderValues:
     prometheus_url: str
     pg_url: str
     alerts_webhook_url: str
+    alerts_webhook_token: str
     telemetry_loki_url: str
     telemetry_prometheus_url: str
     telemetry_grafana_url: str
@@ -72,6 +73,7 @@ def _substitutions(values: NativeRenderValues) -> dict[str, str]:
         "PROMETHEUS_URL": values.prometheus_url,
         "PG_URL": values.pg_url,
         "ALERTS_WEBHOOK_URL": shlex.quote(values.alerts_webhook_url),
+        "ALERTS_WEBHOOK_TOKEN": shlex.quote(values.alerts_webhook_token),
         "REPO": values.repo,
         "lgtm_grafana_listen_host": values.grafana_listen_host,
         "LGTM_LOKI_PORT": str(values.loki_port),
