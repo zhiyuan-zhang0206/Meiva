@@ -11,11 +11,13 @@ from meizel import is_repo_test_file, is_test_path, restrict, split_only
 from meizel.checkout import roles_at, tracked_files
 from meizel.graph.model import MeizelError
 from meizel.roles import pytest_test_hosts, select_packages
+from meizel.source_text import decode_source
 
 __all__ = [
     "FRAMEWORK_DIRS",
     "admission",
     "changed_scope",
+    "decode_source",
     "is_repo_test_file",
     "is_test_path",
     "pytest_test_hosts",
@@ -233,18 +235,15 @@ def python_files(roots: Iterable[Path], repo_root: Path) -> list[Path]:
     return [repo_root / file for file in sorted(files)]
 
 
+# meiva:note
+# The reader around `decode_source`: the one place that pays for the bytes. A lint whose rule
+# already holds the content calls the decision, not this.
 def read_utf8_text(path: Path) -> str | None:
-    """Skip unreadable, binary, and non-UTF-8 files."""
     try:
         data = path.read_bytes()
     except OSError:
         return None
-    if b"\x00" in data[:8192]:
-        return None
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
+    return decode_source(data)
 
 
 # meiva:note

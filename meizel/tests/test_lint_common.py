@@ -261,3 +261,32 @@ def test_meizel_source_code_contains_no_meiva_specific_hardcoded_literals() -> N
             if term in text:
                 violations.append(f"{rel}: contains forbidden literal {term!r}")
     assert violations == []
+
+
+# meiva:note
+# The binary/UTF-8 rule on its own: it is the decision `read_utf8_text` makes after reading, so a
+# caller holding bytes can reach it without a file — and the window boundary is the part of it a
+# caller could quietly change.
+def test_bytes_decode_as_the_text_they_hold() -> None:
+    assert lint_common.decode_source(b"x = 1\n") == "x = 1\n"
+
+
+def test_empty_bytes_are_empty_text() -> None:
+    assert lint_common.decode_source(b"") == ""
+
+
+def test_a_nul_in_the_first_block_marks_a_binary_file() -> None:
+    assert lint_common.decode_source(b"PK\x03\x04\x00\x00payload") is None
+
+
+def test_a_nul_as_the_last_byte_of_the_first_block_is_binary() -> None:
+    assert lint_common.decode_source(b"x" * 8191 + b"\x00") is None
+
+
+def test_a_nul_past_the_first_block_is_text() -> None:
+    data = b"x" * 8192 + b"\x00"
+    assert lint_common.decode_source(data) == data.decode()
+
+
+def test_undecodable_bytes_are_not_source() -> None:
+    assert lint_common.decode_source(b"caf\xe9") is None

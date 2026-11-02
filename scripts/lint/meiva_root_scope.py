@@ -190,12 +190,9 @@ def scan_file(path: Path) -> list[Violation]:
         data = path.read_bytes()
     except OSError:
         return []
-    if b"\x00" in data[:8192]:
-        return []  # binary
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return []  # not UTF-8 text
+    text = lint_common.decode_source(data)
+    if text is None:
+        return []
     exempt_lines = _exempt_lines(text)
     if path.suffix in {".py", ".pyi"}:
         exempt_lines |= _docstring_lines(text)
