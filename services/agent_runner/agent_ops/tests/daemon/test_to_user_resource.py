@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from base.agents.to_user import read_document
+from base.agents.to_user import read_document, to_user_limits
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from base.db import Database, create_agent
@@ -17,6 +17,10 @@ from ops.to_user import read_to_user
 from services.agent_runner.agent_ops.in_flight import RequestTokens, WorkerFutures
 from services.agent_runner.agent_ops.tests.ops_support import Ops
 from services.agent_runner.agent_ops.to_user_resource import resource_route
+
+# meiva:note
+# The read caps the route and the door take as a value, at the configured numbers.
+LIMITS = to_user_limits(settings.to_user)
 
 
 @pytest.mark.asyncio
@@ -35,19 +39,22 @@ async def test_authenticated_home_machine_file_roundtrip(
     outside = unit_home / "report.bin"
     outside.write_bytes(b"\x00\xffreport")
     (workspace / "to_user.md").write_text(f"[report]({outside})")
-    resource = next(iter(read_document(workspace).resources.values()))
+    resource = next(iter(read_document(workspace, limits=LIMITS).resources.values()))
     payload = {"agent_id": agent_id, "references": [resource.id]}
     requests: RequestTokens = set()
     workers: WorkerFutures = set()
     with database.pool() as pool:
-        assert read_to_user(pool, agent_id, "source-host", references=[], home=unit_home).content
+        assert read_to_user(
+            pool, agent_id, "source-host", references=[], home=unit_home, limits=LIMITS
+        ).content
         with pytest.raises(ValueError, match="home machine"):
-            read_to_user(pool, agent_id, "wrong-host", references=[], home=unit_home)
+            read_to_user(pool, agent_id, "wrong-host", references=[], home=unit_home, limits=LIMITS)
         handler = partial(
             resource_route,
             pool=pool,
             machine="source-host",
             home=unit_home,
+            limits=LIMITS,
             executor=op_executor,
             dispatch_sem=asyncio.Semaphore(1),
             requests=requests,
@@ -94,7 +101,7 @@ async def test_a_refused_document_read_reports_its_class(
     with (workspace / "big.md").open("wb") as stream:
         stream.truncate(settings.to_user.max_document_bytes + 1)
     (workspace / "to_user.md").write_text("[big](big.md)")
-    oversized = read_document(workspace).resources["big.md"].id
+    oversized = read_document(workspace, limits=LIMITS).resources["big.md"].id
 
     _, too_large = await ops.route(
         {"kind": "to_user_read", "payload": {"agent_id": agent_id, "references": [oversized]}}

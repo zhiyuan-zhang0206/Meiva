@@ -10,8 +10,8 @@ from markdown_it import MarkdownIt
 from mdit_py_plugins.footnote import footnote_plugin
 
 from base.agents.to_user.errors import ToUserFileTooLarge
+from base.agents.to_user.limits import ToUserLimits
 from base.agents.to_user.models import DOCUMENT_FILENAME, ToUserResource
-from base.config import settings
 
 
 class DocumentMarkdown(MarkdownIt):
@@ -49,10 +49,10 @@ class _RawHtmlReferences(HTMLParser):
                 return
 
 
-def referenced_files(document: Path, content: str) -> dict[str, Path]:
+def referenced_files(document: Path, content: str, *, limits: ToUserLimits) -> dict[str, Path]:
 
     parser = DocumentMarkdown("commonmark", {"html": True}).enable("table").use(footnote_plugin)
-    max_references = settings.to_user.max_references
+    max_references = limits.references
     pending = list(parser.parse(content))
     references: dict[str, Path] = {}
 
@@ -83,9 +83,11 @@ def reference_id(href: str) -> str:
     return hashlib.sha256(href.encode()).hexdigest()
 
 
-def resource_descriptions(document: Path, content: str) -> dict[str, ToUserResource]:
+def resource_descriptions(
+    document: Path, content: str, *, limits: ToUserLimits
+) -> dict[str, ToUserResource]:
     result: dict[str, ToUserResource] = {}
-    for href, path in referenced_files(document, content).items():
+    for href, path in referenced_files(document, content, limits=limits).items():
         try:
             info = path.stat()
             stamp = (
@@ -122,19 +124,19 @@ def read_regular_file(path: Path, limit: int) -> tuple[bytes, os.stat_result]:
     return raw, info
 
 
-def resolve_reference(workspace: Path, references: list[str]) -> Path:
+def resolve_reference(workspace: Path, references: list[str], *, limits: ToUserLimits) -> Path:
 
     if workspace.is_symlink():
         raise ValueError("To user workspace must not be a symlink")
-    max_depth = settings.to_user.max_chain_depth
+    max_depth = limits.chain_depth
     if not references or len(references) > max_depth:
         raise ValueError(f"A resource requires between one and {max_depth} reference IDs")
     path = workspace / DOCUMENT_FILENAME
     for resource_id in references:
         if path.suffix.lower() not in (".md", ".markdown"):
             raise ValueError("Only Markdown documents can link further resources")
-        raw, _ = read_regular_file(path, settings.to_user.max_document_bytes)
-        targets = referenced_files(path, raw.decode("utf-8"))
+        raw, _ = read_regular_file(path, limits.document_bytes)
+        targets = referenced_files(path, raw.decode("utf-8"), limits=limits)
         matches = [target for href, target in targets.items() if reference_id(href) == resource_id]
         if not matches:
             raise FileNotFoundError("The document no longer references this resource")
@@ -142,6 +144,6 @@ def resolve_reference(workspace: Path, references: list[str]) -> Path:
     return path
 
 
-def read_resource(workspace: Path, references: list[str]) -> bytes:
-    path = resolve_reference(workspace, references)
-    return read_regular_file(path, settings.to_user.max_resource_bytes)[0]
+def read_resource(workspace: Path, references: list[str], *, limits: ToUserLimits) -> bytes:
+    path = resolve_reference(workspace, references, limits=limits)
+    return read_regular_file(path, limits.resource_bytes)[0]

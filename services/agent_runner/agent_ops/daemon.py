@@ -33,6 +33,7 @@ from pydantic import ValidationError
 
 from base import paths
 from base.agents.context.clients import ClientSet
+from base.agents.to_user.limits import to_user_limits_from_read_model
 from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
 from base.api_contracts.agent_contract import MeivaAgentError
 from base.api_contracts.launch_retry import LaunchReconcileRequest
@@ -603,6 +604,7 @@ async def serve_ops_daemon(
                     pool=pool,
                     machine=our_machine,
                     home=home,
+                    limits=to_user_limits_from_read_model(authority),
                     executor=executor,
                     dispatch_sem=dispatch_sem,
                     requests=requests,

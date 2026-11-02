@@ -2,14 +2,22 @@ from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.to_user import ToUserDocument, read_document, read_failure
+from base.agents.to_user import ToUserDocument, ToUserLimits, read_document, read_failure
 from base.paths import workspace_path
 
 
 def read_to_user(
-    pool: ConnectionPool, agent_id: int, machine: str, *, references: list[str], home: Path
+    pool: ConnectionPool,
+    agent_id: int,
+    machine: str,
+    *,
+    references: list[str],
+    home: Path,
+    limits: ToUserLimits,
 ) -> ToUserDocument:
-    return read_document(owned_workspace(pool, agent_id, machine, home=home), references=references)
+    return read_document(
+        owned_workspace(pool, agent_id, machine, home=home), limits=limits, references=references
+    )
 
 
 # meiva:note

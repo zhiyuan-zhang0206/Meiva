@@ -235,6 +235,10 @@ class AgentSlices:
         field: Literal[
             "exec_output_max_chars",
             "llm_retry_max_attempts",
+            "max_chain_depth",
+            "max_document_bytes",
+            "max_references",
+            "max_resource_bytes",
             "memory_inherit_max_block_chars",
             "memory_inherit_max_total_chars",
             "memory_per_agent_index_max_lines",

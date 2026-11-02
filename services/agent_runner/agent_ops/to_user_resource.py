@@ -7,6 +7,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base.agents.to_user import (
+    ToUserLimits,
     ToUserReadFailure,
     ToUserReadRequest,
     read_failure,
@@ -27,13 +28,13 @@ _STATUS: dict[ToUserReadFailure, tuple[int, bytes]] = {
 
 
 def resource_response(
-    body: bytes, *, pool: ConnectionPool, machine: str, home: Path
+    body: bytes, *, pool: ConnectionPool, machine: str, home: Path, limits: ToUserLimits
 ) -> tuple[int, bytes, str]:
 
     try:
         request = ToUserReadRequest.model_validate_json(body)
         workspace = owned_workspace(pool, request.agent_id, machine, home=home)
-        content = read_resource(workspace, request.references)
+        content = read_resource(workspace, request.references, limits=limits)
     except ValidationError:
         return 422, b"Invalid resource request", "text/plain"
     except (OSError, ValueError) as exc:
@@ -48,6 +49,7 @@ async def resource_route(
     pool: ConnectionPool,
     machine: str,
     home: Path,
+    limits: ToUserLimits,
     executor: ThreadPoolExecutor,
     dispatch_sem: asyncio.Semaphore,
     requests: in_flight.RequestTokens,
@@ -58,7 +60,9 @@ async def resource_route(
         async with dispatch_sem:
             future = asyncio.get_running_loop().run_in_executor(
                 executor,
-                functools.partial(resource_response, body, pool=pool, machine=machine, home=home),
+                functools.partial(
+                    resource_response, body, pool=pool, machine=machine, home=home, limits=limits
+                ),
             )
             in_flight.track_worker(future, workers=workers)
             return await asyncio.shield(future)
