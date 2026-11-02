@@ -25,15 +25,15 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "roles.py" = "strict"
 
 [debt.impure-call]
-"allowances.py#meizel.checkout.GitRepo" = 1
-"lint_common.py#Path.is_dir" = 1
-"lint_common.py#Path.is_file" = 1
-"lint_common.py#Path.read_bytes" = 1
-"lint_common.py#Path.resolve" = 1
-"lint_common.py#Path.rglob" = 1
-"lint_common.py#import subprocess" = 1
-"lint_common.py#os.path.lexists" = 1
+"allowances.py#meizel.checkout.GitRepo" = { count = 1, owner = "#5921", until = "waits for the policy text or a reader as a value: allowances.load(root) has 17 call sites and none of them holds a GitRepo, so building one here repeats the same git call wherever it moved to" }
+"lint_common.py#Path.is_dir" = { count = 1, owner = "#5921", until = "waits for a caller that already holds which targets exist: a lint's scan dirs and its explicit targets reach the tooling as strings" }
+"lint_common.py#Path.is_file" = { count = 1, owner = "#5921", until = "waits for a caller that already holds which of its targets are files: the admitted set is a list of names, not a stat per name" }
+"lint_common.py#Path.read_bytes" = { count = 1, owner = "#5921", until = "waits for the judged text as a value: rule modules hand the tooling a path, never the content they want judged" }
+"lint_common.py#Path.resolve" = { count = 1, owner = "#5921", until = "waits for resolved targets at the entry: argv arrives as it was typed, and the shell is where a target becomes a real path" }
+"lint_common.py#Path.rglob" = { count = 1, owner = "#5921", until = "waits for the listing as a value: a directory target outside the checkout has no admitted set, so it is walked here" }
+"lint_common.py#import subprocess" = { count = 1, owner = "#5921", until = "waits for an analyzer port: the node analyzer is this tooling's own process boundary and every caller is a non-root module with no better copy of it" }
+"lint_common.py#os.path.lexists" = { count = 1, owner = "#5921", until = "waits for the caller to hold what pre-commit named: --only paths arrive as strings and a tracked symlink whose target is gone is still one of them" }
 
 [debt.impure-edge]
-"allowances.py#meizel/checkout.py" = 1
-"lint_common.py#meizel/checkout.py" = 1
+"allowances.py#meizel/checkout.py" = { count = 1, owner = "#5921", until = "waits for the policy text as a value: the same reader as the GitRepo entry above, so the edge goes when the caller hands the policy in" }
+"lint_common.py#meizel/checkout.py" = { count = 1, owner = "#5921", until = "waits for the tracked-file set as a value: the shell asks git once per run and hands the names down; every caller is a non-root module" }

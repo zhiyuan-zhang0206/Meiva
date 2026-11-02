@@ -37,8 +37,8 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 "sync.py" = "strict"
 
 [debt.impure-call]
-"cli.py#Path.resolve" = 3
-"cli.py#meizel.checkout.GitRepo" = 1
+"cli.py#Path.resolve" = { count = 3, owner = "#5921", until = "waits for the CLI's own paths to be resolved above it: main() is the top of the process, so the only place further up is another file in the same package, which repeats the same call" }
+"cli.py#meizel.checkout.GitRepo" = { count = 1, owner = "#5921", until = "waits for a repository handle as a value: main() builds the one GitRepo every command is handed, and nothing above main() holds it" }
 
 [debt.impure-edge]
-"cli.py#meizel/checkout.py" = 1
+"cli.py#meizel/checkout.py" = { count = 1, owner = "#5921", until = "waits for the repository boundary to live behind a module the commands do not share with the entry: cli.py is the entry and the command implementations at once" }
