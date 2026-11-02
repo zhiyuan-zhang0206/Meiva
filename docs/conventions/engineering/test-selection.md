@@ -160,15 +160,20 @@ nearest `tests` directory that holds at least one collectable test owns it, and
 every collectable test below that directory is the package's test set. The
 directory itself counts when the path is already inside a `tests` directory,
 otherwise a `tests` directory beside an ancestor counts. A path with no nearer
-owner falls back to the top-level tests/ directory. Unless interface early cutoff
-applies (below), a file's transitive runtime consumers are added to its package tests.
+owner falls back to the top-level tests/ directory. A file's transitive runtime consumers are
+added to its package tests.
 
-### Interface early cutoff for strict modules
+### Interface early cutoff for strict modules (`meizel tests` only)
 
-When `--base-ref` is provided, a changed `PACKAGE` Python source file cuts off
-transitive cross-package consumer propagation and selects only its owning package's
-internal tests (plus the pinned tree-scan gates) when all of these hold in both
-base and head:
+`python -m meizel tests --changed <paths> --base-ref <ref>` still offers this narrowing for a
+local run. CI does not use it: `scripts/ci/test_selector.py` stopped applying the cutoff in
+#8250, after #8154 showed the inference is wrong - a test asserts behavior, not a signature -
+and `meizel impacted`, which CI uses to scope basedpyright, never applied it (it is a plain
+reverse import closure).
+
+In that CLI path, a changed `PACKAGE` Python source file cuts off transitive cross-package
+consumer propagation and selects only its owning package's internal tests (plus the pinned
+tree-scan gates) when all of these hold in both base and head:
 
 - the file has effective `purity = "strict"` in `meizel.toml`, carries no recorded
   `[debt.*]` entry in any ancestor `meizel.toml`, and its directory's manifest boundary
@@ -182,17 +187,21 @@ base and head:
   `tests/` fallback) and at least one collectable test in that package reaches the file
   in the runtime import graph.
 
+The fingerprint reads names, signatures, annotations as written, defaults, decorators, bases,
+class-level fields and re-exports. It does not read function or method bodies, so it cannot see
+an attribute type assigned inside one (`self.items: list[str]` in `__init__`), or the bound of a
+private `TypeVar` - or a private alias - that a public annotation names. Both change what a type
+checker sees while the fingerprint reports "unchanged", so a selection made through this cutoff
+drops the consumer that would have caught them. Treat it as a local shortcut, not as a claim
+about what a diff can affect.
+
 Any change to a public parameter name (`backoff_ms` to `backoff_s`), annotation,
 default value, return type, decorator, class field, public constant or re-export
-changes the fingerprint and runs the full transitive consumer closure. Nothing
-re-runs the full suite before landing; the post-merge runs are what close the gap.
+changes the fingerprint and runs the full transitive consumer closure.
 
-CI passes the committed merge-base through `--base-ref`. Selection reads both base
-and head with the same fact collector and resolver, then intersects the resulting tests
-with the current collectable universe. This preserves impact when an import, fixture
-binding or resource edge is removed, and when a changed source is deleted. Base facts
-are read from a temporary Git archive, never from an unrelated working checkout.
-Without base facts, a deleted path has an unknown impact and reports FULL (`incomplete-impact`).
+`--base-ref` also gives selection the base tree for deleted-path recovery: without it, a deleted
+path has an unknown impact and reports FULL (`incomplete-impact`). Base facts are read from a
+temporary Git archive, never from an unrelated working checkout.
 
 ## Decision rules
 
