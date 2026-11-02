@@ -18,9 +18,11 @@ import psutil
 import pytest
 
 from base.host.proc import (
+    ProcessObservation,
     child_state,
     kill_process_tree,
     process_alive,
+    read_process,
     run_bounded,
     terminate_owned_tree,
 )
@@ -408,7 +410,7 @@ def test_timeout_stderr_tail_bounds_the_number_of_lines() -> None:
 def test_child_state_attached_for_a_live_child() -> None:
     proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "sleep"])
     try:
-        assert child_state(proc.pid, os.getpid()) == "attached"
+        assert child_state(proc.pid, os.getpid(), read=read_process) == "attached"
     finally:
         proc.kill()
         proc.wait()
@@ -418,7 +420,7 @@ def test_child_state_detached_for_a_live_non_child() -> None:
     proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "sleep"])
     try:
         # The child's parent is THIS process, never this process's own parent.
-        assert child_state(proc.pid, os.getppid()) == "detached"
+        assert child_state(proc.pid, os.getppid(), read=read_process) == "detached"
     finally:
         proc.kill()
         proc.wait()
@@ -427,7 +429,7 @@ def test_child_state_detached_for_a_live_non_child() -> None:
 def test_child_state_missing_for_a_reaped_pid() -> None:
     proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "noop"])
     proc.wait()
-    assert child_state(proc.pid, os.getpid()) == "missing"
+    assert child_state(proc.pid, os.getpid(), read=read_process) == "missing"
 
 
 def test_child_state_missing_for_a_zombie() -> None:
@@ -439,14 +441,16 @@ def test_child_state_missing_for_a_zombie() -> None:
         time.sleep(0.01)
     try:
         assert handle.status() == psutil.STATUS_ZOMBIE, "child never became a zombie"
-        assert child_state(proc.pid, os.getpid()) == "missing"
+        assert child_state(proc.pid, os.getpid(), read=read_process) == "missing"
     finally:
         proc.wait()
 
 
-def test_child_state_unverifiable_when_the_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raiser(pid: int) -> object:
+def test_child_state_unverifiable_when_the_read_fails() -> None:
+    # meiva:note
+    # The fault is injected rather than made: `AccessDenied` comes from a process
+    # another user owns, which a suite that starts its own children cannot arrange.
+    def refuses(pid: int) -> ProcessObservation:
         raise psutil.AccessDenied
 
-    monkeypatch.setattr(psutil, "Process", raiser)
-    assert child_state(999999, os.getpid()) == "unverifiable"
+    assert child_state(999999, os.getpid(), read=refuses) == "unverifiable"

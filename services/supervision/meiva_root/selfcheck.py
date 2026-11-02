@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from base.clock import Timers
-from base.host.proc import child_state
+from base.host.proc import child_state, read_process
 
 _log = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ class TreeSelfCheck:
             verdict = (
                 verdicts[unit_id]
                 if verdicts is not None and unit_id in verdicts
-                else child_state(int(raw_pid), root_pid)
+                else child_state(int(raw_pid), root_pid, read=read_process)
             )
             if verdict == "attached":
                 continue

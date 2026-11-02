@@ -22,7 +22,8 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 import psutil
@@ -147,6 +148,31 @@ ChildState = Literal["attached", "detached", "missing", "unverifiable"]
 
 
 # meiva:note
+# What one read of a process's table entry answered: its status and its parent id.
+@dataclass(frozen=True)
+class ProcessObservation:
+    status: str
+    ppid: int
+
+
+# meiva:note
+# One read of `pid`'s process entry, raising as psutil does: `psutil.NoSuchProcess`
+# for a pid that names nothing, another `psutil.Error` (or an `OSError`) when the
+# kernel refuses the read.
+ProcessReader = Callable[[int], ProcessObservation]
+
+
+# meiva:note
+# The psutil read: the system implementation of `ProcessReader`. A caller that
+# decides on the answer takes the reader as a parameter, so a test passes the
+# answer — or the failure — it needs. A read the kernel really refuses is not
+# something a live child can be asked to produce.
+def read_process(pid: int) -> ProcessObservation:
+    proc = psutil.Process(pid)
+    return ProcessObservation(status=proc.status(), ppid=proc.ppid())
+
+
+# meiva:note
 # How live process `pid` reads relative to its expected chain parent.
 #
 # The root supervisor's self-check probes each managed child with this:
@@ -155,18 +181,16 @@ ChildState = Literal["attached", "detached", "missing", "unverifiable"]
 # (reparented out of the chain, or the pid was recycled); ``missing`` — no
 # such process, or a corpse awaiting its reaper (neither can serve);
 # ``unverifiable`` — the read itself failed; the answer is never guessed.
-def child_state(pid: int, parent_pid: int) -> ChildState:
+def child_state(pid: int, parent_pid: int, *, read: ProcessReader) -> ChildState:
     try:
-        proc = psutil.Process(pid)
-        status = proc.status()
-        ppid = proc.ppid()
+        observed = read(pid)
     except psutil.NoSuchProcess:
         return "missing"
     except (psutil.Error, OSError):
         return "unverifiable"
-    if status == psutil.STATUS_ZOMBIE:
+    if observed.status == psutil.STATUS_ZOMBIE:
         return "missing"
-    return "attached" if ppid == parent_pid else "detached"
+    return "attached" if observed.ppid == parent_pid else "detached"
 
 
 def force_kill(pid: int) -> None:
