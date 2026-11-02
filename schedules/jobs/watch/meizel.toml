@@ -1,1 +1,7 @@
-exports = ["agent_watch.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py"]
+exports = ["agent_watch.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py", "trunk-red-watch-schedule.py", "trunk_red_watch.py"]
+
+[uses]
+"trunk-red-watch-schedule.py" = ["trunk_red_watch.py"]
+
+[roots]
+"trunk-red-watch-schedule.py" = { kinds = ["clock", "environ", "home"], why = "The watch entry is the composition root of its own loop: it reads the home it runs under, the card-owner override, its scheduler identity and the start instant before the first round" }

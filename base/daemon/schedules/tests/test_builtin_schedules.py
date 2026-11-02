@@ -27,6 +27,7 @@ class TestLoadManifest:
             "c9-daily-report": "product",
             "debt-sweep-daily": "product",
             "dev-ci-metrics": "product",
+            "trunk-red-watch": "product",
             "adversarial-eval-weekly": "product",
             "self-evolution-weekly": "product",
             "self-evolution-daily": "product",
@@ -49,6 +50,7 @@ class TestLoadManifest:
             "memory-arbiter",
             "model-update-tracker",
             "trace-ship-tempo",
+            "trunk-red-watch",
         }
 
     def test_unknown_class_fails_fast(self, tmp_path: Path) -> None:
