@@ -13,5 +13,5 @@ exports = ["admission.py", "api.py", "delivery.py", "digests.py", "ledger.py", "
 "unit.py" = ["api.py", "delivery.py", "ledger.py", "model.py"]
 
 [debt.ambient-read]
-"ledger.py#pid base.paths.private_dir.is_foreign_owned" = { count = 1, owner = "#5816", until = "waits for nothing: the check asks whether the ledger's directory belongs to another user, which only the process about to use it can answer" }
-"unit.py#random base.host.net.auth.random_bytes" = { count = 1, owner = "#5816", until = "waits for nothing: the bundle id is minted per issue so two bundles never share a name, and a caller-supplied source would let two issuers pick one" }
+"ledger.py#pid base.paths.private_dir.is_foreign_owned" = { count = 1, owner = "#5816", until = "permanently: the check asks whether the ledger's directory belongs to another user, which only the process about to use it can answer" }
+"unit.py#random base.host.net.auth.random_bytes" = { count = 1, owner = "#5816", until = "permanently: the bundle id is minted per issue so two bundles never share a name, and a caller-supplied source would let two issuers pick one" }

@@ -8,5 +8,5 @@ exports = ["check_git_hooks.py", "cluster_drift.py", "github_pr.py", "memory_rep
 "repo_change.py" = "strict"
 
 [debt.ambient-read]
-"check_git_hooks.py#cwd pathlib.Path.cwd" = { count = 1, owner = "#5816", until = "waits for nothing: the script checks the hooks of the checkout it was started in, and that cwd is the operand the operator chose" }
-"check_git_hooks.py#home pathlib.Path.home" = { count = 1, owner = "#5816", until = "waits for nothing: machine_checkouts() scans the invoking user's home for checkout directories, and that home is the user's own" }
+"check_git_hooks.py#cwd pathlib.Path.cwd" = { count = 1, owner = "#5816", until = "permanently: the script checks the hooks of the checkout it was started in, and that cwd is the operand the operator chose" }
+"check_git_hooks.py#home pathlib.Path.home" = { count = 1, owner = "#5816", until = "permanently: machine_checkouts() scans the invoking user's home for checkout directories, and that home is the user's own" }

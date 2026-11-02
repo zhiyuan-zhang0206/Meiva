@@ -18,6 +18,6 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "provenance.py" = "strict"
 
 [debt.ambient-read]
-"coding_session_owner.py#pid os.getuid" = { count = 1, owner = "#5816", until = "waits for nothing: the socket directory is keyed by the uid that owns it so every session of the user computes the same path, and a caller-supplied uid would let one user's session address another's directory" }
+"coding_session_owner.py#pid os.getuid" = { count = 1, owner = "#5816", until = "permanently: the socket directory is keyed by the uid that owns it so every session of the user computes the same path, and a caller-supplied uid would let one user's session address another's directory" }
 "helperproc.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for a caller that holds the services config: _services_config() is read only inside helperproc (spawn_enabled, port) and the helper process builds no ConfigBoot of its own, so passing one in means giving the helper entry the boot it deliberately does not take" }
-"hosting.py#pid psutil.Process()" = { count = 1, owner = "#5816", until = "waits for nothing: the lineage is this process's own (psutil.Process() plus its parents), and a caller handing in a pid list would describe a tree it is not in" }
+"hosting.py#pid psutil.Process()" = { count = 1, owner = "#5816", until = "permanently: the lineage is this process's own (psutil.Process() plus its parents), and a caller handing in a pid list would describe a tree it is not in" }

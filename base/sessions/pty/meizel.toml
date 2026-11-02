@@ -12,4 +12,4 @@ exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.
 "survivor_role.py" = "strict"
 
 [debt.ambient-read]
-"paths.py#pid os.getuid" = { count = 1, owner = "#5816", until = "waits for nothing: the fallback directory is /tmp/meiva-pty-<uid> and every process of the user must compute the same path; a caller-supplied uid would let two processes of one user disagree" }
+"paths.py#pid os.getuid" = { count = 1, owner = "#5816", until = "permanently: the fallback directory is /tmp/meiva-pty-<uid> and every process of the user must compute the same path; a caller-supplied uid would let two processes of one user disagree" }
