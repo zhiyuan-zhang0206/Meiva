@@ -55,19 +55,29 @@ def read_shard(path: Path) -> ShardResult:
     )
 
 
-def judge(results: Sequence[ShardResult], expected: Mapping[str, int]) -> NightlyVerdict:
-    by_prefix: dict[str, list[ShardResult]] = {}
-    for result in results:
-        suite = result.shard.split("-", 1)[0]
-        by_prefix.setdefault(suite, []).append(result)
-
-    missing: list[str] = []
-    for suite, count in expected.items():
-        if len(by_prefix.get(suite, [])) != count:
-            missing.append(f"{suite}: expected {count} shards, got {len(by_prefix.get(suite, []))}")
+# meiva:note
+# The verdict certifies that the shards this layout names are the shards that ran, so it
+# compares names, not counts. A count is insensitive to identity: one shard missing and one
+# extra with the same prefix keep the total equal, and the missing shard would be reported as
+# covered -- the nightly verdict then certifies the release gate with evidence that a shard
+# never produced.
+def judge(results: Sequence[ShardResult], expected: Mapping[str, Sequence[str]]) -> NightlyVerdict:
+    expected_names = {name for names in expected.values() for name in names}
+    reported = [result.shard for result in results]
+    missing = sorted(expected_names - set(reported))
     if missing:
         return NightlyVerdict(
-            ok=False, reason="missing-shards: " + "; ".join(missing), shards=tuple(results)
+            ok=False, reason="missing-shards: " + ", ".join(missing), shards=tuple(results)
+        )
+    unexpected = sorted(set(reported) - expected_names)
+    if unexpected:
+        return NightlyVerdict(
+            ok=False, reason="unexpected-shards: " + ", ".join(unexpected), shards=tuple(results)
+        )
+    duplicates = sorted({name for name in reported if reported.count(name) > 1})
+    if duplicates:
+        return NightlyVerdict(
+            ok=False, reason="duplicate-shards: " + ", ".join(duplicates), shards=tuple(results)
         )
 
     red = [result.shard for result in results if not result.ok]
@@ -95,12 +105,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     paths = sorted(arguments.junit_dir.rglob("*.xml"))
     results = [read_shard(path) for path in paths]
+    # meiva:note
+    # The lanes are contiguous 1..N by construction (`--*-shards` counts), so the expected
+    # names are derived from the counts; what the verdict compares is the resulting names.
     verdict = judge(
         results,
         {
-            "static": arguments.static_shards,
-            "backend": arguments.backend_shards,
-            "e2e": arguments.e2e_shards,
+            "static": [f"static-{group}" for group in range(1, arguments.static_shards + 1)],
+            "backend": [f"backend-{group}" for group in range(1, arguments.backend_shards + 1)],
+            "e2e": [f"e2e-{group}" for group in range(1, arguments.e2e_shards + 1)],
         },
     )
     record = {
