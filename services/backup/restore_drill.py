@@ -35,6 +35,7 @@ from base.agents.history.checkpoint_serde import (
     observed_checkpoint_types,
 )
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.pg_throwaway_base import (
     ThrowawayConfig,
     configured_base,
@@ -563,6 +564,7 @@ def main(argv: list[str] | None = None) -> None:
         configured_base(config.view.data_plane.pg_throwaway_base),
         home=home,
         environ=config.process_environment(),
+        timers=SYSTEM_TIMERS,
     )
     image = LoadedCommit.capture()
     version = CodeVersion(image)

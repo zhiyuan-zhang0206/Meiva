@@ -40,6 +40,7 @@ import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import sql
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.authority import ensure_groups, mint_generation
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
@@ -144,6 +145,7 @@ def _authority_instance(process_config: ConfigBoot) -> Iterator[Instance]:
         configured_base(process_config.view.data_plane.pg_throwaway_base),
         home=meiva_home(),
         environ=os.environ,
+        timers=SYSTEM_TIMERS,
     )
     with throwaway_postgres(config=throwaway) as url:
         port = urlsplit(url).port

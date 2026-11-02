@@ -21,6 +21,7 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane import pg_foreground, pg_plan, pg_tools
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.paths import meiva_home
@@ -63,7 +64,11 @@ def test_native_foreground_is_direct_child_and_reaped_on_context_exit(
     instance = foreground_root
     outcome = pytest.raises(KeyboardInterrupt) if interrupted else nullcontext()
     config = ThrowawayConfig(
-        foreground_root, default_root=foreground_root, home=meiva_home(), environ=os.environ
+        foreground_root,
+        default_root=foreground_root,
+        home=meiva_home(),
+        environ=os.environ,
+        timers=SYSTEM_TIMERS,
     )
     with (
         outcome,
@@ -115,6 +120,7 @@ def test_startup_failure_reaps_the_native_postmaster(
                 log=log,
                 port=unused_port,
                 timeout_s=5,
+                timers=SYSTEM_TIMERS,
             )
         assert process.returncode is not None and process.returncode != 0
         with pytest.raises(ChildProcessError):
@@ -141,7 +147,7 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
     try:
         with pytest.raises(RuntimeError, match="another data directory"):
             pg_foreground.wait_foreground_postgres(
-                process, data=tmp_path / "owned-db", log=log, port=port
+                process, data=tmp_path / "owned-db", log=log, port=port, timers=SYSTEM_TIMERS
             )
     finally:
         process.terminate()
@@ -166,7 +172,9 @@ def test_a_symlinked_spelling_of_the_reported_data_directory_is_answered(
         ["/bin/sleep", "30"], log=log, env=pg_tools.pg_start_env(os.environ)
     )
     try:
-        pg_foreground.wait_foreground_postgres(process, data=link, log=log, port=port)
+        pg_foreground.wait_foreground_postgres(
+            process, data=link, log=log, port=port, timers=SYSTEM_TIMERS
+        )
     finally:
         process.terminate()
         process.wait(timeout=5)
@@ -188,6 +196,7 @@ def test_readiness_timeout_is_bounded(tmp_path: Path) -> None:
                 log=log,
                 port=1,
                 timeout_s=0,
+                timers=SYSTEM_TIMERS,
             )
     finally:
         process.terminate()
@@ -309,6 +318,7 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
         bin_dir=bin_dir,
         home=meiva_home(),
         environ=os.environ,
+        timers=SYSTEM_TIMERS,
     )
     error = subprocess.TimeoutExpired if stop_fails else TimeoutError
     try:
@@ -358,6 +368,7 @@ def test_foreground_start_is_handed_the_built_start_env(
         bin_dir=bin_dir,
         home=meiva_home(),
         environ=handed,
+        timers=SYSTEM_TIMERS,
     )
 
     with (

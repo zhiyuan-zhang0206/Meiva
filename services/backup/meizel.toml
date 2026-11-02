@@ -16,4 +16,4 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 
 [roots]
 "dump.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-"restore_drill.py" = { kinds = ["environ", "home", "settings"], why = "Operator process entry boots configuration and reads the home whose backups it restores before composing its resources, and reads its own environment once as the base the decrypt and restore children it spawns are given" }
+"restore_drill.py" = { kinds = ["clock", "environ", "home", "settings"], why = "Operator process entry boots configuration and reads the home whose backups it restores before composing its resources, reads its own environment once as the base the decrypt and restore children it spawns are given, and names the system timers its throwaway cluster's readiness wait runs on" }

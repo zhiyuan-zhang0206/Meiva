@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import ConfigBoot
@@ -29,6 +30,7 @@ def main() -> int:
         configured_base(config.view.data_plane.pg_throwaway_base),
         home=meiva_home(),
         environ=os.environ,
+        timers=SYSTEM_TIMERS,
     )
     with throwaway_postgres(config=throwaway) as url:
         u = urlparse(url)

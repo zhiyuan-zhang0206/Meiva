@@ -21,6 +21,7 @@ from pathlib import Path
 
 import psycopg
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.paths import meiva_home
@@ -59,7 +60,7 @@ def _restore(root: Path, mode: str, base: Path, requested_base: object) -> None:
     with throwaway_postgres(
         base=base,
         foreground=True,
-        config=ThrowawayConfig(base, home=meiva_home(), environ=os.environ),
+        config=ThrowawayConfig(base, home=meiva_home(), environ=os.environ, timers=SYSTEM_TIMERS),
     ) as url:
         with psycopg.connect(url) as conn:
             row = conn.execute("SHOW data_directory").fetchone()

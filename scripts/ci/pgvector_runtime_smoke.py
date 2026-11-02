@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 
 import psycopg
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane import runtime_binaries as rb
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import throwaway_postgres
@@ -69,6 +70,7 @@ def main() -> int:
         configured_base(config.view.data_plane.pg_throwaway_base),
         home=home,
         environ=config.process_environment(),
+        timers=SYSTEM_TIMERS,
     )
     with throwaway_postgres(config=throwaway) as url:
         port = urlsplit(url).port

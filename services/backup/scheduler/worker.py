@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, assert_never
 
-from base.clock import Timers
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.machine import MachineIdentityReader
@@ -96,7 +96,10 @@ async def run_job(
             override = settings.throwaway_base
             request["pg_throwaway_base"] = None if override is None else str(override)
             operation_kind = restore_drill_kind(
-                tree, throwaway=ThrowawayConfig(override, home=tree.home, environ=launch.env)
+                tree,
+                throwaway=ThrowawayConfig(
+                    override, home=tree.home, environ=launch.env, timers=SYSTEM_TIMERS
+                ),
             )
         case "dump":
             operation_kind = dump_kind(tree)
@@ -263,7 +266,10 @@ def execute(
             if raw_base is not None and not isinstance(raw_base, str):
                 raise TypeError("logical restore requires a string or null throwaway base")
             throwaway = ThrowawayConfig(
-                None if raw_base is None else Path(raw_base), home=tree.home, environ=env
+                None if raw_base is None else Path(raw_base),
+                home=tree.home,
+                environ=env,
+                timers=SYSTEM_TIMERS,
             )
             artifact = newest_artifact(tree)
             scratch = work / "scratch"

@@ -12,7 +12,7 @@ from typing import Any
 
 import psycopg
 
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.cluster.dataplane import walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.config import ConfigBoot
@@ -42,11 +42,12 @@ def walg_plane(config: ConfigBoot) -> DataPlaneConfig:
 
 # meiva:note
 # Where the drill and the daily tick may place scratch Postgres instances, read at the verb's door.
-def walg_throwaway(config: ConfigBoot, *, home: Path) -> ThrowawayConfig:
+def walg_throwaway(config: ConfigBoot, *, home: Path, timers: Timers) -> ThrowawayConfig:
     return ThrowawayConfig(
         configured_base(_delivered(config).view.data_plane.pg_throwaway_base),
         home=home,
         environ=config.process_environment(),
+        timers=timers,
     )
 
 
