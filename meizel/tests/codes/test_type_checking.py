@@ -6,7 +6,7 @@ import pytest
 
 from meizel import allowances
 from meizel.contracts.analysis import analyze, diagnose, load_policy
-from meizel.contracts.cli import GitRepo
+from meizel.entry import open_repository
 from meizel.graph.model import Code, FactKind, Sources
 from meizel.graph.universe import Universe
 from meizel.language.scan import scan_source
@@ -38,7 +38,7 @@ ROLES = '[roles]\napplication = ["pkg"]\nstandalone = ["runtimes"]\ntooling = ["
 )
 def test_import_identity_records_direct_guards(tmp_path: Path, source: str) -> None:
     scan = scan_source(
-        Universe(GitRepo(tmp_path), ["pkg/a.py"]),
+        Universe(open_repository(tmp_path), ["pkg/a.py"]),
         "pkg/a.py",
         source.encode(),
         Sources(),
@@ -66,7 +66,7 @@ def test_text_other_objects_and_shadowed_bindings_are_not_guards(
     tmp_path: Path, source: str
 ) -> None:
     scan = scan_source(
-        Universe(GitRepo(tmp_path), ["pkg/a.py"]),
+        Universe(open_repository(tmp_path), ["pkg/a.py"]),
         "pkg/a.py",
         source.encode(),
         Sources(),
@@ -189,7 +189,7 @@ def test_a_guard_diagnostic_carries_the_reason_and_the_rule_document(
 def test_guard_records_do_not_skip_body_or_else_facts(tmp_path: Path) -> None:
     source = "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.a\nelse:\n    import pkg.b\n"
     scan = scan_source(
-        Universe(GitRepo(tmp_path), ["pkg/a.py", "pkg/b.py", "entry.py"]),
+        Universe(open_repository(tmp_path), ["pkg/a.py", "pkg/b.py", "entry.py"]),
         "entry.py",
         source.encode(),
         Sources(),

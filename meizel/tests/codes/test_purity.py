@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from meizel.contracts.analysis import render_policy
-from meizel.contracts.cli import GitRepo
+from meizel.entry import open_repository
 from meizel.language.scan import is_imported_binding, module_bindings
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, git, run
 
@@ -421,7 +421,7 @@ def test_bindings_distinguish_defined_vs_imported_and_flag_imported_patch(
             "meizel.toml": '[uses]\n"app" = ["lib"]\n',
         }
     )
-    b = module_bindings(GitRepo(root).universe(), "lib/consumer.py")
+    b = module_bindings(open_repository(root).universe(), "lib/consumer.py")
     assert "local" in b.defined
     assert {"run", "reexported"} <= b.imported
     assert "reexported" in b.all_names
@@ -448,7 +448,7 @@ def test_bindings_treat_a_file_outside_the_universe_as_dynamic(
     # The universe is the snapshot the run admitted: a name it does not hold cannot be read, so
     # the caller's question about what that module binds stays open instead of guessed.
     root = make_repo({"lib/__init__.py": "", "lib/known.py": "def run() -> int:\n    return 1\n"})
-    universe = GitRepo(root).universe()
+    universe = open_repository(root).universe()
     assert module_bindings(universe, "lib/known.py").dynamic is False
     assert module_bindings(universe, "lib/never_committed.py").dynamic is True
 

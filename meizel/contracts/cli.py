@@ -4,10 +4,11 @@ import argparse
 import json
 import sys
 from collections import Counter
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
-from meizel.checkout import GitRepo, read_roles, read_text, toplevel
 from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
@@ -19,9 +20,11 @@ from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import sync_manifests
 from meizel.graph import ReachabilityScope, python_reverse_closure, reachability_analysis
 from meizel.graph.model import Diagnostic, MeizelError
+from meizel.graph.universe import Checkout
 from meizel.source_evidence import Evidence, load_report
+from meizel.test_graph.model import TestLanes, TestSelection
 
-__all__ = ["main"]
+__all__ = ["CommandDeps", "build_parser", "dispatch"]
 
 # meiva:note
 # This text is consumed by argparse as native CLI help, not discarded source prose.
@@ -30,10 +33,27 @@ _DESCRIPTION = (
     "Command line: check, explain, impacted, tests, sync --prune, bootstrap, debt and roles."
 )
 
+
 # meiva:note
-# The installation this process runs from: the one seat that answers where the checker's own files
-# are, read once here and handed down as a value (`source_evidence.Evidence`).
-_TOOL_ROOT = Path(__file__).resolve().parents[2]
+# The checkout as these commands read it: `meizel.graph.Checkout` names the file half, and the test
+# query is added here, beside the two commands that ask it, so `graph` does not depend on
+# `test_graph` for a signature.
+class Repository(Checkout, Protocol):
+    def test_lanes(self) -> TestLanes: ...
+
+    def select_tests(
+        self, changed_paths: Sequence[str], *, base_ref: str | None = None
+    ) -> TestSelection: ...
+
+
+# meiva:note
+# What only the process entry can build, handed down: where this installation sits, and the two
+# readers the command layer is not allowed to own — the roles manifest and a file the argv names.
+@dataclass(frozen=True, slots=True)
+class CommandDeps:
+    tool_root: Path
+    read_roles: Callable[[Checkout], Mapping[str, tuple[str, ...]]]
+    read_text: Callable[[Path, str], str]
 
 
 # meiva:note
@@ -104,7 +124,7 @@ def _untracked_for_targets(
     ]
 
 
-def _run_check(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_check(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
     raw_paths: list[str] = args.paths
     changed: list[str] | None = args.changed
     if changed is not None and raw_paths:
@@ -135,7 +155,7 @@ def _run_check(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) 
     return 0
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m meizel", description=_DESCRIPTION)
     parser.add_argument(
         "--repo", type=Path, help="repository root (default: the cwd's git toplevel)"
@@ -380,7 +400,7 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
 
 
 def _run_impacted(
-    repo: GitRepo, root: Path, base: Path, raw_paths: list[str], jobs: int | None
+    repo: Repository, root: Path, base: Path, raw_paths: list[str], jobs: int | None
 ) -> int:
     targets = [_relative_target(root, base, p) for p in raw_paths]
     reached = python_reverse_closure(repo.universe(), targets, jobs=jobs)
@@ -396,7 +416,7 @@ def _run_impacted(
 # meiva:note
 # `meizel debt ...`: the commands that read or write recorded debt, and the one that measures the
 # world reads a baseline cannot hold. Kept out of `_dispatch` so the dispatch stays a list of commands.
-def _run_debt(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_debt(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
     if args.debt_mode == "propagation":
         analysis = analyze(repo.universe(), jobs=args.jobs)
         print(
@@ -407,7 +427,7 @@ def _run_debt(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -
     return run_debt(repo, targets, args, args.jobs)
 
 
-def _run_sync(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_sync(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
     if not (args.prune or args.declare):
         raise MeizelError("sync needs --prune or --declare")
     if args.paths and not args.declare:
@@ -430,7 +450,7 @@ def _run_sync(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -
     return 0
 
 
-def _run_surface(repo: GitRepo, against: str) -> int:
+def _run_surface(repo: Repository, against: str) -> int:
     # meiva:note
     # The base is a worktree of its own, so both sides are read by the same readers: the policy's
     # written for a historical tree, and the manifests' as they stand there. A ref whose tree cannot
@@ -441,7 +461,7 @@ def _run_surface(repo: GitRepo, against: str) -> int:
     return 0
 
 
-def _run_policy(repo: GitRepo, args: argparse.Namespace) -> int:
+def _run_policy(repo: Repository, args: argparse.Namespace) -> int:
     if args.policy_mode == "surface":
         return _run_surface(repo, args.against)
     universe = repo.universe()
@@ -450,11 +470,13 @@ def _run_policy(repo: GitRepo, args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_explain(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_explain(
+    repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
+) -> int:
     analysis = analyze(repo.universe(), jobs=args.jobs)
     node = _relative_target(root, base, args.path)
     report = load_report(
-        Evidence(root=root, tool=_TOOL_ROOT),
+        Evidence(root=root, tool=deps.tool_root),
         set(analysis.universe.files),
         node,
         args.typescript_index,
@@ -463,7 +485,7 @@ def _run_explain(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace
     return 0
 
 
-def _print_lane_query(repo: GitRepo, lane: str, *, as_json: bool) -> int:
+def _print_lane_query(repo: Repository, lane: str, *, as_json: bool) -> int:
     lanes = repo.test_lanes()
     chosen = sorted(lanes.static if lane == "static" else lanes.native)
     if as_json:
@@ -482,11 +504,13 @@ def _read_changed_targets(
     base: Path,
     raw_changed: Sequence[str] | None,
     changed_file: str | None,
+    *,
+    read: Callable[[Path, str], str],
 ) -> list[str]:
     collected_raw: list[str] = list(raw_changed or ())
     if changed_file is not None:
         try:
-            file_text = read_text(base, changed_file)
+            file_text = read(base, changed_file)
         except OSError as error:
             raise MeizelError(f"{changed_file}: cannot read changed-files list: {error}") from error
         collected_raw.extend(line.strip() for line in file_text.splitlines() if line.strip())
@@ -494,7 +518,7 @@ def _read_changed_targets(
 
 
 def _print_selection_query(
-    repo: GitRepo,
+    repo: Repository,
     rel_changed: Sequence[str],
     *,
     base_ref: str | None,
@@ -530,7 +554,9 @@ def _print_selection_query(
     return 0
 
 
-def _run_tests(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_tests(
+    repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
+) -> int:
     lane: str | None = args.lane
     raw_changed: list[str] | None = args.changed
     changed_file: str | None = args.changed_files
@@ -538,7 +564,7 @@ def _run_tests(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) 
         raise MeizelError("tests requires --lane, --changed, or --changed-files")
     if raw_changed is None and changed_file is None:
         return _print_lane_query(repo, str(lane), as_json=bool(args.as_json))
-    rel_changed = _read_changed_targets(root, base, raw_changed, changed_file)
+    rel_changed = _read_changed_targets(root, base, raw_changed, changed_file, read=deps.read_text)
     return _print_selection_query(
         repo,
         rel_changed,
@@ -548,7 +574,7 @@ def _run_tests(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) 
     )
 
 
-def _run_reachability(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_reachability(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
     raw_paths: list[str] = args.paths
     targets = [_relative_target(root, base, p) for p in raw_paths]
     universe = repo.universe()
@@ -581,7 +607,13 @@ def _run_reachability(repo: GitRepo, root: Path, base: Path, args: argparse.Name
     return 0
 
 
-def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -> int:
+# meiva:note
+# The command a parsed argv names: a table of commands and nothing else. The entry parsed the argv
+# and opened the repository; this decides which command sees which values, and hands the two shell
+# readers down to the one command that needs them.
+def dispatch(
+    repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
+) -> int:
     cmd = str(args.command)
     if cmd == "check":
         return _run_check(repo, root, base, args)
@@ -590,33 +622,18 @@ def _dispatch(repo: GitRepo, root: Path, base: Path, args: argparse.Namespace) -
     if cmd == "policy":
         return _run_policy(repo, args)
     if cmd == "explain":
-        return _run_explain(repo, root, base, args)
+        return _run_explain(repo, root, base, args, deps)
     if cmd == "impacted":
         return _run_impacted(repo, root, base, args.paths, args.jobs)
     if cmd == "tests":
-        return _run_tests(repo, root, base, args)
+        return _run_tests(repo, root, base, args, deps)
     if cmd == "reachability":
         return _run_reachability(repo, root, base, args)
     if cmd == "roles":
         return enumerations.run_roles(
-            repo, read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))
+            repo, deps.read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))
         )
     if cmd == "sync":
         return _run_sync(repo, root, base, args)
     print(bootstrap(repo, args.out, args.jobs))
     return 0
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-    try:
-        base = args.repo if args.repo is not None else Path.cwd()
-        # meiva:note
-        # The one repository seat of the command: this checkout, read through one value that the
-        # commands are handed instead of a path they would build their own from. A command that
-        # judges reads a snapshot of it (`repo.universe()`).
-        repo = GitRepo(args.repo if args.repo is not None else toplevel(base))
-        return _dispatch(repo, repo.root.resolve(), base, args)
-    except MeizelError as error:
-        print(f"meizel: {error}", file=sys.stderr)
-        return 2

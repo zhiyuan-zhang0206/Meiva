@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from meizel.contracts import enumerations as generated
-from meizel.contracts.cli import GitRepo, main
+from meizel.entry import main, open_repository
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.roles import parse_roles
 from meizel.tests.synthetic import RepoFactory, run, seat
@@ -27,7 +27,7 @@ def _roles(root: Path) -> dict[str, tuple[str, ...]]:
 
 def findings(root: Path) -> list[Diagnostic]:
     return generated.check(
-        GitRepo(root).universe(),
+        open_repository(root).universe(),
         parse_roles((root / "meizel.toml").read_text(encoding="utf-8"), label="meizel.toml"),
     )
 

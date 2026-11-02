@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from meizel import allowances
-from meizel.contracts.cli import GitRepo
+from meizel.entry import open_repository
 from meizel.graph.model import MeizelError, Sources
 from meizel.graph.universe import Universe
 from meizel.language.scan import scan_source
@@ -15,7 +15,7 @@ def main() -> int:
     source = b"answer = 1" if path.endswith(".py") else b"const answer = 1;"
     try:
         scan_source(
-            Universe(GitRepo(Path(sys.argv[2])), [path]),
+            Universe(open_repository(Path(sys.argv[2])), [path]),
             path,
             source,
             Sources(),

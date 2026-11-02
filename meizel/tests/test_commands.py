@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts.cli import main
 from meizel.contracts.sync import remove_entries
+from meizel.entry import main
 from meizel.graph import python_reverse_closure
 from meizel.tests.synthetic import RepoFactory, git, seat, verdict
 

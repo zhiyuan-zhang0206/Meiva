@@ -1,8 +1,5 @@
 exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 
-[roots]
-"cli.py" = { kinds = ["cwd"], why = "CLI composition root captures the working directory once for repository and relative-path inputs" }
-
 [uses]
 "ambient_read.py" = ["debt", "manifest.py", "policy.py"]
 "analysis.py" = ["ambient_read.py", "debt", "enumerations.py", "ledger.py", "manifest.py", "policy.py", "rule.py"]
@@ -37,8 +34,6 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 "sync.py" = "strict"
 
 [debt.impure-call]
-"cli.py#Path.resolve" = { count = 3, owner = "#5921", until = "waits for the CLI's own paths to be resolved above it: main() is the top of the process, so the only place further up is another file in the same package, which repeats the same call" }
-"cli.py#meizel.checkout.GitRepo" = { count = 1, owner = "#5921", until = "waits for a repository handle as a value: main() builds the one GitRepo every command is handed, and nothing above main() holds it" }
+"cli.py#Path.resolve" = { count = 1, owner = "#5921", until = "waits for the CLI's own paths to be resolved above it: main() is the top of the process, so the only place further up is another file in the same package, which repeats the same call" }
 
 [debt.impure-edge]
-"cli.py#meizel/checkout.py" = { count = 1, owner = "#5921", until = "waits for the repository boundary to live behind a module the commands do not share with the entry: cli.py is the entry and the command implementations at once" }

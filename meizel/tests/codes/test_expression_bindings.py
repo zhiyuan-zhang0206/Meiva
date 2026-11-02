@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from meizel import allowances
-from meizel.contracts.cli import GitRepo
+from meizel.entry import open_repository
 from meizel.graph.model import Code, FactKind, Sources
 from meizel.graph.universe import Universe
 from meizel.language.scan import FileScan, scan_source
@@ -16,7 +16,7 @@ def scan(tmp_path: Path, source: str) -> FileScan:
     library = tmp_path / "lib" / "api.py"
     library.parent.mkdir(exist_ok=True)
     library.write_text("VALUE = 1\n", encoding="utf-8")
-    universe = Universe(GitRepo(tmp_path), [path, "lib/__init__.py", "lib/api.py"])
+    universe = Universe(open_repository(tmp_path), [path, "lib/__init__.py", "lib/api.py"])
     return scan_source(universe, path, source.encode(), Sources(), policy=allowances.Policy())
 
 

@@ -12,7 +12,7 @@ from typing import TypeGuard
 
 import pytest
 
-from meizel.contracts.cli import main
+from meizel.entry import main
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:

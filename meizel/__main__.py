@@ -1,3 +1,3 @@
-from meizel.contracts.cli import main
+from meizel.entry import main
 
 raise SystemExit(main())
