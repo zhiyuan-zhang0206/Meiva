@@ -42,7 +42,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host.db_authority import delivery, ledger, model
-from base.host.db_authority.api import API_TOKEN_ENV
+from base.host.db_authority.api import API_TOKEN_ENV, ensure_telemetry_token
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
 from base.host.system.tests.fake_commands import fake_host, real_commands_host
@@ -148,9 +148,16 @@ def _configure(
     return Born(c.home, c.record, c.values, c.plane, dict(c.values))
 
 
+# meiva:note
+# The telemetry token a start's converge publishes before its data-plane step: the steps this
+# module drives do not include the converge, and `issue-unit` refuses a gateway home without it.
+_BORN_TELEMETRY_TOKEN = "born-telemetry-" + "t" * 32
+
+
 def _prepare_schema(
     born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> None:
+    ensure_telemetry_token(born.home, _BORN_TELEMETRY_TOKEN)
     rc = bringup.ensure_gateway_data_plane(
         born.plane,
         home=born.home,

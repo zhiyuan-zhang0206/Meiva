@@ -21,7 +21,7 @@ import pytest
 from dotenv import dotenv_values
 
 from base import config
-from base.cluster.authority.tests.unit_capability_support import HUMAN, MACHINE
+from base.cluster.authority.tests.unit_capability_support import MACHINE
 from base.config.service_read import ConfigAuthority
 from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
@@ -45,13 +45,19 @@ born = _single_box.born
 
 
 # meiva:note
-# The gateway operator's invocation: the born home, the human secret the bundles derive their
-# telemetry token from, and `localhost` as the address runners reach the gateway on. The home
-# serves the gateway through its `.env`, as `meiva init` leaves it.
+# A literal of the throwaway gateway under test; it never leaves the box. The gateway's configuration
+# carries a human secret, which the served endpoint's projection reads.
+_CLUSTER_SECRET = "gateway-human-secret-" + "s" * 32
+
+
+# meiva:note
+# The gateway operator's invocation: the born home, its human secret and `localhost` as the address
+# runners reach the gateway on. The home serves the gateway through its `.env`, as `meiva init`
+# leaves it.
 def _gateway_operator(command_runtime: CommandRuntime, born: Born) -> CommandRuntime:
     with (born.home / ".env").open("a") as env_file:
         env_file.write("MEIVA_MACHINE_SERVE_GATEWAY=true\n")
-    command_runtime.config.set_field("cluster_secret", HUMAN)
+    command_runtime.config.set_field("cluster_secret", _CLUSTER_SECRET)
     command_runtime.config.set_field("machine_host", "localhost")
     return replace(command_runtime, home=born.home)
 
