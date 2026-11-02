@@ -61,6 +61,18 @@ def register_plugin_parent_packages(pkg: str, name: str, plugin_dir: Path) -> No
         sys.modules[child_name] = child
 
 
+# meiva:note
+# Not serialized: every entry here loads a plugin once, at boot, on the process's own thread —
+# `import_faces` from the SDK load, the agent host's `load_installation`, and the plugin catalog a
+# CLI command builds — and no plugin face the repo ships declares a Pydantic model that would need
+# a deferred rebuild (their state models live in the `_state` sibling, which importlib imports
+# under its own per-name lock). Serializing here would also be the wrong fix: of two overlapping
+# loads, the second either binds a second module object (both passed the in-place check before
+# either registered, and the later registration replaces the earlier one) or re-executes the one
+# already registered from two threads. The answer is to serialize the caller that introduced the
+# second entry — reuse-in-place is the issue #147 identity contract, and a per-execution name would
+# fork it.
+# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md
 def load_plugin_module(
     plugin_py: Path, *, name: str, pkg: str, module: str = "plugin"
 ) -> ModuleType:

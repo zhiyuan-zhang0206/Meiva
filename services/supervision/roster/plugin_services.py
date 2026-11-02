@@ -101,6 +101,17 @@ def _declared_plugin_services(
     return tuple(specs)
 
 
+# meiva:note
+# No lock, and the name cannot vary: a per-execution suffix would leave the module unaddressable
+# after the load, whose own dataclasses and annotations — and a plugin's `healthcheck_module=__name__`
+# declaration — assume that name. Nothing reads `healthcheck_module` to find a probe
+# (`ServiceSpec` documents it as documentation-only; the monitor uses `identity_probe`), so the
+# constraint is registrability, not a by-name import. Nothing reaches this function twice at once
+# today either: `build_services` runs in the root's own wiring at boot and in single-threaded CLI
+# commands, and a `services.py` declares `ServiceSpec` dataclasses rather than Pydantic models that
+# would resolve annotations through this entry. A concurrent caller appearing later makes the lock
+# the shape to reach for, since the name is fixed.
+# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md
 def load_plugin_module(name: str, services_py: Path) -> object:
     """Load and register ``services.py`` so its own healthcheck is importable.
 
