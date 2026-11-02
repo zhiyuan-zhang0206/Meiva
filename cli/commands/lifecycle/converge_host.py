@@ -543,9 +543,9 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         ensure_packages_refresh_job,
         requires_unit_config=True,
     ),
-    # The PR-flow sampler's daily job: registers only on a production home
-    # whose machine holds the sampler's credentials (gh + Trunk token) — in
-    # the fleet, macmini; the step itself owns the gating and skips elsewhere.
+    # meiva:note
+    # The PR-flow sampler's daily job registers only on a production home whose machine holds the
+    # sampler's credential (gh) — in the fleet, macmini; the step owns the gating.
     ConvergeStep(
         "PR flow sampler job",
         ensure_pr_flow_job,

@@ -7,13 +7,14 @@
 # window — with the day's data final.
 #
 # The job is **credential-gated**: it registers only on a unit whose machine
-# holds the sampler's two credentials — a `gh` session on PATH and
-# `~/.trunk/api-token` — and only on the registered production home. In the
-# fleet that is macmini, the location the 2026-09-14 design verified; every
-# other unit's converge skips quietly, and a machine that later gains the
-# credentials registers on its own next converge. Nothing here probes the
-# network: the checks are `shutil.which` plus one file read, so converge
-# stays cheap.
+# holds the sampler's remaining credential — a `gh` session on PATH — and only
+# on the registered production home. In the fleet that is macmini, the location
+# the 2026-09-14 design verified; every other unit's converge skips quietly, and
+# a machine that later gains `gh` registers on its own next converge. The Trunk
+# token that used to be the second credential is not checked any more: the
+# exporter stopped reading it on 2026-11-02 (#8176/#8184), so requiring the file
+# would have skipped registration over a credential nothing uses. Nothing here
+# probes the network: the check is `shutil.which`, so converge stays cheap.
 #
 # The job command runs the checkout's own venv python against the checkout's
 # `scripts/ci/pull_requests/pr_flow_export.py` (same checkout rule as
@@ -95,14 +96,11 @@ def unregister_linux(*, roots: JobRoots, host: Host) -> int:
     )
 
 
-def credential_blocker(*, production: bool, roots: JobRoots, host: Host) -> str | None:
+def credential_blocker(*, production: bool, host: Host) -> str | None:
     if not production:
         return "not the registered production home"
     if host.which("gh") is None:
         return "gh CLI not on PATH"
-    token = content.trunk_token_path(roots)
-    if not token.exists() or not token.read_text(encoding="utf-8").strip():
-        return f"no Trunk API token at {token}"
     return None
 
 
@@ -112,7 +110,7 @@ def register_pr_flow_job(*, enabled: bool, production: bool, roots: JobRoots, ho
         return
     if not mechanics.owns_os_job_home("pr flow", roots=roots):
         return
-    blocker = credential_blocker(production=production, roots=roots, host=host)
+    blocker = credential_blocker(production=production, host=host)
     if blocker is not None:
         logger.info("PR-flow sampler job not registered: {}", blocker)
         return
