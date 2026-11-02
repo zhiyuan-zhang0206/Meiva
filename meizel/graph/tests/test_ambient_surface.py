@@ -9,6 +9,7 @@ import fnmatch
 import getpass
 import grp
 import inspect
+import json
 import locale
 import multiprocessing
 import os
@@ -22,6 +23,7 @@ import secrets
 import shutil
 import site
 import socket
+import subprocess
 import sys
 import sysconfig
 import tempfile
@@ -31,6 +33,7 @@ import types
 import uuid
 import zoneinfo
 from collections import Counter
+from functools import cache
 from pathlib import Path
 
 import basedpyright
@@ -112,16 +115,26 @@ def _stub_names(module: str) -> set[str]:
 
 
 # meiva:note
-# The public names of a channel module: the live module's and the stub's, without the submodules
+# What each channel module defines in a fresh interpreter, which runs this file as a script (see the
+# end of it). The test process is not asked: a library imported by any other test in the same
+# process can add names to a stdlib module (`oss2` sets `sys.maxint`), and the table must not be
+# judged against that.
+@cache
+def _live_names() -> dict[str, frozenset[str]]:
+    done = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", str(Path(__file__).resolve())],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return {module: frozenset(names) for module, names in json.loads(done.stdout).items()}
+
+
+# meiva:note
+# The public names of a channel module: a clean interpreter's and the stub's, without the submodules
 # (`os.path` is judged as a module of its own) and the fallbacks a platform leaves as `None`.
 def _public_names(module: str) -> set[str]:
-    live = _MODULES[module]
-    names = {
-        name
-        for name in dir(live)
-        if not inspect.ismodule(getattr(live, name)) and getattr(live, name) is not None
-    }
-    names |= _stub_names(module)
+    names = set(_live_names()[module]) | _stub_names(module)
     return {
         name
         for name in names
@@ -386,3 +399,22 @@ def test_a_method_read_names_a_kind_and_a_target() -> None:
         AmbientKind.CLOCK,
         AmbientKind.ARGV,
     }
+
+
+# meiva:note
+# The child of `_live_names`: the names each channel module defines, in an interpreter that imported
+# nothing but this file's own imports.
+if __name__ == "__main__":
+    print(
+        json.dumps(
+            {
+                name: [
+                    member
+                    for member in dir(module)
+                    if not inspect.ismodule(getattr(module, member))
+                    and getattr(module, member) is not None
+                ]
+                for name, module in _MODULES.items()
+            }
+        )
+    )
