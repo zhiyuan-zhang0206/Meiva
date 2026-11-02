@@ -941,6 +941,49 @@ Where to look when something went wrong on a host:
 | an agent's exec subprocesses | `$MEIVA_HOME/logs/agent-{N}.log` (every exec subprocess of the agent appends) |
 | raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 
+### Is this process supervised, and by which home?
+
+A pid does not say who will restart it, and a service that answers on its port can
+be one the supervisor has never heard of. Read the supervisor's records rather
+than the command line:
+
+1. **Ask the home's units.** Every unit a root runs has
+   `$MEIVA_HOME/run/meiva-root/units/<unit>.json`, whose `pid`, `generation` and
+   `birth` move on each start:
+
+   ```bash
+   grep -lE '"pid": *<pid>\b' "$MEIVA_HOME"/run/meiva-root/units/*.json
+   ```
+
+   A file names it: that unit is supervised by this home's root, and
+   `meiva restart <unit>` is the supported way to move it. Confirm the file is
+   current with `ps -p <pid>` — a dead generation's record outlives its process.
+
+2. **No claim: walk the parents.** A child of a supervised unit is not itself a
+   unit, and the root restarts units, not their grandchildren. Reaching the root
+   is what makes a process supervised; reaching pid 1 below the root means it
+   left the tree.
+
+   ```bash
+   pid=<pid>; while ps -o pid=,ppid=,command= -p "$pid" >/dev/null 2>&1; do
+     ps -o pid=,ppid=,command= -p "$pid" | cut -c1-110
+     parent=$(ps -o ppid= -p "$pid" | tr -d ' ')
+     [ -z "$parent" ] || [ "$parent" = 1 ] && break
+     pid=$parent
+   done
+   ```
+
+3. **Neither: nothing will restart it.** Then find what it belongs to instead of
+   guessing from its name: `lsof -a -p <pid> -d cwd -Fn` gives the working
+   directory, `lsof -p <pid> | grep '\.meiva/'` the home it reads and writes, and
+   a `launchctl list` entry means launchd owns it, not Meiva.
+
+**Which observation settles it is a restart, not a reading.** On 2026-11-02 a
+Grafana started by hand with `nohup` served traffic exactly like the supervised
+one on that node: `meiva status` reported the unit skipped, no unit file named
+its pid, and the endpoint answered normally. Only after the root adopted it did a
+`TERM` come back under a new pid; a hand-started process stays dead.
+
 ### Local log rotation and retention
 
 See [component operations](../../cli/commands/observability/docs/log-maintenance.md).
