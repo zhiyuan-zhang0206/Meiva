@@ -66,6 +66,7 @@ from cli.commands.data_plane.maintenance.report_lines import (
     pooler_clients_line,
     pooler_console_unreadable_line,
 )
+from cli.commands.data_plane.native import redis_instance
 from cli.commands.data_plane.stop_budget import postgres_fast_budget_s
 from cli.commands.data_plane.stop_waits import (
     DEFAULT_STOP_LEGS,
@@ -147,7 +148,7 @@ def _seen_processes(uid: int) -> tuple[SeenProcess, ...]:
 def require_no_unrecorded(recorded: Mapping[str, frozenset[int]], *, home: Path, uid: int) -> None:
     homes = {
         "postgres": str(instance.pg_data_dir(home).resolve()),
-        "redis": str(instance.redis_data_dir(home).resolve()),
+        "redis": str(redis_instance.redis_data_dir(home).resolve()),
         "pgbouncer": str(pooler_files.ini_path(home).resolve()),
     }
     problem = refusal(judge(_seen_processes(uid), homes=homes, recorded=recorded))
@@ -364,7 +365,7 @@ async def _stop(
         redis_process = await custody.capture(
             client,
             port=port,
-            data_dir=instance.redis_data_dir(context.home),
+            data_dir=redis_instance.redis_data_dir(context.home),
             deadline=deadline.at,
         )
         captured = {

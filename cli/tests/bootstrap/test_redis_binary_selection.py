@@ -14,8 +14,8 @@ import pytest
 from pydantic import ValidationError
 
 from base.config.service_read import ConfigAuthority
-from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.native import redis_instance as instance
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 
 

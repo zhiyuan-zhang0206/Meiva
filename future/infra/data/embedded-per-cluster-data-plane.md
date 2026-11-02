@@ -2,7 +2,7 @@
 
 **Current ownership:** this is archived source material for the implemented
 per-home isolation model. Current startup facts are in
-[data-plane startup](../../../cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md).
+[data-plane startup](../../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md).
 Only the Redis binary-vendoring leg remains a plan, tracked in
 [vendored data-plane binaries](vendored-data-plane-binaries.md); the original
 body below is retained as evidence, not an additional implementation checklist.

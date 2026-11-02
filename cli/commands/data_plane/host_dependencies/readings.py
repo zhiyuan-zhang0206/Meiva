@@ -17,7 +17,6 @@ from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.system.boot_unit import systemd_running
 from base.host.system.hostport import Host
-from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.host_dependencies.diagnosis import (
     Absent,
@@ -30,6 +29,7 @@ from cli.commands.data_plane.host_dependencies.diagnosis import (
 )
 from cli.commands.data_plane.host_dependencies.scope import StartScope
 from cli.commands.data_plane.host_dependencies.table import HostTool, Probe, required_tools
+from cli.commands.data_plane.native import redis_instance
 
 __all__ = ["Probing", "read_tools"]
 
@@ -88,7 +88,11 @@ def _redis_reading(probing: Probing, scope: StartScope, probe: Probe) -> Reading
     config = probing.data_plane
     if config is None:
         return NoLocalPlane()
-    resolve = instance.redis_server_bin if probe == Probe.REDIS_SERVER else instance.redis_cli_bin
+    resolve = (
+        redis_instance.redis_server_bin
+        if probe == Probe.REDIS_SERVER
+        else redis_instance.redis_cli_bin
+    )
     try:
         binary = resolve(config.redis_bin_dir, macos=scope.macos)
     except RuntimeError as exc:

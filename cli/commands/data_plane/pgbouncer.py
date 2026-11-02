@@ -34,7 +34,7 @@
 # different backends a transaction hands out.
 #
 # POSIX only (macOS brew or Linux apt `pgbouncer`).
-# meiva:link cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md
+# meiva:link cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md
 
 from __future__ import annotations
 
@@ -59,8 +59,8 @@ from base.native_process.os_platform import LockTimeoutError
 from base.native_process.ownership import OwnedProcess
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
-from cli.commands.data_plane.cluster_instance import wait_for_reachable_bind
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
+from cli.commands.data_plane.native.start_bounds import wait_for_reachable_bind
 from cli.commands.data_plane.pooler.convergence import (
     AnnounceChangedRestart,
     AnnounceDegradedRestart,
@@ -495,7 +495,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     #
     # A missing pooler binary is reported here and refused by data-plane bring-up; the
     # start-wide host dependency preflight installs it before converge.
-    # meiva:link cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md
+    # meiva:link cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md
     missing = converge_pgbouncer(data_plane_config_from_boot(ctx.read_config()), ctx.meiva_home)
     if missing is not None:
         hint = _install_hint(macos=ctx.host.platform.system == "darwin")

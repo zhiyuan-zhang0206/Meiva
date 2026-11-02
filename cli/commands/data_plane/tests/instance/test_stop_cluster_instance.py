@@ -28,6 +28,7 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup, cluster_instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance.probe import ProbeState
+from cli.commands.data_plane.native import redis_instance
 from cli.commands.data_plane.pg_probe import pg_running
 from cli.commands.data_plane.tests.data_plane_records import (
     remote_data_plane_config as remote_data_plane_config,
@@ -90,7 +91,7 @@ def _answers(cluster: NativeCluster) -> tuple[bool, bool]:
         "127.0.0.1",
         host=cluster.host,
     )
-    redis = cluster_instance.redis_reachable(ADMIN_PASSWORD, cluster.redis_port, "127.0.0.1")
+    redis = redis_instance.redis_reachable(ADMIN_PASSWORD, cluster.redis_port, "127.0.0.1")
     return postgres.state is ProbeState.RUNNING, redis
 
 
@@ -161,7 +162,7 @@ def test_a_redis_that_the_admin_cannot_shut_down_is_a_failed_stop(
     assert rc == 1
     err = capsys.readouterr().err
     assert f"redis still answers on 127.0.0.1:{native_cluster.redis_port} after shutdown" in err
-    assert cluster_instance.redis_reachable(ADMIN_PASSWORD, native_cluster.redis_port, "127.0.0.1")
+    assert redis_instance.redis_reachable(ADMIN_PASSWORD, native_cluster.redis_port, "127.0.0.1")
 
 
 # meiva:note

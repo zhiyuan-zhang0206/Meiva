@@ -66,6 +66,7 @@ from cli.commands.data_plane.instance.storage_plan import (
     legacy_home_refusal,
     plan_completion,
 )
+from cli.commands.data_plane.native import start_bounds
 from cli.database import OperatorDatabaseFactory
 from cli.start_identity import mark_phase, needs_provision
 
@@ -119,7 +120,7 @@ def ensure_pooler(
         binary=pooler.pgbouncer_bin(),
         daemon_env=filter_daemon_env(environ),
         macos=macos,
-        bind_wait_s=instance.BIND_WAIT_TIMEOUT_S,
+        bind_wait_s=start_bounds.BIND_WAIT_TIMEOUT_S,
     )
     rc = pgbouncer.ensure_pgbouncer(spec, timers=timers)
     if rc:

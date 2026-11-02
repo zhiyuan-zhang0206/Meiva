@@ -25,9 +25,9 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.tests.containers import redis_server
 from cli.commands.data_plane import cluster_instance as instance
-from cli.commands.data_plane.cluster_instance import StartTuning
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance.redis_plan import redis_conf_text
+from cli.commands.data_plane.native.start_bounds import StartTuning
 from cli.commands.data_plane.tests.data_plane_records import with_redis_admin
 from cli.commands.data_plane.tests.native_cluster import (
     ADMIN_PASSWORD,

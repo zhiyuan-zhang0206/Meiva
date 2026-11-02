@@ -59,6 +59,7 @@ from cli.commands.data_plane.instance.storage_plan import (
     EnsurePooler,
     InAdminSession,
 )
+from cli.commands.data_plane.native import start_bounds
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.data_plane.tests.native_cluster import (
     cached_pg_template,
@@ -445,7 +446,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         binary=base_pooler.pgbouncer_bin(),
         daemon_env=daemon_process_env(),
         macos=command_runtime.host.platform.system == "darwin",
-        bind_wait_s=ci.BIND_WAIT_TIMEOUT_S,
+        bind_wait_s=start_bounds.BIND_WAIT_TIMEOUT_S,
         home=meiva_home(),
     )
     rc = pooler.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS)

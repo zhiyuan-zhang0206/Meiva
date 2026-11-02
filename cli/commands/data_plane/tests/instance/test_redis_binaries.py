@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance.redis_binaries import (
     BREW_REDIS_FORMULA,
@@ -20,6 +19,7 @@ from cli.commands.data_plane.instance.redis_binaries import (
     OverrideDir,
     redis_binary_source,
 )
+from cli.commands.data_plane.native import redis_instance
 
 
 def test_a_configured_directory_wins_on_every_platform() -> None:
@@ -42,8 +42,8 @@ def test_the_shell_returns_a_bare_name_without_an_override_off_macos(
     data_plane_config: DataPlaneConfig,
 ) -> None:
     config = dataclasses.replace(data_plane_config, redis_bin_dir="")
-    assert instance.redis_server_bin(config.redis_bin_dir, macos=False) == "redis-server"
-    assert instance.redis_cli_bin(config.redis_bin_dir, macos=False) == "redis-cli"
+    assert redis_instance.redis_server_bin(config.redis_bin_dir, macos=False) == "redis-server"
+    assert redis_instance.redis_cli_bin(config.redis_bin_dir, macos=False) == "redis-cli"
 
 
 def _tools(directory: Path, *, executable: tuple[str, ...]) -> Path:
@@ -60,10 +60,12 @@ def test_an_override_with_both_executables_resolves_inside_it(
 ) -> None:
     selected = _tools(tmp_path / "bin", executable=("redis-server", "redis-cli"))
     config = dataclasses.replace(data_plane_config, redis_bin_dir=str(selected))
-    assert instance.redis_server_bin(config.redis_bin_dir, macos=False) == str(
+    assert redis_instance.redis_server_bin(config.redis_bin_dir, macos=False) == str(
         selected / "redis-server"
     )
-    assert instance.redis_cli_bin(config.redis_bin_dir, macos=True) == str(selected / "redis-cli")
+    assert redis_instance.redis_cli_bin(config.redis_bin_dir, macos=True) == str(
+        selected / "redis-cli"
+    )
 
 
 @pytest.mark.parametrize("missing", ["redis-server", "redis-cli"])
@@ -73,7 +75,7 @@ def test_an_incomplete_override_never_falls_back_to_path(
     selected = _tools(tmp_path / "bin", executable=("redis-server", "redis-cli"))
     (selected / missing).unlink()
     config = dataclasses.replace(data_plane_config, redis_bin_dir=str(selected))
-    for resolve in (instance.redis_server_bin, instance.redis_cli_bin):
+    for resolve in (redis_instance.redis_server_bin, redis_instance.redis_cli_bin):
         with pytest.raises(RuntimeError, match=missing):
             resolve(config.redis_bin_dir, macos=False)
 
@@ -84,4 +86,4 @@ def test_a_non_executable_override_tool_is_refused(
     selected = _tools(tmp_path / "bin", executable=("redis-server",))
     config = dataclasses.replace(data_plane_config, redis_bin_dir=str(selected))
     with pytest.raises(RuntimeError, match="redis-cli"):
-        instance.redis_server_bin(config.redis_bin_dir, macos=False)
+        redis_instance.redis_server_bin(config.redis_bin_dir, macos=False)

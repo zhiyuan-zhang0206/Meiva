@@ -16,7 +16,7 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.manual_timers import ManualTimers
-from cli.commands.data_plane import cluster_instance as instance
+from cli.commands.data_plane.native import start_bounds
 
 # meiva:note
 # 192.0.2.0/24 (RFC 5737 TEST-NET-1) is never assigned to a real interface, so binding it raises
@@ -25,18 +25,19 @@ _UNASSIGNED = "192.0.2.1"
 
 
 def test_a_loopback_address_is_assigned() -> None:
-    assert instance.addr_assigned("127.0.0.1") is True
+    assert start_bounds.addr_assigned("127.0.0.1") is True
 
 
 def test_an_address_no_interface_holds_is_not_assigned() -> None:
-    assert instance.addr_assigned(_UNASSIGNED) is False
+    assert start_bounds.addr_assigned(_UNASSIGNED) is False
 
 
 @pytest.mark.parametrize("alias", ["localhost", "127.0.0.1", "::1", "ip6-localhost"])
 def test_a_loopback_only_host_never_waits(alias: str) -> None:
     started = time.monotonic()
     assert (
-        instance.wait_for_reachable_bind(host=alias, timeout_s=60.0, timers=SYSTEM_TIMERS) is True
+        start_bounds.wait_for_reachable_bind(host=alias, timeout_s=60.0, timers=SYSTEM_TIMERS)
+        is True
     )
     assert time.monotonic() - started < 1.0
 
@@ -48,7 +49,7 @@ def test_a_loopback_only_host_never_waits(alias: str) -> None:
 def test_an_address_the_kernel_can_bind_settles_on_the_first_look() -> None:
     started = time.monotonic()
     assert (
-        instance.wait_for_reachable_bind(
+        start_bounds.wait_for_reachable_bind(
             host="0.0.0.0",  # noqa: S104
             timeout_s=60.0,
             timers=SYSTEM_TIMERS,
@@ -62,7 +63,7 @@ def test_an_address_the_kernel_can_bind_settles_on_the_first_look() -> None:
 # The address is absent and the budget is spent: fail fast (the caller aborts the start).
 def test_an_address_that_never_appears_gives_up_at_the_deadline() -> None:
     assert (
-        instance.wait_for_reachable_bind(host=_UNASSIGNED, timeout_s=0.0, timers=SYSTEM_TIMERS)
+        start_bounds.wait_for_reachable_bind(host=_UNASSIGNED, timeout_s=0.0, timers=SYSTEM_TIMERS)
         is False
     )
 
@@ -74,5 +75,8 @@ def test_an_address_that_never_appears_gives_up_at_the_deadline() -> None:
 def test_the_bind_wait_spends_the_timers_it_was_handed() -> None:
     timers = ManualTimers(start=0.0)
 
-    assert instance.wait_for_reachable_bind(host=_UNASSIGNED, timeout_s=4.0, timers=timers) is False
+    assert (
+        start_bounds.wait_for_reachable_bind(host=_UNASSIGNED, timeout_s=4.0, timers=timers)
+        is False
+    )
     assert timers.monotonic() >= 4.0

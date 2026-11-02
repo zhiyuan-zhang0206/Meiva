@@ -20,8 +20,8 @@ from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from cli.commands.data_plane import cluster_instance as instance
-from cli.commands.data_plane.cluster_instance import StartTuning
 from cli.commands.data_plane.instance.pg_plan import PgIdentity, pg_hba_body, pg_ident_body
+from cli.commands.data_plane.native.start_bounds import StartTuning
 from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM, NativeCluster
 from cli.commands.data_plane.tests.native_cluster import native_cluster as native_cluster
 from cli.commands.data_plane.tests.native_cluster import retained_children as retained_children

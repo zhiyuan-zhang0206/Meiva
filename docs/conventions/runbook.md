@@ -7,7 +7,7 @@ Current topology and authority have component owners:
 | Topic | Owner |
 |---|---|
 | Home identity, capabilities, init, ports and admitted checkout | [Start identity](../../cli/docs/start_identity.meiva.okf.md) |
-| Owned or remote-managed PostgreSQL, Redis and PgBouncer startup | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md) |
+| Owned or remote-managed PostgreSQL, Redis and PgBouncer startup | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md) |
 | Native PostgreSQL custody and admin authority | [PostgreSQL owner](../../base/cluster/docs/postgres.meiva.okf.md) |
 | Runtime DB/API delivery and remote runner bootstrap | [Authority wiring](../../base/cluster/authority/docs/wiring.meiva.okf.md) |
 | Sealed unit bundle exposure and compromise boundary | [Unit bundle](../../base/host/db_authority/docs/unit-bundle.meiva.okf.md) |
@@ -76,7 +76,7 @@ Runtime facts needed to choose the checkout and operation have component owners:
 |---|---|
 | Which home and initialized identity a CLI may operate | [Start identity](../../cli/docs/start_identity.meiva.okf.md) |
 | Which checkout supplies the CLI and Python installation | [Python installation](../../cli/docs/python-install.meiva.okf.md) |
-| PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md) |
+| PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md) |
 | Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.meiva.okf.md), [wiring](../../base/cluster/authority/docs/wiring.meiva.okf.md), [unit bundle exposure](../../base/host/db_authority/docs/unit-bundle.meiva.okf.md) |
 | Source-start host integration | [Host converge](../../cli/commands/converge/docs/converge-host-wiring.meiva.okf.md) |
 | External agent skill ownership and update | [Package commands](../../cli/commands/extensions/packages/docs/packages.meiva.okf.md) |
