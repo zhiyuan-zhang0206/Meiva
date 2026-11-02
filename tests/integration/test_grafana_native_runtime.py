@@ -69,6 +69,7 @@ _RUNTIME_ENV_PLACEHOLDERS = {
     "PROMETHEUS_URL": "http://127.0.0.1:9090",
     "PG_URL": "127.0.0.1:5433",
     "ALERTS_WEBHOOK_URL": "http://127.0.0.1:8000/api/alerts",
+    "ALERTS_WEBHOOK_TOKEN": "test-webhook-token",
 }
 
 

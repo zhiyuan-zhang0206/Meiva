@@ -364,3 +364,21 @@ def test_a_rotated_webhook_token_changes_the_rendered_environment() -> None:
 
     assert f"MEIVA_ALERTS_WEBHOOK_TOKEN={ROTATED_WEBHOOK_TOKEN}\n" in rendered
     assert WEBHOOK_TOKEN not in rendered
+
+
+# meiva:note
+# Every placeholder a shipped template spells must be one the renderer substitutes, and every
+# substitution must be spelled somewhere: a template that gains a placeholder without a renderer
+# key ships the literal `{{NAME}}` to the host, which is how a contact point ends up sending an
+# empty credential while its configuration looks complete.
+def test_shipped_templates_and_renderer_keys_name_the_same_placeholders() -> None:
+    rendered = {
+        name: render_config(
+            name, (_REPO / "deploy/lgtm/native/config" / name).read_text(encoding="utf-8"), values()
+        )
+        for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env")
+    }
+    for name, content in rendered.items():
+        live = [line for line in content.splitlines() if not line.lstrip().startswith("#")]
+        kept = [line for line in live if "{{" in line]
+        assert not kept, f"{name} kept a placeholder the renderer does not substitute: {kept[0]}"
