@@ -22,4 +22,4 @@ exports = ["configuration.py", "ids.py", "tests"]
 "__init__.py#time.sleep" = { count = 1, owner = "#7240", until = "permanently: same boundary — the wait belongs to the same SYSTEM_TIMERS value; a module that sleeps takes a Timers it was handed" }
 
 [debt.impure-edge]
-"__init__.py#base/config/__init__.py" = { count = 1, owner = "#7240", until = "waits for the clock config as a value: clock_config_from_settings() imports base.config inside the function so importing base.clock never builds the settings singleton (base.config does not import base.clock back; the deferral is startup cost alone), and Clock.from_settings would take a ClockConfig its caller built" }
+"__init__.py#base/config/__init__.py" = { count = 1, owner = "#7240", until = "waits for ClockConfig to live in an owner light enough for clock to import: Clock.from_settings() has ~100 call sites, so handing the config in as a value is a 100-file change; what keeps this entry alive is the import edge, not the read — the read itself is the door this module legitimately owns" }
