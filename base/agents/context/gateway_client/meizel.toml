@@ -9,4 +9,4 @@ exports = ["launch_retry.py", "memory_search.py", "transport.py"]
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"transport.py#random uuid.uuid4" = 1
+"transport.py#random uuid.uuid4" = { count = 1, owner = "#5816", until = "permanently: the idempotency key exists precisely when the caller passed none (the parameter is optional by contract), and a shared rng would let two retries of one call share a key" }

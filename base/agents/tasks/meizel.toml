@@ -15,4 +15,4 @@ exports = ["creation.py", "delivery.py", "model.py", "notes.py", "owner_notifica
 "status.py" = "strict"
 
 [debt.ambient-read]
-"timestamps.py#settings base.clock.Clock.from_settings" = 1
+"timestamps.py#settings base.clock.Clock.from_settings" = { count = 1, owner = "#5816", until = "waits for the Task row to carry its clock: render_task_timestamps() is reached from Task(...) construction in model.py, which holds no configuration, so the fix is a clock field on the model rather than another parameter here" }

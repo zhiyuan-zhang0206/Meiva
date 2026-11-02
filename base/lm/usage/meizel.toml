@@ -11,7 +11,7 @@ exports = ["__init__.py", "metering.py", "reporting.py"]
 "metering.py" = { mode = "none", why = "the LangChain callback adapter: on a chat start it reads the interval clock and keeps the reading per run id, on the end it reads the clock again for latency_ms, and it emits one usage row per generation through the emitter the caller injected, reporting a failed row through the throttled best-effort channel; the row shape and UsageOptions.metered are decided in __init__.py and when a repeated failure is reported in reporting.should_report" }
 
 [debt.ambient-read]
-"__init__.py#clock time.time_ns" = 1
+"__init__.py#clock time.time_ns" = { count = 1, owner = "#5816", until = "permanently: _now_ns() stamps the local start time of a usage record, the instant its caller cannot improve on" }
 
 [debt.impure-edge]
 "__init__.py#base/telemetry/__init__.py" = { count = 1, owner = "#7240", until = "waits for the agent id as a value: every usage row carries ambient_agent_id(), the process-state snapshot base.telemetry takes at startup, and report_sink_failure() is the telemetry door's hook. Repair unverified: the emitter would take the id from its caller — not checked that the callers hold it" }

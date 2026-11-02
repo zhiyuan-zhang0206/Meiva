@@ -11,5 +11,5 @@ exports = ["expand.py", "home.py", "private_dir.py", "tests"]
 "home.py" = { kinds = ["environ", "home"], why = "resolve_meiva_home and default_home read MEIVA_HOME and Path.home(): the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged" }
 
 [debt.ambient-read]
-"__init__.py#home base.paths.home.resolve_meiva_home" = 2
-"private_dir.py#pid os.geteuid" = 1
+"__init__.py#home base.paths.home.resolve_meiva_home" = { count = 2, owner = "#5816", until = "permanently: this module IS the home resolution (MEIVA_HOME else ~/.meiva); meiva_home() and the checkout check read it here so no caller restates the rule" }
+"private_dir.py#pid os.geteuid" = { count = 1, owner = "#5816", until = "permanently: is_foreign_owned() already takes euid and defaults it to the euid of the process doing the check; no caller holds a second answer" }

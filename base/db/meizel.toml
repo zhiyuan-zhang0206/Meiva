@@ -18,5 +18,5 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_sessio
 "handle.py" = ["db"]
 
 [debt.ambient-read]
-"config.py#settings base.config.settings" = 1
-"handle.py#db base.db.connections.connect" = 1
+"config.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for a production caller that holds the dial config: measured 2026-11-02, 0 of 133 connect() callers pass a config and Database.from_settings is the middle layer's API, so a required argument would relocate the read into every caller instead of removing it" }
+"handle.py#db base.db.connections.connect" = { count = 1, owner = "#5816", until = "waits for a caller that supplies its own dial: psycopg.connect is the default for the one dialect this process dials, and the parameter exists for tests rather than for a second production caller" }

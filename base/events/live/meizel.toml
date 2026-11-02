@@ -24,4 +24,4 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 # fixtures. Moving 187 construction sites to repay one entry is not a trade worth making; the entry
 # goes to zero only when `from_settings` itself is deleted, and then all 187 sites move in that one
 # change.
-"bus.py#settings base.config.settings" = 1
+"bus.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for someone to touch EventBus's construction surface: four daemon roots already hold a ConfigBoot, but EventBus.from_settings is imported by about ninety test files, so the required-value form costs a suite-wide edit for one read (P3 since 2026-11-02)" }

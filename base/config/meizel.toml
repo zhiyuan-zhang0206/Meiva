@@ -29,10 +29,10 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "_lite.py" = { kinds = ["environ", "clock"], why = "the boot-lite resolution layer IS the Settings bootstrap, and it reads the wall clock once for a bootstrap fetch TTL: `base.clock` builds a `Clock` from Settings, so asking it here would be a cycle.  it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py" }
 
 [debt.ambient-read]
-"_full.py#home base.paths.home.resolve_meiva_home" = 1
-"_lite.py#home base.paths.home.resolve_meiva_home" = 2
-"_lite.py#pid threading.get_ident" = 3
-"base.py#home base.paths.home.resolve_meiva_home" = 1
+"_full.py#home base.paths.home.resolve_meiva_home" = { count = 1, owner = "#5816", until = "permanently: the .env load at the root of the eager build takes the process's own home, which is what the build is derived from" }
+"_lite.py#home base.paths.home.resolve_meiva_home" = { count = 2, owner = "#5816", until = "permanently: read_process_environment() loads the unit .env from the process's own home and prepare() resolves that home before any caller holds it" }
+"_lite.py#pid threading.get_ident" = { count = 3, owner = "#5816", until = "permanently: the build gate compares the calling thread with the thread that owns the in-flight eager build, and a thread id handed in would let a caller claim to be the builder" }
+"base.py#home base.paths.home.resolve_meiva_home" = { count = 1, owner = "#5816", until = "permanently: unit_home() is this module's statement of which home its sub-models default under, and it is the place that answers the question" }
 
 [debt.any-collaborator]
 "_lite.py#any ConfigBoot.get_field.return" = { count = 1, owner = "#7302", until = "waits for a typed reflective accessor (a per-field accessor table, or a get_field a caller binds to a TypeVar): the leaf type is known only at the call site, so replacing Any with object here turns every int(get_field(...)) at the port and health maps into int(object), and typing.cast is forbidden by the type-cast ratchet" }
