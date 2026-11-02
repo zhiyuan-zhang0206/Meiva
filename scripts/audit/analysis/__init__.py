@@ -18,6 +18,7 @@ from scripts.audit.analysis.moves import (
     verdict_line,
 )
 from scripts.audit.analysis.protection import (
+    app_provided_checks,
     audit_target,
     drift_report,
     encode_branch,
@@ -67,6 +68,7 @@ __all__ = [
     "Site",
     "Target",
     "allowlist_entries",
+    "app_provided_checks",
     "as_json",
     "audit_target",
     "build_matcher",

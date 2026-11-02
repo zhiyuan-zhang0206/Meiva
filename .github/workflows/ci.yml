@@ -2487,3 +2487,51 @@ jobs:
           [ "$result" = "success" ] || exit 1
           [ "$hosted" = "success" ] || exit 1
           [ "$guard" = "success" ] || exit 1
+
+# meiva:note
+# `frontend (eslint + tsc + vitest)` and `e2e (Playwright happy path)` are path-filtered: on a pull
+# request that touches neither side they report SKIPPED, and a required status check that a pull
+# request never reports on blocks it forever. These two gates are the always-reporting face of those
+# suites: they run on every pull request, pass when the suite succeeded or was skipped, and fail when
+# it failed or the workflow was cancelled. `frontend gate` and `e2e gate` are the names to require.
+# meiva:note
+# The `classify` clause is what keeps the gates fail-closed: if classification itself did not
+# succeed, every suite below is skipped and a gate that only looked at its own dependency would
+# report green while nothing ran.
+  frontend-gate:
+    name: frontend gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [classify, frontend]
+    if: ${{ always() }}
+    steps:
+      - name: Report the frontend suite outcome
+        env:
+          CLASSIFY: ${{ needs.classify.result }}
+          SUITE: ${{ needs.frontend.result }}
+        run: |
+          echo "classify: $CLASSIFY; frontend: $SUITE"
+          [ "$CLASSIFY" = "success" ] || exit 1
+          case "$SUITE" in
+            success|skipped) exit 0 ;;
+            *) exit 1 ;;
+          esac
+
+  e2e-gate:
+    name: e2e gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [classify, e2e]
+    if: ${{ always() }}
+    steps:
+      - name: Report the end-to-end suite outcome
+        env:
+          CLASSIFY: ${{ needs.classify.result }}
+          SUITE: ${{ needs.e2e.result }}
+        run: |
+          echo "classify: $CLASSIFY; e2e: $SUITE"
+          [ "$CLASSIFY" = "success" ] || exit 1
+          case "$SUITE" in
+            success|skipped) exit 0 ;;
+            *) exit 1 ;;
+          esac

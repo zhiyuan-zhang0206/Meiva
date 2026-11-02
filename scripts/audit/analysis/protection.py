@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 __all__ = [
+    "app_provided_checks",
     "audit_target",
     "drift_report",
     "encode_branch",
@@ -46,6 +47,13 @@ _ADMISSION_CHECKS = frozenset(
         "secret scan (Gitleaks)",
     }
 )
+# meiva:note
+# Required checks whose verdict comes from a GitHub App rather than a job in `ci.yml`: the name never
+# appears among that workflow's jobs, so a contract test that maps every required check to a job would
+# call this one missing. Membership here is not a claim that the app is installed or has run — the audit
+# reads the live setting, and a required check the app stops reporting blocks merges on its own.
+_APP_PROVIDED_CHECKS = frozenset({"GitGuardian Security Checks"})
+
 _GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _REMOTE_REPO = re.compile(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$")
 # meiva:note
@@ -121,6 +129,10 @@ def _list(value: object, location: str) -> list[object]:
     if not _is_object_list(value):
         raise TypeError(f"{location} must be a list")
     return value
+
+
+def app_provided_checks() -> frozenset[str]:
+    return _APP_PROVIDED_CHECKS
 
 
 def expected_checks() -> frozenset[str]:
