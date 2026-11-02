@@ -5,8 +5,9 @@
 // listed first (the backend owns ordering; SSE invalidates snapshots). Alert is fully
 // separate from Notice.
 
-import { Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 
 import { API_BASE } from "@/lib/transport/api";
 
@@ -59,6 +60,11 @@ function alertDurationMs(a: Alert, nowMs: number): number {
   return Math.max(0, end - start);
 }
 
+// meiva:note
+// Fixed page size for the alerts table so the section keeps a bounded,
+// predictable DOM and pairs with the fixed-height scroll body below.
+export const ALERTS_PAGE_SIZE = 10;
+
 function summaryOf(a: Alert): string {
   return a.annotations.summary || "";
 }
@@ -69,104 +75,145 @@ export default function AlertsSection() {
   const now = useWallDate();
   const nowMs = now.getTime();
   const { data, isLoading, error } = useAlertsSection();
+  const [page, setPage] = useState(0);
 
   const alerts = data?.alerts ?? [];
+  const totalPages = Math.max(1, Math.ceil(alerts.length / ALERTS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageAlerts = alerts.slice(
+    currentPage * ALERTS_PAGE_SIZE,
+    (currentPage + 1) * ALERTS_PAGE_SIZE,
+  );
 
   return (
-    <div data-testid="alerts-section" className="rounded-md border border-border">
-      <div className={cn("items-center justify-end border-b border-border px-3 py-2", FLEX)}>
+    <div
+      data-testid="alerts-section"
+      data-settling={isLoading ? "true" : undefined}
+      className="rounded-md border border-border"
+    >
+      <div className={cn("items-center justify-between border-b border-border px-3 py-2", FLEX)}>
+        <div
+          data-testid="alerts-pagination"
+          className={cn("items-center gap-2 text-xs text-muted-foreground", FLEX)}
+        >
+          <span className="tabular-nums">
+            {t("pageOf", { current: currentPage + 1, total: totalPages })}
+          </span>
+          <button
+            type="button"
+            aria-label={t("previousPage")}
+            disabled={currentPage === 0}
+            onClick={() => setPage((p) => Math.max(0, Math.min(p, totalPages - 1) - 1))}
+            className="inline-flex size-6 items-center justify-center rounded border border-border text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ChevronLeft className="size-3.5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            aria-label={t("nextPage")}
+            disabled={currentPage >= totalPages - 1}
+            onClick={() =>
+              setPage((p) => Math.min(totalPages - 1, Math.min(p, totalPages - 1) + 1))
+            }
+            className="inline-flex size-6 items-center justify-center rounded border border-border text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ChevronRight className="size-3.5" aria-hidden />
+          </button>
+        </div>
         <a href={`${API_BASE}/grafana/alerting/list`} target="_blank" rel="noreferrer"
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
           {t("rules")}
         </a>
       </div>
-      {isLoading ? (
-        <div className={cn("justify-center py-8", FLEX)}>
-          <Loader2 className="size-5 animate-spin text-muted-foreground" />
-        </div>
-      ) : error ? (
-        <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-          Couldn&apos;t load alerts — retrying…
-        </div>
-      ) : alerts.length === 0 ? (
-        <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-          No active alerts or recoveries in the last 24h
-        </div>
-      ) : (
-        // No horizontal scrolling at any viewport width (task #1960): the
-        // table is fixed-layout so the declared column widths hold and the
-        // Alert column (the variable one) wraps its content instead of
-        // growing the table past the container. The Started / Duration /
-        // Source columns hide below lg — a 390px phone keeps Severity, Alert,
-        // and State, which fit with the detail cell wrapping (md-to-lg tablets
-        // keep the same three columns — six fixed columns squeezed the
-        // Alert column to ~30px at iPad-portrait widths, QA #989). The shadcn
-        // Table's own overflow-x-auto container stays as a defensive net; with
-        // every cell wrapping it never overflows.
-        <Table className="table-fixed">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-20">Severity</TableHead>
-              <TableHead className={MIN_W_0}>Alert</TableHead>
-              <TableHead className="hidden w-28 lg:table-cell">Started</TableHead>
-              <TableHead className="hidden w-20 lg:table-cell">Duration</TableHead>
-              <TableHead className="w-24">State</TableHead>
-              <TableHead className="hidden w-24 lg:table-cell">Source</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {alerts.map((a) => (
-              <TableRow key={a.id} data-testid={`alert-row-${a.id}`}>
-                <TableCell>
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
-                      a.status === "resolved"
-                        ? "bg-muted text-muted-foreground"
-                        : cn("text-white", SEVERITY_BG[a.severity]),
-                    )}
-                  >
-                    {a.severity}
-                  </span>
-                </TableCell>
-                <TableCell className={MIN_W_0}>
-                  {/* Multi-line wrapping detail cell: whitespace-normal +
-                      break-words override the shared TableCell nowrap so long
-                      alert names and annotations wrap to further lines instead
-                      of forcing a horizontal scroll. The line-clamp-2 was
-                      dropped — the details must read fully, not ellipsize
-                      (task #1960). */}
-                  <div className="whitespace-normal break-words font-mono text-xs font-semibold">
-                    {a.alertname}
-                  </div>
-                  {summaryOf(a) && (
-                    <div className="mt-0.5 whitespace-normal break-words text-[11px] text-muted-foreground">
-                      {summaryOf(a)}
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell className="hidden lg:table-cell">
-                  <span className="tabular-nums" title={formatAbsolute(a.starts_at)}>
-                    {formatRelativeTime(a.starts_at, now)}
-                  </span>
-                </TableCell>
-                <TableCell className="hidden tabular-nums text-muted-foreground lg:table-cell">
-                  {formatDuration(alertDurationMs(a, nowMs))}
-                </TableCell>
-                <TableCell>
-                  <span className={cn("inline-flex items-center gap-1.5 text-xs", STATE_TEXT[a.status])}>
-                    <span className={cn("size-1.5 rounded-full", STATE_DOT[a.status])} />
-                    {a.status}
-                  </span>
-                </TableCell>
-                <TableCell className="hidden text-[11px] text-muted-foreground lg:table-cell">
-                  {a.source}
-                </TableCell>
+      <div data-testid="alerts-body" className="h-[28rem] overflow-y-auto">
+        {isLoading ? (
+          <div className={cn("h-full items-center justify-center py-8", FLEX)}>
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : error ? (
+          <div className="px-3 py-4 text-center text-sm text-muted-foreground">
+            Couldn&apos;t load alerts — retrying…
+          </div>
+        ) : alerts.length === 0 ? (
+          <div className="px-3 py-4 text-center text-sm text-muted-foreground">
+            No active alerts or recoveries in the last 24h
+          </div>
+        ) : (
+          // meiva:note
+          // No horizontal scrolling at any viewport width (task #1960): the
+          // table is fixed-layout so the declared column widths hold and the
+          // Alert column (the variable one) wraps its content instead of
+          // growing the table past the container. The Started / Duration /
+          // Source columns hide below lg — a 390px phone keeps Severity, Alert,
+          // and State, which fit with the detail cell wrapping (md-to-lg tablets
+          // keep the same three columns — six fixed columns squeezed the
+          // Alert column to ~30px at iPad-portrait widths, QA #989). The shadcn
+          // Table's own overflow-x-auto container stays as a defensive net; with
+          // every cell wrapping it never overflows.
+          // Multi-line wrapping detail cell: whitespace-normal + break-words
+          // override the shared TableCell nowrap so long alert names and
+          // annotations wrap to further lines instead of forcing a horizontal
+          // scroll. The line-clamp-2 was dropped — the details must read fully,
+          // not ellipsize (task #1960).
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-20">Severity</TableHead>
+                <TableHead className={MIN_W_0}>Alert</TableHead>
+                <TableHead className="hidden w-28 lg:table-cell">Started</TableHead>
+                <TableHead className="hidden w-20 lg:table-cell">Duration</TableHead>
+                <TableHead className="w-24">State</TableHead>
+                <TableHead className="hidden w-24 lg:table-cell">Source</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+            </TableHeader>
+            <TableBody>
+              {pageAlerts.map((a) => (
+                <TableRow key={a.id} data-testid={`alert-row-${a.id}`}>
+                  <TableCell>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                        a.status === "resolved"
+                          ? "bg-muted text-muted-foreground"
+                          : cn("text-white", SEVERITY_BG[a.severity]),
+                      )}
+                    >
+                      {a.severity}
+                    </span>
+                  </TableCell>
+                  <TableCell className={MIN_W_0}>
+                    <div className="whitespace-normal break-words font-mono text-xs font-semibold">
+                      {a.alertname}
+                    </div>
+                    {summaryOf(a) && (
+                      <div className="mt-0.5 whitespace-normal break-words text-[11px] text-muted-foreground">
+                        {summaryOf(a)}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell">
+                    <span className="tabular-nums" title={formatAbsolute(a.starts_at)}>
+                      {formatRelativeTime(a.starts_at, now)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="hidden tabular-nums text-muted-foreground lg:table-cell">
+                    {formatDuration(alertDurationMs(a, nowMs))}
+                  </TableCell>
+                  <TableCell>
+                    <span className={cn("inline-flex items-center gap-1.5 text-xs", STATE_TEXT[a.status])}>
+                      <span className={cn("size-1.5 rounded-full", STATE_DOT[a.status])} />
+                      {a.status}
+                    </span>
+                  </TableCell>
+                  <TableCell className="hidden text-[11px] text-muted-foreground lg:table-cell">
+                    {a.source}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }

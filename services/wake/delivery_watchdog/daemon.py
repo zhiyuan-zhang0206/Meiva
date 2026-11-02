@@ -14,7 +14,10 @@ from pathlib import Path
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents.incarnation.lifecycle_commands import SYSTEM_NOTICE_SOURCE
+from base.agents.incarnation.lifecycle_commands import (
+    SYSTEM_NOTICE_SOURCE,
+    TRIGGER_AFTER_KILL_COMMAND,
+)
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -101,13 +104,21 @@ _POOL_MAX_SIZE = 2
 # lost wake) or a terminal one (`terminated`, delivery auto-resurrect failed)
 # signals a real stall.
 #
+# For a terminated owner, a pending chat is only a delivery stall when it passes
+# `TRIGGER_AFTER_KILL_COMMAND` — the same wake-trigger fence that `resurrect_if_terminated`
+# and `stranded_wake.select_stranded` enforce. A chat queued at or before a
+# `terminate` command (such as the companion message inserted by
+# `insert_termination_pair(message=...)`) or left behind by an involuntary death
+# is deliberately not woken and sits pending for a future life or the 24h
+# dead-letter sweep.
+#
 # A system notification queued for a terminated owner is not a stall either: it
 # is written to be read on a later life and is never woken or resurrected
 # (`SYSTEM_NOTICE_SOURCE`, the same predicate the resurrect gate refuses), so it
 # may sit pending until the dead-letter sweep retires it. Any other source
 # (`agent:` / user) still counts — that is the delivery that actually failed.
 #
-# The one interpolated fragment is that module constant, never caller input.
+# The interpolated fragments are those module constants, never caller input.
 def select_stale_pending(
     pool: ConnectionPool,
     threshold_s: float,
@@ -118,9 +129,10 @@ def select_stale_pending(
             "       EXTRACT(EPOCH FROM (now() - m.created_at)) AS age_s "
             "FROM inbound_messages m "
             "LEFT JOIN agents a ON a.id = m.agent_id "
-            "JOIN agents_meta am ON am.id = m.agent_id "
+            "JOIN agents_meta ON agents_meta.id = m.agent_id "
             "WHERE m.status = 'pending' AND m.kind = 'chat' "
-            "  AND am.status IN ('idling', 'terminated') "
+            f"  AND (agents_meta.status = 'idling' "
+            f"       OR (agents_meta.status = 'terminated' AND {TRIGGER_AFTER_KILL_COMMAND})) "
             "  AND m.created_at < now() - make_interval(secs => %s) "
             f"  AND NOT {SYSTEM_NOTICE_SOURCE} "
             "ORDER BY m.created_at ASC",

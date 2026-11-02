@@ -1,4 +1,7 @@
 {
   "unresolvedAlerts": "{count} unresolved alerts",
-  "rules": "Alert rules"
+  "rules": "Alert rules",
+  "pageOf": "Page {current} of {total}",
+  "previousPage": "Previous page",
+  "nextPage": "Next page"
 }

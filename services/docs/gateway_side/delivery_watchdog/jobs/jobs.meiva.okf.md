@@ -7,10 +7,13 @@ tags: []
 
 # Delivery watchdog jobs
 
-One resident loop alerts on stale pending delivery and retires stale claimed
-or terminated-owner inputs to `done`; a second, independent loop runs the
-stranded-wake fallback. A running turn may legitimately hold a queue behind it.
-Consuming a stale row does not certify successful execution.
+One resident loop alerts on stale pending delivery (`idling` owners, or
+`terminated` owners whose pending chat passes `TRIGGER_AFTER_KILL_COMMAND`) and
+retires stale claimed or terminated-owner inputs to `done`; a second, independent
+loop runs the stranded-wake fallback. A running turn may legitimately hold a
+queue behind it, and a chat fenced by a `terminate` command or an involuntary
+death is not a stall. Consuming a stale row does not certify successful
+execution.
 
 The fallback (`stranded_wake.py`) covers the one order the delivery path cannot:
 a message that commits while its owner still reads `running` and that the owner

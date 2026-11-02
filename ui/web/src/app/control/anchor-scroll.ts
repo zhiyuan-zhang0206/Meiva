@@ -37,54 +37,102 @@ export function useSettledAnchorScroll(scrollId: string, targetId: string | null
   const browser = useBrowser();
   const view = browser.view;
   useEffect(() => {
-    if (!targetId) return;
-    const container = document.getElementById(scrollId);
-    const scroll = () => {
-      const target = document.getElementById(targetId);
-      if (target) view.scrollIntoView(target, "start");
-    };
-    scroll();
-    // meiva:note
-    // Nothing to watch — no container, or one whose content has not rendered — and no size
-    // notifications at all (a frame with no page): the initial scroll is the whole behavior, which
-    // is also the correct result when the content is already settled.
-    const content = container?.firstElementChild ?? null;
-    if (container === null || content === null) return;
+    let cancelled = false;
+    let teardown: (() => void) | null = null;
 
-    let lastHeight = container.scrollHeight;
-    let lastScrollTop = container.scrollTop;
-    let stopped = false;
-    let stableTimer: number | undefined;
-    let unwatch: () => void = () => undefined;
-
-    const stop = (): void => {
-      if (stopped) return;
-      stopped = true;
-      unwatch();
-      window.clearTimeout(stableTimer);
-      window.clearTimeout(cap);
+    const readTarget = (): string | null => {
+      if (targetId !== null) return targetId;
+      const hash = browser.navigation.location()?.hash.slice(1) ?? "";
+      return hash.length > 0 ? hash : null;
     };
 
-    // meiva:note
-    // Watch the content wrapper: the container's own box does not change as
-    // its content grows — only the wrapper's height does.
-    unwatch = browser.size.observe(content, () => {
-      if (stopped) return;
-      const height = container.scrollHeight;
-      if (height === lastHeight) return;
-      lastHeight = height;
-      // meiva:note
-      // The user took over scrolling during the settle window — stop.
-      if (Math.abs(container.scrollTop - lastScrollTop) > USER_SCROLL_SLACK_PX) {
-        stop();
-        return;
-      }
+    const start = (resolvedTarget: string): void => {
+      const container = document.getElementById(scrollId);
+      const scroll = () => {
+        const target = document.getElementById(resolvedTarget);
+        if (target) view.scrollIntoView(target, "start");
+      };
       scroll();
-      lastScrollTop = container.scrollTop;
-      window.clearTimeout(stableTimer);
-      stableTimer = window.setTimeout(stop, SETTLE_STABLE_MS);
-    });
-    const cap = window.setTimeout(stop, SETTLE_CAP_MS);
-    return stop;
+      // meiva:note
+      // Nothing to watch — no container, or one whose content has not rendered — and no size
+      // notifications at all (a frame with no page): the initial scroll is the whole behavior, which
+      // is also the correct result when the content is already settled.
+      const content = container?.firstElementChild ?? null;
+      if (container === null || content === null) return;
+
+      let lastHeight = container.scrollHeight;
+      let lastScrollTop = container.scrollTop;
+      let stopped = false;
+      let stableTimer: number | undefined;
+      let unwatch: () => void = () => undefined;
+
+      const stop = (): void => {
+        if (stopped) return;
+        stopped = true;
+        unwatch();
+        window.clearTimeout(stableTimer);
+        window.clearTimeout(cap);
+      };
+
+      const scheduleStableStop = (): void => {
+        window.clearTimeout(stableTimer);
+        // meiva:note
+        // Do not start the stable-height countdown while a section inside the
+        // scroll container is still mounting its deferred body or loading its
+        // initial query (`data-settling`): on /insights#alerts the Alerts
+        // section resolves in ~15ms while Status above it probes every cluster
+        // machine (~500–1500ms), so arming the 500ms grace timer on the first
+        // resize detached the observer before Status finished growing.
+        if (content.querySelector("[data-settling]") !== null) return;
+        stableTimer = window.setTimeout(stop, SETTLE_STABLE_MS);
+      };
+
+      // meiva:note
+      // Watch the content wrapper: the container's own box does not change as
+      // its content grows — only the wrapper's height does.
+      unwatch = browser.size.observe(content, () => {
+        if (stopped) return;
+        const height = container.scrollHeight;
+        if (height === lastHeight) {
+          scheduleStableStop();
+          return;
+        }
+        lastHeight = height;
+        // meiva:note
+        // The user took over scrolling during the settle window — stop.
+        if (Math.abs(container.scrollTop - lastScrollTop) > USER_SCROLL_SLACK_PX) {
+          stop();
+          return;
+        }
+        scroll();
+        lastScrollTop = container.scrollTop;
+        scheduleStableStop();
+      });
+      const cap = window.setTimeout(stop, SETTLE_CAP_MS);
+      teardown = stop;
+    };
+
+    const initial = readTarget();
+    if (initial !== null) {
+      start(initial);
+    } else {
+      // meiva:note
+      // During a client-side `<Link href="/insights#alerts">` transition, the
+      // incoming route renders before the App Router commits the new URL in
+      // its own parent `useEffect` (React runs child `useEffect`s bottom-up
+      // before parent `useEffect`s). Re-read the URL hash on the microtask
+      // immediately after the commit pass finishes so client-side deep links
+      // scroll just like direct loads.
+      queueMicrotask(() => {
+        if (cancelled) return;
+        const committed = readTarget();
+        if (committed !== null) start(committed);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      teardown?.();
+    };
   }, [browser, scrollId, targetId, view]);
 }

@@ -119,4 +119,59 @@ describe("useSettledAnchorScroll", () => {
     // The user-takeover re-scroll is suppressed: only the mount scroll ran.
     expect(scrolled()).toHaveLength(1);
   });
+
+  it("scrolls when the URL hash commits after render (client-side <Link href='/insights#alerts'>)", async () => {
+    // meiva:note
+    // Next.js App Router renders the incoming route with `targetId = null` before its parent
+    // `useEffect` commits `history.pushState(..., "/insights#alerts")`.
+    const page = fakeBrowser({ href: "http://fake.local/insights" });
+    const { scrolled } = mount(null, page);
+    page.moveTo("http://fake.local/insights#alerts");
+    await Promise.resolve();
+
+    expect(scrolled()).toHaveLength(1);
+    expect((scrolled()[0].target as HTMLElement).id).toBe("alerts");
+    expect(scrolled()[0].block).toBe("start");
+  });
+
+  it("holds the settle watch past SETTLE_STABLE_MS while a section still has data-settling", () => {
+    vi.useFakeTimers();
+    try {
+      const page = fakeBrowser();
+      const { container, scrolled } = mount("alerts", page);
+      const scrollContainer = container.querySelector("#scroll")!;
+      const content = container.querySelector("[data-testid=content]")!;
+      const settling = document.createElement("div");
+      settling.setAttribute("data-settling", "true");
+      content.prepend(settling);
+
+      const watch = page.sizeWatches[0];
+
+      Object.defineProperty(scrollContainer, "scrollHeight", {
+        configurable: true,
+        value: 2000,
+      });
+      watch.fire();
+      expect(scrolled()).toHaveLength(2);
+
+      // meiva:note
+      // Even after 1200ms (> SETTLE_STABLE_MS = 500ms), the watch stays active
+      // because `data-settling` has not cleared.
+      vi.advanceTimersByTime(1200);
+      expect(watch.released).toBe(false);
+
+      settling.remove();
+      Object.defineProperty(scrollContainer, "scrollHeight", {
+        configurable: true,
+        value: 3200,
+      });
+      watch.fire();
+      expect(scrolled()).toHaveLength(3);
+
+      vi.advanceTimersByTime(600);
+      expect(watch.released).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

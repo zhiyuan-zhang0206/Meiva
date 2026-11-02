@@ -2,10 +2,10 @@
 // from the ["alerts", "section"] cache. Alert is separate from Notice.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import AlertsSection from "@/components/ops/alerts-section";
+import AlertsSection, { ALERTS_PAGE_SIZE } from "@/components/ops/alerts-section";
 import { API_BASE } from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
@@ -169,5 +169,54 @@ describe("AlertsSection", () => {
     const responsiveHidden = cells.filter((td) => td.className.includes("lg:table-cell"));
     expect(responsiveHidden.length).toBe(3); // Started / Duration / Source
     expect(responsiveHidden.every((td) => td.className.includes("hidden"))).toBe(true);
+  });
+
+  it("keeps a fixed-height scroll body and paginates at 10 rows per page", async () => {
+    expect(ALERTS_PAGE_SIZE).toBe(10);
+    const twentyThreeRows = Array.from({ length: 23 }, (_, idx) => ({
+      ...ROW,
+      id: idx + 1,
+      alertname: `alert-${idx + 1}`,
+    }));
+    wrap(
+      <AlertsSection />,
+      response({
+        alerts: twentyThreeRows,
+        meta: { window: "24h", total: 23, unresolved_count: 23 },
+      }),
+    );
+    await waitFor(() => screen.getByTestId("alert-row-1"));
+
+    const body = screen.getByTestId("alerts-body");
+    expect(body.className).toContain("h-[28rem]");
+    expect(body.className).toContain("overflow-y-auto");
+
+    expect(screen.getByText("Page 1 of 3")).toBeTruthy();
+    expect(screen.getAllByTestId(/^alert-row-/)).toHaveLength(10);
+    expect(screen.getByTestId("alert-row-10")).toBeTruthy();
+    expect(screen.queryByTestId("alert-row-11")).toBeNull();
+
+    const prevBtn = screen.getByRole("button", { name: "Previous page" });
+    const nextBtn = screen.getByRole("button", { name: "Next page" });
+    expect(prevBtn.hasAttribute("disabled")).toBe(true);
+    expect(nextBtn.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(nextBtn);
+    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+    expect(screen.getAllByTestId(/^alert-row-/)).toHaveLength(10);
+    expect(screen.queryByTestId("alert-row-10")).toBeNull();
+    expect(screen.getByTestId("alert-row-11")).toBeTruthy();
+    expect(screen.getByTestId("alert-row-20")).toBeTruthy();
+
+    fireEvent.click(nextBtn);
+    expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+    expect(screen.getAllByTestId(/^alert-row-/)).toHaveLength(3);
+    expect(screen.getByTestId("alert-row-21")).toBeTruthy();
+    expect(screen.getByTestId("alert-row-23")).toBeTruthy();
+    expect(nextBtn.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(prevBtn);
+    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+    expect(screen.getByTestId("alert-row-11")).toBeTruthy();
   });
 });

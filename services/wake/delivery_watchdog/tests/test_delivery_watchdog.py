@@ -330,6 +330,88 @@ class TestSelectStalePending:
         )
         assert [row[0] for row in select_stale_pending(pool, _THRESHOLD_S)] == [iid]
 
+    def test_terminated_owner_chat_before_terminate_command_is_not_a_stall(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        # meiva:note
+        # `insert_termination_pair(message=...)` writes a pending chat row
+        # immediately followed by a `terminate` command (`m.id < terminate_id`).
+        # The turn-boundary claim executes only the terminate command and leaves
+        # the companion chat pending for a future life; because it is fenced by
+        # `TRIGGER_AFTER_KILL_COMMAND`, it is never resurrected and must not be
+        # reported as a delivery stall on daemon restart.
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        _insert_old_inbound(
+            db_conn,
+            aid,
+            age_s=_THRESHOLD_S + 5,
+            database_gate=database_gate,
+            source="agent:123",
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, status, source, created_at) "
+                "VALUES (%s, 'bye', 'terminate', 'done', 'agent:123', "
+                "now() - make_interval(secs => %s))",
+                (aid, _THRESHOLD_S + 5),
+            )
+        db_conn.commit()
+        assert select_stale_pending(pool, _THRESHOLD_S) == []
+
+    def test_terminated_owner_leftover_before_involuntary_death_is_not_a_stall(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        # meiva:note
+        # A chat that arrived before an involuntary death (`termination_source != 'user'`
+        # and `created_at <= status_changed_at`) is excluded by the no-replay fence
+        # (`TRIGGER_AFTER_KILL_COMMAND`) and is never woken.
+        aid = idling_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        _insert_old_inbound(
+            db_conn,
+            aid,
+            age_s=_THRESHOLD_S + 10,
+            database_gate=database_gate,
+            source="agent:123",
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', "
+                "termination_source = 'reaper', "
+                "status_changed_at = now() - make_interval(secs => %s) "
+                "WHERE id = %s",
+                (_THRESHOLD_S + 5, aid),
+            )
+        db_conn.commit()
+        assert select_stale_pending(pool, _THRESHOLD_S) == []
+
     def test_idling_owner_system_notification_is_not_a_stall(
         self,
         redis_url: str,
