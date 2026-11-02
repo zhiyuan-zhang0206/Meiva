@@ -31,18 +31,13 @@ class DebtSweepDaily(TypedDict):
 
 
 # meiva:note
-# PrFlowDaily is one event per complete cluster-tz day in the trailing window, re-emitted on every run so the whole window stays inside Prometheus retention; every numeric field is absolute per-day state (an ObservableGauge), never a sum, and fields are absent when the day has no such sample (no merges -> no percentiles; an unreachable flaky source omits flake_new_quarantines rather than claiming zero).
+# PrFlowDaily is one event per complete cluster-tz day in the trailing window, re-emitted on every run so the whole window stays inside Prometheus retention; every numeric field is absolute per-day state (an ObservableGauge), never a sum, and fields are absent when the day has no such sample (no merges -> no percentiles).
 # meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class PrFlowDaily(TypedDict):
     day: str
     merged_count: int
     ready_to_merge_median_seconds: NotRequired[float]
     ready_to_merge_p90_seconds: NotRequired[float]
-    flake_new_quarantines: NotRequired[int]
-
-
-class PrFlowRun(TypedDict):
-    queue_depth: NotRequired[int]
 
 
 # meiva:note
@@ -253,15 +248,9 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "pr_flow_daily": telemetry_event(
         "pr_flow_daily",
-        "daily PR-flow aggregates — ready->merged percentiles and "
-        "flake discoveries (absolute gauges, one sample per complete day)",
+        "daily PR-flow aggregates — ready->merged percentiles "
+        "(absolute gauges, one sample per complete day)",
         payload=PrFlowDaily,
-        site="scripts/ci/pull_requests/pr_flow_export.py:emit_events (positional emit)",
-    ),
-    "pr_flow_run": telemetry_event(
-        "pr_flow_run",
-        "PR-flow sampler run — point-in-time Trunk queue depth (absolute state)",
-        payload=PrFlowRun,
         site="scripts/ci/pull_requests/pr_flow_export.py:emit_events (positional emit)",
     ),
     "ci_runs_daily": telemetry_event(

@@ -1,27 +1,29 @@
-"""Core PR-flow panels (task #2139) — a separate registration module.
+# meiva:note
+# Core PR-flow panels (task #2139) — a separate registration module.
+#
+# The PR-flow tile reads what the daily macmini export job
+# (``scripts/ci/pull_requests/pr_flow_export.py``, ``pr_flow_daily`` event)
+# publishes as OTLP gauges through ``base/telemetry/otlp/telemetry_otlp.py``: one absolute
+# sample per complete cluster-tz day in a rolling 30-day window, re-emitted on
+# every run.
+#
+# Every sample is a day-labeled gauge series (``day`` rides along as a datapoint
+# attribute, alongside the exporter process dimensions). Two query shapes follow
+# from that:
+#
+# - ``max by (day)`` — collapse the per-run process/machine multiplicity (and a
+#   manual re-run) onto one series per day; a plain read would draw several
+#   overlapping lines per day.
+# - ``last_over_time(...[26h])`` — the exporter is a one-shot process, so a day
+#   series only receives a sample while the daily run keeps re-emitting it; 26h
+#   keeps the last sample alive across the daily cadence (a missed run drops the
+#   day instead of pinning a stale point).
+#
+# The panel SQL/JSON mirror lives in
+# ``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``
+# (row "PR flow") and is locked by ``tests/components/plugins/test_plugin_metrics_logql.py``.
+# meiva:link deploy/lgtm/config/grafana/provisioning/dashboards/README.md
 
-The three PR-flow tiles read what the daily macmini export job
-(``scripts/ci/pull_requests/pr_flow_export.py``, ``pr_flow_daily`` / ``pr_flow_run`` events)
-publishes as OTLP gauges through ``base/telemetry/otlp/telemetry_otlp.py``: one absolute
-sample per complete cluster-tz day in a rolling 30-day window, re-emitted on
-every run, plus the point-in-time Trunk queue depth.
-
-Every sample is a day-labeled gauge series (``day`` rides along as a datapoint
-attribute, alongside the exporter process dimensions). Two query shapes follow
-from that:
-
-- ``max by (day)`` — collapse the per-run process/machine multiplicity (and a
-  manual re-run) onto one series per day; a plain read would draw several
-  overlapping lines per day.
-- ``last_over_time(...[26h])`` — the exporter is a one-shot process, so a day
-  series only receives a sample while the daily run keeps re-emitting it; 26h
-  keeps the last sample alive across the daily cadence (a missed run drops the
-  day instead of pinning a stale point).
-
-The panel SQL/JSON mirror lives in
-``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``
-(row "PR flow") and is locked by ``tests/components/plugins/test_plugin_metrics_logql.py``.
-"""
 
 from __future__ import annotations
 
@@ -64,63 +66,6 @@ def core_metrics() -> list[MetricSpec]:
                     "options": {
                         "excludeByName": {"Time 1": True, "Time 2": True},
                         "renameByName": {"Value #A": "median", "Value #B": "p90"},
-                    },
-                },
-            ],
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="core_pr_flow_queue_depth",
-            title="Trunk queue depth",
-            description=(
-                "Trunk merge-queue depth sampled once per PR-flow export run "
-                "(meiva_pr_flow_run_queue_depth_ratio gauge, macmini daily job). The "
-                "run event is emitted even when Trunk is unreachable, so the "
-                "breadcrumb survives an outage while the depth sample stays absent."
-            ),
-            event_name="pr_flow_run",
-            category="telemetry",
-            unit="short",
-            panel="timeseries",
-            query="meiva_pr_flow_run_queue_depth_ratio",
-            query_type="promql",
-            target_names=["queue depth"],
-            panel_id=2402,
-            section="PR flow",
-            order=1,
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="core_pr_flow_flakes",
-            title="Flake \u2014 new quarantines (by day)",
-            description=(
-                "Tests newly quarantined by Trunk\u2019s flaky detector per complete "
-                "cluster-tz day (meiva_pr_flow_daily_flake_new_quarantines_ratio "
-                "gauge, daily PR-flow export job). A day whose flaky source was "
-                "unreachable is omitted rather than shown as zero."
-            ),
-            event_name="pr_flow_daily",
-            category="telemetry",
-            unit="short",
-            panel="table",
-            query="max by (day) (last_over_time(meiva_pr_flow_daily_flake_new_quarantines_ratio[26h]))",
-            query_type="promql",
-            target_names=["new quarantines"],
-            thresholds=[],
-            panel_id=2404,
-            section="PR flow",
-            order=2,
-            transformations=[
-                {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
-                {
-                    "id": "organize",
-                    "options": {
-                        "excludeByName": {"Time": True},
-                        "renameByName": {"Value": "new quarantines"},
                     },
                 },
             ],

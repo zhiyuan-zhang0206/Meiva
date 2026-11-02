@@ -1,65 +1,54 @@
-"""PR flow exporter — samples the Meiva repo's merge flow into OTLP gauges.
+# meiva:note
+# PR flow exporter — samples the Meiva repo's merge flow into OTLP gauges.
+#
+# Runs once a day on macmini (the registered machine that holds the `gh`
+# session), recomputes the trailing window of the fleet's pull-request
+# pipeline, and publishes it to Prometheus + Loki through the unified telemetry
+# pipeline as ``pr_flow_daily``: one event per complete day in the trailing
+# window, re-emitted on every run so the whole window stays visible inside
+# Prometheus's retention. Fields: ``merged_count`` plus (when the day has
+# samples) ``ready_to_merge_median_seconds`` / ``ready_to_merge_p90_seconds``.
+#
+# Every numeric payload field is dispositioned as an ObservableGauge in
+# ``base/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
+# sums, and re-emission must replace them rather than accrue them.
+#
+# Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
+#
+# - **ready -> merged**: for PRs whose ``merged_at`` falls on day D,
+#   ``merged_at - ready_at`` in seconds, where ``ready_at`` is the first
+#   ``ready_for_review`` timeline event, else ``created_at`` (the fleet opens
+#   PRs ready; the fallback keeps draft-style flows honest if one appears).
+#   median / p90 over the day's PRs, linear interpolation between closest
+#   ranks.
+#
+# Persistence (``$MEIVA_HOME/state/pr-flow/``, survives the prod source-tree
+# resets that clean untracked files out of the checkout):
+#
+# - ``cache.json`` — per-PR compact records keyed by number, refreshed only
+#   when GitHub's ``updated_at`` moved (incremental cache; the run re-fetches a
+#   timeline only when the PR changed). This is the read path's whole write
+#   surface besides the snapshot.
+# - ``snapshot.json`` — the latest computed payload (window, days, run,
+#   stats), rewritten atomically each run. The reconciliation surface: rerun
+#   the script (``--print``) and diff against the emitted gauges.
+#
+# Read-only by construction: GitHub is read through ``gh api`` GETs; nothing
+# here writes to GitHub.
+#
+# Rate-limit budget: a cold run fetches one list page per 100 closed PRs plus
+# one timeline per PR (at most ``MAX_TIMELINE_PAGES`` pages each); steady
+# state refetches only PRs whose ``updated_at`` moved since the last run
+# (typically well under 100/day) plus ~24 list pages. Measured on 2026-09-14 (30-day window, 1361 merged
+# PRs): a cold walk is ~1450 GitHub reads, steady state ~150-200/day — both
+# comfortably inside the account's 5000/hour budget.
+#
+# Failure policy: the PR list is the authoritative population, so a failed
+# list fetch aborts the run (exit 1, no emission — old Prometheus values stay).
+# Timeline failures degrade to cached or partial records and are counted in
+# ``stats``.
+# meiva:link scripts/ci/docs/ci.meiva.okf.md
 
-Runs once a day on macmini (the registered machine that holds the `gh`
-session and `~/.trunk/api-token`), recomputes the trailing window of the
-fleet's pull-request pipeline, and publishes it to Prometheus + Loki through
-the unified telemetry pipeline:
-
-- ``pr_flow_daily`` — one event per complete day in the trailing window,
-  re-emitted on every run so the whole window stays visible inside
-  Prometheus's retention. Fields: ``merged_count`` plus (when the day has
-  samples) ``ready_to_merge_median_seconds`` / ``ready_to_merge_p90_seconds``,
-  ``flake_new_quarantines``.
-- ``pr_flow_run`` — one event per run carrying the point-in-time
-  ``queue_depth`` sample of the Trunk merge queue (absent when the queue is
-  unreachable; the event itself stays as the daily breadcrumb).
-
-Every numeric payload field is dispositioned as an ObservableGauge in
-``base/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
-sums, and re-emission must replace them rather than accrue them.
-
-Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
-
-- **ready -> merged**: for PRs whose ``merged_at`` falls on day D,
-  ``merged_at - ready_at`` in seconds, where ``ready_at`` is the first
-  ``ready_for_review`` timeline event, else ``created_at`` (the fleet opens
-  PRs ready; the fallback keeps draft-style flows honest if one appears).
-  median / p90 over the day's PRs, linear interpolation between closest
-  ranks.
-- **queue depth**: length of Trunk ``getQueue``'s ``enqueuedPullRequests``
-  at run time. One sample per run — a point-in-time reading, not a per-day
-  aggregate.
-- **flakes**: Trunk's flaky database — tests whose ``quarantined_at`` falls
-  on day D, counted over the currently quarantined list.
-
-Persistence (``$MEIVA_HOME/state/pr-flow/``, survives the prod source-tree
-resets that clean untracked files out of the checkout):
-
-- ``cache.json`` — per-PR compact records keyed by number, refreshed only
-  when GitHub's ``updated_at`` moved (incremental cache; the run re-fetches a
-  timeline only when the PR changed). This is the read path's whole write
-  surface besides the snapshot.
-- ``snapshot.json`` — the latest computed payload (window, days, run,
-  stats), rewritten atomically each run. The reconciliation surface: rerun
-  the script (``--print``) and diff against the emitted gauges.
-
-Read-only by construction: GitHub is read through ``gh api`` GETs and Trunk
-through its list endpoints (``getQueue`` / ``flaky-tests/list-quarantined-tests``);
-nothing here writes to GitHub, Trunk, or any queue.
-
-Rate-limit budget: a cold run fetches one list page per 100 closed PRs plus
-one timeline per PR (at most ``MAX_TIMELINE_PAGES`` pages each); steady
-state refetches only PRs whose ``updated_at`` moved since the last run
-(typically well under 100/day) plus ~24 list pages and one Trunk call per
-100 quarantined tests. Measured on 2026-09-14 (30-day window, 1361 merged
-PRs): a cold walk is ~1450 GitHub reads, steady state ~150-200/day — both
-comfortably inside the account's 5000/hour budget.
-
-Failure policy: the PR list is the authoritative population, so a failed
-list fetch aborts the run (exit 1, no emission — old Prometheus values stay).
-Timeline failures degrade to cached or partial records and are counted in
-``stats``; Trunk failures drop only the fields that depend on them.
-"""
 
 from __future__ import annotations
 
@@ -83,7 +72,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 # meiva:note
 # The script-mode root guard must run before importing the checkout-owned API.
-from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener  # noqa: E402 — script path guard
 from base.telemetry import EventPipeline  # noqa: E402
 from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 
@@ -92,12 +80,10 @@ DEFAULT_WINDOW_DAYS = 30
 PROCESS_NAME = "pr-flow"
 
 _GH_TIMEOUT_S = 60.0
-_TRUNK_REQUEST_TIMEOUT_S = 30.0
 # Bounded pagination: the list caps this run's read budget; a truncated walk
 # logs loudly rather than silently shrinking the window.
 MAX_LIST_PAGES = 80
 MAX_TIMELINE_PAGES = 3
-_MAX_FLAKY_PAGES = 20
 # GitHub's per_page ceiling (100); every walk pages in batches of this size
 # (task #3696 exception inventory).
 _PAGE_SIZE = 100
@@ -149,8 +135,6 @@ class RunStats:
     timeline_fetches: int = 0
     timeline_cache_hits: int = 0
     timeline_failures: int = 0
-    trunk_calls: int = 0
-    trunk_error: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -158,8 +142,6 @@ class RunStats:
             "timeline_fetches": self.timeline_fetches,
             "timeline_cache_hits": self.timeline_cache_hits,
             "timeline_failures": self.timeline_failures,
-            "trunk_calls": self.trunk_calls,
-            "trunk_error": self.trunk_error,
         }
 
 
@@ -323,20 +305,14 @@ def duration_seconds(record: PrRecord) -> float | None:
     return duration if duration > 0 else None
 
 
+# meiva:note
+# The per-day metric payload for the trailing window. Days with no merges keep merged_count = 0 and
+# omit the sample-based fields: an absent optional metric is not zero.
 def compute_days(
     records: list[PrRecord],
     days: list[date],
     tz: ZoneInfo,
-    *,
-    flake_counts: dict[date, int] | None,
 ) -> dict[str, dict[str, Any]]:
-    """The per-day metric payload for the trailing window.
-
-    Days with no merges keep ``merged_count = 0`` and omit the sample-based
-    fields (an absent optional metric is not zero). ``flake_counts`` carries
-    the flake source; None means the source was unreachable this run, and
-    every day omits the flake field rather than claiming zero.
-    """
     by_day: dict[date, list[PrRecord]] = {day: [] for day in days}
     for record in records:
         if not record.merged_at:
@@ -358,108 +334,8 @@ def compute_days(
         if durations:
             entry["ready_to_merge_median_seconds"] = round(percentile(durations, 0.5), 1)
             entry["ready_to_merge_p90_seconds"] = round(percentile(durations, 0.9), 1)
-        if flake_counts is not None:
-            entry["flake_new_quarantines"] = flake_counts.get(day, 0)
         payload[day.isoformat()] = entry
     return payload
-
-
-def load_trunk_token(token_path: Path) -> str | None:
-    """The Trunk API token from `~/.trunk/api-token`; None when absent.
-
-    The file is the design's credential location (the macmini fact this job
-    was scheduled around); a missing token skips the Trunk-sourced fields
-    with a logged reason and never fails the run.
-    """
-    try:
-        token = token_path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    return token or None
-
-
-def fetch_queue_depth(repo: str, token: str, stats: RunStats, *, open_url: UrlOpener) -> int | None:
-    """The Trunk merge queue's pending depth right now; None on any failure."""
-    from scripts.ci.pull_requests import trunk_api as trunk
-
-    data, error = trunk.post("getQueue", trunk.target_payload(repo), token, open_url=open_url)
-    stats.trunk_calls += 1
-    if error is not None or data is None:
-        stats.trunk_error = error or "no data"
-        return None
-    items = data.get("enqueuedPullRequests") or []
-    return len(items) if isinstance(items, list) else None
-
-
-def fetch_quarantined(
-    repo: str, token: str, stats: RunStats, *, open_url: UrlOpener
-) -> list[dict[str, Any]] | None:
-    """Trunk's quarantined-test list (paginated); None on any failure.
-
-    Pagination is the response's ``next_page_token`` chain: Trunk ignores a
-    numeric ``page`` index here (it re-serves page one), so the token is the
-    only walk that terminates on real data. The walk is capped at
-    ``_MAX_FLAKY_PAGES`` pages; hitting the cap is logged rather than
-    silently truncating the counts.
-    """
-    from scripts.ci.pull_requests import trunk_api as trunk
-
-    owner, name = repo.split("/", maxsplit=1)
-    collected: list[dict[str, Any]] = []
-    page_token: str | None = None
-    for _ in range(_MAX_FLAKY_PAGES):
-        page_query: dict[str, object] = {"page_size": _PAGE_SIZE}
-        if page_token is not None:
-            page_query["page_token"] = page_token
-        payload: dict[str, object] = {
-            "repo": {"host": "github.com", "owner": owner, "name": name},
-            "org_url_slug": trunk.ORG_SLUG,
-            "page_query": page_query,
-        }
-        data, error = trunk.post(
-            "flaky-tests/list-quarantined-tests",
-            payload,
-            token,
-            open_url=open_url,
-        )
-        stats.trunk_calls += 1
-        if error is not None or data is None:
-            stats.trunk_error = error or "no data"
-            return None
-        batch = data.get("quarantined_tests") or []
-        if not isinstance(batch, list):
-            stats.trunk_error = "unexpected quarantined_tests payload"
-            return None
-        collected.extend(item for item in batch if isinstance(item, dict))
-        page = data.get("page") or {}
-        page_token = page.get("next_page_token") if isinstance(page, dict) else None
-        if not batch or not page_token:
-            return collected
-    print(
-        f"pr-flow: quarantined walk capped at {_MAX_FLAKY_PAGES} pages; "
-        "day counts are a lower bound",
-        file=sys.stderr,
-    )
-    return collected
-
-
-def count_quarantined_by_day(
-    quarantined: list[dict[str, Any]], days: list[date], tz: ZoneInfo
-) -> dict[date, int]:
-    """New quarantines per day, from each entry's `quarantined_at` stamp."""
-    counts: dict[date, int] = {}
-    wanted = set(days)
-    for entry in quarantined:
-        raw = entry.get("quarantined_at")
-        if not isinstance(raw, str):
-            continue
-        try:
-            stamped = datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(tz).date()
-        except ValueError:
-            continue
-        if stamped in wanted:
-            counts[stamped] = counts.get(stamped, 0) + 1
-    return counts
 
 
 def load_cache(path: Path) -> dict[str, dict[str, Any]]:
@@ -576,7 +452,6 @@ def build_snapshot(
     repo: str,
     days: list[date],
     day_payload: dict[str, dict[str, Any]],
-    run: dict[str, Any],
     tz: ZoneInfo,
     stats: RunStats,
     merged_in_window: int,
@@ -594,7 +469,6 @@ def build_snapshot(
             "timezone": str(tz),
         },
         "days": day_payload,
-        "run": run,
         "stats": {
             "merged_in_window": merged_in_window,
             "partial_records": partial,
@@ -603,17 +477,19 @@ def build_snapshot(
     }
 
 
+# meiva:note
+# Emits the daily events through the unified telemetry pipeline; dry_run keeps the seam silent.
 def emit_snapshot(
     snapshot: dict[str, Any], *, dry_run: bool, pipeline: EventPipeline, home: Path
 ) -> None:
-    """Emit the daily + run events through the unified telemetry pipeline."""
     if dry_run:
         return
     emit_events(snapshot, pipeline=pipeline, home=home)
 
 
+# meiva:note
+# The pipeline write, kept as its own seam so tests can assert dry-run silence.
 def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Path) -> None:
-    """The pipeline write (separate seam so tests can assert dry-run silence)."""
     from base import telemetry
 
     telemetry.init_telemetry(home=home, process=PROCESS_NAME, pipeline=pipeline)
@@ -621,16 +497,10 @@ def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Path
     for day, entry in sorted(snapshot["days"].items()):
         attributes = {key: value for key, value in entry.items() if value is not None}
         telemetry.emit("telemetry", "pr_flow_daily", attributes={"day": day, **attributes})
-    run_attributes: dict[str, Any] = {}
-    if snapshot["run"].get("queue_depth") is not None:
-        run_attributes["queue_depth"] = snapshot["run"]["queue_depth"]
-    telemetry.emit("telemetry", "pr_flow_run", attributes=run_attributes)
     telemetry.sync()
 
 
-def main(
-    argv: list[str] | None = None, *, run_process: GhProcess, open_url: UrlOpener, home: Path
-) -> int:
+def main(argv: list[str] | None = None, *, run_process: GhProcess, home: Path) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to sample")
     parser.add_argument(
@@ -679,24 +549,11 @@ def main(
 
     records = collect_records(prs, days, tz, args.repo, cache, stats, run_process=run_process)
 
-    token = load_trunk_token(Path.home() / ".trunk" / "api-token")
-    queue_depth: int | None = None
-    flake_counts: dict[date, int] | None = None
-    if token is None:
-        stats.trunk_error = "no ~/.trunk/api-token"
-        print("pr-flow: no Trunk token — queue depth / flake fields skipped", file=sys.stderr)
-    else:
-        queue_depth = fetch_queue_depth(args.repo, token, stats, open_url=open_url)
-        quarantined = fetch_quarantined(args.repo, token, stats, open_url=open_url)
-        if quarantined is not None:
-            flake_counts = count_quarantined_by_day(quarantined, days, tz)
-
-    day_payload = compute_days(records, days, tz, flake_counts=flake_counts)
+    day_payload = compute_days(records, days, tz)
     snapshot = build_snapshot(
         repo=args.repo,
         days=days,
         day_payload=day_payload,
-        run={"queue_depth": queue_depth},
         tz=tz,
         stats=stats,
         merged_in_window=len(records),
@@ -724,7 +581,6 @@ def main(
             f"{snapshot['stats']['merged_in_window']} merged PRs, "
             f"{stats.timeline_fetches} timeline fetches, "
             f"{stats.timeline_cache_hits} cache hits, "
-            f"queue_depth={queue_depth}, "
             f"{'dry-run (no writes, no emit)' if args.dry_run else 'emitted'}"
         )
     return 0
@@ -733,4 +589,4 @@ def main(
 if __name__ == "__main__":
     from base.paths import meiva_home
 
-    sys.exit(main(run_process=subprocess.run, open_url=SYSTEM_URL_OPENER, home=meiva_home()))
+    sys.exit(main(run_process=subprocess.run, home=meiva_home()))

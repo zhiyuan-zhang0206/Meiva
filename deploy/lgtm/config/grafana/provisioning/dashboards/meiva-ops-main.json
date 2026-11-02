@@ -6719,147 +6719,12 @@
    "type": "table"
   },
   {
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "description": "Trunk merge-queue depth sampled once per PR-flow export run (meiva_pr_flow_run_queue_depth_ratio gauge, macmini daily job). The run event is emitted even when Trunk is unreachable, so the breadcrumb survives an outage while the depth sample stays absent.",
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "fixedColor": "blue",
-      "mode": "fixed"
-     },
-     "custom": {
-      "drawStyle": "line",
-      "fillOpacity": 8,
-      "lineWidth": 1,
-      "showPoints": "never"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 7,
-    "w": 12,
-    "x": 12,
-    "y": 309
-   },
-   "id": 2402,
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "meiva_pr_flow_run_queue_depth_ratio",
-     "legendFormat": "queue depth",
-     "queryType": "range",
-     "refId": "A"
-    }
-   ],
-   "title": "Trunk queue depth",
-   "type": "timeseries"
-  },
-  {
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "description": "Tests newly quarantined by Trunk\u2019s flaky detector per complete cluster-tz day (meiva_pr_flow_daily_flake_new_quarantines_ratio gauge, daily PR-flow export job). A day whose flaky source was unreachable is omitted rather than shown as zero.",
-   "fieldConfig": {
-    "defaults": {
-     "thresholds": {
-      "mode": "absolute",
-      "steps": []
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 7,
-    "w": 12,
-    "x": 0,
-    "y": 316
-   },
-   "id": 2404,
-   "options": {
-    "cellHeight": "sm",
-    "footer": {
-     "countRows": false,
-     "enablePagination": true,
-     "show": false
-    },
-    "showHeader": true,
-    "showTypeIcons": false,
-    "sortBy": []
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "max by (day) (last_over_time(meiva_pr_flow_daily_flake_new_quarantines_ratio[26h]))",
-     "format": "table",
-     "instant": true,
-     "legendFormat": "new quarantines",
-     "range": false,
-     "refId": "A"
-    }
-   ],
-   "title": "Flake \u2014 new quarantines (by day)",
-   "transformations": [
-    {
-     "id": "joinByField",
-     "options": {
-      "byField": "day",
-      "mode": "outer"
-     }
-    },
-    {
-     "id": "organize",
-     "options": {
-      "excludeByName": {
-       "Time": true
-      },
-      "renameByName": {
-       "Value": "new quarantines"
-      }
-     }
-    }
-   ],
-   "type": "table"
-  },
-  {
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 323
+    "y": 316
    },
    "id": 2009,
    "panels": [],
@@ -6885,7 +6750,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 324
+    "y": 317
    },
    "id": 2501,
    "options": {
@@ -6971,7 +6836,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 324
+    "y": 317
    },
    "id": 2502,
    "options": {
@@ -7072,7 +6937,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 331
+    "y": 324
    },
    "id": 2503,
    "options": {
@@ -7188,7 +7053,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 331
+    "y": 324
    },
    "id": 2504,
    "options": {
@@ -7319,7 +7184,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 338
+    "y": 331
    },
    "id": 2505,
    "options": {

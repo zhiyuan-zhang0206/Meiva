@@ -17,10 +17,6 @@ no-op). One debt_sweep_daily event per claimed 06:30 cluster-time slot reports
 scan_status as an explicit fact: the mechanical scan may fail without blocking
 the clearing worker, so the failure is never implied away by the worker action.
 
-pr_flow_run is the point-in-time Trunk queue-depth sample; it is emitted even
-when the depth sample is unavailable, so the daily breadcrumb survives a Trunk
-outage, and the missing field stays absent.
-
 ci_runs_run is one breadcrumb per repository: the fixed window's population and
 this run's GitHub-read budget — current observations, so gauges even though
 their names are counts.
