@@ -27,6 +27,10 @@ from base.api_contracts.agent_contract import (
 
 _BIN_DIRS = (".local/bin", "bin")
 
+# meiva:note
+# The instant the probe is asked at; every credential these tests write is dated against it.
+_NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+
 
 def _external_cli(home: Path, relative_dir: str, name: str) -> Path:
     binary = home / relative_dir / name
@@ -37,11 +41,11 @@ def _external_cli(home: Path, relative_dir: str, name: str) -> Path:
 
 
 def _iso(offset: timedelta) -> str:
-    return (datetime.now(UTC) + offset).isoformat()
+    return (_NOW + offset).isoformat()
 
 
 def _epoch_ms(offset: timedelta) -> int:
-    return int((datetime.now(UTC) + offset).timestamp() * 1000)
+    return int((_NOW + offset).timestamp() * 1000)
 
 
 def _claude_credentials(home: Path, *, access: timedelta, refresh: timedelta) -> None:
@@ -75,7 +79,7 @@ def _kimi_credentials(home: Path, *, expiry: timedelta) -> None:
     payload: dict[str, object] = {
         "access_token": "access",
         "refresh_token": "renewable",
-        "expires_at": (datetime.now(UTC) + expiry).timestamp(),
+        "expires_at": (_NOW + expiry).timestamp(),
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -92,12 +96,14 @@ def _silent_cli(
 
 
 def _probe(home: Path, *, cli_runner: Any = _silent_cli) -> dict[Harness, HarnessProbe]:
-    rows = probe_local_harnesses(home, str(home / "empty-bin"), _BIN_DIRS, cli_runner=cli_runner)
+    rows = probe_local_harnesses(
+        home, str(home / "empty-bin"), _BIN_DIRS, now=_NOW, cli_runner=cli_runner
+    )
     return {row.harness: row for row in rows}
 
 
 def test_every_harness_gets_one_readable_row(tmp_path: Path) -> None:
-    rows = probe_local_harnesses(tmp_path, str(tmp_path / "empty-bin"), _BIN_DIRS)
+    rows = probe_local_harnesses(tmp_path, str(tmp_path / "empty-bin"), _BIN_DIRS, now=_NOW)
     assert [row.harness for row in rows] == list(Harness)
     assert all(row.reason for row in rows)
 
@@ -223,7 +229,7 @@ def test_a_path_install_is_reported_as_on_path(tmp_path: Path) -> None:
     (tmp_path / ".codex" / "auth.json").write_text(
         json.dumps({"tokens": {"access_token": "token"}}), encoding="utf-8"
     )
-    rows = probe_local_harnesses(tmp_path, str(binary.parent), _BIN_DIRS)
+    rows = probe_local_harnesses(tmp_path, str(binary.parent), _BIN_DIRS, now=_NOW)
     row = {candidate.harness: candidate for candidate in rows}[Harness.CODEX]
     assert row.status == "available"
     assert row.on_path is True

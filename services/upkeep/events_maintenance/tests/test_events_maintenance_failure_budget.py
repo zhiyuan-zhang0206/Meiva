@@ -7,7 +7,7 @@ import time
 import psycopg
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.daemon.health import LoopProgress
 from base.daemon.round_loop import CONSECUTIVE_ROUND_FAILURE_LIMIT, RoundFailureLimitError
 from services.upkeep.events_maintenance import passes
@@ -34,7 +34,7 @@ class _Script:
 
 
 def _progress(timeout_s: float = 5.0) -> LoopProgress:
-    return LoopProgress("dispatch", timeout_s=timeout_s, timers=SYSTEM_TIMERS)
+    return LoopProgress("dispatch", timeout_s=timeout_s, clock=system_clock())
 
 
 async def test_consecutive_failed_passes_end_the_loop() -> None:

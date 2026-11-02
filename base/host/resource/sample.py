@@ -1,12 +1,11 @@
 # meiva:note
 # One live CPU / memory / disk / battery reading for this machine — no history. See
-# `base/host/resource/reading.py` for the model and what it keeps; this module reads psutil, the
-# clock and `pmset`.
+# `base/host/resource/reading.py` for the model and what it keeps; this module reads psutil and
+# `pmset`, and stamps the reading with the instant its caller names.
 
 from __future__ import annotations
 
 import subprocess
-import time
 from collections.abc import Callable
 
 from base.host.resource.reading import (
@@ -58,6 +57,7 @@ def battery_sample(
 # fails the probe.
 def resource_sample(
     *,
+    now: float,
     cpu_percent: Callable[[float], float] | None = None,
     battery_fn: Callable[[], BatteryFields] = battery_sample,
 ) -> ResourceSample:
@@ -67,7 +67,7 @@ def resource_sample(
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage(primary_disk_path())
     return assemble_sample(
-        ts=time.time(),
+        ts=now,
         cpu_pct=read_cpu(CPU_INTERVAL_S),
         memory=MemoryFigures(mem.total, mem.available, mem.percent),
         disk=DiskFigures(disk.used, disk.free, disk.percent),

@@ -182,12 +182,12 @@ def _iso_timestamp(value: object) -> datetime | None:
 # mark an idle machine unavailable. `_session_deadline` takes such a deadline and
 # `_renewable_credential` reports a renewable one as the age of the stored token.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-def _session_deadline(deadline: datetime | None, *, where: str) -> _LoginEvidence:
+def _session_deadline(deadline: datetime | None, *, where: str, now: datetime) -> _LoginEvidence:
     if deadline is None:
         return _LoginEvidence(
             signed_in=True, detail=f"a token is stored in {where}, which records no expiry for it"
         )
-    if deadline <= datetime.now(UTC):
+    if deadline <= now:
         return _LoginEvidence(
             signed_in=False, detail=f"the credentials in {where} expired at {deadline.isoformat()}"
         )
@@ -208,7 +208,7 @@ def _renewable_credential(
     )
 
 
-def _claude_credentials(record: object) -> _LoginEvidence:
+def _claude_credentials(record: object, *, now: datetime) -> _LoginEvidence:
     where = "~/.claude/.credentials.json"
     oauth = _nested(record, "claudeAiOauth")
     if oauth is None:
@@ -216,8 +216,10 @@ def _claude_credentials(record: object) -> _LoginEvidence:
     if not _has_value(oauth, "accessToken") and not _has_value(oauth, "refreshToken"):
         return _LoginEvidence(signed_in=False, detail=f"{where} holds no token")
     if _has_value(oauth, "refreshToken"):
-        return _session_deadline(_epoch_ms(oauth.get("refreshTokenExpiresAt")), where=where)
-    return _session_deadline(_epoch_ms(oauth.get("expiresAt")), where=where)
+        return _session_deadline(
+            _epoch_ms(oauth.get("refreshTokenExpiresAt")), where=where, now=now
+        )
+    return _session_deadline(_epoch_ms(oauth.get("expiresAt")), where=where, now=now)
 
 
 # meiva:note
@@ -226,10 +228,10 @@ def _claude_credentials(record: object) -> _LoginEvidence:
 # `~/.claude.json` is not that evidence — the record outlives the login — so on its
 # own it reads `unknown`, as does a missing or unreadable store.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-def _claude_code_login(home: Path) -> _LoginEvidence:
+def _claude_code_login(home: Path, *, now: datetime) -> _LoginEvidence:
     credentials = home / ".claude" / ".credentials.json"
     if credentials.is_file():
-        return _claude_credentials(_read_json(credentials))
+        return _claude_credentials(_read_json(credentials), now=now)
     account = _read_json(home / ".claude.json")
     if _has_value(account, "oauthAccount"):
         return _LoginEvidence(
@@ -307,7 +309,7 @@ def _antigravity_login(home: Path) -> _LoginEvidence:
     )
 
 
-def _kimi_credentials_file_login(path: Path, *, where: str) -> _LoginEvidence:
+def _kimi_credentials_file_login(path: Path, *, where: str, now: datetime) -> _LoginEvidence:
     record = _read_json(path)
     if not _is_object_dict(record):
         return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
@@ -322,9 +324,9 @@ def _kimi_credentials_file_login(path: Path, *, where: str) -> _LoginEvidence:
             data.get("refresh_expires_at") or data.get("refreshTokenExpiresAt")
         )
         if refresh_expires is not None:
-            return _session_deadline(refresh_expires, where=where)
+            return _session_deadline(refresh_expires, where=where, now=now)
         return _renewable_credential(expires_at, where=where, credential="access token")
-    return _session_deadline(expires_at, where=where)
+    return _session_deadline(expires_at, where=where, now=now)
 
 
 def _kimi_config_login(path: Path, *, where: str) -> _LoginEvidence:
@@ -347,14 +349,14 @@ def _kimi_config_login(path: Path, *, where: str) -> _LoginEvidence:
     return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
 
 
-def _kimi_code_login(home: Path) -> _LoginEvidence:
+def _kimi_code_login(home: Path, *, now: datetime) -> _LoginEvidence:
     for rel in (
         Path(".kimi-code/credentials/kimi-code.json"),
         Path(".kimi/credentials/kimi-code.json"),
     ):
         path = home / rel
         if path.is_file():
-            return _kimi_credentials_file_login(path, where=f"~/{rel}")
+            return _kimi_credentials_file_login(path, where=f"~/{rel}", now=now)
     for rel in (Path(".kimi-code/config.toml"), Path(".kimi/config.toml")):
         path = home / rel
         if path.is_file():
@@ -365,12 +367,28 @@ def _kimi_code_login(home: Path) -> _LoginEvidence:
     )
 
 
-_LOGIN_CHECKS = {
-    Harness.CLAUDE_CODE: _claude_code_login,
-    Harness.CODEX: _codex_login,
-    Harness.ANTIGRAVITY: _antigravity_login,
-    Harness.KIMI_CODE: _kimi_code_login,
-}
+# meiva:note
+# The harnesses whose stored credential can answer when their CLI does not. Which check runs is
+# a `match` rather than a table because only some of them decide an expiry, and those need the
+# caller's instant: a table would force every entry to accept one it does not use.
+_LOGIN_CHECKED = frozenset(
+    {Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY, Harness.KIMI_CODE}
+)
+
+
+def _stored_login(harness: Harness, home: Path, *, now: datetime) -> _LoginEvidence:
+    match harness:
+        case Harness.CLAUDE_CODE:
+            return _claude_code_login(home, now=now)
+        case Harness.CODEX:
+            return _codex_login(home)
+        case Harness.ANTIGRAVITY:
+            return _antigravity_login(home)
+        case Harness.KIMI_CODE:
+            return _kimi_code_login(home, now=now)
+        case Harness.MEIVA:
+            raise AssertionError("the built-in runtime has no stored credential to read")
+
 
 _BINARIES = {
     Harness.CLAUDE_CODE: "claude",
@@ -379,7 +397,7 @@ _BINARIES = {
     Harness.KIMI_CODE: "kimi",
 }
 
-_UNPROBED = set(Harness) - {Harness.MEIVA} - set(_BINARIES) - set(_LOGIN_CHECKS)
+_UNPROBED = set(Harness) - {Harness.MEIVA} - set(_BINARIES) - _LOGIN_CHECKED
 if _UNPROBED:
     raise RuntimeError(
         "harnesses missing a binary or login probe entry: "
@@ -518,6 +536,8 @@ def _probe_external(
     home: Path,
     path_env: str | None,
     bin_dirs: Sequence[str],
+    *,
+    now: datetime,
     cli_runner: CliRunner = subprocess.run,
 ) -> HarnessProbe:
     binary = _BINARIES[harness]
@@ -532,7 +552,7 @@ def _probe_external(
     installed = f"installed at {path}" if on_path else f"installed at {path} (not on PATH)"
     evidence = _cli_login(harness, path, runner=cli_runner)
     if evidence.signed_in is None:
-        evidence = _LOGIN_CHECKS[harness](home)
+        evidence = _stored_login(harness, home, now=now)
     if evidence.signed_in is True:
         return HarnessProbe(harness, "available", f"{installed}; {evidence.detail}", path, on_path)
     if evidence.signed_in is False:
@@ -562,6 +582,8 @@ def probe_local_harnesses(
     home: Path | None = None,
     path_env: str | None = None,
     bin_dirs: Sequence[str] | None = None,
+    *,
+    now: datetime,
     cli_runner: CliRunner = subprocess.run,
 ) -> list[HarnessProbe]:
     resolved_home = resolve_user_home(home)
@@ -577,7 +599,12 @@ def probe_local_harnesses(
             continue
         rows.append(
             _probe_external(
-                harness, resolved_home, path_env, resolved_bin_dirs, cli_runner=cli_runner
+                harness,
+                resolved_home,
+                path_env,
+                resolved_bin_dirs,
+                now=now,
+                cli_runner=cli_runner,
             )
         )
     return rows

@@ -19,6 +19,7 @@ import pytest
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.daemon import health_schema
 from base.daemon.health_schema import OK
@@ -66,7 +67,7 @@ def _config(*, exit_seconds: float = 300.0) -> PageServerConfig:
 
 
 def _liveness() -> tuple[LivenessGroup, LoopProgress]:
-    group = LivenessGroup(timers=SYSTEM_TIMERS)
+    group = LivenessGroup(clock=system_clock())
     return group, group.register("reconcile", 60.0)
 
 

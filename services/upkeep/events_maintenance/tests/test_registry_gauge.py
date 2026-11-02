@@ -22,7 +22,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
-from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.daemon.loop_health import LoopProgress
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -100,7 +100,7 @@ async def test_the_loop_samples_at_once_then_paces(
     newest = create_agent(db_conn)
     db_conn.commit()
     task = asyncio.create_task(
-        registry_gauge.registry_gauge_loop(pool, LoopProgress("g", 180.0, timers=SYSTEM_TIMERS))
+        registry_gauge.registry_gauge_loop(pool, LoopProgress("g", 180.0, clock=system_clock()))
     )
     try:
         for _ in range(500):
@@ -122,7 +122,7 @@ async def test_a_failing_sample_ends_the_loop(
     with table_missing(db_conn, "agents"), pytest.raises(psycopg.errors.UndefinedTable):
         await asyncio.wait_for(
             registry_gauge.registry_gauge_loop(
-                pool, LoopProgress("g", 180.0, timers=SYSTEM_TIMERS)
+                pool, LoopProgress("g", 180.0, clock=system_clock())
             ),
             timeout=20.0,
         )

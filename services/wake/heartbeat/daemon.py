@@ -620,7 +620,7 @@ async def run(
     write_pidfile(process_config, runtime=runtime)
     _log.info("[heartbeat] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    liveness = LivenessGroup(timers=clock)
+    liveness = LivenessGroup(clock=clock)
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "heartbeat", endpoint.health_port, home=meiva_home(), liveness=liveness, image=image

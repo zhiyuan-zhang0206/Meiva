@@ -7,7 +7,8 @@ import os
 import random
 import sys
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 
 if __name__ == "__main__":
     argparse.ArgumentParser(description=__doc__).parse_args()
@@ -562,7 +563,7 @@ async def serve_ops_daemon(
 
     pool = boot.open_db_pool(database=database, authority=authority)
     executor = boot.op_thread_pool(authority=authority)
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS))
 
     try:
         acceptance = boot.ops_acceptance(home=home, access=access)

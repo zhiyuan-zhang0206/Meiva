@@ -68,7 +68,9 @@ def write_atomic(path: Path, payload: dict[str, object], *, writer: AtomicWriter
 
 
 @contextlib.contextmanager
-def _diagnostic_lock(path: Path, *, purpose: str, pid: int, timeout_s: float) -> Generator[None]:
+def _diagnostic_lock(
+    path: Path, *, purpose: str, pid: int, now: dt.datetime, timeout_s: float
+) -> Generator[None]:
     """Hold an OS mutex with an atomic, best-effort postmortem holder record.
 
     The OS lock is authority; the sidecar is diagnostic only. Keep the last
@@ -81,7 +83,10 @@ def _diagnostic_lock(path: Path, *, purpose: str, pid: int, timeout_s: float) ->
             holder = {
                 "pid": pid,
                 "purpose": purpose,
-                "since": dt.datetime.now(dt.UTC).isoformat(),
+                # meiva:note
+                # The sidecar is read by an operator, so its instant is written in UTC whatever zone
+                # the caller's clock keeps.
+                "since": now.astimezone(dt.UTC).isoformat(),
             }
             try:
                 write_atomic(holder_path(path), {**holder, "state": "held"}, writer=_WRITER)
@@ -106,8 +111,15 @@ def _diagnostic_lock(path: Path, *, purpose: str, pid: int, timeout_s: float) ->
 
 @contextlib.contextmanager
 def resource_lock(
-    *, home: Path, pid: int, purpose: str, timeout_s: float = _RESOURCE_LOCK_TIMEOUT_S
+    *,
+    home: Path,
+    pid: int,
+    purpose: str,
+    now: dt.datetime,
+    timeout_s: float = _RESOURCE_LOCK_TIMEOUT_S,
 ) -> Generator[None]:
     """Serialize long local start/stop operations with bounded waiting."""
-    with _diagnostic_lock(lifecycle_lock_path(home), purpose=purpose, pid=pid, timeout_s=timeout_s):
+    with _diagnostic_lock(
+        lifecycle_lock_path(home), purpose=purpose, pid=pid, now=now, timeout_s=timeout_s
+    ):
         yield

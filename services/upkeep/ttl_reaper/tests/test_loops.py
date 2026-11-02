@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
@@ -78,7 +79,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     database_gate: ProcessDbGate,
     rpc: RpcClient,
 ) -> None:
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(clock=system_clock())
     before = asyncio.all_tasks()
 
     with _table_missing(db_conn, table), pytest.raises(ExceptionGroup) as raised:

@@ -112,7 +112,7 @@ def cluster_status_op(
 # event loop that serves spawn and lifecycle. The gateway caches one answer per
 # machine for 30 seconds, so a repeat read of the form does not reach this op.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-def harness_probe_op(machine: str) -> HarnessProbeResult:
+def harness_probe_op(machine: str, *, now: datetime) -> HarnessProbeResult:
     return HarnessProbeResult(
         machine=machine,
         harnesses=[
@@ -123,7 +123,7 @@ def harness_probe_op(machine: str) -> HarnessProbeResult:
                 binary=row.binary,
                 on_path=row.on_path,
             )
-            for row in probe_local_harnesses()
+            for row in probe_local_harnesses(now=now)
         ],
     )
 

@@ -152,7 +152,7 @@ def _execute(
                 database_factory=database_factory,
             )
         case ReadHostResources():
-            _emit(host_resource_lines(_read_host_resources()))
+            _emit(host_resource_lines(_read_host_resources(now=command.clock.now().timestamp())))
         case ProbeLgtm():
             print_lgtm_status(LgtmSettings.from_fields(delivered_config(command.config).get_field))
         case ProbeRedisBridge():
@@ -227,9 +227,9 @@ def _print_service_rows(
 #
 # A read failure is a value, not an abort: the reading is one section of `meiva status`,
 # and a host without psutil must still get the service table and the views below it.
-def _read_host_resources() -> HostReading | HostReadingFailed:
+def _read_host_resources(*, now: float) -> HostReading | HostReadingFailed:
     try:
-        sample = resource_sample()
+        sample = resource_sample(now=now)
     # meiva:note
     # psutil may be absent; the rest of status still prints
     except Exception as exc:

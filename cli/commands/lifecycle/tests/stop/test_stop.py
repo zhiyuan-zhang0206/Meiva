@@ -69,6 +69,11 @@ RESTART = RestartRequest(
 )
 
 
+# meiva:note
+# The instant the test says each lock was taken; the sidecar records it unchanged.
+_LOCK_NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
 def test_keeping_shell_sessions_preserves_unselected_process_and_real_pty(
     home: Path,
     launch: Launcher,
@@ -204,14 +209,16 @@ def test_resource_stop_excludes_concurrent_start(home: Path) -> None:
     order: list[str] = []
 
     def stopping() -> None:
-        with home_lifecycle_locks.resource_lock(home=home, pid=os.getpid(), purpose="cli.do_stop"):
+        with home_lifecycle_locks.resource_lock(
+            home=home, pid=os.getpid(), purpose="cli.do_stop", now=_LOCK_NOW
+        ):
             order.append("stop")
             entered.set()
             assert finish.wait(5)
 
     def starting() -> int:
         with home_lifecycle_locks.resource_lock(
-            home=home, pid=os.getpid(), purpose="cli.cmd_start_body"
+            home=home, pid=os.getpid(), purpose="cli.cmd_start_body", now=_LOCK_NOW
         ):
             order.append("start")
             return 0
@@ -238,7 +245,7 @@ def test_resource_stop_excludes_concurrent_start(home: Path) -> None:
     # meiva:note
     # The lock is free again once both are done.
     with home_lifecycle_locks.resource_lock(
-        home=home, pid=os.getpid(), purpose="test:after", timeout_s=1
+        home=home, pid=os.getpid(), purpose="test:after", now=_LOCK_NOW, timeout_s=1
     ):
         pass
 

@@ -149,7 +149,9 @@ async def run(
         sys.exit(1)
     _log.info("[ttl-reaper] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    liveness = LivenessGroup(
+        clock=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS)
+    )
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "ttl_reaper", endpoint.health_port, home=meiva_home(), liveness=liveness, image=image

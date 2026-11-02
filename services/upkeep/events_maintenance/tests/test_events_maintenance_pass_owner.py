@@ -8,7 +8,7 @@ import time
 import psycopg
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.daemon.health import LoopProgress
 from services.upkeep.events_maintenance import passes
 
@@ -17,7 +17,7 @@ from services.upkeep.events_maintenance import passes
     "failure", [RuntimeError("unknown failure"), psycopg.ProgrammingError("drift")]
 )
 async def test_completed_failure_preserves_the_original_exception(failure: Exception) -> None:
-    progress = LoopProgress("dispatch", timeout_s=1.0, timers=SYSTEM_TIMERS)
+    progress = LoopProgress("dispatch", timeout_s=1.0, clock=system_clock())
 
     def fail() -> None:
         raise failure
@@ -32,7 +32,7 @@ async def test_completed_failure_preserves_the_original_exception(failure: Excep
 async def test_late_failure_is_reported_without_reviving_the_loop(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    progress = LoopProgress("dispatch", timeout_s=0.01, timers=SYSTEM_TIMERS)
+    progress = LoopProgress("dispatch", timeout_s=0.01, clock=system_clock())
     release = threading.Event()
     failure = RuntimeError("late worker failure")
 
@@ -63,7 +63,7 @@ async def test_late_failure_is_reported_without_reviving_the_loop(
 # meiva:note
 # A worker that exceeds its hard deadline wedges; elapsed time never earns a beat.
 async def test_wedged_pass_fails_without_earning_a_beat_while_in_flight() -> None:
-    progress = LoopProgress("dispatch", timeout_s=0.1, timers=SYSTEM_TIMERS)
+    progress = LoopProgress("dispatch", timeout_s=0.1, clock=system_clock())
 
     def overrun() -> None:
         time.sleep(0.4)
@@ -80,7 +80,7 @@ async def test_wedged_pass_fails_without_earning_a_beat_while_in_flight() -> Non
 # meiva:note
 # A bounded worker completion advances progress after it returns, never before.
 async def test_completed_pass_beats_after_its_worker_finishes() -> None:
-    progress = LoopProgress("dispatch", timeout_s=5.0, timers=SYSTEM_TIMERS)
+    progress = LoopProgress("dispatch", timeout_s=5.0, clock=system_clock())
 
     def work() -> None:
         time.sleep(0.4)
@@ -92,7 +92,7 @@ async def test_completed_pass_beats_after_its_worker_finishes() -> None:
 
 
 async def test_sleeping_beats_progress_so_a_long_wait_is_not_a_wedge() -> None:
-    progress = LoopProgress("dispatch", timeout_s=0.3, timers=SYSTEM_TIMERS)
+    progress = LoopProgress("dispatch", timeout_s=0.3, clock=system_clock())
     await asyncio.sleep(0.4)
     assert not progress.is_alive()
 

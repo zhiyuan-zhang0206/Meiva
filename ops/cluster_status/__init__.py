@@ -149,9 +149,9 @@ def read_db_snapshot(
 
 # meiva:note
 # One live resource sample, degraded to None on any psutil failure.
-def read_resource_sample() -> ResourceSample | None:
+def read_resource_sample(*, now: float) -> ResourceSample | None:
     try:
-        return resource_sample()
+        return resource_sample(now=now)
     except Exception:  # psutil may not be installed; degrade gracefully
         _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
         return None
@@ -191,17 +191,21 @@ def status_snapshot(
     head_sha = checkout_head_sha(home / "source", host=host)
     agent_host_online = check_pidfile(str(agent_host_pidfile))[0] if runner else None
     supervisor_online = _supervisor_online(home)
+    # meiva:note
+    # One instant for the whole snapshot: the session rows and the resource reading are facts
+    # about the same observation, and a second read would let them disagree about when.
+    now = cluster_now()
     sessions = collect_sessions(
         service_backend=get_backend(timers=SYSTEM_TIMERS, home=home),
         shell_backend=get_shell_backend(home=home),
-        now=cluster_now(),
+        now=now,
     )
     # meiva:note
     # The live one-shot resource sample blocks for its CPU interval. Run it in parallel with
     # the central-DB reads so snapshot latency pays the slower of those independent
     # operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        resource_future = executor.submit(read_resource_sample)
+        resource_future = executor.submit(read_resource_sample, now=now.timestamp())
         db_snapshot = read_db_snapshot(db, pool, machine_name=machine_name, count_agents=runner)
         resource = resource_future.result()
     return assemble_status(

@@ -482,7 +482,9 @@ def cmd_start_body(
     command: CommandRuntime,
     boot_attempt: bool = False,
 ) -> int:
-    with resource_lock(home=command.home, pid=command.pid, purpose="cli.cmd_start_body"):
+    with resource_lock(
+        home=command.home, pid=command.pid, purpose="cli.cmd_start_body", now=command.clock.now()
+    ):
         # meiva:note
         # Core start logic, shared by cmd_start and cmd_restart.
         #
