@@ -4,31 +4,23 @@
 
 from __future__ import annotations
 
-import email.message
 import json
 import subprocess
-import urllib.error
-import urllib.request
 from collections.abc import Sequence
-from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 from base.host.net.tests.fake_url_opener import FakeUrlOpener
 from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.pull_requests import commands as ci_utils
-from scripts.ci.pull_requests import owner_operations, status
+from scripts.ci.pull_requests import status
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     APP_CHECK,
     TEST_CLOCK,
     CIStatus,
-    TrunkResponse,
-    completed_process_stub,
     core_rollup,
-    make_clock,
     status_check_rollup_entry,
-    urlopen_sequence,
 )
 from scripts.ci.pull_requests.tests.test_ci_monitor import diag_gh as diag_gh
 from scripts.ci.pull_requests.tests.test_ci_monitor import gh as gh
@@ -75,57 +67,6 @@ def test_runs_probe_returns_none_on_bad_response(returncode: int, stdout: str) -
 )
 def test_parse_ts(value: str | None, expected: float | None) -> None:
     assert status.parse_ts(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("last", "now", "expected"), [(90.0, 100.0, 290), (0.0, 400.0, 0), (None, 100.0, 0)]
-)
-def test_queue_cooldown_seconds(last: float | None, now: float, expected: int) -> None:
-    clock = make_clock(wall_start=datetime.fromtimestamp(now, tz=UTC))
-    host = fake_host(
-        lambda argv, **_k: subprocess.CompletedProcess(
-            list(argv),
-            0,
-            "null" if last is None else datetime.fromtimestamp(last, tz=UTC).isoformat(),
-            "",
-        )
-    )
-    assert owner_operations.queue_cooldown_seconds("7", "o/r", host=host, clock=clock) == expected
-
-
-@pytest.mark.parametrize(
-    ("replies", "expected"),
-    [
-        (
-            [
-                completed_process_stub('"2026-08-24T22:36:05Z"'),
-                completed_process_stub('"2026-08-24T22:35:00Z"'),
-            ],
-            1787610965.0,
-        ),
-        (
-            [
-                completed_process_stub(returncode=1),
-                completed_process_stub('"2026-08-24T22:36:05Z"'),
-            ],
-            1787610965.0,
-        ),
-        ([completed_process_stub(returncode=1), completed_process_stub(returncode=1)], None),
-        ([completed_process_stub("null"), completed_process_stub("null")], None),
-    ],
-)
-def test_last_head_update(replies: list[Any], expected: float | None) -> None:
-    reply_iter = iter(replies)
-    seen: list[list[str]] = []
-
-    def _run(argv: Sequence[str], **_k: object) -> Any:
-        seen.append(list(argv))
-        return next(reply_iter)
-
-    host = fake_host(_run)
-    assert owner_operations.last_head_update("7", "o/r", host=host) == expected
-    assert "/issues/7/timeline" in " ".join(seen[0])
-    assert "/pulls/7/commits" in " ".join(seen[1])
 
 
 def test_wait_all_passed_exits_zero(no_sleep, poll, capsys) -> None:
@@ -277,102 +218,6 @@ def test_wait_timeout_while_pending_exits_one(no_sleep, poll, capsys) -> None:
     assert "timed out" in capsys.readouterr().err
 
 
-def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, capsys) -> None:
-    gh_calls: list[list[str]] = []
-    host = poll(CIStatus.ALL_PASSED, calls=gh_calls)
-    requests: list[urllib.request.Request] = []
-    open_url = urlopen_sequence(
-        [
-            TrunkResponse({"accepted": True}),
-            TrunkResponse({"state": "pending"}),
-            TrunkResponse({"state": "merged"}),
-        ],
-        requests,
-    )
-    # --merge implies --wait: with the Trunk default queue, submit the PR
-    # then wait for the queue to land it.
-    assert (
-        ci_utils.main(
-            ["1243", "--merge"],
-            host=host,
-            clock=no_sleep,
-            open_url=open_url,
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 0
-    )
-    assert requests[0].full_url == "https://api.trunk.io/v1/submitPullRequest"
-    assert requests[0].get_header("X-api-token") == "test-token"
-    assert requests[0].data is not None
-    assert json.loads(cast(bytes, requests[0].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": _RN},
-        "pr": {"number": 1243},
-        "targetBranch": "main",
-        "priority": 100,
-        "noBatch": False,
-    }
-    assert requests[1].full_url == "https://api.trunk.io/v1/getSubmittedPullRequest"
-    assert "PR #1243 merged by the Trunk merge queue" in capsys.readouterr().out
-
-    assert gh_calls[0][:4] == ["gh", "pr", "view", "1243"]
-
-
-def test_wait_merge_trunk_failed_state_prints_full_payload(no_sleep, poll, capsys) -> None:
-    """Task #2541: a failed/cancelled Trunk submission often carries an empty
-    `reason`, so the old one-line print was undiagnosable (five first-submit
-    failures 2026-09-06 left no trace). The full getSubmittedPullRequest
-    payload must be printed on the terminal branch."""
-    host = poll(CIStatus.ALL_PASSED)
-    open_url = urlopen_sequence(
-        [
-            TrunkResponse({"accepted": True}),
-            TrunkResponse({"state": "failed", "details": {"message": "batch rejected"}}),
-        ],
-        [],
-    )
-    assert (
-        ci_utils.main(
-            ["1243", "--merge"],
-            host=host,
-            clock=no_sleep,
-            open_url=open_url,
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 1
-    )
-    err = capsys.readouterr().err
-    assert "PR #1243 Trunk queue failed" in err
-    assert "full getSubmittedPullRequest payload" in err
-    assert '"state": "failed"' in err
-    assert '"batch rejected"' in err
-
-
-def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, capsys) -> None:
-    host = poll(CIStatus.ALL_PASSED)
-    open_url = urlopen_sequence(
-        [
-            urllib.error.URLError("network down"),
-            urllib.error.URLError("network down"),
-        ],
-        [],
-    )
-    # Two failed submit attempts (retried once) -> exit 4.
-    assert (
-        ci_utils.main(
-            ["1243", "--merge"],
-            host=host,
-            clock=no_sleep,
-            open_url=open_url,
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 4
-    )
-    assert "Trunk queue submission failed" in capsys.readouterr().err
-
-
 def test_wait_usage_errors_exit_two() -> None:
     with pytest.raises(SystemExit) as e:
         ci_utils.main(
@@ -516,193 +361,6 @@ def test_json_probe_pending_is_not_terminal(gh: Any, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["verdict"] == "pending"
     assert payload["terminal"] is False
-
-
-def test_queue_status_prints_state_and_items(capsys) -> None:
-    requests: list[urllib.request.Request] = []
-    open_url = urlopen_sequence(
-        [
-            TrunkResponse(
-                {
-                    "state": "running",
-                    "concurrency": 5,
-                    "enqueuedPullRequests": [
-                        {
-                            "state": "testing",
-                            "prNumber": 1900,
-                            "prTitle": "feat: x",
-                            "priorityName": "high",
-                            "prSha": "abc123abc123abc123",
-                        },
-                        {
-                            "state": "pending",
-                            "prNumber": 1901,
-                            "prTitle": "fix: y",
-                            "priorityName": "medium",
-                            "prSha": "def456def456def456",
-                        },
-                    ],
-                }
-            )
-        ],
-        requests,
-    )
-    assert (
-        ci_utils.main(
-            ["--queue-status"],
-            clock=TEST_CLOCK,
-            open_url=open_url,
-            host=fake_host(),
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 0
-    )
-    out = capsys.readouterr().out
-    assert "state=running" in out
-    assert "#1900 [testing] feat: x" in out
-    assert "#1901 [pending] fix: y" in out
-    assert requests[0].full_url == "https://api.trunk.io/v1/getQueue"
-    assert requests[0].get_header("X-api-token") == "test-token"
-    assert json.loads(cast(bytes, requests[0].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": _RN},
-        "targetBranch": "main",
-    }
-
-
-def test_queue_status_empty_queue(capsys) -> None:
-    open_url = urlopen_sequence(
-        [TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []
-    )
-    assert (
-        ci_utils.main(
-            ["--queue-status"],
-            clock=TEST_CLOCK,
-            open_url=open_url,
-            host=fake_host(),
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 0
-    )
-    assert "No PRs in the queue" in capsys.readouterr().out
-
-
-def test_queue_status_json_prints_raw_payload(capsys) -> None:
-    open_url = urlopen_sequence(
-        [TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []
-    )
-    assert (
-        ci_utils.main(
-            ["--queue-status", "--json"],
-            clock=TEST_CLOCK,
-            open_url=open_url,
-            host=fake_host(),
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 0
-    )
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["state"] == "running"
-
-
-def test_queue_status_api_error_exits_three(capsys) -> None:
-    open_url = urlopen_sequence([urllib.error.URLError("network down")], [])
-    assert (
-        ci_utils.main(
-            ["--queue-status"],
-            clock=TEST_CLOCK,
-            open_url=open_url,
-            host=fake_host(),
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 3
-    )
-    assert "Trunk queue status error" in capsys.readouterr().err
-
-
-def test_queue_status_requires_token(capsys) -> None:
-    assert (
-        ci_utils.main(
-            ["--queue-status"],
-            clock=TEST_CLOCK,
-            host=fake_host(),
-            open_url=FakeUrlOpener(),
-            workflows=True,
-            env={},
-        )
-        == 3
-    )
-    assert "TRUNK_API_TOKEN is required" in capsys.readouterr().err
-
-
-def test_evict_success_exits_zero(capsys) -> None:
-    requests: list[urllib.request.Request] = []
-    open_url = urlopen_sequence([TrunkResponse({})], requests)
-    assert (
-        ci_utils.main(
-            ["1877", "--evict"],
-            clock=TEST_CLOCK,
-            open_url=open_url,
-            host=fake_host(),
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 0
-    )
-    assert "PR #1877 cancelled from the Trunk merge queue" in capsys.readouterr().err
-    assert requests[0].full_url == "https://api.trunk.io/v1/cancelPullRequest"
-    assert json.loads(cast(bytes, requests[0].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": _RN},
-        "pr": {"number": 1877},
-        "targetBranch": "main",
-    }
-
-
-def test_evict_not_in_queue_exits_one(capsys) -> None:
-    """cancelPullRequest answers 404 when the PR is not in the queue; a
-    nonzero exit keeps a typo'd PR number from reading as a clean evict."""
-    responses: list[TrunkResponse | urllib.error.URLError] = []
-    responses.append(
-        urllib.error.HTTPError(
-            "https://api.trunk.io/v1/cancelPullRequest",
-            404,
-            "Not Found",
-            email.message.Message(),
-            None,
-        )
-    )
-    open_url = urlopen_sequence(responses, [])
-    assert (
-        ci_utils.main(
-            ["1877", "--evict"],
-            clock=TEST_CLOCK,
-            open_url=open_url,
-            host=fake_host(),
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 1
-    )
-    assert "not in the Trunk merge queue" in capsys.readouterr().err
-
-
-def test_evict_api_error_exits_four(capsys) -> None:
-    open_url = urlopen_sequence([urllib.error.URLError("network down")], [])
-    assert (
-        ci_utils.main(
-            ["1877", "--evict"],
-            clock=TEST_CLOCK,
-            open_url=open_url,
-            host=fake_host(),
-            workflows=True,
-            env={"TRUNK_API_TOKEN": "test-token"},
-        )
-        == 4
-    )
-    assert "Trunk queue cancel error" in capsys.readouterr().err
 
 
 def test_evict_requires_pr_number() -> None:
