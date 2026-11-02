@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 from uuid import UUID, uuid4
 
-import httpx
 import psycopg
 import pytest
 
@@ -25,6 +24,7 @@ from base.events.live.announce import (
 )
 from base.events.live.bus import EventBus
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_get
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
 from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
 from tests.e2e.fixture_environment import E2EEnv
@@ -151,7 +151,7 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
                 "ORDER BY id DESC LIMIT 1",
                 (agent_id,),
             ).fetchone()
-        timeline = httpx.get(
+        timeline = gateway_get(
             f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=10.0
         ).json()["items"]
         replied = any(
@@ -172,12 +172,12 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
         else None
     )
 
-    timeline = httpx.get(
+    timeline = gateway_get(
         f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=10.0
     ).json()["items"]
     assert not any(RESUMED_REPLY in str(item["payload"]) for item in timeline)
 
-    roster = httpx.get(f"{e2e_env.gateway_url}/api/agents/roster", timeout=10.0).json()
+    roster = gateway_get(f"{e2e_env.gateway_url}/api/agents/roster", timeout=10.0).json()
     card = next(card for card in roster["agents"] if card["agent_id"] == agent_id)
     assert card["open_impersonation_session_id"] == session_id
     assert card["open_impersonation_status"] == "active"
@@ -207,7 +207,7 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
                 "FROM agent_impersonations WHERE id=%s",
                 (lease_id,),
             ).fetchone()
-        timeline = httpx.get(
+        timeline = gateway_get(
             f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=10.0
         ).json()["items"]
         replied = any(RESUMED_REPLY in str(item["payload"]) for item in timeline)

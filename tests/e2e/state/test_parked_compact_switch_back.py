@@ -13,6 +13,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from base.db import Database
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_get, gateway_post
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e.fakes.scenarios.parked_compact import (
     POST_COMPACT_NARRATION,
@@ -25,7 +26,7 @@ from tests.fixtures.gateway_config import post_spawn
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:
-    return httpx.get(
+    return gateway_get(
         f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
     ).json()["items"]
 
@@ -162,4 +163,4 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(
         )
     finally:
         with contextlib.suppress(httpx.HTTPError):
-            httpx.post(f"{gateway_url}/api/agents/{agent_b}/terminate", timeout=5.0)
+            gateway_post(f"{gateway_url}/api/agents/{agent_b}/terminate", timeout=5.0)

@@ -6,7 +6,6 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 
@@ -14,6 +13,7 @@ from base.config import settings
 from base.db import Database
 from base.paths import resolve_meiva_home, workspace_dir
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_post
 from tests.e2e._db import (
     chat_and_wait,
     checkpoint_values,
@@ -188,7 +188,7 @@ def test_sdk_calls_resolve_relative_paths_against_the_logical_cwd(
 
 
 def _restart_and_wait(agent_id: int) -> None:
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
         json={"message": "restart code effects"},
         timeout=10.0,

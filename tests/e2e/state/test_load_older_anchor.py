@@ -4,10 +4,10 @@ import re
 import time
 from typing import TypedDict
 
-import httpx
 import pytest
 from playwright.sync_api import Page, Route
 
+from tests.e2e._credentials import gateway_get
 from tests.e2e.fixture_environment import E2EEnv
 
 _SAMPLER_JS = """
@@ -147,7 +147,7 @@ def _wait_landing(
         if n > before_n:
             return n
         page.wait_for_timeout(200)
-    rest_items = httpx.get(
+    rest_items = gateway_get(
         f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
         timeout=30.0,
     ).json()["items"]
@@ -195,7 +195,7 @@ def _run_rounds(
                 break
             page.wait_for_timeout(200)
         if n <= before_n:
-            rest = httpx.get(
+            rest = gateway_get(
                 f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
                 timeout=30.0,
             ).json()["items"]
@@ -300,7 +300,7 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     page.click('[data-testid="composer-send"]')
     deadline = time.monotonic() + 120.0
     while True:
-        items = httpx.get(
+        items = gateway_get(
             f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
             timeout=90.0,
         ).json()["items"]

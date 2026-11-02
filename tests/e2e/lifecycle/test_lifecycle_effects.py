@@ -8,12 +8,12 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 
 from base.config import settings
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_get, gateway_post
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
@@ -52,7 +52,7 @@ def _inbound(agent_id: int) -> list[tuple[str, str, str]]:
 
 def _terminate(agent_id: int) -> None:
     with contextlib.suppress(Exception):
-        httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/terminate", timeout=5.0)
+        gateway_post(f"{GATEWAY_URL}/api/agents/{agent_id}/terminate", timeout=5.0)
         wait_for_status(agent_id, "terminated", timeout=15.0)
 
 
@@ -109,7 +109,7 @@ def test_sdk_spawn_starts_a_child_that_runs_the_prompt(
         assert ("chat", f"agent:{parent}") in [(k, s) for k, s, _ in _inbound(child)], _inbound(
             child
         )
-        got = httpx.get(f"{GATEWAY_URL}/api/agents/{child}", timeout=10.0)
+        got = gateway_get(f"{GATEWAY_URL}/api/agents/{child}", timeout=10.0)
         got.raise_for_status()
         assert got.json()["agent_id"] == child
     finally:
@@ -122,7 +122,7 @@ def test_external_terminate_stores_a_message_that_greets_the_revival(
 ) -> None:
     agent = spawned_agent
     chat_and_wait(agent, "hello")
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent}/terminate",
         json={"message": world.TERMINATE_NOTE},
         timeout=10.0,
@@ -144,7 +144,7 @@ def test_forced_terminate_kills_a_running_exec_and_its_process(
 ) -> None:
     agent = spawned_agent
     _start_long_exec(agent)
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent}/terminate", json={"force": True}, timeout=10.0
     ).raise_for_status()
     wait_for_status(agent, "terminated", timeout=30.0)
@@ -158,7 +158,7 @@ def _assert_exec_never_finishes() -> None:
 
 
 def _start_long_exec(agent_id: int) -> None:
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/messages",
         json={"content": "run the long job", "source": "user"},
         timeout=10.0,
@@ -173,7 +173,7 @@ def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
 ) -> None:
     agent = spawned_agent
     _start_long_exec(agent)
-    cancelled = httpx.post(f"{GATEWAY_URL}/api/agents/{agent}/cancel", timeout=30.0)
+    cancelled = gateway_post(f"{GATEWAY_URL}/api/agents/{agent}/cancel", timeout=30.0)
     cancelled.raise_for_status()
     assert cancelled.json() == {"status": "cancelled"}
     wait_for_status(agent, "idling", timeout=30.0)

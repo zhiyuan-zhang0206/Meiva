@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from playwright.sync_api import ConsoleMessage, Page
@@ -12,6 +11,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from base.sessions.tests.poll_until import poll_until
 from scripts.verify.scripted_reply import REPLY_TEXT
+from tests.e2e._credentials import gateway_get
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv
 
@@ -36,7 +36,7 @@ def _wait_for_scripted_reply_in_timeline(gateway_url: str, agent_id: int) -> lis
 
     def scripted_reply_reached_timeline() -> tuple[bool, object]:
         nonlocal items
-        items = httpx.get(
+        items = gateway_get(
             f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
         ).json()["items"]
         reply_seen = any(it["kind"] == "agent_chat" and REPLY_TEXT in it["payload"] for it in items)

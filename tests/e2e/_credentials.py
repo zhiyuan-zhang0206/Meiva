@@ -1,36 +1,37 @@
-"""The e2e stack's credentials: a real cluster secret and a real write generation.
+# meiva:note
+# The e2e stack's credentials: a real cluster secret and a real write generation.
+#
+# The cluster API always authenticates, so the direct-process stack authenticates the
+# way a started cluster does, with the same stores and none of the launcher's custody:
+#
+# - the e2e home gets a cluster secret (`MEIVA_CLUSTER_SECRET`, declared in its `.env`
+#   like every cluster-scope key) and an active write generation in its private ledger
+#   (`base.host.db_authority.tests.generation.seed_active_generation`, the ledger `meiva start`
+#   births at first start);
+# - the test process carries the generation marker (`MEIVA_DB_GENERATION`, the one a launcher
+#   delivers beside the login), which tells the boot pass of every process descending from
+#   it that its database login was delivered: this stack has no root custody to admit an
+#   operator delivery from the ledger;
+# - each process the stack starts is delivered the machine API token of its class in
+#   `MEIVA_API_TOKEN`, as `cli.commands.data_plane.bringup.api_delivery` delivers it:
+#   the gateway its gateway-class token (so its `/ops` dials are accepted), the ops
+#   daemon and the agent host the runner-class token (agent children inherit it);
+# - the test process reaches the gateway as an operator would, with the human secret as
+#   a Bearer header (`gateway_get` and the other helpers below add it to a request that
+#   names none).
+#
+# No product admission rule is bypassed or weakened for the fixture.
 
-The cluster API always authenticates, so the direct-process stack authenticates the
-way a started cluster does, with the same stores and none of the launcher's custody:
-
-- the e2e home gets a cluster secret (`MEIVA_CLUSTER_SECRET`, declared in its `.env`
-  like every cluster-scope key) and an active write generation in its private ledger
-  (`base.host.db_authority.tests.generation.seed_active_generation`, the ledger `meiva start`
-  births at first start);
-- the test process carries the generation marker (`MEIVA_DB_GENERATION`, the one a launcher
-  delivers beside the login), which tells the boot pass of every process descending from
-  it that its database login was delivered: this stack has no root custody to admit an
-  operator delivery from the ledger;
-- each process the stack starts is delivered the machine API token of its class in
-  `MEIVA_API_TOKEN`, as `cli.commands.data_plane.bringup.api_delivery` delivers it:
-  the gateway its gateway-class token (so its `/ops` dials are accepted), the ops
-  daemon and the agent host the runner-class token (agent children inherit it);
-- the test process reaches the gateway as an operator would, with the human secret as
-  a Bearer header (`gateway_credentials` / `install_gateway_client_credentials`).
-
-No product admission rule is bypassed or weakened for the fixture.
-"""
 
 from __future__ import annotations
 
 import secrets
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
-import pytest
 from playwright.sync_api import Browser, BrowserContext
 
 from base.config import set_field, settings
@@ -91,22 +92,58 @@ def forget_credentials() -> None:
     _current = None
 
 
-@pytest.fixture(autouse=True)
-def gateway_client_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Give this test's own HTTP calls to the e2e gateway the human secret as bearer.
+__all__ = [
+    "gateway_client",
+    "gateway_delete",
+    "gateway_get",
+    "gateway_patch",
+    "gateway_post",
+    "gateway_put",
+]
 
-    Scoped to the gateway's origin and to requests carrying no `Authorization` of their
-    own, so the test's calls to other servers and its explicit headers are untouched.
-    """
-    original = httpx.Client.send
 
-    def send(client: httpx.Client, request: httpx.Request, **kwargs: object) -> httpx.Response:
-        if str(request.url).startswith(GATEWAY_URL) and "authorization" not in request.headers:
+# meiva:note
+# The operator's bearer, added to a request that carries no `Authorization` of its own and read
+# per request: a test that mints a fresh generation gets that generation's secret without
+# rebuilding its client.
+class _OperatorBearer(httpx.Auth):
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        if "authorization" not in request.headers:
             request.headers.update(bearer_header(current_credentials().secret))
-        return original(client, request, **kwargs)  # pyright: ignore[reportArgumentType]
+        yield request
 
-    monkeypatch.setattr(httpx.Client, "send", send)
-    yield
+
+# meiva:note
+# An `httpx.Client` that authenticates against the e2e gateway; every helper below is one call
+# on it, so a test never builds the credential itself.
+def gateway_client(**kwargs: Any) -> httpx.Client:
+    kwargs.setdefault("timeout", 30.0)
+    return httpx.Client(auth=_OperatorBearer(), **kwargs)
+
+
+def _call(method: str, url: str, **kwargs: Any) -> httpx.Response:
+    with gateway_client() as client:
+        return client.request(method, url, **kwargs)
+
+
+def gateway_get(url: str, **kwargs: Any) -> httpx.Response:
+    return _call("GET", url, **kwargs)
+
+
+def gateway_post(url: str, **kwargs: Any) -> httpx.Response:
+    return _call("POST", url, **kwargs)
+
+
+def gateway_put(url: str, **kwargs: Any) -> httpx.Response:
+    return _call("PUT", url, **kwargs)
+
+
+def gateway_patch(url: str, **kwargs: Any) -> httpx.Response:
+    return _call("PATCH", url, **kwargs)
+
+
+def gateway_delete(url: str, **kwargs: Any) -> httpx.Response:
+    return _call("DELETE", url, **kwargs)
 
 
 # meiva:note
@@ -114,8 +151,8 @@ def gateway_client_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
 # connections before any process serves them, so only a response proves it. A
 # session that never minted credentials runs without the stack (a suite that
 # stubs every API call never starts one), so there is nothing to log in to, and
-# the probe must answer without a request: the autouse client-credential hook
-# intercepts this probe's own call and would fail it for the missing mint.
+# the probe must answer without a request — it uses plain httpx, not the
+# credential-carrying helpers, which would need the mint this probe is asking about.
 # meiva:link docs/conventions/testing.md
 def _gateway_serving() -> bool:
     if _current is None:

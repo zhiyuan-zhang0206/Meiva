@@ -5,11 +5,11 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-import httpx
 import pytest
 from playwright.sync_api import Page
 
 from base.api_contracts.agent_contract import AgentStatus
+from tests.e2e._credentials import gateway_get
 from tests.e2e._db import wait_for_status
 from tests.e2e.fakes.scenarios.error_recovery import ERROR_MSG, RECOVERY_REPLY
 from tests.e2e.fixture_environment import E2EEnv
@@ -27,7 +27,7 @@ def _poll_timeline_items(
 ) -> list[dict[str, Any]]:
     deadline = time.monotonic() + timeout
     while True:
-        items = httpx.get(
+        items = gateway_get(
             f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
         ).json()["items"]
         if is_ready(items) or time.monotonic() > deadline:

@@ -19,6 +19,7 @@ from base.sessions.backend import PtySessionBackend
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_get, gateway_post
 from tests.e2e._db import chat_and_wait, wait_for_status
 from tests.e2e._ports import GATEWAY_SOCKET, GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
@@ -115,7 +116,7 @@ def test_background_completion_respects_the_hourly_policy(
     spawned_agent: int, clean_shell_world: None
 ) -> None:
     agent = spawned_agent
-    response = httpx.post(
+    response = gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent}/restart",
         json={
             "message": "apply hourly policy",
@@ -189,7 +190,7 @@ def test_session_survives_agent_host_and_gateway_restarts(
         )
 
     usable("initial")
-    restart = httpx.post(
+    restart = gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent}/restart",
         json={"message": "restart shell effects"},
         timeout=30.0,
@@ -217,7 +218,7 @@ def test_session_survives_agent_host_and_gateway_restarts(
 
             def gateway_ready() -> tuple[bool, object]:
                 try:
-                    response = httpx.get(f"{GATEWAY_URL}/api/agents", timeout=2.0)
+                    response = gateway_get(f"{GATEWAY_URL}/api/agents", timeout=2.0)
                 except httpx.HTTPError as exc:
                     return False, repr(exc)
                 return response.status_code == 200, response.status_code
@@ -299,7 +300,7 @@ def test_at_watcher_revives_a_terminated_owner(spawned_agent: int, clean_shell_w
     agent = spawned_agent
     chat_and_wait(agent, "arm a watcher before termination")
     wid = int((world.sandbox() / "resurrection-id").read_text())
-    httpx.post(f"{GATEWAY_URL}/api/agents/{agent}/terminate", timeout=10.0).raise_for_status()
+    gateway_post(f"{GATEWAY_URL}/api/agents/{agent}/terminate", timeout=10.0).raise_for_status()
     wait_for_status(agent, "terminated")
 
     def revived() -> tuple[bool, object]:

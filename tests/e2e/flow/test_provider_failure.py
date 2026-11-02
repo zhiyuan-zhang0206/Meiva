@@ -2,7 +2,6 @@ import asyncio
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
-import httpx
 import psycopg
 import pytest
 from langchain_core.messages import AIMessage
@@ -19,6 +18,7 @@ from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
 from base.paths import plugins_dir, resolve_meiva_home
+from tests.e2e._credentials import gateway_get
 from tests.e2e._ports import FRONTEND_URL, GATEWAY_URL
 
 
@@ -72,11 +72,11 @@ def test_broken_provider_preserves_browser_history_text_and_stop(
         agent_id, historical = executor.submit(
             asyncio.run, seed_running_agent(database_gate)
         ).result(30)
-    unauthorized = httpx.get(f"{GATEWAY_URL}/api/agents", headers={"Authorization": ""})
+    unauthorized = gateway_get(f"{GATEWAY_URL}/api/agents", headers={"Authorization": ""})
     assert unauthorized.status_code == 401
-    models = httpx.get(f"{GATEWAY_URL}/api/models")
+    models = gateway_get(f"{GATEWAY_URL}/api/models")
     assert models.status_code == 503 and models.json()["code"] == "model_catalog_unavailable"
-    roster = httpx.get(f"{GATEWAY_URL}/api/agents/roster").json()
+    roster = gateway_get(f"{GATEWAY_URL}/api/agents/roster").json()
     assert roster["agents"][0]["supports_vision"] is None
     page = playwright_page
     page.goto(f"{FRONTEND_URL}?agent_id={historical}")

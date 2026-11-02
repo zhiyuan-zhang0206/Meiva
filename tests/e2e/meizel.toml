@@ -2,19 +2,16 @@ exports = ["conftest.py", "fakes", "process_support.py", "visual"]
 
 [uses]
 "_credentials.py" = ["_ports.py"]
-"_db.py" = ["_ports.py"]
+"_db.py" = ["_credentials.py", "_ports.py"]
 "conftest.py" = ["_credentials.py", "_db.py", "_ports.py", "_truncate.py", "fixture_environment.py", "frontend_build.py", "process_support.py"]
 "flow" = ["_credentials.py", "_db.py", "_ports.py", "fakes", "fixture_environment.py", "process_support.py"]
 "frontend_build.py" = ["process_support.py"]
 "lifecycle" = ["_credentials.py", "_db.py", "_ports.py", "fakes", "fixture_environment.py"]
-"plugins" = ["_db.py", "_ports.py", "fakes"]
+"plugins" = ["_credentials.py", "_db.py", "_ports.py", "fakes"]
 "process_support.py" = ["_credentials.py", "_ports.py", "_truncate.py"]
-"state" = ["_db.py", "_timeline.py", "fakes", "fixture_environment.py"]
+"state" = ["_credentials.py", "_db.py", "_timeline.py", "fakes", "fixture_environment.py"]
 "test_reserved_ports.py" = ["_ports.py"]
 "visual" = ["_ports.py"]
 
 [loads]
 "process_support.py" = ["services/agent_runner"]
-
-[debt.third-party-patch]
-"_credentials.py#monkeypatch.setattr httpx.Client.send" = 1

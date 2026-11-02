@@ -4,7 +4,6 @@ import os
 import time
 from typing import Any
 
-import httpx
 import psycopg
 from psycopg import sql
 
@@ -15,6 +14,7 @@ from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db import Database
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_post
 from tests.e2e._ports import GATEWAY_URL
 
 
@@ -45,7 +45,7 @@ def checkpoint_values(agent_id: int) -> dict[str, Any]:
 
 
 def chat_and_wait(agent_id: int, text: str, *, timeout: float = 90.0) -> None:
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/messages",
         json={"content": text, "source": "user"},
         timeout=10.0,

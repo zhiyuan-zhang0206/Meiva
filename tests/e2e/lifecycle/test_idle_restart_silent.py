@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from langchain_core.messages import AIMessage
@@ -12,6 +11,7 @@ from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver a
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
+from tests.e2e._credentials import gateway_post
 from tests.e2e._ports import GATEWAY_URL
 
 
@@ -88,7 +88,7 @@ def _assert_silent_and_alive_after_restart(values: dict[str, Any]) -> None:
 def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
     agent_id = spawned_agent
 
-    resp = httpx.post(
+    resp = gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/messages",
         json={"content": "\u8bf7\u8bbe\u7f6e\u5de5\u4f5c\u76ee\u5f55", "source": "user"},
         timeout=10.0,
@@ -101,7 +101,7 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
         f"pre-restart cwd not written to plugin state: {values.get('meiva_code__cwd')!r}"
     )
 
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
         json={"message": "restart idle agent"},
         timeout=10.0,

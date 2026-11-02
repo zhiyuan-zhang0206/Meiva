@@ -4,7 +4,6 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
-import httpx
 import psycopg
 import pytest
 
@@ -17,7 +16,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.sessions.tests.poll_until import poll_until
 from ops.cluster.rpc import RpcClient, RpcConfig
-from tests.e2e._credentials import current_credentials
+from tests.e2e._credentials import current_credentials, gateway_get, gateway_post
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv
 
@@ -74,7 +73,7 @@ def test_resurrect_brings_back_terminated_agent(
             ).result(timeout=120)
         assert response["status"] == "spawned"
     else:
-        response = httpx.post(
+        response = gateway_post(
             f"{e2e_env.gateway_url}/api/agents/{agent_id}/messages",
             json={"content": "wake up", "source": "user"},
             timeout=90,
@@ -104,7 +103,7 @@ def test_resurrect_brings_back_terminated_agent(
             and resurrect == (1,)
             and chats in ([("claimed", True)], [("done", True)])
         ):
-            response = httpx.get(
+            response = gateway_get(
                 f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
                 timeout=30,
             )
