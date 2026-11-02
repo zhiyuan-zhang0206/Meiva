@@ -504,6 +504,14 @@ stop --yes --close-shell-sessions` with the window's other stop choices (`--keep
 on the gateway), confirm `run/lifecycle-op.json` records a completed stop, then rerun
 `up` alone.
 
+The same refusal is not specific to updates: on a home whose root is already running,
+`meiva start --only-service NAME` answers with the same sentence and lists the entire
+roster, because the launch digest binds the whole selection. A running host therefore has
+no supported way to restart one service — `--only-service` is a *start* selection, not a
+restart scope, and reaching it means stopping the tree. Plan a single-service restart as
+the window it really is; do not discover it while a service is already down (2026-11-02:
+Grafana was stopped to reload its environment and could not be started back alone).
+
 `run` accepts both halves' flags, executes `down` then `up` in one log and stops
 at the first failure. It reports the failed half to repair and rerun; a failed
 `down` never enters `up`. `run --dry-run` (in place of `--execute`) previews both halves. An authorized
