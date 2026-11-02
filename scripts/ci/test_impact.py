@@ -21,14 +21,10 @@ from meizel.allowances import POLICY, Policy, parse
 from meizel.checkout import GitRepo
 from meizel.contracts.sync import prepare_policy_snapshot
 from meizel.test_graph.cutoff import (
-    effective_purity_from_manifests,
-    manifest_boundary_unchanged,
-    manifest_has_no_debt_for_file,
-    module_interface_unchanged,
-    strict_cutoff_eligible,
+    package_local_tests as package_local_tests,
 )
 from meizel.test_graph.cutoff import (
-    package_local_tests as package_local_tests,
+    strict_cutoff_eligible,
 )
 from meizel.test_graph.impact import propagate_test_consumers
 from meizel.test_graph.model import CutoffContext
@@ -404,38 +400,6 @@ def _ancestor_manifests(root: Path, path: str) -> dict[str, str]:
             break
         directory = directory.rpartition("/")[0]
     return manifests
-
-
-def effective_file_purity(root: Path, path: str) -> str:
-    return effective_purity_from_manifests(path, _ancestor_manifests(root, path))
-
-
-def file_has_no_recorded_debt(root: Path, path: str) -> bool:
-    return manifest_has_no_debt_for_file(path, _ancestor_manifests(root, path))
-
-
-def public_interface_unchanged(base_root: Path, head_root: Path, path: str) -> bool:
-    base_file, head_file = base_root / path, head_root / path
-    if not (path.endswith(".py") and base_file.is_file() and head_file.is_file()):
-        return False
-    base_manifests = _ancestor_manifests(base_root, path)
-    head_manifests = _ancestor_manifests(head_root, path)
-    if (
-        effective_purity_from_manifests(path, base_manifests) != "strict"
-        or effective_purity_from_manifests(path, head_manifests) != "strict"
-        or not manifest_has_no_debt_for_file(path, base_manifests)
-        or not manifest_has_no_debt_for_file(path, head_manifests)
-        or not manifest_boundary_unchanged(path, base_manifests, head_manifests)
-    ):
-        return False
-    try:
-        base_source = base_file.read_text(encoding="utf-8")
-        head_source = head_file.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    return module_interface_unchanged(
-        path, base_source, head_source, _policy(head_root).public_surface
-    )
 
 
 class _CheckoutScope(Protocol):

@@ -364,6 +364,65 @@ def test_policy_surface_reads_a_declared_kind_s_vocabulary_by_its_direction(
     assert "`meizel.policy.toml [ambient.settings]` `app.Settings.load()`" in out
 
 
+STATE = '\n[state]\n"reader.py" = ["registry"]\n'
+REGISTRY = '\n[ambient]\nregistry = ["app.Table.open()"]\n'
+
+
+# meiva:note
+# A `[state]` line may name only a kind the policy of its own revision declares. The revision on one
+# side declares `registry` and the other does not, so each side must be read with its own kinds:
+# reading either with the other's (or with none) would report its manifest as unread instead of
+# reporting the declaration that appeared or went away.
+@pytest.mark.parametrize(
+    ("declared_in", "verb"),
+    [("base", "removed"), ("head", "added")],
+)
+def test_policy_surface_reads_each_side_with_the_kinds_its_own_policy_declares(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+    declared_in: str,
+    verb: str,
+) -> None:
+    declaring = {"meizel.policy.toml": POLICY + REGISTRY, "app/meizel.toml": MANIFEST + STATE}
+    silent = {"meizel.policy.toml": POLICY, "app/meizel.toml": MANIFEST}
+    base, head = (declaring, silent) if declared_in == "base" else (silent, declaring)
+    root = make_repo({**LOADER, **READER, "meizel.toml": ROOT, **base})
+    commit(root)
+    write(root, head)
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "unread" not in out
+    assert f"**{verb}** `app/meizel.toml [state]` `reader.py` = [registry]" in out
+    assert f"**{verb}** `meizel.policy.toml [ambient.registry]` `app.Table.open()`" in out
+    assert "1 narrower, 1 wider" in out
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "direction", "verb"),
+    [
+        ("", '\n[public-surface]\nnames = ["__api__"]\n', "wider", "added"),
+        ('\n[public-surface]\nnames = ["__api__"]\n', "", "narrower", "removed"),
+    ],
+)
+def test_policy_surface_reads_a_public_surface_name_by_its_direction(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+    before: str,
+    after: str,
+    direction: str,
+    verb: str,
+) -> None:
+    files = {**LOADER, "app/meizel.toml": MANIFEST, "meizel.toml": ROOT}
+    root = make_repo({**files, "meizel.policy.toml": POLICY + before})
+    commit(root)
+    write(root, {"meizel.policy.toml": POLICY + after})
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert f"1 {direction}" in out
+    assert "unknown" not in out
+    assert f"**{verb}** `meizel.policy.toml [public-surface.names]` `__api__`" in out
+
+
 def test_policy_surface_pairs_a_declaration_with_git_rename(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:

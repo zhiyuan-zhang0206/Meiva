@@ -291,3 +291,34 @@ def test_the_new_file_must_exist(
     write(root, {"app/test_x.py": f"{HEADER}{TEST}"})
     assert run(root, "debt", "carry", "--move-symbol", "app/test_x.py::fake=app/calls.py") == 2
     assert "app/calls.py is not a file" in capsys.readouterr().err
+
+
+# meiva:note
+# What a symbol's debt counts depends on the state the tree declares: `fetch` reads `registry`, a
+# kind only this tree's policy names, so its entry follows it only if the manifests that say which
+# files hold that state were read with the tree's own kinds.
+def test_a_symbol_reading_a_declared_kind_carries_its_entry(make_repo: RepoFactory) -> None:
+    table = "class RegistryTable:\n    @classmethod\n    def from_settings(cls):\n        return cls()\n"
+    fetch = (
+        "from lib.table import RegistryTable\n\n\n"
+        "def fetch():\n    return RegistryTable.from_settings()\n"
+    )
+    root = make_repo(
+        {
+            "lib/__init__.py": "",
+            "lib/table.py": table,
+            "lib/meizel.toml": 'exports = ["table.py"]\n\n[state]\n"table.py" = ["registry"]\n',
+            "app/__init__.py": "",
+            "app/old.py": f"{fetch}\n\ndef keep() -> int:\n    return 1\n",
+            "meizel.toml": '[roles]\napplication = ["app", "lib"]\n\n[uses]\n"app" = ["lib"]\n',
+            "meizel.policy.toml": '[ambient]\nregistry = ["RegistryTable.from_settings()"]\n',
+        }
+    )
+    assert run(root, "debt", "record", "app", "--owner", "#1", "--until", "moves") == 0
+    git(root, "add", "-A")
+    commit(root)
+    key = "registry lib.table.RegistryTable.from_settings"
+    assert debt_of(root, "app") == {"ambient-read": {f"old.py#{key}": 1}}
+    write(root, {"app/old.py": "def keep() -> int:\n    return 1\n", "app/new.py": fetch})
+    assert carry(root, "--move-symbol", "app/old.py::fetch=app/new.py") == 0
+    assert debt_of(root, "app") == {"ambient-read": {f"new.py#{key}": 1}}

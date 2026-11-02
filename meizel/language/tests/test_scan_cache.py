@@ -220,6 +220,31 @@ def test_scan_all_hits_sqlite_cache_and_invalidates_on_same_length_edit(tmp_path
     assert third["pkg/a.py"].facts[0].names == ("OTHER",)
 
 
+# meiva:note
+# A cached scan whose file acquires a declared kind is decoded with the kinds the policy declares,
+# so it is a hit; decoded with the standard library's alone, the entry would be refused as unknown
+# and the file scanned again on every run.
+def test_a_cached_scan_of_a_declared_kind_is_a_hit(tmp_path: Path) -> None:
+    root = _init_git_repo(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/table.py": "registry = {}\n",
+            "pkg/a.py": "from pkg.table import registry\n\nUSE = registry\n",
+        },
+    )
+    policy = Policy(state_kinds=("registry",))
+    sources = Sources(names={"pkg.table.registry": "registry"})
+    first_repo = _RecordingCheckout(GitRepo(root))
+    first = scan_all(first_repo.universe(), sources, jobs=1, policy=policy)
+    assert [site.kind for site in first["pkg/a.py"].ambient] == ["registry"]
+
+    second_repo = _RecordingCheckout(GitRepo(root))
+    second = scan_all(second_repo.universe(), sources, jobs=1, policy=policy)
+    assert second_repo.loaded_bytes == []
+    assert second == first
+
+
 def test_cross_file_patch_target_deps_invalidate_when_target_module_changes(
     tmp_path: Path,
 ) -> None:

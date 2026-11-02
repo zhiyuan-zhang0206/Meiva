@@ -9,8 +9,6 @@ tags:
 
 # meizel/ — Remaining Host-Specific Knowledge
 
-Parent: [[meizel/docs/meizel.meiva.okf.md|the meizel node]].
-
 The code under `meizel/` is not yet free of this repository: the places below still name its paths,
 fixtures, roles or vocabulary. This is the work list for the next decoupling change, not a statement
 of what is acceptable; each entry should move to the policy, to a manifest, or to the host's own
@@ -21,10 +19,10 @@ tooling. Paths are non-test code and lines are those of the commit that wrote th
     `_GLOBAL_NAMES` (`uv.lock`, `.github/workflows/ci.yml`); `impact.py:161` `schedules`,
     `impact.py:170` `ui/` and `impact.py:179` `.github/actions/`; `impact.py:259` and `:273`,
     `checkout_plan.py:28` and `:89`, `meizel/checkout.py:710` and `:715`: the `tests/e2e/` layout.
-  - `lanes.py:30-48` fixture names of the host's database and bus (`gateway_data_plane`,
+  - `lanes.py:25-47` fixture names of the host's database and bus (`gateway_data_plane`,
     `cluster_defaults_unset`, `aops_pool`, `aredis_inbound_listener`, `postgres_access`,
     `redis_access`, ...), `lanes.py:49` `NATIVE_MARKERS` (`native_permissions_helper`) and
-    `lanes.py:51-57` `NATIVE_MODULES`.
+    `lanes.py:51-59` `NATIVE_MODULES`.
 - Contracts: `contracts/enumerations.py:190` `_outside_rule` (`meizel/`, `docs/`);
   `contracts/ambient_read.py:50` `_GOVERNED_ROLES`, the host's role vocabulary.
 - Single decision owners (`owners/`): `decisions.py:33-54` and `:150-161` (the `postgres-dial`
@@ -46,3 +44,5 @@ tooling. Paths are non-test code and lines are those of the commit that wrote th
   `docs/conventions/python-conventions.md`.
 - Toolchain conventions, a weaker coupling: `source_evidence/loader.py:25`, `:26` and `:69` read
   `pnpm-lock.yaml`.
+
+Parent: [[meizel/docs/meizel.meiva.okf.md|the meizel node]].
