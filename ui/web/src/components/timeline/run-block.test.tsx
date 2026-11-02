@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 
 import { TurnBlock } from "./run-block";
@@ -59,5 +59,64 @@ describe("TurnBlock inner row windowing", () => {
 
     expect(container.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
     expect(container.querySelector('[data-timeline-spacer="turn-after"]')).not.toBeNull();
+  });
+
+  it("keeps the measured tail mounted while the live window follows its bottom", () => {
+    const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      readonly record: { callback: ResizeObserverCallback; targets: Set<Element> };
+      constructor(callback: ResizeObserverCallback) {
+        this.record = { callback, targets: new Set() };
+        observers.push(this.record);
+      }
+      observe(target: Element) { this.record.targets.add(target); }
+      unobserve(target: Element) { this.record.targets.delete(target); }
+      disconnect() { this.record.targets.clear(); }
+    });
+    const reportRowHeights = (blockSize: number) => {
+      for (const { callback, targets } of observers) {
+        const rows = [...targets].filter((target) => target.hasAttribute("data-turn-row"));
+        if (rows.length === 0) continue;
+        callback(
+          rows.map((target) => ({ target, borderBoxSize: [{ blockSize, inlineSize: 600 }] }) as unknown as ResizeObserverEntry),
+          {} as ResizeObserver,
+        );
+      }
+    };
+    const memberIds = Array.from({ length: 120 }, (_, i) => `${i + 1}.0`);
+    render(
+      <TurnBlock
+        id="1.0"
+        memberIds={memberIds}
+        summary={baseSummary}
+        expanded
+        onToggle={vi.fn()}
+        turnActive
+        liveWindow
+        onActivityAtBottomChange={vi.fn()}
+        windowedCount={120}
+        turnRows={20}
+        renderWindowedRow={(index) => (
+          <div data-testid="windowed-row" data-row-index={index}>
+            {`Row ${index}`}
+          </div>
+        )}
+      />,
+    );
+    const mountedIndexes = () =>
+      screen.getAllByTestId("windowed-row").map((row) => Number(row.getAttribute("data-row-index")));
+
+    const innerViewport = screen.getByTestId("activity-scroll-viewport");
+    Object.defineProperty(innerViewport, "clientHeight", { value: 390, configurable: true });
+    act(() => reportRowHeights(300));
+    const pinnedTopOfMeasuredRows = 120 * 304 - 390;
+    innerViewport.scrollTop = pinnedTopOfMeasuredRows;
+    fireEvent.scroll(innerViewport);
+    expect(mountedIndexes()).toEqual([117, 118, 119]);
+
+    innerViewport.scrollTop = 20_000;
+    fireEvent.scroll(innerViewport);
+    expect(mountedIndexes()).toEqual([117, 118, 119]);
+    vi.unstubAllGlobals();
   });
 });
