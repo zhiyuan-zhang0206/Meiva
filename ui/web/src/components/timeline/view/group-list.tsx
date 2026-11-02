@@ -264,12 +264,7 @@ export function TimelineGroupList({
                   shouldWindowTurn
                     ? (idx: number) => {
                         const m = group.members[idx];
-                        const rowKey = `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`;
-                        return (
-                          <div key={rowKey} data-virtual-row={rowKey}>
-                            {renderRow(m.item, m.index, m.source, m.rank, forceChildExpand)}
-                          </div>
-                        );
+                        return renderRow(m.item, m.index, m.source, m.rank, forceChildExpand);
                       }
                     : undefined
                 }

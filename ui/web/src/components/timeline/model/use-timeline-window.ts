@@ -119,11 +119,11 @@ function keepFocusInTimeline(content: HTMLElement, rect: DOMRect): void {
   content.focus({ preventScroll: true });
 }
 
-function span(sizes: readonly number[], start: number, end: number): number {
+export function span(sizes: readonly number[], start: number, end: number, gap = GAP): number {
   if (end <= start) return 0;
   let height = 0;
-  for (let index = start; index < end; index++) height += sizes[index] + GAP;
-  return height - GAP;
+  for (let index = start; index < end; index++) height += sizes[index] + gap;
+  return height - gap;
 }
 
 /** The remote rows become two spacers; only the viewport and one viewport on each side mount. */
@@ -132,25 +132,26 @@ export function windowForSizes(
   top: number,
   height: number,
   origin = 0,
+  gap = GAP,
 ): WindowRange {
   const min = Math.max(0, top - height * BUFFER_VIEWPORTS - origin);
   const max = Math.max(min, top + height * (1 + BUFFER_VIEWPORTS) - origin);
   let cursor = 0;
   let start = 0;
-  while (start < sizes.length - 1 && cursor + sizes[start] + GAP < min) {
-    cursor += sizes[start] + GAP;
+  while (start < sizes.length - 1 && cursor + sizes[start] + gap < min) {
+    cursor += sizes[start] + gap;
     start++;
   }
   let end = start;
   while (end < sizes.length && (cursor < max || end === start)) {
-    cursor += sizes[end] + GAP;
+    cursor += sizes[end] + gap;
     end++;
   }
   return {
     start,
     end,
-    before: span(sizes, 0, start),
-    after: span(sizes, end, sizes.length),
+    before: span(sizes, 0, start, gap),
+    after: span(sizes, end, sizes.length, gap),
   };
 }
 

@@ -35,10 +35,12 @@ import {
 import { CallBadge } from "./view/card-summary";
 import { useNow } from "./model/reasoning-clock";
 import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
-import { windowForSizes } from "./model/use-timeline-window";
+import { span, windowForSizes } from "./model/use-timeline-window";
 
 const INNER_BOOTSTRAP_ROWS = 24;
 const INNER_ESTIMATED_ROW_PX = 40;
+const INNER_UNMEASURED_VIEW_PX = 360;
+const INNER_ROW_GAP_PX = 4;
 
 interface TurnBlockProps {
   id: string;
@@ -135,7 +137,18 @@ export const TurnBlock = memo(function TurnBlock({
     turnRows !== undefined &&
     windowedCount > turnRows &&
     renderWindowedRow !== undefined;
-  const [innerView, setInnerView] = useState({ top: 0, height: 0 });
+  // meiva:note
+  // The inner window places rows by measured heights (estimates only until a row
+  // has mounted once), and while the live window follows its bottom the range is
+  // the tail of those sizes, not a mapping of the DOM scrollTop. Mapping a pinned
+  // scrollTop through estimates mounted a different row set each frame, the
+  // height change re-pinned the scrollport, and the live window flickered for as
+  // long as the agent worked. Rows sit `space-y-1` (INNER_ROW_GAP_PX) apart.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+  const [innerView, setInnerView] = useState({ top: 0, height: 0, follow: true });
+  const [rowHeights, setRowHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const rowHeightsRef = useRef(rowHeights);
+  const rowObserverRef = useRef<{ observer: ResizeObserver; nodes: Set<HTMLElement> } | null>(null);
 
   const handleInnerScroll = useCallback(
     (event: ReactUIEvent<HTMLDivElement>) => {
@@ -143,25 +156,28 @@ export const TurnBlock = memo(function TurnBlock({
       if (!el) return;
       if (event.target !== el && event.target !== event.currentTarget) return;
 
-      if (isWindowed) {
-        setInnerView((prev) =>
-          Math.abs(prev.top - el.scrollTop) >= 1 || prev.height !== el.clientHeight
-            ? { top: el.scrollTop, height: el.clientHeight }
-            : prev,
-        );
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (liveWindow) {
+        const prevTop = lastInnerScrollTopRef.current;
+        lastInnerScrollTopRef.current = el.scrollTop;
+
+        if (dist <= 16) {
+          if (!innerStickyRef.current) innerStickyRef.current = true;
+          onActivityAtBottomChange?.(true);
+        } else if (el.scrollTop < prevTop - 1) {
+          innerStickyRef.current = false;
+          onActivityAtBottomChange?.(false);
+        }
       }
 
-      if (!liveWindow) return;
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const prevTop = lastInnerScrollTopRef.current;
-      lastInnerScrollTopRef.current = el.scrollTop;
-
-      if (dist <= 16) {
-        if (!innerStickyRef.current) innerStickyRef.current = true;
-        onActivityAtBottomChange?.(true);
-      } else if (el.scrollTop < prevTop - 1) {
-        innerStickyRef.current = false;
-        onActivityAtBottomChange?.(false);
+      if (isWindowed) {
+        const follow = liveWindow && innerStickyRef.current && dist <= 16;
+        setInnerView((prev) =>
+          prev.follow !== follow || prev.height !== el.clientHeight ||
+          (!follow && Math.abs(prev.top - el.scrollTop) >= 1)
+            ? { top: el.scrollTop, height: el.clientHeight, follow }
+            : prev,
+        );
       }
     },
     [isWindowed, liveWindow, onActivityAtBottomChange],
@@ -171,12 +187,67 @@ export const TurnBlock = memo(function TurnBlock({
     if (!isWindowed) return;
     const el = activityScrollRef.current;
     if (!el) return;
+    const follow = liveWindow && innerStickyRef.current;
     setInnerView((prev) =>
-      prev.top !== el.scrollTop || prev.height !== el.clientHeight
-        ? { top: el.scrollTop, height: el.clientHeight }
+      prev.top !== el.scrollTop || prev.height !== el.clientHeight || prev.follow !== follow
+        ? { top: el.scrollTop, height: el.clientHeight, follow }
         : prev,
     );
+  }, [isWindowed, liveWindow]);
+
+  // meiva:note
+  // One ResizeObserver per windowed session records each mounted row's height;
+  // each commit observes only newly mounted rows and releases unmounted ones. Two
+  // notifications can land before React commits, so the second builds on the
+  // first through the ref rather than on the last committed map.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+  useLayoutEffect(() => {
+    if (!isWindowed || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      let next: Map<string, number> | null = null;
+      for (const entry of entries) {
+        const node = entry.target as HTMLElement;
+        const key = node.dataset.turnRow;
+        if (!key) continue;
+        const height = entry.borderBoxSize[0]?.blockSize ?? node.getBoundingClientRect().height;
+        const known = (next ?? rowHeightsRef.current).get(key);
+        if (height <= 0 || (known !== undefined && Math.abs(known - height) < 1)) continue;
+        next ??= new Map(rowHeightsRef.current);
+        next.set(key, height);
+      }
+      if (!next) return;
+      rowHeightsRef.current = next;
+      setRowHeights(next);
+    });
+    rowObserverRef.current = { observer, nodes: new Set() };
+    return () => {
+      observer.disconnect();
+      rowObserverRef.current = null;
+    };
   }, [isWindowed]);
+
+  useLayoutEffect(() => {
+    const rows = rowObserverRef.current;
+    const content = activityContentRef.current;
+    if (!rows || !content) return;
+    const mounted = new Set(
+      [...content.children].filter(
+        (node): node is HTMLElement => node instanceof HTMLElement && node.dataset.turnRow !== undefined,
+      ),
+    );
+    for (const node of rows.nodes) {
+      if (!mounted.has(node)) {
+        rows.observer.unobserve(node);
+        rows.nodes.delete(node);
+      }
+    }
+    for (const node of mounted) {
+      if (!rows.nodes.has(node)) {
+        rows.observer.observe(node);
+        rows.nodes.add(node);
+      }
+    }
+  });
 
   useEffect(() => {
     if (!liveWindow || !expanded) {
@@ -255,27 +326,32 @@ export const TurnBlock = memo(function TurnBlock({
   const renderedBody = (() => {
     if (!expanded) return null;
     if (!isWindowed) return children;
-    const sizes = Array.from({ length: windowedCount }, () => INNER_ESTIMATED_ROW_PX);
-    const range =
-      innerView.height <= 0 && innerView.top <= 0
-        ? (() => {
-            const start = Math.max(0, windowedCount - INNER_BOOTSTRAP_ROWS);
-            return {
-              start,
-              end: windowedCount,
-              before: start > 0 ? start * (INNER_ESTIMATED_ROW_PX + 12) - 12 : 0,
-              after: 0,
-            };
-          })()
-        : windowForSizes(sizes, innerView.top, innerView.height > 0 ? innerView.height : 360, 0);
+    const keys = Array.from({ length: windowedCount }, (_, index) => memberSources?.[index] ?? memberIds[index]);
+    const sizes = keys.map((key) => rowHeights.get(key) ?? INNER_ESTIMATED_ROW_PX);
+    const viewHeight = innerView.height > 0 ? innerView.height : INNER_UNMEASURED_VIEW_PX;
+    const range = (() => {
+      if (innerView.height <= 0 && innerView.top <= 0) {
+        const start = Math.max(0, windowedCount - INNER_BOOTSTRAP_ROWS);
+        return { start, end: windowedCount, before: span(sizes, 0, start, INNER_ROW_GAP_PX), after: 0 };
+      }
+      const top = liveWindow && innerView.follow
+        ? Math.max(0, span(sizes, 0, windowedCount, INNER_ROW_GAP_PX) - viewHeight)
+        : innerView.top;
+      return windowForSizes(sizes, top, viewHeight, 0, INNER_ROW_GAP_PX);
+    })();
     return (
       <>
         {range.before > 0 ? (
           <div data-timeline-spacer="turn-before" style={{ height: range.before }} aria-hidden="true" />
         ) : null}
-        {Array.from({ length: range.end - range.start }, (_, offset) =>
-          renderWindowedRow(range.start + offset),
-        )}
+        {Array.from({ length: range.end - range.start }, (_, offset) => {
+          const index = range.start + offset;
+          return (
+            <div key={keys[index]} data-turn-row={keys[index]}>
+              {renderWindowedRow(index)}
+            </div>
+          );
+        })}
         {range.after > 0 ? (
           <div data-timeline-spacer="turn-after" style={{ height: range.after }} aria-hidden="true" />
         ) : null}
