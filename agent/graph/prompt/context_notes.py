@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.messages.delivery.retry import retryable_database_error
-from base.agents.to_user import read_document
+from base.agents.to_user import ToUserLimits, read_document, to_user_limits_from_agent
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
@@ -202,11 +202,11 @@ def machine_clause(ctx: MeivaContext) -> str | None:
     return machine_name_text(name)
 
 
-def workspace_facts(workspace: Path, home: Path) -> Workspace:
+def workspace_facts(workspace: Path, home: Path, *, limits: ToUserLimits) -> Workspace:
 
     display = workspace_display(workspace, home)
     try:
-        document = read_document(workspace)
+        document = read_document(workspace, limits=limits)
     except (OSError, ValueError) as exc:
         return Workspace(display, None, str(exc))
     return Workspace(display, document.content, None)
@@ -220,7 +220,11 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
     label = own_label(ctx, aid)
     machine = machine_clause(ctx)
     workspace = (
-        workspace_facts(workspace_dir(aid, home=ctx.require_meiva_home()), ctx.require_user_home())
+        workspace_facts(
+            workspace_dir(aid, home=ctx.require_meiva_home()),
+            ctx.require_user_home(),
+            limits=to_user_limits_from_agent(ctx.require_agent()),
+        )
         if ctx.require_agent().read("agent", "workspace_in_system_prompt")
         else None
     )

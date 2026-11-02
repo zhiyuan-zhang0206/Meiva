@@ -180,6 +180,10 @@ class ConfigAuthority:
         self,
         name: Literal[
             "llm_invoke_retry_attempts",
+            "max_chain_depth",
+            "max_document_bytes",
+            "max_references",
+            "max_resource_bytes",
             "neighbors_default_depth",
             "neighbors_default_limit",
             "ops_concurrency",

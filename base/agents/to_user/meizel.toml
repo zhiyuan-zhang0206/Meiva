@@ -1,14 +1,13 @@
-exports = ["document.py", "errors.py", "models.py", "resources.py"]
+exports = ["document.py", "errors.py", "limits.py", "models.py", "resources.py"]
 
 [uses]
-"__init__.py" = ["document.py", "errors.py", "models.py", "resources.py"]
-"document.py" = ["models.py", "resources.py"]
-"resources.py" = ["errors.py", "models.py"]
+"__init__.py" = ["document.py", "errors.py", "limits.py", "models.py", "resources.py"]
+"document.py" = ["limits.py", "models.py", "resources.py"]
+"limits.py" = []
+"resources.py" = ["errors.py", "limits.py", "models.py"]
 
 [purity]
 "models.py" = "strict"
 
 [debt.ambient-read]
-"document.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for the ops entry to carry a config: read_document() has two callers, the agent prompt path (which holds the boot) and ops/to_user.py (which holds only the meiva home), so the byte cap cannot become a parameter until the ops entry is handed one" }
 "resources.py#home pathlib.Path.expanduser" = { count = 1, owner = "#5816", until = "waits for the ops path to carry a user home: the agent rendering path resolves ~ against require_user_home() while ops/to_user.py has no user home in hand, so the expanduser() fallback stays for the one caller that cannot answer" }
-"resources.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for the same config as read_document(): referenced_files() and resolve_reference() read the to_user caps and both are reached through the document read whose ops entry holds no configuration" }

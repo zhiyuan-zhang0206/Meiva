@@ -27,15 +27,20 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
+from base.agents.to_user import to_user_limits
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineFacts, MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.config import ConfigBoot
+from base.config import ConfigBoot, settings
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.host.env.agent_slices import AgentSlices
 from base.paths import resolve_meiva_home
 from base.paths.tests.homes import point_home
+
+# meiva:note
+# The to-user read caps every context here hands the panel reader, at the configured numbers.
+LIMITS = to_user_limits(settings.to_user)
 
 
 def _clock() -> Clock:
@@ -166,13 +171,13 @@ def test_workspace_facts_follow_the_document_on_disk(tmp_path: Path) -> None:
     ws = tmp_path / "workspaces" / "29"
     ws.mkdir(parents=True)
 
-    assert workspace_facts(ws, tmp_path) == Workspace("~/workspaces/29", None, None)
+    assert workspace_facts(ws, tmp_path, limits=LIMITS) == Workspace("~/workspaces/29", None, None)
 
     (ws / "to_user.md").write_text("Waiting on a decision")
-    assert workspace_facts(ws, tmp_path).document == "Waiting on a decision"
+    assert workspace_facts(ws, tmp_path, limits=LIMITS).document == "Waiting on a decision"
 
     (ws / "to_user.md").write_text("The decision has arrived")
-    assert workspace_facts(ws, tmp_path).document == "The decision has arrived"
+    assert workspace_facts(ws, tmp_path, limits=LIMITS).document == "The decision has arrived"
 
 
 def test_workspace_facts_report_a_workspace_that_cannot_be_read(tmp_path: Path) -> None:
@@ -181,7 +186,7 @@ def test_workspace_facts_report_a_workspace_that_cannot_be_read(tmp_path: Path) 
     link = tmp_path / "link"
     link.symlink_to(real)
 
-    facts = workspace_facts(link, tmp_path)
+    facts = workspace_facts(link, tmp_path, limits=LIMITS)
 
     assert facts.document is None
     assert facts.error == "To user workspace must not be a symlink"

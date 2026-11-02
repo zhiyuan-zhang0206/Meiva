@@ -11,6 +11,7 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 from base.agents.to_user import ToUserReadRequest
+from base.agents.to_user.limits import to_user_limits_from_read_model
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint
@@ -64,6 +65,7 @@ def dispatch_sync(
                     local_machine.name(),
                     references=request.references,
                     home=home,
+                    limits=to_user_limits_from_read_model(authority),
                 )
             except (OSError, ValueError) as exc:
                 # meiva:note

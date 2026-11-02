@@ -10,7 +10,7 @@ from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, PluginStateHandle
 from base.agents.context import MeivaContext
-from base.agents.to_user import DOCUMENT_FILENAME, read_document
+from base.agents.to_user import DOCUMENT_FILENAME, read_document, to_user_limits_from_agent
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.text_budget import count_words
@@ -67,7 +67,9 @@ class _ToUserLimitHook(Hook):
             return cleared
         try:
             document = await asyncio.to_thread(
-                read_document, workspace_dir(agent_id, home=runtime.context.require_meiva_home())
+                read_document,
+                workspace_dir(agent_id, home=runtime.context.require_meiva_home()),
+                limits=to_user_limits_from_agent(agent),
             )
         except (OSError, ValueError):
             logger.opt(exception=True).warning(

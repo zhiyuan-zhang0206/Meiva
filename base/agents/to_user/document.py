@@ -2,20 +2,26 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.agents.to_user.limits import ToUserLimits
 from base.agents.to_user.models import DOCUMENT_FILENAME, ToUserDocument
 from base.agents.to_user.resources import (
     read_regular_file,
     resolve_reference,
     resource_descriptions,
 )
-from base.config import settings
 
 
-def read_document(workspace: Path, *, references: list[str] | None = None) -> ToUserDocument:
+def read_document(
+    workspace: Path, *, limits: ToUserLimits, references: list[str] | None = None
+) -> ToUserDocument:
 
     if workspace.is_symlink():
         raise ValueError("To user workspace must not be a symlink")
-    path = resolve_reference(workspace, references) if references else workspace / DOCUMENT_FILENAME
+    path = (
+        resolve_reference(workspace, references, limits=limits)
+        if references
+        else workspace / DOCUMENT_FILENAME
+    )
     if path.suffix.lower() not in (".md", ".markdown"):
         raise ValueError("To user documents must be Markdown")
     empty = ToUserDocument(
@@ -25,7 +31,7 @@ def read_document(workspace: Path, *, references: list[str] | None = None) -> To
         legacy_html=not references and (workspace / "to_user.html").is_file(),
     )
     try:
-        raw, info = read_regular_file(path, settings.to_user.max_document_bytes)
+        raw, info = read_regular_file(path, limits.document_bytes)
     except FileNotFoundError:
         if references:
             raise
@@ -33,7 +39,7 @@ def read_document(workspace: Path, *, references: list[str] | None = None) -> To
     content = raw.decode("utf-8")
     if not content.strip():
         return empty
-    resources = resource_descriptions(path, content)
+    resources = resource_descriptions(path, content, limits=limits)
     revision = hashlib.sha256(raw)
     for href, resource in sorted(resources.items()):
         revision.update(f"\n{href}:{resource.version}".encode())

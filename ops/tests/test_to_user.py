@@ -9,9 +9,14 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.agents.to_user import DOCUMENT_FILENAME
+from base.agents.to_user import DOCUMENT_FILENAME, to_user_limits
+from base.config import settings
 from base.db import Database, create_agent
 from ops.to_user import owned_workspace, read_to_user
+
+# meiva:note
+# The read caps the door takes as a value, at the numbers the process is configured with.
+LIMITS = to_user_limits(settings.to_user)
 
 
 def _agent_on(db_conn: psycopg.Connection, machine: str) -> int:
@@ -68,7 +73,9 @@ def test_the_document_is_read_from_the_home_machines_workspace(
     (workspace / DOCUMENT_FILENAME).write_text("# Report\n\nDone.\n", encoding="utf-8")
 
     with database.pool() as pool:
-        document = read_to_user(pool, agent_id, "source-host", references=[], home=served_home)
+        document = read_to_user(
+            pool, agent_id, "source-host", references=[], home=served_home, limits=LIMITS
+        )
 
     assert document.content == "# Report\n\nDone.\n"
     assert document.version is not None
