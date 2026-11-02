@@ -29,6 +29,7 @@ from meizel.contracts.debt import (
 )
 from meizel.contracts.ledger import resolve_debt_conflicts, tally
 from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
+from meizel.contracts.policy import load_policy
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import Checkout, EditPlan, Universe
@@ -274,7 +275,7 @@ def _analysis_for_prune(
         _refuse_malformed(analysis.diagnostics, "prune")
         return analysis if any(m.debt for m in analysis.manifests.values()) else None
     universe = repo.universe()
-    manifests, manifest_diags = load_manifests(universe)
+    manifests, manifest_diags = load_manifests(universe, load_policy(universe)[0].state_kinds)
     _refuse_malformed(manifest_diags, "prune")
     if not any(m.debt for m in manifests.values()):
         return None

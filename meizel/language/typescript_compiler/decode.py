@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from typing import TypeGuard
 
 from meizel.graph.model import (
@@ -15,6 +16,7 @@ from meizel.graph.model import (
     PurityItem,
     Restricted,
     TypeCastSite,
+    known_kind,
 )
 from meizel.language.typescript_compiler.model import TsScan
 
@@ -62,7 +64,7 @@ def _strings(value: object) -> tuple[str, ...]:
     return tuple(_text(item) for item in _array(value))
 
 
-def _source(value: object) -> TsScan:
+def _source(value: object, kinds: Collection[str]) -> TsScan:
     r = _record(
         value,
         "path facts external patches purity problems exports defined ambient casts any subsets symbols restricted",
@@ -98,7 +100,7 @@ def _source(value: object) -> TsScan:
     ambient: list[Acquisition] = []
     for item in _array(r["ambient"]):
         line, kind, target = _row(item, 3)
-        ambient.append(Acquisition(_number(line), _text(kind), _text(target)))
+        ambient.append(Acquisition(_number(line), known_kind(_text(kind), kinds), _text(target)))
     casts: list[TypeCastSite] = []
     for item in _array(r["casts"]):
         line, column, name = _row(item, 3)
@@ -151,12 +153,12 @@ def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def decode_batch(text: str, expected: frozenset[str]) -> dict[str, TsScan]:
+def decode_batch(text: str, expected: frozenset[str], kinds: Collection[str]) -> dict[str, TsScan]:
     raw: object = json.loads(text, object_pairs_hook=_unique)
     result = _record(raw, "version sources")
     if type(result["version"]) is not int or result["version"] != 1:
         raise ValueError("unsupported TypeScript compiler result version")
-    scans = [_source(item) for item in _array(result["sources"])]
+    scans = [_source(item, kinds) for item in _array(result["sources"])]
     paths = [scan.path for scan in scans]
     if len(set(paths)) != len(paths) or set(paths) != set(expected):
         raise ValueError("TypeScript compiler returned a different source set")

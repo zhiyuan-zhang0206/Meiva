@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from meizel import allowances
+from meizel.graph.model import OS_KINDS
 from meizel.tests.synthetic import RepoFactory
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -77,7 +78,7 @@ def test_the_keys_of_the_ambient_table_declare_the_state_kinds() -> None:
     assert policy.reader_kinds[-2:] == ("queue", "cache_2")
 
 
-@pytest.mark.parametrize("kind", ["environ", "clock", "home", "cwd", "platform", "pid", "random"])
+@pytest.mark.parametrize("kind", OS_KINDS)
 def test_a_kind_of_the_standard_library_cannot_be_declared_as_state(kind: str) -> None:
     policy, problems = allowances.parse(f'[ambient]\n{kind} = ["thing()"]\n')
     assert policy.state_kinds == ()

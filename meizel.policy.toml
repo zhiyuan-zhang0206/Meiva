@@ -86,7 +86,7 @@
 # table may list readers of it. A module declares under [state] in its meizel.toml that it holds
 # state of a kind; the names, resolved against those modules, are the points where a file acquires
 # it. A bare name acquires when imported or read as an attribute, `name()` only when called. The
-# kinds of the standard library (environ, clock, home, cwd, platform, pid, random) are the
+# kinds of the standard library (argv, environ, clock, home, cwd, platform, pid, random) are the
 # checker's and cannot be declared here.
 [ambient]
 settings = [

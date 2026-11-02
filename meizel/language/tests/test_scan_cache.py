@@ -6,10 +6,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from meizel.allowances import Policy
 from meizel.checkout import GitRepo
 from meizel.graph import python_reverse_closure
 from meizel.graph.model import (
+    OS_KINDS,
     Acquisition,
     AmbientKind,
     AnyCollaboratorSite,
@@ -137,7 +140,7 @@ def test_encode_decode_file_scan_round_trips_full_and_sparse_forms() -> None:
     minimal = FileScan("pkg/empty.py")
     encoded_minimal = encode_file_scan(minimal)
     assert encoded_minimal == '{"path":"pkg/empty.py"}'
-    assert decode_file_scan(encoded_minimal) == minimal
+    assert decode_file_scan(encoded_minimal, OS_KINDS) == minimal
 
     populated = FileScan(
         "pkg/full.py",
@@ -179,7 +182,11 @@ def test_encode_decode_file_scan_round_trips_full_and_sparse_forms() -> None:
         symbols=(("Box", 34, 40), ("fn", 19, 33)),
         deps=("pkg/dep.py",),
     )
-    assert decode_file_scan(encode_file_scan(populated)) == populated
+    assert decode_file_scan(encode_file_scan(populated), OS_KINDS) == populated
+
+    fake = FileScan("pkg/fake.py", ambient=[Acquisition(28, "envrion", "os.environ")])
+    with pytest.raises(ValueError, match="unknown ambient kind 'envrion'"):
+        decode_file_scan(encode_file_scan(fake), OS_KINDS)
 
 
 def test_scan_all_hits_sqlite_cache_and_invalidates_on_same_length_edit(tmp_path: Path) -> None:

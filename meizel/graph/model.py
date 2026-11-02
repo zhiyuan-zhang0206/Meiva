@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import NamedTuple
@@ -28,6 +29,7 @@ __all__ = [
     "Sources",
     "TypeCastSite",
     "Unless",
+    "known_kind",
 ]
 
 
@@ -131,6 +133,17 @@ class AmbientKind(StrEnum):
 # meiva:note
 # The names of `AmbientKind`: the kinds no repository declares, which a state kind may not reuse.
 OS_KINDS: tuple[KindName, ...] = tuple(kind.value for kind in AmbientKind)
+
+
+# meiva:note
+# A kind name read back from a producer outside the Python scanner (the TypeScript compiler, a scan
+# cache): it must be one the policy accepts, `Policy.reader_kinds`, or the result is refused. A
+# misspelled kind would otherwise become a kind of its own that a debt entry can record.
+def known_kind(kind: str, accepted: Collection[str]) -> KindName:
+    if kind not in accepted:
+        known = ", ".join(accepted)
+        raise ValueError(f"unknown ambient kind {kind!r}; the policy's kinds are {known}")
+    return kind
 
 
 class Fact(NamedTuple):

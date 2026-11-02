@@ -38,12 +38,12 @@ from meizel.contracts.debt_rules import (
 from meizel.contracts.debt_sites import approved, format_approved, format_sites, sites
 from meizel.contracts.debt_symbol import (
     SymbolMove,
+    declared_manifests,
     defines,
     parse_symbol_move_lines,
     parse_symbol_moves,
     symbol_debt,
 )
-from meizel.contracts.manifest import load_manifests
 from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
 from meizel.graph.universe import MANIFEST, Checkout, Universe, parent_of
@@ -245,7 +245,7 @@ def _move_symbols(
     moves: list[SymbolMove],
     renames: list[tuple[str, str]],
 ) -> list[str]:
-    manifests, _ = load_manifests(universe)
+    manifests = declared_manifests(universe)
     lines: list[str] = []
     for move in moves:
         old_source, new_source = _check_move(repo, base, universe, move)

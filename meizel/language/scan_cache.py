@@ -27,6 +27,7 @@ from meizel.graph.model import (
     Sources,
     TypeCastSite,
     Unless,
+    known_kind,
 )
 from meizel.graph.universe import MANIFEST, Universe
 from meizel.language.fixtures import FixtureFunction, FixtureRequest, FixtureState
@@ -323,7 +324,7 @@ def _decode_common_scan(raw: Mapping[str, object]) -> FileScan:
     )
 
 
-def _scan_from_raw(value: object) -> FileScan:
+def _scan_from_raw(value: object, kinds: Collection[str]) -> FileScan:
     raw = _record(value)
     if raw.keys() <= _COMMON_SCAN_KEYS:
         return _decode_common_scan(raw)
@@ -351,7 +352,7 @@ def _scan_from_raw(value: object) -> FileScan:
             for line, fn, param in _opt_rows(raw, "input_appends", 3)
         ],
         ambient=[
-            Acquisition(_integer(line), _text(kind), _text(target))
+            Acquisition(_integer(line), known_kind(_text(kind), kinds), _text(target))
             for line, kind, target in _opt_rows(raw, "ambient", 3)
         ],
         entropy=[
@@ -372,9 +373,9 @@ def encode_file_scan(scan: FileScan) -> str:
     return json.dumps(_scan_to_raw(scan), separators=(",", ":"))
 
 
-def decode_file_scan(text: str) -> FileScan:
+def decode_file_scan(text: str, kinds: Collection[str]) -> FileScan:
     raw: object = json.loads(text)
-    return _scan_from_raw(raw)
+    return _scan_from_raw(raw, kinds)
 
 
 def _sources_to_json(sources: Sources) -> str:
@@ -536,7 +537,9 @@ def _deps_valid(deps: tuple[tuple[str, str], ...], digests: Mapping[str, str]) -
     return all(digests.get(dep, _MISSING) == expected for dep, expected in deps)
 
 
-def _decode_py_entry(text: str, digests: Mapping[str, str]) -> _CachedPyScan | None:
+def _decode_py_entry(
+    text: str, digests: Mapping[str, str], kinds: Collection[str]
+) -> _CachedPyScan | None:
     try:
         raw_obj: object = json.loads(text)
         entry = _record(raw_obj)
@@ -546,7 +549,7 @@ def _decode_py_entry(text: str, digests: Mapping[str, str]) -> _CachedPyScan | N
         )
         if not _deps_valid(deps, digests):
             return None
-        return _CachedPyScan(_scan_from_raw(entry["scan"]), deps)
+        return _CachedPyScan(_scan_from_raw(entry["scan"], kinds), deps)
     except (ValueError, TypeError, KeyError, IndexError):
         return None
 
@@ -609,7 +612,11 @@ def _from_py_memo(
 
 
 def _partition_py_cache(
-    universe: Universe, paths: list[str], ctx: str, digests: Mapping[str, str]
+    universe: Universe,
+    paths: list[str],
+    ctx: str,
+    digests: Mapping[str, str],
+    kinds: Collection[str],
 ) -> tuple[dict[str, str], dict[str, FileScan], list[str]]:
     keys = {p: f"pyscan:v1:{ctx}:{p}:{digests[p]}" for p in paths if p in digests}
     scans, pending = _from_py_memo(universe, paths, keys, digests)
@@ -618,7 +625,7 @@ def _partition_py_cache(
     misses: list[str] = []
     for path in pending:
         hit = cached.get(keys[path]) if path in keys else None
-        decoded = None if hit is None else _decode_py_entry(hit, digests)
+        decoded = None if hit is None else _decode_py_entry(hit, digests, kinds)
         if decoded is not None and path in keys:
             universe.repo.memo_put(keys[path], decoded)
             scans[path] = decoded.scan
@@ -661,7 +668,7 @@ def _scan_python_cached(
             for scan, _ in _scan_python_misses(universe, sources, paths, jobs, policy)
         }
     ctx = _py_context_digest(universe, sources, policy, digests)
-    keys, scans, misses = _partition_py_cache(universe, paths, ctx, digests)
+    keys, scans, misses = _partition_py_cache(universe, paths, ctx, digests, policy.reader_kinds)
     if not misses:
         return scans
     fresh = _scan_python_misses(universe, sources, misses, jobs, policy)
@@ -728,7 +735,10 @@ def _scan_ts_cached(
     if hit is not None:
         try:
             raw_obj: object = json.loads(hit)
-            decoded = {s.path: s for s in (_scan_from_raw(item) for item in _array(raw_obj))}
+            decoded = {
+                s.path: s
+                for s in (_scan_from_raw(item, policy.reader_kinds) for item in _array(raw_obj))
+            }
             if set(decoded) == set(paths):
                 repo.memo_put(key, _CachedTsBatch(decoded))
                 return decoded

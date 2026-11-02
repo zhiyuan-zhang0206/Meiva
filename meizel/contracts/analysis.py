@@ -698,8 +698,8 @@ def _inert_roots(
 def _load_declarations(
     universe: Universe, scope: frozenset[str] | None
 ) -> tuple[dict[str, Manifest], Policy, list[Diagnostic]]:
-    manifests, diagnostics = load_manifests(universe)
     policy, policy_problems = load_policy(universe)
+    manifests, diagnostics = load_manifests(universe, policy.state_kinds)
     diagnostics.extend(policy_problems)
     diagnostics.extend(check_policy(manifests, policy))
     diagnostics.extend(reader_problems(policy))

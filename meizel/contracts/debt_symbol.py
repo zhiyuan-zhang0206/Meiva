@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from meizel import allowances
 from meizel.contracts.ambient_read import sources_from
 from meizel.contracts.analysis import diagnose
-from meizel.contracts.manifest import Manifest
+from meizel.contracts.manifest import Manifest, load_manifests
 from meizel.contracts.policy import load_policy
 from meizel.graph.model import Code, MeizelError, Sources
 from meizel.graph.universe import Universe
@@ -23,6 +23,7 @@ from meizel.language.scan import FileScan, scan_source
 
 __all__ = [
     "SymbolMove",
+    "declared_manifests",
     "defines",
     "parse_symbol_move_lines",
     "parse_symbol_moves",
@@ -148,6 +149,13 @@ def _source_span(scan: FileScan, source: bytes, name: str) -> tuple[int, int] | 
 def defines(universe: Universe, path: str, source: bytes, name: str) -> bool:
     scan = scan_source(universe, path, source, Sources(), policy=allowances.Policy())
     return _source_span(scan, source, name) is not None
+
+
+# meiva:note
+# The manifests of a tree, read with the state kinds its own policy declares; what a manifest says
+# is not reported here, the checker's run does that.
+def declared_manifests(universe: Universe) -> dict[str, Manifest]:
+    return load_manifests(universe, load_policy(universe)[0].state_kinds)[0]
 
 
 def symbol_debt(

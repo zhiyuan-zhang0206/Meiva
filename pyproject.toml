@@ -1486,6 +1486,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meizel/language/typescript_compiler/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meizel/owners/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
