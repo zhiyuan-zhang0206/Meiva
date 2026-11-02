@@ -14,6 +14,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -88,6 +89,9 @@ def repo(tmp_path: Path) -> Path:
         (probe / name).write_text(
             f"#!{sys.executable}\nimport os,json,sys\n"
             "if os.path.basename(sys.argv[0]) == 'pnpm':\n"
+            " if sys.argv[1:] == ['exec', 'eslint', '--version']:\n"
+            "  print(os.environ.get('PROBE_OUTPUT', 'v9.0.0'))\n"
+            "  raise SystemExit(int(os.environ.get('PROBE_STATUS', '0')))\n"
             " with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
             " raise SystemExit(int(os.environ.get('TOOL_STATUS', '0')))\n"
             "sys.stdin.read()\n"
@@ -96,7 +100,17 @@ def repo(tmp_path: Path) -> Path:
     return result
 
 
-def select(repo: Path, tool: str, *, tool_status: str = "0") -> subprocess.CompletedProcess[str]:
+def select(
+    repo: Path,
+    tool: str,
+    *,
+    tool_status: str = "0",
+    probe_status: str = "0",
+    probe_output: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    overrides = {"TOOL_STATUS": tool_status, "PROBE_STATUS": probe_status}
+    if probe_output is not None:
+        overrides["PROBE_OUTPUT"] = probe_output
     return subprocess.run(
         [sys.executable, str(SELECTOR), tool],
         cwd=repo,
@@ -104,7 +118,7 @@ def select(repo: Path, tool: str, *, tool_status: str = "0") -> subprocess.Compl
         text=True,
         check=False,
         timeout=15,
-        env=_repo_env(repo, TOOL_STATUS=tool_status),
+        env=_repo_env(repo, **overrides),
     )
 
 
@@ -416,3 +430,110 @@ def test_ci_base_mode_runs_incremental_eslint_conditional_build_and_vitest(repo:
     recorded_app = calls(repo)
     assert ["run", "build"] in recorded_app
     assert ["run", "check:bundle-integrity"] in recorded_app
+
+
+# meiva:note
+# The environments a push meets when `ui/web` was not installed with pnpm, and what each must say.
+# The answer is an environment, not a lint: it skips the tool the way the guard already skips a
+# missing tree, because an eslint line here sends the reader into a change that is fine (#6021).
+# Structure only chooses the
+# wording; the verdict comes from the probe answering a version or not.
+_NOT_INSTALLED = '[ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL] Command "eslint" not found'
+
+
+def _frontend_contribution(repo: Path) -> None:
+    git(repo, "checkout", "-qb", "contribution")
+    commit(repo, "ui/web/src/widget.tsx", "export const x = 1")
+
+
+def test_missing_node_modules_reports_the_environment(repo: Path) -> None:
+    _frontend_contribution(repo)
+    shutil.rmtree(repo / "ui/web/node_modules")
+    result = select(repo, "eslint", probe_status="1", probe_output=_NOT_INSTALLED)
+    assert result.returncode == 0, result.stderr
+    assert "WARNING: PRE-PUSH SKIPPED [eslint]" in result.stderr
+    assert "node_modules is missing" in result.stderr
+    assert "pnpm install --frozen-lockfile" in result.stderr
+    assert calls(repo) == []
+
+
+def test_an_npm_installed_tree_names_pnpm_as_the_installer(repo: Path) -> None:
+    # meiva:note
+    # The fixture's tree holds `.bin` entries and no `.pnpm` store: the shape an `npm install`
+    # leaves, which is what the reader has to be told.
+    _frontend_contribution(repo)
+    assert not (repo / "ui/web/node_modules/.pnpm").exists()
+    result = select(repo, "eslint", probe_status="1", probe_output=_NOT_INSTALLED)
+    assert result.returncode == 0, result.stderr
+    assert "no .pnpm store" in result.stderr
+    assert "pnpm install --frozen-lockfile" in result.stderr
+    assert calls(repo) == []
+
+
+def test_a_stored_tree_that_cannot_run_the_tools_reports_the_environment(repo: Path) -> None:
+    # meiva:note
+    # A tree can carry the store and still be missing the tools -- a half-finished or damaged
+    # install. The probe is what separates this from a working tree, so the verdict stays an
+    # environment one instead of a tool failure.
+    _frontend_contribution(repo)
+    (repo / "ui/web/node_modules/.pnpm").mkdir()
+    result = select(repo, "eslint", probe_status="1", probe_output=_NOT_INSTALLED)
+    assert result.returncode == 0, result.stderr
+    assert "cannot run the tools the lockfile pins" in result.stderr
+    assert calls(repo) == []
+
+
+def _path_without_pnpm(shadow: Path) -> str:
+    # meiva:note
+    # The case is "no pnpm exists at all", and it must not depend on where a machine keeps its
+    # tools: a CI image installed pnpm outside the standard directories, and one of them also
+    # provided `bash`. A shadow directory holding only the tools the contribution range needs
+    # names exactly what the selector runs and nothing else.
+    shadow.mkdir()
+    for name in ("bash", "git", "perl"):
+        (shadow / name).symlink_to(_on_path(name))
+    return str(shadow)
+
+
+# meiva:note
+# The programs this file runs are the machine's own, as in every other case here: the subject is a
+# shell hook, so a fake would test nothing. This reads `PATH` for them without going through
+# `shutil.which`, whose ambient form the host-platform lint counts for a different kind of test.
+def _on_path(program: str) -> str:
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(entry) / program
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    raise AssertionError(f"no {program} on PATH to build a path without pnpm")
+
+
+def test_pnpm_off_path_is_an_environment_verdict(repo: Path, tmp_path: Path) -> None:
+    _frontend_contribution(repo)
+    env = _repo_env(repo)
+    env["PATH"] = _path_without_pnpm(tmp_path / "without-pnpm")
+    assert shutil.which("pnpm", path=env["PATH"]) is None
+    result = subprocess.run(
+        [sys.executable, str(SELECTOR), "eslint"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "pnpm is not on PATH" in result.stderr
+    assert calls(repo) == []
+
+
+def test_an_answered_probe_leaves_the_push_to_the_tool(repo: Path) -> None:
+    # meiva:note
+    # The negative control: a tree whose probe answers a version is checked as before, and the
+    # tool's own status is what the push reports.
+    _frontend_contribution(repo)
+    result = select(repo, "eslint")
+    assert result.returncode == 0, result.stderr
+    assert "environment" not in result.stderr
+    assert calls(repo) == [
+        ["exec", "eslint", "--no-warn-ignored", "--max-warnings", "0", "src/widget.tsx"]
+    ]

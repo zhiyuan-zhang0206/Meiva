@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -43,6 +44,13 @@ _DISK_CONSUMERS = (
     ),
 )
 _RSC_MARKERS = ("next/navigation", "next/headers", '"use client"', "'use client'")
+# meiva:note
+# An unusable frontend environment is a skip, not a tool status: `prepush-guard.sh` already answers
+# a missing tree that way, and a push that cannot check the frontend is not a red lint. The two
+# outcomes stay distinguishable by what they say and by the exit status they carry.
+_FRONTEND_FIX = "cd ui/web && pnpm install --frozen-lockfile"
+_PROBE_TIMEOUT_S = 120
+_VERSION = re.compile(r"v?\d+(?:\.\d+)+")
 
 
 # meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
@@ -155,6 +163,65 @@ def _related_sources(existing: list[str], direct: list[str]) -> list[str]:
     ]
 
 
+# meiva:note
+# A push cannot check the frontend when `ui/web` was installed some other way, and reporting that as
+# a failed lint sends the reader to code that is fine: on an `npm install` tree `pnpm exec eslint`
+# answers `Command "eslint" not found`, which reads like a defect in the change (#6021).
+#
+# The verdict is functional -- run the tool `pnpm-lock.yaml` pins -- because a hand-assembled
+# `node_modules` satisfies every structural signal while holding none of the tools; structure only
+# chooses which explanation to print. The exit status is not consulted on its own: pnpm answered
+# that failed probe with status 0 in this repository, so the answered version is what counts.
+# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+def _environment_verdict() -> str | None:
+    try:
+        probe = subprocess.run(
+            ["pnpm", "exec", "eslint", "--version"],
+            cwd=_WEB,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PROBE_TIMEOUT_S,
+        )
+    except FileNotFoundError:
+        return "pnpm is not on PATH, so no frontend check can run here"
+    except subprocess.TimeoutExpired:
+        return f"`pnpm exec eslint --version` did not answer within {_PROBE_TIMEOUT_S}s"
+    if probe.returncode == 0 and _answered_a_version(probe.stdout):
+        return None
+    installed = Path(_WEB, "node_modules")
+    if not installed.is_dir():
+        return "ui/web/node_modules is missing, so the frontend tools are not installed"
+    if not (installed / ".pnpm").is_dir():
+        return "ui/web/node_modules has no .pnpm store, so something other than pnpm installed it"
+    return "pnpm cannot run the tools the lockfile pins from this ui/web/node_modules"
+
+
+# meiva:note
+# A version on any line, not the whole output: pnpm prints its own notices (a newer release is
+# available) around the tool's answer, and treating those as an unusable tree would block a push
+# that can be checked. A failed probe answers no version at all, which is what separates the two.
+def _answered_a_version(stdout: str) -> bool:
+    return any(_VERSION.fullmatch(line.strip()) for line in stdout.splitlines())
+
+
+# meiva:note
+# The message carries the reason, not only the command: without it the next reader installs the
+# same tree again. It also says what did not happen, in the words the guard already uses, because
+# a silently unchecked frontend reads as a passing one.
+def _report_environment(tool: str, verdict: str) -> None:
+    print(
+        f"WARNING: PRE-PUSH SKIPPED [{tool}]: {verdict}. CI must pass before merge.",
+        file=sys.stderr,
+    )
+    print(
+        "ui/web is installed with pnpm: pnpm-lock.yaml pins its graph, and an `npm install` tree has "
+        "no node_modules/.pnpm and hoists dependencies differently, while a hand-assembled one can "
+        f"look populated and still hold none of the tools. Fix: {_FRONTEND_FIX}",
+        file=sys.stderr,
+    )
+
+
 def main(tool: str) -> int:
     paths = contribution()
     web = [p for p in paths if p.startswith(_WEB)]
@@ -163,6 +230,9 @@ def main(tool: str) -> int:
     )
     if not web and (tool != "vitest" or not disk):
         print(f"pre-push: no {tool} input in branch contribution; no tool invoked")
+        return 0
+    if verdict := _environment_verdict():
+        _report_environment(tool, verdict)
         return 0
     if tool == "tsc":
         return _run(

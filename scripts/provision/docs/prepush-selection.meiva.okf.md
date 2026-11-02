@@ -15,4 +15,12 @@ source of consumers: existing filesystem contract tests stay explicit, while
 global configuration and deleted-module closure belong to CI and are reported
 as unverified locally rather than running a full suite.
 
+Before any tool runs, the selector asks whether `ui/web` can run one at all: `pnpm exec eslint
+--version` must answer a version. The verdict is functional on purpose — a hand-assembled
+`node_modules` answers every structural question and still holds none of the tools — and an
+unusable tree is a skip in the guard's words (`WARNING: PRE-PUSH SKIPPED [<tool>]: … CI must pass
+before merge`), carrying the reason and `pnpm install --frozen-lockfile`, never a tool's own
+failure. The shape of the tree only chooses the wording: missing directory, no `.pnpm` store, or a
+store that cannot run the pinned tools.
+
 Every process this selector runs is a fixed repo-local command — git queries and scripts/hooks/prepush-*.sh — with repo-owned path arguments and never a shell, so no untrusted input reaches argv (S603 is exempted for this file in pyproject.toml on that ground). The heavy-tool invocation is deliberately unbounded — the developer watches it run — and prepush-guard.sh serializes one heavy tool across host worktrees and reports skips loudly instead of failing silently.
