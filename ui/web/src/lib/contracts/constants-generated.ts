@@ -9,3 +9,35 @@ export const SSE_EVENT_WINDOW_MS = 40;
 export const USER_REPLY_HEADER = "Meiva agent to user:";
 // meiva:link base/agents/messages/reply_intent.py
 export const USER_REPLY_PREFIX = "Meiva agent to user: ";
+
+// meiva:link base/agents/messages/kwargs.py
+export const NOTE_TAGS = [
+  "impersonation",
+  "sdk_hint",
+  "agent_reply",
+  "non_human_wake",
+  "task",
+  "compact_reminder",
+  "history_dump",
+  "silent_idle_continue",
+  "memory",
+  "memory_write_check",
+  "to_user_soft_limit",
+  "lifecycle_terminate",
+  "lifecycle_restart",
+  "lifecycle_resurrect",
+  "lifecycle_fork",
+  "heartbeat",
+  "security",
+  "context",
+  "agent_id",
+  "agent_memory",
+  "inherited_memory",
+  "project_skills",
+  "preloaded_skills",
+  "new_skills",
+  "skill_recall",
+  "exec_timeout",
+  "timezone",
+  "sdk_expand",
+] as const;

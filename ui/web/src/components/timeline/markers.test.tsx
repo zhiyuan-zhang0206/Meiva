@@ -9,7 +9,10 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { NOTE_TAGS } from "@/lib/contracts/constants-generated";
+
 import { EphemeralSystemMarker } from "./markers";
+import { classifyMarker, isSilentMarker } from "./model/marker-classify";
 
 // This repo's convention: explicit cleanup (no vitest globals auto-cleanup).
 afterEach(() => {
@@ -35,5 +38,39 @@ describe("marker data-testid hooks (Task #1018)", () => {
       expect(screen.queryByTestId("marker-error")).toBeNull();
       unmount();
     }
+  });
+});
+
+describe("classifyMarker", () => {
+  it.each(NOTE_TAGS)("NoteTag %s has a card", (tag) => {
+    expect(classifyMarker(tag).kind).not.toBe("ephemeral");
+  });
+
+  it("splits the vocabulary into lifecycle, memory and note", () => {
+    expect(classifyMarker("lifecycle_fork")).toEqual({ kind: "lifecycle", tag: "lifecycle_fork" });
+    expect(classifyMarker("agent_memory")).toEqual({ kind: "memory" });
+    expect(classifyMarker("timezone")).toEqual({ kind: "note" });
+  });
+
+  it("sends an untagged or unknown source to the ephemeral path", () => {
+    expect(classifyMarker(null)).toEqual({ kind: "ephemeral" });
+    expect(classifyMarker("tag_from_a_newer_server")).toEqual({ kind: "ephemeral" });
+  });
+});
+
+describe("isSilentMarker", () => {
+  it("silences the non-human-wake reminder and nothing else in the vocabulary", () => {
+    expect(NOTE_TAGS.filter((tag) => isSilentMarker(tag, "body"))).toEqual(["non_human_wake"]);
+  });
+
+  it("judges a source outside the vocabulary by its payload", () => {
+    expect(isSilentMarker(null, "compact_done")).toBe(true);
+    expect(isSilentMarker(null, "compact_request:abc")).toBe(true);
+    expect(isSilentMarker("tag_from_a_newer_server", "cancelled")).toBe(true);
+    expect(isSilentMarker(null, "error:boom")).toBe(false);
+  });
+
+  it("never silences a known note by a payload that happens to match", () => {
+    expect(isSilentMarker("heartbeat", "cancelled")).toBe(false);
   });
 });

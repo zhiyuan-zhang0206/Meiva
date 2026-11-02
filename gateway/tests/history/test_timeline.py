@@ -153,22 +153,13 @@ class TestSdkCallsProjection:
         ]
 
 
+# meiva:note
+# Every MeivaMsgType member must dispatch to its intended timeline item kind. A HumanMessage tagged
+# with a known meiva_msg_type that the render loop has no branch for falls to `_fallback_human_item`
+# — a system_marker with source=None that the frontend renders as the red "unrecognized" alarm (the
+# #1017 regression class: the auto-compact path produced an untagged summary).
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 class TestMeivaMsgTypeDispatch:
-    """Every MeivaMsgType member must dispatch to its intended timeline item kind.
-
-    A HumanMessage tagged with a known meiva_msg_type that the render loop has no
-    branch for falls to `_fallback_human_item` — a system_marker with
-    source=None that the frontend renders as the red "unrecognized" alarm
-    (the #1017 regression class: the auto-compact path produced an untagged
-    summary). This parametrized test makes "add a new MeivaMsgType without
-    adapting the renderer" impossible: every member must render as its
-    intended kind, never the null-source catch-all.
-
-    Companion cross-stack contract: tests/contracts/test_lint_marker_contract.py
-    (backend NoteTag ⊆ frontend dispatch sets) + the frontend marker-contract
-    tests in ui/web/src/components/timeline/timeline.test.tsx.
-    """
-
     @staticmethod
     def _render(msg: HumanMessage) -> list[TimelineItem]:
 

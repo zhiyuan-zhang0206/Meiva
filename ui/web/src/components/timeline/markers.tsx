@@ -54,9 +54,14 @@ export function MarkerBody({ payload, markdown = false }: { payload: string; mar
   );
 }
 
+// meiva:note
+// The marker vocabulary is generated from the backend NoteTag, so a non-null source this
+// build does not know is a tag newer than the loaded page; reloading picks it up. A null
+// source is an untagged message, which no reload fixes.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
 function UnknownMarkerChip({ source, payload }: { source: string | null; payload: string }) {
   const t = useTranslations("markers");
-  console.warn("[timeline] unrecognized system_marker, frontend not adapted", { source, payload });
+  console.warn("[timeline] unrecognized system_marker", { source, payload });
   return (
     <div
       data-testid="marker-unrecognized"
@@ -65,6 +70,11 @@ function UnknownMarkerChip({ source, payload }: { source: string | null; payload
       <div className="text-[11px] font-mono uppercase tracking-widest mb-1">
         {t("unrecognized")}
       </div>
+      {source !== null ? (
+        <div data-testid="marker-unrecognized-reload" className="text-[12px] mb-1">
+          {t("unrecognizedReload")}
+        </div>
+      ) : null}
       <div className="text-[11px] font-mono opacity-70 mb-1">
         source = {source === null ? "null" : JSON.stringify(source)}
       </div>

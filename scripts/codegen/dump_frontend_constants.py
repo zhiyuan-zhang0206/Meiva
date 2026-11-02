@@ -1,14 +1,10 @@
-"""Generate `ui/web/src/lib/contracts/constants-generated.ts` from backend constants.
-
-Single source of truth: module-level int constants in `base/events/live/projection.py`
-(currently `EVENT_COALESCE_MS` — the SSE live-view event window). The frontend
-imports the generated file, so the agent-side coalesce window and the
-frontend-side render throttle can never drift apart.
-
-Run manually after changing a source constant, or let pre-commit's
-`constants-codegen-fresh` hook fail-loud on drift:
-    .venv/bin/python scripts/codegen/dump_frontend_constants.py
-"""
+# meiva:note
+# Generates ui/web/src/lib/contracts/constants-generated.ts from the backend owners of facts the
+# frontend also needs: EVENT_COALESCE_MS (base/events/live/projection.py), the user-reply header
+# (base/agents/messages/reply_intent.py) and the NoteTag value set (base/agents/messages/kwargs.py).
+# The frontend imports the generated file, so the two sides cannot drift apart. Run it after
+# changing a source, or let pre-commit's `constants-codegen-fresh` hook fail on drift.
+# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 
 from __future__ import annotations
 
@@ -26,6 +22,7 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 
+from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.reply_intent import USER_REPLY_HEADER, USER_REPLY_PREFIX
 from base.events.live.projection import EVENT_COALESCE_MS
 
@@ -42,6 +39,11 @@ export const SSE_EVENT_WINDOW_MS = {coalesce_ms};
 export const USER_REPLY_HEADER = {user_reply_header};
 // meiva:link base/agents/messages/reply_intent.py
 export const USER_REPLY_PREFIX = {user_reply_prefix};
+
+// meiva:link base/agents/messages/kwargs.py
+export const NOTE_TAGS = [
+{note_tags}
+] as const;
 """
 
 
@@ -52,6 +54,7 @@ def main(out_dir: str | None = None) -> None:
             coalesce_ms=EVENT_COALESCE_MS,
             user_reply_header=json.dumps(USER_REPLY_HEADER),
             user_reply_prefix=json.dumps(USER_REPLY_PREFIX),
+            note_tags="\n".join(f"  {json.dumps(tag.value)}," for tag in NoteTag),
         )
     )
     if not out_dir:

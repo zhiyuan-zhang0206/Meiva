@@ -5,6 +5,7 @@
   "forked": "已分叉",
   "memory": "记忆",
   "note": "笔记",
-  "unrecognized": "无法识别的 system_marker（前端未适配）",
+  "unrecognized": "无法识别的 system_marker",
+  "unrecognizedReload": "当前页面比服务端旧，刷新后即可正常显示这条笔记。",
   "errorPrefix": "[错误] {content}"
 }
