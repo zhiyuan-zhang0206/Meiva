@@ -85,12 +85,7 @@ def _ci_usage_command(
 
 
 def _diagnose_command(
-    args: argparse.Namespace,
-    parser: argparse.ArgumentParser,
-    *,
-    host: Host,
-    open_url: UrlOpener,
-    env: Mapping[str, str],
+    args: argparse.Namespace, parser: argparse.ArgumentParser, *, host: Host
 ) -> int | None:
     """Dispatch --diagnose when set; None when not set."""
     if not args.diagnose:
@@ -101,13 +96,7 @@ def _diagnose_command(
         parser.error("PR number is required with --diagnose")
     from scripts.ci.pull_requests.diagnose import diagnose_pr, print_diagnosis
 
-    diag = diagnose_pr(
-        args.pr,
-        args.repo,
-        token=env.get("TRUNK_API_TOKEN"),
-        host=host,
-        open_url=open_url,
-    )
+    diag = diagnose_pr(args.pr, args.repo, host=host)
     if args.json:
         print(json.dumps(diag, indent=2))
     else:
@@ -174,11 +163,10 @@ def main(
     p.add_argument(
         "--diagnose",
         action="store_true",
-        help="diagnose why the PR's CI / queue attempt failed: reads the check "
-        "rollup + job log tails, Trunk queue state, and the synthetic "
-        "Trunk-derived fields, then prints classifications with suggested actions "
-        "(--json for the machine-readable report). Diagnosis only — no repair "
-        "action is executed.",
+        help="diagnose why the PR's CI failed: reads the check rollup + job log "
+        "tails and the queue-era synthetic test PRs, then prints classifications "
+        "with suggested actions (--json for the machine-readable report). "
+        "Diagnosis only — no repair action is executed.",
     )
     p.add_argument(
         "--rerun-failed-jobs",
@@ -203,7 +191,7 @@ def main(
     if ci_usage_rc is not None:
         return ci_usage_rc
 
-    diagnose_rc = _diagnose_command(args, p, host=host, open_url=open_url, env=env)
+    diagnose_rc = _diagnose_command(args, p, host=host)
     if diagnose_rc is not None:
         return diagnose_rc
 

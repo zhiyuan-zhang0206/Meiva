@@ -9,12 +9,16 @@ tags:
 
 # CI diagnosis and monitor contracts
 
-`diagnose.py` classifies a PR's failing CI checks from the rollup, job log
-tails and Trunk state. Diagnosis only — no repair action is taken here; the
-operator executes the suggested action. Evidence sources: the PR's check
-rollup + job log tails, Trunk's queue state, and the synthetic trunk-merge
-test PRs, one per queue attempt — their failed logs are where queue-attempt
-failures are read.
+`diagnose.py` classifies a PR's failing CI checks from the rollup and job log
+tails. Diagnosis only — no repair action is taken here; the operator executes
+the suggested action. Evidence sources: the PR's check rollup + job log tails,
+and the queue-era synthetic `trunk-merge/pr-<n>/*` test PRs of the PR under
+diagnosis — their failed logs are where a queue attempt's failures are read,
+which still resolves the history left by the retired queue.
+
+Nothing here queries Trunk. Its API stopped authorizing on 2026-11-02 (401 in
+the last export run, 403 to a direct probe), and a probe that can only fail is
+worse than no probe: it reads as "temporarily down" instead of "gone".
 
 The suite's usage-ledger fixtures fix their day relative to now: the
 `--ci-usage` rollup window is a rolling `--ci-usage-days` x 24h, so a literal
