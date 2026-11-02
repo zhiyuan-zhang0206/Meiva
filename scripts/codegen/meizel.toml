@@ -4,11 +4,13 @@ exports = ["build_okf_data.py", "dump_openapi.py", "gen_config_lite_table.py", "
 "tests" = ["build_android_release.py", "build_app_update_manifest.py"]
 
 [roots]
-"build_android_release.py" = { kinds = ["clock"], why = "CLI entrypoint stamps the release manifest with the current UTC build time when --built-at is omitted" }
+"build_android_release.py" = { kinds = ["clock", "argv"], why = "CLI entrypoint stamps the release manifest with the current UTC build time when --built-at is omitted; the __main__ guard reads argv[1:] once and hands it to main" }
+"build_app_update_manifest.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "build_okf_data.py" = { kinds = ["argv"], why = "Codegen script entry: main() parses the process command line (`parse_args()` without an argument list)" }
 "dump_event_fixtures.py" = { kinds = ["argv"], why = "Codegen script entry: main() takes the output directory from sys.argv[1]" }
 "dump_frontend_constants.py" = { kinds = ["argv"], why = "Codegen script entry: its __main__ block passes the optional output path sys.argv[1] to main()" }
 "dump_openapi.py" = { kinds = ["argv"], why = "Codegen script entry: main() takes the output path from sys.argv[1]" }
 "gen_config_lite_table.py" = { kinds = ["argv"], why = "Codegen script entry: its __main__ block takes the output path from sys.argv[1:] and the `--check` flag from sys.argv" }
 "gen_event_registry.py" = { kinds = ["argv"], why = "Codegen script entry: its __main__ block takes the output path from sys.argv[1:] and the `--check` flag from sys.argv" }
+"gen_pyright_test_environments.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "serve_okf_viz.py" = { kinds = ["platform", "argv"], why = "Local dev server entrypoint resolves the host machine name to print the preview URL; it also reads its command line (argv) once, as the process entry" }

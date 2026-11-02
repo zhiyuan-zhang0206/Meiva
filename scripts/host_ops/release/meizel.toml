@@ -8,6 +8,14 @@ exports = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.p
 "tag.py" = ["git_tags.py"]
 "tests" = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
 
+[roots]
+"base.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"bisect_train.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"certify.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"nightly.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"promote.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"tag.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+
 [debt.ambient-read]
 "bisect_train.py#environ tempfile.TemporaryDirectory()" = { count = 2, owner = "#8237", until = "waits for `_run_probe` and `_execute_bisect` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
 "bisect_train.py#pid sys.executable" = { count = 2, owner = "#8237", until = "waits for `_default_pytest_python` and `_execute_bisect` to take the interpreter path from its caller: it reads `sys.executable` itself" }

@@ -583,7 +583,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
         return cmd_doctor(args, home=Path.home())
@@ -596,4 +596,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

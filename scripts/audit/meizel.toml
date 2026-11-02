@@ -17,10 +17,15 @@ exports = ["analysis", "branch_protection.py", "ensure_plugins_loaded_context_ce
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
 
 [roots]
+"branch_protection.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"call_sites.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "ensure_plugins_loaded_context_census.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"impact_census.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "module_moves.py" = { kinds = ["argv"], why = "Audit script entry: its __main__ block exits with main(sys.argv[1:])" }
 "refusal_loss.py" = { kinds = ["argv"], why = "Audit script entry: its __main__ block exits with main(sys.argv[1:])" }
-"schema_drift.py" = { kinds = ["settings"], why = "CLI schema drift audit falls back to the deployment database URL from settings when --dsn is omitted" }
+"schema_drift.py" = { kinds = ["settings", "argv"], why = "CLI schema drift audit falls back to the deployment database URL from settings when --dsn is omitted; the __main__ guard reads argv[1:] once and hands it to main" }
+"sdk_usage.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"where_used.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 
 [purity]
 "." = "strict"

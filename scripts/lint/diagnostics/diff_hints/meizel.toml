@@ -1,5 +1,8 @@
 exports = ["hints.py"]
 
+[roots]
+"hints.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+
 [purity]
 "." = { mode = "none", why = "hints.py is the shell: it runs git, reads the revision's files and prints what the pure modules listed here return; each of those is strict on its own line" }
 "acks.py" = "strict"

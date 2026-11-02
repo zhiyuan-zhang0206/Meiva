@@ -656,7 +656,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     run_process: GhProcess,
     timers: Timers,
@@ -711,4 +711,6 @@ if __name__ == "__main__":
     from base.clock import SYSTEM_TIMERS
     from base.paths import meiva_home
 
-    sys.exit(main(run_process=subprocess.run, timers=SYSTEM_TIMERS, home=meiva_home()))
+    sys.exit(
+        main(sys.argv[1:], run_process=subprocess.run, timers=SYSTEM_TIMERS, home=meiva_home())
+    )

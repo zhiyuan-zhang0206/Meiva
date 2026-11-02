@@ -105,7 +105,7 @@ def record(ids: list[str], path: Path, host: str) -> Census:
     return document
 
 
-def main(argv: list[str] | None = None, *, host: str) -> int:
+def main(argv: list[str], *, host: str) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=_REPO_ROOT)
     parser.add_argument("--report", type=Path, default=None)
@@ -124,4 +124,4 @@ def main(argv: list[str] | None = None, *, host: str) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(host=platform.system().lower()))
+    sys.exit(main(sys.argv[1:], host=platform.system().lower()))

@@ -19,6 +19,7 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "tests" = ["allowances.py", "contracts", "entry.py", "graph", "language", "lint_common.py", "roles.py", "test_graph"]
 
 [roots]
+"__main__.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "entry.py" = { kinds = ["cwd", "clock", "platform"], why = "the process entry: when argv names no --repo it reads the working directory once and hands the resolved repository root down to the commands, it reads the day once for the placeholder `debt record` writes into an entry nobody has reviewed, and when argv names no --jobs it reads the processor count once and hands the worker count down, so that no command below decides how parallel it is" }
 
 [purity]

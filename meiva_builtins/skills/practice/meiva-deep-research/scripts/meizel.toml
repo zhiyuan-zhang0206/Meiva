@@ -1,1 +1,4 @@
 exports = ["audit_research.py"]
+
+[roots]
+"audit_research.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }

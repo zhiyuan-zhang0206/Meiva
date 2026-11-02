@@ -76,7 +76,7 @@ not an oversight; a module nobody has looked at is not on it.
 |---|---|
 | `subprocess` | every call is an effect that starts a child; the program it starts is named by the caller (`sys.executable` and `shutil.which`, which are judged) |
 | `signal` | installs handlers and sends signals (effects); `getsignal` reads a handler the caller installed |
-| `argparse`, `optparse` | `parse_args()` without an argument list is judged by the method name (`METHOD_READS`), since the receiver has no type; `getopt` takes its list as a parameter |
+| `argparse`, `optparse` | `parse_args()` without an argument list, or handed a parameter that defaults to `None`, is judged by the method name (`METHOD_READS`), since the receiver has no type; `getopt` takes its list as a parameter |
 | `warnings`, `logging`, `atexit`, `gc` | process-wide hooks and sinks: writes, not reads |
 | `inspect`, `traceback`, `faulthandler` | introspection of the program's own call stack |
 | `ctypes`, `ctypes.util`, `mmap`, `fcntl`, `select` | descriptor and foreign-call effects; `ctypes.util.find_library` searches the library paths and may run `ldconfig` or the compiler, an effect on files and processes whose environment lookup (`LD_LIBRARY_PATH`) it hides |

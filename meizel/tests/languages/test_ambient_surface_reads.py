@@ -176,6 +176,60 @@ def test_the_same_calls_given_the_value_read_nothing(make_repo: RepoFactory, sou
 
 
 # meiva:note
+# `parse_args(argv)` in `def main(argv=None)` is `parse_args()` hidden behind a parameter: argparse
+# reads `sys.argv[1:]` when it is handed `None`. The call is an `argv` acquisition when the first
+# argument is a parameter of the same function that defaults to `None` and that the body does not
+# rebind. Facts of the one function only: nothing is asked of its callers.
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def main(argv=None):\n    return parser.parse_args(argv)\n",
+        "def main(argv: list[str] | None = None):\n    return parser.parse_args(argv)\n",
+        "def main(argv=None):\n    return parser.parse_args(args=argv)\n",
+        "def main(*, argv=None):\n    return parser.parse_args(argv)\n",
+        "def main(a, argv=None, b=1):\n    return parser.parse_args(argv)\n",
+        "def main(argv=None):\n    return build().parse_args(argv)\n",
+        "class C:\n    def main(self, argv=None):\n        return self.parser.parse_args(argv)\n",
+    ],
+)
+def test_an_optional_parameter_handed_to_a_parser_is_the_command_line(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == [("argv", "argparse.ArgumentParser.parse_args")]
+
+
+def test_the_optional_parameter_of_another_parser_method_is_the_command_line(
+    make_repo: RepoFactory,
+) -> None:
+    source = "def main(argv=None):\n    return parser.parse_known_args(argv)\n"
+    assert acquired(make_repo, source) == [("argv", "argparse.ArgumentParser.parse_known_args")]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def main(argv: list[str]):\n    return parser.parse_args(argv)\n",
+        "def main(argv=['a']):\n    return parser.parse_args(argv)\n",
+        "def main(argv=DEFAULT):\n    return parser.parse_args(argv)\n",
+        "def main(argv=None):\n    argv = [] if argv is None else argv\n"
+        "    return parser.parse_args(argv)\n",
+        "def main(argv=None):\n    if argv is None:\n        argv = []\n"
+        "    return parser.parse_args(argv)\n",
+        "def main(argv=None):\n    return parser.parse_args(argv or [])\n",
+        "def main(argv=None, other=None):\n    return parser.parse_args(other_list)\n",
+        "def main(argv=None):\n    def inner(argv):\n        return parser.parse_args(argv)\n"
+        "    return inner\n",
+        "def main(argv=None):\n    return parser.format_help(argv)\n",
+        "def main(moment=None):\n    return other.astimezone(moment)\n",
+    ],
+)
+def test_a_parameter_that_is_required_or_decided_before_the_parser_is_not_the_command_line(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == []
+
+
+# meiva:note
 # `input` is the builtin only when the file does not bind the name: a parameter, an assignment or
 # a comprehension variable called `input` is the file's own value and reads no stream.
 @pytest.mark.parametrize(

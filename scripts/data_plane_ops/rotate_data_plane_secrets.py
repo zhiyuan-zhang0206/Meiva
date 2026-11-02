@@ -526,7 +526,7 @@ def run_rotation(
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     if settings.data_plane.is_remote:
         print(
             "✗ this cluster's data plane is remote-managed — rotation is a "
@@ -560,4 +560,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

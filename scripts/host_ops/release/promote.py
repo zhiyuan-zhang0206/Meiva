@@ -30,7 +30,7 @@ from scripts.host_ops.release.git_tags import (  # noqa: E402
 )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Advance channel/stable to a verified certified release tag."
     )
@@ -112,4 +112,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

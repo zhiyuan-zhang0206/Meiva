@@ -14,6 +14,9 @@ exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "front
 "redis_acl.py" = ["ownership.py", "port_preflight.py"]
 "tests" = ["__init__.py", "checkpoint_schema.py", "dataplane", "derive.py", "frontend_build.py", "listener_plan.py", "machine", "machines.py", "ownership.py", "port_preflight.py", "ports.py", "postgres.py", "provision.py", "rate_limit.py", "transport_encryption.py"]
 
+[roots]
+"frontend_build.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+
 [purity]
 "listener_plan.py" = "strict"
 "rate_limit.py" = "strict"

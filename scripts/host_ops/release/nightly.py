@@ -88,7 +88,7 @@ def judge(results: Sequence[ShardResult], expected: Mapping[str, Sequence[str]])
     return NightlyVerdict(ok=True, reason="all-shards-green", shards=tuple(results))
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--junit-dir", type=Path, required=True, help="directory holding the junit files"
@@ -141,4 +141,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

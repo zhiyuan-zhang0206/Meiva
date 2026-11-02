@@ -14,6 +14,7 @@ import argparse
 import dataclasses
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping
@@ -553,7 +554,7 @@ def run_drill(
     return report, time.monotonic() - started
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(description="Restore and verify an encrypted Meiva DB backup.")
     parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.enc artifact")
     args = parser.parse_args(argv)
@@ -593,4 +594,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

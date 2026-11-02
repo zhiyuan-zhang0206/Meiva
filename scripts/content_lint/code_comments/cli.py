@@ -69,7 +69,7 @@ def report_result(
     print(f"code comments: {result.notes} notes; {scope}; {counts}")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Parseable source notes with links to tracked repository files"
     )

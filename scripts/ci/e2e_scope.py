@@ -224,7 +224,7 @@ def skips_e2e(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Print `skip=true` or `skip=false` for the workflow's step output."""
     parser = argparse.ArgumentParser(description="Whether a pull request can skip the e2e jobs.")
     parser.add_argument("--changed-files", type=Path, required=True)
@@ -247,4 +247,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

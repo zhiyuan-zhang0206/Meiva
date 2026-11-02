@@ -86,7 +86,7 @@ def test_valid_core_manifest_passes(repo: Path) -> None:
         "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"meiva": ">=2026.1.1"}},
     )
-    assert lint.main([], repo_root=repo) == 0
+    assert lint.main([], repo_root=repo, home=repo) == 0
 
 
 def _write_plugin(repo: Path, name: str, *, manifest: bool) -> None:
@@ -109,7 +109,7 @@ def _write_plugin(repo: Path, name: str, *, manifest: bool) -> None:
 
 def test_builtin_plugin_with_a_manifest_passes(repo: Path) -> None:
     _write_plugin(repo, "foo", manifest=True)
-    assert lint.main([], repo_root=repo) == 0
+    assert lint.main([], repo_root=repo, home=repo) == 0
 
 
 def test_builtin_plugin_without_a_manifest_is_red(
@@ -117,7 +117,7 @@ def test_builtin_plugin_without_a_manifest_is_red(
 ) -> None:
     _write_plugin(repo, "foo", manifest=True)
     _write_plugin(repo, "bar", manifest=False)
-    assert lint.main([], repo_root=repo) == 1
+    assert lint.main([], repo_root=repo, home=repo) == 1
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "meiva_builtins/plugins/bar: builtin plugin ships no meiva-plugin.json" in out
     assert "meiva_builtins/plugins/foo" not in out
@@ -129,12 +129,12 @@ def test_core_manifest_excluding_current_version_is_red(repo: Path) -> None:
         "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"meiva": ">=0.1.0,<1"}},
     )
-    assert lint.main([], repo_root=repo) == 1
+    assert lint.main([], repo_root=repo, home=repo) == 1
 
 
 def test_core_manifest_invalid_is_red(repo: Path) -> None:
     _write(repo, "meiva_builtins/skills/foo/meiva-plugin.json", {"apiVersion": 2})
-    assert lint.main([], repo_root=repo) == 1
+    assert lint.main([], repo_root=repo, home=repo) == 1
 
 
 def test_core_requires_commit_ancestor_passes(repo: Path) -> None:
@@ -148,7 +148,7 @@ def test_core_requires_commit_ancestor_passes(repo: Path) -> None:
             "requires_commit": _head(repo),
         },
     )
-    assert lint.main([], repo_root=repo) == 0
+    assert lint.main([], repo_root=repo, home=repo) == 0
 
 
 def test_core_requires_commit_unresolvable_is_red(repo: Path) -> None:
@@ -157,7 +157,7 @@ def test_core_requires_commit_unresolvable_is_red(repo: Path) -> None:
         "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "requires_commit": "f" * 40},
     )
-    assert lint.main([], repo_root=repo) == 1
+    assert lint.main([], repo_root=repo, home=repo) == 1
 
 
 def test_non_core_manifest_is_audited_not_failed(
@@ -170,7 +170,7 @@ def test_non_core_manifest_is_audited_not_failed(
         "examples/thing/meiva-plugin.json",
         {"apiVersion": 2, "name": "thing", "version": "1.0.0", "engines": {"meiva": "<1"}},
     )
-    assert lint.main([], repo_root=repo) == 0
+    assert lint.main([], repo_root=repo, home=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "audit examples/thing/meiva-plugin.json" in out
     assert "derived 2026.1.2: FAIL" in out
@@ -181,7 +181,7 @@ def test_explicit_missing_target_is_an_error(
 ) -> None:
     """An --audit-dir that does not exist must fail, not be skipped silently."""
     missing = tmp_path / "gone"
-    assert lint.main(["--audit-dir", str(missing)]) == 1
+    assert lint.main(["--audit-dir", str(missing)], home=tmp_path) == 1
     assert str(missing) in capsys.readouterr().err
 
 
@@ -202,16 +202,20 @@ def test_an_audit_dir_with_a_home_shorthand_lands_under_the_given_home(
     assert "not found" not in printed.err
 
 
-def test_unrecognized_arguments_are_rejected(capsys: pytest.CaptureFixture[str]) -> None:
+def test_unrecognized_arguments_are_rejected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A positional path is not part of this lint's interface — reject it loudly
     instead of silently running a full scan."""
-    assert lint.main(["nope/missing.py"]) == 2
+    assert lint.main(["nope/missing.py"], home=tmp_path) == 2
     assert "unrecognized argument(s)" in capsys.readouterr().err
 
 
-def test_audit_dir_without_a_value_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
+def test_audit_dir_without_a_value_is_rejected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A bare --audit-dir is a usage error, not an IndexError traceback."""
-    assert lint.main(["--audit-dir"]) == 2
+    assert lint.main(["--audit-dir"], home=tmp_path) == 2
     assert "--audit-dir requires a value" in capsys.readouterr().err
 
 
@@ -222,7 +226,7 @@ def test_the_failure_block_carries_the_reason_and_the_owner_doc(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_plugin(repo, "bar", manifest=False)
-    assert lint.main([], repo_root=repo) == 1
+    assert lint.main([], repo_root=repo, home=repo) == 1
     err = capsys.readouterr().err.lower()
 
     assert "host version" in err

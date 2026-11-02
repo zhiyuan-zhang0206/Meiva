@@ -509,7 +509,7 @@ def _run_sync_plugins(
     return 0
 
 
-def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
+def main(argv: list[str], *, now: datetime | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare Meiva's reviewed catalog with official provider pricing."
     )
@@ -589,4 +589,4 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

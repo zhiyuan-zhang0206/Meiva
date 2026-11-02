@@ -212,7 +212,7 @@ def parse_range(argv: list[str] | None) -> tuple[date, date]:
 
 # meiva:note
 # Operator CLI: recompute a range of closed UTC days (monotone guard applies).
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     first, last = parse_range(argv)
     config = ConfigBoot()
     config.boot()
@@ -235,4 +235,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

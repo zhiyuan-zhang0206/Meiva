@@ -204,7 +204,7 @@ def run_evidence(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     args = _parse_args(argv)
     if sys.platform != "darwin":
         print("this evidence run needs macOS", file=sys.stderr)
@@ -230,4 +230,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

@@ -35,6 +35,7 @@ if __name__ == "__main__":
     )
     sys.exit(
         main(
+            sys.argv[1:],
             host=Host.system(environ=os.environ),
             clock=clock,
             open_url=SYSTEM_URL_OPENER,

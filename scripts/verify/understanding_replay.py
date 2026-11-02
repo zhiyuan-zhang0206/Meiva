@@ -335,7 +335,7 @@ def print_replay_report(db: Database, agent_id: int) -> None:
         )
 
 
-def main(argv: Sequence[str] | None = None, *, dockerenv: Path = DOCKERENV) -> None:
+def main(argv: Sequence[str], *, dockerenv: Path = DOCKERENV) -> None:
     parser = argparse.ArgumentParser(
         description=CLI_DESCRIPTION, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -384,4 +384,4 @@ def main(argv: Sequence[str] | None = None, *, dockerenv: Path = DOCKERENV) -> N
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

@@ -119,7 +119,7 @@ def _relative(raw: str, repo_root: Path) -> str:
     return relative_target(raw, spec.resolve() if spec.is_absolute() else None, repo_root)
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     # meiva:note
     # Report references in an explicit checkout, defaulting to this checkout.
     #
@@ -154,4 +154,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

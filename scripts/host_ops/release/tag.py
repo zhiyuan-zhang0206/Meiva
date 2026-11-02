@@ -39,7 +39,7 @@ def plan(tagged: str | None, target: str) -> TagAction:
     return "skip" if tagged == target else "refuse"
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="Decide what the publish step does with a tag.")
     parser.add_argument("--repo", default=".", type=Path, help="checkout to read git facts from")
     parser.add_argument(
@@ -68,4 +68,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

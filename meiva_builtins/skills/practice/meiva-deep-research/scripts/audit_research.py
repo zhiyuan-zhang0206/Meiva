@@ -224,7 +224,7 @@ def _report_problems(report_path: str, source_ids: set[int]) -> list[str]:
     ]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True, help="path to research_state.json")
     parser.add_argument("--report", help="path to the derived report (markdown)")
@@ -259,4 +259,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
