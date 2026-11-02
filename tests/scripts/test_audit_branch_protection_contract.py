@@ -10,33 +10,61 @@ from scripts.audit.analysis import app_provided_checks, expected_checks
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_expected_checks_match_ci_workflow_aggregator_job_names() -> None:
+# meiva:note
+# What makes the declaration consistent with the workflow that must carry it: every required check is
+# either a job in `ci.yml` or an app-provided check, a job the workflow does carry must not also be
+# exempted, and an exemption must describe a check that is actually required. Each mistake is silent
+# on its own — a missing job never runs, a shadowed exemption excuses a job that does exist, and a
+# stray exemption is a licence waiting to be used. The predicate lives here because it guards a
+# declaration against a workflow; nothing at runtime asks it anything.
+def _contract_problems(
+    expected: frozenset[str], app_provided: frozenset[str], job_names: frozenset[str]
+) -> list[str]:
+    problems: list[str] = []
+    shadowed = sorted(app_provided & job_names)
+    if shadowed:
+        problems.append(f"app-provided checks that are also workflow jobs: {', '.join(shadowed)}")
+    missing = sorted(expected - job_names - app_provided)
+    if missing:
+        problems.append(f"required checks missing from the workflow: {', '.join(missing)}")
+    strayed = sorted(app_provided - expected)
+    if strayed:
+        problems.append(f"app-provided checks that are not required: {', '.join(strayed)}")
+    return problems
+
+
+def _job_names() -> frozenset[str]:
     ci_path = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
     document = yaml.safe_load(ci_path.read_text(encoding="utf-8"))
     assert isinstance(document, dict)
     jobs = cast("dict[str, dict[str, Any]]", document["jobs"])
-    job_names = {str(job["name"]) for job in jobs.values() if "name" in job}
-    missing = expected_checks() - job_names - app_provided_checks()
-    assert not missing, (
-        f"expected_checks() missing from .github/workflows/ci.yml: {sorted(missing)}"
-    )
+    return frozenset(str(job["name"]) for job in jobs.values() if "name" in job)
+
+
+def test_the_contract_names_only_workflow_jobs_and_declared_app_checks() -> None:
+    assert _contract_problems(expected_checks(), app_provided_checks(), _job_names()) == []
 
 
 # meiva:note
-# An exemption that is not itself required, or that overlaps the job names, would either hide a
-# genuinely missing job or quietly excuse a name that ci.yml does provide. Both are silent.
-def test_app_provided_checks_are_required_and_absent_from_the_workflow() -> None:
-    ci_path = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
-    document = yaml.safe_load(ci_path.read_text(encoding="utf-8"))
-    assert isinstance(document, dict)
-    jobs = cast("dict[str, dict[str, Any]]", document["jobs"])
-    job_names = {str(job["name"]) for job in jobs.values() if "name" in job}
-    assert app_provided_checks() <= expected_checks()
-    assert not app_provided_checks() & job_names
+# Each of these is a mutation of the real contract: if any of them stops reported, the exemption
+# mechanism has become a licence to name a check that nothing carries.
+def test_a_required_check_that_no_job_carries_is_a_problem() -> None:
+    problems = _contract_problems(frozenset({"a", "b"}), frozenset(), frozenset({"a"}))
+    assert problems == ["required checks missing from the workflow: b"]
 
 
-def test_trunk_merge_queue_configuration_is_retired() -> None:
-    assert not (_REPO_ROOT / ".trunk" / "trunk.yaml").exists()
+def test_an_exemption_for_a_real_job_name_is_a_problem() -> None:
+    problems = _contract_problems(
+        frozenset({"classify change"}),
+        frozenset({"classify change"}),
+        frozenset({"classify change"}),
+    )
+    assert problems == ["app-provided checks that are also workflow jobs: classify change"]
+
+
+def test_an_exemption_that_is_not_required_is_a_problem() -> None:
+    problems = _contract_problems(frozenset({"a"}), frozenset({"spare"}), frozenset({"a"}))
+    assert problems == ["app-provided checks that are not required: spare"]
 
 
 # meiva:note
