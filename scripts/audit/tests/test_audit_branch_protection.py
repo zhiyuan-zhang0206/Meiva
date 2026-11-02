@@ -120,9 +120,8 @@ def test_drift_report_detects_missing_required_status_checks() -> None:
 
 
 def test_drift_report_detects_a_missing_workflow() -> None:
-    workflows = {"workflows": [{"path": ".github/workflows/ci.yml", "state": "active"}]}
-    assert drift_report(_protection(), _EXPECTED_CHECKS, workflows) == [
-        "workflow ci-rerun.yml is missing on GitHub"
+    assert drift_report(_protection(), _EXPECTED_CHECKS, {"workflows": []}) == [
+        "workflow ci.yml is missing on GitHub"
     ]
 
 

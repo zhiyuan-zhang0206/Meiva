@@ -48,10 +48,17 @@ _ADMISSION_CHECKS = frozenset(
 )
 _GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _REMOTE_REPO = re.compile(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$")
-_REQUIRED_WORKFLOWS = (
-    ".github/workflows/ci.yml",
-    ".github/workflows/ci-rerun.yml",
-)
+# meiva:note
+# The workflows this audit requires to be active. `ci-rerun.yml` was dropped on 2026-11-02: it was
+# disabled by hand at 2026-10-31 02:01 (+08:00), after commit fa9c840bfb (2026-10-12) had already
+# removed its "run the full CI again after every merge" behaviour, and its payload prefilter leaves
+# it almost nothing to do (the last five runs were all `skipped`). It reruns failed jobs on a pull
+# request's first attempt; it produces no admission conclusion, so switching it off weakens no
+# gate, while an audit that keeps reporting it would bury the next real drift.
+# meiva:note
+# Reconsider that removal if an automatic rerun of first-attempt flaky failures becomes a required
+# capability again, or if a workflow in this tuple starts carrying a merge-blocking conclusion.
+_REQUIRED_WORKFLOWS = (".github/workflows/ci.yml",)
 _SAFE_URL_BYTES = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~")
 
 
