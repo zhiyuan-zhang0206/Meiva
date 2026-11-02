@@ -3088,3 +3088,46 @@ CREATE UNIQUE INDEX IF NOT EXISTS signal_state_open_key_idx
 CREATE INDEX IF NOT EXISTS signal_state_open_last_seen_idx
     ON signal_state (last_seen)
     WHERE resolved_at IS NULL;
+
+-- ─────────────── alert_escalations ───────────────
+-- The escalation ledger: who was told about a condition, when, and how it went. It is
+-- deliberately not a second copy of the condition — severity, whether it still fires and
+-- when it started are read from the source row on every pass. `source_kind` names which
+-- condition table `source_id` belongs to, so one ledger serves both while the two tables
+-- still exist.
+CREATE TABLE IF NOT EXISTS alert_escalations (
+    id                    BIGSERIAL PRIMARY KEY,
+    source_kind           TEXT NOT NULL CHECK (source_kind IN ('alerts', 'signal_state')),
+    source_id             BIGINT NOT NULL,
+    -- Escalations actually delivered to a person. A shadow decision is not one of them.
+    escalation_count      INTEGER NOT NULL DEFAULT 0 CHECK (escalation_count >= 0),
+    -- Would-be escalations recorded while the loop runs without sending, so the volume a
+    -- live gate would produce is measurable before the gate opens.
+    shadow_escalations    INTEGER NOT NULL DEFAULT 0 CHECK (shadow_escalations >= 0),
+    last_delivery_at      TIMESTAMPTZ,
+    last_delivery_result  TEXT CHECK (last_delivery_result IN ('shadow', 'sent', 'held', 'failed')),
+    -- No escalation before this instant, whatever the source says: the rate limit lives on
+    -- the ledger so a restart cannot reset it.
+    cooldown_until        TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One ledger row per source episode: the same condition escalating twice updates this row.
+CREATE UNIQUE INDEX IF NOT EXISTS alert_escalations_source_idx
+    ON alert_escalations (source_kind, source_id);
+
+COMMENT ON TABLE alert_escalations IS
+    'The escalation ledger: who was told about a condition, when, and how it went. Condition facts are read from the source row every pass, never copied here.';
+
+COMMENT ON COLUMN alert_escalations.source_kind IS
+    'Which condition table source_id refers to: alerts (Grafana-sourced episodes) or signal_state (detector-sourced episodes).';
+
+COMMENT ON COLUMN alert_escalations.escalation_count IS
+    'Escalations delivered to a person. Only the escalation loop writes it, and only when a delivery was accepted.';
+
+COMMENT ON COLUMN alert_escalations.shadow_escalations IS
+    'Would-be escalations recorded while the mode is shadow: the loop decides and logs but sends nothing, so the volume is measurable before the gate opens.';
+
+COMMENT ON COLUMN alert_escalations.cooldown_until IS
+    'No escalation before this instant. The rate limit is stored here rather than in memory so a restart cannot reset it.';

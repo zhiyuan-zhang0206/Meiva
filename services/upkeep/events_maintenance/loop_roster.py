@@ -12,6 +12,10 @@ from dataclasses import dataclass
 
 REGISTRY_GAUGE_DEADLINE_S = 180.0
 ALERT_RECONCILIATION_DEADLINE_S = 180.0
+# meiva:note
+# The escalation pass is one bounded read plus at most a handful of upserts per minute; three
+# missed intervals is roughly when a person stops trusting the delay.
+ESCALATION_DEADLINE_S = 180.0
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,7 @@ def roster(
         LoopSpec("dispatch", dispatch_deadline_s),
         LoopSpec("resolution", resolution_deadline_s),
         LoopSpec("registry_gauge", REGISTRY_GAUGE_DEADLINE_S),
+        LoopSpec("escalation", ESCALATION_DEADLINE_S),
     )
     if reconcile_alerts:
         return (*loops, LoopSpec("alert_reconciliation", ALERT_RECONCILIATION_DEADLINE_S))

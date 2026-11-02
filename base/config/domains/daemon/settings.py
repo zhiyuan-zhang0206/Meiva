@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, model_validator
 
 from base.config.base import EnvSettings
@@ -391,6 +393,54 @@ class DaemonSettings(
         default=1500.0,
         alias="MEIVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S",
         description="Hard deadline in seconds for one hourly events-maintenance pass. Exceeding this bound wedges the loop for watchdog respawn.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_escalation_mode: Literal["off", "shadow"] = Field(
+        default="shadow",
+        alias="MEIVA_EVENTS_ESCALATION_MODE",
+        description="What the alert escalation pass does with an open critical/error episode older than the age floor: `shadow` decides and records what a person would have been told, without sending; `off` skips the pass. Delivery is a later slice, so there is no `live` value to select yet.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_escalation_interval_seconds: float = Field(
+        default=60.0,
+        alias="MEIVA_EVENTS_ESCALATION_INTERVAL_SECONDS",
+        description="Escalation pass interval (seconds). One minute keeps the decision within the responsiveness a P1 needs without polling faster than a person can act.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_escalation_min_age_seconds: float = Field(
+        default=600.0,
+        alias="MEIVA_EVENTS_ESCALATION_MIN_AGE_SECONDS",
+        description="How long an open critical/error episode must persist (seconds) before it counts as unanswered. Ten minutes leaves room for the on-duty agent the alert wakes first; the value is the user's attention budget, not a technical bound.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_escalation_cooldown_seconds: float = Field(
+        default=1800.0,
+        alias="MEIVA_EVENTS_ESCALATION_COOLDOWN_SECONDS",
+        description="Minimum gap (seconds) between two escalation decisions for the same episode. Stored on the ledger row, so a restart cannot reset the wait.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
