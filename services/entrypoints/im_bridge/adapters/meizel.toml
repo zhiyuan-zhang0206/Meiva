@@ -15,4 +15,4 @@ exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "run_plan
 "weixin_login.py" = { kinds = ["clock", "home"], why = "Operator script entry of the Weixin QR login resolves the home whose state directory receives the credentials; builds the process clock from SYSTEM_TIMERS" }
 
 [debt.third-party-patch]
-"feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1
+"feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = { count = 1, until = "waits for lark_oapi.ws.Client to take a proxy: its __init__ accepts app_id, app_secret, log_level, event_handler, domain, auto_reconnect, source, extra_ua_tags, headers and client_assertion_provider only, and the module-level _ws_connect_kwargs it resolves by name at connect time pins proxy=None, so on a proxied host the long connection cannot be established without replacing that attribute. Falsified the day the client takes a proxy parameter or stops pinning None." }
