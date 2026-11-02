@@ -83,5 +83,11 @@ class CodeVersion:
                     f"cannot resolve the loaded commit of {self.loaded.source_root}: "
                     "the process must capture its code version at startup"
                 )
-            self._version = first_parent_count(self.loaded.source_root, self.loaded.sha)
+            # meiva:note
+            # A release tree has no history to count; its record carried the count, captured
+            # with the commit, and is the only answer for that tree.
+            if self.loaded.code_version is not None:
+                self._version = self.loaded.code_version
+            else:
+                self._version = first_parent_count(self.loaded.source_root, self.loaded.sha)
         return self._version

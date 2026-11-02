@@ -7,6 +7,7 @@ cache that same captured SHA, with honest unknowns and bounded Git failures.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -221,3 +222,70 @@ def test_unknown_loaded_image_cannot_be_replaced_by_a_later_git_checkout(
     with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
         code_version.CodeVersion(loaded).get()
     assert loaded.sha is None
+
+
+_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _release(path: Path, **overrides: object) -> Path:
+    path.mkdir()
+    body: dict[str, object] = {
+        "schema": loaded_commit.RELEASE_SCHEMA,
+        "commit": _COMMIT,
+        "code_version": 4821,
+        "committed_at": "2026-11-02T09:21:00+00:00",
+        **overrides,
+    }
+    (path / loaded_commit.RELEASE_RECORD).write_text(json.dumps(body), encoding="utf-8")
+    return path
+
+
+# meiva:note
+# A sealed release has no `.git`; its record is the whole answer, and the version comes from the
+# record without asking Git, which would fail in that tree.
+def test_a_release_tree_is_captured_from_its_record_without_git(tmp_path: Path) -> None:
+    image = loaded_commit.LoadedCommit.capture(
+        _release(tmp_path / "release"), git_executable=str(tmp_path / "no-such-git")
+    )
+    assert (image.sha, image.code_version) == (_COMMIT, 4821)
+    assert code_version.CodeVersion(image).get() == 4821
+
+
+def test_a_record_wins_over_a_git_checkout_in_the_same_tree(tmp_path: Path) -> None:
+    repo = _repo_with_commits(tmp_path / "repo", 2)
+    (repo / loaded_commit.RELEASE_RECORD).write_text(
+        loaded_commit.ReleaseRecord(_COMMIT, 7, "2026-11-02T09:21:00+00:00").to_json()
+    )
+    image = loaded_commit.LoadedCommit.capture(repo)
+    assert (image.sha, code_version.CodeVersion(image).get()) == (_COMMIT, 7)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"schema": "meiva-source-release/v0"},
+        {"commit": "ABC"},
+        {"code_version": 0},
+        {"code_version": True},
+        {"code_version": "4821"},
+        {"committed_at": "2026-11-02T17:21:00+08:00"},
+        {"committed_at": "yesterday"},
+        {"extra": 1},
+    ],
+)
+def test_an_unreadable_record_is_an_unknown_commit_not_a_guess(
+    tmp_path: Path, overrides: dict[str, object]
+) -> None:
+    release = _release(tmp_path / "release", **overrides)
+    with pytest.raises(loaded_commit.ReleaseRecordError):
+        loaded_commit.read_release_record(release)
+    image = loaded_commit.LoadedCommit.capture(release)
+    assert (image.sha, image.code_version) == (None, None)
+    with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
+        code_version.CodeVersion(image).get()
+
+
+def test_a_record_round_trips_and_a_tree_without_one_is_not_a_release(tmp_path: Path) -> None:
+    record = loaded_commit.ReleaseRecord(_COMMIT, 12, "2026-11-02T09:21:00+00:00")
+    assert loaded_commit.ReleaseRecord.parse(record.to_json(), origin="r") == record
+    assert loaded_commit.read_release_record(tmp_path) is None

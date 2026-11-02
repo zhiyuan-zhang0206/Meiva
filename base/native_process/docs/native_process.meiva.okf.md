@@ -90,6 +90,13 @@ version read. An unknown capture stays unknown and raises `CodeVersionError`
 when a gated database needs a version; a later checkout cannot stand in for the
 image the process loaded.
 
+A sealed release tree has no `.git`. Its root carries `.meiva-release.json`
+(`loaded_commit.RELEASE_RECORD`: commit, first-parent count, UTC commit time),
+and `capture()` reads that record instead of running Git, keeping the count on
+the image so `CodeVersion` never counts. A record that does not parse is an
+unknown capture. The release format and its stager are described in
+[[base/deploy/sealed_release/docs/sealed-release.meiva.okf.md]].
+
 ## Clock-epoch test construction
 
 `tests/test_proc_tree.py::test_capture_and_verify_span_clock_epochs` leaves one

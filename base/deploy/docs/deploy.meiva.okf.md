@@ -18,6 +18,7 @@ Its component nodes describe the current contracts and implementation.
 - [[base/deploy/schema/docs/migrations.meiva.okf.md]] — Schema Migrations (baseline + deltas).
 - [[base/deploy/schema/docs/reset-generations.meiva.okf.md]] — Schema reset generations.
 - [[base/deploy/schema/docs/rollback_snapshot.meiva.okf.md]] — Recovery Snapshot Convention.
+- [[base/deploy/sealed_release/docs/sealed-release.meiva.okf.md]] — Sealed source releases.
 - [[base/deploy/docs/start-trace.meiva.okf.md]] — Start phase timings (on-demand `meiva start` attribution).
 
 `timing.clock_values()` captures the canonical registered clock sources once at

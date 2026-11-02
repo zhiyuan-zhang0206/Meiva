@@ -21,6 +21,9 @@ import fnmatch
 import subprocess
 from pathlib import Path
 
+from base.deploy.sealed_release.sealed_plan import ManifestError, report
+from base.deploy.sealed_release.sealed_tree import SealedTreeError, verify
+from base.deploy.sealed_release.stage_plan import releases_dir
 from base.host.git.gitenv import git_env
 from base.host.system.hostport import Host
 
@@ -110,23 +113,22 @@ def validate_whitelist(patterns: tuple[str, ...]) -> None:
                 )
 
 
+# meiva:note
+# Human-readable tamper findings for the home's `source`, empty only when the guard saw the tree
+# and found nothing wrong. A guard that could not look returns a `GUARD_SKIPPED_PREFIX` line
+# instead, so the probe reports the guard as failing rather than a blind guard as a clean tree.
+#
+# A `source` that is a pointer into its home's `source-releases/` runs a sealed release, which its
+# manifest describes: the guard compares `lstat` against it (seconds, not minutes), and a release
+# or manifest it cannot read is a guard that could not look. The criterion is the pointer, not a
+# file inside the tree, so a stray record in a checkout cannot switch the guard off its checks.
+# Anything else is a checkout, judged by `git status`: tracked files changed against HEAD, and
+# untracked files outside the whitelist.
+# meiva:link future/infra/lifecycle/release-dir-atomic-code-swap.md
 def source_tree_violations(repo: Path, *, host: Host) -> tuple[str, ...]:
-    """Human-readable tamper findings for the prod source checkout.
-
-    Returns ``()`` only when the guard SAW the tree and found nothing wrong.
-    When the checkout exists but the guard cannot evaluate it — not a git
-    checkout, or a git command failed (binary missing, command error,
-    timeout) — the result carries a ``{GUARD_SKIPPED_PREFIX}...`` marker
-    instead of ``()``, so the health probe reports the guard itself as
-    failing rather than mistaking a blind guard for a clean tree (best-effort
-    against transient git hiccups, but never silently blind — a broken git is
-    exactly the state in which tampering becomes invisible). Detects two
-    tamper shapes:
-
-    - tracked files changed vs HEAD (any non-untracked ``git status`` entry)
-    - untracked files outside the whitelist
-    """
     source = Path(repo)
+    if source.is_symlink() and source.resolve().parent == releases_dir(source.parent).resolve():
+        return _release_violations(source)
     if not (source / ".git").exists():
         return (f"{GUARD_SKIPPED_PREFIX}not a git checkout",)
     status = git(source, "status", "--porcelain", host=host)
@@ -144,3 +146,10 @@ def source_tree_violations(repo: Path, *, host: Host) -> tuple[str, ...]:
         else:
             violations.append(f"tracked change: {entry}")
     return tuple(violations)
+
+
+def _release_violations(source: Path) -> tuple[str, ...]:
+    try:
+        return report(verify(source, content=False))
+    except (OSError, ManifestError, SealedTreeError) as exc:
+        return (f"{GUARD_SKIPPED_PREFIX}cannot verify the release: {exc}",)

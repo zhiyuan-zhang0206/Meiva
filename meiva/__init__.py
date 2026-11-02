@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from base.native_process.loaded_commit import LoadedCommit as _LoadedCommit
+from base.native_process.loaded_commit import capture_code_version as _capture_code_version
 from base.native_process.loaded_commit import capture_commit as _capture_commit
 
 # This immutable value belongs to the SDK module's first code load, before any
@@ -12,7 +13,11 @@ from base.native_process.loaded_commit import capture_commit as _capture_commit
 # Python code with a checkout that moved later. It owns no clients or gate.
 if "_LOADED_IMAGE" not in globals():
     _source_root = _Path(__file__).resolve().parents[1]
-    _LOADED_IMAGE = _LoadedCommit(source_root=_source_root, sha=_capture_commit(_source_root))
+    _LOADED_IMAGE = _LoadedCommit(
+        source_root=_source_root,
+        sha=_capture_commit(_source_root),
+        code_version=_capture_code_version(_source_root),
+    )
 
 
 # Runtime connections — `meiva.DB`, `meiva.REDIS` — are the bound context's clients

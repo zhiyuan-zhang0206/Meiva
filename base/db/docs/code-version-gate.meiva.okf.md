@@ -22,7 +22,9 @@ Operator procedures (reading state, rollback, credential rotation):
 first-parent commits reachable from the commit the process loaded
 (`git rev-list --count --first-parent <sha>`), from `loaded_commit`'s boot capture
 and never from the checkout as it later became, cached for the process lifetime.
-A tree that is not a git checkout raises `CodeVersionError`; nothing substitutes
+A sealed release tree carries the count in its `.meiva-release.json`, computed by
+the stager from a full clone, and the capture keeps it, so a release needs no
+history. A tree that is neither raises `CodeVersionError`; nothing substitutes
 `0`. A shallow clone under-counts, which only makes its processes look older.
 
 ## The minimum

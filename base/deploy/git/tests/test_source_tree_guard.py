@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.deploy.git import source_tree_guard as stg
+from base.deploy.sealed_release import sealed_tree
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import fake_host
 
@@ -144,6 +145,51 @@ def test_git_command_failure_signals_guard_skipped(tmp_path: Path) -> None:
     (repo / ".git").write_text("gitdir: /nonexistent\n")
 
     assert stg.source_tree_violations(repo, host=_HOST) == ("guard skipped: git unavailable",)
+
+
+def _release_source(home: Path) -> Path:
+    release = home / "source-releases" / "1-0123456789ab"
+    (release / "pkg").mkdir(parents=True)
+    (release / "pkg" / "mod.py").write_text("VALUE = 1\n")
+    sealed_tree.write_manifest(release, sealed_tree.snapshot(release), host=_HOST)
+    (home / "source").symlink_to("source-releases/1-0123456789ab")
+    return home / "source"
+
+
+# meiva:note
+# A pointer into the home's releases runs a release, which has no `.git`; its manifest is what the
+# guard compares, so an added file is found without Git and an unchanged release reads clean.
+def test_a_release_pointer_is_judged_by_its_manifest(tmp_path: Path) -> None:
+    source = _release_source(tmp_path)
+    assert stg.source_tree_violations(source, host=_HOST) == ()
+
+    (source / "pkg" / "extra.py").write_text("")
+
+    assert "added: pkg/extra.py" in stg.source_tree_violations(source, host=_HOST)
+
+
+def test_a_release_the_guard_cannot_verify_is_a_blind_guard(tmp_path: Path) -> None:
+    (tmp_path / "source").symlink_to("source-releases/1-0123456789ab")
+    (finding,) = stg.source_tree_violations(tmp_path / "source", host=_HOST)
+    assert finding.startswith("guard skipped: cannot verify the release")
+
+    (tmp_path / "source-releases" / "1-0123456789ab").mkdir(parents=True)
+    (finding,) = stg.source_tree_violations(tmp_path / "source", host=_HOST)
+    assert finding.startswith("guard skipped: cannot verify the release")
+
+
+# meiva:note
+# Release mode follows the pointer, not a file inside the tree: a checkout holding a stray release
+# record, or a release-shaped manifest beside it, is still judged by Git.
+def test_a_stray_release_record_does_not_take_a_checkout_off_git(tmp_path: Path) -> None:
+    repo = _init_source(tmp_path / "source")
+    (repo / ".meiva-release.json").write_text("{}")
+    (repo / "tracked.txt").write_text("edited")
+
+    findings = stg.source_tree_violations(repo, host=_HOST)
+
+    assert "untracked outside whitelist: .meiva-release.json" in findings
+    assert any(line.startswith("tracked change:") for line in findings)
 
 
 # --- whitelist self-check ---
