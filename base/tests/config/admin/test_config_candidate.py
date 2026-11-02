@@ -37,16 +37,18 @@ def _write(
 
 def _validate_env_patch(env_path: Path) -> EnvPatchValidator:
     from base.config.admin.candidate import validate_env_patch
+    from base.host.env.dotenv_file import capture_env_bytes
 
-    return partial(validate_env_patch, path=env_path)
+    return partial(validate_env_patch, env_bytes=capture_env_bytes(env_path))
 
 
 def _validate_env_patch_for_write(
     env_path: Path,
 ) -> Callable[[dict[str, object], set[str]], EnvPatchValidation]:
     from base.config.admin.candidate import validate_env_patch_for_write
+    from base.host.env.dotenv_file import capture_env_bytes
 
-    return partial(validate_env_patch_for_write, path=env_path)
+    return partial(validate_env_patch_for_write, env_bytes=capture_env_bytes(env_path))
 
 
 def test_patch_that_breaks_a_cross_field_invariant_is_rejected(configured_env: Path) -> None:
@@ -100,9 +102,14 @@ def test_removing_required_field_is_invalid(configured_env: Path) -> None:
 def test_validate_or_raise_joins_candidate_errors(configured_env: Path) -> None:
     """Non-HTTP callers receive the same alias-safe candidate explanation."""
     from base.config.admin.candidate import validate_env_patch_or_raise
+    from base.host.env.dotenv_file import capture_env_bytes
 
     with pytest.raises(ValueError, match="exec_node_timeout_seconds"):
-        validate_env_patch_or_raise({"exec_node_timeout_seconds": 200}, set(), path=configured_env)
+        validate_env_patch_or_raise(
+            {"exec_node_timeout_seconds": 200},
+            set(),
+            env_bytes=capture_env_bytes(configured_env),
+        )
 
 
 def test_current_invalid_domain_is_rejected_until_the_patch_repairs_it(

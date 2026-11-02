@@ -114,6 +114,13 @@ def env_file_path(home: Path) -> Path:
 # The door keeps its one recorded read: its callers are modules that hold no home to pass
 # (`base/config`, `base/lm`, the plugin config view), so handing the home in would move the
 # same `resolve_meiva_home()` to each of them instead of removing it.
+# meiva:note
+# The exact bytes of this process's `.env` — the image a config candidate is judged against and
+# digested from, captured once by the caller that is about to write it.
+def capture_process_env_bytes() -> bytes:
+    return capture_env_bytes(process_env_file())
+
+
 def process_env_file() -> Path:
     from base.paths.home import resolve_meiva_home
 

@@ -21,7 +21,7 @@ from base.config.admin.metadata import ConfigFieldMeta
 from base.config.env_changed import EnvChangedError
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
-from base.host.env.dotenv_file import process_env_file
+from base.host.env.dotenv_file import capture_env_bytes, process_env_file
 from base.host.system.hostport import Host
 from base.packages.plugin_config_admin import (
     panel_metadata,
@@ -182,7 +182,9 @@ def _apply_patch(
     trace_id: str | None,
 ) -> tuple[bool, list[str]]:
     writes, removals = split_reducer_patch(overrides, metas)
-    candidate = validate_env_patch_for_write(writes, removals, path=env_path)
+    candidate = validate_env_patch_for_write(
+        writes, removals, env_bytes=capture_env_bytes(env_path)
+    )
     errors_by_domain = candidate.errors_by_domain
     if errors_by_domain:
         _reject_candidate(errors_by_domain, set(writes) | removals, results)

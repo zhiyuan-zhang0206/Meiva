@@ -4,10 +4,7 @@ exports = ["candidate.py", "editing.py", "metadata.py"]
 "editing.py" = ["metadata.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "editing.py" = "strict"
 "metadata.py" = "strict"
-
-[debt.impure-edge]
-"candidate.py#base/host/env/dotenv_file.py" = { count = 1, owner = "#7240", until = "waits for the current env bytes as a value: validate_env_patch calls process_env_file() and capture_env_bytes() to judge a candidate patch against the file it is about to rewrite, and both callers (ops/host_config._apply_patch, the gateway's runtime router) already hold the path and are shells, so the readers are the thing to replace with a value. Repair unverified: that those two callers can read the file once and hand the bytes down" }
