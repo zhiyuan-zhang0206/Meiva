@@ -86,11 +86,28 @@ create_worktree() {
     die "branch '$BRANCH' already exists (checked out nowhere) — pick another <task> / --branch, or delete the stale branch first: git branch -d $BRANCH"
   fi
 
+  # meiva:note
+  # `--no-prune` is not decoration: this machine enables `fetch.prune` globally (in its Git
+  # configuration), and a narrow refspec fetch under prune deletes the remote-tracking refs it did
+  # not just fetch —
+  # including `origin/main` itself, intermittently (measured 2026-11-02: three identical
+  # `git fetch origin main:refs/remotes/origin/main` runs left the ref present, missing, present;
+  # reproduced in a throwaway clone, same alternation). Every push hook then fails with "requires
+  # local origin/main" for a reason no reader of the branch could see.
+  #
+  # And this fetch is the ONLY thing on a macmini checkout that moves `origin/main` forward: no
+  # timer, no cron, nothing else writes that ref. So a branch created here is the moment the
+  # local base becomes true, and the pre-push hooks that read `merge-base(origin/main, HEAD)`
+  # are only correct until the next merge elsewhere. When you need to know what main actually
+  # is right now, ask GitHub (`gh api repos/{owner}/{repo}/commits/main --jq .sha`), not this
+  # ref; and when a push fails on someone else's commit, that is the stale base, not your code.
+  # `scripts/hooks/prepush-base.sh` refreshes it best-effort for the same reason (2026-11-02,
+  # task #6019).
   BASE="${BASE:-origin/main}"
   case "$BASE" in
     origin/*)
       echo "→ fetching $BASE …"
-      git -C "$MAIN_ROOT" fetch --quiet origin "+refs/heads/${BASE#origin/}:refs/remotes/$BASE" \
+      git -C "$MAIN_ROOT" fetch --quiet --no-prune origin "+refs/heads/${BASE#origin/}:refs/remotes/$BASE" \
         || die "cannot fetch $BASE — check the network, or pass --base with a ref you already have"
       ;;
   esac
