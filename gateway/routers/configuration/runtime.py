@@ -25,6 +25,7 @@ from base.config.admin.metadata import ConfigFieldMeta
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.env.config_lite_table import FIELD_DOMAINS
+from base.host.env.dotenv_file import capture_process_env_bytes
 from base.host.system.hostport import Host
 from base.log import logger
 from base.packages.plugin_config_admin import (
@@ -472,7 +473,9 @@ def _validate_cluster_candidate(
     plan: ConfigPatchPlan, metas: dict[str, ConfigFieldMeta], *, local: bool
 ) -> None:
     patch = write_plan.candidate_patch(plan, metas, FIELD_DOMAINS, local=local)
-    candidate = validate_env_patch_for_write(patch.writes, patch.removals)
+    candidate = validate_env_patch_for_write(
+        patch.writes, patch.removals, env_bytes=capture_process_env_bytes()
+    )
     _refuse(write_plan.candidate_rejection(candidate.errors))
 
 
@@ -520,7 +523,9 @@ async def _write_cluster_fields(
     actor: str | None,
     trace_id: str | None,
 ) -> None:
-    candidate = validate_env_patch_for_write(plan.cluster_writes, plan.cluster_removals)
+    candidate = validate_env_patch_for_write(
+        plan.cluster_writes, plan.cluster_removals, env_bytes=capture_process_env_bytes()
+    )
     _refuse(write_plan.candidate_rejection(candidate.errors))
     try:
         await asyncio.to_thread(

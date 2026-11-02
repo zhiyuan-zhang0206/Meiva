@@ -16,7 +16,6 @@ import re
 from dataclasses import dataclass
 from functools import cache
 from io import StringIO
-from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
@@ -30,7 +29,6 @@ from base.config.config_registry import (
     field_alias,
     field_domain,
 )
-from base.host.env.dotenv_file import capture_env_bytes, process_env_file
 
 __all__ = [
     "EnvPatchValidation",
@@ -55,34 +53,30 @@ class EnvPatchValidation:
 
 
 def validate_env_patch(
-    updates: dict[str, object], removals: set[str], *, path: Path | None = None
+    updates: dict[str, object], removals: set[str], *, env_bytes: bytes
 ) -> list[str]:
     """Return validation errors for the full `.env` candidate after this patch.
 
     This read-only wrapper has no persistence guarantee; writers use
     ``validate_env_patch_for_write`` and pass its digest to ``write_fields``.
     """
-    return validate_env_patch_for_write(updates, removals, path=path).errors
+    return validate_env_patch_for_write(updates, removals, env_bytes=env_bytes).errors
 
 
+# meiva:note
+# Validate an affected-domain candidate and bind it to its file digest. The caller captures the exact
+# file image under the writer lock and hands it here: this module reads nothing, and the bytes it
+# judges are the bytes it digests. Only fields of a patched domain are reconstructed, so an invalid
+# setting in an unrelated profile can neither crash nor reject the candidate; fields absent from the
+# image keep their boot-time value or Pydantic default.
 def validate_env_patch_for_write(
-    updates: dict[str, object], removals: set[str], *, path: Path | None = None
+    updates: dict[str, object], removals: set[str], *, env_bytes: bytes
 ) -> EnvPatchValidation:
-    """Validate an affected-domain candidate and bind it to its file digest.
-
-    The exact file image is captured under the writer lock, then parsed without
-    re-reading the file. Only fields belonging to a patched domain are
-    reconstructed; an invalid setting in an unrelated profile can therefore
-    neither crash nor reject this candidate. Fields absent from the fresh file
-    retain their boot-time environment value or Pydantic default.
-    """
-    env_path = process_env_file() if path is None else path
     if not updates and not removals:
-        return EnvPatchValidation([], {}, _env_digest(capture_env_bytes(env_path)))
+        return EnvPatchValidation([], {}, _env_digest(env_bytes))
 
     patched_domains = {field_domain(name) for name in set(updates) | removals}
-    payload = capture_env_bytes(env_path)
-    aliases = _env_aliases(payload)
+    aliases = _env_aliases(env_bytes)
 
     models = domain_model_classes()
     errors: list[str] = []
@@ -98,7 +92,7 @@ def validate_env_patch_for_write(
             domain_errors = _render_validation_errors(exc, model)
             errors.extend(domain_errors)
             errors_by_domain[domain] = domain_errors
-    return EnvPatchValidation(errors, errors_by_domain, _env_digest(payload))
+    return EnvPatchValidation(errors, errors_by_domain, _env_digest(env_bytes))
 
 
 def _env_aliases(payload: bytes) -> dict[str, str]:
@@ -148,10 +142,10 @@ def _env_digest(payload: bytes) -> str:
 
 
 def validate_env_patch_or_raise(
-    updates: dict[str, object], removals: set[str], *, path: Path | None = None
+    updates: dict[str, object], removals: set[str], *, env_bytes: bytes
 ) -> None:
     """Raise ``ValueError`` when the full `.env` candidate is invalid."""
-    errors = validate_env_patch(updates, removals, path=path)
+    errors = validate_env_patch(updates, removals, env_bytes=env_bytes)
     if errors:
         raise ValueError("; ".join(errors))
 
