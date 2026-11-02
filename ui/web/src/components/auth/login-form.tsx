@@ -1,6 +1,7 @@
 "use client";
 
-// Login form — accepts the cluster password and authenticates.
+// meiva:note
+// Login form — accepts the web login password and authenticates.
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -61,7 +62,7 @@ export function LoginForm() {
           name="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder={t("clusterSecret")}
+          placeholder={t("password")}
           autoComplete="current-password"
           disabled={loading}
           className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"

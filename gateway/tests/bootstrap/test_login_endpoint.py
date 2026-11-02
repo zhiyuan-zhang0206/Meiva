@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +23,7 @@ from base.cluster import rate_limit
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
+from gateway.tests.auth.gateway_auth import LOGIN_PASSWORD, seed_login_password
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_config_fields,
@@ -45,8 +47,10 @@ class _FakeClock:
 
 
 @pytest.fixture(autouse=True)
-def patch_secret() -> Iterator[None]:
-    """Enable auth with a known secret, mirroring test_auth.py."""
+def patch_secret(unit_home: Path) -> Iterator[None]:
+    """Enable auth with a known secret and a web login password in the test's own home,
+    mirroring test_auth.py."""
+    seed_login_password(unit_home)
     with gateway_config_fields(cluster_secret=_SECRET):
         yield
 
@@ -88,7 +92,7 @@ def test_correct_password_is_not_evaluated_while_locked(
     with gateway_test_client(machine=machine_identity) as client:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
     assert resp.status_code == 429
 
 
@@ -99,7 +103,7 @@ def test_successful_login_resets_failure_counter(
         # A success after 4 failures clears the streak...
         for _ in range(config.settings.gateway.login_max_failures - 1):
             _wrong_login(client)
-        assert client.post("/api/auth/login", json={"password": _SECRET}).status_code == 200
+        assert client.post("/api/auth/login", json={"password": LOGIN_PASSWORD}).status_code == 200
         # ...so five more failures are needed before the next lockout.
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
@@ -120,7 +124,7 @@ def test_lockout_expires_and_recovers(*, machine_identity: MachineIdentityReader
         for _ in range(config.settings.gateway.login_max_failures):
             limiter.record_failure("testclient", now=now - window_s - 1)
         _wrong_login(client)
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
     assert resp.status_code == 200
 
 
@@ -145,7 +149,7 @@ def test_lockout_is_per_ip(*, machine_identity: MachineIdentityReader) -> None:
         )
         # A different IP in the same lifespan keeps an independent counter.
         other = GatewayTestClient(attacker.app, client=("203.0.113.8", 40000))
-        resp = other.post("/api/auth/login", json={"password": _SECRET})
+        resp = other.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
         assert resp.status_code == 200
         assert (
             attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
@@ -172,7 +176,8 @@ def test_login_lockout_is_isolated_between_application_lifespans(
             )
             _wrong_login(independent)
             assert (
-                independent.post("/api/auth/login", json={"password": _SECRET}).status_code == 200
+                independent.post("/api/auth/login", json={"password": LOGIN_PASSWORD}).status_code
+                == 200
             )
             assert (
                 attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code

@@ -28,6 +28,7 @@ Owners:
 | `PATCH /api/agents/{agent_id}` | natural | label patch — CAS update |
 | `POST /api/alerts` | natural | Grafana Alertmanager webhook — upsert per (fingerprint, starts_at) |
 | `POST /api/auth/login` | natural | login — repeats just mint a fresh cookie |
+| `PUT /api/auth/password` | natural | set the web login password — a repeat stores the same password under a fresh salt and ends the same password sessions |
 | `POST /api/auth/logout` | natural | clear session cookie — idempotent |
 | `POST /api/auth/sessions/{session_id}/revoke` | natural | session revocation — guarded update; repeats cannot revoke twice |
 | `POST /api/cluster/stopping` | one-shot | control-plane op — host self-report during stop |

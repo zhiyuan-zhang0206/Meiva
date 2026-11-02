@@ -77,6 +77,7 @@ from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.http.auth import rejection_log
 from gateway.http.auth import router as auth_router
+from gateway.http.auth.login_password_store import LoginPasswords
 from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT, SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
 from gateway.http.config import GatewayConfig, gateway_config_from_boot, placeholder_config
@@ -254,6 +255,7 @@ async def lifespan(
             releases.callback(db_pool.close)
             app.state.sessions = SessionStore(db_pool)
             app.state.session_keys = SessionKeys(app.state.gateway_config.rng)
+            app.state.login_passwords = LoginPasswords(app.state.gateway_config.rng)
             app.state.session_touch = SessionTouchThrottle()
             app.state.page_host_cache = page_target.PageHostCache()
             app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
@@ -402,6 +404,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
         current_session_fact,
         request.app.state.sessions,
         request.app.state.session_keys,
+        request.app.state.login_passwords,
         cookie_token,
         secret,
         home=request.app.state.gateway_process.home,

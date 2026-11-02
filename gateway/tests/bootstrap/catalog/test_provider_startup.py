@@ -22,6 +22,7 @@ from gateway.http.model_catalog import (
     load_model_catalog,
     require_catalog,
 )
+from gateway.tests.auth.gateway_auth import login_with_ticket
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 
@@ -88,7 +89,7 @@ def test_broken_provider_keeps_auth_and_management_available(
     with gateway_test_client(machine=machine_identity, boot=boot) as client:
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/models", headers={"Authorization": ""}).status_code == 401
-        login = client.post("/api/auth/login", json={"password": credential})
+        login = login_with_ticket(client, credential)
         assert login.status_code == 200, login.text
         assert client.get("/api/auth/check").status_code == 200
         assert client.get("/api/settings").status_code == 200

@@ -48,6 +48,7 @@ LITE_VERBS = frozenset(
         "plugins",
         "skill",
         "permissions",
+        "auth",
     }
 )
 

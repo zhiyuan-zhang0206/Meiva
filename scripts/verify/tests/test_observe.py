@@ -97,12 +97,18 @@ def test_a_home_without_a_human_secret_is_refused(tmp_path: Path) -> None:
         observe.human_secret(tmp_path)
 
 
-def test_the_login_presents_the_human_secret_and_keeps_the_session(tmp_path: Path) -> None:
+def test_the_login_trades_the_human_secret_for_a_ticket_and_keeps_the_session(
+    tmp_path: Path,
+) -> None:
     (tmp_path / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
+        if request.url.path == "/api/auth/login-ticket":
+            return httpx.Response(
+                200, json={"ticket": "ticket.human-1.abc", "expires_in_seconds": 120}
+            )
         return httpx.Response(
             200, json={"ok": True}, headers={"Set-Cookie": "meiva_session=s1; Path=/"}
         )
@@ -112,8 +118,16 @@ def test_the_login_presents_the_human_secret_and_keeps_the_session(tmp_path: Pat
     ) as client:
         observe.login(client, tmp_path)
         assert client.cookies.get("meiva_session") == "s1"
-    assert [request.url.path for request in seen] == ["/api/auth/login"]
-    assert json.loads(seen[0].content) == {"password": "dev-cluster-secret"}
+    assert [request.url.path for request in seen] == [
+        "/api/auth/login-ticket",
+        "/api/auth/login-ticket/redeem",
+    ]
+    # meiva:note
+    # The secret is a bearer on the ticket request only: it is never a password, and it does
+    # not travel with the redemption.
+    assert seen[0].headers["authorization"] == "Bearer dev-cluster-secret"
+    assert "authorization" not in seen[1].headers
+    assert json.loads(seen[1].content) == {"ticket": "ticket.human-1.abc"}
 
 
 def test_a_refused_login_is_an_error(tmp_path: Path) -> None:

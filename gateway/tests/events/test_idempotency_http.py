@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers, scoped_chat_message_key
+from gateway.tests.auth.gateway_auth import login_with_ticket
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.test_idempotency import agent_id as agent_id
 from gateway.tests.test_idempotency import client as client
@@ -70,7 +71,7 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
     headers = {"Idempotency-Key": "session-rotation", "Idempotency-Scope": "principal-v1"}
     with gateway_test_client(cluster_secret=secret, session_cookie_secure=False) as client:
         client.headers.pop("Authorization", None)
-        login = client.post("/api/auth/login", json={"password": secret})
+        login = login_with_ticket(client, secret)
         assert login.status_code == 200, login.text
         old_cookie = login.cookies[cookie_name()]
         first = client.post(url, json=body, headers=headers)
@@ -81,7 +82,7 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
             url, json=body, headers=headers | {"Cookie": f"{cookie_name()}={old_cookie}"}
         )
         assert revoked.status_code == 401
-        rotated = client.post("/api/auth/login", json={"password": secret})
+        rotated = login_with_ticket(client, secret)
         assert rotated.status_code == 200, rotated.text
         assert rotated.cookies[cookie_name()] != old_cookie
         repeated = client.post(url, json=body, headers=headers)

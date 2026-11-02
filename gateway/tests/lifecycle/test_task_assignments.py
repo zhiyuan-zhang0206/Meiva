@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.http.model_catalog import CatalogLoadFailure
+from gateway.tests.auth.gateway_auth import login_with_ticket
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 from gateway.tests.support.db_faults.missing_table import missing_table
@@ -279,7 +280,7 @@ def test_revoked_principals_cannot_replay(
 def test_cookie_and_bearer_share_verified_subject(client: TestClient, body: dict[str, Any]) -> None:
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201
-    assert client.post("/api/auth/login", json={"password": SECRET}).status_code == 200
+    assert login_with_ticket(client, SECRET).status_code == 200
     client.headers.pop("Authorization")
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201

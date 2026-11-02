@@ -169,8 +169,18 @@ def human_secret(home: Path) -> str:
     return secret
 
 
+# meiva:note
+# Open a browser session the way the link `meiva start` prints does.
+#
+# The home's cluster secret is a bearer and not a login password: it asks the gateway for a
+# one-time ticket, and the ticket is redeemed (without the bearer) for the session cookie the
+# client keeps.
 def login(client: httpx.Client, home: Path) -> None:
-    opened = client.post("/api/auth/login", json={"password": human_secret(home)})
+    issued = client.post(
+        "/api/auth/login-ticket", headers={"Authorization": f"Bearer {human_secret(home)}"}
+    )
+    issued.raise_for_status()
+    opened = client.post("/api/auth/login-ticket/redeem", json={"ticket": issued.json()["ticket"]})
     opened.raise_for_status()
 
 

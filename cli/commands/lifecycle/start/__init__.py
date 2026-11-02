@@ -330,9 +330,7 @@ def _report_running_tree(
     sessions = {spec.session for spec in started}
     if shows_gateway_hint(sessions, unready=bool(wait.unready)):
         for line in gateway_hint_lines(
-            host=start.command.machine.host(),
-            port=start.config.gateway_port,
-            home=start.command.home,
+            host=start.command.machine.host(), port=start.config.gateway_port
         ):
             print(line)
         print_login_link(sessions, config=start.config, at_terminal=sys.stdout.isatty())

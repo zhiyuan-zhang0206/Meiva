@@ -1,15 +1,16 @@
-"""One-time login tickets: the credential behind the link `meiva start` prints.
-
-A human-secret caller issues a ticket (`POST /api/auth/login-ticket`); a browser
-redeems it, without any credential, for the same session cookie a password
-login sets (`POST /api/auth/login-ticket/redeem`). The ticket is a short-lived
-`web_sessions` row: single use, expiring, never a session cookie itself, and
-bound to the credential that issued it.
-"""
+# meiva:note
+# One-time login tickets: the credential behind the link `meiva start` prints.
+#
+# A human-secret caller issues a ticket (`POST /api/auth/login-ticket`); a browser
+# redeems it, without any credential, for a session cookie of the same shape a password
+# login sets (`POST /api/auth/login-ticket/redeem`). The ticket is a short-lived
+# `web_sessions` row: single use, expiring, never a session cookie itself, and
+# bound to the cluster secret that issued it, not to the web login password.
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import httpx2
 import psycopg
@@ -19,6 +20,7 @@ from fastapi.testclient import TestClient
 from base import config
 from base.host.net.auth import bearer_header, cookie_name
 from gateway.http.auth.session_store import LOGIN_TICKET_TTL_SECONDS
+from gateway.tests.auth.gateway_auth import LOGIN_PASSWORD, seed_login_password
 from gateway.tests.auth.gateway_config import anonymous_gateway_client, gateway_config_fields
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -27,8 +29,10 @@ _REDEEM = "/api/auth/login-ticket/redeem"
 
 
 @pytest.fixture(autouse=True)
-def patch_secret() -> Iterator[None]:
-    """A known secret and anonymous clients: each test says what credential it presents."""
+def patch_secret(unit_home: Path) -> Iterator[None]:
+    """A known secret, a web login password in the test's own home and anonymous clients:
+    each test says what credential it presents."""
+    seed_login_password(unit_home)
     with gateway_config_fields(cluster_secret=_SECRET):
         yield
 
@@ -72,21 +76,24 @@ def test_a_ticket_is_short_lived_and_not_cacheable(db_conn: psycopg.Connection) 
     assert 0 < float(row[0]) <= LOGIN_TICKET_TTL_SECONDS
 
 
-def test_redeeming_sets_the_same_session_cookie_a_login_sets() -> None:
+def test_redeeming_sets_a_session_cookie_shaped_like_a_login_and_bound_to_the_secret() -> None:
     with anonymous_gateway_client(fields={"session_ttl_seconds": 456}) as client:
         ticket = _issue(client)
         redeemed = _redeem(client, ticket)
-        logged_in = client.post("/api/auth/login", json={"password": _SECRET})
+        logged_in = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
 
     assert redeemed.status_code == 200 and redeemed.json() == {"ok": True}
     set_cookie = redeemed.headers["Set-Cookie"]
     assert set_cookie.startswith(f"{cookie_name()}=")
     for flag in ("HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=456"):
         assert flag in set_cookie
-    # Same credential, same mint: the session id differs only after the mint.
-    mint = redeemed.cookies[cookie_name()].partition(".")[0]
-    assert mint == logged_in.cookies[cookie_name()].partition(".")[0]
-    assert mint.startswith("human-")
+    # meiva:note
+    # The ticket binds the cluster secret's mint, never the password's: the two sessions
+    # carry different mints, so setting the password again ends only the password's.
+    ticket_mint = redeemed.cookies[cookie_name()].partition(".")[0]
+    login_mint = logged_in.cookies[cookie_name()].partition(".")[0]
+    assert ticket_mint.startswith("human-")
+    assert login_mint.startswith("password-")
 
 
 def test_the_redeemed_cookie_authenticates_and_no_cookie_does_not() -> None:
@@ -151,7 +158,9 @@ def test_a_ticket_is_not_a_session_cookie() -> None:
 
 def test_a_session_cookie_is_not_a_ticket() -> None:
     with anonymous_gateway_client() as client:
-        cookie = client.post("/api/auth/login", json={"password": _SECRET}).cookies[cookie_name()]
+        cookie = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD}).cookies[
+            cookie_name()
+        ]
         client.cookies.clear()
         response = _redeem(client, cookie)
         still_valid = client.get("/api/agents", headers=_cookie_headers(cookie))

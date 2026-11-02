@@ -1,11 +1,12 @@
-"""Server-side browser-session authentication and revocation endpoints.
-
-POST /api/auth/login               — verify password, set session cookie
-POST /api/auth/login-ticket        — issue a one-time, short-lived login ticket
-POST /api/auth/login-ticket/redeem — exchange a ticket for a session cookie
-POST /api/auth/logout              — revoke and clear the current session cookie
-GET  /api/auth/check               — report whether the current session is valid
-"""
+# meiva:note
+# Server-side browser-session authentication and revocation endpoints.
+#
+# POST /api/auth/login               — verify the web login password, set session cookie
+# PUT  /api/auth/password            — set the web login password (a human credential only)
+# POST /api/auth/login-ticket        — issue a one-time, short-lived login ticket
+# POST /api/auth/login-ticket/redeem — exchange a ticket for a session cookie
+# POST /api/auth/logout              — revoke and clear the current session cookie
+# GET  /api/auth/check               — report whether the current session is valid
 
 from __future__ import annotations
 
@@ -26,9 +27,12 @@ from base.host.net.auth import (
     is_managed_browser_user_agent,
     session_cookie_header,
 )
+from gateway.http.auth.login_password import password_problem
+from gateway.http.auth.login_password_store import LoginPasswords
 from gateway.http.auth.request_principal import (
     SessionKeys,
     current_session_fact,
+    human_mint,
     login_mint,
     require_human_credential,
     session_mints,
@@ -49,15 +53,22 @@ from gateway.http.middleware.error_envelope import error_response
 router = APIRouter()
 
 
+# meiva:note
+# POST /api/auth/login body. `password` is the web login password (or, for the
+# managed browser of an agent-runner, the active generation's runner API
+# token); a missing or empty one falls through to the 401 below rather than a
+# 422. `username` is accepted for Chrome password-manager compatibility but
+# never validated.
 class LoginRequest(BaseModel):
-    """POST /api/auth/login body. `password` is the cluster secret (or, for the
-    managed browser of an agent-runner, the active generation's runner API
-    token); a missing or empty one falls through to the 401 below rather than a
-    422. `username` is accepted for Chrome password-manager compatibility but
-    never validated."""
-
     password: str = ""
     username: str | None = None
+
+
+# meiva:note
+# PUT /api/auth/password body: the new web login password in clear text, which the
+# gateway stores only as a salted hash.
+class SetPasswordRequest(BaseModel):
+    password: str
 
 
 class LoginTicketRedeemRequest(BaseModel):
@@ -67,31 +78,31 @@ class LoginTicketRedeemRequest(BaseModel):
     ticket: str = ""
 
 
+# meiva:note
+# Authenticate with the web login password and receive a session cookie.
+#
+# Request body: ``{"password": "<web-login-password>"}``. An agent-runner's
+# managed browser presents the active generation's runner API token instead.
+# The cluster secret is not a login password, and a gateway whose password was
+# never set (``PUT /api/auth/password``) refuses every password: its browser
+# sessions open from a login ticket. The session is bound to the credential
+# that minted it (`login_mint`): it stops authenticating when that generation
+# is revoked or the password is set again, whatever its remaining lifetime.
+#
+# On success, returns ``{"ok": true}`` and sets an HTTP-only session
+# cookie whose lifetime is controlled by ``session_ttl_seconds``.
+#
+# On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
+#
+# Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
+# a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
+# those config fields; enforcement in base/cluster/rate_limit.py).
+# While locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —
+# 401 would read as "wrong password" and invite exactly the retry loop the
+# lockout exists to stop. A successful login resets the IP's counter.
 @router.post("/api/auth/login")
 async def login(body: LoginRequest, request: Request) -> JSONResponse:
-    """Authenticate with the cluster secret and receive a session cookie.
-
-    Request body: ``{"password": "<cluster-secret>"}``. An agent-runner's
-    managed browser presents the active generation's runner API token instead.
-    The session is bound to the credential that minted it (`login_mint`): it
-    stops authenticating when that generation is revoked or the human secret
-    rotates, whatever its remaining lifetime.
-
-    On success, returns ``{"ok": true}`` and sets an HTTP-only session
-    cookie whose lifetime is controlled by ``session_ttl_seconds``.
-
-    On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
-
-    Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
-    a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
-    those config fields; enforcement in base/cluster/rate_limit.py).
-    While locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —
-    401 would read as "wrong password" and invite exactly the retry loop the
-    lockout exists to stop. A successful login resets the IP's counter.
-    """
     ip = request.client.host if request.client else "unknown"
-    config: GatewayConfig = request.app.state.gateway_config
-    secret = config.cluster_secret
 
     login_limiter: LoginRateLimiter = request.app.state.login_limiter
     remaining = login_limiter.lockout_remaining(ip, now=gateway_clock(request).now().timestamp())
@@ -121,8 +132,8 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     mint = await asyncio.to_thread(
         login_mint,
         request.app.state.session_keys,
+        request.app.state.login_passwords,
         password,
-        secret,
         home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
@@ -164,31 +175,57 @@ async def _open_session(request: Request, mint: str, ip: str) -> JSONResponse:
     return JSONResponse(content={"ok": True}, headers=headers)
 
 
+# meiva:note
+# Set the web login password, replacing the one before it.
+#
+# Request body: ``{"password": "<new-password>"}``, at least
+# ``MIN_PASSWORD_LENGTH`` characters (else a typed 422 ``password_too_short``). Only a human
+# credential may set it (the cluster secret, a human login session or a trusted network); a
+# write generation's machine token gets 403, so no machine credential chooses what a browser
+# logs in with. The gateway stores a salted scrypt hash in
+# ``$MEIVA_HOME/web-login-password.json`` and never the password itself.
+#
+# Setting a password ends every session the previous one minted, the caller's own included
+# when it logged in with that password, even when the new password equals the old one (the
+# stored bytes carry a fresh salt). Sessions a login ticket opened and a unit's managed
+# browser sessions stay. Returns ``{"ok": true}``.
+@router.put("/api/auth/password", dependencies=[Depends(require_human_credential)])
+async def set_login_password(body: SetPasswordRequest, request: Request) -> JSONResponse:
+    problem = password_problem(body.password)
+    if problem is not None:
+        return error_response(
+            request, code="password_too_short", status=422, detail=problem, retryable=False
+        )
+    await asyncio.to_thread(
+        request.app.state.login_passwords.set,
+        request.app.state.gateway_process.home.resolve(),
+        body.password,
+    )
+    return JSONResponse(content={"ok": True})
+
+
+# meiva:note
+# Issue a one-time login ticket for a browser, from a human caller.
+#
+# The ticket is a `web_sessions` row valid for ``LOGIN_TICKET_TTL_SECONDS``
+# and bound to the cluster secret's mint (`human_mint`), not to the web login
+# password: redeeming it (``/api/auth/login-ticket/redeem``) opens a session
+# that outlives a password set again and dies when the secret rotates, so a
+# gateway with no password set still has a way in. Only a human credential
+# (the secret, a human login session or a trusted network) may issue one; a
+# write generation's machine token gets 403, so no machine credential can
+# mint a browser session.
+#
+# Returns ``{"ticket": "<opaque>", "expires_in_seconds": <int>}``.
 @router.post("/api/auth/login-ticket", dependencies=[Depends(require_human_credential)])
 async def issue_login_ticket(request: Request) -> JSONResponse:
-    """Issue a one-time login ticket for a browser, from a human-secret caller.
-
-    The ticket is a `web_sessions` row valid for ``LOGIN_TICKET_TTL_SECONDS``
-    and bound to the human secret's mint: redeeming it
-    (``/api/auth/login-ticket/redeem``) opens exactly the session a password
-    login with that secret would. Only the human secret (or a session it
-    minted) may issue one; a write generation's machine token gets 403, so no
-    machine credential can mint a browser session.
-
-    Returns ``{"ticket": "<opaque>", "expires_in_seconds": <int>}``.
-    """
     config: GatewayConfig = request.app.state.gateway_config
-    secret = config.cluster_secret
     mint = await asyncio.to_thread(
-        login_mint,
+        human_mint,
         request.app.state.session_keys,
-        secret,
-        secret,
+        config.cluster_secret,
         home=request.app.state.gateway_process.home,
-        cache=request.app.state.machine_token_acceptance,
     )
-    if mint is None:
-        raise RuntimeError("the gateway has no cluster secret to issue a login ticket from")
     ticket = minted_ticket_id(mint)
     ip = request.client.host if request.client else "unknown"
     await asyncio.to_thread(
@@ -218,6 +255,7 @@ async def _consume_login_ticket(request: Request, ticket: str) -> str | None:
     admitted = await asyncio.to_thread(
         session_mints,
         request.app.state.session_keys,
+        request.app.state.login_passwords,
         config.cluster_secret,
         home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
@@ -290,6 +328,7 @@ async def check(request: Request) -> JSONResponse:
         current_session_fact,
         request.app.state.sessions,
         request.app.state.session_keys,
+        request.app.state.login_passwords,
         token,
         config.cluster_secret,
         home=request.app.state.gateway_process.home,
@@ -306,18 +345,20 @@ async def check(request: Request) -> JSONResponse:
     return JSONResponse(content={"authenticated": fact is not None or anonymous_admitted})
 
 
+# meiva:note
+# Unrevoked, unexpired sessions whose mint is still admitted: the rows
+# `current_session_fact` would accept. The sessions of a rotated secret or a password set
+# again, and ids without a mint, are dead and omitted.
 def _sessions_that_authenticate(
     pool: ConnectionPool,
     keys: SessionKeys,
+    passwords: LoginPasswords,
     secret: str,
     *,
     home: Path,
     cache: AcceptanceCache | None = None,
 ) -> list[dict[str, Any]]:
-    """Unrevoked, unexpired sessions whose mint is still admitted: the rows
-    `current_session_fact` would accept. A rotated secret's sessions and ids without
-    a mint are dead and omitted."""
-    admitted = session_mints(keys, secret, home=home, cache=cache)
+    admitted = session_mints(keys, passwords, secret, home=home, cache=cache)
     return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
 
 
@@ -340,6 +381,7 @@ async def sessions(request: Request) -> list[dict[str, Any]]:
         _sessions_that_authenticate,
         request.app.state.db_pool,
         request.app.state.session_keys,
+        request.app.state.login_passwords,
         config.cluster_secret,
         home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,

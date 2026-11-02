@@ -704,7 +704,8 @@ agent-runners, and the user's own devices (laptop, phone) are **one trust
 group**. The gateway is reachable **only** over the private network — there is
 no public ingress, the gateway host has no public IP (and the earlier
 Cloudflare Tunnel was retired) — but reachability is not trust: every
-authenticated route requires a bearer or a session cookie (browser login). A
+authenticated route requires a bearer or a session cookie (browser login: the web
+login password, set with `meiva auth set-password`, or a one-time ticket). A
 human or operator presents the cluster secret (`MEIVA_CLUSTER_SECRET`, gateway
 only); services, agents and remote units present their write generation's
 machine API token (`MEIVA_API_TOKEN`: the gateway admits the active
@@ -757,7 +758,7 @@ loopback.
 
 ## Credential rotation
 
-`MEIVA_CLUSTER_SECRET` is the gateway's human bearer (API, frontend login); no
+`MEIVA_CLUSTER_SECRET` is the gateway's human bearer (API, one-time login tickets; not the web login password); no
 remote unit holds it, and machine API tokens rotate with every write
 generation. Run
 [`scripts/data_plane_ops/rotate_cluster_secret.py`](../../scripts/data_plane_ops/rotate_cluster_secret.py)
